@@ -78,7 +78,10 @@ type redisDumpEntry struct {
 // of "the Redis server" that turned out to hold only the first of them is
 // found out on the day the others are needed.
 func dumpRedis(ctx context.Context, dsn, outDir string, opts DumpOptions) (*DumpResult, error) {
-	client, err := RedisClient(ctx, dsn, 0)
+	// Quiet: a dump reads every key, and counted as use that makes each one
+	// the server's most recently used — on the night the backup runs, an
+	// eviction policy that goes by recency has nothing left to go by.
+	client, err := RedisOpen(ctx, dsn, RedisOpenOptions{DB: 0, Retry: true, Quiet: true})
 	if err != nil {
 		return nil, err
 	}

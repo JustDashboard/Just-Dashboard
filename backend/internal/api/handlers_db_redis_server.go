@@ -248,7 +248,7 @@ func (s *Server) handleRedisSave(w http.ResponseWriter, r *http.Request) error {
 // with four commands each, bounded by its own clock and by the request's.
 func (s *Server) handleRedisAnalysis(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}

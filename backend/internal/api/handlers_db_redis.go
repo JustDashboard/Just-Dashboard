@@ -60,6 +60,12 @@ func (s *Server) mountDatabaseRedisRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/{id}/keys/value", s.handle(s.handleRedisSet))
 		r.Method(http.MethodPost, "/{id}/keys/expire", s.handle(s.handleRedisExpire))
 		r.Method(http.MethodPost, "/{id}/keys/persist", s.handle(s.handleRedisPersist))
+		// The same two for one field of a hash, on a server that keeps an
+		// expiry per field. Like the key's they set an expiry still to come or
+		// remove one, and refuse the one that has already passed, which would
+		// be a delete.
+		r.Method(http.MethodPost, "/{id}/keys/field/expire", s.handle(s.handleRedisFieldExpire))
+		r.Method(http.MethodPost, "/{id}/keys/field/persist", s.handle(s.handleRedisFieldPersist))
 		// Rename, copy and bulk are routine as asked for by default, and each
 		// has one option that removes data: overwrite, replace, and the
 		// delete and expire actions. The handlers demand the destructive
@@ -69,6 +75,10 @@ func (s *Server) mountDatabaseRedisRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/{id}/keys/bulk", s.handle(s.handleRedisBulk))
 		r.Method(http.MethodPost, "/{id}/keys/stream/groups", s.handle(s.handleRedisStreamGroup))
 		r.Method(http.MethodPost, "/{id}/keys/stream/ack", s.handle(s.handleRedisStreamAck))
+		// Handing a group's pending entries to another of its consumers moves
+		// who is answerable for them and removes nothing: the console calls
+		// XCLAIM and XAUTOCLAIM writes, and so does this.
+		r.Method(http.MethodPost, "/{id}/keys/stream/claim", s.handle(s.handleRedisStreamClaim))
 		// The console is a text box that can say anything, so nobody reaches
 		// it on the read surface, and what a given line needs beyond this is
 		// decided from the line.
@@ -141,6 +151,19 @@ func redisDB(raw string) (int, error) {
 // redisClient resolves a connection to a Redis client on the database the
 // request names.
 func (s *Server) redisClient(r *http.Request) (*redis.Client, *dbConnection, error) {
+	return s.redisOpen(r, false)
+}
+
+// redisReader is redisClient for a route that only looks at keys: a listing,
+// a key's facts, a page of its contents, a download. What it reads is not
+// counted by the server as use of the key, where the server can be asked not
+// to, so the idle time a page shows is the application's and not the page's
+// own doing.
+func (s *Server) redisReader(r *http.Request) (*redis.Client, *dbConnection, error) {
+	return s.redisOpen(r, true)
+}
+
+func (s *Server) redisOpen(r *http.Request, quiet bool) (*redis.Client, *dbConnection, error) {
 	conn, dsn, err := s.redisRow(r)
 	if err != nil {
 		return nil, nil, err
@@ -149,7 +172,7 @@ func (s *Server) redisClient(r *http.Request) (*redis.Client, *dbConnection, err
 	if err != nil {
 		return nil, nil, err
 	}
-	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: db})
+	client, err := dbx.RedisOpen(r.Context(), dsn, dbx.RedisOpenOptions{DB: db, Quiet: quiet})
 	if err != nil {
 		return nil, conn, redisConnectFailed(dsn, err, db)
 	}
@@ -206,10 +229,15 @@ func redisFail(err error, write bool) error {
 	var (
 		exists   *dbx.RedisKeyExistsError
 		conflict *dbx.RedisConflictError
+		noExpiry *dbx.RedisNoFieldExpiryError
 		replied  redis.Error
 		network  net.Error
 	)
 	switch {
+	case errors.As(err, &noExpiry), errors.Is(err, dbx.ErrRedisNoAutoClaim):
+		// The server has no such command. The engine's flags say the feature
+		// exists for the product; this is the one server that lacks it.
+		return httpx.Err(http.StatusBadRequest, "unsupported", err.Error())
 	case errors.Is(err, dbx.ErrRedisKeyNotFound):
 		return httpx.Err(http.StatusNotFound, "key_not_found", err.Error())
 	case errors.Is(err, dbx.ErrRedisMemberNotFound):
@@ -252,7 +280,7 @@ func (s *Server) handleRedisScan(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.BadRequest("invalid Redis cursor")
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -275,7 +303,7 @@ func (s *Server) handleRedisGet(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -307,7 +335,7 @@ func (s *Server) handleRedisTree(w http.ResponseWriter, r *http.Request) error {
 		}
 		prefix = dbx.RedisBytes(raw)
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -331,7 +359,7 @@ func (s *Server) handleRedisMeta(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -356,7 +384,7 @@ func (s *Server) handleRedisMembers(w http.ResponseWriter, r *http.Request) erro
 	if order != "" && order != "asc" && order != "desc" {
 		return httpx.BadRequest("order must be asc or desc")
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -375,8 +403,8 @@ func (s *Server) handleRedisMembers(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
-// handleRedisRaw sends one whole value — a string, a hash field or a list
-// element — as a download.
+// handleRedisRaw sends one whole value — a string, a hash field, a list
+// element, a member of a set or of a sorted set — as a download.
 //
 // It reads nothing a page of the same key does not already show the start
 // of, which is why it sits on the read surface beside the pages. The value
@@ -408,7 +436,31 @@ func (s *Server) handleRedisRaw(w http.ResponseWriter, r *http.Request) error {
 		}
 		whole.Index = &index
 	}
-	client, _, err := s.redisClient(r)
+	// A member of a set or a sorted set is named by itself, and a reader who
+	// wants the whole of one has only what the page kept of it: how it begins
+	// and how many bytes it is.
+	switch {
+	case q.Has("memberB64"):
+		raw, err := base64.StdEncoding.DecodeString(q.Get("memberB64"))
+		if err != nil {
+			if raw, err = base64.RawURLEncoding.DecodeString(q.Get("memberB64")); err != nil {
+				return httpx.BadRequest("memberB64 is not valid base64")
+			}
+		}
+		member := dbx.RedisBytes(raw)
+		whole.Member = &member
+	case q.Has("member"):
+		member := dbx.RedisBytes(q.Get("member"))
+		whole.Member = &member
+	}
+	if q.Has("bytes") {
+		size, err := strconv.ParseInt(q.Get("bytes"), 10, 64)
+		if err != nil || size < 0 {
+			return httpx.BadRequest("bytes must be the member's size in bytes")
+		}
+		whole.Size = &size
+	}
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -583,6 +635,74 @@ func (s *Server) handleRedisPersist(w http.ResponseWriter, r *http.Request) erro
 		return redisFail(err, true)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "pttl": pttl})
+	return nil
+}
+
+// redisFields is the fields of a hash a request names: one as `field`,
+// several as `members`, which is what a hash's fields are called wherever a
+// request names more than one.
+func (req *redisKeyRequest) fields() []dbx.RedisBytes {
+	var out []dbx.RedisBytes
+	if req.Field != nil {
+		out = append(out, *req.Field)
+	}
+	if req.Members != nil {
+		out = append(out, *req.Members...)
+	}
+	return out
+}
+
+// handleRedisFieldExpire sets when fields of a hash expire, on a server that
+// keeps an expiry per field. It takes the three forms the key's route takes
+// and treats them the same way: a ttl of zero or less removes the expiry, and
+// a moment that has passed is refused, because setting it deletes the field.
+func (s *Server) handleRedisFieldExpire(w http.ResponseWriter, r *http.Request) error {
+	return s.redisFieldExpiry(w, r, "database.redis.field.expire", false)
+}
+
+// handleRedisFieldPersist removes fields' expiries, as the key's persist
+// route does a key's: the request that says so in its path.
+func (s *Server) handleRedisFieldPersist(w http.ResponseWriter, r *http.Request) error {
+	return s.redisFieldExpiry(w, r, "database.redis.field.persist", true)
+}
+
+func (s *Server) redisFieldExpiry(w http.ResponseWriter, r *http.Request, action string, persist bool) error {
+	var req redisKeyRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	key, err := req.key()
+	if err != nil {
+		return err
+	}
+	fields := req.fields()
+	if len(fields) == 0 {
+		return httpx.BadRequest("name the field, or the fields as members")
+	}
+	expiry := dbx.RedisExpiry{Seconds: req.TTL, Millis: req.TTLMs, At: req.At}
+	if persist {
+		never := int64(0)
+		expiry = dbx.RedisExpiry{Seconds: &never}
+	}
+	client, conn, err := s.redisClient(r)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	// A field's name is data as often as it is a label, so the trail says how
+	// many were changed and not which.
+	detail := map[string]any{"key": key, "db": client.Options().DB, "fields": len(fields)}
+	if !persist {
+		detail["ttl"], detail["ttlMs"], detail["at"] = req.TTL, req.TTLMs, req.At
+	}
+	httpx.SetAudit(r, action, conn.Name, detail)
+	left, err := dbx.RedisSetFieldExpiry(ctx, client, nil, key, fields, expiry)
+	if err != nil {
+		return redisFail(err, true)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"ok": true, "fields": left})
 	return nil
 }
 
@@ -840,7 +960,7 @@ func (s *Server) handleRedisStream(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return err
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -864,7 +984,7 @@ func (s *Server) handleRedisStreamPending(w http.ResponseWriter, r *http.Request
 	if q.Get("group") == "" {
 		return httpx.BadRequest("group is required")
 	}
-	client, _, err := s.redisClient(r)
+	client, _, err := s.redisReader(r)
 	if err != nil {
 		return err
 	}
@@ -899,6 +1019,12 @@ type redisStreamRequest struct {
 	MaxLen      *int64 `json:"maxLen"`
 	MinID       string `json:"minId"`
 	Approximate bool   `json:"approximate"`
+	// MinIdleMs, Auto, Cursor and Count describe a claim; see
+	// dbx.RedisStreamClaim.
+	MinIdleMs int64  `json:"minIdleMs"`
+	Auto      bool   `json:"auto"`
+	Cursor    string `json:"cursor"`
+	Count     int    `json:"count"`
 }
 
 // redisStreamBody decodes a stream request and opens the client for it.
@@ -963,6 +1089,37 @@ func (s *Server) handleRedisStreamAck(w http.ResponseWriter, r *http.Request) er
 		return redisFail(err, true)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"acknowledged": n})
+	return nil
+}
+
+// handleRedisStreamClaim hands a group's pending entries to one of its
+// consumers: the ones named, or whatever has been pending long enough.
+func (s *Server) handleRedisStreamClaim(w http.ResponseWriter, r *http.Request) error {
+	req, client, conn, err := s.redisStreamBody(r)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	detail := map[string]any{
+		"key": *req.Key, "group": req.Group, "ids": len(req.IDs), "auto": req.Auto,
+		"minIdleMs": req.MinIdleMs, "db": client.Options().DB,
+	}
+	if req.Consumer != nil {
+		detail["consumer"] = *req.Consumer
+	}
+	httpx.SetAudit(r, "database.redis.stream.claim", conn.Name, detail)
+	out, err := dbx.RedisStreamClaimEntries(ctx, client, nil, dbx.RedisStreamClaim{
+		Key: *req.Key, Group: req.Group, Consumer: req.Consumer, IDs: req.IDs,
+		MinIdleMs: req.MinIdleMs, Auto: req.Auto, Cursor: req.Cursor, Count: req.Count,
+	})
+	if err != nil {
+		return redisFail(err, true)
+	}
+	detail["claimed"] = len(out.Claimed)
+	httpx.SetAudit(r, "database.redis.stream.claim", conn.Name, detail)
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 

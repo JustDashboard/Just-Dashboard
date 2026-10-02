@@ -242,6 +242,61 @@ func TestRedisFeaturesFollowTheServersAnswers(t *testing.T) {
 	}
 }
 
+// Leaving a key's idle time alone and claiming without naming entries are
+// each a command some servers lack, decided like the rest: by the server's
+// own answer where it gave one, by its release otherwise, and never for a
+// fork that answers to a Redis version it is not.
+func TestRedisFeaturesForReadsThatDoNotTouchAndForClaims(t *testing.T) {
+	for _, c := range []struct {
+		name               string
+		profile            *RedisProfile
+		noTouch, autoClaim bool
+	}{
+		{"Redis 7.4 by its own answer", &RedisProfile{Flavor: RedisFlavorRedis, Mode: "standalone", compat: [2]int{7, 4},
+			known: map[string]bool{"client|no-touch": true, "xautoclaim": true}}, true, true},
+		{"Redis 7.0 by its own answer", &RedisProfile{Flavor: RedisFlavorRedis, Mode: "standalone", compat: [2]int{7, 0},
+			known: map[string]bool{"client|no-touch": false, "xautoclaim": true}}, false, true},
+		{"Redis 7.2 that would not describe its commands", &RedisProfile{Flavor: RedisFlavorRedis, Mode: "standalone", compat: [2]int{7, 2}}, true, true},
+		{"Redis 7.0 that would not describe its commands", &RedisProfile{Flavor: RedisFlavorRedis, Mode: "standalone", compat: [2]int{7, 0}}, false, true},
+		{"Redis 6.0", &RedisProfile{Flavor: RedisFlavorRedis, Mode: "standalone", compat: [2]int{6, 0}}, false, false},
+		{"Valkey 8, which says it is Redis 7.2", &RedisProfile{Flavor: RedisFlavorValkey, Mode: "standalone", compat: [2]int{7, 2},
+			known: map[string]bool{"client|no-touch": true, "xautoclaim": true}}, true, true},
+		{"KeyDB, a Redis 6.3", &RedisProfile{Flavor: RedisFlavorKeyDB, Mode: "standalone", compat: [2]int{6, 3}}, false, true},
+		{"Dragonfly, which says it is Redis 7.4", &RedisProfile{Flavor: RedisFlavorDragonfly, Mode: "standalone", compat: [2]int{7, 4}}, false, true},
+		{"a sentinel", &RedisProfile{Flavor: RedisFlavorRedis, Mode: "sentinel", compat: [2]int{7, 4},
+			known: map[string]bool{"client|no-touch": true, "xautoclaim": true}}, false, false},
+	} {
+		if f := c.profile.features(); f.NoTouch != c.noTouch || f.StreamAutoClaim != c.autoClaim {
+			t.Errorf("%s: noTouch=%v streamAutoClaim=%v, want %v and %v", c.name, f.NoTouch, f.StreamAutoClaim, c.noTouch, c.autoClaim)
+		}
+	}
+}
+
+// A quiet client asks each of its connections to leave idle times alone. A
+// server that has never heard of the command answers with an error, and that
+// is not the connection's failure: it is opened, and read as before.
+func TestAQuietRedisClientOpensOnAServerWithoutNoTouch(t *testing.T) {
+	addr := fakeRedis(t, "*0\r\n")
+	client, err := RedisOpen(context.Background(), "redis://"+addr+"/0", RedisOpenOptions{DB: RedisDSNDatabase, Quiet: true})
+	if err != nil {
+		t.Fatalf("a quiet client was not opened on a server without CLIENT NO-TOUCH: %v", err)
+	}
+	defer client.Close()
+	if err := client.Ping(context.Background()).Err(); err != nil {
+		t.Errorf("the connection is not usable after the refusal: %v", err)
+	}
+	// The raw connection a page is read over does the same.
+	wire, err := redisDialOptions(context.Background(), client.Options())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wire.close()
+	wire.quiet()
+	if reply, err := wire.ask("PING"); err != nil || redisText(reply.generic()) != "PONG" {
+		t.Errorf("the raw connection after the refusal: %v %v", reply, err)
+	}
+}
+
 func TestRedisPersistenceFacts(t *testing.T) {
 	redis := redisPersistenceFacts(map[string]string{
 		"loading": "0", "rdb_last_save_time": "1790837946", "rdb_changes_since_last_save": "28",

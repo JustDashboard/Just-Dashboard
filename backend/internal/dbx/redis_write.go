@@ -737,6 +737,152 @@ type RedisExpiry struct {
 	At *int64
 }
 
+// command is the expiry as the command that sets it on a key — expire,
+// pexpire or pexpireat — and the number that command takes. An empty verb is
+// an expiry to be removed. what names the thing expiring, for the refusals.
+//
+// The rules are the same for a key and for one field of a hash, which is why
+// they are stated once: an expiry is given exactly one way, a relative one of
+// zero or less removes the expiry rather than setting one that has already
+// passed, and a moment that has passed is refused, because setting it is a
+// delete under another name.
+func (e RedisExpiry) command(what string) (verb string, n int64, err error) {
+	given := 0
+	for _, set := range []bool{e.Seconds != nil, e.Millis != nil, e.At != nil} {
+		if set {
+			given++
+		}
+	}
+	if given != 1 {
+		return "", 0, fmt.Errorf("give the expiry one way: ttl in seconds, ttlMs in milliseconds, or at as a moment")
+	}
+	// The number goes to the server as it was given. By way of a
+	// time.Duration or a time.Time, as the driver's own commands take it, a
+	// far-off expiry — the year 9999, the usual way of writing "never" — wraps
+	// to a negative one, and Redis reads a negative expiry as a delete.
+	now := time.Now()
+	switch {
+	case e.At != nil:
+		// A moment already past deletes the key the instant it is set, which
+		// is a delete under another name and is refused as one.
+		if *e.At <= now.UnixMilli() {
+			return "", 0, fmt.Errorf("that moment has already passed; setting it would delete the %s at once", what)
+		}
+		if *e.At > redisMaxExpiryMs {
+			return "", 0, errRedisExpiryTooFar
+		}
+		return "pexpireat", *e.At, nil
+	case e.Millis != nil && *e.Millis > 0:
+		if !redisExpiryInRange(*e.Millis, 1, now) {
+			return "", 0, errRedisExpiryTooFar
+		}
+		return "pexpire", *e.Millis, nil
+	case e.Seconds != nil && *e.Seconds > 0:
+		if !redisExpiryInRange(*e.Seconds, 1000, now) {
+			return "", 0, errRedisExpiryTooFar
+		}
+		return "expire", *e.Seconds, nil
+	}
+	return "", 0, nil
+}
+
+// RedisFieldExpiry is what is left of one hash field's life.
+type RedisFieldExpiry struct {
+	Field RedisBytes `json:"field"`
+	// PTTL is in milliseconds: -1 for a field that does not expire, -2 for
+	// one that is not in the hash.
+	PTTL int64 `json:"pttl"`
+}
+
+// RedisNoFieldExpiryError is an expiry asked for one field of a hash on a
+// server that keeps none: it came with Redis 7.4 and Valkey 9.0.
+type RedisNoFieldExpiryError struct{ Server string }
+
+func (e *RedisNoFieldExpiryError) Error() string {
+	return e.Server + " keeps no expiry for one field of a hash; that came with Redis 7.4 and Valkey 9.0. Set an expiry on the whole key instead"
+}
+
+// RedisSetFieldExpiry sets or clears the expiry of fields of one hash and
+// reports what each is afterwards. It is RedisSetExpiry for a field: the same
+// three ways of saying when, and the same refusal to set an expiry that has
+// already passed — which here would delete the field.
+//
+// profile may be nil. A server without per-field expiry is refused with a
+// *RedisNoFieldExpiryError before anything is sent to it.
+func RedisSetFieldExpiry(ctx context.Context, client *redis.Client, profile *RedisProfile, key RedisBytes, fields []RedisBytes, e RedisExpiry) ([]RedisFieldExpiry, error) {
+	switch {
+	case len(fields) == 0:
+		return nil, fmt.Errorf("name at least one field")
+	case len(fields) > redisMaxPageRows:
+		return nil, fmt.Errorf("at most %d fields are changed at once", redisMaxPageRows)
+	}
+	verb, n, err := e.command("field")
+	if err != nil {
+		return nil, err
+	}
+	if profile == nil {
+		if profile, err = RedisProbe(ctx, client); err != nil {
+			return nil, err
+		}
+	}
+	if profile.Mode == "sentinel" {
+		return nil, ErrRedisSentinel
+	}
+	if !profile.Features.HashFieldTTL {
+		return nil, &RedisNoFieldExpiryError{Server: redisProductName(profile)}
+	}
+	k := string(key)
+	named := make([]any, 0, len(fields)+2)
+	named = append(named, "FIELDS", len(fields))
+	for _, f := range fields {
+		named = append(named, string(f))
+	}
+	change := []any{"HPERSIST", k}
+	if verb != "" {
+		// The key's verbs with an H in front, and the same number.
+		change = []any{"H" + strings.ToUpper(verb), k, n}
+	}
+	pipe := client.Pipeline()
+	typeCmd := pipe.Type(ctx, k)
+	applied := pipe.Do(ctx, append(change, named...)...)
+	left := pipe.Do(ctx, append([]any{"HPTTL", k}, named...)...)
+	_, _ = pipe.Exec(ctx)
+	if err := typeCmd.Err(); err != nil {
+		return nil, RedisExplainError(ctx, client, err)
+	}
+	switch typ := typeCmd.Val(); typ {
+	case "none":
+		return nil, ErrRedisKeyNotFound
+	case "hash":
+	default:
+		return nil, fmt.Errorf("%q is a %s, not a hash: only a hash's fields expire on their own", key.Display(), typ)
+	}
+	if err := applied.Err(); err != nil && err != redis.Nil {
+		return nil, RedisExplainError(ctx, client, err)
+	}
+	ttls, err := left.Int64Slice()
+	if err != nil || len(ttls) != len(fields) {
+		// The change was made; what is left could not be read back. A key
+		// that expired in between reads as every field gone.
+		ttls = make([]int64, len(fields))
+		for i := range ttls {
+			ttls[i] = -2
+		}
+	}
+	out := make([]RedisFieldExpiry, len(fields))
+	missing := 0
+	for i, f := range fields {
+		out[i] = RedisFieldExpiry{Field: f, PTTL: ttls[i]}
+		if ttls[i] == -2 {
+			missing++
+		}
+	}
+	if missing == len(fields) {
+		return nil, ErrRedisMemberNotFound
+	}
+	return out, nil
+}
+
 // RedisSetExpiry sets or clears a key's expiry and reports what it is
 // afterwards, in milliseconds (-1 for none).
 //
@@ -746,42 +892,9 @@ type RedisExpiry struct {
 // TTL in a form meant.
 func RedisSetExpiry(ctx context.Context, client *redis.Client, key RedisBytes, e RedisExpiry) (int64, error) {
 	k := string(key)
-	given := 0
-	for _, set := range []bool{e.Seconds != nil, e.Millis != nil, e.At != nil} {
-		if set {
-			given++
-		}
-	}
-	if given != 1 {
-		return 0, fmt.Errorf("give the expiry one way: ttl in seconds, ttlMs in milliseconds, or at as a moment")
-	}
-	// The number goes to the server as it was given. By way of a
-	// time.Duration or a time.Time, as the driver's own commands take it, a
-	// far-off expiry — the year 9999, the usual way of writing "never" — wraps
-	// to a negative one, and Redis reads a negative expiry as a delete.
-	now := time.Now()
-	verb, n := "", int64(0)
-	switch {
-	case e.At != nil:
-		// A moment already past deletes the key the instant it is set, which
-		// is a delete under another name and is refused as one.
-		if *e.At <= now.UnixMilli() {
-			return 0, fmt.Errorf("that moment has already passed; setting it would delete the key at once")
-		}
-		if *e.At > redisMaxExpiryMs {
-			return 0, errRedisExpiryTooFar
-		}
-		verb, n = "pexpireat", *e.At
-	case e.Millis != nil && *e.Millis > 0:
-		if !redisExpiryInRange(*e.Millis, 1, now) {
-			return 0, errRedisExpiryTooFar
-		}
-		verb, n = "pexpire", *e.Millis
-	case e.Seconds != nil && *e.Seconds > 0:
-		if !redisExpiryInRange(*e.Seconds, 1000, now) {
-			return 0, errRedisExpiryTooFar
-		}
-		verb, n = "expire", *e.Seconds
+	verb, n, err := e.command("key")
+	if err != nil {
+		return 0, err
 	}
 	pipe := client.Pipeline()
 	var applied *redis.IntCmd
