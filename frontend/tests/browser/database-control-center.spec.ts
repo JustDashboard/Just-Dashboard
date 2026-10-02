@@ -1192,6 +1192,7 @@ test.describe("adding a database", () => {
   test("a server with no Docker says so before anything is asked of it", async ({ page }) => {
     await mockFleet(page, { inventory: dockerlessInventory() })
     await page.goto("/databases/new?mode=start&engine=postgres")
+    await page.getByRole("heading", { name: "PostgreSQL", exact: true }).waitFor()
     const panel = page.locator("[data-slot=flow-panel]")
     await expect(panel).toContainText("There is no Docker to start it in")
     await expect(panel.getByRole("button", { name: "Create" })).toBeDisabled()
