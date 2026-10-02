@@ -142,7 +142,8 @@ is excluded from the policy decision key, so toggling it cannot invalidate cache
   restart and foreign-remote suppression, remote parsing, and the decision key staying stable.
 - Browser (`deploy-projects.spec.ts`, `deploy-notifications.spec.ts`, `deploy-settings-a.spec.ts`):
   a Discord channel's creation, pause/resume, test delivery, delivery history and removal; each
-  channel saying how its last message went and its sheet reading every attempt; an e-mail edit that
+  channel saying how its last message went on one line with its verbs on the card's middle, the
+  recent messages and the last day's counts over them, and a channel's sheet reading every attempt; an e-mail edit that
   waits for its host, sender and recipients, and a Discord edit that keeps its webhook hidden until
   *Replace delivery settings* is opened; and the GitHub commit-status switch in Settings → General's
   Automatic deployment section.

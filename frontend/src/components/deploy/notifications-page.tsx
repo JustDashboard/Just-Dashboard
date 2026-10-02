@@ -41,7 +41,6 @@ import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { EmptyNote, ErrorState, LoadingPanel } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status, StatusDot } from "@/components/status-dot"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
@@ -62,7 +61,6 @@ import {
 import { OutcomeStrip, type OutcomeTone } from "@/components/outcome-strip"
 import {
   ProductGlyph,
-  ProductGlyphs,
   ProductLogo,
   channelProduct,
   webhookProduct,
@@ -78,8 +76,6 @@ import {
   InputGroupText,
   InputGroupToggle,
 } from "@/components/ui/input-group"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -96,14 +92,20 @@ import { ChannelGlyph, channelMark, mailProduct } from "@/components/deploy/voca
  * every release — which is why this is its own destination off the fleet
  * page rather than a tab nested under a single project.
  *
- * The page's one question is whether the messages are arriving, so it opens
- * on four readings of exactly that — how many channels and which services, how
- * many messages went out and how many were given up on in the last day, and
- * when the last one left — then the picture of where an outcome goes, whose
- * lines are that answer per channel, then the channels as cards drawn as the
- * service each posts to, each saying how its last message went and carrying
- * its last fourteen as a strip. A card opens the channel's own sheet: what it
- * is, and every attempt to reach it.
+ * The page's one question is whether the messages are arriving, and it opens
+ * on the picture of where an outcome goes, whose lines are that answer per
+ * channel, standing on the page's own ground. Under it are the channels as
+ * cards drawn as the service each posts to, each saying how its last message
+ * went and carrying its last fourteen as a strip, beside the messages
+ * themselves, newest first. A card opens the channel's own sheet: what it is,
+ * and every attempt to reach it.
+ *
+ * It carries no tiles (design-system §15 pass 2's exit). It had four, and each
+ * said what something under it says with more in it: the channel count and
+ * how many are paused are the Channels header's, the services are the marks
+ * in the picture, what was delivered and given up on over the last day are
+ * the counts over the recent messages — where each message is also named,
+ * with the run it announced — and the last message is that list's first row.
  */
 
 const KINDS: { kind: NotificationChannelKind; title: string; hint: string }[] = [
@@ -320,7 +322,7 @@ function ready(draft: Draft) {
   }
 }
 
-/** A delivery's time within the last day — the readings' window. */
+/** A delivery's time within the last day — the window the counts are over. */
 function withinDay(iso: string) {
   return Date.now() - Date.parse(iso) < 86_400_000
 }
@@ -347,10 +349,11 @@ function latestAttempts(log: NotificationDelivery[]) {
 }
 
 /**
- * Every channel's recent log, for the day's readings: one read per channel,
- * as a backup job's card reads its own runs. The list itself carries each
- * channel's newest attempt and last fourteen, which is what the cards and the
- * picture draw; only the counts over a day need the log behind them.
+ * Every channel's recent log, for the recent messages and the day's counts
+ * over them: one read per channel, as a backup job's card reads its own runs.
+ * The list itself carries each channel's newest attempt and last fourteen,
+ * which is what the cards and the picture draw; only the messages themselves
+ * need the log behind them.
  */
 function useDeliveryLogs(channels: NotificationChannel[] | undefined) {
   const ids = (channels ?? []).map((channel) => channel.id)
@@ -665,11 +668,14 @@ export function NotificationsPage() {
         <LoadingPanel plain rows={3} />
       ) : (
         <>
-          {list.length > 0 && <ChannelReadings channels={list} logs={logs} />}
-
-          {/* Framed, like the GitHub App's picture on Credentials: a drawing
-              of one thing and the places it goes needs an edge to read as one. */}
-          <div className="animate-rise overflow-hidden rounded-xl border bg-card px-5 py-6 sm:px-6 sm:py-7 lg:px-8 lg:py-9">
+          {/* On the page's own ground rather than in a frame: the dot grid a
+              wiring picture is drawn on fades out towards its edges, so the
+              picture has a middle and needs no border to read as one thing. */}
+          <div className="relative animate-rise py-2 lg:py-6">
+            <div
+              aria-hidden
+              className="wire-grid pointer-events-none absolute inset-x-0 -inset-y-4"
+            />
             <Fanout
               channels={list}
               fleet={fleet.data?.deployments ?? []}
@@ -677,50 +683,60 @@ export function NotificationsPage() {
             />
           </div>
 
-          <Panel plain>
-            <PanelHeader
-              title="Channels"
-              actions={
-                <span className="flex flex-wrap items-center gap-3">
-                  {list.length > 0 && (
-                    <span className="numeric text-hint text-muted-foreground">
-                      {plural(list.length, "channel")}
-                      {paused > 0 && ` · ${paused} paused`}
-                    </span>
-                  )}
-                  {admin && (
-                    <Button size="sm" onClick={() => add("discord")}>
-                      <Plus className="size-3.5" />
-                      Add channel
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-            <PanelBody>
-              {list.length === 0 ? (
-                // The picture above already offers the five kinds; the list
-                // only has to say it is empty.
-                <EmptyNote>No notification channels</EmptyNote>
-              ) : (
-                <ChoiceList aria-label="Notification channels" className="animate-rise">
-                  {ordered.map((channel) => {
-                    const verbs = verbsFor(channel, "card")
-                    return (
-                      <ChannelCard
-                        key={channel.id}
-                        channel={channel}
-                        verbs={verbs}
-                        {...working(channel, verbs)}
-                        wide={wide}
-                        onOpen={() => setHistoryId(channel.id)}
-                      />
-                    )
-                  })}
-                </ChoiceList>
-              )}
-            </PanelBody>
-          </Panel>
+          {/* Side by side once a card has the width to stay one line beside
+              the messages; stacked below that. */}
+          <div
+            className={cn(
+              "grid min-w-0 items-start gap-8 2xl:gap-x-10",
+              list.length > 0 && "2xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]",
+            )}
+          >
+            <Panel plain>
+              <PanelHeader
+                title="Channels"
+                actions={
+                  <span className="flex flex-wrap items-center gap-3">
+                    {list.length > 0 && (
+                      <span className="numeric text-hint text-muted-foreground">
+                        {plural(list.length, "channel")}
+                        {paused > 0 && ` · ${paused} paused`}
+                      </span>
+                    )}
+                    {admin && (
+                      <Button size="sm" onClick={() => add("discord")}>
+                        <Plus className="size-3.5" />
+                        Add channel
+                      </Button>
+                    )}
+                  </span>
+                }
+              />
+              <PanelBody>
+                {list.length === 0 ? (
+                  // The picture above already offers the five kinds; the list
+                  // only has to say it is empty.
+                  <EmptyNote>No notification channels</EmptyNote>
+                ) : (
+                  <ChoiceList aria-label="Notification channels" className="animate-rise">
+                    {ordered.map((channel) => {
+                      const verbs = verbsFor(channel, "card")
+                      return (
+                        <ChannelCard
+                          key={channel.id}
+                          channel={channel}
+                          verbs={verbs}
+                          {...working(channel, verbs)}
+                          wide={wide}
+                          onOpen={() => setHistoryId(channel.id)}
+                        />
+                      )
+                    })}
+                  </ChoiceList>
+                )}
+              </PanelBody>
+            </Panel>
+            {list.length > 0 && <RecentMessages channels={list} logs={logs} />}
+          </div>
         </>
       )}
 
@@ -862,115 +878,100 @@ export function NotificationsPage() {
   )
 }
 
+// The list is the answer at a glance; a channel's sheet holds every attempt.
+const RECENT_MESSAGES = 8
+
 /**
- * Four readings, each part of "are my messages arriving": how many channels
- * there are and which services they post to, how many messages went out and
- * how many were given up on over the last day, and when the last one left.
- * A message retried until it went out counts once, as delivered.
+ * The messages themselves, newest first across every channel: what each
+ * announced and for which run, the channel it went to and how that went. Over
+ * them, what was delivered and what was given up on in the last day — the
+ * figures the page used to open on, beside the rows they count. A message
+ * retried until it went out is one row and counts once, as delivered.
  */
-function ChannelReadings({
+function RecentMessages({
   channels,
   logs,
 }: {
   channels: NotificationChannel[]
   logs: ReturnType<typeof useDeliveryLogs>
 }) {
-  const paused = channels.filter((channel) => !channel.enabled).length
-  const products = [...new Set(channels.flatMap((channel) => channelMark(channel) ?? []))]
   const messages = logs.data
-    ? channels.flatMap((channel) =>
-        latestAttempts(logs.data?.get(channel.id) ?? []).map((delivery) => ({ channel, delivery })),
-      )
+    ? channels
+        .flatMap((channel) =>
+          latestAttempts(logs.data?.get(channel.id) ?? []).map((delivery) => ({
+            channel,
+            delivery,
+          })),
+        )
+        .sort((a, b) => b.delivery.createdAt.localeCompare(a.delivery.createdAt))
     : undefined
-  const newest = <T extends { delivery: { createdAt: string } }>(items: T[]) =>
-    [...items].sort((a, b) => b.delivery.createdAt.localeCompare(a.delivery.createdAt))[0]
-  const delivered = messages?.filter((m) => m.delivery.status === "delivered")
-  const givenUp = messages?.filter(
-    (m) => m.delivery.status === "failed" && !m.delivery.nextAttemptAt,
-  )
-  const retrying = messages?.filter(
-    (m) => m.delivery.status === "failed" && m.delivery.nextAttemptAt,
-  )
-  const deliveredToday = delivered?.filter((m) => withinDay(m.delivery.createdAt))
-  const failedToday = givenUp?.filter((m) => withinDay(m.delivery.createdAt))
-  const lastDelivered = delivered && newest(delivered)
-  const lastFailed = failedToday && newest(failedToday)
-  const last = newest(
-    channels.flatMap((channel) =>
-      channel.lastDelivery ? [{ channel, delivery: channel.lastDelivery }] : [],
-    ),
-  )
-
-  // A count arrives by counting: the figure rises with its tile.
-  const figure = (value: number | undefined) =>
-    value !== undefined ? (
-      <NumberTicker value={value} />
-    ) : logs.error ? (
-      "—"
-    ) : (
-      <Skeleton className="h-6 w-8" />
-    )
-  const settled = messages ? "animate-rise" : undefined
-  const key = (name: string) => (messages ? name : `${name}-loading`)
-  const unread = logs.error ? "delivery log unavailable" : undefined
+  const shown = messages?.slice(0, RECENT_MESSAGES) ?? []
+  const arrived = useArrivals(shown.map((message) => String(message.delivery.id)))
+  const today = messages?.filter((message) => withinDay(message.delivery.createdAt)) ?? []
+  const delivered = today.filter((message) => message.delivery.status === "delivered").length
+  const failed = today.filter(
+    (message) => message.delivery.status === "failed" && !message.delivery.nextAttemptAt,
+  ).length
+  // Whenever it was first tried: a retry ahead is a message still on its way.
+  const retrying = (messages ?? []).filter(
+    (message) => message.delivery.status === "failed" && message.delivery.nextAttemptAt,
+  ).length
 
   return (
-    <StatGrid columns={4} dense className="animate-rise">
-      <StatTile
-        label="Channels"
-        value={<NumberTicker value={channels.length} />}
-        hint={
-          <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-            <span className="truncate">{paused > 0 ? `${paused} paused` : "none paused"}</span>
-            <ProductGlyphs ids={products} />
-          </span>
+    <Panel plain>
+      <PanelHeader
+        title="Recent messages"
+        actions={
+          // As tall as the button in the Channels header, so beside it the two
+          // titles and the two rules stand on the same lines.
+          <div className="flex min-h-8 items-center">
+            {messages && messages.length > 0 && (
+              <p className="text-hint text-muted-foreground">
+                <span className="numeric font-medium text-foreground">{delivered}</span> delivered ·{" "}
+                <span
+                  className={cn(
+                    "numeric font-medium",
+                    failed > 0 ? "text-destructive" : "text-foreground",
+                  )}
+                >
+                  {failed}
+                </span>{" "}
+                failed
+                {retrying > 0 && (
+                  <>
+                    {" "}
+                    · <span className="numeric font-medium text-foreground">{retrying}</span>{" "}
+                    retrying
+                  </>
+                )}{" "}
+                · last 24h
+              </p>
+            )}
+          </div>
         }
       />
-      <StatTile
-        key={key("delivered")}
-        label="Delivered · 24h"
-        value={figure(deliveredToday?.length)}
-        hint={
-          unread ??
-          (messages &&
-            (lastDelivered
-              ? `last to ${lastDelivered.channel.name} ${relativeTime(lastDelivered.delivery.createdAt)}`
-              : "nothing delivered yet"))
-        }
-        className={settled}
-      />
-      <StatTile
-        key={key("failed")}
-        label="Failed · 24h"
-        value={figure(failedToday?.length)}
-        tone={failedToday && failedToday.length > 0 ? "danger" : "default"}
-        hint={
-          unread ??
-          (messages &&
-            [
-              lastFailed
-                ? `${lastFailed.channel.name} · ${
-                    RESPONSE_WORD[lastFailed.delivery.responseClass] ??
-                    lastFailed.delivery.responseClass
-                  } ${relativeTime(lastFailed.delivery.createdAt)}`
-                : "none failed",
-              retrying && retrying.length > 0 && `${retrying.length} retrying`,
-            ]
-              .filter(Boolean)
-              .join(" · "))
-        }
-        className={settled}
-      />
-      <StatTile
-        label="Last message"
-        value={last ? relativeTime(last.delivery.createdAt) : "—"}
-        hint={
-          last
-            ? `${EVENT_WORD[last.delivery.event] ?? last.delivery.event} to ${last.channel.name}`
-            : "nothing sent yet"
-        }
-      />
-    </StatGrid>
+      <PanelBody>
+        {logs.error ? (
+          <ErrorState error={logs.error} onRetry={logs.refresh} />
+        ) : !messages ? (
+          <LoadingPanel plain rows={3} />
+        ) : shown.length === 0 ? (
+          <EmptyNote>No messages sent yet</EmptyNote>
+        ) : (
+          <RowList aria-label="Recent messages" className="animate-rise">
+            {shown.map(({ channel, delivery }) => (
+              <AttemptRow
+                key={delivery.id}
+                delivery={delivery}
+                channel={channel}
+                arrived={arrived.has(String(delivery.id))}
+                wide={false}
+              />
+            ))}
+          </RowList>
+        )}
+      </PanelBody>
+    </Panel>
   )
 }
 
@@ -1041,7 +1042,7 @@ function outcomeWords(channel: NotificationChannel) {
  * is the same picture with nothing wired yet. The lines from the projects are
  * still: every one of them reports, and a project is not a delivery.
  *
- * Wide, the three balance around the lines across the frame. On a phone the
+ * Wide, the three balance around the lines across the page. On a phone the
  * list below already names every channel, so the picture shrinks to what it
  * adds: the projects over this server over a row of channels, the lines
  * running down through it.
@@ -1064,7 +1065,7 @@ function Fanout({
     ...missing.map((item) => ({ key: `add-${item.kind}`, kind: item.kind })),
   ]
   // Every channel: the grey mark and its still line say which are paused, and
-  // the tile and the list's header already count them.
+  // the list's header already counts them.
   const hint =
     channels.length === 0 ? "reaching nobody yet" : `reaching ${plural(channels.length, "channel")}`
   const shown = fleet.slice(0, 3)
@@ -1123,7 +1124,7 @@ function Fanout({
         </div>
       ) : (
         // The words over the marks, so the lines run downwards over nothing
-        // but the frame's own ground.
+        // but the page's own ground.
         <div className="flex flex-col items-center text-center">
           <p className="eyebrow">This server</p>
           <p className="text-body leading-snug font-medium">Every deployment</p>
@@ -1339,11 +1340,17 @@ function FanoutTarget({
 
 /**
  * One channel, as a card that opens its sheet: drawn as the service it posts
- * to, named, with the address it posts at as the literal the server holds.
- * How its last message went is beside the name in the colour of what
- * happened, and under the line are the events it hears about and its last
- * fourteen attempts as a strip — so a channel that has been dropping every
- * other message reads as that before its name is read.
+ * to, named, with the events it hears about and the address it posts at — the
+ * literal the server holds — under the name. At its other end are how its
+ * last message went, in the colour of what happened, and its last fourteen
+ * attempts as a strip — so a channel that has been dropping every other
+ * message reads as that before its name is read.
+ *
+ * One line, so the verbs stand on the card's middle: the events and the strip
+ * were a second line under the name, which left the verbs level with the name
+ * over an empty corner. The strip keeps fourteen squares' width however few it
+ * holds, so down a list the strips are one column and the states end on one
+ * edge. A phone has no room for that line and keeps the second one.
  */
 function ChannelCard({
   channel,
@@ -1361,6 +1368,14 @@ function ChannelCard({
   onOpen: () => void
 }) {
   const last = <LastDelivery channel={channel} sending={sending} switching={switching} />
+  const strip = (
+    <RecentStrip
+      recent={channel.recent}
+      retrying={
+        channel.lastDelivery?.status === "failed" && Boolean(channel.lastDelivery.nextAttemptAt)
+      }
+    />
+  )
   return (
     <ChoiceRow
       leading={<ChannelTile channel={channel} />}
@@ -1370,25 +1385,30 @@ function ChannelCard({
       busy={Boolean(sending)}
       description={
         <>
+          {wide && `${eventLabel(channel.events)} · `}
           <span className="font-mono">{channel.target || channel.url}</span>
           {channel.via && ` · via ${channel.via}`}
         </>
       }
-      trailing={wide ? last : undefined}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {last}
+            <span className="flex w-27.5 justify-end">{strip}</span>
+          </span>
+        )
+      }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${channel.name}`} />}
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
-        {/* A line of its own, so the state is never read as one more word of
-            the events after it. */}
-        {!wide && <div className="basis-full">{last}</div>}
-        <span className="min-w-0">{eventLabel(channel.events)}</span>
-        <RecentStrip
-          recent={channel.recent}
-          retrying={
-            channel.lastDelivery?.status === "failed" && Boolean(channel.lastDelivery.nextAttemptAt)
-          }
-        />
-      </div>
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground">
+          {/* A line of its own, so the state is never read as one more word of
+              the events after it. */}
+          <div className="basis-full">{last}</div>
+          <span className="min-w-0">{eventLabel(channel.events)}</span>
+          {strip}
+        </div>
+      )}
     </ChoiceRow>
   )
 }
@@ -1613,14 +1633,17 @@ function ChannelSheet({
 /**
  * One attempt: what it announced, as words, and which run; when, which try it
  * was and how the far end answered; and its outcome. The wire key stays at the
- * edge as the literal a receiver matches on.
+ * edge as the literal a receiver matches on. Outside a channel's own sheet the
+ * row says which channel it went to, by its mark and its name.
  */
 function AttemptRow({
   delivery,
+  channel,
   arrived,
   wide,
 }: {
   delivery: NotificationDelivery
+  channel?: NotificationChannel
   arrived: boolean
   wide: boolean
 }) {
@@ -1640,8 +1663,10 @@ function AttemptRow({
       className={cn(arrived && "animate-rise")}
       // The event is not the row's state: the one coloured mark on the row
       // is its outcome at the edge (§4).
+      leading={channel && <ChannelGlyph channel={channel} />}
       title={`${event}${run}`}
       subtitle={[
+        channel?.name,
         relativeTime(delivery.createdAt),
         delivery.attempt > 1 && `attempt ${delivery.attempt}`,
         RESPONSE_WORD[delivery.responseClass] ?? (delivery.responseClass || "—"),

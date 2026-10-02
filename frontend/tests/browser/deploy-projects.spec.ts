@@ -595,7 +595,11 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
   await page.getByRole("switch", { name: "Started" }).click()
   await page.getByRole("dialog").getByRole("button", { name: "Add channel", exact: true }).click()
 
-  const row = page.getByRole("listitem").filter({ hasText: "Ops room" })
+  // The channel's card, not the messages beside it, which name the channel too.
+  const row = page
+    .getByRole("list", { name: "Notification channels" })
+    .getByRole("listitem")
+    .filter({ hasText: "Ops room" })
   await expect(row).toBeVisible()
   await testInfo.attach("notifications-list-1280", {
     body: await page.screenshot({
@@ -634,8 +638,9 @@ test("Discord channel creation, pause, test delivery, history and removal", asyn
   await row.getByRole("button", { name: "Actions for Ops room" }).click()
   await page.getByRole("menuitem", { name: "Delivery history" }).click()
   await expect(page.getByRole("heading", { name: "Deliveries · Ops room" })).toBeVisible()
-  await expect(page.getByText(/run\.failed/)).toBeVisible()
-  await expect(page.getByText("Delivered", { exact: true })).toBeVisible()
+  const sheet = page.getByRole("dialog", { name: "Deliveries · Ops room" })
+  await expect(sheet.getByText(/run\.failed/)).toBeVisible()
+  await expect(sheet.getByText("Delivered", { exact: true })).toBeVisible()
   await page.keyboard.press("Escape")
 
   await row.getByRole("button", { name: "Actions for Ops room" }).click()
