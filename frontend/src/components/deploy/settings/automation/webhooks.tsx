@@ -30,7 +30,6 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useGitHubApp } from "@/hooks/use-github"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentDraftSource,
@@ -72,6 +71,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { humanize, isActiveRun } from "@/components/deploy/vocabulary"
 import { useProject } from "@/components/deploy/project-context"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
@@ -94,11 +94,12 @@ import {
  * deployment: a forge's push or pull request, reached through the GitHub App
  * or a signed payload URL, or anything else that signs its request.
  *
- * Each webhook is a card that opens its deliveries, drawn as the forge that
- * sends to it, with how the last delivery went beside the name in the colour
- * of what happened and its last fourteen deliveries as a strip under it — so
- * a webhook whose signature has been failing reads as that before its name is
- * read. A light runs round the card while a delivery it accepted is deploying.
+ * Each webhook is a one-line card that opens its deliveries, drawn as the
+ * forge that sends to it, with how the last delivery went at its far end in
+ * the colour of what happened and its last fourteen deliveries as a strip
+ * beside that — so a webhook whose signature has been failing reads as that
+ * before its name is read. A light runs round the card while a delivery it
+ * accepted is deploying.
  */
 
 /** What the Add and Edit sheet is open on. */
@@ -219,6 +220,10 @@ export function Webhooks({
   const { triggers } = automation
   const [openId, setOpenId] = useState<number>()
   const [rotated, setRotated] = useState<{ name: string; secret: string }>()
+  // A card's facts and readings share one line where the list's own column
+  // has room for both, and the readings take a second line where it has not.
+  const [column, columnWidth] = useColumnWidth()
+  const wide = columnWidth >= 560
   const list = triggers.data ?? []
   const opened = list.find((trigger) => trigger.id === openId)
 
@@ -369,31 +374,34 @@ export function Webhooks({
         )
       }
     >
-      {triggers.loading && !triggers.data ? (
-        <LoadingRows rows={2} />
-      ) : triggers.error && !triggers.data ? (
-        <ErrorState error={triggers.error} onRetry={triggers.refresh} />
-      ) : list.length === 0 ? (
-        canAdmin ? (
-          <ProviderStarters onPick={(provider) => sheet.openAdd({ provider })} />
+      <div ref={column} className="min-w-0">
+        {triggers.loading && !triggers.data ? (
+          <LoadingRows rows={2} />
+        ) : triggers.error && !triggers.data ? (
+          <ErrorState error={triggers.error} onRetry={triggers.refresh} />
+        ) : list.length === 0 ? (
+          canAdmin ? (
+            <ProviderStarters onPick={(provider) => sheet.openAdd({ provider })} />
+          ) : (
+            <EmptyNote className="px-0 py-2 text-left">No webhooks yet.</EmptyNote>
+          )
         ) : (
-          <EmptyNote className="px-0 py-2 text-left">No webhooks yet.</EmptyNote>
-        )
-      ) : (
-        // Each card lands by itself, so one added from the sheet rises in
-        // rather than appearing; a poll keeps the rest mounted, unmoved.
-        <ChoiceList aria-label="Webhooks">
-          {list.map((trigger, index) => (
-            <WebhookCard
-              key={trigger.id}
-              index={index}
-              trigger={trigger}
-              verbs={canAdmin ? verbsFor(trigger) : undefined}
-              onOpen={canAdmin ? () => setOpenId(trigger.id) : undefined}
-            />
-          ))}
-        </ChoiceList>
-      )}
+          // Each card lands by itself, so one added from the sheet rises in
+          // rather than appearing; a poll keeps the rest mounted, unmoved.
+          <ChoiceList aria-label="Webhooks">
+            {list.map((trigger, index) => (
+              <WebhookCard
+                key={trigger.id}
+                index={index}
+                trigger={trigger}
+                wide={wide}
+                verbs={canAdmin ? verbsFor(trigger) : undefined}
+                onOpen={canAdmin ? () => setOpenId(trigger.id) : undefined}
+              />
+            ))}
+          </ChoiceList>
+        )}
+      </div>
 
       <DeliveriesSheet
         projectId={projectId}
@@ -477,32 +485,44 @@ function DeliveryFact({ trigger }: { trigger: DeploymentTrigger }) {
 }
 
 /**
- * One webhook as a card that opens its deliveries. The two readings — how
- * the last delivery went, and whether it is on — sit beside the name when
- * the card is wide and lead the line under it on a phone; chosen once
- * (`useMediaQuery`) rather than drawn twice, so each is in the page once.
- * Each rises into its new state when it changes: a delivery arriving, the
- * run it started, the switch.
+ * One webhook as a card that opens its deliveries, on one line: drawn as the
+ * forge that sends to it, named, with what it listens to under the name — the
+ * repository and branch, the paths it is narrowed to, whether it opens
+ * previews, and how deliveries arrive. At its other end are how the last
+ * delivery went, in the colour of what happened, whether it is on, and its
+ * last fourteen deliveries as a strip. Each reading rises into its new state
+ * when it changes: a delivery arriving, the run it started, the switch.
  *
- * The line under the name says how deliveries arrive only where that is the
- * exception — through the GitHub App — and the paths it watches only where it
- * is narrowed to some: "signed hook" under every other webhook, and "all
- * paths" under every unfiltered one, were the default said on each card, and
- * a signed hook's own card read "Signed hook · signed hook".
+ * One line, so the verbs stand on the card's middle: the strip, the paths and
+ * the preview address were a second band under the name, which left the verbs
+ * level with the name over an empty corner. The address went rather than
+ * moved — the picture above and the previews' own head both draw it. The
+ * strip keeps fourteen squares' width however few it holds, so down a list
+ * the strips are one column and the states end on one edge. A column too
+ * narrow for that line keeps a second one for the readings and the strip, and
+ * lets the facts wrap rather than lose their end.
+ *
+ * The facts say how deliveries arrive only where that is the exception —
+ * through the GitHub App — and the paths only where it is narrowed to some:
+ * "signed hook" under every other webhook, and "all paths" under every
+ * unfiltered one, were the default said on each card, and a signed hook's own
+ * card read "Signed hook · signed hook".
  */
 function WebhookCard({
   trigger,
   index,
+  wide,
   verbs,
   onOpen,
 }: {
   trigger: DeploymentTrigger
   index: number
+  /** Whether the list's column has room for the card's one line. */
+  wide: boolean
   verbs?: Verb[]
   onOpen?: () => void
 }) {
   const project = useProject()
-  const wide = useMediaQuery("(min-width: 640px)")
   const runId = trigger.lastDelivery?.runId
   const deploying =
     runId === undefined
@@ -527,11 +547,9 @@ function WebhookCard({
       />
     </>
   )
+  const strip = <DeliveryStrip recent={trigger.recent} />
   const include = trigger.config.watchInclude ?? []
   const forge = trigger.kind !== "generic_hook" && trigger.kind !== "api"
-  const strip = (trigger.recent?.length ?? 0) > 0
-  const narrowed = forge && include.length > 0
-  const below = !wide || strip || narrowed || Boolean(trigger.config.preview)
   return (
     <ChoiceRow
       verb={`Open ${trigger.name}`}
@@ -543,7 +561,7 @@ function WebhookCard({
       leading={<TriggerMark trigger={trigger} />}
       title={trigger.name}
       description={
-        <>
+        <span className={cn(!wide && "whitespace-normal")}>
           {trigger.config.repository ? (
             <span className="font-mono">{trigger.config.repository}</span>
           ) : (
@@ -555,38 +573,34 @@ function WebhookCard({
               <span className="font-mono">{trigger.config.ref}</span>
             </>
           )}
+          {forge && include.length > 0 && (
+            <>
+              {" · "}
+              <span className="font-mono">{include[0]}</span>
+              {include.length > 1 && <span className="numeric">{` +${include.length - 1}`}</span>}
+            </>
+          )}
+          {trigger.config.preview && " · previews"}
           {viaApp(trigger) && " · via GitHub App"}
-        </>
+        </span>
       }
-      trailing={wide ? <span className="flex items-center gap-4">{readings}</span> : undefined}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {readings}
+            {/* Only an administrator's list carries deliveries, so only theirs
+                keeps a column for them: anyone else's would be an empty one
+                on every card. */}
+            {onOpen && <span className="flex w-27.5 justify-end">{strip}</span>}
+          </span>
+        )
+      }
       actions={verbs && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${trigger.name}`} />}
     >
-      {below && (
+      {!wide && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
-          {!wide && <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>}
-          <DeliveryStrip recent={trigger.recent} />
-          {narrowed && (
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-              <span className="truncate font-mono text-foreground/85">{include[0]}</span>
-              {include.length > 1 && <span className="numeric">+{include.length - 1}</span>}
-            </span>
-          )}
-          {trigger.config.preview && (
-            <span className="inline-flex min-w-0 items-center gap-1.5">
-              <SourcePull aria-hidden className="size-3.5 shrink-0" />
-              <span className="truncate">
-                previews
-                {trigger.config.previewDomain && (
-                  <>
-                    {" at "}
-                    <span className="font-mono text-foreground/85">
-                      {trigger.config.previewDomain}
-                    </span>
-                  </>
-                )}
-              </span>
-            </span>
-          )}
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>
+          {strip}
         </div>
       )}
     </ChoiceRow>

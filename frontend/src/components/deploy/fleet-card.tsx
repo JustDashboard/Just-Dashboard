@@ -565,13 +565,22 @@ export function ProjectCard({
 /**
  * A row in the list, in the shape the page picks for its width.
  *
- * `wide` (from `xl`): the readings sit beside the name in fixed measures — its
- * state, its traffic, its history, when — so a column of rows scans like the
- * table it replaces. Below that they go beneath the name at the row's full
- * width and nothing is dropped (§12); `roomy` (from `sm`) keeps the state
- * beside the name, and a phone puts it first on the line beneath, where the
- * verbs beside the name would otherwise leave the source line a third of the
- * row and the commit's subject nothing.
+ * One line wherever its readings fit beside the name, so the verbs stand on
+ * the row's middle: below `xl` the readings were a band under the source line,
+ * which made every row three lines tall with the verbs level with the name
+ * over an empty corner. `lined` (from `lg`): its state, its last fourteen runs
+ * — the release path, in flight — and when, in fixed measures, so a column of
+ * rows scans like the table it replaces and the states end on one edge.
+ * `wide` (from `xl`): its traffic joins them. The traffic is the one reading a
+ * narrower line leaves out: it is the widest, and the grid's card, the
+ * project's Overview and, past 5% failing, the Attention list above all carry
+ * it.
+ *
+ * Below `lg` the sidebar leaves the name no room for them, and they go beneath
+ * it at the row's full width; `roomy` (from `sm`) keeps the state beside the
+ * name, and a phone puts it first on the line beneath, where the verbs beside
+ * the name would otherwise leave the source line a third of the row and the
+ * commit's subject nothing.
  */
 export function ProjectRow({
   deployment,
@@ -581,8 +590,9 @@ export function ProjectRow({
   confirm,
   refresh,
   wide,
+  lined,
   roomy,
-}: ProjectProps & { wide: boolean; roomy: boolean }) {
+}: ProjectProps & { wide: boolean; lined: boolean; roomy: boolean }) {
   const { verbs, progressive, gate } = useFleetVerbs(deployment, confirm, refresh)
   const now = useNow(1000, Boolean(deployment.activeRun))
   const recent = deployment.recentRuns ?? []
@@ -623,7 +633,7 @@ export function ProjectRow({
       title={deployment.name}
       description={<SourceSummary deployment={deployment} pulls={pulls} compact />}
       trailing={
-        wide ? (
+        lined ? (
           <>
             <span className="flex w-32 min-w-0 flex-col gap-0.5">
               {stage ? (
@@ -636,7 +646,9 @@ export function ProjectRow({
               )}
               {pending}
             </span>
-            <span className="flex w-48 min-w-0">{traffic && <RowTraffic pulse={traffic} />}</span>
+            {wide && (
+              <span className="flex w-48 min-w-0">{traffic && <RowTraffic pulse={traffic} />}</span>
+            )}
             <span className="flex w-28 items-center">{history}</span>
             <span className="w-16 text-right text-hint text-muted-foreground">{when}</span>
           </>
@@ -651,11 +663,11 @@ export function ProjectRow({
           dim
           verbs={verbs}
           menuLabel={`Actions for ${deployment.name}`}
-          className={cn(wide && "w-16.5 justify-end")}
+          className={cn(lined && "w-16.5 justify-end")}
         />
       }
     >
-      {!wide && (
+      {!lined && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
           {!roomy && status}
           <Address deployment={deployment} />

@@ -982,12 +982,29 @@ trail stays a table.
 measures where there is room and under it where there is not, chosen once with a media query — and
 the width they need is measured inside the project's shell, not the window: at 1280 the content
 column beside the project's navigation is about 968px, which left a service's name 150px beside
-five readings, so the wide shape of a service and of the Overview's runs-beside-previews starts at
-`2xl`, as does the build console's rail of stages beside the transcript. Inside a settings page the
-column is narrower still, because the fields are held to 48rem however wide the window is, so there
-the window is the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a
-list is drawn in, before its first paint, and the variables (from 600px), mounts and linked
-databases (from 480px) choose beside-or-under from that — still once, still drawn once. A row that
+five readings, so the wide shape of the Overview's runs-beside-previews starts at `2xl`, as does
+the build console's rail of stages beside the transcript. Inside a settings page the column is
+narrower still, because the fields are held to 48rem however wide the window is, so there the
+window is the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a list
+is drawn in, before its first paint, and the variables and linked databases (from 600px), the
+storage page's mounts (from 480px) and Automation's webhooks, schedules, approvals and previews
+(from 560px) choose beside-or-under from that — still once, still drawn once.
+
+**Wide, a lit card is one line** — the Notifications channel card is the reference. The mark, the
+name over one truncating line of its secondary facts joined with " · ", and at its far end the state
+word and the outcome strip, the strip in a fixed `w-27.5` column so that down a list the strips are
+one column and the states end on one edge, then the arrow and the verbs on the card's middle. A
+second band under the name — a strip, a preview address, a run's trigger — left the card two or
+three lines tall with the verbs level with the name over an empty corner, and 0.7.1 took it off
+every deployment card that had one: webhooks, schedules, approvals and previews; linked databases,
+the gate evidence, the live mounts and a variable's linked database; a backup job (`JobCard`, which
+measures its own width because it is drawn on /backups as well); a runtime service (one line from
+1280, its ports from 1536), a domain (from 1024), a mount and a dependency; the fleet's list rows
+(from `lg`, traffic joining at `xl`), the runs in flight (from `sm`) and the archive (from `sm`).
+Narrow, each keeps one short second line, as the channel card does on a phone; a fact that fitted
+neither line and is not needed to recognise or judge the card went to the page or sheet it opens.
+A revealed variable value and an isolation note on a preview keep their line, because one is a
+control and the other is the thing to do. A row that
 only reflows rather than rearranging, a domain or a mount editor, uses a container query
 (`@container`, `@min-[40rem]` for a domain and `@min-[36rem]` for a mount) and draws nothing twice
 by construction.

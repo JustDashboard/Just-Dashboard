@@ -137,11 +137,12 @@ function Fleet() {
   const admin = can("system.admin")
   // The header's shape, and the list rows', chosen once rather than drawn
   // twice and hidden: the tests and a screen reader find each link by its
-  // name, and a hidden twin is a second answer to every query (§12). A run
-  // in flight lays its path, stage and clock beside its name only from `lg`,
-  // where the sidebar leaves the name room to be read.
+  // name, and a hidden twin is a second answer to every query (§12). A run in
+  // flight keeps its stage and clock beside its name from `sm`; its release
+  // path, and a project's readings, join the line only from `lg`, where the
+  // sidebar leaves the name room to be read.
   const roomy = useMediaQuery("(min-width: 640px)")
-  const wideRuns = useMediaQuery("(min-width: 1024px)")
+  const lined = useMediaQuery("(min-width: 1024px)")
   const wide = useMediaQuery("(min-width: 1280px)")
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
@@ -310,7 +311,8 @@ function Fleet() {
             <InProgressPanel
               work={fleet.data.activeWork}
               deployments={deployments}
-              roomy={wideRuns}
+              wide={roomy}
+              roomy={lined}
               canCancel={can("service.control")}
               cancelling={cancelling}
               onCancel={cancel}
@@ -473,6 +475,7 @@ function Fleet() {
                     <ProjectRow
                       key={deployment.id}
                       wide={wide}
+                      lined={lined}
                       roomy={roomy}
                       deployment={deployment}
                       pulse={pulses?.[String(deployment.id)]}
@@ -499,10 +502,19 @@ function Fleet() {
  * Each is a destination — the run's own page — drawn as the project it is
  * releasing, with the release path sweeping and the stage it is at lit, which
  * is how its page draws it too.
+ *
+ * One line, so Cancel stands on the row's middle: the stage and the clock sit
+ * at its end in fixed measures, so down the list the stages are one column and
+ * the clocks end on one edge. From `lg` the release path leads them, and who
+ * started the run follows its name; narrower, the stage's word says where it
+ * is, and who started it is on the run's page. A phone has no room for the
+ * stage beside the name and keeps one slim line under it — the path and the
+ * stage, nothing else.
  */
 function InProgressPanel({
   work,
   deployments,
+  wide,
   roomy,
   canCancel,
   cancelling,
@@ -510,6 +522,9 @@ function InProgressPanel({
 }: {
   work: DeploymentActiveWork[]
   deployments: DeploymentSummary[]
+  /** From `sm`: the stage beside the name. */
+  wide: boolean
+  /** From `lg`: the release path before the stage, and who started the run. */
   roomy: boolean
   canCancel: boolean
   cancelling: Set<number>
@@ -549,10 +564,9 @@ function InProgressPanel({
             const path = (
               <MiniReleasePath currentStep={item.currentStep} currentStatus={item.currentStatus} />
             )
-            // Who started it and what it is building: beside the run's name
-            // where there is room, under the stage on a phone. The starter is
-            // named, because a face and then a subject is how every card
-            // below draws a commit and its author.
+            // Who started it and what it is building, beside the run's name.
+            // The starter is named, because a face and then a subject is how
+            // every card below draws a commit and its author.
             const starter = (
               <>
                 <RunActorMark run={run} remote={summary?.sourceRemote} size="xs" />
@@ -577,16 +591,18 @@ function InProgressPanel({
                 title={item.projectName}
                 description={
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="shrink-0">
+                    {/* Whole beside the starter, which gives way first; alone,
+                        beside the stage and Cancel, it is what gives way. */}
+                    <span className={roomy ? "shrink-0" : "min-w-0 truncate"}>
                       {runTitle(run)} · {item.environment}
                     </span>
                     {roomy && starter}
                   </span>
                 }
                 trailing={
-                  roomy ? (
+                  wide ? (
                     <>
-                      {path}
+                      {roomy && path}
                       <span className="w-28 min-w-0 truncate text-xs">
                         <TextShimmer className="font-medium">{stage}</TextShimmer>
                       </span>
@@ -615,13 +631,10 @@ function InProgressPanel({
                   )
                 }
               >
-                {!roomy && (
-                  <div className="min-w-0 space-y-1.5 text-hint text-muted-foreground">
-                    <div className="flex min-w-0 items-center gap-3">
-                      {path}
-                      <TextShimmer className="truncate text-hint font-medium">{stage}</TextShimmer>
-                    </div>
-                    <div className="flex min-w-0 items-center gap-1.5">{starter}</div>
+                {!wide && (
+                  <div className="flex min-w-0 items-center gap-3">
+                    {path}
+                    <TextShimmer className="truncate text-hint font-medium">{stage}</TextShimmer>
                   </div>
                 )}
               </ChoiceRow>

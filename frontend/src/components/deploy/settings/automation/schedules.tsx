@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   ArrowRight,
   ArrowUpDown,
@@ -81,6 +81,7 @@ import {
 import { contentsLabel, targetLabel } from "@/components/backups/shared"
 import { destinationProduct } from "@/components/backups/marks"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import {
   RunStatus,
   formatDuration,
@@ -108,12 +109,12 @@ import {
  * Schedules — deploy, restart, back up or run a command on a clock, in a
  * named timezone.
  *
- * A schedule is read as the sentence it is ("Every day at 03:00 · Europe/
- * Chisinau") rather than as the five cron fields the server stores, with the
- * chain of steps it runs drawn as their glyphs and words, and its last
- * fourteen firings as a strip — so a nightly deploy that has been failing
- * reads as that before its name is read. Its sheet lays the firings and the
- * next five runs on one axis around now.
+ * A schedule is a one-line card read as the sentence it is ("Every day at
+ * 03:00 · Europe/Chisinau") rather than as the five cron fields the server
+ * stores, with the chain of steps it runs, and its last fourteen firings as a
+ * strip — so a nightly deploy that has been failing reads as that before its
+ * name is read. Its sheet draws the chain as glyphs and words, and lays the
+ * firings and the next five runs on one axis around now.
  */
 
 /** How many firings a card draws: two weeks of a nightly schedule. */
@@ -274,6 +275,10 @@ export function Schedules({
   const list = schedules.data ?? []
   const [openId, setOpenId] = useState<number>()
   const opened = list.find((schedule) => schedule.id === openId)
+  // A card's facts and readings share one line where the list's own column
+  // has room for both, and the readings take a second line where it has not.
+  const [column, columnWidth] = useColumnWidth()
+  const wide = columnWidth >= 560
   const jobs = useBackupJobs(
     list.some((schedule) => schedule.steps.some((step) => step.action === "backup")),
   )
@@ -385,43 +390,46 @@ export function Schedules({
         )
       }
     >
-      {schedules.loading && !schedules.data ? (
-        <LoadingRows rows={2} />
-      ) : schedules.error && !schedules.data ? (
-        <ErrorState error={schedules.error} onRetry={schedules.refresh} />
-      ) : list.length === 0 ? (
-        canAdmin ? (
-          <div className="space-y-2">
-            <p className="text-hint text-muted-foreground">Start one that will</p>
-            <ChoiceGrid columns={2} className="grid-cols-2 lg:grid-cols-4">
-              {ACTIONS.map((action) => (
-                <ActionCard
-                  key={action.key}
-                  action={action.key}
-                  onClick={() => sheet.openAdd({ action: action.key })}
-                />
-              ))}
-            </ChoiceGrid>
-          </div>
+      <div ref={column} className="min-w-0">
+        {schedules.loading && !schedules.data ? (
+          <LoadingRows rows={2} />
+        ) : schedules.error && !schedules.data ? (
+          <ErrorState error={schedules.error} onRetry={schedules.refresh} />
+        ) : list.length === 0 ? (
+          canAdmin ? (
+            <div className="space-y-2">
+              <p className="text-hint text-muted-foreground">Start one that will</p>
+              <ChoiceGrid columns={2} className="grid-cols-2 lg:grid-cols-4">
+                {ACTIONS.map((action) => (
+                  <ActionCard
+                    key={action.key}
+                    action={action.key}
+                    onClick={() => sheet.openAdd({ action: action.key })}
+                  />
+                ))}
+              </ChoiceGrid>
+            </div>
+          ) : (
+            <EmptyNote className="px-0 py-2 text-left">No schedules yet.</EmptyNote>
+          )
         ) : (
-          <EmptyNote className="px-0 py-2 text-left">No schedules yet.</EmptyNote>
-        )
-      ) : (
-        // Each card lands by itself, so one added from the sheet rises in.
-        <ChoiceList aria-label="Schedules">
-          {list.map((schedule, index) => (
-            <ScheduleCard
-              key={schedule.id}
-              index={index}
-              base={base}
-              schedule={schedule}
-              jobs={jobs.data}
-              verbs={canAdmin ? (fired) => verbsFor(schedule, fired) : undefined}
-              onOpen={() => setOpenId(schedule.id)}
-            />
-          ))}
-        </ChoiceList>
-      )}
+          // Each card lands by itself, so one added from the sheet rises in.
+          <ChoiceList aria-label="Schedules">
+            {list.map((schedule, index) => (
+              <ScheduleCard
+                key={schedule.id}
+                index={index}
+                base={base}
+                schedule={schedule}
+                jobs={jobs.data}
+                wide={wide}
+                verbs={canAdmin ? (fired) => verbsFor(schedule, fired) : undefined}
+                onOpen={() => setOpenId(schedule.id)}
+              />
+            ))}
+          </ChoiceList>
+        )}
+      </div>
 
       <ScheduleRunsSheet
         projectId={projectId}
@@ -473,6 +481,17 @@ function ScheduleMark({ schedule }: { schedule: DeploymentSchedule }) {
   )
 }
 
+/** A step's word, and the backup job or the program it names. */
+function stepOf(step: DeploymentSchedule["steps"][number], jobs?: BackupJob[]) {
+  const jobId = Number(step.config.jobId ?? step.config.backupJobId)
+  const argv = Array.isArray(step.config.argv) ? (step.config.argv as string[]) : []
+  return {
+    label: actionOf(step.action)?.label ?? humanize(step.action),
+    job: step.action === "backup" ? jobs?.find((one) => one.id === jobId)?.name : undefined,
+    program: step.action === "container_command" ? argv[0] : undefined,
+  }
+}
+
 /**
  * The steps a schedule runs, as their glyphs and words joined by arrows: a
  * backup names its job, a command its program.
@@ -489,33 +508,60 @@ function StepChain({
   return (
     <span className={cn("inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1", className)}>
       {schedule.steps.map((step, index) => {
-        const meta = actionOf(step.action)
+        const { label, job, program } = stepOf(step, jobs)
         const Glyph = ACTION_GLYPH[step.action]
-        const jobId = Number(step.config.jobId ?? step.config.backupJobId)
-        const job = jobs?.find((one) => one.id === jobId)
-        const argv = Array.isArray(step.config.argv) ? (step.config.argv as string[]) : []
         return (
           <span key={index} className="inline-flex min-w-0 items-center gap-1.5">
             {index > 0 && <ArrowRight aria-label="then" className="size-3 shrink-0 opacity-60" />}
             {Glyph && <Glyph aria-hidden className="size-3.5 shrink-0" />}
-            <span className="text-foreground/85">{meta?.label ?? humanize(step.action)}</span>
+            <span className="text-foreground/85">{label}</span>
             {/* The dot is an item of its own, so the gap stands on both sides. */}
-            {step.action === "backup" && job && (
+            {job && (
               <>
                 <span aria-hidden>·</span>
-                <span className="truncate">{job.name}</span>
+                <span className="truncate">{job}</span>
               </>
             )}
-            {step.action === "container_command" && argv[0] && (
+            {program && (
               <>
                 <span aria-hidden>·</span>
-                <span className="truncate font-mono">{argv[0]}</span>
+                <span className="truncate font-mono">{program}</span>
               </>
             )}
           </span>
         )
       })}
     </span>
+  )
+}
+
+/**
+ * The same chain as words in a card's line of facts. Without a glyph per
+ * step — the first step's is the card's mark already — and as text rather
+ * than a row of boxes, so the line's end can be cut short with an ellipsis.
+ */
+function StepWords({ schedule, jobs }: { schedule: DeploymentSchedule; jobs?: BackupJob[] }) {
+  return (
+    <>
+      {schedule.steps.map((step, index) => {
+        const { label, job, program } = stepOf(step, jobs)
+        return (
+          <Fragment key={index}>
+            {index > 0 && (
+              <ArrowRight aria-label="then" className="mx-1 inline size-3 align-[-2px]" />
+            )}
+            {label}
+            {job && ` · ${job}`}
+            {program && (
+              <>
+                {" · "}
+                <span className="font-mono">{program}</span>
+              </>
+            )}
+          </Fragment>
+        )
+      })}
+    </>
   )
 }
 
@@ -580,9 +626,19 @@ function FiringStrip({ firings, timezone }: { firings: Firing[]; timezone: strin
 }
 
 /**
- * One schedule as a card that opens its runs. When it fires next and whether
- * it is on sit beside the name when the card is wide and lead the line under
- * it on a phone — chosen once, so each is in the page once.
+ * One schedule as a card that opens its runs, on one line: drawn as what its
+ * first step does, named, with when it fires under the name — the sentence,
+ * and the zone that says which three o'clock — then the steps it runs. At its
+ * other end are when it fires next, or that it is running, whether it is on,
+ * and its last fourteen firings as a strip.
+ *
+ * One line, so the verbs stand on the card's middle: the steps and the strip
+ * were a second band under the name, which left the verbs level with the name
+ * over an empty corner. The strip keeps fourteen squares' width however few
+ * it holds, so down a list the strips are one column and the states end on
+ * one edge. A column too narrow for that line keeps a second one for the
+ * readings and the strip, and lets the sentence wrap, or the zone would be the
+ * part that goes.
  *
  * Of the time, the part that is read is how long until it fires, so that is
  * in the foreground and "next" beside it is not. Each reading rises into its
@@ -595,6 +651,7 @@ function ScheduleCard({
   index,
   schedule,
   jobs,
+  wide,
   verbs,
   onOpen,
 }: {
@@ -602,11 +659,12 @@ function ScheduleCard({
   index: number
   schedule: DeploymentSchedule
   jobs?: BackupJob[]
+  /** Whether the list's column has room for the card's one line. */
+  wide: boolean
   verbs?: (fired?: number) => Verb[]
   onOpen: () => void
 }) {
   const project = useProject()
-  const wide = useMediaQuery("(min-width: 640px)")
   const runs = usePoll(
     (signal) =>
       get<{ runs: DeploymentEngineRun[] }>(
@@ -649,6 +707,7 @@ function ScheduleCard({
       />
     </>
   )
+  const strip = <FiringStrip firings={firings} timezone={schedule.timezone} />
   return (
     <ChoiceRow
       verb={`Open ${schedule.name}`}
@@ -659,13 +718,19 @@ function ScheduleCard({
       leading={<ScheduleMark schedule={schedule} />}
       title={schedule.name}
       description={
-        // The row's line is cut to one; on a phone the sentence wraps instead,
-        // or the zone that says which three o'clock is the part that goes.
-        <span className="max-sm:whitespace-normal">
-          {describeCron(schedule.expression)} · {schedule.timezone}
+        <span className={cn(!wide && "whitespace-normal")}>
+          {describeCron(schedule.expression)} · {schedule.timezone} ·{" "}
+          <StepWords schedule={schedule} jobs={jobs} />
         </span>
       }
-      trailing={wide ? <span className="flex items-center gap-4">{readings}</span> : undefined}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {readings}
+            <span className="flex w-27.5 justify-end">{strip}</span>
+          </span>
+        )
+      }
       actions={
         verbs && (
           <VerbActions
@@ -676,11 +741,12 @@ function ScheduleCard({
         )
       }
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
-        {!wide && <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>}
-        <StepChain schedule={schedule} jobs={jobs} />
-        <FiringStrip firings={firings} timezone={schedule.timezone} />
-      </div>
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground sm:pl-11">
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>
+          {strip}
+        </div>
+      )}
     </ChoiceRow>
   )
 }

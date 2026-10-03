@@ -1076,11 +1076,15 @@ function VariablesBody({
 
 /**
  * A variable in the list. Its name in the family's hue, what it holds on the
- * line under it — a mask, the database it points at, or the value while it is
- * revealed — and who set it, as their face. Where the list's column is wide
- * the row's edge carries its pending state and the three places it can reach;
- * narrower, they go under the name at the card's full width. The state of the
- * database a reference reads is always under the name it describes.
+ * line under it — a mask, or the database it points at — and who set it, as
+ * their face. Where the list's column is wide the card is one line: its edge
+ * carries its pending state, the state of the database a reference reads, and
+ * the three places it can reach, which are the same width on every row, so
+ * down the list the states end on one edge. The database's state was a band
+ * of its own under the name, the one reading that made a row two lines tall
+ * with its verbs level with the name. Narrower, all of it goes under the name
+ * at the card's full width. A revealed value always takes a line of its own:
+ * it is there to be selected and copied, not read past.
  */
 function VariableRow({
   variable,
@@ -1130,17 +1134,15 @@ function VariableRow({
     <Status key="not-built" tone="warning" label="Not in the build" className="animate-rise" />
   ) : undefined
   // The state of the database a reference reads, where it is anything but
-  // connected — a dot and its word (§4) under the name it describes, not a
-  // bare dot in the value's line where it read as a separator. Connected is
-  // the quiet case, and Databases already draws it.
+  // connected — a dot and its word (§4) among the row's states, not a bare
+  // dot in the value's line where it read as a separator. Connected is the
+  // quiet case, and Databases already draws it.
   const linkState = link && link.status !== "connected" && (
     <Status tone={LINK_STATUS[link.status].tone} label={LINK_STATUS[link.status].label} />
   )
-  // Wide, the edge holds the variable's own state and reach; narrow, all of
-  // it goes under the name, the three slots first so they line up down the list.
-  const under = wide ? (
-    linkState
-  ) : (
+  // Wide, the edge holds the states and the reach; narrow, all of it goes
+  // under the name, the three slots first so they line up down the list.
+  const under = !wide && (
     <>
       <Reach scopes={variable.scopes} />
       {state}
@@ -1168,6 +1170,7 @@ function VariableRow({
       trailing={
         wide ? (
           <>
+            {linkState}
             {state}
             <Reach scopes={variable.scopes} />
           </>

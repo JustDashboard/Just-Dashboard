@@ -17,7 +17,6 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { ProductLogo } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { MOUNT_STATUS, MountMark } from "@/components/deploy/vocabulary"
 import { volumeProduct } from "@/components/deploy/service-product"
@@ -204,20 +203,19 @@ function StorageForm({
             </EmptyNote>
           ) : (
             <ChoiceList aria-label="In the live release">
+              {/* One line where the column has room: what the source is, whether
+                  the container can write to it and what the release found are
+                  words on the line under the path, and the state is the card's
+                  other end — the kind and read-only were chips beside the
+                  state, and the release's detail a band of its own under the
+                  name. Narrow, the state and the detail keep a line under it. */}
               {storage.mounts.map((mount, index) => {
                 const status = MOUNT_STATUS[mount.status]
                 const size =
                   mount.kind === "volume"
                     ? volumeFacts(mount.source, facts).volume?.size
                     : undefined
-                const readings = (
-                  <>
-                    <Status tone={status.tone} label={status.label} />
-                    {/* The editor's word for the same thing, not the engine's "bind". */}
-                    <Tag>{mount.kind === "volume" ? "volume" : "host path"}</Tag>
-                    {mount.readOnly && <Tag>read-only</Tag>}
-                  </>
-                )
+                const state = <Status tone={status.tone} label={status.label} />
                 return (
                   <ChoiceRow
                     key={`${mount.source}-${mount.target}`}
@@ -235,15 +233,20 @@ function StorageForm({
                     description={
                       <>
                         <span className="font-mono">{mount.source}</span>
+                        {/* The editor's word for the same thing, not the engine's "bind". */}
+                        {" · "}
+                        <span>{mount.kind === "volume" ? "volume" : "host path"}</span>
+                        {mount.readOnly && " · read-only"}
                         {size ? <span className="numeric"> · {bytes(size)}</span> : null}
                         <span> · {mount.ownership}</span>
+                        {wide && mount.detail && ` · ${mount.detail}`}
                       </>
                     }
-                    trailing={wide ? readings : undefined}
+                    trailing={wide && state}
                   >
-                    {(!wide || mount.detail) && (
+                    {!wide && (
                       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:pl-11">
-                        {!wide && readings}
+                        {state}
                         {mount.detail && (
                           <span className="text-hint text-muted-foreground">{mount.detail}</span>
                         )}

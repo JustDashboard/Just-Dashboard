@@ -16,7 +16,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { ApiError, del, get, post, put, refusedIndex } from "@/lib/api"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { copyText } from "@/lib/clipboard"
 import { useAuth } from "@/hooks/use-auth"
@@ -39,7 +39,7 @@ import { scheduleLabel } from "@/components/backups/shared"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { ProductGlyph, ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, ProductLogos } from "@/components/product-logo"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -190,10 +190,12 @@ function DatabasesBody({
   const canRun = can("service.control")
   const project = useProject()
   const { confirm, dialog } = useConfirm()
-  // The three lists share one fields column; readings go beside a name
-  // where it has room and under it where it does not.
+  // The lists share one fields column; readings go beside a name where it
+  // has room and under it where it does not. A card holds two of them at its
+  // end — a database's state and its dump, a run's two verdicts — which left
+  // the name a word wide below 600.
   const [column, columnWidth] = useColumnWidth()
-  const wide = columnWidth >= 480
+  const wide = columnWidth >= 600
   // Where SettingPicture lays its marks out in a row rather than a column.
   const pictureRow = useMediaQuery("(min-width: 1024px)")
   const databaseDependencies = configuration.dependencies.filter((d) => d.kind === "database")
@@ -553,7 +555,7 @@ function DatabasesBody({
       <SettingSection
         title="Linked databases"
         state={
-          // Which variable carries each database is its row's own "via" line,
+          // Which variable carries each database is its card's own "via",
           // and one nothing carries says so under its own card, so the head
           // keeps only how fresh the cards' readings are. It had also said
           // "no variable carries a linked database" over cards saying it.
@@ -643,9 +645,45 @@ function DatabasesBody({
                       className="animate-rise"
                     />
                   )
+                  // "Add the dump" under the policy turns this green; keyed,
+                  // so the change rises rather than repaints.
+                  const dumpMark = savedBackups.length > 0 && (
+                    <Status
+                      key={dumpedBy?.id ?? "none"}
+                      tone={dumpedBy ? "running" : "warning"}
+                      label={dumpedBy ? `dumped by ${dumpedBy.name}` : "no native dump"}
+                      className="animate-rise"
+                    />
+                  )
+                  const via =
+                    carriers.length > 0 ? (
+                      <span className="shrink-0">
+                        via{" "}
+                        {carriers.map((variable, at) => (
+                          <span key={variable.name}>
+                            {at > 0 && ", "}
+                            <Link
+                              href={`/deploy/${projectId}/settings/variables`}
+                              className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
+                            >
+                              {variable.name}
+                            </Link>
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="shrink-0">no variable names it</span>
+                    )
                   return (
                     <DatabaseRowGroup key={`${id}-${index}`}>
-                      {/* `index` lets a database that was just linked arrive
+                      {/* One line where the column has room: the variable that
+                          carries the database joins its address under the
+                          name, and whether a dump covers it stands beside
+                          its state at the card's other end. They were a band
+                          under the name, which left the verbs level with it
+                          over an empty corner. Narrow, the state, the carrier
+                          and the dump keep a line under it.
+                          `index` lets a database that was just linked arrive
                           as a card rather than appear; the list re-renders
                           under the links poll without moving. */}
                       <ChoiceRow
@@ -659,49 +697,44 @@ function DatabasesBody({
                           // The engine is the card's logo and the picture's
                           // eyebrow; a small-caps PostgreSQL here was it a
                           // third time. Before the first deployment binds it
-                          // there is no address, and the status says why.
-                          link && (
+                          // there is no address, and the status says why. The
+                          // address is what gives way, so the carrier — a
+                          // link — is never cut.
+                          (link || wide) && (
                             <span className="flex min-w-0 items-center gap-1.5">
-                              <span className="shrink-0 font-mono">{link.database}</span>
-                              <span aria-hidden>·</span>
-                              <span className="min-w-0 truncate font-mono">{link.hostname}</span>
+                              {link && (
+                                <>
+                                  <span className="shrink-0 font-mono">{link.database}</span>
+                                  <span aria-hidden>·</span>
+                                  <span className="min-w-0 truncate font-mono">
+                                    {link.hostname}
+                                  </span>
+                                </>
+                              )}
+                              {link && wide && <span aria-hidden>·</span>}
+                              {wide && via}
                             </span>
                           )
                         }
-                        trailing={wide ? statusMark : undefined}
+                        trailing={
+                          wide && (
+                            <span className="flex items-center gap-4">
+                              {dumpMark}
+                              {statusMark}
+                            </span>
+                          )
+                        }
                         actions={
                           <VerbActions dim verbs={verbs} menuLabel={`Actions for ${name}`} />
                         }
                       >
-                        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
-                          {!wide && statusMark}
-                          {carriers.length > 0 ? (
-                            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                              via
-                              {carriers.map((variable) => (
-                                <Link
-                                  key={variable.name}
-                                  href={`/deploy/${projectId}/settings/variables`}
-                                  className="rounded-sm focus-ring hover:underline"
-                                >
-                                  <Tag mono>{variable.name}</Tag>
-                                </Link>
-                              ))}
-                            </span>
-                          ) : (
-                            <span>no variable names it</span>
-                          )}
-                          {/* "Add the dump" under the policy turns this green;
-                              keyed, so the change rises rather than repaints. */}
-                          {savedBackups.length > 0 && (
-                            <Status
-                              key={dumpedBy?.id ?? "none"}
-                              tone={dumpedBy ? "running" : "warning"}
-                              label={dumpedBy ? `dumped by ${dumpedBy.name}` : "no native dump"}
-                              className="animate-rise"
-                            />
-                          )}
-                        </div>
+                        {!wide && (
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
+                            {statusMark}
+                            {via}
+                            {dumpMark}
+                          </div>
+                        )}
                       </ChoiceRow>
                       {failing && (
                         <Notice
@@ -947,6 +980,13 @@ function DatabasesBody({
                 </>
               )
               const dumps = item.databaseDumps?.length ?? 0
+              // One line where the column has room: how many dumps the run
+              // took and which recovery check it rests on join the run's line,
+              // and the two verdicts are the card's other end. They were a
+              // band under the name, with the engines drawn again beside a
+              // count the card's own marks already make; the image the check
+              // restored is the job's page's to say. Narrow, the verdicts
+              // keep a line under the name.
               return (
                 <ChoiceRow
                   key={`${item.jobId}-${item.runId ?? 0}`}
@@ -968,28 +1008,22 @@ function DatabasesBody({
                       {" · "}
                       {humanize(item.status)}
                       {item.detail ? ` · ${item.detail}` : ""}
+                      {dumps > 0 && ` · ${plural(dumps, "native dump")}`}
+                      {item.restoreVerificationId ? (
+                        <>
+                          {" · recovery check "}
+                          <span className="numeric">#{item.restoreVerificationId}</span>
+                          {" · schema "}
+                          <span className="font-mono">{item.restoreSchemaVersion}</span>
+                        </>
+                      ) : null}
                     </>
                   }
-                  trailing={wide ? readings : undefined}
+                  trailing={wide && <span className="flex items-center gap-4">{readings}</span>}
                 >
-                  {(!wide || dumps > 0 || item.restoreVerificationId) && (
-                    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-hint text-muted-foreground sm:pl-11">
-                      {!wide && readings}
-                      {dumps > 0 && (
-                        <span className="flex items-center gap-1.5">
-                          <ProductGlyphs ids={engines} />
-                          {dumps === 1
-                            ? "1 linked database covered by a native dump"
-                            : `${dumps} linked databases covered by native dumps`}
-                        </span>
-                      )}
-                      {item.restoreVerificationId && (
-                        <span className="font-mono break-all">
-                          Recovery check #{item.restoreVerificationId} · schema{" "}
-                          {item.restoreSchemaVersion}
-                          {item.restoreApplicationImage ? ` · ${item.restoreApplicationImage}` : ""}
-                        </span>
-                      )}
+                  {!wide && (
+                    <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 sm:pl-11">
+                      {readings}
                     </div>
                   )}
                 </ChoiceRow>
@@ -1123,9 +1157,9 @@ function DatabasePicture({
 /**
  * One backup job a release gates on. A chosen job is the Backups page's own
  * card — its products, its last run in colour, where it writes, its last
- * fourteen runs — with what the live release observed of it added to its
- * second line. A new row, a job being changed, or one that no longer exists
- * is the picker instead, never a bare id.
+ * fourteen runs — with what the live release observed of it beside its last
+ * run. A new row, a job being changed, or one that no longer exists is the
+ * picker instead, never a bare id.
  */
 function BackupPolicy({
   index,
