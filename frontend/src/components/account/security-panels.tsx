@@ -176,7 +176,7 @@ function Verdict({
  * The three states are: not enrolled, enrolled, and enrolled on an install
  * that requires it — where the off switch is absent rather than disabled,
  * since a control that cannot be used is a question the operator has to answer
- * for themselves. The state is the section's rail head, and its verdict opens
+ * for themselves. The state is under the section's head, and its verdict opens
  * the section in the colour of what it means.
  */
 export function TwoFactorSection() {

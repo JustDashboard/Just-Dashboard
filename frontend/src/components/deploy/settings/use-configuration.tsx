@@ -61,7 +61,7 @@ export function useConfiguration(projectId: number, environmentId: number) {
 
 /**
  * The three states a settings section passes through before it has a form
- * to show. Rendered by the section, so the rail stays put while it loads.
+ * to show. Rendered by the section, so its head stays put while it loads.
  *
  * `readings` says the page opens on a row of figures, so the skeleton draws
  * one: a placeholder that is not the shape of what replaces it is a jump.
@@ -84,7 +84,7 @@ export function ConfigurationState({
 
 /**
  * A settings page before its configuration lands: the figures, then two
- * sections with their heads in the rail and three fields beside each.
+ * sections, each head over three fields.
  *
  * It was a framed table — a header strip over five rows — which is the one
  * shape no settings page has, so the moment the data arrived the whole
@@ -94,7 +94,7 @@ export function ConfigurationState({
  */
 function SettingsSkeleton({ readings }: { readings?: boolean }) {
   return (
-    <div className="min-w-0 space-y-8">
+    <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8">
       {readings && (
         <StatGrid columns={4} dense>
           {[0, 1, 2, 3].map((cell) => (
@@ -111,7 +111,7 @@ function SettingsSkeleton({ readings }: { readings?: boolean }) {
           ))}
         </StatGrid>
       )}
-      <div className="max-w-3xl divide-y divide-hairline">
+      <div className="divide-y divide-hairline">
         {[0, 1].map((row) => (
           <div key={row} className="min-w-0 space-y-4 py-8 first:pt-0 last:pb-0">
             <div className="space-y-2">
@@ -226,7 +226,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * already claimed to have.
  *
  * `key` names the section (`deploy.7.settings.build`). `changed` answers for
- * a group of fields, so a rail head can say which part of a long form has
+ * a group of fields, so a section's head can say which part of a long form has
  * the edits; `changes` is the count the foot prints; `discard` drops the
  * draft and the form reads the saved value again.
  */

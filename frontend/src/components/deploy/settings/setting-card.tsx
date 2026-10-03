@@ -38,12 +38,12 @@ import {
 type SettingApplies = "next-deployment" | "immediately"
 
 /**
- * The sections' column, for what sits under a form rather than in one of its
- * sections — and for the game server's foot, which has no `FormSections`
- * around it — so Save sits under the fields it saves rather than a thousand
- * pixels to their right on a wide screen.
+ * The sections' centred column, for the page around them and for what sits
+ * under a form rather than in one of its sections — the game server's foot
+ * included, which has no `FormSections` around it — so Save sits under the
+ * fields it saves rather than a thousand pixels to their right.
  */
-const FIELDS_COLUMN = "max-w-3xl"
+const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
 
 const APPLIES: Record<SettingApplies, string> = {
   "next-deployment": "Applies on your next deployment",
@@ -52,10 +52,12 @@ const APPLIES: Record<SettingApplies, string> = {
 
 /**
  * A settings page: its configuration read, what is saved but not live, the
- * page's figures when it has any, and its forms in one run of rail sections.
+ * page's figures when it has any, and its forms in one run of sections — all
+ * of it in the one centred column, so the strip and the figures line up with
+ * the fields under them.
  *
  * No heading of its own. The project's other pages add none under the
- * project header, and the first rail head already names what the page is.
+ * project header, and the first section's head already names what the page is.
  * The content rises once when the first read lands and not on every revision
  * after it, because a save is not an arrival.
  */
@@ -75,7 +77,7 @@ export function SettingsPage({
   return (
     <ConfigurationState state={state} readings={Boolean(readings)}>
       {(configuration) => (
-        <div className="min-w-0 animate-rise space-y-8">
+        <div className={cn("min-w-0 animate-rise space-y-8", FIELDS_COLUMN)}>
           <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
           <LastFailureRemedy />
           {readings?.(configuration)}
@@ -199,7 +201,7 @@ export function SettingSection({
 
 /**
  * Where a section stands against what is saved and what is live, as the one
- * `Status` its rail head carries — or nothing, which is the common case: a
+ * `Status` its head carries — or nothing, which is the common case: a
  * "Live" on every head would be noise.
  *
  * `notLive` is for a section that one kind of pending change maps onto

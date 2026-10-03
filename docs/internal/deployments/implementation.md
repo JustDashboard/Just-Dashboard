@@ -1663,7 +1663,7 @@ Settings are nine pages — General, Build, Runtime, Environment variables, Doma
 but not live yet at the top, as a strip that names each change and links to its page but carries no
 command (the header's is the one), then, on the page that holds it, the newest failed deployment's
 fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings,
-then its forms, each section's head over its fields in one 48rem column. Each form saves the whole
+then its forms, each head over its fields in one centred 48rem column. Each form saves the whole
 configuration with the revision it read, keeps its draft keyed on a digest of its own saved value
 (`useSettingDraft`) so a save of the form beside it no longer throws the draft away, and ends in a
 foot with when the change applies, Discard and Save; a refusal that names a field lands on that

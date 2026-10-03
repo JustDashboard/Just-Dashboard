@@ -345,8 +345,8 @@ export default function DashboardConfigurationPage() {
               aside
               title="Address"
               hint={
-                // The host is the field beside it, so it may truncate here;
-                // what the rail adds is that it answers, and on which port.
+                // The host is the field under it, so it may truncate here;
+                // what the head adds is that it answers, and on which port.
                 <span className="block space-y-1">
                   <a
                     href={report.endpoint}

@@ -416,6 +416,15 @@ from its own. The rail spent a third of the width on a few words a section and s
 line of the first field label beside it, so a section read as two labels side by side. `aside`
 keeps its name from that column, and now means a section of the page rather than of a dialog.
 
+**Where the column sits is the page's call.** A page that is only a form centres it: the nine
+project settings pages (`SettingsPage` centres its strip and readings with it, so they line up with
+the fields), a game server's settings, the account's Security and a database's Settings. A 48rem
+column against the left edge of a wide page left the rest of it an empty band nothing explained. A
+form that is one block among full-width ones keeps their left edge instead — Configuration's
+settings under its stack and last restart, the proxy pages' password files, access lists, backups and
+watched domains, Security's findings and SSH — because centred there its title stood 180px in from
+every title above it.
+
 **Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
 purpose: 32px above and below every section, so 64px and a hairline between one section and the
 next, against 16px from a head to its own fields, which stand 20px apart — a head is always nearer

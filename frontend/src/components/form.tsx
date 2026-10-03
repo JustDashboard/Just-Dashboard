@@ -226,7 +226,7 @@ export function FormSection({
         id={id}
         data-slot={slot}
         className={cn(
-          "max-w-3xl min-w-0 scroll-mt-6 space-y-4 py-8 first:pt-0 last:pb-0",
+          "w-full max-w-3xl min-w-0 scroll-mt-6 space-y-4 py-8 first:pt-0 last:pb-0",
           className,
         )}
       >
@@ -266,9 +266,21 @@ export function FormSection({
  * A run of `FormSection aside`s, a hairline between each, held to the fields'
  * width so the hairlines stop where the fields do — a settings page's forms
  * included, which are its children rather than sections.
+ *
+ * Where it sits across the page is the page's call. A page that is only a
+ * form centres it (`mx-auto`), because a 48rem column against the left edge
+ * of a wide page left the rest of it an unexplained empty band. A form that is
+ * one block among full-width ones — Configuration's settings under its stack,
+ * a proxy page's lists — keeps their left edge: centred there, its title
+ * stood 180px in from every title above it.
  */
 export function FormSections({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("max-w-3xl min-w-0 divide-y divide-hairline", className)} {...props} />
+  return (
+    <div
+      className={cn("w-full max-w-3xl min-w-0 divide-y divide-hairline", className)}
+      {...props}
+    />
+  )
 }
 
 /**

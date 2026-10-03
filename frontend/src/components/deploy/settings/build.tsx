@@ -105,7 +105,7 @@ import {
  * of their names (§14), and it offers all eight recipes the backend builds —
  * the select it replaced offered three.
  *
- * Two forms, two saves: Build (four rail sections, one PUT) and Release
+ * Two forms, two saves: Build (four sections, one PUT) and Release
  * tasks. Each keeps its own draft, keyed on its own saved value, so saving
  * one never restarts the other's unsaved edits.
  */
@@ -162,7 +162,7 @@ const BUILD_FIELD_IDS: Record<string, string> = {
   "build.targetPlatform": "build-platform",
 }
 
-/** Which rail head a refused field belongs to, so the head says "Not saved" too. */
+/** Which section head a refused field belongs to, so the head says "Not saved" too. */
 const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
   "build-method": "build",
   "build-package-manager": "build",
@@ -665,7 +665,7 @@ function BuildReadings({
 
 /**
  * The Build form: which builder, the commands it runs, the image it makes and
- * which variables reach which stage — four rail heads, one save, because one
+ * which variables reach which stage — four section heads, one save, because one
  * PUT writes all of it.
  */
 function BuildForm({

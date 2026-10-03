@@ -72,7 +72,7 @@ import {
  * cannot run two releases side by side, and blue/green on such a plan used
  * to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (five rail sections, one PUT) and Health
+ * Two forms, two saves: Runtime (five sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
  */
@@ -162,7 +162,7 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.devices": "runtime-devices",
 }
 
-/** Which rail head a refused field belongs to, so that head says "Not saved". */
+/** Which section head a refused field belongs to, so that head says "Not saved". */
 const FIELD_SECTION: Record<string, string> = {
   "runtime-image": "runtime",
   "runtime-command": "runtime",
@@ -415,7 +415,7 @@ function RuntimeReadings({
   )
 }
 
-/** One or two states for a rail head, stacked, or nothing when there are none. */
+/** One or two states for a section head, stacked, or nothing when there are none. */
 function statuses(...items: React.ReactNode[]) {
   const shown = items.filter(Boolean)
   if (shown.length === 0) return undefined
@@ -423,7 +423,7 @@ function statuses(...items: React.ReactNode[]) {
 }
 
 /**
- * The Runtime form: five rail heads — the image and command, where it
+ * The Runtime form: five section heads — the image and command, where it
  * listens, what it may use, how releases replace each other, what it can
  * reach — and one save, because one PUT writes all of it.
  */

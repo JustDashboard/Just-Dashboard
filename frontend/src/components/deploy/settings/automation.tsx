@@ -51,7 +51,7 @@ import {
  * It opens on four readings — the last run nothing pressed a button for, the
  * next one a clock will start, the revisions waiting for a look, and the
  * alerts firing — then draws the senders as a picture, then lays the four
- * blocks out as the other settings pages do: heads in a rail, each carrying
+ * blocks out as the other settings pages do: each head over its block, carrying
  * what its block currently is as data, the webhooks, schedules and previews
  * as cards that open their own sheets, and the alert rules as sentences.
  *
