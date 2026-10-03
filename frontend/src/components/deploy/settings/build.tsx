@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import type { FormEvent } from "react"
 import { Copy, LockClosed } from "@/components/icons"
 import { ApiError, get, post, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -489,8 +488,7 @@ function BuildForm({
   const applyProposed = (changes: DeploymentDetectionChange[]) =>
     setBuild(applyDetectionChanges(build, configuration.runtime, changes).build)
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
+  const submit = async () => {
     // Said field by field rather than spread over the saved plan: a field the
     // draft cleared comes back from session storage absent, and a spread would
     // put the saved value back under it.
@@ -506,7 +504,7 @@ function BuildForm({
       !GO_VERSION.test(next.goVersion)
     ) {
       setFieldError({ id: "build-go-version", message: GO_ERROR })
-      return
+      return false
     }
     const errors = validateConfiguration(
       { ...configuration, build: next, variables: planVariables(configuration) },
@@ -514,11 +512,11 @@ function BuildForm({
     )
     if (errors.target) {
       setFieldError({ id: "build-target", message: errors.target })
-      return
+      return false
     }
     if (errors.systemPackages) {
       setFieldError({ id: "build-system-packages", message: errors.systemPackages })
-      return
+      return false
     }
     const refusal =
       errors.buildMethod ||
@@ -530,16 +528,22 @@ function BuildForm({
       errors.dotnetVersion
     if (refusal) {
       setError(refusal)
-      return
+      return false
     }
     setError(undefined)
     setFieldError(undefined)
     setSaving(true)
     try {
-      await save({ build: next })
-      notify.success("Build settings saved", {
-        description: "They will apply on your next deployment.",
+      // Release tasks and the detected framework are not this form's to
+      // write, so they are taken from the copy the save goes out against.
+      await save({
+        build: (latest) => ({
+          ...next,
+          releaseTasks: latest.build.releaseTasks,
+          framework: latest.build.framework,
+        }),
       })
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.field && BUILD_FIELD_IDS[caught.field]) {
         setFieldError({ id: BUILD_FIELD_IDS[caught.field], message: caught.message })
@@ -550,6 +554,7 @@ function BuildForm({
       } else {
         notify.error("Could not save build settings", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -660,7 +665,7 @@ function BuildForm({
   return (
     <SettingForm
       name="Build"
-      onSubmit={submit}
+      onSave={submit}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -1530,8 +1535,7 @@ function ReleaseTasksForm({
   const [error, setError] = useState<string>()
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
+  const submit = async () => {
     const build = { ...configuration.build, releaseTasks: tasks }
     const errors = validateConfiguration(
       { ...configuration, build, variables: planVariables(configuration) },
@@ -1539,16 +1543,14 @@ function ReleaseTasksForm({
     )
     if (errors.releaseTasks) {
       setError(errors.releaseTasks)
-      return
+      return false
     }
     setError(undefined)
     setRowError(undefined)
     setSaving(true)
     try {
-      await save({ build })
-      notify.success("Release tasks saved", {
-        description: "They will apply on your next deployment.",
-      })
+      await save({ build: (latest) => ({ ...latest.build, releaseTasks: tasks }) })
+      return true
     } catch (caught) {
       const index =
         caught instanceof ApiError ? refusedIndex(caught.field, "build.releaseTasks") : undefined
@@ -1559,6 +1561,7 @@ function ReleaseTasksForm({
       } else {
         notify.error("Could not save release tasks", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -1567,7 +1570,7 @@ function ReleaseTasksForm({
   return (
     <SettingForm
       name="Release tasks"
-      onSubmit={submit}
+      onSave={submit}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}

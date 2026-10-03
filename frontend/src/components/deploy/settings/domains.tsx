@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import type { FormEvent } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
@@ -147,12 +146,12 @@ function DomainsForm({
     notify.success("Domains saved")
   }
 
-  const onSave = async (event: FormEvent) => {
-    event.preventDefault()
+  const onSave = async () => {
     setSaving(true)
     setRowError(undefined)
     try {
-      await persist(domains)
+      await save({ domains })
+      return true
     } catch (error) {
       const index = error instanceof ApiError ? refusedIndex(error.field, "domains") : undefined
       if (error instanceof ApiError && index !== undefined) {
@@ -160,6 +159,7 @@ function DomainsForm({
       } else {
         notify.error("Could not save domains", error)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -206,7 +206,7 @@ function DomainsForm({
     <>
       <SettingForm
         name="Domains"
-        onSubmit={(event) => void onSave(event)}
+        onSave={onSave}
         dirty={draft.dirty}
         changes={draft.changes}
         saving={saving}

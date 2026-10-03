@@ -1,7 +1,6 @@
 "use client"
 
 import { createRef, useMemo, useRef, useState } from "react"
-import type { FormEvent } from "react"
 import Link from "next/link"
 import {
   Archive,
@@ -468,15 +467,14 @@ function DatabasesBody({
     }
   }
 
-  const onSaveOthers = async (event: FormEvent) => {
-    event.preventDefault()
+  const onSaveOthers = async () => {
     setSaving(true)
     setDependencyError(undefined)
     const merged = [...databaseDependencies, ...otherDependencies]
     try {
       await save({ dependencies: merged })
       setChanging([])
-      notify.success("Dependencies saved")
+      return true
     } catch (error) {
       const index =
         error instanceof ApiError ? refusedIndex(error.field, "dependencies") : undefined
@@ -489,6 +487,7 @@ function DatabasesBody({
       } else {
         notify.error("Could not save dependencies", error)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -735,7 +734,7 @@ function DatabasesBody({
 
       <SettingForm
         name="Backups & volumes"
-        onSubmit={(event) => void onSaveOthers(event)}
+        onSave={onSaveOthers}
         dirty={draft.dirty}
         changes={draft.changes}
         saving={saving}

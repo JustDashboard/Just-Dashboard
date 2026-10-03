@@ -2,11 +2,14 @@ import { expect, test } from "@playwright/test"
 import {
   backupJob,
   deployment,
+  expectSaved,
   json,
   mockProject,
   now,
   project,
   run,
+  saveBar,
+  saveSettings,
   steps,
 } from "./deploy-fixture"
 
@@ -49,8 +52,8 @@ test.describe("Domains", () => {
     await expect(https).toHaveAttribute("aria-pressed", "true")
     await https.click()
     await expect(page.getByText("1 unsaved change", { exact: true })).toBeVisible()
-    await page.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].domains).toEqual([
       { hostname: "api.example.test", https: false, ownership: "managed" },
@@ -138,7 +141,7 @@ test.describe("Domains", () => {
     })
     await page.goto("/deploy/7/settings/domains")
     await page.getByRole("button", { name: "HTTPS on api.example.test" }).click()
-    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
     await expect(
       page
         .getByRole("list", { name: "Domains" })
@@ -205,8 +208,8 @@ test.describe("Storage", () => {
       page.getByRole("list", { name: "Mounts" }).getByText("volume", { exact: true }),
     ).toHaveCount(2)
 
-    await page.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Storage saved", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].runtime).toMatchObject({
       mounts: [
@@ -244,7 +247,7 @@ test.describe("Storage", () => {
     })
     await page.goto("/deploy/7/settings/storage")
     await page.getByRole("textbox", { name: "Container path" }).fill("relative/path")
-    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
     await expect(page.getByText("target path must be absolute", { exact: true })).toBeVisible()
     await expect(page.getByText("Could not save storage")).toHaveCount(0)
   })
@@ -403,8 +406,8 @@ test.describe("Databases & backups", () => {
 
     await restoreSwitch.click()
     await page.getByRole("spinbutton", { name: "Maximum age" }).fill("12")
-    await page.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].dependencies).toEqual([
       expect.objectContaining({
@@ -457,9 +460,9 @@ test.describe("Databases & backups", () => {
     await page.getByRole("button", { name: "Add volume", exact: true }).click()
     await page.getByRole("combobox", { name: "Volume" }).click()
     await page.getByRole("option", { name: "media-cache", exact: true }).click()
-    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
 
-    await expect(page.getByText("Dependencies saved", { exact: true })).toBeVisible()
+    await expectSaved(page)
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].dependencies).toEqual(
       expect.arrayContaining([
@@ -792,7 +795,7 @@ test.describe("Databases & backups field errors", () => {
     })
     await page.goto("/deploy/7/settings/databases")
     await page.getByRole("spinbutton", { name: "Maximum age" }).fill("0")
-    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
     await expect(page.getByText("maximum age must be positive", { exact: true })).toBeVisible()
     await expect(page.getByText("Could not save dependencies")).toHaveCount(0)
   })
@@ -1276,7 +1279,7 @@ test.describe("Runtime", () => {
     const card = page.getByRole("form", { name: "Runtime" })
     const port = card.getByRole("spinbutton", { name: "Application port" })
     await port.fill("99999")
-    await card.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
 
     await expect(port).toHaveAttribute("aria-invalid", "true")
     await expect(
@@ -1288,8 +1291,12 @@ test.describe("Runtime", () => {
   })
 })
 
-test.describe("Settings cards keep independent unsaved edits", () => {
-  test("saving the Build card does not discard an unsaved release task", async ({ page }) => {
+test.describe("One Save writes every edited form on the page", () => {
+  // The page's bar saves its dirty forms one after another. The second write
+  // has to carry the revision the first handed back and the first form's
+  // part as it now is — sent with the copy on screen, it was refused, or it
+  // undid the first.
+  test("Build and its release tasks save together, neither undoing the other", async ({ page }) => {
     await mockProject(page)
     const puts: Record<string, unknown>[] = []
     page.on("request", (request) => {
@@ -1298,51 +1305,31 @@ test.describe("Settings cards keep independent unsaved edits", () => {
       }
     })
     await page.goto("/deploy/7/settings/build")
-
-    await page.getByRole("button", { name: "Add release task", exact: true }).click()
-    const taskCommand = page.getByRole("textbox", { name: "Release task 1 command" })
-    await taskCommand.fill("./bin/migrate --force")
 
     const buildCard = page.getByRole("form", { name: "Build" })
     await buildCard.getByRole("textbox", { name: "Root directory" }).fill("apps/api")
-    await buildCard.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Build settings saved", { exact: true })).toBeVisible()
-    await expect.poll(() => puts.length).toBe(1)
-
-    await expect(taskCommand).toHaveValue("./bin/migrate --force")
-  })
-
-  // Each draft is keyed on its own section's saved value, not the page's
-  // revision, so the save beside it bumping the revision restarts nothing.
-  test("saving release tasks does not discard an unsaved Build edit", async ({ page }) => {
-    await mockProject(page)
-    const puts: Record<string, unknown>[] = []
-    page.on("request", (request) => {
-      if (request.method() === "PUT" && request.url().endsWith("/configuration")) {
-        puts.push(request.postDataJSON())
-      }
-    })
-    await page.goto("/deploy/7/settings/build")
-
-    const root = page.getByRole("form", { name: "Build" }).getByRole("textbox", {
-      name: "Root directory",
-    })
-    await root.fill("apps/web")
-
     const tasks = page.getByRole("form", { name: "Release tasks" })
     await tasks.getByRole("button", { name: "Add release task", exact: true }).click()
     await tasks.getByLabel("Release task 1 name").fill("Migrate")
-    await tasks.getByLabel("Release task 1 command").fill("./bin/migrate")
-    await tasks.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Release tasks saved", { exact: true })).toBeVisible()
-    await expect.poll(() => puts.length).toBe(1)
-    // The release tasks' save wrote the saved build, not the unsaved draft.
-    expect((puts[0].build as Record<string, unknown>).rootDirectory).toBeUndefined()
+    await tasks.getByLabel("Release task 1 command").fill("./bin/migrate --force")
 
-    await expect(root).toHaveValue("apps/web")
+    // The bar counts both and names where they are.
+    await expect(saveBar(page).getByText(/Build and Release tasks/)).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect.poll(() => puts.length).toBe(2)
+
+    const [first, second] = puts as { revision: number; build: Record<string, unknown> }[]
+    expect(second.revision).toBe(first.revision + 1)
+    expect(first.build.rootDirectory).toBe("apps/api")
+    expect(second.build.rootDirectory).toBe("apps/api")
+    expect(second.build.releaseTasks).toEqual([
+      expect.objectContaining({ command: "./bin/migrate --force" }),
+    ])
+    await expect(saveBar(page)).toHaveCount(0)
   })
 
-  test("saving health checks does not discard an unsaved Runtime edit", async ({ page }) => {
+  test("Runtime and health checks save together on the latest revision", async ({ page }) => {
     await mockProject(page)
     const puts: Record<string, unknown>[] = []
     page.on("request", (request) => {
@@ -1352,17 +1339,43 @@ test.describe("Settings cards keep independent unsaved edits", () => {
     })
     await page.goto("/deploy/7/settings/runtime")
 
-    const memory = page.getByRole("form", { name: "Runtime" }).getByLabel("Memory limit")
-    await memory.fill("768")
-
+    await page.getByRole("form", { name: "Runtime" }).getByLabel("Memory limit").fill("768")
     const checks = page.getByRole("form", { name: "Health checks" })
     await checks.getByRole("button", { name: "Add check", exact: true }).click()
-    await checks.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Health checks saved", { exact: true })).toBeVisible()
-    await expect.poll(() => puts.length).toBe(1)
-    expect((puts[0].runtime as Record<string, unknown>).memoryMb).toBeUndefined()
+    await saveSettings(page)
+    await expectSaved(page)
+    await expect.poll(() => puts.length).toBe(2)
 
-    await expect(memory).toHaveValue("768")
+    const [first, second] = puts as {
+      revision: number
+      runtime: Record<string, unknown>
+      checks: unknown[]
+    }[]
+    expect(second.revision).toBe(first.revision + 1)
+    expect(first.runtime.memoryMb).toBe(768)
+    expect(second.runtime.memoryMb).toBe(768)
+    expect(second.checks.length).toBe(first.checks.length + 1)
+  })
+
+  test("Discard on the bar drops every form's edits", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/settings/runtime")
+    const memory = page.getByRole("form", { name: "Runtime" }).getByLabel("Memory limit")
+    const original = await memory.inputValue()
+    await memory.fill("768")
+    await page
+      .getByRole("form", { name: "Health checks" })
+      .getByRole("button", {
+        name: "Add check",
+        exact: true,
+      })
+      .click()
+    await expect(
+      saveBar(page).getByText("Runtime and Health checks", { exact: false }),
+    ).toBeVisible()
+    await saveBar(page).getByRole("button", { name: "Discard", exact: true }).click()
+    await expect(saveBar(page)).toHaveCount(0)
+    await expect(memory).toHaveValue(original)
   })
 })
 
@@ -1574,8 +1587,8 @@ test.describe("Password protection", () => {
     await password.click()
     await page.getByLabel("User name").fill("team")
     await page.locator("#domain-password-0").fill("correct horse battery")
-    await page.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     await expect.poll(() => puts.length).toBe(1)
     expect(puts[0].domains).toEqual([
       {
@@ -1593,8 +1606,8 @@ test.describe("Password protection", () => {
     await expect(page.getByLabel("User name")).toHaveValue("team")
     await expect(page.locator("#domain-password-0")).toHaveAttribute("placeholder", "Unchanged")
     await https.click()
-    await page.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     await expect.poll(() => puts.length).toBe(2)
     expect(puts[1].domains).toEqual([
       {
@@ -1611,7 +1624,7 @@ test.describe("Password protection", () => {
     // Turning it off sends no protection at all.
     await password.click()
     await expect(page.getByLabel("User name")).toHaveCount(0)
-    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
     await expect.poll(() => puts.length).toBe(3)
     expect((puts[2].domains as Record<string, unknown>[])[0]).not.toHaveProperty("protection")
   })

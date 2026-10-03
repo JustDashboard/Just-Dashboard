@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, useState } from "react"
-import type { FormEvent } from "react"
 import Link from "next/link"
 import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
@@ -339,13 +338,12 @@ function RuntimeForm({
   const blueGreen = runtime.strategy === "blue_green"
   const failsNext = blueGreen && Boolean(refusal)
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
+  const submit = async () => {
     setError(undefined)
     setFieldError(undefined)
     if (fixedPort && hostPort === 0) {
       setFieldError({ id: "runtime-host-port", message: "Use a port from 1 to 65535." })
-      return
+      return false
     }
     setSaving(true)
     try {
@@ -359,9 +357,7 @@ function RuntimeForm({
         capabilitiesText: linesOf(prev.capabilitiesText).join("\n"),
         devicesText: linesOf(prev.devicesText).join("\n"),
       }))
-      notify.success("Runtime settings saved", {
-        description: "The desired revision changed; the live release was not touched.",
-      })
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.field && RUNTIME_FIELD_IDS[caught.field]) {
         setFieldError({ id: RUNTIME_FIELD_IDS[caught.field], message: caught.message })
@@ -372,6 +368,7 @@ function RuntimeForm({
       } else {
         notify.error("Could not save runtime settings", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -389,7 +386,7 @@ function RuntimeForm({
   return (
     <SettingForm
       name="Runtime"
-      onSubmit={submit}
+      onSave={submit}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -1118,8 +1115,7 @@ function HealthChecksForm({
   const [error, setError] = useState<string>()
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault()
+  const submit = async () => {
     setError(undefined)
     setRowError(undefined)
     setSaving(true)
@@ -1129,9 +1125,7 @@ function HealthChecksForm({
       // What was sent, not what was typed: a command's blank lines stay out
       // of the draft too, or they would read as an edit the save did not make.
       draft.set(next)
-      notify.success("Health checks saved", {
-        description: "The desired revision changed; the live release was not touched.",
-      })
+      return true
     } catch (caught) {
       const index = caught instanceof ApiError ? refusedIndex(caught.field, "checks") : undefined
       if (caught instanceof ApiError && index !== undefined) {
@@ -1141,6 +1135,7 @@ function HealthChecksForm({
       } else {
         notify.error("Could not save health checks", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -1152,7 +1147,7 @@ function HealthChecksForm({
   return (
     <SettingForm
       name="Health checks"
-      onSubmit={submit}
+      onSave={submit}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}

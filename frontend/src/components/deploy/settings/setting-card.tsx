@@ -1,11 +1,14 @@
 "use client"
 
-import type { FormEvent } from "react"
 import { cn } from "@/lib/utils"
 import type { DeploymentEnvironmentConfiguration } from "@/lib/types"
 import { FormNote, FormSection, FormSections } from "@/components/form"
 import { Status } from "@/components/status-dot"
-import { Button } from "@/components/ui/button"
+import {
+  SaveBarProvider,
+  useSaveBarEntry,
+  type SettingApplies,
+} from "@/components/deploy/settings/save-bar"
 import { PendingChanges } from "@/components/deploy/settings/pending-changes"
 import { LastFailureRemedy } from "@/components/deploy/settings/last-failure"
 import {
@@ -28,27 +31,20 @@ import {
  * The pieces, outermost first:
  *
  *   `SettingsPage` — loads the configuration, then the pending strip and the
- *   page's forms, rising once when the first read lands.
- *   `SettingForm` — one form, one save. It may span several sections
- *   (Runtime is five), because what one PUT writes is what one Save means.
+ *   page's forms, rising once when the first read lands; and the page's one
+ *   Save, which floats at the bottom while anything holds an edit
+ *   (`save-bar.tsx`).
+ *   `SettingForm` — one form, one write. It may span several sections
+ *   (Runtime is five), because what one PUT writes is one form; the bar
+ *   saves every dirty form on the page in order.
  *   `SettingSection` — one head and its fields.
- *   `SettingFoot` — when the change applies, Discard, and Save.
  */
-
-type SettingApplies = "next-deployment" | "immediately"
 
 /**
  * The sections' centred column, for the page around them and for what sits
- * under a form rather than in one of its sections — the game server's foot
- * included, which has no `FormSections` around it — so Save sits under the
- * fields it saves rather than a thousand pixels to their right.
+ * under a form rather than in one of its sections.
  */
 const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
-
-const APPLIES: Record<SettingApplies, string> = {
-  "next-deployment": "Applies on your next deployment",
-  immediately: "Applies immediately",
-}
 
 /**
  * A settings page: its configuration read, what is saved but not live, and
@@ -58,7 +54,8 @@ const APPLIES: Record<SettingApplies, string> = {
  * No heading of its own. The project's other pages add none under the
  * project header, and the first section's head already names what the page is.
  * The content rises once when the first read lands and not on every revision
- * after it, because a save is not an arrival.
+ * after it, because a save is not an arrival. The room at the foot is the
+ * save bar's, so it never lies over the last field on the page.
  */
 export function SettingsPage({
   state,
@@ -71,33 +68,41 @@ export function SettingsPage({
   children: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
 }) {
   return (
-    <ConfigurationState state={state}>
-      {(configuration) => (
-        <div className={cn("min-w-0 animate-rise space-y-8", FIELDS_COLUMN)}>
-          <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
-          <LastFailureRemedy />
-          <FormSections>{children(configuration)}</FormSections>
-        </div>
-      )}
-    </ConfigurationState>
+    <SaveBarProvider>
+      <ConfigurationState state={state}>
+        {(configuration) => (
+          <div className={cn("min-w-0 animate-rise space-y-8 pb-20", FIELDS_COLUMN)}>
+            <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
+            <LastFailureRemedy />
+            <FormSections>{children(configuration)}</FormSections>
+          </div>
+        )}
+      </ConfigurationState>
+    </SaveBarProvider>
   )
 }
 
 /**
- * One form of a settings page: its sections, the refusal when the server
- * turned the save down, and the foot.
+ * One form of a settings page: its sections, and the refusal when the server
+ * turned the save down. It draws no Save of its own — it puts itself on the
+ * page's save bar, which counts its edits beside the rest of the page's and
+ * calls `onSave` when Save is pressed. Enter in a field submits the form,
+ * which is the bar's Save too, so one key never saves half a page.
  *
  * `name` is the form's accessible name — the thing a reader, an assistive
- * technology and a test all find it by, now that no frame draws its edge.
- * `dirty` and `changes` come from `useSettingDraft`; Save is the brand face
- * only while there is something to save.
+ * technology and a test all find it by — and the word the bar uses for the
+ * part of the page the edits are in. `dirty` and `changes` come from
+ * `useSettingDraft`. `onSave` resolves true when the write went through and
+ * false when it was refused, which is how the bar knows to say *Saved*.
+ * `note` is a line about this form at its foot — why it cannot be edited.
  */
 export function SettingForm({
   name,
-  onSubmit,
+  onSave,
   dirty = false,
   changes = 0,
   saving = false,
+  invalid = false,
   canEdit,
   onDiscard,
   applies = "next-deployment",
@@ -106,36 +111,41 @@ export function SettingForm({
   children,
 }: {
   name: string
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
+  onSave: () => Promise<boolean>
   dirty?: boolean
   changes?: number
   saving?: boolean
+  /** Holds the bar's Save while a field is out of range. */
+  invalid?: boolean
   canEdit: boolean
   onDiscard?: () => void
   applies?: SettingApplies
-  /** In place of the applies line, when the consequence is more particular. */
   note?: React.ReactNode
   /** A refusal that belongs to the whole form rather than to one field. */
   error?: React.ReactNode
   children: React.ReactNode
 }) {
+  const saveAll = useSaveBarEntry(
+    canEdit,
+    { name, dirty, changes, saving, invalid, applies },
+    { save: onSave, discard: onDiscard },
+  )
   return (
-    <form aria-label={name} onSubmit={onSubmit} className="min-w-0 py-8 first:pt-0 last:pb-0">
+    <form
+      aria-label={name}
+      onSubmit={(event) => {
+        event.preventDefault()
+        void saveAll?.()
+      }}
+      className="min-w-0 py-8 first:pt-0 last:pb-0"
+    >
       <FormSections>{children}</FormSections>
       {error && (
-        <FormNote tone="danger" role="alert" className={cn("mt-6", FIELDS_COLUMN)}>
+        <FormNote tone="danger" role="alert" className={cn("mt-6 animate-rise", FIELDS_COLUMN)}>
           {error}
         </FormNote>
       )}
-      <SettingFoot
-        applies={applies}
-        note={note}
-        dirty={dirty}
-        changes={changes}
-        saving={saving}
-        canEdit={canEdit}
-        onDiscard={onDiscard}
-      />
+      {note && <FormNote className={cn("mt-6", FIELDS_COLUMN)}>{note}</FormNote>}
     </form>
   )
 }
@@ -226,130 +236,4 @@ export function settingStatus({
       <Status key="not-live" tone="notice" label="Saved · not live yet" className="animate-rise" />
     )
   return null
-}
-
-/**
- * The end of a settings form: Save, and — once there is something to save —
- * how many edits it holds and when they take effect.
- *
- * At rest it is Save and nothing else, at the fields' right edge where the
- * switches above it end. Every form used to close on "Applies immediately —
- * no deployment" at the column's far left in 11px grey, a thousand pixels from
- * the button it qualified: on a page of three forms that was three stray lines
- * nobody had asked a question of. When a change applies is news only once
- * there is a change, so it arrives with the count. A `note` is the exception
- * and stays at rest, beside Save, because it says something particular about
- * this form — why it cannot be edited, what a restart still has to do.
- *
- * Save is the outline face while the form is clean and the brand face once
- * it holds an edit — the command face as a function of state (§16), so the
- * one blue on a page of five forms is the form that has something to save.
- * It is never disabled when clean: saving an untouched Source checks it
- * again, which is how an operator finds out a credential stopped working.
- *
- * While dirty the foot follows the reader down the form, as Configuration's
- * apply bar does, because a Save a screen below the field that was changed
- * is how a form gets abandoned half-edited. It is opaque rather than frosted
- * (§16 has no glass), takes its hairline only then, and rises into place
- * rather than snapping (§11 *arrived*). The count is the head's amber
- * `Status` again, because the head has usually scrolled away by the time the
- * bar is what the reader sees. Its row keeps to the fields column. On a phone,
- * while dirty, Discard and Save take half the width each at a thumb's height
- * under the count; clean, Save sits alone at the right edge.
- *
- * `invalid` holds Save while a field is out of range.
- */
-export function SettingFoot({
-  applies,
-  note,
-  dirty = false,
-  changes = 0,
-  saving = false,
-  invalid = false,
-  canEdit,
-  onDiscard,
-}: {
-  applies?: SettingApplies
-  note?: React.ReactNode
-  dirty?: boolean
-  changes?: number
-  saving?: boolean
-  invalid?: boolean
-  /** Draws Discard and Save; a reader who cannot edit sees only the note. */
-  canEdit?: boolean
-  onDiscard?: () => void
-}) {
-  const line = note ?? (dirty && applies ? APPLIES[applies] : undefined)
-  if (!canEdit && !line) return null
-  const controls = canEdit && (
-    <div className={cn("flex shrink-0 items-center gap-2", dirty && "max-sm:w-full")}>
-      {dirty && onDiscard && (
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={saving}
-          onClick={onDiscard}
-          className="max-sm:h-11 max-sm:flex-1"
-        >
-          Discard
-        </Button>
-      )}
-      <Button
-        type="submit"
-        size="sm"
-        variant={dirty ? "default" : "outline"}
-        pending={saving}
-        disabled={invalid}
-        className={cn("max-sm:h-11", dirty && "max-sm:flex-1")}
-      >
-        {saving ? "Saving…" : "Save"}
-      </Button>
-    </div>
-  )
-  return (
-    <div
-      className={cn(
-        "mt-6",
-        dirty &&
-          "sticky bottom-0 z-20 -mx-5 border-t border-hairline bg-background px-5 py-3 md:-mx-8 md:px-8",
-      )}
-    >
-      {/* Keyed on the state, so the bar rises in when the first edit lands and
-          the quiet foot rises back once it is saved or discarded. */}
-      <div
-        key={dirty ? "dirty" : "clean"}
-        className={cn(
-          "flex min-w-0 animate-rise flex-wrap items-center justify-end gap-x-4 gap-y-2.5",
-          FIELDS_COLUMN,
-        )}
-      >
-        {dirty && (
-          <Status
-            tone="warning"
-            label={
-              changes > 0
-                ? `${changes} unsaved change${changes === 1 ? "" : "s"}`
-                : "Unsaved changes"
-            }
-          />
-        )}
-        {line && (
-          <div
-            className={cn(
-              "min-w-0 text-xs leading-snug text-muted-foreground",
-              // Beside the count while dirty, so the two read as one sentence
-              // about the edit; beside Save at rest, so a note is read as
-              // belonging to the button it qualifies.
-              dirty ? "mr-auto" : "flex-1 text-right",
-            )}
-          >
-            {line}
-          </div>
-        )}
-        {dirty && !line && <span aria-hidden className="mr-auto" />}
-        {controls}
-      </div>
-    </div>
-  )
 }

@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import type { FormEvent } from "react"
 import { Archive, Plus } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -124,13 +123,12 @@ function StorageForm({
     project.product,
   )
 
-  const onSave = async (event: FormEvent) => {
-    event.preventDefault()
+  const onSave = async () => {
     setSaving(true)
     setMountError(undefined)
     try {
-      await save({ runtime: { ...configuration.runtime, mounts } })
-      notify.success("Storage saved")
+      await save({ runtime: (latest) => ({ ...latest.runtime, mounts }) })
+      return true
     } catch (error) {
       const index =
         error instanceof ApiError ? refusedIndex(error.field, "runtime.mounts") : undefined
@@ -139,6 +137,7 @@ function StorageForm({
       } else {
         notify.error("Could not save storage", error)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -157,7 +156,7 @@ function StorageForm({
     <>
       <SettingForm
         name="Persistent mounts"
-        onSubmit={(event) => void onSave(event)}
+        onSave={onSave}
         dirty={draft.dirty}
         changes={draft.changes}
         saving={saving}

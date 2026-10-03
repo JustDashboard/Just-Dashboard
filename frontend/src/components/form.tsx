@@ -75,7 +75,8 @@ export function Field({
       </div>
       {children}
       {error ? (
-        <p role="alert" className="text-hint leading-relaxed text-destructive">
+        // Rises in rather than appearing (§11): a refusal is news.
+        <p role="alert" className="animate-rise text-hint leading-relaxed text-destructive">
           {error}
         </p>
       ) : (
@@ -542,8 +543,10 @@ export function OptionRow({
           disabled={disabled}
         />
       </label>
+      {/* What the switch reveals rises into place (§11's *arrived*) rather
+          than snapping in under the reader's pointer. */}
       {children && checked && (
-        <div className="mt-2 ml-1 border-l border-hairline pl-4">{children}</div>
+        <div className="mt-2 ml-1 animate-rise border-l border-hairline pl-4">{children}</div>
       )}
     </div>
   )
