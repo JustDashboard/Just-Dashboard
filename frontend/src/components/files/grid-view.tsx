@@ -32,6 +32,7 @@ export function GridView({
   size,
   onToggle,
   onSelect,
+  onFocusEntry,
   onOpen,
   onDragStart,
   onDropPaths,
@@ -48,6 +49,7 @@ export function GridView({
   size: TileSize
   onToggle: (entry: FileEntry, checked: boolean) => void
   onSelect: (entry: FileEntry, event: React.MouseEvent) => void
+  onFocusEntry?: (entry: FileEntry) => void
   onOpen: (entry: FileEntry) => void
   onDragStart?: (entry: FileEntry, event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
@@ -56,6 +58,7 @@ export function GridView({
   const width = size === "sm" ? "5rem" : size === "lg" ? "8rem" : "6.5rem"
   return (
     <div
+      data-file-grid
       className="grid content-start justify-start gap-x-1 gap-y-1 p-2 pb-24"
       style={{ gridTemplateColumns: `repeat(auto-fill, minmax(0, ${width}))` }}
     >
@@ -71,6 +74,7 @@ export function GridView({
           size={size}
           onToggle={(checked) => onToggle(entry, checked)}
           onSelect={(event) => onSelect(entry, event)}
+          onFocusEntry={() => onFocusEntry?.(entry)}
           onOpen={() => onOpen(entry)}
           onDragStart={onDragStart ? (event) => onDragStart(entry, event) : undefined}
           onDropPaths={onDropPaths}
@@ -91,6 +95,7 @@ function Tile({
   size,
   onToggle,
   onSelect,
+  onFocusEntry,
   onOpen,
   onDragStart,
   onDropPaths,
@@ -105,6 +110,7 @@ function Tile({
   size: TileSize
   onToggle: (checked: boolean) => void
   onSelect: (event: React.MouseEvent) => void
+  onFocusEntry: () => void
   onOpen: () => void
   onDragStart?: (event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
@@ -123,16 +129,26 @@ function Tile({
     <div
       ref={viewportRef}
       data-entry-path={entry.path}
+      tabIndex={active ? 0 : -1}
       data-state={selected ? "selected" : undefined}
       data-dragging={dragging || undefined}
       draggable={caps.write && !!onDragStart}
       onDragStart={onDragStart}
       {...drop.handlers}
       onClick={onSelect}
+      onFocusCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) onFocusEntry()
+      }}
       onDoubleClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && event.key === "Enter") {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
       className={cn(
         "group relative flex cursor-pointer flex-col items-center gap-1 rounded-md border border-transparent px-1.5 py-1.5 text-center transition-[background-color,border-color,opacity] duration-150 select-none",
-        "hover:bg-row-hover",
+        "focus-ring-inset hover:bg-row-hover",
         (active || selected) && "bg-accent",
         active && "border-rule-brand",
         dimmed && "opacity-50",
@@ -168,6 +184,7 @@ function Tile({
 
       <span className="w-full min-w-0">
         <button
+          data-file-name
           type="button"
           className="line-clamp-2 w-full rounded-sm text-xs leading-snug break-words focus-ring"
           onClick={(e) => {

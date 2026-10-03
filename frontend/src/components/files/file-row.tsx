@@ -56,6 +56,7 @@ export function FileRow({
   caps,
   onToggle,
   onSelect,
+  onFocusEntry,
   onOpen,
   onDragStart,
   onDropPaths,
@@ -72,6 +73,7 @@ export function FileRow({
   caps: RowCaps
   onToggle: (checked: boolean) => void
   onSelect: (event: React.MouseEvent) => void
+  onFocusEntry?: () => void
   onOpen: () => void
   onDragStart?: (event: React.DragEvent) => void
   onDropPaths?: (paths: string[], dir: string, mode: DropMode) => void
@@ -102,6 +104,7 @@ export function FileRow({
       ref={viewportRef}
       onFocusCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+          onFocusEntry?.()
           setFocusedControls(!!(near || active))
         }
       }}
@@ -152,6 +155,7 @@ export function FileRow({
           )}
           <div className="min-w-0">
             <button
+              data-file-name
               className="flex max-w-full items-center text-left text-body hover:underline"
               onClick={(e) => {
                 e.stopPropagation()

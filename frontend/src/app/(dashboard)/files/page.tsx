@@ -1,12 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { useMarquee } from "@/components/files/use-marquee"
 import { rangePaths } from "@/components/files/selection"
 import {
   ArrowMove,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Check,
   ChevronDown,
@@ -25,6 +27,7 @@ import {
   Plus,
   PlusSquareSmall,
   PreviewDocument,
+  Question,
   RefreshClockwise,
   SettingsSliders,
   SidebarLeftClose,
@@ -66,6 +69,10 @@ import { GridView, type TileSize } from "@/components/files/grid-view"
 import { ImageEditorSheet } from "@/components/files/image-editor"
 import { MediaViewer } from "@/components/files/media-viewer"
 import { PathBar } from "@/components/files/path-bar"
+import { useFolderNavigation } from "@/components/files/use-folder-navigation"
+import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
+import { matchName } from "@/components/files/navigation"
+import { FilesShortcuts } from "@/components/files/shortcuts-dialog"
 import { PlacesMenu } from "@/components/files/places-menu"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
@@ -131,6 +138,7 @@ type SortKey = "name" | "size" | "modified" | "owner" | "mode"
 type Sort = { key: SortKey; dir: "asc" | "desc" }
 type ViewMode = "list" | "grid"
 type Clip = { mode: "cut" | "copy"; paths: string[] }
+type FolderVisit = { active: string | null; selected: string[]; scroll: number; view: ViewMode }
 
 const RAIL = { base: 264, min: 200, max: 440 }
 const INSPECTOR = { base: 320, min: 260, max: 560 }
@@ -164,12 +172,8 @@ export default function FilesPage() {
   // or a navigation has said otherwise, the answer *is* whatever the server
   // reports as home. The chosen directory is kept for the tab, so the rail's
   // bare link comes back to the folder being worked in rather than to home.
-  const [chosenPath, setChosenPath] = useSessionState<string | null>(
-    "files.path",
-    null,
-    initialPath ? cleanPath(initialPath) : undefined,
-  )
-  const path = chosenPath ?? places.data?.home ?? null
+  const navigation = useFolderNavigation(places.data?.home)
+  const path = navigation.path
   const pathRef = useRef(path)
   useEffect(() => {
     pathRef.current = path
@@ -205,18 +209,23 @@ export default function FilesPage() {
   const [quickMode, setQuickMode] = useState<FileSearchMode>("names")
   const [searchLocation, setSearchLocation] = useState<{ path: string; line?: number }>()
   const [clip, setClip] = useState<Clip | null>(null)
-  // The selection and the active row are scoped to the directory they were
-  // made in, so navigating away discards both without a reset effect.
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const [visits, setVisits] = useSessionState<Record<string, FolderVisit>>("files.visits", {})
+  // A directory's explicit selection wins over its remembered visit; neither
+  // is allowed to select a path in another directory or a vanished entry.
   const [selection, setSelection] = useState<{ dir: string; paths: Set<string> }>({
-    dir: path ?? "/",
+    dir: "",
     paths: new Set(),
   })
-  const [active, setActive] = useState<{ dir: string; entry: FileEntry } | null | undefined>()
+  const [active, setActive] = useState<{ dir: string; entry: FileEntry | null } | undefined>()
   // Where a Shift-click range starts: the last row clicked or arrowed to.
   const anchor = useRef<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
   const folderInput = useRef<HTMLInputElement>(null)
-  const selected = selection.dir === path ? selection.paths : EMPTY
+  const listingElement = useRef<HTMLDivElement>(null)
+  const restored = useRef<string | null>(null)
+  const focusAfterNavigation = useRef(false)
+  const nameTyping = useRef({ query: "", time: 0, dir: path })
 
   // Polled gently: a file that arrived by scp, a deploy that wrote a release,
   // a log that rotated — the listing used to show none of it until the
@@ -232,14 +241,6 @@ export default function FilesPage() {
     [path],
   )
   const refreshListing = listing.refresh
-  // A storage investigation names an existing entry in a validated listing.
-  // An explicit click or deselection wins over the initial URL selection.
-  const activeEntry =
-    active === undefined && initialEntry && path === initialPath
-      ? (listing.data?.entries.find((entry) => entry.path === initialEntry) ?? null)
-      : active && active.dir === path
-        ? active.entry
-        : null
   const firstHidden = useRef(true)
   useEffect(() => {
     if (firstHidden.current) {
@@ -286,6 +287,116 @@ export default function FilesPage() {
     return list
   }, [listing.data, sort])
   const byPath = useMemo(() => new Map(entries.map((e) => [e.path, e])), [entries])
+  const visit = path ? visits[path] : undefined
+  const selected = useMemo(
+    () =>
+      new Set(
+        [...(selection.dir === path ? selection.paths : (visit?.selected ?? []))].filter((p) =>
+          byPath.has(p),
+        ),
+      ),
+    [selection, path, visit, byPath],
+  )
+  const activeEntry =
+    active === undefined && initialEntry && path === initialPath
+      ? (byPath.get(initialEntry) ?? null)
+      : active?.dir === path
+        ? (byPath.get(active.entry?.path ?? "") ?? null)
+        : (byPath.get(visit?.active ?? "") ?? null)
+
+  const rememberFolder = useCallback(() => {
+    if (!path || listing.data?.path !== path) return
+    const scroll = listingElement.current?.querySelector<HTMLElement>(
+      "[data-file-scroll], [data-slot='table-container']",
+    )
+    const snapshot = {
+      active: activeEntry?.path ?? null,
+      selected: [...selected],
+      scroll: scroll?.scrollTop ?? 0,
+      view,
+    }
+    setVisits((previous) => {
+      const saved = previous[path]
+      if (
+        saved &&
+        saved.active === snapshot.active &&
+        saved.scroll === snapshot.scroll &&
+        saved.view === snapshot.view &&
+        saved.selected.length === snapshot.selected.length &&
+        saved.selected.every((p, i) => p === snapshot.selected[i])
+      )
+        return previous
+      return Object.fromEntries([
+        ...Object.entries(previous)
+          .filter(([dir]) => dir !== path)
+          .slice(-39),
+        [path, snapshot],
+      ])
+    })
+  }, [path, listing.data, activeEntry, selected, view, setVisits])
+
+  useEffect(() => {
+    // A stable listener survives the synchronous traversal render. It uses
+    // only the persistent listing region, never an outgoing render's rows.
+    const onPop = () => {
+      focusAfterNavigation.current =
+        document.activeElement === document.body ||
+        !!listingElement.current?.contains(document.activeElement)
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
+  }, [])
+
+  useEffect(() => {
+    // Remember interaction state while it belongs to this folder, before a
+    // native history render can replace it with the destination's state.
+    rememberFolder()
+    const contents = listingElement.current
+    let frame: number | undefined
+    const onScroll = () => {
+      if (frame !== undefined) return
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        rememberFolder()
+      })
+    }
+    contents?.addEventListener("scroll", onScroll, { capture: true, passive: true })
+    return () => {
+      contents?.removeEventListener("scroll", onScroll, true)
+      if (frame !== undefined) cancelAnimationFrame(frame)
+    }
+  }, [rememberFolder])
+
+  useLayoutEffect(() => {
+    if (!listing.data || listing.data.path !== path) {
+      restored.current = null
+      return
+    }
+    const key = `${path}:${view}`
+    if (restored.current === key) return
+    restored.current = key
+    anchor.current = activeEntry?.path ?? null
+    const scroll = listingElement.current?.querySelector<HTMLElement>(
+      "[data-file-scroll], [data-slot='table-container']",
+    )
+    if (scroll) scroll.scrollTop = visit?.view === view ? visit.scroll : 0
+    if (focusAfterNavigation.current) {
+      focusAfterNavigation.current = false
+      // The browser restores history focus after popstate. Put the listing's
+      // focus back on the next frame, after that native restoration finishes.
+      requestAnimationFrame(() => {
+        const contents = listingElement.current
+        if (contents?.dataset.folderPath !== path) return
+        const row = activeEntry
+          ? contents.querySelector<HTMLElement>(
+              `[data-entry-path="${CSS.escape(activeEntry.path)}"]`,
+            )
+          : null
+        const focusTarget = row ?? contents
+        focusTarget?.focus({ preventScroll: true })
+      })
+    }
+  }, [path, view, listing.data, visit, activeEntry])
   const names = useMemo(() => new Set(entries.map((e) => e.name)), [entries])
   // The viewer walks the folder's files in the order the listing shows them.
   const viewable = useMemo(() => entries.filter((e) => !e.isDir), [entries])
@@ -343,10 +454,11 @@ export default function FilesPage() {
   // The row above the listing that goes up a level — only where up is
   // somewhere the server will list. An install that narrowed JD_FILE_ROOTS
   // used to offer a parent that answered 403.
-  const parent =
-    listing.data && listing.data.parent !== listing.data.path ? listing.data.parent : null
+  const parentPath = listing.data?.parent ?? (path ? parentOf(path) : null)
+  const parent = parentPath !== path ? parentPath : null
   const parentReachable =
-    parent !== null && (listing.data?.roots ?? []).some((root) => isWithin(parent, root))
+    parent !== null &&
+    (listing.data?.roots ?? places.data?.roots ?? []).some((root) => isWithin(parent, root))
 
   // The disk this folder is on, from the metrics stream the shell already
   // keeps open: a cloud says how much room is left, and so does this.
@@ -437,18 +549,23 @@ export default function FilesPage() {
     onSelect: setSelected,
     onClear: () => {
       clearSelection()
-      setActive(null)
+      setActive({ dir: path ?? "/", entry: null })
       anchor.current = null
     },
   })
 
   const navigate = useCallback(
     (next: string) => {
-      setChosenPath(cleanPath(next))
-      setActive(null)
+      if (cleanPath(next) === path) return
+      focusAfterNavigation.current =
+        document.activeElement === document.body ||
+        !!listingElement.current?.contains(document.activeElement)
+      rememberFolder()
+      navigation.navigate(next)
+      setActive(undefined)
       setViewing(null)
     },
-    [setChosenPath],
+    [path, rememberFolder, navigation],
   )
 
   const viewEntry = useCallback(
@@ -588,13 +705,14 @@ export default function FilesPage() {
         notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
         if (mode === "move") {
           afterLabelledChange([...moved])
-          setActive((previous) =>
-            previous &&
-            previous.dir === path &&
-            [...moved].some((src) => isWithin(previous.entry.path, src))
-              ? null
-              : previous,
-          )
+          setActive((previous) => {
+            const entry = previous?.entry
+            return entry &&
+              previous.dir === path &&
+              [...moved].some((src) => isWithin(entry.path, src))
+              ? { dir: previous.dir, entry: null }
+              : previous
+          })
         }
       }
       clearSelection()
@@ -629,7 +747,7 @@ export default function FilesPage() {
         if (name === entry.name) return
         await post("/files/move", { from: entry.path, to: joinPath(path ?? "/", name) })
         notify.success(`Renamed to ${name}`)
-        setActive(null)
+        setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange([entry.path])
       },
@@ -673,7 +791,7 @@ export default function FilesPage() {
         await del("/files/delete", {
           query: { path: entry.path, recursive: entry.isDir },
         })
-        setActive(null)
+        setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange([entry.path])
       },
@@ -705,7 +823,7 @@ export default function FilesPage() {
           }
         }
         clearSelection()
-        setActive(null)
+        setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange(targets.map((e) => e.path))
         if (failed) notify.error(`${plural(failed, "item")} could not be deleted`)
@@ -893,76 +1011,119 @@ export default function FilesPage() {
     onDropFiles: (transfer, dir) => void dropFiles(transfer, dir),
   })
 
-  /** Arrow keys walk the listing; Shift extends the selection as they go. */
-  const moveActive = (key: "ArrowDown" | "ArrowUp" | "Home" | "End", extend: boolean) => {
+  const activateEntry = (entry: FileEntry) => {
+    setActive((previous) =>
+      previous?.dir === path && previous.entry?.path === entry.path
+        ? previous
+        : { dir: path ?? "/", entry },
+    )
+  }
+
+  const focusEntry = (entry: FileEntry) => {
+    activateEntry(entry)
+    requestAnimationFrame(() => {
+      const el = listingElement.current?.querySelector<HTMLElement>(
+        `[data-entry-path="${CSS.escape(entry.path)}"]`,
+      )
+      el?.scrollIntoView({ block: "nearest" })
+      el?.focus({ preventScroll: true })
+    })
+  }
+
+  /** Vertical arrows follow rendered tile rows, including after a resize. */
+  const moveActive = (
+    key: "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" | "Home" | "End",
+    extend: boolean,
+  ) => {
     if (entries.length === 0) return
     const index = activeEntry ? entries.findIndex((e) => e.path === activeEntry.path) : -1
+    const grid = listingElement.current?.querySelector<HTMLElement>("[data-file-grid]")
+    const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 1
+    const step = key === "ArrowDown" || key === "ArrowUp" ? columns : 1
     const next =
       key === "Home"
         ? 0
         : key === "End"
           ? entries.length - 1
-          : key === "ArrowDown"
-            ? Math.min(entries.length - 1, index + 1)
-            : Math.max(0, index - 1)
+          : index < 0
+            ? 0
+            : key === "ArrowDown" || key === "ArrowRight"
+              ? Math.min(entries.length - 1, index + step)
+              : Math.max(0, index - step)
     const entry = entries[next]
-    setActive({ dir: path ?? "/", entry })
+    focusEntry(entry)
     if (extend && anchor.current) {
-      const a = entries.findIndex((e) => e.path === anchor.current)
-      const [lo, hi] = a < next ? [a, next] : [next, a]
-      const paths = new Set<string>()
-      for (let i = Math.max(0, lo); i <= hi; i++) paths.add(entries[i].path)
-      setSelected(paths)
+      setSelected(
+        new Set(
+          rangePaths(
+            entries.map((e) => e.path),
+            anchor.current,
+            entry.path,
+          ),
+        ),
+      )
     } else {
       anchor.current = entry.path
     }
-    requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLElement>(
-        `[data-entry-path="${CSS.escape(entry.path)}"]`,
-      )
-      el?.scrollIntoView({ block: "nearest" })
-      if (el?.tagName === "TR") el.focus({ preventScroll: true })
-    })
   }
 
-  // The page's own shortcuts. They all match something people already have
-  // in their hands: Ctrl+P is every editor's "go to file", F2 renames as it
-  // has since Norton Commander, Space is a quick look, Backspace goes up,
-  // and the clipboard chords do what the menu's Copy, Cut and Paste do.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
+      if (!filesOwnKeyboard(event) || isTypingTarget(event.target)) return
       const target = event.target as HTMLElement | null
-      const typing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable === true
-      // A dialog or a menu open anywhere owns the keyboard; a shortcut firing
-      // behind one acts on a page the operator cannot see. One that is
-      // closing — still in the DOM for its exit animation — no longer does.
-      if (
-        document.querySelector(
-          "[role='dialog']:not([data-state='closed']), [role='menu']:not([data-state='closed'])",
-        )
-      ) {
-        return
-      }
       const mod = event.metaKey || event.ctrlKey
       const key = event.key.toLowerCase()
-
       if (mod && event.shiftKey && key === "f") {
         event.preventDefault()
         setQuickMode("content")
         setQuickOpen(true)
         return
       }
-      if (mod && key === "p") {
+      if (mod && !event.shiftKey && (key === "p" || key === "f")) {
         event.preventDefault()
         setQuickMode("names")
         setQuickOpen(true)
         return
       }
-      if (typing) return
+      if ((event.key === "F5" || (mod && key === "r")) && !event.shiftKey && !event.altKey) {
+        event.preventDefault()
+        reload()
+        return
+      }
+      if ((event.altKey && event.key === "ArrowLeft") || (event.metaKey && key === "[")) {
+        if (navigation.canBack) {
+          event.preventDefault()
+          navigation.back()
+        }
+        return
+      }
+      if ((event.altKey && event.key === "ArrowRight") || (event.metaKey && key === "]")) {
+        if (navigation.canForward) {
+          event.preventDefault()
+          navigation.forward()
+        }
+        return
+      }
+      if (event.altKey && event.key === "ArrowUp") {
+        event.preventDefault()
+        if (parentReachable && parent) navigate(parent)
+        return
+      }
+      if (mod && event.shiftKey && key === "n" && canWrite) {
+        event.preventDefault()
+        newFolder()
+        return
+      }
+      if (mod && event.shiftKey && (key === "." || event.code === "Period")) {
+        event.preventDefault()
+        setShowHidden((previous) => !previous)
+        return
+      }
+      if (mod && event.code === "Space" && activeEntry) {
+        event.preventDefault()
+        toggleSelected(activeEntry, !selected.has(activeEntry.path))
+        return
+      }
       if (mod && key === "a") {
         event.preventDefault()
         setSelected(new Set(entries.map((e) => e.path)))
@@ -981,17 +1142,21 @@ export default function FilesPage() {
         void paste()
         return
       }
-      if (mod) return
-
-      // A control with the focus keeps its own keys: Space on a checkbox is
-      // the checkbox's, Enter on a button is the button's.
-      const onControl = target?.closest(
-        "button, a, input, select, textarea, [role='checkbox'], [role='menuitem']",
-      )
+      if (mod || event.altKey) return
+      // File name buttons belong to the listing; other controls keep their
+      // own Space, Enter and arrow behavior.
+      const onControl =
+        !target?.closest("[data-file-name]") &&
+        target?.closest("button, a, input, select, textarea, [role='checkbox'], [role='menuitem']")
       switch (event.key) {
         case "Escape":
-          clearSelection()
-          setActive(null)
+          event.preventDefault()
+          nameTyping.current.query = ""
+          if (selected.size > 0 || activeEntry) {
+            clearSelection()
+            setActive({ dir: path ?? "/", entry: null })
+            listingElement.current?.focus({ preventScroll: true })
+          } else if (clip) setClip(null)
           break
         case "F2":
           if (activeEntry && canWrite) {
@@ -1006,10 +1171,8 @@ export default function FilesPage() {
           else if (activeEntry) deleteEntry(activeEntry)
           break
         case "Backspace":
-          if (parentReachable && parent) {
-            event.preventDefault()
-            navigate(parent)
-          }
+          event.preventDefault()
+          if (parentReachable && parent) navigate(parent)
           break
         case "Enter":
           if (activeEntry && !onControl) {
@@ -1025,18 +1188,66 @@ export default function FilesPage() {
           break
         case "ArrowDown":
         case "ArrowUp":
+        case "ArrowLeft":
+        case "ArrowRight":
         case "Home":
         case "End":
           if (onControl) break
           event.preventDefault()
+          if (view === "list" && event.key === "ArrowRight") {
+            if (activeEntry?.isDir) openEntry(activeEntry)
+            break
+          }
+          if (view === "list" && event.key === "ArrowLeft") {
+            if (parentReachable && parent) navigate(parent)
+            break
+          }
           moveActive(event.key, event.shiftKey)
           break
+        case "?":
+          if (onControl) break
+          event.preventDefault()
+          setShortcutsOpen(true)
+          break
+        default: {
+          if (onControl || event.key.length !== 1 || event.key === " ") break
+          const now = performance.now()
+          const previous = nameTyping.current
+          const fresh = previous.dir !== path || now - previous.time > 700
+          const repeated = [...previous.query].every((letter) => letter.toLocaleLowerCase() === key)
+          const query = fresh || repeated ? event.key : previous.query + event.key
+          nameTyping.current = { query, time: now, dir: path }
+          const cycling = [...query].every((letter) => letter.toLocaleLowerCase() === key)
+          const index = activeEntry ? entries.findIndex((e) => e.path === activeEntry.path) : -1
+          const next = matchName(
+            entries.map((e) => e.name),
+            cycling ? event.key : query,
+            cycling ? index : index - 1,
+          )
+          if (next >= 0) {
+            event.preventDefault()
+            anchor.current = entries[next].path
+            focusEntry(entries[next])
+          }
+        }
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeEntry, canWrite, canDestruct, entries, path, selected, clip, parent, parentReachable])
+  }, [
+    activeEntry,
+    canWrite,
+    canDestruct,
+    entries,
+    path,
+    selected,
+    clip,
+    parent,
+    parentReachable,
+    navigation,
+    reload,
+  ])
 
   const openFileInput = () => fileInput.current?.click()
   const uploadFromInput = (input: HTMLInputElement) => {
@@ -1059,7 +1270,7 @@ export default function FilesPage() {
     : undefined
 
   return (
-    <Page fill className="gap-2 px-2 py-2 md:px-3 md:py-3">
+    <Page fill data-files-workspace className="gap-2 px-2 py-2 md:px-3 md:py-3">
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
@@ -1082,6 +1293,36 @@ export default function FilesPage() {
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
         >
           <PaneHeader className="flex-wrap gap-x-1 gap-y-1.5 px-2 py-1.5">
+            <div
+              role="group"
+              aria-label="Folder navigation"
+              className="flex shrink-0 items-center gap-0.5"
+            >
+              <IconAction
+                label="Back to previous folder"
+                className="size-8"
+                disabled={!navigation.canBack}
+                onClick={navigation.back}
+              >
+                <ArrowLeft />
+              </IconAction>
+              <IconAction
+                label="Forward to next folder"
+                className="size-8"
+                disabled={!navigation.canForward}
+                onClick={navigation.forward}
+              >
+                <ArrowRight />
+              </IconAction>
+              <IconAction
+                label="Go to parent folder"
+                className="size-8"
+                disabled={!parentReachable}
+                onClick={() => parent && navigate(parent)}
+              >
+                <ArrowUp />
+              </IconAction>
+            </div>
             <IconAction
               label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
               aria-pressed={showSidebar}
@@ -1362,8 +1603,13 @@ export default function FilesPage() {
                 className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
               >
                 <div
+                  ref={listingElement}
                   data-file-listing
-                  className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden"
+                  data-folder-path={path ?? undefined}
+                  tabIndex={0}
+                  role="region"
+                  aria-label="Folder contents"
+                  className="@container relative flex min-h-0 flex-1 flex-col overflow-hidden focus-ring-inset"
                   {...marquee.handlers}
                   onDragEnd={() => setDragging(EMPTY)}
                   onDropCapture={() => setDragging(EMPTY)}
@@ -1398,6 +1644,7 @@ export default function FilesPage() {
                           size={tile}
                           onToggle={toggleSelected}
                           onSelect={selectRow}
+                          onFocusEntry={activateEntry}
                           onOpen={openEntry}
                           onDragStart={canWrite ? dragStart : undefined}
                           onDropPaths={dropInto}
@@ -1493,6 +1740,7 @@ export default function FilesPage() {
                               caps={caps}
                               onToggle={(checked) => toggleSelected(entry, checked)}
                               onSelect={(event) => selectRow(entry, event)}
+                              onFocusEntry={() => activateEntry(entry)}
                               onOpen={() => openEntry(entry)}
                               onDragStart={
                                 canWrite ? (event) => dragStart(entry, event) : undefined
@@ -1538,7 +1786,7 @@ export default function FilesPage() {
               />
 
               <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
-                <span className="numeric min-w-0 truncate">
+                <span aria-live="polite" aria-atomic="true" className="numeric min-w-0 truncate">
                   {listing.data
                     ? selected.size > 0
                       ? `${plural(selected.size, "item")} selected${
@@ -1554,6 +1802,13 @@ export default function FilesPage() {
                             .join(", ")
                     : ""}
                 </span>
+                <IconAction
+                  label="Files shortcuts"
+                  className="size-6 shrink-0"
+                  onClick={() => setShortcutsOpen(true)}
+                >
+                  <Question />
+                </IconAction>
                 {mount && (
                   <span className="flex min-w-0 shrink-0 items-center gap-2">
                     <Meter
@@ -1601,6 +1856,7 @@ export default function FilesPage() {
           </div>
         </div>
       </FolderColourProvider>
+      <FilesShortcuts open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
 
       <QuickOpen
         open={quickOpen}
@@ -1649,7 +1905,7 @@ export default function FilesPage() {
         modified={activeEntry?.path === editingImage ? activeEntry?.modified : undefined}
         onOpenChange={(open) => !open && setEditingImage(null)}
         onSaved={() => {
-          setActive(null)
+          setActive({ dir: path ?? "/", entry: null })
           reload()
         }}
       />

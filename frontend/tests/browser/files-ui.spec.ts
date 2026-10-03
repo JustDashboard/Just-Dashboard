@@ -2,7 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 
 test.use({
   video:
-    process.env.JD_FILES_SEARCH_VIDEO === "1"
+    process.env.JD_FILES_SEARCH_VIDEO === "1" || process.env.JD_FILES_INTERACTIONS_VIDEO === "1"
       ? { mode: "on", size: { width: 1280, height: 960 } }
       : "off",
 })
@@ -250,6 +250,335 @@ async function openFiles(page: Page) {
   await page.goto("/files")
   await page.locator("tr[data-entry-path]").first().waitFor()
 }
+
+test.describe("native Files interactions", () => {
+  const item = (page: Page, name: string) => page.locator(`[data-entry-path='${home}/${name}']`)
+  const folderPath = (page: Page) => new URL(page.url()).searchParams.get("path")
+
+  test("folder history ends at the prior page and deep links survive a fresh tab", async ({
+    page,
+    context,
+  }) => {
+    await mockFiles(page)
+    await page.goto(`/files/editor?path=${encodeURIComponent(`${home}/notes.md`)}`)
+    await expect(page.getByText("notes.md", { exact: true }).first()).toBeVisible()
+    await page.goto(`/files?path=${encodeURIComponent(home)}`)
+    await expect(item(page, "photos")).toBeVisible()
+    await item(page, "photos").locator("[data-file-name]").dblclick()
+    const address = page.url()
+    await page.goBack()
+    await expect(item(page, "photos")).toBeVisible()
+    await page.goBack()
+    await expect(page).toHaveURL(/\/files\/editor\?/)
+    const fresh = await context.newPage()
+    await mockFiles(fresh)
+    await fresh.goto(address)
+    await expect(
+      fresh.getByRole("button", { name: "Folders in " + home + "/photos" }),
+    ).toBeVisible()
+    await expect(fresh.getByRole("button", { name: "Back to previous folder" })).toBeDisabled()
+    await fresh.close()
+  })
+
+  test("browser and toolbar history traverse folders, survive reload and branch after Back", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await expect(page.getByRole("button", { name: "Back to previous folder" })).toBeDisabled()
+    await item(page, "photos").locator("[data-file-name]").dblclick()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.getByRole("button", { name: "Go to parent folder" }).click()
+    await expect.poll(() => folderPath(page)).toBe(home)
+    await page.goBack()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeEnabled()
+    await page.reload()
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeEnabled()
+    await page.getByRole("button", { name: "Forward to next folder" }).click()
+    await expect(item(page, "site")).toBeVisible()
+    await page.keyboard.press("Alt+ArrowLeft")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.keyboard.press("Alt+ArrowRight")
+    await expect(item(page, "site")).toBeVisible()
+    await page.keyboard.press("Meta+[")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.keyboard.press("Meta+]")
+    await expect(item(page, "site")).toBeVisible()
+    await page.getByRole("button", { name: "Back to previous folder" }).click()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.getByRole("navigation", { name: "Places" }).locator("button[title='/etc']").click()
+    await expect.poll(() => folderPath(page)).toBe("/etc")
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeDisabled()
+    const length = await page.evaluate(() => history.length)
+    await page
+      .getByRole("button", { name: "Folders in /etc" })
+      .locator("..")
+      .getByRole("button", { name: "etc", exact: true })
+      .click()
+    expect(await page.evaluate(() => history.length)).toBe(length)
+  })
+
+  test("Back restores selection, active item, scroll and keyboard focus", async ({ page }) => {
+    await mockFiles(page)
+    const many = [
+      ...entries,
+      ...Array.from({ length: 80 }, (_, i) => entry(`file-${String(i).padStart(3, "0")}.txt`)),
+    ]
+    await page.route("**/api/v1/files/list**", async (route) => {
+      const dir = new URL(route.request().url()).searchParams.get("path") ?? home
+      await json(route, {
+        path: dir,
+        parent: home,
+        roots: ["/"],
+        entries: dir === home ? many : [],
+      })
+    })
+    await openFiles(page)
+    await item(page, "file-060.txt").getByRole("checkbox").click()
+    const scroll = page.locator("[data-file-listing] [data-slot='table-container']")
+    const before = await scroll.evaluate((el) => el.scrollTop)
+    expect(before).toBeGreaterThan(500)
+    await page
+      .getByRole("navigation", { name: "Places" })
+      .locator(`button[title='${home}/photos']`)
+      .click()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.goBack()
+    await expect(item(page, "file-060.txt").getByRole("checkbox")).toBeChecked()
+    await expect(page.getByRole("heading", { name: "file-060.txt" })).toBeVisible()
+    await expect.poll(() => scroll.evaluate((el) => el.scrollTop)).toBe(before)
+    await expect(item(page, "file-060.txt")).toBeFocused()
+    await page.keyboard.press("ArrowDown")
+    await expect(item(page, "file-061.txt")).toBeFocused()
+  })
+
+  test("refresh, find, hidden files, new folder and Escape belong to Files", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    let reads = 0
+    page.on("request", (request) => {
+      if (request.url().includes("/files/list?")) reads++
+    })
+    await page.evaluate(() => {
+      document.documentElement.dataset.filesAlive = "yes"
+    })
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    for (const key of ["Control+r", "Meta+r", "F5"]) {
+      const before = reads
+      await page.keyboard.press(key)
+      await expect.poll(() => reads).toBeGreaterThan(before)
+      expect(await page.evaluate(() => document.documentElement.dataset.filesAlive)).toBe("yes")
+    }
+    await page.keyboard.press("Control+f")
+    await expect(page.getByRole("dialog", { name: "Find files" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    const hidden = page.waitForRequest(
+      (request) =>
+        request.url().includes("/files/list?") &&
+        new URL(request.url()).searchParams.get("hidden") === "true",
+    )
+    await page.keyboard.press("Control+Shift+.")
+    await hidden
+    await page.keyboard.press("Control+Shift+n")
+    await expect(page.getByRole("dialog", { name: "New folder" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await item(page, "notes.md").locator("[data-file-name]").click()
+    await page.keyboard.press("Control+x")
+    await expect(page.getByLabel("Forget the clipboard")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByLabel("Forget the clipboard")).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(page.getByLabel("Forget the clipboard")).toHaveCount(0)
+  })
+
+  test("path inputs, menus, dialogs and the app rail keep their own keys", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.press("Control+l")
+    const input = page.getByRole("textbox", { name: "Folder path" })
+    await expect(input).toBeFocused()
+    await input.fill("/var/www/a b")
+    await page.keyboard.press("Backspace")
+    await expect(input).toHaveValue("/var/www/a ")
+    await page.keyboard.press("Control+a")
+    expect(
+      await input.evaluate((el: HTMLInputElement) => el.selectionEnd! - el.selectionStart!),
+    ).toBe("/var/www/a ".length)
+    await page.keyboard.press("Escape")
+    expect(folderPath(page)).toBe(home)
+    await item(page, "photos").click({ button: "right" })
+    await page.keyboard.press("Control+l")
+    await expect(input).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Files shortcuts" }).click()
+    await page.keyboard.press("Backspace")
+    expect(folderPath(page)).toBe(home)
+    await expect(page.getByRole("dialog", { name: "Files shortcuts" })).toBeVisible()
+    await page.keyboard.press("Escape")
+    const rail = page.locator("[data-sidebar='sidebar']").first()
+    const railButton = rail.getByRole("link").first()
+    await railButton.focus()
+    const prevented = await railButton.evaluate((el) => {
+      const event = new KeyboardEvent("keydown", {
+        key: "a",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+      el.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+    expect(prevented).toBe(false)
+    await expect(item(page, "photos").getByRole("checkbox")).not.toBeChecked()
+  })
+
+  test("name typing and tile arrows work from the item name and wrapper", async ({ page }) => {
+    await mockFiles(page)
+    await openFiles(page)
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.type("ph")
+    await expect(item(page, "photos")).toBeFocused()
+    await item(page, "photos").locator("[data-file-name]").focus()
+    await page.keyboard.press("Shift+ArrowDown")
+    await expect(item(page, "site")).toBeFocused()
+    await expect(item(page, "photos").getByRole("checkbox")).toBeChecked()
+    await expect(item(page, "site").getByRole("checkbox")).toBeChecked()
+    await page.keyboard.press("Escape")
+    await item(page, "notes.md").locator("[data-file-name]").focus()
+    await page.keyboard.press("ArrowUp")
+    await expect(item(page, "logo.png")).toBeFocused()
+    await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.press("Home")
+    await expect(item(page, "photos")).toBeFocused()
+    await page.keyboard.press("ArrowRight")
+    await expect(item(page, "site")).toBeFocused()
+    await page.keyboard.press("Control+Space")
+    await expect(item(page, "site").getByRole("checkbox")).toBeChecked()
+    const columns = await page
+      .locator("[data-file-grid]")
+      .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").length)
+    await page.keyboard.press("Home")
+    await page.keyboard.press("ArrowDown")
+    const ordered = await page
+      .locator("[data-entry-path]")
+      .evaluateAll((els) => els.map((el) => el.getAttribute("data-entry-path")))
+    await expect(
+      page.locator(`[data-entry-path='${ordered[Math.min(columns, ordered.length - 1)]}']`),
+    ).toBeFocused()
+    await page.keyboard.press("Home")
+    await page.keyboard.press("Enter")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await page.keyboard.press("Backspace")
+    await expect(item(page, "photos")).toBeFocused()
+  })
+
+  test("restricted roots disable parent navigation and readonly shortcuts never write", async ({
+    page,
+  }) => {
+    await mockFiles(page)
+    await page.route("**/api/v1/auth/session", (route) =>
+      json(route, { ...user, capabilities: ["read"] }),
+    )
+    await page.route("**/api/v1/files/list**", (route) =>
+      json(route, { path: home, parent: "/home", roots: [home], entries }),
+    )
+    const writes: string[] = []
+    page.on("request", (request) => {
+      if (request.method() !== "GET" && request.url().includes("/files/"))
+        writes.push(request.url())
+    })
+    await openFiles(page)
+    await expect(page.getByRole("button", { name: "Go to parent folder" })).toBeDisabled()
+    await item(page, "notes.md").locator("[data-file-name]").click()
+    for (const key of ["Backspace", "Alt+ArrowUp", "Control+Shift+n", "F2", "Delete", "Control+x"])
+      await page.keyboard.press(key)
+    expect(folderPath(page)).toBe(home)
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    expect(writes).toEqual([])
+  })
+
+  test("record the Files workflow at desktop and phone widths", async ({ page }) => {
+    const pause = async () => {
+      if (process.env.JD_FILES_INTERACTIONS_VIDEO === "1") await page.waitForTimeout(700)
+    }
+    await page.setViewportSize({ width: 1280, height: 960 })
+    await mockFiles(page)
+    await openFiles(page)
+    await pause()
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.type("ph", { delay: 140 })
+    await page.keyboard.press("Enter")
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await pause()
+    await page.keyboard.press("Alt+ArrowLeft")
+    await expect(item(page, "photos")).toBeFocused()
+    await pause()
+    await page.getByRole("radio", { name: "Tiles", exact: true }).click()
+    await page.getByRole("region", { name: "Folder contents" }).focus()
+    await page.keyboard.press("ArrowRight")
+    await page.keyboard.press("Control+Space")
+    await expect(page.getByRole("toolbar", { name: "Selection actions" }).locator("..")).toHaveCSS(
+      "opacity",
+      "1",
+    )
+    await page.screenshot({ path: "test-results/files-native-desktop.png", animations: "disabled" })
+    await pause()
+    await page.keyboard.press("Control+f")
+    await expect(page.getByRole("dialog", { name: "Find files" })).toBeVisible()
+    await pause()
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Files shortcuts" }).click()
+    await expect(page.getByRole("dialog", { name: "Files shortcuts" })).toHaveCSS("opacity", "1")
+    await page.screenshot({
+      path: "test-results/files-native-shortcuts.png",
+      animations: "disabled",
+    })
+    await pause()
+    await page.keyboard.press("Escape")
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeVisible()
+    await page.getByRole("button", { name: "Forward to next folder" }).click()
+    await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await pause()
+    await page.getByRole("button", { name: "Back to previous folder" }).click()
+    await expect(item(page, "photos")).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+    await page.screenshot({ path: "test-results/files-native-phone.png", animations: "disabled" })
+    await pause()
+  })
+
+  test("navigation and shortcut help fit a small phone and landscape", async ({ page }) => {
+    await mockFiles(page)
+    await page.emulateMedia({ reducedMotion: "reduce" })
+    await openFiles(page)
+    for (const size of [
+      { width: 375, height: 667 },
+      { width: 844, height: 390 },
+    ]) {
+      await page.setViewportSize(size)
+      await expect(page.getByRole("button", { name: "Go to parent folder" })).toBeVisible()
+      await page.getByRole("button", { name: "Files shortcuts" }).click()
+      const dialog = page.getByRole("dialog", { name: "Files shortcuts" })
+      await expect(dialog).toBeVisible()
+      const box = await dialog.boundingBox()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.y).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(size.width)
+      expect(box!.y + box!.height).toBeLessThanOrEqual(size.height)
+      await dialog.getByRole("button", { name: "Close", exact: true }).click()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      )
+    }
+  })
+})
 
 test("large listings retain find, selection and keyboard menu focus", async ({ page }) => {
   test.setTimeout(90_000)
