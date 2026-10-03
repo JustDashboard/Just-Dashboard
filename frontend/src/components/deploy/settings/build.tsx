@@ -50,7 +50,6 @@ import {
   PYTHON_VERSION,
   automaticPackageManagerHint,
   commandsForPackageManager,
-  dockerfileStageHint,
   dotnetVersionReading,
   goMainPackageList,
   installsAssetsWithNode,
@@ -94,6 +93,12 @@ import {
  * Two forms, two saves: Build (four sections, one PUT) and Release
  * tasks. Each keeps its own draft, keyed on its own saved value, so saving
  * one never restarts the other's unsaved edits.
+ *
+ * What a field needs while it is typed stays under it — what the repository
+ * declares, what detection proposes; where Auto looks and why a field exists
+ * is behind its ⓘ. A head says only what no field under it already shows,
+ * and what a press reveals — a recipe's own fields, a proposal, a new answer
+ * under a field — rises into place rather than snapping in.
  */
 
 type BuildPlan = DeploymentConfiguration["build"]
@@ -171,6 +176,21 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
 }
 
 const GO_ERROR = `Use Go ${GO_VERSIONS.slice(0, -1).join(", ")} or ${GO_VERSIONS.at(-1)}, or leave empty to follow go.mod.`
+
+/**
+ * A hint that answers the reader's last press — the install a package manager
+ * runs, what detection proposes — keyed on its words, so a new answer rises in
+ * (§11) rather than being repainted in place under the pointer.
+ */
+function answer(text: string | undefined) {
+  return (
+    text && (
+      <span key={text} className="block animate-rise">
+        {text}
+      </span>
+    )
+  )
+}
 
 type Builder = {
   key: string
@@ -579,7 +599,6 @@ function BuildForm({
   const installOnly = buildVariables.filter((variable) => stageOf(variable.name) === "install")
   const subdirectory = configuration.source?.subdirectory?.replace(/^\/+|\/+$/g, "")
   const root = build.rootDirectory?.replace(/^\/+|\/+$/g, "")
-  const runsIn = [subdirectory, root].filter(Boolean).join("/")
   const bunLastBuild = evidence?.prepared?.baseImages?.some((base) =>
     base.reference.startsWith("oven/bun"),
   )
@@ -604,6 +623,17 @@ function BuildForm({
     evidence?.prepared?.method === build.method &&
     (build.method !== "recipe" || evidence.prepared.recipe === recipe)
   const preview = asLastBuilt ? evidence?.prepared?.dockerfilePreview?.trimEnd() : undefined
+  const lastToolchain =
+    asLastBuilt && evidence?.prepared?.toolchain
+      ? [
+          evidence.prepared.nodeVersion && `node ${evidence.prepared.nodeVersion}`,
+          evidence.prepared.toolchain,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : undefined
+  const baseImages = evidence?.prepared?.baseImages?.map((base) => base.reference) ?? []
+  const reaching = buildVariables.length - installOnly.length
 
   const choose = (choice: Builder) => {
     // Pressing the builder already chosen changes nothing, not even a recipe
@@ -682,13 +712,16 @@ function BuildForm({
         id="build"
         title="Build"
         // The builder is the card picked below; the head keeps what only the
-        // last build knows.
+        // last build knows, with the toolchain itself the line's loudest
+        // words. It rises when the run's record lands, and again when picking
+        // the last build's builder back brings it back.
         state={
-          asLastBuilt &&
-          evidence?.prepared?.toolchain && (
-            <span className="block truncate font-mono">
-              {evidence.prepared.nodeVersion && `node ${evidence.prepared.nodeVersion} · `}
-              {evidence.prepared.toolchain} · last build
+          lastToolchain && (
+            <span key={lastToolchain} className="flex min-w-0 animate-rise items-baseline gap-1.5">
+              <span className="shrink-0">last built with</span>
+              <span className="truncate font-mono text-foreground" title={lastToolchain}>
+                {lastToolchain}
+              </span>
             </span>
           )
         }
@@ -728,15 +761,17 @@ function BuildForm({
         }
       >
         {proposal && (
-          <DetectionProposalPanel
-            projectId={projectId}
-            title="Detection proposes"
-            proposal={proposal}
-            changes={proposed}
-            canEdit={canEdit}
-            onApply={applyProposed}
-            onDismiss={() => setProposal(undefined)}
-          />
+          <div className="animate-rise">
+            <DetectionProposalPanel
+              projectId={projectId}
+              title="Detection proposes"
+              proposal={proposal}
+              changes={proposed}
+              canEdit={canEdit}
+              onApply={applyProposed}
+              onDismiss={() => setProposal(undefined)}
+            />
+          </div>
         )}
         {picks ? (
           <Field label="Builder" error={errorFor("build-method")}>
@@ -766,17 +801,22 @@ function BuildForm({
           />
         )}
 
+        {/* A recipe's own fields rise as its card is pressed: they are what
+            the press revealed, not a page that happened to redraw. */}
         {build.method === "recipe" &&
           (recipe === "node" ||
             (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
             <Field
               label="Package manager"
-              hint={
+              // The install the pressed manager runs, under the cards as it
+              // is picked.
+              hint={answer(
                 proposedFor("build.packageManager") ??
-                packageManagerReading(detected, build.packageManager) ??
-                "Pick one when the repository has more than one lockfile."
-              }
+                  packageManagerReading(detected, build.packageManager),
+              )}
+              info="Pick one when the repository has more than one lockfile."
               error={errorFor("build-package-manager")}
+              className="animate-rise"
             >
               <ChoiceGrid
                 id="build-package-manager"
@@ -816,12 +856,10 @@ function BuildForm({
             (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
             <Field
               label="Node version"
-              hint={
-                detected?.nodeVersion
-                  ? `Auto builds on Node ${detected.nodeVersion}; a version here outranks the repository.`
-                  : "Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node."
-              }
+              hint={detected?.nodeVersion && `Auto builds on Node ${detected.nodeVersion}`}
+              info="Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node; a version here outranks the repository."
               error={errorFor("build-node-version")}
+              className="animate-rise"
             >
               <Segments
                 id="build-node-version"
@@ -850,8 +888,9 @@ function BuildForm({
         {build.method === "recipe" && recipe === "python" && (
           <Field
             label="Python version"
-            hint="Auto reads .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml, and stays below a version a pinned package has no wheels for."
+            info="Auto reads .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml, and stays below a version a pinned package has no wheels for."
             error={errorFor("build-python-version")}
+            className="animate-rise"
           >
             <Segments
               id="build-python-version"
@@ -882,8 +921,9 @@ function BuildForm({
         {build.method === "recipe" && recipe === "php" && (
           <Field
             label="PHP version"
-            hint="Auto reads composer.json, config.platform.php and what composer.lock's packages accept."
+            info="Auto reads composer.json, config.platform.php and what composer.lock's packages accept."
             error={errorFor("build-php-version")}
+            className="animate-rise"
           >
             <Segments
               id="build-php-version"
@@ -918,11 +958,10 @@ function BuildForm({
         {build.method === "recipe" && recipe === "java" && (
           <Field
             label="Java version"
-            hint={
-              javaVersionReading(detected) ??
-              "Auto reads the build files, .java-version, .sdkmanrc, .tool-versions and mise.toml."
-            }
+            hint={javaVersionReading(detected)}
+            info="Auto reads the build files, .java-version, .sdkmanrc, .tool-versions and mise.toml."
             error={errorFor("build-java-version")}
+            className="animate-rise"
           >
             <Segments
               id="build-java-version"
@@ -947,11 +986,10 @@ function BuildForm({
         {build.method === "recipe" && recipe === "dotnet" && (
           <Field
             label=".NET version"
-            hint={
-              dotnetVersionReading(detected) ??
-              "Auto reads the project's target framework and the SDK global.json pins."
-            }
+            hint={dotnetVersionReading(detected)}
+            info="Auto reads the project's target framework and the SDK global.json pins."
             error={errorFor("build-dotnet-version")}
+            className="animate-rise"
           >
             <Segments
               id="build-dotnet-version"
@@ -978,52 +1016,79 @@ function BuildForm({
         )}
 
         {build.method === "recipe" && recipe === "go" && (
-          <Field
-            label="Go main package"
-            htmlFor="build-go-package"
-            hint={
-              proposedFor("build.goPackage") ??
-              (proposal?.candidate?.goMainPackages?.length && !proposal.elsewhere
-                ? `Main packages: ${goMainPackageList(proposal.candidate)}.`
-                : "The directory of the command to build, such as cmd/api; empty lets the recipe choose.")
-            }
-            error={errorFor("build-go-package")}
-          >
-            <InputGroup>
-              <InputGroupAddon align="inline-start">
-                <InputGroupText className="font-mono">./</InputGroupText>
-              </InputGroupAddon>
-              <InputGroupInput
-                id="build-go-package"
-                value={build.goPackage ?? ""}
-                readOnly={!canEdit}
-                aria-invalid={Boolean(errorFor("build-go-package"))}
-                className="font-mono"
-                placeholder="recipe chooses"
-                autoComplete="off"
-                spellCheck={false}
-                onChange={(event) =>
-                  setBuild({
-                    ...build,
-                    goPackage: event.target.value.replace(/^\.\//, "") || undefined,
-                  })
-                }
-              />
-            </InputGroup>
-          </Field>
+          <FieldRow className="animate-rise">
+            <Field
+              label="Go main package"
+              htmlFor="build-go-package"
+              hint={answer(
+                proposedFor("build.goPackage") ??
+                  (proposal?.candidate?.goMainPackages?.length && !proposal.elsewhere
+                    ? `Main packages: ${goMainPackageList(proposal.candidate)}`
+                    : undefined),
+              )}
+              info="The directory of the command to build, such as cmd/api; empty lets the recipe choose."
+              error={errorFor("build-go-package")}
+            >
+              <InputGroup>
+                <InputGroupAddon align="inline-start">
+                  <InputGroupText className="font-mono">./</InputGroupText>
+                </InputGroupAddon>
+                <InputGroupInput
+                  id="build-go-package"
+                  value={build.goPackage ?? ""}
+                  readOnly={!canEdit}
+                  aria-invalid={Boolean(errorFor("build-go-package"))}
+                  className="font-mono"
+                  placeholder="recipe chooses"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) =>
+                    setBuild({
+                      ...build,
+                      goPackage: event.target.value.replace(/^\.\//, "") || undefined,
+                    })
+                  }
+                />
+              </InputGroup>
+            </Field>
+            <Field
+              label="Go version"
+              htmlFor="build-go-version"
+              error={errorFor("build-go-version")}
+            >
+              <InputGroup>
+                <InputGroupAddon align="inline-start">
+                  <ProductGlyph id="go" />
+                </InputGroupAddon>
+                <InputGroupInput
+                  id="build-go-version"
+                  value={build.goVersion ?? ""}
+                  readOnly={!canEdit}
+                  aria-invalid={Boolean(errorFor("build-go-version"))}
+                  className="font-mono"
+                  placeholder="go.mod decides"
+                  onChange={(event) =>
+                    setBuild({ ...build, goVersion: event.target.value || undefined })
+                  }
+                />
+              </InputGroup>
+            </Field>
+          </FieldRow>
         )}
 
         {build.method === "recipe" && recipe === "rust" && (
           <Field
             label="Rust binary"
             htmlFor="build-cargo-bin"
-            hint={
+            hint={answer(
               proposedFor("build.cargoBin") ??
-              ((proposal?.candidate?.rust?.binaries?.length ?? 0) > 1 && !proposal?.elsewhere
-                ? `Binaries: ${proposal?.candidate?.rust?.binaries?.join(", ")}.`
-                : "The binary target to serve; empty lets the recipe choose (default-run, or the one that starts a server).")
-            }
+                ((proposal?.candidate?.rust?.binaries?.length ?? 0) > 1 && !proposal?.elsewhere
+                  ? `Binaries: ${proposal?.candidate?.rust?.binaries?.join(", ")}`
+                  : undefined),
+            )}
+            info="The binary target to serve; empty lets the recipe choose (default-run, or the one that starts a server)."
             error={errorFor("build-cargo-bin")}
+            className="animate-rise"
           >
             <Input
               id="build-cargo-bin"
@@ -1041,59 +1106,62 @@ function BuildForm({
           </Field>
         )}
 
-        {build.method === "recipe" && recipe === "go" && (
-          <Field label="Go version" htmlFor="build-go-version" error={errorFor("build-go-version")}>
-            <InputGroup>
-              <InputGroupAddon align="inline-start">
-                <ProductGlyph id="go" />
-              </InputGroupAddon>
-              <InputGroupInput
-                id="build-go-version"
-                value={build.goVersion ?? ""}
-                readOnly={!canEdit}
-                aria-invalid={Boolean(errorFor("build-go-version"))}
-                className="font-mono"
-                placeholder="go.mod decides"
-                onChange={(event) =>
-                  setBuild({ ...build, goVersion: event.target.value || undefined })
-                }
-              />
-            </InputGroup>
-          </Field>
-        )}
-
         {build.method === "dockerfile" && (
-          <Field
-            label="Dockerfile path"
-            htmlFor="build-dockerfile"
-            hint="Relative to the root directory."
-            error={errorFor("build-dockerfile")}
-          >
-            <InputGroup>
-              <InputGroupAddon align="inline-start">
-                <ProductGlyph id="docker" />
-              </InputGroupAddon>
-              <InputGroupInput
-                id="build-dockerfile"
-                value={build.dockerfile ?? ""}
+          <FieldRow className="animate-rise">
+            <Field
+              label="Dockerfile path"
+              htmlFor="build-dockerfile"
+              info="Relative to the root directory."
+              error={errorFor("build-dockerfile")}
+            >
+              <InputGroup>
+                <InputGroupAddon align="inline-start">
+                  <InputGroupText className="max-w-32 font-mono">
+                    <ProductGlyph id="docker" />
+                    <span className="truncate">{root ? `${root}/` : "./"}</span>
+                  </InputGroupText>
+                </InputGroupAddon>
+                <InputGroupInput
+                  id="build-dockerfile"
+                  value={build.dockerfile ?? ""}
+                  readOnly={!canEdit}
+                  aria-invalid={Boolean(errorFor("build-dockerfile"))}
+                  className="font-mono"
+                  placeholder="Dockerfile"
+                  // A stage belongs to the file it was read from; another file
+                  // keeping it would fail with "not a stage".
+                  onChange={(event) =>
+                    setBuild({ ...build, dockerfile: event.target.value, target: undefined })
+                  }
+                />
+              </InputGroup>
+            </Field>
+            {/* "Leave empty to build the last stage" was the placeholder again. */}
+            <Field
+              label="Stage"
+              htmlFor="build-target"
+              hint={answer(proposedFor("build.target"))}
+              error={errorFor("build-target")}
+            >
+              <Input
+                id="build-target"
+                value={build.target ?? ""}
                 readOnly={!canEdit}
-                aria-invalid={Boolean(errorFor("build-dockerfile"))}
+                aria-invalid={Boolean(errorFor("build-target"))}
                 className="font-mono"
-                placeholder="Dockerfile"
-                // A stage belongs to the file it was read from; another file
-                // keeping it would fail with "not a stage".
+                placeholder="the last stage"
                 onChange={(event) =>
-                  setBuild({ ...build, dockerfile: event.target.value, target: undefined })
+                  setBuild({ ...build, target: event.target.value.trim() || undefined })
                 }
               />
-            </InputGroup>
-          </Field>
+            </Field>
+          </FieldRow>
         )}
         {build.method === "compose" && (
           <Field
             label="Primary service"
             htmlFor="build-primary-service"
-            hint="The service readiness and the release's container follow. Leave empty for the one detection chose: it builds or publishes a port, never a database."
+            info="The service readiness and the release's container follow. Empty takes the one detection chose: it builds or publishes a port, never a database."
             error={errorFor("build-primary-service")}
           >
             <Input
@@ -1102,29 +1170,9 @@ function BuildForm({
               readOnly={!canEdit}
               aria-invalid={Boolean(errorFor("build-primary-service"))}
               className="font-mono"
-              placeholder="web"
+              placeholder="detection chooses"
               onChange={(event) =>
                 setBuild({ ...build, primaryService: event.target.value.trim() || undefined })
-              }
-            />
-          </Field>
-        )}
-        {build.method === "dockerfile" && (
-          <Field
-            label="Stage"
-            htmlFor="build-target"
-            hint={proposedFor("build.target") ?? dockerfileStageHint()}
-            error={errorFor("build-target")}
-          >
-            <Input
-              id="build-target"
-              value={build.target ?? ""}
-              readOnly={!canEdit}
-              aria-invalid={Boolean(errorFor("build-target"))}
-              className="font-mono"
-              placeholder="the last stage"
-              onChange={(event) =>
-                setBuild({ ...build, target: event.target.value.trim() || undefined })
               }
             />
           </Field>
@@ -1132,21 +1180,11 @@ function BuildForm({
       </SettingSection>
 
       {builds && (
+        // No state under the title: where it runs and what it runs were the
+        // Root directory and Build command fields right under it, said again.
         <SettingSection
           id="commands"
           title="Commands"
-          state={
-            <span className="block space-y-1">
-              <span className="block truncate">
-                runs in <span className="font-mono text-foreground">/{runsIn}</span>
-              </span>
-              {build.method !== "dockerfile" && build.buildCommand && (
-                <span className="block truncate font-mono" title={build.buildCommand}>
-                  $ {build.buildCommand}
-                </span>
-              )}
-            </span>
-          }
           status={settingStatus({
             dirty: draft.changed([
               "rootDirectory",
@@ -1161,7 +1199,7 @@ function BuildForm({
           <Field
             label="Root directory"
             htmlFor="build-root"
-            hint="Inside the source's own root directory."
+            info="Inside the source's own root directory, set on General."
             error={errorFor("build-root")}
           >
             <InputGroup>
@@ -1183,7 +1221,9 @@ function BuildForm({
           </Field>
 
           {(build.method === "recipe" || build.method === "static") && (
-            <>
+            // Keyed on the builder, so moving between a recipe and a static
+            // site, which swaps the commands, rises like any other reveal.
+            <div key={build.method} className="animate-rise space-y-5">
               {build.method === "static" ? (
                 <CommandField
                   id="build-command"
@@ -1220,7 +1260,7 @@ function BuildForm({
               <Field
                 label="Output directory"
                 htmlFor="build-output"
-                hint={proposedFor("build.outputDirectory")}
+                hint={answer(proposedFor("build.outputDirectory"))}
                 error={errorFor("build-output")}
               >
                 <InputGroup>
@@ -1242,20 +1282,25 @@ function BuildForm({
                   />
                 </InputGroup>
               </Field>
-            </>
+            </div>
           )}
 
           {(build.method === "static" ||
             (build.method === "recipe" && Boolean(build.outputDirectory))) && (
-            <OptionRow
-              title="Single-page application"
-              hint="Answers paths without a file with index.html, so client-side routes open directly."
-              checked={build.spaFallback ?? false}
-              onCheckedChange={(spaFallback) =>
-                setBuild({ ...build, spaFallback: spaFallback || undefined })
-              }
-              disabled={!canEdit}
-            />
+            // Rises as the output directory that makes it matter is typed.
+            // The row is alone in this wrapper, so it loses the top padding
+            // it keeps after a field, which the wrapper puts back.
+            <div className="animate-rise pt-1.5">
+              <OptionRow
+                title="Single-page application"
+                hint="Answers paths without a file with index.html, so client-side routes open directly."
+                checked={build.spaFallback ?? false}
+                onCheckedChange={(spaFallback) =>
+                  setBuild({ ...build, spaFallback: spaFallback || undefined })
+                }
+                disabled={!canEdit}
+              />
+            </div>
           )}
         </SettingSection>
       )}
@@ -1264,20 +1309,16 @@ function BuildForm({
         <SettingSection
           id="image"
           title="Image"
+          // What the last image was built from, which only the run knows,
+          // rising when it lands. Whether layers are reused is the switch
+          // right under it, and was its second line.
           state={
-            <span className="block space-y-1">
-              {evidence?.prepared?.baseImages && evidence.prepared.baseImages.length > 0 && (
-                <span className="flex min-w-0 items-center gap-1.5">
-                  last image from
-                  <ProductGlyphs
-                    ids={imageProducts(evidence.prepared.baseImages.map((base) => base.reference))}
-                  />
-                </span>
-              )}
-              <span className="block">
-                {build.noCache ? "clean every build" : "cached layers reused"}
+            baseImages.length > 0 && (
+              <span className="flex min-w-0 animate-rise items-center gap-1.5">
+                last image from
+                <ProductGlyphs ids={imageProducts(baseImages)} />
               </span>
-            </span>
+            )
           }
           status={settingStatus({
             dirty: draft.changed(["targetPlatform", "noCache"]),
@@ -1287,7 +1328,7 @@ function BuildForm({
           <Field
             label="Target platform"
             htmlFor="build-platform"
-            hint="Empty builds for this server."
+            info="Empty builds for this server."
             error={errorFor("build-platform")}
           >
             <Input
@@ -1316,6 +1357,7 @@ function BuildForm({
           {preview && (
             <Disclosure
               quiet
+              className="animate-rise"
               summary={
                 evidence?.prepared?.method === "dockerfile"
                   ? "Dockerfile the last build used"
@@ -1346,10 +1388,13 @@ function BuildForm({
         <SettingSection
           id="build-variables"
           title="Build variables"
+          // The figure rises as a stage pressed below changes it.
           state={
             <>
-              <span className="numeric">{buildVariables.length - installOnly.length}</span> reach
-              the build
+              <span key={reaching} className="numeric inline-block animate-rise">
+                {reaching}
+              </span>{" "}
+              reach the build
             </>
           }
           status={settingStatus({ dirty: draft.changed(["secrets"]) })}
@@ -1409,7 +1454,7 @@ function BuildForm({
                     />
                   </div>
                   {ships && (
-                    <FormNote tone="warning" className="mt-1.5">
+                    <FormNote tone="warning" className="mt-1.5 animate-rise">
                       {variable.name} is compiled into the JavaScript browsers download — secret or
                       not, it is public.
                     </FormNote>
@@ -1447,7 +1492,7 @@ function CommandField({
   onChange: (value: string) => void
 }) {
   return (
-    <Field label={label} htmlFor={id} hint={hint} error={error}>
+    <Field label={label} htmlFor={id} hint={answer(hint)} error={error}>
       <InputGroup>
         <InputGroupAddon align="inline-start">
           <InputGroupText className="font-mono">$</InputGroupText>
@@ -1504,7 +1549,7 @@ function PrebuiltFact({
       <div className="min-w-0">
         <p className="text-body font-medium">{title}</p>
         {detail && (
-          <p className="truncate font-mono text-hint text-muted-foreground" title={detail}>
+          <p className="truncate font-mono text-xs text-muted-foreground" title={detail}>
             {detail}
           </p>
         )}
@@ -1644,12 +1689,19 @@ function SystemPackagesField({
     <Field
       label="System packages"
       htmlFor="build-system-packages"
+      // What is already there is what the reader needs while typing, so as
+      // not to add it twice; the placeholder shows the separator.
       hint={
-        installed.length
-          ? `Installed for the dependencies already: ${installed.join(", ")}. Add others the application needs, separated by spaces.`
-          : "Debian packages installed before the dependencies, separated by spaces, such as libpq-dev."
+        installed.length > 0 && (
+          <>
+            Installed for the dependencies already:{" "}
+            <span className="font-mono">{installed.join(" ")}</span>
+          </>
+        )
       }
+      info="Debian packages installed before the dependencies, separated by spaces, such as libpq-dev."
       error={error}
+      className="animate-rise"
     >
       <Input
         id="build-system-packages"
@@ -1657,7 +1709,7 @@ function SystemPackagesField({
         readOnly={!canEdit}
         aria-invalid={Boolean(error)}
         className="font-mono"
-        placeholder="none"
+        placeholder="libpq-dev libjpeg-dev"
         autoComplete="off"
         spellCheck={false}
         onChange={(event) => {

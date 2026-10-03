@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowLeftRight, Box, Globe, Pause, Servers } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -72,6 +73,11 @@ import {
  * Two forms, two saves: Runtime (five sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
+ *
+ * A head says only what the fields under it do not: the command as one line,
+ * a count, a state. What a field needs while it is typed stays under it, a
+ * list's format is shown by its placeholder, and the reasoning behind a field
+ * is behind its ⓘ, so the page reads as heads, fields and switches.
  */
 
 type RuntimePlan = DeploymentConfiguration["runtime"]
@@ -133,14 +139,6 @@ const BIND_ADDRESSES: [string, string][] = [
   ["0.0.0.0", "0.0.0.0 · every interface"],
   ["::", ":: · every IPv6 interface"],
 ]
-
-/** What a restart policy does, for the Releases head that says it back. */
-const RESTART_PHRASE: Record<string, string> = {
-  "unless-stopped": "restarts unless stopped",
-  always: "always restarts",
-  "on-failure": "restarts on failure",
-  no: "never restarts",
-}
 
 /** The scalar `runtime.*` fields a validation refusal can name. */
 const RUNTIME_FIELD_IDS: Record<string, string> = {
@@ -280,11 +278,15 @@ export function RuntimeSettings({
 
 type Save = ReturnType<typeof useConfiguration>["save"]
 
-/** One or two states for a section head, stacked, or nothing when there are none. */
+/**
+ * One or two states for a section head, side by side, or nothing when there
+ * are none. Stacked, "Unsaved changes" arriving under "Public" made a head
+ * with no state line a line taller, and pushed the field being typed in down.
+ */
 function statuses(...items: React.ReactNode[]) {
   const shown = items.filter(Boolean)
   if (shown.length === 0) return undefined
-  return <span className="flex flex-col items-start gap-1">{shown}</span>
+  return <span className="flex flex-wrap items-center gap-x-3 gap-y-1">{shown}</span>
 }
 
 /**
@@ -400,30 +402,26 @@ function RuntimeForm({
       applies="next-deployment"
       error={error}
     >
+      {/* The head is the command as one line, which the field under it, one
+          argument per line, does not show; the image was the field under it
+          again, glyph and all. The line rises when it swaps between the
+          image's own command and one typed here, not on every keystroke. */}
       <SettingSection
         id="runtime"
         title="Runtime"
         state={
-          <span className="block space-y-1">
-            {image ? (
-              <span className="flex min-w-0 items-center gap-1.5 text-foreground">
-                <ProductGlyph id={imageProduct(image)} />
-                <span className="truncate font-mono" title={image}>
-                  {image}
-                </span>
-              </span>
+          <span
+            key={argv.length > 0 ? "argv" : "own"}
+            className="block animate-rise truncate"
+            title={argv.length > 0 ? argv.join(" ") : undefined}
+          >
+            {argv.length > 0 ? (
+              <>
+                runs <span className="font-mono text-foreground">{argv.join(" ")}</span>
+              </>
             ) : (
-              !built && <span className="block">no image set</span>
+              "runs the image's own command"
             )}
-            <span className="block truncate">
-              {argv.length > 0 ? (
-                <>
-                  runs <span className="font-mono text-foreground">{argv.join(" ")}</span>
-                </>
-              ) : (
-                "runs the image's own command"
-              )}
-            </span>
           </span>
         }
         status={settingStatus({
@@ -444,18 +442,19 @@ function RuntimeForm({
               readOnly={!canEdit}
               aria-invalid={Boolean(errorFor("runtime-image"))}
               className="font-mono"
-              placeholder={built ? "The image Build produces" : "image reference"}
+              placeholder={built ? "The image Build produces" : "ghcr.io/owner/image:tag"}
               autoComplete="off"
               spellCheck={false}
               onChange={(event) => patch({ image: event.target.value })}
             />
           </InputGroup>
         </Field>
+        {/* The placeholder is an argv written one argument per line, so it
+            says the format; what empty means is the head's line while it is. */}
         <Field
           label="Command argv"
           htmlFor="runtime-command"
-          hint="One argument per line."
-          info="Secret values belong in scoped variables, not argv: the command line is visible to anything on the server that can list processes."
+          info="One argument per line; empty runs the image's own command. Secret values belong in scoped variables, not argv: the command line is visible to anything on the server that can list processes."
           error={errorFor("runtime-command")}
         >
           <Textarea
@@ -464,7 +463,7 @@ function RuntimeForm({
             onChange={(event) => patch({ commandText: event.target.value })}
             readOnly={!canEdit}
             aria-invalid={Boolean(errorFor("runtime-command"))}
-            placeholder="Empty runs the image's own command"
+            placeholder={"node\ndist/server.js\n--port\n3000"}
             className="min-h-24 font-mono sm:text-xs"
           />
         </Field>
@@ -474,7 +473,7 @@ function RuntimeForm({
         id="listen"
         title="Where it listens"
         status={statuses(
-          exposed && <Status key="public" tone="warning" label="Public" />,
+          exposed && <Status key="public" tone="warning" label="Public" className="animate-rise" />,
           settingStatus({
             dirty: draft.changed(["internalPort", "hostPort", "bindAddress", "maxRequestBodyMb"]),
             refused: refusedIn("listen"),
@@ -482,63 +481,74 @@ function RuntimeForm({
         )}
       >
         <ListenPicture domains={configuration.domains} runtime={runtime} projectId={projectId} />
-        <Field
-          label="Application port"
-          htmlFor="runtime-internal-port"
-          error={errorFor("runtime-internal-port")}
-        >
-          <InputGroup>
-            <InputGroupAddon align="inline-start">
-              <InputGroupText className="font-mono">container :</InputGroupText>
-            </InputGroupAddon>
-            <InputGroupInput
-              id="runtime-internal-port"
-              type="number"
-              min={0}
-              max={65535}
-              value={runtime.internalPort ?? 0}
-              readOnly={!canEdit}
-              aria-invalid={Boolean(errorFor("runtime-internal-port"))}
-              className="font-mono"
-              onChange={(event) => patch({ internalPort: clampPort(event.target.value) })}
-            />
-          </InputGroup>
-        </Field>
-        <Field
-          label="Largest upload"
-          htmlFor="runtime-max-body"
-          info={`The proxy answers a bigger request with 413 before the application sees it. Zero keeps the proxy's default: ${DEFAULT_REQUEST_BODY_LIMIT}.`}
-          hint={
-            runtime.maxRequestBodyMb ? undefined : `Proxy default: ${DEFAULT_REQUEST_BODY_LIMIT}`
-          }
-          error={errorFor("runtime-max-body")}
-        >
-          <InputGroup>
-            <InputGroupInput
-              id="runtime-max-body"
-              type="number"
-              min={0}
-              max={MAX_REQUEST_BODY_MB}
-              value={runtime.maxRequestBodyMb ?? 0}
-              readOnly={!canEdit}
-              aria-invalid={Boolean(errorFor("runtime-max-body"))}
-              className="font-mono"
-              onChange={(event) =>
-                patch({
-                  maxRequestBodyMb:
-                    Math.min(MAX_REQUEST_BODY_MB, Math.max(0, Number(event.target.value) || 0)) ||
-                    undefined,
-                })
-              }
-            />
-            <InputGroupAddon align="inline-end">
-              <InputGroupText>MB</InputGroupText>
-            </InputGroupAddon>
-          </InputGroup>
-        </Field>
+        {/* Both are the proxy's way in to the application — where it forwards
+            and how much it lets through — so they read as one row. */}
+        <FieldRow>
+          <Field
+            label="Application port"
+            htmlFor="runtime-internal-port"
+            error={errorFor("runtime-internal-port")}
+          >
+            <InputGroup>
+              <InputGroupAddon align="inline-start">
+                <InputGroupText className="font-mono">container :</InputGroupText>
+              </InputGroupAddon>
+              <InputGroupInput
+                id="runtime-internal-port"
+                type="number"
+                min={0}
+                max={65535}
+                value={runtime.internalPort ?? 0}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-internal-port"))}
+                className="font-mono"
+                onChange={(event) => patch({ internalPort: clampPort(event.target.value) })}
+              />
+            </InputGroup>
+          </Field>
+          <Field
+            label="Largest upload"
+            htmlFor="runtime-max-body"
+            info="The proxy answers a bigger request with 413 before the application sees it. Zero keeps the proxy's default."
+            hint={
+              runtime.maxRequestBodyMb ? undefined : (
+                <span className="block animate-rise">
+                  Proxy default: {DEFAULT_REQUEST_BODY_LIMIT}
+                </span>
+              )
+            }
+            error={errorFor("runtime-max-body")}
+          >
+            <InputGroup>
+              <InputGroupInput
+                id="runtime-max-body"
+                type="number"
+                min={0}
+                max={MAX_REQUEST_BODY_MB}
+                value={runtime.maxRequestBodyMb ?? 0}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-max-body"))}
+                className="font-mono"
+                onChange={(event) =>
+                  patch({
+                    maxRequestBodyMb:
+                      Math.min(MAX_REQUEST_BODY_MB, Math.max(0, Number(event.target.value) || 0)) ||
+                      undefined,
+                  })
+                }
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>MB</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+        </FieldRow>
         <OptionList>
+          {/* The consequence is the hint, so the title is the switch's name
+              rather than a sentence with a clause hung off it. */}
           <OptionRow
-            title="Publish on a fixed host port — blue/green is then unavailable"
+            title="Publish on a fixed host port"
+            hint="One release at a time can hold the port, so blue / green is unavailable."
             tone={exposed ? "warning" : "default"}
             checked={fixedPort}
             onCheckedChange={(on) => {
@@ -597,7 +607,7 @@ function RuntimeForm({
                 </Field>
               </FieldRow>
               {exposed && (
-                <FormNote tone="warning">
+                <FormNote tone="warning" className="animate-rise">
                   Open on every interface — reachable without the proxy. Close it at the{" "}
                   <Link
                     href="/security/firewall"
@@ -613,7 +623,7 @@ function RuntimeForm({
         </OptionList>
         {/* The fields a refusal can name are behind the switch while it is off. */}
         {!fixedPort && (errorFor("runtime-host-port") || errorFor("runtime-bind")) && (
-          <FormNote tone="danger" role="alert">
+          <FormNote tone="danger" role="alert" className="animate-rise">
             {errorFor("runtime-host-port") || errorFor("runtime-bind")}
           </FormNote>
         )}
@@ -624,7 +634,7 @@ function RuntimeForm({
         title="Resources"
         status={statuses(
           memory === 0 && cpus === 0 && pids === 0 && (
-            <Status key="uncapped" tone="warning" label="No limits" />
+            <Status key="uncapped" tone="warning" label="No limits" className="animate-rise" />
           ),
           settingStatus({
             dirty: draft.changed(["memoryMb", "cpus", "pidsLimit"]),
@@ -675,13 +685,19 @@ function RuntimeForm({
         </FieldRow>
       </SettingSection>
 
+      {/* No state line: it said the restart policy back ("restarts unless
+          stopped") over the select that already says it. */}
       <SettingSection
         id="releases"
         title="Releases"
-        state={RESTART_PHRASE[runtime.restartPolicy ?? "unless-stopped"]}
         status={statuses(
           failsNext && (
-            <Status key="fails" tone="warning" label="Will fail on the next deployment" />
+            <Status
+              key="fails"
+              tone="warning"
+              label="Will fail on the next deployment"
+              className="animate-rise"
+            />
           ),
           settingStatus({
             dirty: draft.changed(["strategy", "restartPolicy"]),
@@ -724,7 +740,7 @@ function RuntimeForm({
               a hint inside a faded option, the one sentence on the page the
               operator needed and the hardest to read. */}
           {refusal && (
-            <FormNote tone={failsNext ? "warning" : "default"}>
+            <FormNote tone={failsNext ? "warning" : "default"} className="animate-rise">
               Blue / green is unavailable: {refusal}.
             </FormNote>
           )}
@@ -732,7 +748,7 @@ function RuntimeForm({
         <Field
           label="Restart policy"
           htmlFor="runtime-restart"
-          hint="Deployments stop and start their own releases either way."
+          info="What Docker does when the container exits or the server restarts. Deployments stop and start their own releases either way."
           error={errorFor("runtime-restart")}
         >
           <Select
@@ -760,9 +776,11 @@ function RuntimeForm({
         title="Container access"
         status={statuses(
           runtime.privileged ? (
-            <Status key="privileged" tone="danger" label="Privileged" />
+            <Status key="privileged" tone="danger" label="Privileged" className="animate-rise" />
           ) : (
-            runtime.hostNetwork && <Status key="host" tone="warning" label="Host network" />
+            runtime.hostNetwork && (
+              <Status key="host" tone="warning" label="Host network" className="animate-rise" />
+            )
           ),
           settingStatus({
             dirty: draft.changed(["privileged", "hostNetwork", "capabilitiesText", "devicesText"]),
@@ -795,15 +813,17 @@ function RuntimeForm({
         <Disclosure
           quiet
           summary="Capabilities and devices"
-          facts={`${capabilities.length} ${capabilities.length === 1 ? "capability" : "capabilities"} · ${devices.length} ${devices.length === 1 ? "device" : "devices"}`}
+          facts={`${plural(capabilities.length, "capability", "capabilities")} · ${plural(devices.length, "device")}`}
           open={accessOpen || accessRefused}
           onOpenChange={setAccessOpen}
         >
+          {/* The format is the placeholders', which hold two lines each; the
+              rule the server checks it against is behind ⓘ. */}
           <FieldRow>
             <Field
               label="Linux capabilities"
               htmlFor="runtime-capabilities"
-              hint="One uppercase capability per line."
+              info="Kernel capabilities added to the container, one per line, in capitals."
               error={errorFor("runtime-capabilities")}
             >
               <Textarea
@@ -812,14 +832,14 @@ function RuntimeForm({
                 onChange={(event) => patch({ capabilitiesText: event.target.value })}
                 readOnly={!canEdit}
                 aria-invalid={Boolean(errorFor("runtime-capabilities"))}
-                placeholder="NET_ADMIN"
+                placeholder={"NET_ADMIN\nSYS_TIME"}
                 className="min-h-20 font-mono sm:text-xs"
               />
             </Field>
             <Field
               label="Host devices"
               htmlFor="runtime-devices"
-              hint="One absolute path per line."
+              info="Devices on this server passed into the container, one absolute path per line."
               error={errorFor("runtime-devices")}
             >
               <Textarea
@@ -828,7 +848,7 @@ function RuntimeForm({
                 onChange={(event) => patch({ devicesText: event.target.value })}
                 readOnly={!canEdit}
                 aria-invalid={Boolean(errorFor("runtime-devices"))}
-                placeholder="/dev/dri"
+                placeholder={"/dev/dri\n/dev/net/tun"}
                 className="min-h-20 font-mono sm:text-xs"
               />
             </Field>
@@ -871,20 +891,21 @@ function LimitField({
   onChange: (value: number) => void
 }) {
   const pct = peak !== undefined && value > 0 ? (peak / value) * 100 : undefined
+  // Keyed on which line it is rather than on its text, so "no limit" rises as
+  // the field is cleared and a peak rises when its hour lands, but a figure
+  // that only moves is not re-announced.
+  const hint =
+    peak !== undefined ? (
+      <span key="peak" className="block animate-rise">
+        peak {peakLabel(peak)} in the last hour
+      </span>
+    ) : value === 0 ? (
+      <span key="unlimited" className="block animate-rise">
+        no limit
+      </span>
+    ) : undefined
   return (
-    <Field
-      label={label}
-      htmlFor={id}
-      info={info}
-      hint={
-        peak !== undefined
-          ? `peak ${peakLabel(peak)} in the last hour`
-          : value === 0
-            ? "no limit"
-            : undefined
-      }
-      error={error}
-    >
+    <Field label={label} htmlFor={id} info={info} hint={hint} error={error}>
       <InputGroup>
         <InputGroupInput
           id={id}
@@ -983,21 +1004,28 @@ function ListenPicture({
       }
     />
   )
+  // The second way in rises as the switch opens it — its mark and its words,
+  // never the node: the line to it is measured once as it appears, and a node
+  // still four pixels into its rise would leave the line ending under its mark.
   const anywhereNode = exposed && (
     <WireNode
       key="anywhere"
       nodeRef={anywhereMark}
       align="end"
       mark={
-        <WireMark size="md" tone="warning">
+        <WireMark size="md" tone="warning" className="animate-rise">
           <Globe />
         </WireMark>
       }
-      eyebrow="Anywhere"
-      title="Any address"
-      hint={<span className="text-warning">bypasses the proxy</span>}
+      eyebrow={<span className="inline-block animate-rise">Anywhere</span>}
+      title={<span className="block animate-rise">Any address</span>}
+      hint={<span className="block animate-rise text-warning">bypasses the proxy</span>}
     />
   )
+  // What the server's address is, as a kind rather than a value: its words
+  // rise when the kind changes — a fixed port turned on, the host network —
+  // and not with every digit typed into a port.
+  const hostKind = hostNetwork ? "host" : port === 0 ? "none" : hostPort > 0 ? "fixed" : "leased"
   const hostNode = (
     <WireNode
       nodeRef={hostMark}
@@ -1009,17 +1037,19 @@ function ListenPicture({
       }
       eyebrow="This server"
       title={
-        hostNetwork ? (
-          <span className="font-mono">:{port || "any"}</span>
-        ) : port === 0 ? (
-          // No application port leases no host port (activation_executor.go):
-          // there is nothing for the proxy to forward to.
-          "No port"
-        ) : (
-          <span className="font-mono">
-            {hostPort > 0 ? `${bind}:${hostPort}` : "127.0.0.1:leased"}
-          </span>
-        )
+        <span key={hostKind} className="block animate-rise">
+          {hostNetwork ? (
+            <span className="font-mono">:{port || "any"}</span>
+          ) : port === 0 ? (
+            // No application port leases no host port (activation_executor.go):
+            // there is nothing for the proxy to forward to.
+            "No port"
+          ) : (
+            <span className="font-mono">
+              {hostPort > 0 ? `${bind}:${hostPort}` : "127.0.0.1:leased"}
+            </span>
+          )}
+        </span>
       }
       hint={
         hostNetwork
@@ -1036,11 +1066,11 @@ function ListenPicture({
       align="start"
       mark={
         port > 0 ? (
-          <WireMark size="md" tone="brand">
+          <WireMark key="listens" size="md" tone="brand" className="animate-rise">
             <Box />
           </WireMark>
         ) : (
-          <WirePlaceholder size="md">
+          <WirePlaceholder key="none" size="md" className="animate-rise">
             <Box />
           </WirePlaceholder>
         )
@@ -1168,14 +1198,20 @@ function HealthChecksForm({
         title="Health checks"
         state={
           checks.length > 0 ? (
-            <>
+            // Rises as a switch or a new check changes it.
+            <span key={required} className="inline-block animate-rise">
               <span className="numeric">{required}</span> required
-            </>
+            </span>
           ) : undefined
         }
         status={statuses(
           web && !hasReadiness(checks) && (
-            <Status key="unverified" tone="warning" label="No readiness check" />
+            <Status
+              key="unverified"
+              tone="warning"
+              label="No readiness check"
+              className="animate-rise"
+            />
           ),
           settingStatus({
             dirty: draft.dirty,

@@ -16,7 +16,7 @@ import {
   Warning,
 } from "@/components/icons"
 import { ApiError, del, get, post, put, refusedIndex } from "@/lib/api"
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { copyText } from "@/lib/clipboard"
 import { useAuth } from "@/hooks/use-auth"
@@ -111,6 +111,12 @@ import { sectionHref } from "@/components/database/engine"
  *
  *   Latest backup gate evidence — what the last deployment's gate recorded,
  *   each job a card that opens the job.
+ *
+ * A head says only what its rows cannot: when the links were last read, that
+ * storage is not a backup. What a row already says — which variable carries a
+ * database, how many volumes there are — is not said again over it, and what
+ * changes under the reader's hand (a link's state, a dump added, a policy or
+ * volume added, a job swapped) rises into its new state.
  */
 
 type Dependency = DeploymentEnvironmentConfiguration["dependencies"][number]
@@ -526,21 +532,7 @@ function DatabasesBody({
       ? observedStorage.mounts.find((mount) => mount.source === resourceId)
       : undefined
 
-  // A binding can outlive the variable that made it — removing a variable does
-  // not detach a database from retained releases — so an observed link is not
-  // proof that a variable still holds the address. It only rules out saying
-  // nothing carries it.
-  const boundWithoutReference = databaseDependencies.some(
-    (dependency) =>
-      variablesFor(dependency.resourceId).length === 0 && Boolean(linkFor(dependency.resourceId)),
-  )
-  const allCarriers = [
-    ...new Set(
-      databaseDependencies.flatMap((dependency) =>
-        variablesFor(dependency.resourceId).map((variable) => variable.name),
-      ),
-    ),
-  ]
+  const checkedAt = links.data?.[0]?.checkedAt
   const savedBackups = savedOthers
     .filter((dependency) => dependency.kind === "backup")
     .map((dependency) => jobFor(dependency.resourceId))
@@ -561,17 +553,18 @@ function DatabasesBody({
       <SettingSection
         title="Linked databases"
         state={
-          // Which variable carries each database is its row's own "via"
-          // link; the head says only what the rows cannot — that none does.
-          databaseDependencies.length > 0 && (
-            <p>
-              {allCarriers.length === 0 &&
-                (boundWithoutReference
-                  ? "Bound on the managed network; no variable names one by reference. "
-                  : "No variable carries a linked database. ")}
-              Last checked{" "}
-              {links.data?.[0]?.checkedAt ? relativeTime(links.data[0].checkedAt) : "never"}.
-            </p>
+          // Which variable carries each database is its row's own "via" line,
+          // and one nothing carries says so under its own card, so the head
+          // keeps only how fresh the cards' readings are. It had also said
+          // "no variable carries a linked database" over cards saying it.
+          databaseDependencies.length > 0 &&
+          checkedAt && (
+            <span>
+              Checked{" "}
+              <time dateTime={checkedAt} title={timestamp(checkedAt)}>
+                {relativeTime(checkedAt)}
+              </time>
+            </span>
           )
         }
         actions={canAdmin && <ProjectDatabase target="container" onConnect={connect} />}
@@ -593,7 +586,7 @@ function DatabasesBody({
               {observedLinks.length > 0 && (pictureRow || observedLinks.length === 1) && (
                 <DatabasePicture links={observedLinks} deployment={project.detail.deployment} />
               )}
-              <ChoiceList aria-label="Linked databases" className="animate-rise">
+              <ChoiceList aria-label="Linked databases">
                 {databaseDependencies.map((dependency, index) => {
                   const link = linkFor(dependency.resourceId)
                   const status = LINK_STATUS[link?.status ?? "pending"]
@@ -640,30 +633,39 @@ function DatabasesBody({
                         run: () => removeDatabase(dependency, index),
                       },
                     )
-                  const statusMark = <Status tone={status.tone} label={status.label} />
+                  // Keyed on the state, so a link that connects or drops
+                  // rises into its new word rather than being repainted.
+                  const statusMark = (
+                    <Status
+                      key={link?.status ?? "pending"}
+                      tone={status.tone}
+                      label={status.label}
+                      className="animate-rise"
+                    />
+                  )
                   return (
                     <DatabaseRowGroup key={`${id}-${index}`}>
+                      {/* `index` lets a database that was just linked arrive
+                          as a card rather than appear; the list re-renders
+                          under the links poll without moving. */}
                       <ChoiceRow
+                        index={index}
                         href={sectionHref(id)}
                         verb={name}
                         busy={busy === `ping-${id}`}
                         leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}
                         title={name}
                         description={
-                          link ? (
+                          // The engine is the card's logo and the picture's
+                          // eyebrow; a small-caps PostgreSQL here was it a
+                          // third time. Before the first deployment binds it
+                          // there is no address, and the status says why.
+                          link && (
                             <span className="flex min-w-0 items-center gap-1.5">
-                              {/* The engine's own name, as the picture spells
-                                  it; narrow, the logo beside says it and the
-                                  width goes to the address. */}
-                              {wide && (
-                                <Tag>{DATABASE_ENGINE_LABELS[link.driver] ?? link.driver}</Tag>
-                              )}
                               <span className="shrink-0 font-mono">{link.database}</span>
                               <span aria-hidden>·</span>
                               <span className="min-w-0 truncate font-mono">{link.hostname}</span>
                             </span>
-                          ) : (
-                            "Not observed yet — the first deployment binds it"
                           )
                         }
                         trailing={wide ? statusMark : undefined}
@@ -689,10 +691,14 @@ function DatabasesBody({
                           ) : (
                             <span>no variable names it</span>
                           )}
+                          {/* "Add the dump" under the policy turns this green;
+                              keyed, so the change rises rather than repaints. */}
                           {savedBackups.length > 0 && (
                             <Status
+                              key={dumpedBy?.id ?? "none"}
                               tone={dumpedBy ? "running" : "warning"}
                               label={dumpedBy ? `dumped by ${dumpedBy.name}` : "no native dump"}
+                              className="animate-rise"
                             />
                           )}
                         </div>
@@ -702,6 +708,7 @@ function DatabasesBody({
                           tone="danger"
                           icon={Warning}
                           title={`${link?.name} needs reconnection`}
+                          className="animate-rise"
                         >
                           {link?.detail ||
                             "The original database container or Compose service is not running. The dashboard retries every five seconds."}
@@ -712,6 +719,7 @@ function DatabasesBody({
                           tone="warning"
                           icon={Warning}
                           title="No variable carries this database"
+                          className="animate-rise"
                         >
                           The release attaches a database by reading the variable that holds its
                           address. Add it again from Add database, or write the reference into a
@@ -719,7 +727,7 @@ function DatabasesBody({
                         </Notice>
                       )}
                       {errorFor("database", index) && (
-                        <p role="alert" className="text-hint text-destructive">
+                        <p role="alert" className="animate-rise text-hint text-destructive">
                           {errorFor("database", index)}
                         </p>
                       )}
@@ -777,37 +785,39 @@ function DatabasesBody({
           }
         >
           {backupRows.length === 0 ? (
-            <div className="space-y-3">
+            canAdmin && databaseDependencies.length > 0 ? (
+              /*
+                A database nothing dumps and no job covers: the coverage list
+                on Backups already knows how to write that job, so this sends
+                the operator to it with the database chosen rather than
+                building a second form here. The head has said there is no
+                backup; a sentence over these cards saying it again was the
+                same fact between the head and the cards that act on it.
+              */
+              <ChoiceList aria-label="Databases with no backup">
+                {databaseDependencies.map((dependency, index) => {
+                  const link = linkFor(dependency.resourceId)
+                  const name = link?.name ?? `database ${dependency.resourceId}`
+                  return (
+                    <ChoiceRow
+                      key={`protect-${dependency.resourceId}`}
+                      index={index}
+                      href={`/backups?database=${dependency.resourceId}`}
+                      verb={`Back up ${name}`}
+                      leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}
+                      title={`Back up ${name}`}
+                      description="No job dumps it — opens Backups with the native dump chosen"
+                    />
+                  )
+                })}
+              </ChoiceList>
+            ) : (
               <EmptyNote className="px-0 py-0 text-left">
                 {databaseDependencies.length > 0
                   ? "No backup policy is declared, so a release takes nothing with it."
                   : "No backup dependency is declared."}
               </EmptyNote>
-              {/*
-                A database nothing dumps and no job covers: the coverage list
-                on Backups already knows how to write that job, so this sends
-                the operator to it with the database chosen rather than
-                building a second form here.
-              */}
-              {canAdmin && databaseDependencies.length > 0 && (
-                <ChoiceList aria-label="Databases with no backup">
-                  {databaseDependencies.map((dependency) => {
-                    const link = linkFor(dependency.resourceId)
-                    const name = link?.name ?? `database ${dependency.resourceId}`
-                    return (
-                      <ChoiceRow
-                        key={`protect-${dependency.resourceId}`}
-                        href={`/backups?database=${dependency.resourceId}`}
-                        verb={`Back up ${name}`}
-                        leading={<ProductLogo size="sm" id={link?.driver} fallback={Database} />}
-                        title={`Back up ${name}`}
-                        description="No job dumps it — opens Backups with the native dump chosen"
-                      />
-                    )
-                  })}
-                </ChoiceList>
-              )}
-            </div>
+            )
           ) : (
             <div className="divide-y divide-hairline">
               {backupRows.map(({ dependency, index }) => (
@@ -837,12 +847,10 @@ function DatabasesBody({
           )}
         </SettingSection>
 
+        {/* No state line: it counted the rows right under it, and the title
+            already says the release needs them. */}
         <SettingSection
           title="Volumes this release needs"
-          state={
-            volumeRows.length > 0 &&
-            `${plural(volumeRows.length, "volume")} checked before the release starts`
-          }
           actions={
             canAdmin && (
               <Button
@@ -893,7 +901,7 @@ function DatabasesBody({
           latestRun.data && (
             <Link
               href={`/deploy/${projectId}/runs/${latestRun.data.run.id}`}
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:text-foreground hover:underline"
+              className="inline-flex items-center gap-1 rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
             >
               From deployment #{latestRun.data.run.runNumber}
               <ArrowUpRight aria-hidden className="size-3" />
@@ -901,14 +909,17 @@ function DatabasesBody({
           )
         }
       >
+        {/* Flush, as the other sections' empty lines are: this one alone kept
+            the note's 24px of padding, so the page's last head sat further
+            from its line than every other head from its own. */}
         {!latestRunId ? (
-          <EmptyNote className="px-0 text-left">
+          <EmptyNote className="px-0 py-0 text-left">
             No deployment run has produced backup evidence yet.
           </EmptyNote>
         ) : latestRun.loading ? (
-          <EmptyNote className="px-0 text-left">Reading the latest run…</EmptyNote>
+          <EmptyNote className="px-0 py-0 text-left">Reading the latest run…</EmptyNote>
         ) : backupGateEvidence.length === 0 ? (
-          <EmptyNote className="px-0 text-left">
+          <EmptyNote className="px-0 py-0 text-left">
             The latest run did not execute a backup policy.
           </EmptyNote>
         ) : (
@@ -1011,9 +1022,9 @@ function DatabaseRowGroup({ children }: { children: React.ReactNode }) {
 /**
  * How the application reaches its databases: each database on the left as
  * its engine, the managed network in the middle, the application on the
- * right — framed, because a picture needs an edge to read as one thing (§2).
- * The line is the link's state: a pulse while it is connected, still when it
- * has not been seen lately, red and still when it needs reconnecting, dashed
+ * right, on the page's own ground over the dot grid (`SettingPicture`). The
+ * line is the link's state: a pulse while it is connected, still when it has
+ * not been seen lately, red and still when it needs reconnecting, dashed
  * before the first deployment binds it.
  */
 function DatabasePicture({
@@ -1218,10 +1229,12 @@ function BackupPolicy({
       },
     )
 
+  // The policy rises when Add backup makes it, and the card and the picker
+  // each rise when Change job, or choosing one, swaps between them.
   return (
-    <div className="min-w-0 space-y-4 py-5 first:pt-0 last:pb-0">
+    <div className="min-w-0 animate-rise space-y-4 py-5 first:pt-0 last:pb-0">
       {job && !changing ? (
-        <ChoiceList>
+        <ChoiceList className="animate-rise">
           <JobCard
             job={job}
             products={products}
@@ -1232,7 +1245,7 @@ function BackupPolicy({
           />
         </ChoiceList>
       ) : (
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
+        <div className="grid min-w-0 animate-rise grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
           <Field label="Backup job" htmlFor={`backup-job-${index}`}>
             <Select
               value={dependency.resourceId ?? ""}
@@ -1294,6 +1307,7 @@ function BackupPolicy({
               tone="warning"
               icon={Warning}
               title={`${job.name} takes no native dump of ${name}`}
+              className="animate-rise"
             >
               <p>
                 The release falls back to this database&rsquo;s data directory and refuses if the
@@ -1334,14 +1348,14 @@ function BackupPolicy({
           }
         />
       </OptionList>
+      {/* The field and its unit say how old; what that refuses is behind ⓘ.
+          Only a zero needs a line while typing, because "0 hours" reads as
+          the strictest limit when it is no limit at all. */}
       <Field
         label="Maximum age"
         htmlFor={`backup-age-${index}`}
-        hint={
-          config.maxAgeSeconds
-            ? `Refuses the release when the newest backup is older than ${plural(Math.round(config.maxAgeSeconds / 3600), "hour")}.`
-            : "Zero accepts a backup of any age."
-        }
+        info="The release is refused when the newest backup is older than this."
+        hint={config.maxAgeSeconds ? undefined : "Zero accepts a backup of any age."}
       >
         <InputGroup className="w-full sm:w-44">
           <InputGroupInput
@@ -1367,7 +1381,7 @@ function BackupPolicy({
         </InputGroup>
       </Field>
       {error && (
-        <p role="alert" className="text-hint text-destructive">
+        <p role="alert" className="animate-rise text-hint text-destructive">
           {error}
         </p>
       )}
@@ -1408,7 +1422,7 @@ function VolumeRow({
   const volume = items.find((item) => item.name === value)
   const status = observed ? MOUNT_STATUS[observed.status] : undefined
   return (
-    <li className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0">
+    <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0">
       <MountMark source={value} product={product} className="mb-0.5" />
       <Field label="Volume" htmlFor={`volume-${index}`}>
         <Select
@@ -1456,24 +1470,35 @@ function VolumeRow({
           </IconAction>
         )}
       </span>
-      <div className="col-[2/-1] flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+      {/* The readings take the status's 12px, so the size and the live
+          release's detail sit on one baseline with it rather than a step
+          under it. */}
+      <div className="col-[2/-1] flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 text-xs">
         <OwnershipSelect
           value={dependency.ownership}
           onChange={(ownership) => onChange({ ...dependency, ownership })}
           label={value ? `Ownership of ${value}` : "Ownership"}
           disabled={!canAdmin}
         />
-        {status && <Status tone={status.tone} label={status.label} />}
+        {status && (
+          <Status
+            key={observed?.status}
+            tone={status.tone}
+            label={status.label}
+            className="animate-rise"
+          />
+        )}
         {observed?.target && <Tag mono>{observed.target}</Tag>}
         {volume && volume.size > 0 && (
-          <span className="numeric text-hint text-muted-foreground">{bytes(volume.size)}</span>
+          // Keyed on the volume, so choosing another one brings its size in.
+          <span key={volume.name} className="numeric animate-rise text-muted-foreground">
+            {bytes(volume.size)}
+          </span>
         )}
-        {observed?.detail && (
-          <span className="text-hint text-muted-foreground">{observed.detail}</span>
-        )}
+        {observed?.detail && <span className="text-muted-foreground">{observed.detail}</span>}
       </div>
       {error && (
-        <p role="alert" className="col-span-full pl-11 text-hint text-destructive">
+        <p role="alert" className="col-span-full animate-rise pl-11 text-hint text-destructive">
           {error}
         </p>
       )}

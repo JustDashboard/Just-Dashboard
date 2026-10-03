@@ -43,7 +43,6 @@ import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
   Command,
@@ -356,32 +355,34 @@ export function Schedules({
     },
   ]
 
-  const zones = [...new Set(list.map((schedule) => schedule.timezone))]
-  const enabled = list.filter((schedule) => schedule.enabled).length
+  const paused = list.filter((schedule) => !schedule.enabled).length
 
+  // How many, and how many are paused, as one line. Each card's sentence ends
+  // on its own timezone, and with none yet the four cards below say what a
+  // schedule can do, which is what the head's sentence said.
   return (
     <SettingSection
       id="schedules"
       title="Schedules"
       state={
-        list.length > 0
-          ? `times in ${zones.join(", ")}`
-          : "Deploy, restart, back up or run a command on a clock, in a named timezone."
+        list.length > 0 && (
+          <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            <span className="numeric">{plural(list.length, "schedule")}</span>
+            {paused > 0 && (
+              <span key={paused} className="flex animate-rise items-center gap-x-1.5">
+                <span aria-hidden>·</span>
+                <span className="numeric">{paused} paused</span>
+              </span>
+            )}
+          </span>
+        )
       }
       actions={
-        <>
-          {list.length > 0 && (
-            <span className="mr-1.5 text-hint text-muted-foreground">
-              <span className="numeric text-foreground">{plural(list.length, "schedule")}</span> ·{" "}
-              <span className="numeric">{enabled}</span> on
-            </span>
-          )}
-          {canAdmin && (
-            <Button size="sm" variant="outline" onClick={() => sheet.openAdd()}>
-              <Plus className="size-3.5" /> Add schedule
-            </Button>
-          )}
-        </>
+        canAdmin && (
+          <Button size="sm" variant="outline" onClick={() => sheet.openAdd()}>
+            <Plus className="size-3.5" /> Add schedule
+          </Button>
+        )
       }
     >
       {schedules.loading && !schedules.data ? (
@@ -406,10 +407,12 @@ export function Schedules({
           <EmptyNote className="px-0 py-2 text-left">No schedules yet.</EmptyNote>
         )
       ) : (
-        <ChoiceList aria-label="Schedules" className="animate-rise">
-          {list.map((schedule) => (
+        // Each card lands by itself, so one added from the sheet rises in.
+        <ChoiceList aria-label="Schedules">
+          {list.map((schedule, index) => (
             <ScheduleCard
               key={schedule.id}
+              index={index}
               base={base}
               schedule={schedule}
               jobs={jobs.data}
@@ -580,15 +583,23 @@ function FiringStrip({ firings, timezone }: { firings: Firing[]; timezone: strin
  * One schedule as a card that opens its runs. When it fires next and whether
  * it is on sit beside the name when the card is wide and lead the line under
  * it on a phone — chosen once, so each is in the page once.
+ *
+ * Of the time, the part that is read is how long until it fires, so that is
+ * in the foreground and "next" beside it is not. Each reading rises into its
+ * new state: running, the next firing, paused. The cron expression is not on
+ * the card: it was the sentence above it again in five fields of small mono,
+ * and the runs sheet states it beside the sentence for whoever needs it.
  */
 function ScheduleCard({
   base,
+  index,
   schedule,
   jobs,
   verbs,
   onOpen,
 }: {
   base: string
+  index: number
   schedule: DeploymentSchedule
   jobs?: BackupJob[]
   verbs?: (fired?: number) => Verb[]
@@ -615,29 +626,33 @@ function ScheduleCard({
   const readings = (
     <>
       {running ? (
-        <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
-          running now
-        </TextShimmer>
+        <span key="running" className="flex animate-rise">
+          <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
+            running now
+          </TextShimmer>
+        </span>
       ) : next ? (
         <span
-          className={cn(
-            "numeric text-xs whitespace-nowrap",
-            overdue(next) ? "text-warning" : "text-muted-foreground",
-          )}
+          key={`next-${next}`}
+          className="numeric animate-rise text-xs whitespace-nowrap text-muted-foreground"
           title={`${zonedMoment(next, schedule.timezone).day} ${zonedMoment(next, schedule.timezone).time} ${schedule.timezone}`}
         >
-          {until.startsWith("in ") ? `next ${until}` : until}
+          {until.startsWith("in ") && "next "}
+          <span className={overdue(next) ? "text-warning" : "text-foreground"}>{until}</span>
         </span>
       ) : null}
       <Status
+        key={schedule.enabled ? "enabled" : "paused"}
         tone={schedule.enabled ? "running" : "stopped"}
         label={schedule.enabled ? "Enabled" : "Paused"}
+        className="animate-rise"
       />
     </>
   )
   return (
     <ChoiceRow
       verb={`Open ${schedule.name}`}
+      index={index}
       onSelect={onOpen}
       busy={running}
       className={cn(!schedule.enabled && "opacity-80")}
@@ -665,11 +680,6 @@ function ScheduleCard({
         {!wide && <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>}
         <StepChain schedule={schedule} jobs={jobs} />
         <FiringStrip firings={firings} timezone={schedule.timezone} />
-        {wide && (
-          <Tag mono className="ml-auto">
-            {schedule.expression}
-          </Tag>
-        )}
       </div>
     </ChoiceRow>
   )
@@ -1228,10 +1238,12 @@ export function ScheduleSheet({
               <>
                 {describeCron(expression)}
                 {firstRun && ` · next ${untilLabel(firstRun)}`}
+                {/* Rises in when the server's answer lands: the one moment
+                    the line under the form changes without being typed. */}
                 {test?.answer && (
                   <Check
                     aria-label="checked by the server"
-                    className="ml-1 inline size-3 align-[-1px] text-success"
+                    className="ml-1 inline size-3 animate-rise align-[-1px] text-success"
                   />
                 )}
               </>
@@ -1268,14 +1280,14 @@ export function ScheduleSheet({
               onChange={(fields) => patch({ fields })}
             />
             {test?.refused && (
-              <FormNote tone="danger" role="alert">
+              <FormNote key={test.refused} tone="danger" role="alert" className="animate-rise">
                 {test.refused}
               </FormNote>
             )}
             <Field
               label="Timezone"
               htmlFor="schedule-timezone"
-              hint="The clock the times above are read on."
+              info="The clock the times above are read on."
             >
               <TimezonePicker
                 id="schedule-timezone"
@@ -1311,11 +1323,14 @@ export function ScheduleSheet({
                   </ChoiceGrid>
                 </div>
 
+                {/* What an action needs rises in when its card is picked,
+                    rather than snapping in under the pointer. */}
                 {draft.action === "backup" && (
                   <Field
                     label="Backup job"
                     htmlFor="schedule-backup-job"
                     error={!draft.backupJobId ? "Choose a backup job." : undefined}
+                    className="animate-rise"
                   >
                     <Select
                       value={draft.backupJobId}
@@ -1349,7 +1364,11 @@ export function ScheduleSheet({
 
                 {draft.action === "container_command" && (
                   <>
-                    <Field label="Container" htmlFor="schedule-container-pick">
+                    <Field
+                      label="Container"
+                      htmlFor="schedule-container-pick"
+                      className="animate-rise"
+                    >
                       <Select
                         value={draft.otherContainer ? OTHER_CONTAINER : draft.containerId}
                         onValueChange={(value) =>
@@ -1377,7 +1396,11 @@ export function ScheduleSheet({
                       </Select>
                     </Field>
                     {draft.otherContainer && (
-                      <Field label="Container ID" htmlFor="schedule-container">
+                      <Field
+                        label="Container ID"
+                        htmlFor="schedule-container"
+                        className="animate-rise"
+                      >
                         <Input
                           id="schedule-container"
                           className="font-mono sm:text-xs"
@@ -1388,14 +1411,19 @@ export function ScheduleSheet({
                         />
                       </Field>
                     )}
+                    {/* The placeholder is a command laid out the way it is
+                        wanted, one argument to a line, and the statement
+                        under the field reads it back as it will run. */}
                     <Field
                       label="Command"
                       htmlFor="schedule-argv"
-                      hint="One argument per line: the program, then each argument."
+                      info="One argument per line: the program, then each argument."
+                      className="animate-rise"
                     >
                       <Textarea
                         id="schedule-argv"
                         rows={3}
+                        placeholder={"php\nartisan\ncache:clear"}
                         className="font-mono sm:text-xs"
                         value={draft.argv}
                         onChange={(event) => patch({ argv: event.target.value })}
@@ -1406,16 +1434,21 @@ export function ScheduleSheet({
                       label="Runs"
                       sql={argv.length > 0 ? shellQuote(argv) : ""}
                       placeholder="The command appears here as it will run."
+                      className="animate-rise"
                     />
                   </>
                 )}
 
                 {(draft.action === "backup" || draft.action === "container_command") && (
-                  <FieldRow>
+                  <FieldRow className="animate-rise">
+                    {/* The limit is what is checked while typing; what an
+                        empty field means is the placeholder's 3600, and the
+                        sentence for it is behind the ⓘ. */}
                     <Field
                       label="Timeout"
                       htmlFor="schedule-timeout"
-                      hint="Empty waits up to an hour; at most 12 hours."
+                      hint="At most 12 hours."
+                      info="Empty waits up to an hour."
                     >
                       <InputGroup>
                         <InputGroupInput

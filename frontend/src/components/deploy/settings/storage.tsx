@@ -252,6 +252,8 @@ function StorageForm({
                   </ChoiceRow>
                 )
               })}
+              {/* The row is a link and its title the verb, so where it goes
+                  needs no second clause; why it is here does. */}
               {unprotected.map(({ source, volume }) => (
                 <ChoiceRow
                   key={`protect-${source}`}
@@ -259,7 +261,7 @@ function StorageForm({
                   verb={`Back up ${source}`}
                   leading={<ProductLogo size="sm" fallback={Archive} />}
                   title={`Back up ${source}`}
-                  description="No job copies it — opens Backups with this volume chosen"
+                  description="No backup job copies it"
                 />
               ))}
             </ChoiceList>

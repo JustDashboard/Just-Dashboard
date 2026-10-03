@@ -282,7 +282,7 @@ function SaveBar({
               </span>
             )}
           </p>
-          <p className="mt-0.5 truncate pl-4 text-xs text-muted-foreground">
+          <p className="mt-0.5 pl-4 text-xs text-muted-foreground max-sm:line-clamp-2 sm:truncate">
             {done
               ? appliesLine(shown)
               : invalid

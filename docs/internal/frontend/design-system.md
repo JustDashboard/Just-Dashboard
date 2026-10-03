@@ -78,10 +78,11 @@ taking a frame:
   row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
-  edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
-  one thing: three on the settings pages, each inside its section and drawn through
-  `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
-  Runtime's where it
+  edge (what kept a frame there was, first, a *picture*, on the argument that a picture needs an
+  edge to read as one thing — the settings pages' four were framed until 0.7.1 and now stand
+  unframed over `wire-grid`, as below, each inside its section and drawn through
+  `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`: General's
+  push to a deployment, Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
   open on every interface), Databases' way the application reaches its databases (each engine, the
   managed network, the application) and Automation's what deploys it (the watched branch, each
@@ -108,7 +109,10 @@ taking a frame:
   repository, the watch with when it last looked, the deploys, and the last check's decision on
   one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
   one box on a page of hairlines, and the decision's sentence had sat in the section head's status
-  slot at the page's 16px, louder than the head itself. The preview beside it is the
+  slot at the page's 16px, louder than the head itself. Runtime's, Databases' and Automation's
+  followed with the rest of the settings pages, through `SettingPicture`; Security's exposure path
+  draws through the same component and keeps its frame, as a block among framed readings. The
+  preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because

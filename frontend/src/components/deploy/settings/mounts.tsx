@@ -111,7 +111,8 @@ export function MountRows({
   onChange,
   readOnly,
   idPrefix = "mount",
-  emptyLabel = "No persistent mounts. The runtime is currently stateless.",
+  // The title already says there are none; this says what that costs.
+  emptyLabel = "Whatever the container writes is gone on its next release.",
   rowError,
   product,
 }: {
@@ -133,12 +134,15 @@ export function MountRows({
     <ul aria-label="Mounts" className="@container divide-y divide-hairline">
       {mounts.map((mount, index) => {
         const source = mount.source.trim()
+        const kind = source ? mountKind(source) : undefined
         return (
+          // A row rises as it is added (§11's *arrived*) rather than snapping
+          // in under the button that added it.
           <li
             key={index}
-            className="grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0 @min-[36rem]:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_auto]"
+            className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3 py-4 first:pt-0 @min-[36rem]:grid-cols-[2rem_minmax(0,1fr)_0.875rem_minmax(0,1fr)_auto]"
           >
-            <span className="row-start-1 mb-0.5 flex">
+            <span key={kind ?? "none"} className="row-start-1 mb-0.5 flex animate-rise">
               <MountMark source={source} product={source ? product : undefined} />
             </span>
             <Field label="Source" htmlFor={`${idPrefix}-source-${index}`} className="row-start-1">
@@ -151,9 +155,13 @@ export function MountRows({
                   onChange={(event) => change(index, { source: event.target.value })}
                   className="font-mono"
                 />
-                {source && (
+                {/* Keyed on the kind, so the word rises when "/" turns a
+                    volume into a host path and not on every letter typed. */}
+                {kind && (
                   <InputGroupAddon align="inline-end">
-                    <InputGroupText>{mountKind(source)}</InputGroupText>
+                    <InputGroupText key={kind} className="animate-rise">
+                      {kind}
+                    </InputGroupText>
                   </InputGroupAddon>
                 )}
               </InputGroup>
@@ -210,7 +218,10 @@ export function MountRows({
               className="col-[2/span_2] row-start-3 @min-[36rem]:col-[2/span_4] @min-[36rem]:row-start-2"
             />
             {rowError?.(index) && (
-              <p role="alert" className="col-span-full pl-11 text-hint text-destructive">
+              <p
+                role="alert"
+                className="col-span-full animate-rise pl-11 text-hint text-destructive"
+              >
                 {rowError(index)}
               </p>
             )}

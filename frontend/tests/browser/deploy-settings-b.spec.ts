@@ -326,10 +326,16 @@ test.describe("Databases & backups", () => {
     await expect(orders).toHaveAttribute("href", "/databases/9")
     await expect(page.getByText("db-9.jd.internal", { exact: true })).toBeVisible()
     await expect(page.getByText("Connected", { exact: true })).toBeVisible()
-    // The engine is spelled as the picture above spells it, not as the driver key.
+    // The engine is spelled as the picture spells it, not as the driver key —
+    // once, in the picture: the row's own small-caps tag repeated it.
+    await expect(
+      page
+        .getByRole("list", { name: "How the application reaches its databases" })
+        .getByText("PostgreSQL", { exact: true }),
+    ).toBeVisible()
     await expect(
       page.getByRole("list", { name: "Linked databases" }).getByText("PostgreSQL", { exact: true }),
-    ).toBeVisible()
+    ).toHaveCount(0)
     // How the application reaches it, drawn as a picture once it is bound.
     await expect(
       page.getByRole("list", { name: "How the application reaches its databases" }),
@@ -748,8 +754,9 @@ test.describe("Databases & backups evidence", () => {
     )
     await page.goto("/deploy/7/settings/databases")
 
+    // Said once, on the row it is about, rather than again in the head.
     await expect(page.getByText("No variable carries this database")).toBeVisible()
-    await expect(page.getByText("No variable carries a linked database.")).toBeVisible()
+    await expect(page.getByText("No variable carries a linked database.")).toHaveCount(0)
   })
 
   test("a database bound by a literal address is not reported as uncarried", async ({ page }) => {
@@ -763,9 +770,7 @@ test.describe("Databases & backups evidence", () => {
     await page.goto("/deploy/7/settings/databases")
 
     await expect(page.getByText("No variable carries this database")).toHaveCount(0)
-    await expect(
-      page.getByText("Bound on the managed network; no variable names one by reference."),
-    ).toBeVisible()
+    await expect(page.getByText(/no variable names it/)).toBeVisible()
 
     await page.getByRole("button", { name: "Actions for orders-db" }).click()
     await page.getByRole("menuitem", { name: "Remove database" }).click()
@@ -844,9 +849,9 @@ test.describe("Automation", () => {
     await page.goto("/deploy/7/settings/automation")
 
     await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeVisible()
-    // With none yet, the section offers the senders themselves, and the head
-    // says what already deploys it.
-    await expect(page.getByText(/already deploy it — a webhook adds another sender/)).toBeVisible()
+    // With none yet, the section offers the senders themselves; the picture
+    // above already draws what deploys it, so the head does not say it again.
+    await expect(page.getByText(/already deploy it — a webhook adds another sender/)).toHaveCount(0)
     // The picture's empty mark and the section's button are one act, named alike.
     await page.getByRole("button", { name: "Add webhook", exact: true }).first().click()
     const sheet = page.getByRole("dialog", { name: "Add webhook" })

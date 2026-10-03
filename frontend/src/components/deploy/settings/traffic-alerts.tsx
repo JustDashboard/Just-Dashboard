@@ -20,6 +20,7 @@ import { plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { NotificationChannel, TrafficAlert, TrafficAlertKind } from "@/lib/types"
 import { ALERT_KINDS, latency } from "@/lib/requests"
+import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
@@ -247,44 +248,45 @@ export function TrafficAlerts({
     },
   ]
 
+  // One line: how many rules, how many are firing — only once one is, in red,
+  // rising in as it starts — who they tell, and where those channels are
+  // kept. The counts sat beside Add alert at 11px and the channels on a line
+  // of their own above the link, so the head was three readings in two
+  // places. With no rule, the line under it says that nobody is told.
   return (
     <SettingSection
       id="alerts"
       title="Traffic alerts"
       state={
-        <span className="block space-y-1">
-          <span className="block">
-            {rules.length === 0 ? (
-              "Nobody is told yet."
-            ) : (
+        <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          {rules.length > 0 && (
+            <>
+              <span className="numeric">{plural(rules.length, "rule")}</span>
+              {firing > 0 && (
+                <span key={firing} className="flex animate-rise items-center gap-x-1.5">
+                  <span aria-hidden>·</span>
+                  <span className="numeric font-medium text-destructive">{firing} firing</span>
+                </span>
+              )}
+              <span aria-hidden>·</span>
               <ChannelNames
                 ids={everyChannel ? [] : reached.map((channel) => channel.id)}
                 channels={channelList}
               />
-            )}
-          </span>
-          <Button variant="link" size="xs" asChild className="h-auto px-0 text-hint">
+              <span aria-hidden>·</span>
+            </>
+          )}
+          <Button variant="link" size="xs" asChild className="h-auto px-0 text-xs">
             <Link href="/deploy/notifications">Notification channels</Link>
           </Button>
         </span>
       }
       actions={
-        <>
-          {rules.length > 0 && (
-            <span className="mr-1.5 text-hint text-muted-foreground">
-              <span className="numeric text-foreground">{plural(rules.length, "rule")}</span>
-              {" · "}
-              <span className={cn("numeric", firing > 0 && "font-medium text-destructive")}>
-                {firing} firing
-              </span>
-            </span>
-          )}
-          {canAdmin && (
-            <Button size="sm" variant="outline" onClick={() => setEditing({})}>
-              <Plus className="size-3.5" /> Add alert
-            </Button>
-          )}
-        </>
+        canAdmin && (
+          <Button size="sm" variant="outline" onClick={() => setEditing({})}>
+            <Plus className="size-3.5" /> Add alert
+          </Button>
+        )
       }
     >
       {alerts.loading && !alerts.data ? (
@@ -292,11 +294,11 @@ export function TrafficAlerts({
       ) : alerts.error && !alerts.data ? (
         <ErrorState error={alerts.error} onRetry={alerts.refresh} />
       ) : rules.length === 0 ? (
+        // The consequence, once. How an alert works is the sheet's to say,
+        // and the three cards below are what one can watch for.
         <div className="space-y-3">
           <EmptyNote className="max-w-prose px-0 py-0 text-left">
-            Nobody is told when this deployment fails, slows down or goes quiet. An alert watches
-            the request record every minute and tells your notification channels once when it
-            crosses the line, and once when it comes back.
+            Nobody is told when this deployment fails, slows down or goes quiet.
           </EmptyNote>
           {canAdmin && (
             <ChoiceGrid columns={3} className="lg:grid-cols-3">
@@ -307,16 +309,11 @@ export function TrafficAlerts({
           )}
         </div>
       ) : (
-        <ul aria-label="Alert rules" className="min-w-0 animate-rise divide-y divide-hairline">
-          {rules.map((rule) => (
-            <AlertRow
-              key={rule.id}
-              rule={rule}
-              channels={shared ? undefined : channelList}
-              verbs={canAdmin ? verbsFor(rule) : undefined}
-            />
-          ))}
-        </ul>
+        <AlertRules
+          rules={rules}
+          channels={shared ? undefined : channelList}
+          verbsFor={canAdmin ? verbsFor : undefined}
+        />
       )}
 
       <SidePanel
@@ -342,6 +339,36 @@ export function TrafficAlerts({
       </SidePanel>
       {dialog}
     </SettingSection>
+  )
+}
+
+/**
+ * The rules, as rows you read. The list rises once as it first appears; after
+ * that only a rule that was not in it a moment ago does — one just added from
+ * the sheet — and a poll that merely re-sorts them moves nothing.
+ */
+function AlertRules({
+  rules,
+  channels,
+  verbsFor,
+}: {
+  rules: TrafficAlert[]
+  channels?: NotificationChannel[]
+  verbsFor?: (rule: TrafficAlert) => Verb[]
+}) {
+  const arrived = useArrivals(rules.map((rule) => String(rule.id)))
+  return (
+    <ul aria-label="Alert rules" className="min-w-0 animate-rise divide-y divide-hairline">
+      {rules.map((rule) => (
+        <AlertRow
+          key={rule.id}
+          rule={rule}
+          channels={channels}
+          verbs={verbsFor?.(rule)}
+          className={cn(arrived.has(String(rule.id)) && "animate-rise")}
+        />
+      ))}
+    </ul>
   )
 }
 
@@ -372,35 +399,50 @@ function StarterCard({ kind, onClick }: { kind: TrafficAlertKind; onClick: () =>
 /**
  * One rule, read as its sentence, whole — it wraps rather than truncates,
  * because on a phone the sentence *is* the rule. Under it, the last reading
- * against the rule's line on a meter (a count for a silence rule, which has
- * no line), the channels it tells and when it was last checked. The state
- * sits at the right of the sentence when there is room, and leads the second
- * line on a phone.
+ * against the rule's line on a meter, the channels it tells and when it was
+ * last checked. The state sits at the right of the sentence when there is
+ * room, and leads the second line on a phone; it rises into a new state —
+ * firing, quiet again, paused — rather than being repainted.
+ *
+ * The sentence is set in the foreground, not muted after the kind: it holds
+ * the line the rule is drawn at, which is the one thing on the row that was
+ * set by hand. The reading is said once. While the rule runs, its state says
+ * it ("Firing · 4.2% failing"), so the meter carries no figure of its own —
+ * it printed "4.2% against 1%" a line under "4.2% failing", with the 1% in
+ * the sentence above both. A paused rule's state is only "Paused", so there
+ * the last reading is spelled out beside the meter, or counted for a silence
+ * rule, which has no line to draw.
  */
 function AlertRow({
   rule,
   channels,
   verbs,
+  className,
 }: {
   rule: TrafficAlert
   /** The channels to name this rule's among; absent when the head names them for every rule. */
   channels?: NotificationChannel[]
   verbs?: Verb[]
+  className?: string
 }) {
   const wide = useMediaQuery("(min-width: 640px)")
   const words = ALERT_KINDS[rule.kind]
   const tone = standing(rule)
   const status = !rule.enabled ? (
-    <Status tone="stopped" label="Paused" />
+    <Status key="paused" tone="stopped" label="Paused" className="animate-rise" />
   ) : rule.state === "firing" ? (
     <Status
+      key="firing"
       tone="danger"
       label={`Firing · ${words.read(rule.observed)}${rule.stateSince ? ` since ${relativeTime(rule.stateSince)}` : ""}`}
+      className="animate-rise"
     />
   ) : (
     <Status
+      key={rule.checkedAt ? "quiet" : "waiting"}
       tone="running"
       label={rule.checkedAt ? `Quiet · ${words.read(rule.observed)}` : "Waiting for a reading"}
+      className="animate-rise"
     />
   )
   const scale = Math.max(rule.threshold * 2, rule.observed * 1.1, 1)
@@ -409,12 +451,13 @@ function AlertRow({
       className={cn(
         "grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0",
         !rule.enabled && "opacity-80",
+        className,
       )}
     >
       <KindTile kind={rule.kind} className={cn(!rule.enabled && "opacity-60")} />
       <p className="min-w-0 pt-1.5 text-body leading-snug text-pretty">
         <span className="font-medium">{words.label}</span>{" "}
-        <span className="text-muted-foreground">
+        <span className="text-foreground/85">
           {words.describe(rule.threshold, rule.windowMinutes)}
         </span>
       </p>
@@ -433,35 +476,33 @@ function AlertRow({
       </span>
       <div className="col-span-2 col-start-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-hint text-muted-foreground">
         {!wide && status}
-        {rule.kind === "silence" ? (
-          <span className="numeric whitespace-nowrap">
-            {rule.checkedAt
-              ? `${plural(rule.observed, "request")} in ${rule.windowMinutes} min`
-              : "no reading yet"}
-          </span>
-        ) : (
-          rule.checkedAt && (
-            <span className="inline-flex items-center gap-2.5">
-              <Meter
-                value={(rule.observed / scale) * 100}
-                mark={(rule.threshold / scale) * 100}
-                tone={tone}
-                label={`${words.read(rule.observed)} against a ${limitWords(rule)} line`}
-                className="w-28 shrink-0 sm:w-40"
-              />
-              <span
-                className={cn(
-                  "numeric whitespace-nowrap",
-                  tone === "danger" && "text-destructive",
-                  tone === "warning" && "text-warning",
-                )}
-              >
-                {rule.kind === "latency" ? latency(rule.observed) : `${rule.observed.toFixed(1)}%`}{" "}
-                <span className="text-muted-foreground">against {limitWords(rule)}</span>
+        {rule.kind === "silence"
+          ? !rule.enabled && (
+              <span className="numeric whitespace-nowrap">
+                {rule.checkedAt
+                  ? `${plural(rule.observed, "request")} in ${rule.windowMinutes} min`
+                  : "no reading yet"}
               </span>
-            </span>
-          )
-        )}
+            )
+          : rule.checkedAt && (
+              <span className="inline-flex items-center gap-2.5">
+                <Meter
+                  value={(rule.observed / scale) * 100}
+                  mark={(rule.threshold / scale) * 100}
+                  tone={tone}
+                  label={`${words.read(rule.observed)} against a ${limitWords(rule)} line`}
+                  className="w-28 shrink-0 sm:w-40"
+                />
+                {!rule.enabled && (
+                  <span className="numeric whitespace-nowrap">
+                    {rule.kind === "latency"
+                      ? latency(rule.observed)
+                      : `${rule.observed.toFixed(1)}%`}{" "}
+                    <span className="text-muted-foreground">against {limitWords(rule)}</span>
+                  </span>
+                )}
+              </span>
+            )}
         {channels && <ChannelNames ids={rule.channels} channels={channels} />}
         {rule.checkedAt && (
           <span className="whitespace-nowrap">checked {relativeTime(rule.checkedAt)}</span>
@@ -584,13 +625,19 @@ export function AlertForm({
         </div>
       </Field>
 
+      {/* A hint here is what is read while typing: the limit spoken back in
+          its unit, and a silence window's floor. What the figure measures is
+          the chosen card's own line above, and the window's meaning is behind
+          its ⓘ. */}
       <FieldRow>
         {kind !== "silence" && (
           <Field
             label={kind === "latency" ? "p95 above" : "Failing share above"}
             htmlFor="alert-limit"
-            hint={kind === "latency" ? `= ${latency(limit)}` : "Of requests answered 5xx."}
+            hint={kind === "latency" && `= ${latency(limit)}`}
             error={error}
+            // Back from No traffic, which has no line, the limit rises in.
+            className="animate-rise"
           >
             <InputGroup>
               <InputGroupInput
@@ -610,9 +657,10 @@ export function AlertForm({
         <Field
           label="Over"
           htmlFor="alert-window"
-          hint={
+          hint={kind === "silence" && "At least 5 minutes."}
+          info={
             kind === "silence"
-              ? "Minutes with no requests at all; at least 5."
+              ? "Minutes with no requests at all."
               : "The window each reading is taken over."
           }
           error={kind === "silence" ? error : undefined}
@@ -666,11 +714,13 @@ export function AlertForm({
                 />
               ))}
             </OptionList>
-            <FormNote>
-              {selected.length === 0
-                ? "None chosen: every enabled channel is told."
-                : `${selected.length} chosen.`}
-            </FormNote>
+            {/* Said only when it changes who is told; "2 chosen" counted the
+                switches right above it. It rises in as the last one goes off. */}
+            {selected.length === 0 && (
+              <FormNote className="animate-rise">
+                None chosen: every enabled channel is told.
+              </FormNote>
+            )}
           </div>
         )}
       </Field>

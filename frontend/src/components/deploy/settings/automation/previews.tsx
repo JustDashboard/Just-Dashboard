@@ -313,21 +313,19 @@ export function Previews({
   ]
   const offer = canAdmin && triggers.data !== undefined && previewTriggers.length === 0
 
+  // One line: the address previews are given while a webhook creates them,
+  // why there are none while none does. That each revision is approved first
+  // is the "Awaiting review" group itself, and the option that turns them on.
   return (
     <SettingSection
       id="previews"
       title="Preview environments"
       state={
-        previewTriggers.length > 0 ? (
-          <>
-            {patterns.length > 0 && (
-              <span className="block font-mono text-foreground/85">{patterns.join(", ")}</span>
-            )}
-            each revision is approved before it builds
-          </>
-        ) : (
-          "Off — no webhook creates them"
-        )
+        previewTriggers.length === 0
+          ? "Off — no webhook creates them"
+          : patterns.length > 0 && (
+              <span className="font-mono text-foreground/85">{patterns.join(", ")}</span>
+            )
       }
       actions={
         offer &&
@@ -348,9 +346,10 @@ export function Previews({
             count={pending.filter((a) => a.state === "pending").length}
           />
           <ChoiceList aria-label="Revisions awaiting review">
-            {pending.map((approval) => (
+            {pending.map((approval, index) => (
               <ApprovalCard
                 key={approval.id}
+                index={index}
                 approval={approval}
                 trigger={triggerOf(approval.triggerId)}
                 canReview={canAdmin}
@@ -367,10 +366,12 @@ export function Previews({
       ) : previews.error && !previews.data ? (
         <ErrorState error={previews.error} onRetry={previews.refresh} />
       ) : list.length === 0 ? (
+        // The head says whether a webhook creates them; this says when one
+        // appears, which is the question an empty list leaves.
         <EmptyState
           icon={SourcePull}
           title="No preview environments"
-          description="A webhook with pull-request previews creates one per pull request, after you approve its revision."
+          description="One per pull request, after you approve its revision."
           action={
             offer && (
               <Button size="sm" variant="outline" onClick={onTurnOn}>
@@ -383,10 +384,11 @@ export function Previews({
       ) : (
         <section className="space-y-2">
           {pending.length > 0 && <GroupRule label="Environments" count={list.length} />}
-          <ChoiceList aria-label="Preview environments" className="animate-rise">
-            {list.map((preview) => (
+          <ChoiceList aria-label="Preview environments">
+            {list.map((preview, index) => (
               <PreviewCard
                 key={preview.id}
+                index={index}
                 projectId={projectId}
                 preview={preview}
                 approval={approvalOf(preview)}
@@ -449,24 +451,27 @@ export function Previews({
  */
 function ApprovalCard({
   approval,
+  index,
   trigger,
   canReview,
   onReview,
   onReject,
 }: {
   approval: DeploymentPreviewApproval
+  index: number
   trigger?: DeploymentTrigger
   canReview: boolean
   onReview: () => void
   onReject: () => void
 }) {
   const rejected = approval.state === "rejected"
+  // Keyed on the decision, so a rejection rises into place over the request.
   const status = rejected ? (
-    <Status tone="stopped" label="Rejected" />
+    <Status key="rejected" tone="stopped" label="Rejected" className="animate-rise" />
   ) : approval.state === "pending" ? (
-    <Status tone="warning" label="Awaiting approval" />
+    <Status key="pending" tone="warning" label="Awaiting approval" className="animate-rise" />
   ) : (
-    <Status tone="warning" label="Setup incomplete" />
+    <Status key="setup" tone="warning" label="Setup incomplete" className="animate-rise" />
   )
   // Wide, the state sits beside the name; on a phone it leads the line of
   // facts under it, which the fork and the commit need the width of.
@@ -474,6 +479,7 @@ function ApprovalCard({
   return (
     <ChoiceRow
       verb={`Review revision · PR ${approval.providerRef}`}
+      index={index}
       onSelect={onReview}
       disabled={rejected || !canReview}
       className={cn(rejected && "opacity-80")}
@@ -661,6 +667,7 @@ function usePreviewRuns(projectId: number, environmentId: number | undefined, in
  * name when the card is wide, and lead the line under it on a phone.
  */
 function PreviewCard({
+  index,
   projectId,
   preview,
   approval,
@@ -669,6 +676,7 @@ function PreviewCard({
   verbs,
   onOpen,
 }: {
+  index: number
   projectId: number
   preview: DeploymentPreview
   approval?: DeploymentPreviewApproval
@@ -688,22 +696,36 @@ function PreviewCard({
   // request wrote one; a webhook preview knows only what its approval said.
   const author = preview.author ?? approval?.author
   const revision = preview.revision ?? approval?.revision
+  // Each rises into its new state: a run starting, the run it ended as, the
+  // preview opening, closing or being stopped for isolation.
   const readings = (
     <>
       {active ? (
         // Said as the webhook and schedule cards say theirs, with the stage.
-        <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
-          {`deploying · ${(active.currentStep?.label ?? "building").toLowerCase()}`}
-        </TextShimmer>
+        <span key={`active-${active.id}`} className="flex animate-rise">
+          <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
+            {`deploying · ${(active.currentStep?.label ?? "building").toLowerCase()}`}
+          </TextShimmer>
+        </span>
       ) : (
-        recent[0] && <RunStatus state={recent[0].state} />
+        recent[0] && (
+          <span key={`${recent[0].id}-${recent[0].state}`} className="flex animate-rise">
+            <RunStatus state={recent[0].state} />
+          </span>
+        )
       )}
-      <Status tone={isolation.tone} label={isolation.label} />
+      <Status
+        key={isolation.label}
+        tone={isolation.tone}
+        label={isolation.label}
+        className="animate-rise"
+      />
     </>
   )
   return (
     <ChoiceRow
       verb={`Open ${preview.environmentSlug}`}
+      index={index}
       onSelect={onOpen}
       busy={deploying || Boolean(active)}
       className={cn(!open && "opacity-80")}
