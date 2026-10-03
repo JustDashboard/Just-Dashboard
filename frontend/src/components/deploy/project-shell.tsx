@@ -3,14 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import {
-  ArrowLeft,
-  ArrowRight,
-  External,
-  FolderClosed,
-  LockClosed,
-  LockOpen,
-} from "@/components/icons"
+import { ArrowRight, External, FolderClosed, LockClosed, LockOpen } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type {
@@ -28,7 +21,6 @@ import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
-import { HostIdentity } from "@/components/metrics/host-identity"
 import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/product-logo"
 import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
@@ -63,16 +55,17 @@ import {
  * with a mark on each settings page that holds a change not yet live; what it
  * draws is the project context over whichever of those pages you picked.
  *
- * Nothing here is framed. The back link and command sit in the compact context
- * row. The identity line below is the one the host Overview,
- * Metrics and the account pages open on (`HostIdentity`), so a project is
- * described the way the machine is: the project drawn as itself on the tile —
- * its site's icon, else the product it is — then where it answers, with the
- * certificate's state in the lock's colour, then what it is made of as facts
- * in two rows: the source, branch and runtime, then the live release's age and
- * whether it deploys itself. Commit and actor details belong to the deployment
- * history, where the run gives them context. Its state and what needs attention
- * stay on separate lines at the far end, including at desktop widths.
+ * Nothing here is framed. The whole context is one compact header at the top
+ * of the page, because it repeats above all fourteen pages and every row it
+ * takes is a row of logs or settings pushed under the fold: the project drawn
+ * as itself on the tile — its site's icon, else the product it is — then where
+ * it answers, with the certificate's state in the lock's colour, its state and
+ * what needs attention on that same line, and the command at the far end. One
+ * line of facts runs under the address: the source, branch and runtime, the
+ * live release's age and whether it deploys itself. The way back is the rail's
+ * own, the address is the way to the site, and commit and actor details belong
+ * to the deployment history, where the run gives them context. On a phone the
+ * state and the facts take the full width under the tile, address and command.
  *
  * The verbs are the projects grid's (`useProjectVerbs`): the command is the
  * first of View, Start, Deploy and Redeploy, and every other verb goes in the
@@ -115,114 +108,88 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const domain = project.operations?.domains.domains.find((route) => route.hostname === hostOf(url))
 
   return (
-    <Page>
-      <PageContext
-        eyebrow={
-          <Link
-            href="/deploy"
-            className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-          >
-            <ArrowLeft className="size-3" /> Deployments
-          </Link>
-        }
-        title={record.name}
-        actions={
-          <>
-            {url && (
-              <Button variant="outline" size="sm" asChild>
-                <a href={url} target="_blank" rel="noopener noreferrer">
-                  <External className="size-3.5" /> Visit
-                </a>
-              </Button>
-            )}
-            {command &&
-              (command.key === "view" && activeRun ? (
-                <Button size="sm" asChild>
-                  <Link href={`${base}/runs/${activeRun.id}`}>
-                    {command.label} <ArrowRight className="size-3.5" />
-                  </Link>
-                </Button>
-              ) : (
-                <Button
-                  size="sm"
-                  disabled={command.disabled}
-                  pending={project.starting === command.key}
-                  onClick={command.run}
-                >
-                  <command.icon className="size-3.5" />
-                  {project.starting === command.key ? command.progressive : command.label}
-                </Button>
-              ))}
-            {menu.length > 0 && <VerbMenu verbs={menu} label="Deployment actions" />}
-          </>
-        }
-      />
+    <Page className="pt-4 md:pt-5">
+      <PageContext title={record.name} />
 
-      <section aria-label={`About ${record.name}`}>
-        <HostIdentity
-          logo={<ProjectMark deployment={deployment} product={project.product} size="lg" />}
-          title={<Address deployment={deployment} url={url} domain={domain} />}
-          facts={
-            <span className="flex min-w-0 flex-1 flex-col gap-2">
-              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-                <SourceFact
-                  deployment={deployment}
-                  record={record}
-                  configuration={project.configuration}
-                  blueprint={project.blueprint}
-                />
-                <BranchFact deployment={deployment} record={record} />
-                <RuntimeFact deployment={deployment} configuration={project.configuration} />
-              </span>
-              <span className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5">
-                {project.liveRelease && (
-                  <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
-                    <span className="numeric shrink-0 text-foreground">
-                      Release #{project.liveRelease.number}
-                    </span>
-                    <ReleaseLine
-                      run={project.liveRun}
-                      activatedAt={project.liveRelease.activatedAt}
-                    />
-                  </span>
-                )}
-                <AutoDeployFact
-                  reading={project.gitWatch && autoDeployReading(project.gitWatch)}
-                  href={`${base}/settings/general#automatic-deployment`}
-                />
-              </span>
-            </span>
-          }
-          aside={
-            <div className="grid min-w-0 justify-items-start gap-1 sm:justify-items-end sm:text-right">
-              <ProjectStatus
-                summary={deployment}
-                runtime={runtime}
-                archived={project.archived}
-                live={Boolean(activeRun)}
-                className="text-body"
-              />
-              {activeRun ? (
-                <Link
-                  href={`${base}/runs/${activeRun.id}`}
-                  className="flex items-center gap-1.5 rounded-sm text-xs focus-ring"
-                >
-                  <TextShimmer>
-                    {activeRun.currentStep?.label ?? RUN_LABELS[activeRun.state]}
-                  </TextShimmer>
-                  <span className="numeric text-muted-foreground">#{activeRun.runNumber}</span>
+      <section
+        aria-label={`About ${record.name}`}
+        data-slot="project-header"
+        className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5"
+      >
+        <ProjectMark deployment={deployment} product={project.product} className="sm:row-span-2" />
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents">
+          {/* A flex box, so the address sits on the row's centre rather than
+              on the baseline of a line box taller than its type. */}
+          <p className="flex max-w-full min-w-0 text-title font-semibold tracking-tight">
+            <Address deployment={deployment} url={url} domain={domain} />
+          </p>
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:order-2 max-sm:col-span-3">
+            <ProjectStatus
+              summary={deployment}
+              runtime={runtime}
+              archived={project.archived}
+              live={Boolean(activeRun)}
+            />
+            {activeRun ? (
+              <Link
+                href={`${base}/runs/${activeRun.id}`}
+                className="flex items-center gap-1.5 rounded-sm text-xs focus-ring"
+              >
+                <TextShimmer>
+                  {activeRun.currentStep?.label ?? RUN_LABELS[activeRun.state]}
+                </TextShimmer>
+                <span className="numeric text-muted-foreground">#{activeRun.runNumber}</span>
+              </Link>
+            ) : (
+              !project.archived && (
+                <Assessment diagnosis={project.operations?.diagnosis} href={`${base}#attention`} />
+              )
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 max-sm:order-1 sm:row-span-2">
+          {command &&
+            (command.key === "view" && activeRun ? (
+              <Button size="sm" asChild>
+                <Link href={`${base}/runs/${activeRun.id}`}>
+                  {command.label} <ArrowRight className="size-3.5" />
                 </Link>
-              ) : (
-                !project.archived && (
-                  <Assessment
-                    diagnosis={project.operations?.diagnosis}
-                    href={`${base}#attention`}
-                  />
-                )
-              )}
-            </div>
-          }
-        />
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                disabled={command.disabled}
+                pending={project.starting === command.key}
+                onClick={command.run}
+              >
+                <command.icon className="size-3.5" />
+                {project.starting === command.key ? command.progressive : command.label}
+              </Button>
+            ))}
+          {menu.length > 0 && <VerbMenu verbs={menu} label="Deployment actions" />}
+        </div>
+        <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-3 sm:col-span-1 sm:col-start-2">
+          <SourceFact
+            deployment={deployment}
+            record={record}
+            configuration={project.configuration}
+            blueprint={project.blueprint}
+          />
+          <BranchFact deployment={deployment} record={record} />
+          <RuntimeFact deployment={deployment} configuration={project.configuration} />
+          {project.liveRelease && (
+            <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
+              <span className="numeric shrink-0 text-foreground">
+                Release #{project.liveRelease.number}
+              </span>
+              <ReleaseLine run={project.liveRun} activatedAt={project.liveRelease.activatedAt} />
+            </span>
+          )}
+          <AutoDeployFact
+            reading={project.gitWatch && autoDeployReading(project.gitWatch)}
+            href={`${base}/settings/general#automatic-deployment`}
+          />
+        </div>
       </section>
 
       {children}
@@ -319,9 +286,9 @@ function Address({
 }) {
   if (!url) {
     if (!deployment.liveReleaseId)
-      return <span className="text-muted-foreground">Not deployed yet</span>
+      return <span className="truncate text-muted-foreground">Not deployed yet</span>
     return (
-      <>
+      <span className="truncate">
         Private service
         {deployment.internalPort && (
           <span className="font-mono text-body font-normal text-muted-foreground">
@@ -329,7 +296,7 @@ function Address({
             :{deployment.internalPort}
           </span>
         )}
-      </>
+      </span>
     )
   }
   const https = url.startsWith("https:")
@@ -339,7 +306,7 @@ function Address({
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-sm align-bottom focus-ring hover:underline"
+      className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:underline"
     >
       <span title={domain ? CERTIFICATE_LABEL[domain.certificate] : undefined} className="flex">
         <Lock
@@ -363,7 +330,8 @@ function Address({
       <span className="sr-only">
         {domain ? `, ${CERTIFICATE_LABEL[domain.certificate]}` : https ? "" : ", not encrypted"}
       </span>
-      <External aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+      {/* On a phone the command shares this row, and the address needs the width. */}
+      <External aria-hidden className="size-3.5 shrink-0 text-muted-foreground max-sm:hidden" />
     </a>
   )
 }
@@ -466,8 +434,11 @@ function BranchFact({
 
 /**
  * What a repository runs as: the framework detection found on the language's
- * own mark, a Dockerfile as Docker, a static site on nginx. An image, a stack
- * and a template already said what they are in the source fact.
+ * own mark, else the language and its version, a Dockerfile as Docker, a static
+ * site on nginx. The mark already says the language under a framework, and the
+ * version and package manager are read where they are set, in Settings → Build.
+ * An image, a stack and a template already said what they are in the source
+ * fact.
  */
 function RuntimeFact({
   deployment,
@@ -498,11 +469,11 @@ function RuntimeFact({
                 : recipe === "dotnet"
                   ? build?.dotnetVersion
                   : undefined
-    const language = [RECIPE_SHORT[recipe], version].filter(Boolean).join(" ")
     return (
       <Fact mark={mark}>
-        {framework ? `${frameworkLabel(framework)} · ${language}` : language}
-        {build?.packageManager && build.packageManager !== "npm" && ` · ${build.packageManager}`}
+        {framework
+          ? frameworkLabel(framework)
+          : [RECIPE_SHORT[recipe], version].filter(Boolean).join(" ")}
       </Fact>
     )
   }
@@ -512,15 +483,16 @@ function RuntimeFact({
 }
 
 /**
- * The live release's age stays visible; who shipped it is read with that
- * deployment's full provenance in the history.
+ * The live release's age stays visible, and says so only when it got there by
+ * a rollback; who shipped it is read with that deployment's full provenance in
+ * the history.
  */
 function ReleaseLine({ run, activatedAt }: { run?: DeploymentEngineRun; activatedAt?: string }) {
   if (!run)
-    return activatedAt ? <span className="truncate">live {relativeTime(activatedAt)}</span> : null
+    return activatedAt ? <span className="truncate">{relativeTime(activatedAt)}</span> : null
   return (
     <span className="truncate">
-      {run.operation === "rollback" ? "rolled back" : "deployed"}{" "}
+      {run.operation === "rollback" && "rolled back "}
       {relativeTime(run.endedAt ?? run.requestedAt)}
     </span>
   )
@@ -549,7 +521,7 @@ function AutoDeployFact({
 const WORST: Verdict[] = ["critical", "warning", "notice"]
 
 /**
- * The diagnosis under the state: how many findings need attention, as a way
+ * The diagnosis beside the state: how many findings need attention, as a way
  * to them on the Overview, or that every owner was read and nothing was
  * wrong. A diagnosis that could not read every owner says so rather than
  * claiming a pass.

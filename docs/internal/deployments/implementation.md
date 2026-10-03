@@ -1534,14 +1534,18 @@ The project pages under `/deploy/[id]` share one read of the project through a l
 read once, the Git watch every fifteen seconds for a normalized Git source — one poll the header and
 the Overview share — and a template's definition), so moving between a project's pages never
 refetches the project, and a configuration save on any page is re-read there when the desired
-revision moves. The shell draws the name, then the identity line the host Overview opens on
-(`HostIdentity`): the project drawn as itself, its address with the certificate's state in the
-lock's colour, with source, tracked branch and runtime on one facts row, then the live release's
-age and automatic-deployment status on a second. Exact commits, authors and trigger details remain
-in the deployment history and run pages; the Overview's wiring also names the live commit. Its
-state — deploying, ready, failed, unhealthy, stopped, not deployed, derived from the summary and
-the runtime observation — stays on its own line above the diagnosis verdict or stage in flight at
-every width. Its actions are Visit, the one command (`projectCommand`: View deployment while a run
+revision moves. The shell draws the project identity line as one compact header at the top of
+every project page, so the page's own content starts directly under it: the project drawn as
+itself, its address with the certificate's state in the lock's colour, then its state — deploying,
+ready, failed, unhealthy, stopped, not deployed, derived from the summary and the runtime
+observation — and the diagnosis verdict or stage in flight on that same line, with the command at
+the far end. One line of facts runs under the address: source, tracked branch, runtime (the
+framework, else the language and version), the live release's age and automatic-deployment status.
+Exact commits, authors and trigger details remain in the deployment history and run pages; the
+Overview's wiring also names the live commit. The header has no back link and no Visit button —
+the rail's panel leads back to Deployments and the address is the link to the site. Below `sm` the
+state and the facts each take the full width under the mark, address and command. Its actions are
+the one command (`projectCommand`: View deployment while a run
 is active, else Start, Deploy, Deploy changes or Redeploy) and a verbs menu grouped Running,
 Building and Project — Restart and Stop; Redeploy live release, Retry, Rebuild without cache and
 Deploy a specific version; Duplicate project and Open in Docker — with Archive and Delete
