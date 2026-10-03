@@ -4,18 +4,20 @@ import { useMemo } from "react"
 import Link from "next/link"
 import {
   Archive,
+  ArrowRight,
   Box,
   ChartActivity,
-  CloudUpload,
   Database,
+  GitHubMark,
   Globe,
+  Plus,
   Puzzle,
   SettingsGear,
   Shield,
 } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { unusableCount } from "@/lib/db-connections"
-import { bytes, clock, duration, percent, rate, relativeTime } from "@/lib/format"
+import { bytes, clock, duration, percent, plural, rate, relativeTime } from "@/lib/format"
 import type {
   BackupJob,
   BackupRun,
@@ -24,11 +26,14 @@ import type {
   DbConnection,
   DeploymentFleet,
   Exposure,
+  GitRepo,
   MetricEvent,
   MountStats,
+  TrafficPulse,
   UpdateReport,
 } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import { useAuth } from "@/hooks/use-auth"
+import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
@@ -39,16 +44,24 @@ import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
+import { EmptyState } from "@/components/state"
+import { useConfirm } from "@/components/confirm-dialog"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
+import { TopProcesses } from "@/components/metrics/top-processes"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { engineFor } from "@/components/database/engine"
 import { eventColor } from "@/components/metrics/metric-chart"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { ProjectCard } from "@/components/deploy/fleet-card"
+import { sortFleet } from "@/components/deploy/fleet"
+import { serverAttention, verdictWith } from "@/components/overview/attention"
 import {
   ProductGlyphs,
+  ProductLogos,
   containerProducts,
   cpuProduct,
+  hostProduct,
   platformProduct,
   virtualizationProduct,
 } from "@/components/product-logo"
@@ -59,13 +72,43 @@ import { Skeleton } from "@/components/ui/skeleton"
 // A fixed hour, not the metrics page's draggable window: the landing page is a
 // glance, and there is exactly one range control in the product — on /metrics.
 const HOUR: MetricsWindow = { key: "1h" }
+// Activity reads a day rather than the tiles' hour: a nightly backup and the
+// deploy before lunch are what "recent" means to somebody opening the page,
+// and an hour was "Nothing in the last hour" on most visits.
+const DAY: MetricsWindow = { key: "24h" }
+
+/** Two rows of three: the projects that need the reader most, then the way to the rest. */
+const SHOWN_PROJECTS = 6
 
 export default function OverviewPage() {
   const { host, snapshot, error } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
-  const events = useMetricEvents(HOUR)
-  const { health: recordedHealth, loading: healthLoading, error: healthError } = useHealth()
-  const health = recordedHealth
+  const events = useMetricEvents(DAY)
+  const { health, loading: healthLoading, error: healthError } = useHealth()
+  const reads = useModuleReads()
+  const { confirm, dialog } = useConfirm()
+
+  const attention = useMemo(
+    () =>
+      serverAttention({
+        deployments: reads.fleet.data?.deployments,
+        pulses: reads.traffic.data,
+        backups: reads.backups.data,
+        certificates: reads.certificates.data,
+        packages: reads.packages.data,
+        databases: reads.databases.data,
+        exposure: reads.exposure.data,
+      }),
+    [
+      reads.fleet.data,
+      reads.traffic.data,
+      reads.backups.data,
+      reads.certificates.data,
+      reads.packages.data,
+      reads.databases.data,
+      reads.exposure.data,
+    ],
+  )
 
   const trends = useMemo(() => {
     const points = recorded.history?.points ?? []
@@ -175,7 +218,7 @@ export default function OverviewPage() {
             {health && (
               <HealthVerdict
                 partial={!!health.silences?.length}
-                status={health.status}
+                status={verdictWith(health.status, attention)}
                 className="text-body"
               />
             )}
@@ -257,43 +300,193 @@ export default function OverviewPage() {
         />
       </StatGrid>
 
-      {/* The findings and what happened, side by side: the first two things
-          to read after the numbers, and neither needs the full width. */}
-      <div className="grid items-start gap-8 lg:grid-cols-3 [&>*]:min-w-0">
-        <HealthPanel
-          plain
-          className="lg:col-span-2"
-          health={health}
-          error={healthError}
-          loading={healthLoading}
-          emptyLabel={
-            health?.recorded
-              ? "Capacity, memory, CPU steal, pressure, sockets, services and containers all within limits"
-              : "Every check passed on the current reading"
-          }
-        />
+      {/* What needs the reader, from the machine and from every module on
+          it, as one list: the recorder's findings and a failed deploy, a
+          quiet backup or a certificate past its renewal, worst first. It
+          has the width to itself because it is the first thing to read
+          after the numbers, and a short list beside a tall one left half
+          the row empty. */}
+      <HealthPanel
+        plain
+        health={health}
+        also={attention}
+        error={healthError}
+        loading={healthLoading}
+        emptyLabel={
+          health?.recorded
+            ? "Capacity, memory, CPU steal, pressure, sockets, services, containers, deployments, backups and certificates all within limits"
+            : "Every check passed on the current reading"
+        }
+      />
+
+      <DeploymentsSection fleet={reads.fleet} traffic={reads.traffic.data} confirm={confirm} />
+
+      {/* Who is spending the machine and what changed on it — the two
+          questions the tiles raise — side by side, as /metrics pairs its
+          process list with its notable moments. */}
+      <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+        <TopProcesses />
         <ActivityPanel events={events} />
       </div>
 
       {/* The same run of readings as the tiles at the top, one per module,
           because a module's headline figure *is* a reading. Each says what
           it counts with the products themselves — the images running, the
-          engines connected — after its words. */}
+          engines connected — after its words. Deployments has its own
+          section above, so its tile went to Git. */}
       <Section title="Services">
         <StatGrid columns={4}>
-          <DockerCard />
-          <DatabasesCard />
-          <ProxyCard />
-          <SecurityCard />
-          <PackagesCard platform={host.platform} />
-          <DeploymentsCard />
-          <BackupsCard />
+          <DockerCard read={reads.docker} />
+          <DatabasesCard read={reads.databases} />
+          <ProxyCard read={reads.certificates} />
+          <SecurityCard read={reads.exposure} />
+          <PackagesCard read={reads.packages} platform={host.platform} />
+          <BackupsCard read={reads.backups} />
+          <GitCard read={reads.git} />
           <UpdatesCard />
         </StatGrid>
       </Section>
+      {dialog}
     </Page>
   )
 }
+
+/**
+ * Every module's own read, once, at the page: the Services tiles draw them
+ * and the Health list reads what is wrong out of them, so a failed backup is
+ * one request whether it is said as a figure or as a finding.
+ */
+function useModuleReads() {
+  return {
+    docker: usePoll<Container[]>(
+      (signal) => get<Container[]>("/docker/containers/", undefined, signal),
+      60_000,
+    ),
+    databases: usePoll<DbConnection[]>(
+      (signal) => get<DbConnection[]>("/databases/", undefined, signal),
+      60_000,
+    ),
+    certificates: usePoll<Certificate[]>(
+      (signal) => get<Certificate[]>("/certificates/", undefined, signal),
+      300_000,
+    ),
+    exposure: usePoll<Exposure>((signal) => get<Exposure>("/exposure", undefined, signal), 60_000),
+    packages: usePoll<UpdateReport>(
+      (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
+      300_000,
+    ),
+    // The fleet's own cadence is five seconds; a glance can take ten, which
+    // still moves a run's release path while the reader watches.
+    fleet: usePoll<DeploymentFleet>(
+      (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
+      10_000,
+    ),
+    traffic: usePoll<Record<string, TrafficPulse>>(
+      (signal) => get<Record<string, TrafficPulse>>("/deploy/traffic", undefined, signal),
+      60_000,
+    ),
+    backups: usePoll<BackupJob[]>(
+      (signal) => get<BackupJob[]>("/backups/", undefined, signal),
+      120_000,
+    ),
+    git: usePoll<{ available: boolean; repos: GitRepo[] }>(
+      (signal) => get<{ available: boolean; repos: GitRepo[] }>("/git/", undefined, signal),
+      120_000,
+    ),
+  }
+}
+
+/**
+ * The projects on this server, as the fleet draws them: each the product it
+ * is, its address, its traffic and its last runs, with a light round the
+ * edge while one deploys. Worst first, so a failing project is on the first
+ * row, and capped at two rows — the fleet is one press away for the rest.
+ */
+function DeploymentsSection({
+  fleet,
+  traffic,
+  confirm,
+}: {
+  fleet: PollState<DeploymentFleet>
+  traffic: Record<string, TrafficPulse> | undefined
+  confirm: ReturnType<typeof useConfirm>["confirm"]
+}) {
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const deployments = useMemo(() => sortFleet(fleet.data?.deployments ?? []), [fleet.data])
+  const shown = deployments.slice(0, SHOWN_PROJECTS)
+
+  return (
+    <Section
+      title="Deployments"
+      actions={
+        <div className="flex items-center gap-3">
+          {deployments.length > shown.length && (
+            <span className="numeric text-hint text-muted-foreground">
+              Showing {shown.length} of {deployments.length}
+            </span>
+          )}
+          {admin && deployments.length > 0 && (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/deploy/new">
+                <Plus className="size-3.5" />
+                New project
+              </Link>
+            </Button>
+          )}
+          <Link
+            href="/deploy"
+            className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+          >
+            All projects <ArrowRight className="size-3" />
+          </Link>
+        </div>
+      }
+    >
+      {fleet.loading && !fleet.data ? (
+        <ul aria-hidden className={PROJECT_GRID}>
+          {[0, 1, 2].map((index) => (
+            <li key={index}>
+              <Skeleton className="h-48 rounded-xl" />
+            </li>
+          ))}
+        </ul>
+      ) : !fleet.data ? (
+        <p className="text-body text-muted-foreground">The deployments could not be read.</p>
+      ) : deployments.length === 0 ? (
+        <EmptyState
+          mark={<ProductLogos ids={["github", "docker", "docker-compose"]} size="md" />}
+          title="Deploy your first project"
+          description="A repository, an image, a template or a compose file — everything you deploy is watched from here."
+          action={
+            admin && (
+              <Button size="sm" asChild>
+                <Link href="/deploy/new">New project</Link>
+              </Button>
+            )
+          }
+        />
+      ) : (
+        <ul aria-label="Deployment projects" className={PROJECT_GRID}>
+          {shown.map((deployment, index) => (
+            <ProjectCard
+              key={deployment.id}
+              index={index}
+              deployment={deployment}
+              pulse={traffic?.[String(deployment.id)]}
+              work={fleet.data?.activeWork.find((item) => item.run.id === deployment.activeRun?.id)}
+              confirm={confirm}
+              refresh={fleet.refresh}
+            />
+          ))}
+        </ul>
+      )}
+    </Section>
+  )
+}
+
+/** The fleet's own grid, one column short of it at the widest: two rows of three. */
+const PROJECT_GRID = "grid gap-3 lg:grid-cols-2 xl:grid-cols-3"
 
 /**
  * Deploys, backups, restarts and the actions that change things — the list
@@ -304,15 +497,24 @@ function ActivityPanel({ events }: { events: MetricEvent[] }) {
 
   return (
     <Panel plain>
-      <PanelHeader title="Recent activity" />
+      <PanelHeader
+        title="Recent activity"
+        actions={
+          // A control's height, so this hairline meets the one under Top
+          // processes' toggle group across the gap rather than a step above it.
+          <span className="flex h-8 items-center text-hint text-muted-foreground">
+            Last 24 hours
+          </span>
+        }
+      />
       <PanelBody
         flush
         className={
-          newestFirst.length === 0 ? "py-4" : "-mx-3 max-h-[17rem] overflow-y-auto px-3 py-1"
+          newestFirst.length === 0 ? "py-4" : "-mx-3 max-h-[23.5rem] overflow-y-auto px-3 py-1"
         }
       >
         {newestFirst.length === 0 ? (
-          <p className="text-body text-muted-foreground">Nothing in the last hour.</p>
+          <p className="text-body text-muted-foreground">Nothing in the last 24 hours.</p>
         ) : (
           <RowList className="animate-rise">
             {newestFirst.map((event, i) => (
@@ -436,11 +638,8 @@ function ServiceTile({
   )
 }
 
-function DockerCard() {
-  const { data, error, loading } = usePoll<Container[]>(
-    (signal) => get<Container[]>("/docker/containers/", undefined, signal),
-    60_000,
-  )
+function DockerCard({ read }: { read: PollState<Container[]> }) {
+  const { data, error, loading } = read
   const running = data?.filter((c) => c.state === "running")
   const products = containerProducts(running ?? [])
   return (
@@ -457,11 +656,8 @@ function DockerCard() {
   )
 }
 
-function DatabasesCard() {
-  const { data, error, loading } = usePoll<DbConnection[]>(
-    (signal) => get<DbConnection[]>("/databases/", undefined, signal),
-    60_000,
-  )
+function DatabasesCard({ read }: { read: PollState<DbConnection[]> }) {
+  const { data, error, loading } = read
   // Drawn as what each one is, in the registry's words: the glyph of its
   // flavour where the server has said one, of its driver otherwise.
   const engines = [...new Set((data ?? []).flatMap((conn) => engineFor(conn).logo ?? []))]
@@ -486,11 +682,8 @@ function DatabasesCard() {
   )
 }
 
-function ProxyCard() {
-  const { data, error, loading } = usePoll<Certificate[]>(
-    (signal) => get<Certificate[]>("/certificates/", undefined, signal),
-    300_000,
-  )
+function ProxyCard({ read }: { read: PollState<Certificate[]> }) {
+  const { data, error, loading } = read
   const soonest = useMemo(() => {
     if (!data || data.length === 0) return undefined
     return [...data].sort((a, b) => a.daysLeft - b.daysLeft)[0]
@@ -517,11 +710,8 @@ function ProxyCard() {
   )
 }
 
-function SecurityCard() {
-  const { data, error, loading } = usePoll<Exposure>(
-    (signal) => get<Exposure>("/exposure", undefined, signal),
-    60_000,
-  )
+function SecurityCard({ read }: { read: PollState<Exposure> }) {
+  const { data, error, loading } = read
   const grade = data ? EXPOSURE_GRADE[data.grade] : undefined
   return (
     <ServiceTile
@@ -548,11 +738,8 @@ function SecurityCard() {
   )
 }
 
-function PackagesCard({ platform }: { platform: string }) {
-  const { data, error, loading } = usePoll<UpdateReport>(
-    (signal) => get<UpdateReport>("/packages/updates", undefined, signal),
-    300_000,
-  )
+function PackagesCard({ read, platform }: { read: PollState<UpdateReport>; platform: string }) {
+  const { data, error, loading } = read
   const pending = data?.packages.length ?? 0
   return (
     <ServiceTile
@@ -583,58 +770,8 @@ function PackagesCard({ platform }: { platform: string }) {
   )
 }
 
-/** A deployment's last run, read as a verdict rather than as a state machine. */
-function runFailed(state: string | undefined): boolean {
-  return state === "failed" || state === "failed_activation" || state === "rolled_back"
-}
-
-function DeploymentsCard() {
-  const { data, error, loading } = usePoll<DeploymentFleet>(
-    (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
-    60_000,
-  )
-  const deployments = data?.deployments ?? []
-  const active = data?.activeWork.length ?? 0
-  const failed = deployments.filter((d) => runFailed(d.lastRun?.state)).length
-  const unhealthy = deployments.filter((d) => d.health === "unhealthy").length
-  const count = `${deployments.length} deployment${deployments.length === 1 ? "" : "s"}`
-  return (
-    <ServiceTile
-      icon={CloudUpload}
-      title="Deployments"
-      href="/deploy"
-      loading={loading && !data}
-      unavailable={moduleGone(error)}
-      value={
-        !data
-          ? undefined
-          : deployments.length === 0
-            ? "None yet"
-            : active > 0
-              ? `${active} deploying`
-              : failed > 0
-                ? `${failed} failed`
-                : unhealthy > 0
-                  ? `${unhealthy} unhealthy`
-                  : `${deployments.length} live`
-      }
-      tone={active === 0 && (failed > 0 || unhealthy > 0) ? "danger" : "default"}
-      hint={
-        !data || deployments.length === 0
-          ? undefined
-          : active > 0 && failed > 0
-            ? `${count} · ${failed} failed`
-            : count
-      }
-    />
-  )
-}
-
-function BackupsCard() {
-  const { data, error, loading } = usePoll<BackupJob[]>(
-    (signal) => get<BackupJob[]>("/backups/", undefined, signal),
-    120_000,
-  )
+function BackupsCard({ read }: { read: PollState<BackupJob[]> }) {
+  const { data, error, loading } = read
   const latest = useMemo(() => {
     if (!data) return undefined
     return data
@@ -681,6 +818,47 @@ function BackupsCard() {
           : data && data.length > 0
             ? `${data.length} job${data.length === 1 ? "" : "s"} scheduled`
             : undefined
+      }
+    />
+  )
+}
+
+/**
+ * The working copies on this server, drawn as the forges they push to, and
+ * what is waiting in them: uncommitted work first, because it is the one
+ * thing here a deploy or a restore cannot bring back.
+ */
+function GitCard({ read }: { read: PollState<{ available: boolean; repos: GitRepo[] }> }) {
+  const { data, error, loading } = read
+  const repos = data?.repos ?? []
+  const dirty = repos.filter((repo) => repo.dirty).length
+  const behind = repos.filter((repo) => repo.behind > 0).length
+  const conflicted = repos.filter((repo) => repo.conflicts > 0).length
+  const forges = [...new Set(repos.flatMap((repo) => hostProduct(repo.remote) ?? []))]
+  return (
+    <ServiceTile
+      icon={GitHubMark}
+      title="Git"
+      href="/git"
+      products={forges}
+      loading={loading && !data}
+      unavailable={moduleGone(error) || data?.available === false}
+      value={
+        !data
+          ? undefined
+          : repos.length === 0
+            ? "None yet"
+            : conflicted > 0
+              ? `${conflicted} in conflict`
+              : plural(repos.length, "repository", "repositories")
+      }
+      tone={conflicted > 0 ? "warning" : "default"}
+      hint={
+        !data || repos.length === 0
+          ? undefined
+          : [dirty > 0 ? `${dirty} uncommitted` : "All committed", behind > 0 && `${behind} behind`]
+              .filter(Boolean)
+              .join(" · ")
       }
     />
   )

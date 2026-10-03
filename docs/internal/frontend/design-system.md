@@ -42,7 +42,9 @@ block *was* framed read as a page of containers, and the frames stopped separati
 there was nothing unframed left to separate from. The ground went darker (`--background` 0.145,
 `--card` 0.168) so the one step still reads, and the default flipped: **a block on a page is plain
 unless it can say why it needs an edge.** The host Overview ended 0.6.7 with no framed block at all
-above its Services row and none in it — see §15 for what that took. Three kinds of thing stopped
+above its Services row and none in it — see §15 for what that took. The edges it has gained since,
+in 0.7.1, are the Deployments section's project cards, and they are the lit edge of things you take
+(§16) rather than frames: each card opens its project. Three kinds of thing stopped
 taking a frame:
 
 - a run of figures — `StatGrid` draws hairlines *between* tiles and nothing around them (`framed`
@@ -1157,8 +1159,8 @@ kind's glyph on the same tile.
 reports itself to be — its distribution (`platformProduct`, from `/etc/os-release`'s id), its processor
 (`cpuProduct`, from the model string: AMD, Intel, Arm), its hypervisor (`virtualizationProduct`: QEMU for
 a KVM guest) — and a running process as the product it is (`processProduct`: `postgres` is Postgres,
-`dockerd` is Docker, `node` is Node.js) in the Metrics page's top processes and in every row of the
-live process table. The other three Processes pages read their rows the same way: a systemd unit as
+`dockerd` is Docker, `node` is Node.js) in the top processes the Overview and the Metrics page share
+and in every row of the live process table. The other three Processes pages read their rows the same way: a systemd unit as
 the product it runs (`unitProduct` — `postgresql@16-main.service` is Postgres, `pm2-deploy.service`
 PM2, `certbot.timer` Let's Encrypt's renewal, by the unit's name with its suffix and instance
 dropped, then by its first word), a PM2 application as its interpreter (`pm2Product`: Node unless
@@ -1168,7 +1170,7 @@ script of the operator's own keeps the clock). Each returns nothing for a name i
 and the tile keeps a glyph: a Tux on an unrecognised distribution, or a guessed logo on `bash` or
 `apt-daily.timer`, would be the drawing lying about the row. A reading that counts products carries
 them after its words (`ProductGlyphs`): the Overview's Docker tile draws the images its running
-containers are, Databases the engines its connections speak, the live table's Processes tile what
+containers are, Databases the engines its connections speak, Git the forges its checkouts push to, the live table's Processes tile what
 the machine is running, and the Services page's Active and Failed tiles what is up and what is not.
 The Live page opens on the machine's identity line — the same one, with the table's cadence and cap
 at its right end where Metrics keeps its range — and PM2 on PM2's own: its mark, the account, the
@@ -1739,9 +1741,24 @@ machine's identity line first (`HostIdentity` — its distribution drawn as itse
 hypervisor as bare marks among its facts, the verdict and Metrics link at the right end); a five-tile
 `StatGrid` of readings, the four that move carrying their last hour in
 the tile's `trend` slot where a meter would be and the one that fills keeping its meter; a plain
-`Health` list beside a plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink`
-tiles, one per module, each naming what it counts with the products themselves. No frame anywhere on
-the page. Everything that arrived, rose.
+`Health` list across the full width; the Deployments section; a plain top-processes list beside a
+plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
+each naming what it counts with the products themselves. No frame anywhere on the page — the project
+cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
+
+The 0.7.1 pass asked of each block whether it answered the question a reader opens the page with,
+and three did not. The Health list said only what the recorder measures, so a failed deploy, a
+backup gone quiet or a certificate past its renewal was a red figure on a tile two screens down with
+no word of what it was; it now carries what every module found (`components/overview/attention.ts`,
+the fleet's own Attention findings among them), worst first, each opening the page that fixes it,
+and the verdict on the list and the identity line is the worst of all of them. With that it took the
+row's full width — beside the activity list it was one finding over half a row of nothing. The
+projects, which are why most visits happen, were one figure on one tile; they are the fleet's own
+cards now, worst first and two rows at most, and the tile went to Git. And nothing on the page said
+*who* was spending the CPU the first tile reported, so the Metrics page's top processes sit beside
+the activity list, which reads the last day rather than the last hour: an hour was "Nothing in the
+last hour" on most visits. The two headers there share a height so their hairlines meet across the
+gap (§15 pass 9).
 
 Reading pages now keep their page name in a screen-reader-only `h1` through `PageContext`. The rail
 provides the visible location. A linked parent remains as a compact way back, while pages without

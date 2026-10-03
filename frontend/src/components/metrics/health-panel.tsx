@@ -12,6 +12,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Status } from "@/components/status-dot"
 import { FindingList } from "@/components/finding-list"
+import { type LinkedFinding, verdictWith, worstFirst } from "@/components/overview/attention"
 
 /**
  * What the numbers mean.
@@ -30,9 +31,16 @@ export function HealthPanel({
   className,
   onChanged,
   error,
+  also = [],
 }: {
   health: Health | undefined
   loading: boolean
+  /**
+   * What the other modules found, read into the same list rather than a
+   * second one beside it: two lists answering "what needs me" is one too
+   * many. Each opens the page that owns it.
+   */
+  also?: LinkedFinding[]
   /** Drawn as a titled list on the page rather than in a frame — see `Panel`. */
   plain?: boolean
   /** What "nothing found" covers, when the caller has folded more checks in. */
@@ -59,38 +67,36 @@ export function HealthPanel({
     )
   }
   if (!health) return error ? <HealthReadError error={error} onRetry={refresh} /> : null
+  const status = verdictWith(health.status, also)
 
   return (
     <Panel plain={plain} className={className}>
       <PanelHeader
         title="Health"
-        actions={
-          <Status
-            verdict={health.status}
-            label={
-              health.status === "ok" && health.silences?.length
-                ? "Partial assessment"
-                : verdictLabel(health.status)
-            }
-          />
-        }
+        actions={<HealthVerdict status={status} partial={!!health.silences?.length} />}
       />
       <PanelBody>
         {error && <HealthReadError error={error} onRetry={refresh} />}
         <FindingList
-          findings={health.findings.map((finding) => {
-            const target = healthInvestigation(finding.id)
-            return {
+          findings={worstFirst([
+            ...health.findings.map((finding) => {
+              const target = healthInvestigation(finding.id)
+              return {
+                ...finding,
+                action: target
+                  ? {
+                      label: target.kind === "link" ? target.label : "Investigate",
+                      onClick: () =>
+                        target.kind === "link" ? router.push(target.href) : setSelected(finding),
+                    }
+                  : undefined,
+              }
+            }),
+            ...also.map(({ action, ...finding }) => ({
               ...finding,
-              action: target
-                ? {
-                    label: target.kind === "link" ? target.label : "Investigate",
-                    onClick: () =>
-                      target.kind === "link" ? router.push(target.href) : setSelected(finding),
-                  }
-                : undefined,
-            }
-          })}
+              action: action && { label: action.label, onClick: () => router.push(action.href) },
+            })),
+          ])}
           emptyLabel={
             health.silences?.length
               ? "No findings in the completed checks"
