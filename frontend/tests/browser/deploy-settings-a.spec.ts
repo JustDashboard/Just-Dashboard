@@ -164,8 +164,8 @@ test.describe("Build settings", () => {
       "aria-pressed",
       "true",
     )
-    // The live release's own Build step: how long it took.
-    await expect(page.getByText("1m 12s", { exact: true })).toBeVisible()
+    // No row of figures over the form: the sections' heads say what it is.
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
 
     await buildCard.getByLabel("Build command").fill("bun run build")
     await buildCard.getByLabel("Start command").fill("bun run start")
@@ -277,10 +277,12 @@ test.describe("Runtime settings", () => {
     await page.goto("/deploy/7/settings/runtime")
     const runtimeCard = page.getByRole("form", { name: "Runtime" })
     // The fixture's writable /data mount is what the executor refuses
-    // blue/green over: the reading and the Releases head say so before the
+    // blue/green over: the strategy and the Releases head say so before the
     // next deployment finds out, and the choice cannot be taken again.
     await expect(
-      page.getByText("/data is writable — two releases cannot share it", { exact: true }),
+      runtimeCard.getByText(
+        "Blue / green is unavailable: /data is writable — two releases cannot share it.",
+      ),
     ).toBeVisible()
     await expect(runtimeCard.getByText("Will fail on the next deployment")).toBeVisible()
     await expect(runtimeCard.getByRole("button", { name: "Release blue / green" })).toHaveCount(0)

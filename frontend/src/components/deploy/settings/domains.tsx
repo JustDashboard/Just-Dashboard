@@ -28,16 +28,13 @@ import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
   DeploymentHostnameSuggestion,
-  DeploymentOperations,
 } from "@/lib/types"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyState, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
-import type { Tone } from "@/components/tone"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
@@ -67,9 +64,7 @@ import { useProject } from "@/components/deploy/project-context"
  * It was a framed card holding a framed box per hostname, each a bag of
  * labelled controls whose labels sat on two baselines, with the certificate
  * as two grey status lines and the port, bind address and two links in a
- * footnote under the card. Now the page opens on four readings — how many
- * names, how many the proxy actually routes here, the certificate that runs
- * out first, and where the proxy sends them — and each hostname is one row:
+ * footnote under the card. Now each hostname is one row:
  * the certificate's issuer drawn as itself (Let's Encrypt, from the issuer the
  * live release's certificate names), the name as a link to the site, its
  * route and certificate as readings with the days left, then the two
@@ -96,147 +91,10 @@ export function DomainsSettings({
   environmentId: number
 }) {
   const state = useConfiguration(projectId, environmentId)
-  const project = useProject()
   return (
-    <SettingsPage
-      state={state}
-      readings={(configuration) => (
-        <DomainReadings configuration={configuration} operations={project.operations} />
-      )}
-    >
+    <SettingsPage state={state}>
       {(configuration) => <DomainsForm configuration={configuration} save={state.save} />}
     </SettingsPage>
-  )
-}
-
-/**
- * The four figures: the names, how many the proxy routes here, the
- * certificate that runs out first, and where the proxy sends the traffic. The
- * last is `warning` when the container is also published on every interface,
- * the Runtime tab's rule, because then the proxy is not the only way in — and
- * the notice under the figures says what to check.
- */
-function DomainReadings({
-  configuration,
-  operations,
-}: {
-  configuration: DeploymentEnvironmentConfiguration
-  operations?: DeploymentOperations
-}) {
-  const domains = configuration.domains
-  const runtime = configuration.runtime
-  const observed = operations?.domains.status === "available" ? operations.domains : undefined
-  const routeFor = (hostname: string) =>
-    observed?.domains.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
-  const routes = domains.map((domain) => ({ domain, route: routeFor(domain.hostname) }))
-
-  const https = domains.filter((domain) => domain.https).length
-  const guarded = domains.filter((domain) => domain.protection).length
-  const served = routes.filter(({ route }) => route?.route === "served").length
-  const wrong = routes.find(
-    ({ route }) => route?.route === "foreign" || route?.route === "conflict",
-  )
-  const unrouted = routes.find(({ route }) => route?.route !== "served")
-  const routedTone: Tone = wrong
-    ? "danger"
-    : unrouted
-      ? "warning"
-      : domains.length > 0
-        ? "success"
-        : "default"
-
-  const certificates = routes
-    .map(({ route }) => route)
-    .filter(
-      (route): route is DeploymentDomainRoute =>
-        Boolean(route) &&
-        (route!.certificate === "valid" ||
-          route!.certificate === "expiring" ||
-          route!.certificate === "expired"),
-    )
-  const expired = certificates.find((route) => route.certificate === "expired")
-  const soonest = certificates
-    .filter((route) => typeof route.certificateDaysLeft === "number")
-    .sort((a, b) => (a.certificateDaysLeft ?? 0) - (b.certificateDaysLeft ?? 0))[0]
-  const expiry = expired ?? soonest
-  const renewed = certificates.find((route) => route.certificateRenewedBy === "caddy")
-  const issuer = issuerProduct(expiry?.certificateIssuer)
-
-  const publicBind = runtime.bindAddress === "0.0.0.0" || runtime.bindAddress === "::"
-  const published = runtime.ports?.length
-    ? ` · also ${runtime.ports.map((port) => `${port.hostPort}→${port.containerPort}`).join(", ")}`
-    : ""
-
-  return (
-    <>
-      <StatGrid columns={4} dense>
-        <StatTile
-          label="Hostnames"
-          value={domains.length}
-          hint={
-            domains.length > 0
-              ? `${https} over HTTPS · ${guarded} behind a password`
-              : "The proxy has no name for it yet"
-          }
-        />
-        <StatTile
-          label="Routed"
-          value={observed ? `${served} of ${domains.length}` : "—"}
-          tone={observed ? routedTone : "default"}
-          hint={
-            !observed
-              ? (operations?.domains.reason ?? "Not observed yet")
-              : wrong
-                ? // The row names which host; the hint says who else answers.
-                  `${wrong.route!.route === "conflict" ? "Also served" : "Served"} by ${wrong.route!.servedBy ?? "another site"}`
-                : unrouted
-                  ? `${plural(domains.length - served, "name")} without a route`
-                  : domains.length > 0
-                    ? "Every name answers here"
-                    : undefined
-          }
-        />
-        <StatTile
-          label="Soonest expiry"
-          value={
-            expired
-              ? "Expired"
-              : soonest
-                ? plural(soonest.certificateDaysLeft ?? 0, "day")
-                : https === 0 && domains.length > 0
-                  ? "HTTP only"
-                  : "—"
-          }
-          tone={expired ? "danger" : soonest?.certificate === "expiring" ? "warning" : "default"}
-          trailing={issuer && <ProductGlyph id={issuer} className="size-4 align-[-3px]" />}
-          hint={
-            expiry
-              ? `${expiry.hostname}${issuer ? " · Let's Encrypt" : ""}`
-              : renewed
-                ? `${renewed.hostname} · renewed by Caddy`
-                : https > 0
-                  ? "No certificate observed yet"
-                  : undefined
-          }
-        />
-        <StatTile
-          label="Upstream"
-          value={runtime.internalPort ? `:${runtime.internalPort}` : "—"}
-          tone={publicBind && (runtime.hostPort ?? 0) > 0 ? "warning" : "default"}
-          hint={`${runtime.bindAddress || "127.0.0.1"} · host port ${runtime.hostPort || "dynamic"}${published}`}
-        />
-      </StatGrid>
-      {publicBind && (
-        <Notice tone="warning" title="This environment binds a public address" icon={Warning}>
-          Traffic on {runtime.bindAddress} reaches the container directly, ahead of Proxy. Confirm
-          the{" "}
-          <Link href="/security/firewall" className="underline underline-offset-4">
-            firewall
-          </Link>{" "}
-          allows only the traffic you expect before relying on it.
-        </Notice>
-      )}
-    </>
   )
 }
 
@@ -278,6 +136,8 @@ function DomainsForm({
 
   const routeFor = (hostname: string) =>
     routes?.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
+  const { bindAddress } = configuration.runtime
+  const publicBind = bindAddress === "0.0.0.0" || bindAddress === "::"
 
   const update = (index: number, next: Partial<DomainValue>) =>
     setDomains(domains.map((item, i) => (i === index ? { ...item, ...next } : item)))
@@ -380,6 +240,15 @@ function DomainsForm({
             )
           }
         >
+          {publicBind && (
+            <Notice tone="warning" title="This environment binds a public address" icon={Warning}>
+              Traffic on {bindAddress} reaches the container directly, ahead of Proxy. Confirm the{" "}
+              <Link href="/security/firewall" className="underline underline-offset-4">
+                firewall
+              </Link>{" "}
+              allows only the traffic you expect before relying on it.
+            </Notice>
+          )}
           {domains.length === 0 && leaving.length === 0 ? (
             <EmptyState
               icon={Globe}

@@ -27,8 +27,8 @@ import {
  *
  * The pieces, outermost first:
  *
- *   `SettingsPage` — loads the configuration, then the pending strip, the
- *   page's readings and its forms, rising once when the first read lands.
+ *   `SettingsPage` — loads the configuration, then the pending strip and the
+ *   page's forms, rising once when the first read lands.
  *   `SettingForm` — one form, one save. It may span several sections
  *   (Runtime is five), because what one PUT writes is what one Save means.
  *   `SettingSection` — one head and its fields.
@@ -51,10 +51,9 @@ const APPLIES: Record<SettingApplies, string> = {
 }
 
 /**
- * A settings page: its configuration read, what is saved but not live, the
- * page's figures when it has any, and its forms in one run of sections — all
- * of it in the one centred column, so the strip and the figures line up with
- * the fields under them.
+ * A settings page: its configuration read, what is saved but not live, and
+ * its forms in one run of sections — all of it in the one centred column, so
+ * the strip lines up with the fields under it.
  *
  * No heading of its own. The project's other pages add none under the
  * project header, and the first section's head already names what the page is.
@@ -64,23 +63,19 @@ const APPLIES: Record<SettingApplies, string> = {
 export function SettingsPage({
   state,
   pageKinds,
-  readings,
   children,
 }: {
   state: ReturnType<typeof useConfiguration>
   /** The pending-change kinds this page edits — see `PendingChanges`. */
   pageKinds?: string[]
-  /** The page's figures, as a `StatGrid dense`. */
-  readings?: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
   children: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
 }) {
   return (
-    <ConfigurationState state={state} readings={Boolean(readings)}>
+    <ConfigurationState state={state}>
       {(configuration) => (
         <div className={cn("min-w-0 animate-rise space-y-8", FIELDS_COLUMN)}>
           <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
           <LastFailureRemedy />
-          {readings?.(configuration)}
           <FormSections>{children(configuration)}</FormSections>
         </div>
       )}

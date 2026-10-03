@@ -1508,10 +1508,8 @@ names** — remove a mount and the file manager silently browses the container's
 
 ## Deployment workspace
 
-`/deploy` opens on four readings the chips under them cannot say — how many projects are live,
-requests a minute across the fleet with its hour as a line, the share of them failing (weighted by
-traffic; amber from 1%, red from 5%) and the build slots in use — then the runs in progress as rows
-that open the run, an attention list, and the projects under a search field and counted state
+`/deploy` opens on the runs in progress as rows that open the run (it has no row of figures: each
+card carries its own traffic and the counts are the chips'), then an attention list, and the projects under a search field and counted state
 chips, ordered worst first: failed, unhealthy, deploying, ready with pending changes, ready,
 stopped, not deployed. What needs attention is decided apart from how it is drawn
 (`components/deploy/fleet.ts`, `fleetAttention`): a failed deploy with the engine's own terminal
@@ -1676,31 +1674,30 @@ installation for a connected GitHub repository — submodule and LFS choice, or 
 platform, changed in place through
 `PUT …/environments/{env}/source` and checked before it is saved) and Automatic deployment: the Git
 policy with a picture of what a push does, the last decision and the GitHub commit-status switch.
-Build opens on what it builds with, the last build (read from the live release's own Build step), the
-release tasks and the build variables, over the builder — every recipe, a Dockerfile or a static site
+None of the settings pages opens on a row of figures; each section's head says what it currently
+is. Build is the builder — every recipe, a Dockerfile or a static site
 — the package manager, the commands, the image and the build variables as one form and the release
 tasks, reorderable and
 each with its last run, as another; choosing a builder that is not a recipe clears the recipe's
-versions, secrets and package manager, which the plan would otherwise refuse. Runtime opens on where
-it listens, the memory limit against the live release's last-hour peak, how a release is replaced —
-naming a blue/green plan the executor would refuse, before it is deployed — and container access,
-over the runtime, where it listens, resources, the release strategy and container access as one form
-and the health checks, grouped by phase, as another. Environment variables is the list, its counts on
+versions, secrets and package manager, which the plan would otherwise refuse; the Build and Image
+heads name what the live release's own Build step prepared. Runtime is the runtime, where it
+listens, resources (each limit against the live release's last-hour peak), the release strategy —
+naming a blue/green plan the executor would refuse, before it is deployed — and container access as
+one form, and the health checks, grouped by phase, as another. Environment variables is the list, its counts on
 filter chips, each variable drawn as the service its name names and a reference as its database, with
 Reveal, Copy value (the audited reveal route; the value is never drawn), Rotate and Remove, and a
 removed name still live as a struck-through row; the editor is a sheet, and editing an existing
 variable asks for its value again (an administrator can reveal the current one into it) so a scope
 change can never blank a secret; the `.env` import is a sheet that previews every name through the
-dry run before anything is written, and cannot import while any name is refused. Domains opens on four
-readings and checks a new hostname in its Add domain sheet through `GET /deploy/hostname`, showing the
-A record to create and, for an administrator, whether it already resolves here. Storage opens on four
-readings joined from Docker's volume sizes and the backup coverage report, each refused read leaving
-its reading out, and draws each host path as the Files page's folder in its colour, over the mount
-editor and the live release's mounts as cards, with a card to back up any volume nothing copies. Databases & backups links databases
+dry run before anything is written, and cannot import while any name is refused. Domains warns in
+its section when the environment binds a public address, and checks a new hostname in its Add
+domain sheet through `GET /deploy/hostname`, showing the A record to create and, for an
+administrator, whether it already resolves here. Storage draws each host path as the Files page's
+folder in its colour, in the mount editor and the live release's mounts as cards, each volume with
+its size from Docker where that read is allowed, with a card to back up any volume nothing copies. Databases & backups links databases
 through the same sheet the creation flow uses — in a section of its own, since linking is its own write
-— and never commits a half-filled sibling row when a database is connected or removed. It opens on
-four readings — linked count, connection, backup policy and native-dump coverage — and draws each link
-as a card carrying its engine, database, managed hostname, observed status, the variables that carry
+— and never commits a half-filled sibling row when a database is connected or removed. It draws each
+link as a card carrying its engine, database, managed hostname, observed status, the variables that carry
 it and the reason reconciliation recorded when it could not repair one, under a picture of how the
 application reaches them. Because runtime activation attaches a database by reading the variable that
 holds its address rather than the dependency row, removing a link offers to delete the variables that
@@ -1708,8 +1705,8 @@ reference it, and says so plainly when it is bound by a value it cannot name. Th
 gates on is drawn as the Backups page draws it — its products, last run, destination, last fourteen
 runs, next run and stored size — with the live release's observation folded onto the same card, runs
 on demand, and warns when it takes no native dump of a linked database — which the gate would
-otherwise refuse mid-deployment — with one press to add the dump; Automation opens on four readings
-and a picture of what deploys the project, and holds webhooks (each with its deliveries in a sheet,
+otherwise refuse mid-deployment — with one press to add the dump; Automation opens on a picture of
+what deploys the project, and holds webhooks (each with its deliveries in a sheet,
 the hook URL shown absolute, and a signed hook's secret shown once when it is made and when it is
 rotated), schedules (a builder in the schedule's own time zone, the server's check before saving,
 and each schedule's past firings and next five runs), previews (approve with a fork warning, reject,

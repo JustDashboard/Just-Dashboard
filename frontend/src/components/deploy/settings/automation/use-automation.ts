@@ -28,10 +28,10 @@ export type Automation = {
 /**
  * Every read the Automation page draws from, polled once for the whole page.
  *
- * Each block used to poll its own endpoints, so the readings at the top, the
- * picture of what deploys the project and the lists under them would each
- * have kept a copy of the same webhooks and schedules on a different clock —
- * three answers to "is anything firing?" a few seconds apart. One set of
+ * Each block used to poll its own endpoints, so the picture of what deploys
+ * the project and the lists under it would each have kept a copy of the same
+ * webhooks and schedules on a different clock — answers to "is anything
+ * firing?" a few seconds apart. One set of
  * polls now, on the cadences the blocks had: the engine's own records every
  * five seconds, the alert rules every fifteen (they are evaluated once a
  * minute), and the notification channels once, since they are edited on

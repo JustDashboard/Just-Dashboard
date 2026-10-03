@@ -128,7 +128,7 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 | `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
 | `/deploy/[id]` | The project shell (one compact header: the address, status word, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
 | `/deploy/[id]/deployments` | Success and weekly frequency over releases per day, median release and recovery time over release time per day beside it, why releases failed under both, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
-| `/deploy/[id]/logs`, `/runtime`, `/console` | Five traffic readings and an alerts line over one pane of five views (three until 2026-09-27) — Requests (what the ingress served, from a record the server keeps in memory, with deploy and container marks on the chart, and each request's own lines and what the proxy said inline), Insights (the window faceted: failing pages, scanners, bots, sources, slowest, and the output's exceptions), Output (what the containers wrote, per service), Builds (the recent runs' transcripts) and Events (Docker's exits, OOM kills, restarts and health flips, crash loops folded), see [`request-observability.md`](request-observability.md); services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
+| `/deploy/[id]/logs`, `/runtime`, `/console` | Four traffic readings (five, with the container's, until 2026-10-03) and an alerts line over one pane of five views (three until 2026-09-27) — Requests (what the ingress served, from a record the server keeps in memory, with deploy and container marks on the chart, and each request's own lines and what the proxy said inline), Insights (the window faceted: failing pages, scanners, bots, sources, slowest, and the output's exceptions), Output (what the containers wrote, per service), Builds (the recent runs' transcripts) and Events (Docker's exits, OOM kills, restarts and health flips, crash loops folded), see [`request-observability.md`](request-observability.md); services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
 | `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a run of sections, every head over its fields, whose forms end in their own Save (a stack of setting cards with a footer Save until 2026-09-24), reached from the Settings group on the rail rather than a rail of their own. |
 | `/deploy/[id]/runs/[run]` | The deployment page: status, facts, the release path with durations, the build console (search, stage, errors, wrap, follow), runtime logs, details and metrics (its facts a row until 2026-09-24; see "Life and colour"). |
 
@@ -381,10 +381,9 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
 `design-system.md` §2, §7, §11, §12, §14 and §15 carry the rules it followed and the ones it wrote.
 
 - **The fleet** (`projects-page.tsx`, with its decisions in `fleet.ts` and a project in
-  `fleet-card.tsx`) opens on four readings the chips under them cannot say: how many projects are
-  live, with their products; requests a minute across the fleet, with the hour as a line; the share
-  of them failing, weighted by traffic, amber from 1% and red from 5%, naming the worst site; and
-  the build slots in use. In-progress runs are lit rows that open the run, the seven-segment
+  `fleet-card.tsx`) opened on four readings the chips under them cannot say (live projects, fleet
+  requests a minute, the failing share, the build slots in use) until 2026-10-03, when they were
+  removed and the page began with its runs in flight. In-progress runs are lit rows that open the run, the seven-segment
   release path sweeping beside the stage it is at. Attention is a finding list — a failed deploy
   with the engine's own reason, a live release failing its health check, a site failing 5% or
   more — and the per-state counts are on the chips, which scroll on a phone. Cards are ordered
@@ -433,9 +432,9 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   step. The build console groups each step's lines under a sticky rule,
   counts its errors, shows elapsed time, downloads `deployment-N.log` and, from `2xl`, lists the
   stages in a rail. Rolling back is the brand command, and the dialog draws the swap it will make.
-- **Logs.** The five readings each carry their hour — requests with the agents that asked as
-  logos, failing as a sixty-minute strip, the slow tenth, bytes served and the container's
-  disruptions as a tick rail. The alerts line names the channels a rule tells by their logos, says
+- **Logs.** The readings each carry their hour — requests with the agents that asked as
+  logos, failing as a sixty-minute strip, the slow tenth and bytes served (and, until 2026-10-03,
+  the container's disruptions as a tick rail; the Events tab counts those). The alerts line names the channels a rule tells by their logos, says
   when a rule tells no one, and writes the first rule in a sheet on the page. The request rows,
   the opened request (now with Copy as curl and Block) and Insights draw a request by the log
   console's colours; Insights opens on a response-time ladder whose marks narrow the rows to
@@ -451,14 +450,15 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
 - **Settings.** All nine are rail forms (`settings/setting-card.tsx`), with a pending strip that no
   longer carries a second "Deploy changes", and drafts keyed per form so a save of one no longer
   discards the edits in another. General's sections are Name, Source and Automatic deployment,
-  the last with its picture and the commit-status switch. Build and Runtime open on readings drawn
-  from the draft and the live release — the last build's size and platform, the memory limit
-  against the last hour's peak, a blue/green strategy the plan cannot run said before it is
-  deployed — and Build picks its builder and package manager from product cards. Variables is its
+  the last with its picture and the commit-status switch. Build and Runtime opened on readings drawn
+  from the draft and the live release until 2026-10-03, when every settings page's row of figures
+  was removed; Runtime still draws each limit against the last hour's peak and says a blue/green
+  strategy the plan cannot run before it is deployed, and Build picks its builder and package
+  manager from product cards. Variables is its
   list first, its counts on chips, with the editor and the `.env` import as sheets; the import
-  says what each name will do before anything is written. Domains, Storage and Databases open on
-  four readings each; Add domain shows the record to create and, for an administrator, whether it
-  already points here. Automation opens on four readings and a picture of what deploys the
+  says what each name will do before anything is written. Domains, Storage and Databases opened on
+  four readings each (until 2026-10-03); Add domain shows the record to create and, for an
+  administrator, whether it already points here. Automation opens on a picture of what deploys the
   project, with webhooks, schedules and previews as cards that open their own sheets: a
   webhook's deliveries, a schedule's past firings and next five runs, a pull request's review
   with a fork warning. Danger zone is one frame of acts in lifecycle order — stop, archive (or,

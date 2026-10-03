@@ -938,9 +938,6 @@ test("a deployment domain Caddy renews says so, with no days left and no certifi
   await expect(form.getByText("Certificate valid", { exact: true })).toBeVisible()
   await expect(form.getByText("Renewed by Caddy", { exact: true })).toBeVisible()
   await expect(page.getByText(/\bdays? left$/)).toHaveCount(0)
-  // The figure over the list names the domain rather than "No certificate".
-  await expect(page.getByText("api.example.test · renewed by Caddy", { exact: true })).toBeVisible()
-  await expect(page.getByText("No certificate observed yet", { exact: true })).toHaveCount(0)
 
   await page.getByRole("button", { name: "Actions for api.example.test" }).click()
   await expect(page.getByRole("menuitem", { name: "Open the serving site" })).toBeVisible()

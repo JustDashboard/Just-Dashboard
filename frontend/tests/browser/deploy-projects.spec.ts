@@ -41,12 +41,10 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
     "aria-pressed",
     "true",
   )
-  // The fleet's four readings sit over the cards; the per-state counts are
-  // the chips', and a state nothing is in draws no chip. Health nobody has
-  // observed is not a reason for attention.
-  for (const reading of ["Live", "Requests", "Failing requests", "Build slots"]) {
-    await expect(page.getByText(reading, { exact: true })).toBeVisible()
-  }
+  // No row of figures over the cards: each card carries its own traffic, the
+  // per-state counts are the chips', and a state nothing is in draws no chip.
+  // Health nobody has observed is not a reason for attention.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Changes pending/ })).toContainText("6")
   await expect(page.getByRole("button", { name: /^Deploying/ })).toHaveCount(0)
   await expect(page.getByRole("button", { name: /^Attention/ })).toHaveCount(0)
