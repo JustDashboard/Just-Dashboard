@@ -818,7 +818,10 @@ fresh its numbers are.
 
 Nothing here needs a `motion-reduce:` guard. The rule lives once at the root of `globals.css` and
 collapses every animation's *duration* rather than cancelling it, so a keyframe that would otherwise
-never reach its final frame still ends up there.
+never reach its final frame still ends up there. A *delay* is the one exception, because the rule does
+not touch it: the account menu's rows `rise` in a stagger from the row nearest its card, and that
+stagger is `motion-safe:[animation-delay:…]` so a reduced-motion reader gets every row at once rather
+than rows popping in one after another.
 
 ### Motion that arrived with a library
 
