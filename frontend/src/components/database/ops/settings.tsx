@@ -75,7 +75,7 @@ export function Settings() {
   return (
     <SectionFrame section="settings">
       {sections.length > 2 && <SectionJump sections={sections} />}
-      <FormSections railFrom="xl">
+      <FormSections>
         <ConnectionSection />
         {server && <ReachabilitySection confirm={confirm} />}
         {parameters && <ParametersSection />}

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useId, useState } from "react"
+import { useId, useState } from "react"
 
 import { Check, ChevronDown, Copy, Information, Minus } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -178,7 +178,7 @@ export function FieldRow({
  * invented for any of them. It meets a `Modal`'s own title at the same size in
  * a dialog, which is correct and not a collision: that one sits in a bordered
  * header strip above the body, and these are inside it under hairlines. A
- * rail head (`aside`) is a rung higher again, for the reason given there.
+ * page section (`aside`) is a rung higher again, for the reason given there.
  */
 export function FormSection({
   id,
@@ -186,7 +186,6 @@ export function FormSection({
   hint,
   actions,
   aside,
-  railFrom,
   className,
   children,
   "data-slot": slot,
@@ -199,53 +198,46 @@ export function FormSection({
   /** Names the section for a caller composing it, as `SettingSection` does. */
   "data-slot"?: string
   /**
-   * The title in a column of its own beside the fields, from `lg` — for a
-   * page that *is* a form, where the sections are the page's structure
-   * rather than parts of a dialog. Stacked in a `FormSections`.
+   * A section of a page that *is* a form, rather than a part of a dialog —
+   * the sections are the page's structure. Stacked in a `FormSections`. The
+   * name is left from when the head sat in a column aside the fields.
    *
-   * A settings page of five sections with their heads over their fields read
-   * as one long column in which every head was the same distance from the
-   * fields above it as from its own. With the heads in a rail the page is a
-   * table of contents down the left and the inputs down the right, and the
-   * `hint` under a head has room to carry what the section currently *is* —
-   * the address it answers at, the certificate on disk — which is data under
-   * a title rather than a caption for it (§5).
+   * That column was 15rem of every row spent on a few words, and it set each
+   * head on the line of the first field label beside it, so a section read as
+   * two labels side by side. The head is over its fields now, in one column
+   * no wider than the fields were. What the rail was for — heads over fields
+   * once read as one long run in which every head sat as far from the fields
+   * above it as from its own — is answered by spacing instead: 64px and a
+   * hairline between sections, 16px between a head and its fields.
    *
-   * The rail had flattened into a row of labels. Its head was 15 beside 13px
-   * field labels on the same line, its state was 11px muted — the size and
-   * tone of every hint in the fields column — and nothing said which head the
-   * fields beside it belonged to once it had scrolled away. So the head takes
-   * the page-section rank (16, as a `Section`'s), its state reads at 12 as
-   * data between title and hint, it stays beside its fields while they scroll,
-   * and the fields stand behind a rule: the one-line containment an
-   * `OptionRow` already draws for what its switch reveals, because this fence
-   * has a head as well.
+   * The head is a `Section`'s 16, a rung above the 15 of a dialog's section,
+   * because it names a part of the page. Under it the `hint` carries what the
+   * section currently *is* — the address it answers at, the certificate on
+   * disk — at 12, as data between the title and the 11px hints in the fields
+   * (§5). `actions` sit at the head's far end.
    */
   aside?: boolean
-  /** Where the rail starts. Inherited from the `FormSections` around it. */
-  railFrom?: RailFrom
   className?: string
   children: React.ReactNode
 }) {
-  const inherited = useContext(RailContext)
   if (aside) {
-    const rail = RAIL[railFrom ?? inherited]
     return (
       <section
         id={id}
         data-slot={slot}
         className={cn(
-          "grid min-w-0 scroll-mt-6 gap-x-4 gap-y-4 py-10 first:pt-0 last:pb-0",
-          rail.grid,
+          "max-w-3xl min-w-0 scroll-mt-6 space-y-4 py-8 first:pt-0 last:pb-0",
           className,
         )}
       >
-        <div className={cn("min-w-0", rail.head)}>
-          <h3 className="text-base font-semibold tracking-tight">{title}</h3>
-          {hint && <div className="mt-2 text-xs leading-relaxed text-muted-foreground">{hint}</div>}
-          {actions && <div className="mt-3 flex flex-wrap items-center gap-1.5">{actions}</div>}
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0 space-y-1">
+            <h3 className="text-base font-semibold tracking-tight">{title}</h3>
+            {hint && <div className="text-xs leading-relaxed text-muted-foreground">{hint}</div>}
+          </div>
+          {actions && <div className="flex flex-wrap items-center gap-1.5">{actions}</div>}
         </div>
-        <div className={cn("max-w-3xl min-w-0 space-y-5", rail.fields)}>{children}</div>
+        <div className="min-w-0 space-y-5">{children}</div>
       </section>
     )
   }
@@ -271,51 +263,12 @@ export function FormSection({
 }
 
 /**
- * The width from which a `FormSection aside` sets its head beside its fields.
- *
- * `lg` for a page with the whole content column to itself. `xl` for a form
- * inside a shell that already spends a column of its own — a project's
- * settings, beside the project's 256px navigation — where at 1024 a 15rem
- * rail left the fields about 416px, and a row of three fields 130px each.
+ * A run of `FormSection aside`s, a hairline between each, held to the fields'
+ * width so the hairlines stop where the fields do — a settings page's forms
+ * included, which are its children rather than sections.
  */
-type RailFrom = "lg" | "xl"
-
-/**
- * The rail's classes at each width, spelled out whole so Tailwind finds them.
- * The fields start 18rem in either way — the 15rem rail, a 1rem gap, the rule
- * and its 2rem inset — which is where `SettingFoot` lines its row up, and the
- * 50rem cap is the 48rem the fields had plus that inset.
- */
-const RAIL: Record<RailFrom, { grid: string; head: string; fields: string }> = {
-  lg: {
-    grid: "lg:grid-cols-[15rem_minmax(0,1fr)]",
-    head: "lg:sticky lg:top-6 lg:self-start",
-    fields: "lg:max-w-[50rem] lg:border-l lg:border-hairline lg:pl-8",
-  },
-  xl: {
-    grid: "xl:grid-cols-[15rem_minmax(0,1fr)]",
-    head: "xl:sticky xl:top-6 xl:self-start",
-    fields: "xl:max-w-[50rem] xl:border-l xl:border-hairline xl:pl-8",
-  },
-}
-
-const RailContext = createContext<RailFrom>("lg")
-
-/**
- * A run of `FormSection aside`s, a hairline between each. `railFrom` is said
- * once here rather than on every section, so the heads of one page can never
- * leave the rail at two different widths.
- */
-export function FormSections({
-  railFrom = "lg",
-  className,
-  ...props
-}: React.ComponentProps<"div"> & { railFrom?: RailFrom }) {
-  return (
-    <RailContext.Provider value={railFrom}>
-      <div className={cn("min-w-0 divide-y divide-hairline", className)} {...props} />
-    </RailContext.Provider>
-  )
+export function FormSections({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("max-w-3xl min-w-0 divide-y divide-hairline", className)} {...props} />
 }
 
 /**

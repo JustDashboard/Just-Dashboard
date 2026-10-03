@@ -1662,14 +1662,15 @@ Settings are nine pages — General, Build, Runtime, Environment variables, Doma
 & backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
 but not live yet at the top, as a strip that names each change and links to its page but carries no
 command (the header's is the one), then, on the page that holds it, the newest failed deployment's
-fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings, then its forms with their heads in a rail
-from `xl`. Each form saves the whole configuration with the revision it read, keeps its draft keyed on
-a digest of its own saved value (`useSettingDraft`) so a save of the form beside it no longer throws
-the draft away, and ends in a foot with when the change applies, Discard and Save; a refusal that
-names a field lands on that control (a refused row is marked in place), and one that names none
-lands on the form. General holds the name, the Source (a repository, branch, root directory,
-credential — read through the App's installation for a connected GitHub repository — submodule and
-LFS choice, or an image reference and platform, changed in place through
+fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings,
+then its forms, each section's head over its fields in one 48rem column. Each form saves the whole
+configuration with the revision it read, keeps its draft keyed on a digest of its own saved value
+(`useSettingDraft`) so a save of the form beside it no longer throws the draft away, and ends in a
+foot with when the change applies, Discard and Save; a refusal that names a field lands on that
+control (a refused row is marked in place), and one that names none lands on the form. General holds
+the name, the Source (a repository, branch, root directory, credential — read through the App's
+installation for a connected GitHub repository — submodule and LFS choice, or an image reference and
+platform, changed in place through
 `PUT …/environments/{env}/source` and checked before it is saved) and Automatic deployment: the Git
 policy with a picture of what a push does, the last decision and the GitHub commit-status switch.
 Build opens on what it builds with, the last build (read from the live release's own Build step), the

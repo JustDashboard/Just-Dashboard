@@ -164,7 +164,7 @@ export function GameSettings({ projectId }: { projectId: number }) {
             void save()
           }}
         >
-          <FormSections railFrom="xl" className="animate-rise">
+          <FormSections className="animate-rise">
             <FormSection
               aside
               title={
