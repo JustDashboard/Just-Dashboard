@@ -12,7 +12,7 @@ the firewall, backups and deploys, behind a login that lives on your private net
 
 </div>
 
-![The server overview with live metrics, health findings and service summaries](docs/overview.png)
+![The server overview with live metrics, what needs attention across every module, the deployed projects and service summaries](docs/overview.png)
 
 Screenshots show version 0.7.0 with example data.
 
