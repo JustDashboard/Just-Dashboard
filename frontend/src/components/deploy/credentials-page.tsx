@@ -36,7 +36,6 @@ import type {
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
@@ -53,7 +52,7 @@ import {
   FormNote,
   FormSection,
 } from "@/components/form"
-import { ProductGlyph, ProductGlyphs, ProductLogo, hostProduct } from "@/components/product-logo"
+import { ProductGlyph, ProductLogo, hostProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -63,7 +62,6 @@ import {
   InputGroupText,
   InputGroupToggle,
 } from "@/components/ui/input-group"
-import { NumberTicker } from "@/components/ui/number-ticker"
 import {
   Select,
   SelectContent,
@@ -71,7 +69,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -86,13 +83,19 @@ import { useGitHubApp } from "@/hooks/use-github"
  * these by id instead of carrying its own copy, so rotating a token happens
  * once here rather than once per project that used it.
  *
- * The page opens on four readings — how many are held and across which hosts,
- * how many a project's source reads through, how many were saved and never
- * used, and when one was last used — then the GitHub App, whose state is said
- * in its own section (its header and its setup path) rather than as a third
- * statement in a tile, and then the credentials as cards you open to edit,
- * each drawn as the host it signs in to: github.com is GitHub's mark and
- * gitlab.com GitLab's, which is how the reader already knows them (§14).
+ * The page opens on the GitHub App, whose state is said in its own section —
+ * its header, its picture on the page's own ground and its setup path — and
+ * then the credentials as cards you open to edit, each drawn as the host it
+ * signs in to: github.com is GitHub's mark and gitlab.com GitLab's, which is
+ * how the reader already knows them (§14).
+ *
+ * It carries no tiles (design-system §15 pass 2's exit). It had four, and each
+ * said what a card or the list's header says where the thing is: how many are
+ * held and across how many hosts is the header's, with the hosts drawn on the
+ * cards; how many a project's source reads through is the In use rule's count,
+ * and the projects are named on the cards they read through; one saved and
+ * never used says so on its own card, in amber; and when each was last used
+ * is beside its name.
  */
 
 /**
@@ -287,8 +290,8 @@ function effectiveName(draft: Draft) {
  * GitHub App credential is the account whose installation mints it, as that
  * account's face with GitHub's mark in the corner.
  *
- * A credential nothing reads is not dimmed: that is a reading, and the Never
- * used tile says it.
+ * A credential nothing reads is not dimmed: that is a reading, and its card
+ * says it in words.
  */
 function CredentialMark({
   credential,
@@ -555,6 +558,7 @@ export function CredentialsPage() {
     { key: "in-use", label: "In use", rows: (list ?? []).filter((c) => c.usedBy > 0) },
     { key: "idle", label: "Not in use", rows: (list ?? []).filter((c) => c.usedBy === 0) },
   ].filter((group) => group.rows.length > 0)
+  const hosts = new Set((list ?? []).map((credential) => credential.target).filter(Boolean))
   const editing = draft?.id ? list?.find((credential) => credential.id === draft.id) : undefined
 
   return (
@@ -567,12 +571,6 @@ export function CredentialsPage() {
         }
         title="Credentials"
       />
-
-      {/* Nothing saved is said once, by the kinds below, not by four tiles
-          of zeroes — as Notifications shows no tiles without a channel. */}
-      {admin && (list === undefined || list.length > 0) && (
-        <CredentialReadings list={list} failed={Boolean(credentials.error)} />
-      )}
 
       <GitHubAppPanel
         admin={admin}
@@ -589,6 +587,12 @@ export function CredentialsPage() {
               {list && list.length > 0 && (
                 <span className="numeric text-hint text-muted-foreground">
                   {plural(list.length, "credential")}
+                  {/* A host is optional for every kind but a registry login.
+                      Left out on a phone, where it pushed the command under
+                      the title. */}
+                  {hosts.size > 0 && (
+                    <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>
+                  )}
                 </span>
               )}
               {admin && (
@@ -688,134 +692,19 @@ export function CredentialsPage() {
 }
 
 /**
- * Four readings over the saved credentials, each a question an operator asks
- * of a keyring — the account keys page asks the same four of its API keys: how
- * many are held and across which hosts, which of them a project actually
- * reads through, which were saved and never used (a credential nobody uses is
- * one nobody would notice being used), and when one was last reached for.
- * Drawn only once something is saved: an empty keyring is the kinds below.
- */
-function CredentialReadings({
-  list,
-  failed,
-}: {
-  list: DeploymentCredential[] | undefined
-  failed: boolean
-}) {
-  // A count arrives by counting: the figure rises with its tile and settles on
-  // the value, rather than the value being there before the tile is.
-  const figure = (value: number | undefined) =>
-    value === undefined ? (
-      failed ? (
-        "—"
-      ) : (
-        <Skeleton className="h-6 w-8" />
-      )
-    ) : (
-      <NumberTicker value={value} />
-    )
-  const ready = list !== undefined
-  const hosts = new Set((list ?? []).map((credential) => credential.target).filter(Boolean))
-  const products = [...new Set((list ?? []).flatMap((c) => credentialProduct(c) ?? []))]
-  const inUse = (list ?? []).filter((credential) => credential.usedBy > 0)
-  // Projects, the unit the cards count in, and each once: two credentials
-  // behind one project (its Git token and its registry login) are one project.
-  const projectIds = new Set(inUse.flatMap((credential) => credential.usedByProjectIds ?? []))
-  const reached =
-    projectIds.size || inUse.reduce((sum, credential) => sum + projectsUsing(credential), 0)
-  const unused = (list ?? [])
-    .filter((credential) => !credential.lastUsedAt)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  const latest = (list ?? [])
-    .filter((credential) => credential.lastUsedAt)
-    .sort((a, b) => (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? ""))[0]
-  const rise = ready ? "animate-rise" : undefined
-  const key = (name: string) => (ready ? name : `${name}-loading`)
-
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        key={key("credentials")}
-        label="Credentials"
-        value={figure(list?.length)}
-        hint={
-          ready && (
-            <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-              <span className="truncate">
-                {/* A host is optional for every kind but a registry login. */}
-                {hosts.size > 0 ? `across ${plural(hosts.size, "host")}` : "no host named"}
-              </span>
-              <ProductGlyphs ids={products} />
-            </span>
-          )
-        }
-        className={rise}
-      />
-      <StatTile
-        key={key("in-use")}
-        label="In use"
-        value={figure(list && inUse.length)}
-        hint={
-          ready &&
-          (reached > 0
-            ? `${plural(reached, "project")} read through them`
-            : "nothing reads one yet")
-        }
-        className={rise}
-      />
-      <StatTile
-        key={key("never-used")}
-        label="Never used"
-        value={figure(list && unused.length)}
-        tone={unused.length > 0 ? "warning" : "default"}
-        hint={
-          ready &&
-          (unused.length > 0
-            ? `${unused[0].name} added ${calendarDate(unused[0].createdAt)}`
-            : "every credential has been used")
-        }
-        className={rise}
-      />
-      <StatTile
-        key={key("last-used")}
-        label="Last used"
-        value={
-          ready ? (
-            latest ? (
-              relativeTime(latest.lastUsedAt)
-            ) : (
-              "—"
-            )
-          ) : failed ? (
-            "—"
-          ) : (
-            <Skeleton className="h-6 w-20" />
-          )
-        }
-        hint={
-          ready &&
-          (latest ? (
-            <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
-              <CredentialGlyph credential={latest} />
-              <span className="truncate">{latest.name}</span>
-            </span>
-          ) : (
-            "never"
-          ))
-        }
-        className={rise}
-      />
-    </StatGrid>
-  )
-}
-
-/**
  * One saved credential, as a card that opens its editor: drawn as its host,
  * named, with where it signs in as the literal the server holds and how much
- * it is used after it. The kind is a property of the card, so it sits at the
- * card's edge (§4) — under the name on a phone. The projects reading through
- * it are drawn as themselves under the line, each at a line's height beside
- * its name, so "used by 2 projects" says which two.
+ * it is used after it — "never used" in amber, since a credential nobody uses
+ * is one nobody would notice being used. The kind is a property of the card,
+ * so it sits at the card's edge (§4) — under the name on a phone. The projects
+ * reading through it are drawn as themselves before the kind, so "used by 2
+ * projects" says which two: marks alone until the card has the width for
+ * their names.
+ *
+ * One line, so the verbs stand on the card's middle: the projects were a
+ * second line under the name, which left the verbs level with the name over
+ * an empty corner on every card in use. A phone has no room for that line and
+ * keeps the second one.
  *
  * An App credential gets the card without its control: there is nothing on it
  * to edit. Its kind still lines up with the others', in the arrow's place.
@@ -847,7 +736,35 @@ function CredentialCard({
       <Tag>{KIND_LABEL[credential.kind]}</Tag>
     )
   const shown = projects.slice(0, 3)
-  const usage = `${usageLabel(projectsUsing(credential))} · ${lastUsedLabel(credential.lastUsedAt)}`
+  const usage = (
+    <>
+      {usageLabel(projectsUsing(credential))}
+      {" · "}
+      <span className={cn(!credential.lastUsedAt && "text-warning")}>
+        {lastUsedLabel(credential.lastUsedAt)}
+      </span>
+    </>
+  )
+  const readers = shown.length > 0 && (
+    <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+      <span className={cn(wide && "sr-only")}>reads the source of</span>
+      {shown.map((project) => (
+        <span
+          key={project.id}
+          title={project.name}
+          className="inline-flex min-w-0 items-center gap-1.5"
+        >
+          <ProjectMark deployment={project} size="xs" />
+          <span className={cn("truncate text-foreground/80", wide && "max-w-36 max-xl:sr-only")}>
+            {project.name}
+          </span>
+        </span>
+      ))}
+      {projects.length > shown.length && (
+        <span className="numeric">+{projects.length - shown.length}</span>
+      )}
+    </span>
+  )
   return (
     <ChoiceRow
       leading={<CredentialMark credential={credential} installation={installation} />}
@@ -877,31 +794,21 @@ function CredentialCard({
       trailing={
         wide ? (
           <>
-            {tag}
+            {readers && <span className="mr-2 text-hint text-muted-foreground">{readers}</span>}
+            {/* The widest kind's width, so down a list the kinds end on one
+                edge and the projects before them on another. */}
+            <span className="flex w-24 justify-end">{tag}</span>
             {!onEdit && <span aria-hidden className="w-3.5 shrink-0" />}
           </>
         ) : undefined
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${credential.name}`} />}
     >
-      {(!wide || shown.length > 0) && (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
-          {!wide && tag}
-          {!wide && where && <span>{usage}</span>}
-          {shown.length > 0 && (
-            <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-              <span>reads the source of</span>
-              {shown.map((project) => (
-                <span key={project.id} className="inline-flex min-w-0 items-center gap-1.5">
-                  <ProjectMark deployment={project} size="xs" />
-                  <span className="truncate text-foreground/80">{project.name}</span>
-                </span>
-              ))}
-              {projects.length > shown.length && (
-                <span className="numeric">+{projects.length - shown.length}</span>
-              )}
-            </span>
-          )}
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground">
+          {tag}
+          {where && <span>{usage}</span>}
+          {readers}
         </div>
       )}
     </ChoiceRow>

@@ -77,8 +77,7 @@ taking a frame:
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
-  one thing: the GitHub App on Credentials — the accounts that installed it, the App and this
-  server — and four on the settings pages, each inside its rail section and drawn through
+  one thing: four on the settings pages, each inside its rail section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
   General's automatic deployment (the repository, the watch, the deploys), Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
@@ -97,12 +96,13 @@ taking a frame:
   (`components/deploy/wire.tsx`) draws one more picture that sits *unframed* because it is inside a
   block that already has its edge: the way a request reaches a project on the overview — source,
   live release, runtime, domains, each drawn as its product — in the column beside the preview; each
-  mark paints the ground under its tint so the line never shows through it. And one that is
-  unframed because it is the page's opening rather than a block on it: where an outcome goes on
+  mark paints the ground under its tint so the line never shows through it. And two that are
+  unframed because each is its page's opening rather than a block on it: where an outcome goes on
   Notifications — the projects on the left, this server in the middle, a mark per channel on the
-  right, dashed rings for the kinds not yet added — stands on the page's own ground over
-  `wire-grid`, the dot grid that fades out towards its edges, which gives the picture a middle
-  where a border gave it an outline. The preview beside it is the
+  right, dashed rings for the kinds not yet added — and the GitHub App on Credentials — the
+  accounts that installed it, the App and this server, with its setup path under it — stand on the
+  page's own ground over `wire-grid`, the dot grid that fades out towards its edges, which gives a
+  picture a middle where a border gave it an outline. The preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
@@ -717,6 +717,11 @@ rather than assembling its own recharts tree — adding a measurement should mea
 - The x-axis is **numeric over time**, never a category axis of pre-formatted labels: a category axis
   spaces every bucket equally, which lies whenever the record has a hole in it.
 - A series with no numbers anywhere in the window is **dropped rather than drawn flat at zero**.
+- **A measure some days have and others do not is a mark on each day that has one**, on the
+  window's own days, never a line through the days that do. Deployment history's release time per
+  day was a sparkline over the days something shipped: four releases a week apart drew as one
+  slope, with no date and no scale to read it against. It is a bar on its day now, a tick on a
+  day nothing succeeded, the window's median ruled across and the top of the scale named.
 - **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude.
 - The hovered instant lives outside React, as a timestamp rather than a row index.
@@ -792,7 +797,7 @@ above:
   draw down beside them; `ChoiceRow` given its `index` staggers every lit list the same way, capped
   at twelve so a long list does not spend a second arriving, and `ChoiceCard` staggers a grid by its
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
-  the fleet's live and build-slot figures, the Credentials readings, the
+  the fleet's live and build-slot figures, the
   Overview's requests, the delivery insights, the run page's traffic after activation, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, and the readings on
   Packages, System users and the audit log. A figure that follows a
@@ -1585,11 +1590,8 @@ The passes, in order. Each one is a diff you can review on its own.
    The rest of the deployment section took the pass as a question of *which* figures. The fleet
    opens on four the chips beneath it cannot say — how many projects are live, requests a minute
    across the fleet, the share of them failing, the build slots in use — and leaves the per-state
-   counts to the chips, with the cards ordered worst first. Credentials opens on how many are held
-   and across which hosts, how many a source reads through, how many were never used and when one
-   last was; the GitHub App's state moved out of the tiles into its own section, where its header
-   and its setup path already said it. The Logs page's readings each carry their last hour, as the
-   host Overview's do.
+   counts to the chips, with the cards ordered worst first. The Logs page's readings each carry
+   their last hour, as the host Overview's do.
 
    **And the one page with no tiles, which is the shape of the argument for dropping this pass.**
    `/git` had four — repositories, uncommitted, behind, unpushed — and the operator asked for them to
@@ -1609,6 +1611,12 @@ The passes, in order. Each one is a diff you can review on its own.
    list of the recent messages beside the cards: the day's delivered, failed and retrying are the
    counts in that list's header — a message retried until it went out is one row and counts once,
    as delivered — and the last message is its first row, naming the run it announced.
+
+   Credentials took it after that. Its four (held and across which hosts, in use, never used, last
+   used) each said what a card says where the credential is: the count and the hosts went to the
+   Saved credentials header, the In use rule counts what a source reads through and each card names
+   the projects that do, one never used says so on its own card in amber, and when each was last
+   used is beside its name. The GitHub App's state stays in its own section.
 
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
    on a page you configure is best drawn beside the control that sets it. Version's Installed,
@@ -1636,9 +1644,15 @@ The passes, in order. Each one is a diff you can review on its own.
    project's Runtime page carries each count in the header of the block it counts, with the four
    moving readings — processor, memory, processes, network — as the live usage tiles.
 
-   Deployment history also takes this exit: success and weekly frequency sit with the releases-per-day
-   chart, while median duration, its trend and recovery time are a compact timing list beside it.
-   The four readings keep their basis and window without a separate strip of tiles over the records.
+   Deployment history also takes this exit: each pair of readings stands over the chart it explains.
+   Success and weekly frequency sit over releases per day; median duration and recovery time sit over
+   release time per day, which draws the same days at the same height beside it, with the window's
+   median as a dashed rule and the slowest day naming the top of its scale. Why the releases failed
+   runs under both, each cause a share of every failed release — and a lone cause a line with its
+   count, since a bar with nothing beside it compares nothing. The timing was a list of two figures
+   set at the far edge of their labels over a trend with no scale, and the reason a single full bar:
+   a drawing that cannot be read off is not a reading. The four readings keep their basis and window
+   without a separate strip of tiles over the records.
    The project Overview retains its delivery tiles. History's counted status filters use the
    underlined view-strip look as toggle buttons; filtering the same records does not make them ARIA
    tabs. Switching status or environment reserves the results' height for the page visit, so a

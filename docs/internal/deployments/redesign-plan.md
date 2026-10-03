@@ -127,7 +127,7 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 | `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
 | `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
 | `/deploy/[id]` | The project shell (one compact header: the address, status word, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
-| `/deploy/[id]/deployments` | Success and weekly frequency with the daily chart, a compact release/recovery timing list, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
+| `/deploy/[id]/deployments` | Success and weekly frequency over releases per day, median release and recovery time over release time per day beside it, why releases failed under both, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
 | `/deploy/[id]/logs`, `/runtime`, `/console` | Five traffic readings and an alerts line over one pane of five views (three until 2026-09-27) — Requests (what the ingress served, from a record the server keeps in memory, with deploy and container marks on the chart, and each request's own lines and what the proxy said inline), Insights (the window faceted: failing pages, scanners, bots, sources, slowest, and the output's exceptions), Output (what the containers wrote, per service), Builds (the recent runs' transcripts) and Events (Docker's exits, OOM kills, restarts and health flips, crash loops folded), see [`request-observability.md`](request-observability.md); services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
 | `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a run of rail sections whose forms end in their own Save (a stack of setting cards with a footer Save until 2026-09-24), reached from the Settings group on the rail rather than a rail of their own. |
 | `/deploy/[id]/runs/[run]` | The deployment page: status, facts, the release path with durations, the build console (search, stage, errors, wrap, follow), runtime logs, details and metrics (its facts a row until 2026-09-24; see "Life and colour"). |
@@ -179,7 +179,8 @@ it were brought in through the shadcn registry (Magic UI, rewritten onto the des
 tokens; see `docs/internal/frontend/design-system.md` §11):
 
 - **Credentials:** the GitHub App as the accounts that installed it, the App and this server,
-  with the traffic between them as lines (`github-app-card.tsx`, `wire.tsx`).
+  with the traffic between them as lines, drawn on the page's own ground over the dot grid rather
+  than in a frame (`github-app-card.tsx`, `wire.tsx`).
 - **Deployment page:** the release path as a timeline — one bar in seven segments, each as long as
   the stage took, the working stage's name lit by `ui/text-shimmer` — and a burst of paper when a
   release goes live in front of the reader (`run-pipeline.tsx`). Details rows open to the step's
@@ -395,10 +396,11 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   sources as cards; the archive draws each project as what it deployed, at a step of opacity, with
   its source and how many variables deleting it would lose, and deleting one asks for its name and
   lists what goes and what stays on the server.
-- **Credentials** opens on four readings — held and across which hosts, in use, never used, last
-  used — with the GitHub App's state in its own section, its setup a three-segment path rather than
-  numbered circles and each installed account drawn as its GitHub picture. A credential is a card
-  drawn as the host it signs in to, naming the projects that read through it; its sheet opens on
+- **Credentials** opens on the GitHub App's own section — its state, its picture, its setup a
+  three-segment path rather than numbered circles and each installed account drawn as its GitHub
+  picture — with no tiles over it: the count and the hosts are the Saved credentials header's. A
+  credential is a one-line card drawn as the host it signs in to, naming the projects that read
+  through it before its kind and saying "never used" in amber; its sheet opens on
   the four kinds as cards or, when editing, on the credential, draws the host's product as it is
   typed, and names a pasted token by its prefix or a key by its first line, warning on a mismatch
   or a public key. **Notifications** opens on the picture of where an outcome goes, draws each

@@ -1623,10 +1623,14 @@ caching, so an SVG opened directly is a picture and not a document; `404 favicon
 product, Compose, its framework, its recipe's language, Docker or nginx), and only a project no
 product names keeps its workload glyph.
 
-Deployments carries delivery insights with success rate and weekly frequency beside the daily chart,
-and median release time, its trend and recovery time in a compact timing list. These replace the
-history page's four tiles; the Overview keeps its delivery tiles. A failure reason narrows the list
-to the failed runs. The runs sit under a strip of the last twenty outcomes and the environment picker,
+Deployments carries delivery insights as two charts over the same days: success rate and weekly
+frequency over releases per day, and median release time and recovery time over release time per
+day — a bar for each day a release succeeded, the window's median as a dashed rule and the slowest
+day naming the scale's top. It is not drawn for a window in which nothing succeeded. These replace
+the history page's four tiles; the Overview keeps its delivery tiles. Why releases failed runs under
+both charts, counting the failed releases and when the last one was; each cause's bar is its share
+of every failed release, and a single cause is a line with its count and no bar. A failure reason
+narrows the list to the failed runs. The runs sit under a strip of the last twenty outcomes and the environment picker,
 grouped under In progress and then by day, narrowed by counted, underlined status filters. Zero-count
 filters remain selectable and show the empty state with Clear filters. Switching status or environment
 reserves the results' current height, including pagination, for this page visit so a shorter list
