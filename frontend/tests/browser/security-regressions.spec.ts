@@ -317,6 +317,9 @@ test("slow polling has only one request in flight", async ({ page }) => {
     ],
     total: 1,
   })
+  await expect(page.getByRole("button", { name: "Show 1 new audit entry" })).toBeVisible()
+  await expect(page.getByRole("table").getByText("FRESH_RESULT", { exact: true })).toHaveCount(0)
+  await page.getByRole("button", { name: "Show 1 new audit entry" }).click()
   await expect(page.getByRole("table").getByText("FRESH_RESULT", { exact: true })).toBeVisible()
 })
 

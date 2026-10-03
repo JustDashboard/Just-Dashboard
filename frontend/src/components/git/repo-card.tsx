@@ -191,7 +191,7 @@ export function RepoCard({
   }
 
   return (
-    <li className="min-w-0">
+    <li className="min-w-0" data-workspace-item={repo.path} data-workspace-name={repo.name}>
       {/* Each card lands a beat after the one before it, capped so a shelf
           of forty does not take two seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
@@ -210,6 +210,7 @@ export function RepoCard({
             {/* What it is, and how far it has drifted. */}
             <div className="flex min-w-0 items-center gap-2">
               <button
+                data-workspace-primary
                 type="button"
                 // The card's own handler already fires on the pointer; this one
                 // is for the keyboard and must not open the repository twice.

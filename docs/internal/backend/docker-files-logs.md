@@ -397,6 +397,11 @@ reads or response bytes.
 
 ## Logs
 
+The host Logs frontend records sources, modes, run handoffs and settled searches in browser history.
+Back/Forward restores the question and its in-memory record/following state; match controls and local
+read refresh operate in the current pane. [Workspace interactions](../frontend/workspace-interactions.md)
+defines identity, storage and keyboard rules; discovery, search and stream routes retain their guards.
+
 `logsx` + `handlers_logs.go` were three products wearing one page: the grep box and level chips applied
 to *file* tails only, `/logs/search` and `/logs/logrotate` had no caller, export ignored the filter, and
 rotated archives were unreachable — so "when did this start" could not be asked past last night's

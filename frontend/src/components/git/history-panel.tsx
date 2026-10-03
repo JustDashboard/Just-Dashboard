@@ -259,6 +259,7 @@ export function HistoryPanel({
       <div className="flex shrink-0 items-center gap-1.5 border-b border-hairline px-2 py-1.5">
         <SearchInput
           dense
+          data-workspace-search
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search commit messages…"

@@ -23,6 +23,7 @@
 
 export type Crosshair = {
   ts: number | null
+  pinned?: boolean
   /**
    * Which chart the pointer is actually in.
    *
@@ -73,6 +74,7 @@ export function getServerCrosshair(): Crosshair {
  * collapse into a single render instead of forty.
  */
 export function setCrosshair(ts: number | null, source: string | null = null) {
+  if (current.pinned) return
   if (current.ts === ts && current.source === source) {
     // Already showing this. Drop any queued update that would undo it.
     pending = null
@@ -106,6 +108,7 @@ function flushCrosshair() {
  * and there is no smoothness to preserve on the way out.
  */
 export function clearCrosshair() {
+  if (current.pinned) return
   pending = null
   if (frame !== 0 && typeof cancelAnimationFrame !== "undefined") {
     cancelAnimationFrame(frame)
@@ -113,5 +116,19 @@ export function clearCrosshair() {
   }
   if (current === EMPTY) return
   current = EMPTY
+  for (const listener of listeners) listener()
+}
+
+export function pinCrosshair(ts: number) {
+  pending = null
+  if (frame !== 0 && typeof cancelAnimationFrame !== "undefined") cancelAnimationFrame(frame)
+  frame = 0
+  current = { ts, source: null, pinned: true }
+  for (const listener of listeners) listener()
+}
+
+export function unpinCrosshair() {
+  current = EMPTY
+  clearCrosshair()
   for (const listener of listeners) listener()
 }

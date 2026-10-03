@@ -212,6 +212,8 @@ export function InstallPanel({
               return (
                 <li
                   key={result.name}
+                  data-workspace-item={result.name}
+                  data-workspace-name={result.name}
                   className={cn(
                     "group flex min-w-0 items-center gap-3 py-2.5 transition-colors hover:bg-row-hover",
                     ROW_BLEED,
@@ -221,6 +223,7 @@ export function InstallPanel({
                   <button
                     type="button"
                     onClick={() => onInspect(result.name)}
+                    data-workspace-primary
                     className="min-w-0 flex-1 space-y-0.5 text-left"
                   >
                     <span className="flex min-w-0 items-baseline gap-2">

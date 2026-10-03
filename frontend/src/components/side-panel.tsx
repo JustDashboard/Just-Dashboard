@@ -3,6 +3,7 @@
 import { createContext, useContext, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
+import { useWorkspaceFocus } from "@/components/workspace/workspace"
 import {
   Sheet,
   SheetContent,
@@ -88,12 +89,16 @@ export function SidePanel({
   children: React.ReactNode
 }) {
   const body = useRef<HTMLDivElement>(null)
+  const restoreFocus = useWorkspaceFocus()
   const [slot, setSlot] = useState<HTMLElement | null>(null)
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[width], className)}
+        onCloseAutoFocus={(event) => {
+          if (restoreFocus?.()) event.preventDefault()
+        }}
         onOpenAutoFocus={
           initialFocus === "body"
             ? (event) => {

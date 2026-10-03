@@ -2,6 +2,10 @@
 
 ## Git working copies
 
+The frontend keeps a commit-message draft per checkout for the tab, walks changed files with
+Alt+Up/Down, and returns focus to the selected file when Escape closes its preview. These read and
+navigation interactions are specified in [workspace interactions](../frontend/workspace-interactions.md).
+
 `internal/gitx` discovers repositories at most five levels below `JD_GIT_ROOTS`, skips generated and
 hidden trees, and stops descending once it finds `.git` — a `.git` *file* counts as much as a directory,
 because that is what a linked worktree and a submodule checkout carry. Summaries are read four at a time,
@@ -85,6 +89,10 @@ because `git stash` uses its own special pathspecs internally. Dashboard Git mut
 per checkout, with Git's native locks still protecting against terminal clients.
 
 ## Backups
+
+The job frontend selects runs through `?run=` and remembers archive selection per run. Shift ranges
+and keyboard selection operate on the rendered entries; review and restore still use the route
+contracts below. See [workspace interactions](../frontend/workspace-interactions.md).
 
 Backup sources and local targets pass through the configured file resolver on create/update and again
 before test/execution. Local artifacts are independently contained for inspection, restore and

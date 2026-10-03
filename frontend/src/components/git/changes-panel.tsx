@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useSessionState } from "@/lib/view-state"
 import {
   Archive,
   Check,
@@ -76,7 +77,7 @@ export function ChangesPanel({
   active?: string
   onChanged: () => void
 }) {
-  const [message, setMessage] = useState("")
+  const [message, setMessage] = useSessionState(`git.${repoPath}.commit.message`, "")
   const [amend, setAmend] = useState(false)
   const [identityOpen, setIdentityOpen] = useState(false)
   const q = { path: repoPath }
@@ -521,6 +522,8 @@ function FileRow({
       {/* No tooltip on the name: the row is a list of paths and clicking one
           to see its diff is the only thing it does. */}
       <button
+        data-workspace-item={`${side}:${file.path}`}
+        data-workspace-name={file.path}
         type="button"
         onClick={onClick}
         aria-pressed={active}

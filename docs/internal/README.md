@@ -63,6 +63,8 @@ strategy, and feature ownership behind those rules.
   the terminal workspace, renderer, shortcuts, clipboard, reconnect, and layout behavior.
 - [`frontend/feature-map.md`](frontend/feature-map.md) — every route area, its user-facing
   responsibility, component owner, and cross-feature handoffs.
+- [`frontend/workspace-interactions.md`](frontend/workspace-interactions.md) — page-owned keyboard commands,
+  history, focus/scroll restoration, held live lists and pinned metric moments.
 - [`frontend/data-theming.md`](frontend/data-theming.md) — API and WebSocket clients, polling, metrics state,
   confirmations, and self-update state.
 

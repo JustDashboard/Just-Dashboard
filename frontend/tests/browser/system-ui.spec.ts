@@ -1,5 +1,8 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 
+const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
+test.use({ video: recordWorkspace ? "on" : "off" })
+
 /**
  * The two System pages, System users and the audit log, checked in a browser
  * against a mocked host with enough people, daemons and history in it for
@@ -440,4 +443,65 @@ test.describe("on a phone", () => {
       })
     }
   })
+})
+
+test("workspace: audit filter history and incoming entries preserve the row being read", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let incoming = false
+  await page.route("**/api/v1/audit/**", (route) => {
+    const answer = audit(new URL(route.request().url()))
+    if (incoming) answer.entries.unshift({ ...trail[0], id: 9999, action: "new.entry" })
+    return json(route, answer)
+  })
+  await page.goto("/audit")
+  const rows = page.locator("[data-workspace-item]")
+  await expect(rows.first()).toBeVisible()
+  const first = await rows.first().getAttribute("data-workspace-item")
+  await rows.first().focus()
+  incoming = true
+  await page.keyboard.press("F5")
+  await expect(page.getByRole("button", { name: "Show 1 new audit entry" })).toBeVisible()
+  await expect(rows.first()).toHaveAttribute("data-workspace-item", first!)
+  await page.getByRole("button", { name: "Show 1 new audit entry" }).click()
+  await expect(page.locator('[data-workspace-item="9999"]:visible')).toBeVisible()
+  const action = page.getByPlaceholder("Action, e.g. docker.container")
+  await action.fill("docker.")
+  await expect(page).toHaveURL(/action=docker\./)
+  await action.fill("git.")
+  await expect(page).toHaveURL(/action=git\./)
+  await page.goBack()
+  await expect(action).toHaveValue("docker.")
+})
+
+test("workspace: mobile audit navigation respects input and sidebar focus", async ({
+  page,
+}, testInfo) => {
+  await mockHost(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await page.goto("/audit")
+  const rows = page.locator("[data-workspace-item]:visible")
+  await expect(rows.first()).toBeVisible()
+  await rows.first().focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(rows.nth(1)).toBeFocused()
+  if (recordWorkspace) {
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: testInfo.outputPath("audit-phone.png") })
+  }
+  await page.keyboard.press("?")
+  await expect(page.getByRole("dialog", { name: "Audit shortcuts" })).toBeVisible()
+  await expect(page.getByRole("dialog")).not.toContainText("Open item")
+  if (recordWorkspace) await page.waitForTimeout(700)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.keyboard.press("Control+f")
+  const action = page.getByPlaceholder("Action, e.g. docker.container")
+  await expect(action).toBeFocused()
+  await action.press("?")
+  await expect(action).toHaveValue("?")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
 })

@@ -30,6 +30,8 @@ import {
   packageProduct,
 } from "@/components/packages/marks"
 import { PackageSheet } from "@/components/packages/package-sheet"
+import { useQuerySelection } from "@/hooks/use-query-selection"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductGlyphs, platformProduct } from "@/components/product-logo"
@@ -108,7 +110,7 @@ export default function PackagesPage() {
   const [view, setView] = useViewState<View>("packages.tab", "installed")
   const [scope, setScope] = useViewState<Scope>("packages.scope", "explicit")
   const [bySize, setBySize] = useViewState("packages.by-size", false)
-  const [inspect, setInspect] = useState<string | null>(null)
+  const [inspect, setInspect] = useQuerySelection("package")
   const [applying, setApplying] = useState(false)
 
   const inventory = usePoll(
@@ -258,470 +260,494 @@ export default function PackagesPage() {
   const answered = Boolean(data) || Boolean(inventory.error)
 
   return (
-    <Page>
-      {dialog}
-      <PageContext eyebrow="Advanced" title="Packages" />
+    <Workspace
+      name="Packages"
+      refresh={() => {
+        inventory.refresh()
+        updates.refresh()
+      }}
+      escape={() => {
+        if (!filter) return false
+        setFilter("")
+        return true
+      }}
+    >
+      <Page>
+        {dialog}
+        <PageContext eyebrow="Advanced" title="Packages" actions={<WorkspaceHelp />} />
 
-      {/* What manages this host and how fresh the answer is, as the line the
+        {/* What manages this host and how fresh the answer is, as the line the
           Overview opens on: the distribution the manager belongs to as the
           mark, the manager beside its name, the index's age and the read as
           facts, and whether anything is owed as the verdict — with the
           index's verbs beside it, because they change what the line says. */}
-      {data?.available && (
-        <HostIdentity
-          className="animate-rise"
-          mark={platformProduct(host?.platform) ?? managerProduct(data.manager)}
-          fallback={Puzzle}
-          title={
-            <>
-              {host?.platform ? platformName(host) : data.manager}{" "}
-              {host?.platform && (
-                <span className="font-mono text-body font-normal text-muted-foreground">
-                  {data.manager}
-                </span>
-              )}
-            </>
-          }
-          facts={
-            <>
-              <span className="numeric font-medium text-foreground">
-                {data.packages.length.toLocaleString()} packages
-              </span>
-              {data.indexAge && (
-                <>
-                  <FactDot />
-                  <span className={cn(indexStale && "text-warning")}>
-                    index refreshed {relativeTime(data.indexAge)}
+        {data?.available && (
+          <HostIdentity
+            className="animate-rise"
+            mark={platformProduct(host?.platform) ?? managerProduct(data.manager)}
+            fallback={Puzzle}
+            title={
+              <>
+                {host?.platform ? platformName(host) : data.manager}{" "}
+                {host?.platform && (
+                  <span className="font-mono text-body font-normal text-muted-foreground">
+                    {data.manager}
                   </span>
-                </>
-              )}
-              <FactDot />
-              <span>read {relativeTime(data.readAt)}</span>
-            </>
-          }
-          aside={
-            <div className="flex max-w-full flex-wrap items-center gap-2">
-              <span className="mr-2 text-body">
-                {report?.rebootRequired ? (
-                  <Status verdict="warning" label="Reboot required" />
-                ) : securityCount > 0 ? (
-                  <Status
-                    verdict="warning"
-                    label={`${securityCount} security update${securityCount === 1 ? "" : "s"}`}
-                  />
-                ) : upgradeCount > 0 ? (
-                  <Status
-                    verdict="notice"
-                    label={`${upgradeCount} update${upgradeCount === 1 ? "" : "s"} waiting`}
-                  />
-                ) : (
-                  <Status verdict="ok" label="Up to date" />
                 )}
-              </span>
-              <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
-              {canRefresh && (
+              </>
+            }
+            facts={
+              <>
+                <span className="numeric font-medium text-foreground">
+                  {data.packages.length.toLocaleString()} packages
+                </span>
+                {data.indexAge && (
+                  <>
+                    <FactDot />
+                    <span className={cn(indexStale && "text-warning")}>
+                      index refreshed {relativeTime(data.indexAge)}
+                    </span>
+                  </>
+                )}
+                <FactDot />
+                <span>read {relativeTime(data.readAt)}</span>
+              </>
+            }
+            aside={
+              <div className="flex max-w-full flex-wrap items-center gap-2">
+                <span className="mr-2 text-body">
+                  {report?.rebootRequired ? (
+                    <Status verdict="warning" label="Reboot required" />
+                  ) : securityCount > 0 ? (
+                    <Status
+                      verdict="warning"
+                      label={`${securityCount} security update${securityCount === 1 ? "" : "s"}`}
+                    />
+                  ) : upgradeCount > 0 ? (
+                    <Status
+                      verdict="notice"
+                      label={`${upgradeCount} update${upgradeCount === 1 ? "" : "s"} waiting`}
+                    />
+                  ) : (
+                    <Status verdict="ok" label="Up to date" />
+                  )}
+                </span>
+                <RecentJobs kinds={["updates.", "packages."]} onOpen={console_.open} />
+                {canRefresh && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={applying}
+                    onClick={() => void refreshIndex()}
+                  >
+                    <CloudDownload className="size-4" />
+                    Refresh index
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
+                  disabled={applying}
+                  onClick={() => {
+                    inventory.refresh()
+                    updates.refresh()
+                  }}
+                >
+                  <RefreshClockwise className="size-4" />
+                  Re-read
+                </Button>
+              </div>
+            }
+          />
+        )}
+
+        <StatGrid columns={4}>
+          <StatTile
+            label="Installed"
+            value={
+              <Figure settled={answered}>
+                {data?.available ? <NumberTicker value={data.packages.length} /> : "—"}
+              </Figure>
+            }
+            hint={
+              data?.available
+                ? knowsExplicit
+                  ? `${(data.packages.length - data.explicitCount).toLocaleString()} arrived as dependencies`
+                  : undefined
+                : data
+                  ? "no supported package manager"
+                  : undefined
+            }
+          />
+          <StatTile
+            label="Installed by hand"
+            value={
+              <Figure settled={answered}>
+                {knowsExplicit ? <NumberTicker value={data!.explicitCount} /> : "—"}
+              </Figure>
+            }
+            hint={
+              knowsExplicit ? (
+                <ProductsHint products={products.explicit}>asked for, not pulled in</ProductsHint>
+              ) : data?.available ? (
+                `${data.manager} does not record this`
+              ) : undefined
+            }
+          />
+          <StatTile
+            label="Updates"
+            value={
+              <Figure settled={answered}>
+                {data?.available ? <NumberTicker value={upgradeCount} /> : "—"}
+              </Figure>
+            }
+            tone={
+              securityCount > 0
+                ? "warning"
+                : upgradeCount > 0
+                  ? "default"
+                  : data?.available
+                    ? "success"
+                    : "default"
+            }
+            hint={
+              data?.available ? (
+                <ProductsHint products={products.behind}>
+                  {securityCount > 0
+                    ? `${securityCount} security`
+                    : upgradeCount > 0
+                      ? report?.securityFiltering
+                        ? "none are security updates"
+                        : `${data.manager} publishes no advisory data`
+                      : "everything is current"}
+                </ProductsHint>
+              ) : undefined
+            }
+          />
+          <StatTile
+            label="On disk"
+            value={
+              <Figure settled={answered}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
+            }
+            hint={
+              largest?.size
+                ? `${largest.name} is the largest at ${bytes(largest.size)}`
+                : data?.available
+                  ? "what the installed packages occupy"
+                  : undefined
+            }
+          />
+        </StatGrid>
+
+        {/* The decision. Security updates are the reason to be on this page in a
+          hurry, and the button to act is here rather than three tabs in. */}
+        {canUpgrade && securityWaiting && (
+          <Notice
+            tone="warning"
+            icon={ShieldOff}
+            title={`${report!.securityCount} security update${report!.securityCount === 1 ? "" : "s"} waiting`}
+          >
+            Installing only these leaves everything else at the version it is on now. Services whose
+            packages change are restarted.
+            <div className="pt-2">
+              <Button size="sm" disabled={applying} onClick={() => upgrade(true)}>
+                <ShieldOff className="size-4" />
+                Install security updates
+              </Button>
+            </div>
+          </Notice>
+        )}
+
+        {report?.rebootRequired && (
+          <Notice tone="warning" icon={RotateCounterClockwise} title="This server needs a reboot">
+            An installed update cannot take effect until the machine restarts
+            {report.rebootPackages?.length
+              ? `: ${report.rebootPackages.slice(0, 6).join(", ")}`
+              : ""}
+            . Reboot from the Terminal when it suits you — the dashboard will not do it for you.
+          </Notice>
+        )}
+
+        {indexStale && (
+          <Notice tone="warning" icon={CloudDownload} title="The package index is out of date">
+            This host last fetched its repository list {relativeTime(data!.indexAge)}, and
+            everything on this page — what is available, what is behind — is read from it. Refresh
+            it to search against what the repositories actually carry now.
+            {canRefresh && (
+              <div className="pt-2">
+                <Button
+                  size="sm"
+                  variant="outline"
                   disabled={applying}
                   onClick={() => void refreshIndex()}
                 >
                   <CloudDownload className="size-4" />
                   Refresh index
                 </Button>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={applying}
-                onClick={() => {
-                  inventory.refresh()
-                  updates.refresh()
-                }}
-              >
-                <RefreshClockwise className="size-4" />
-                Re-read
-              </Button>
-            </div>
-          }
+              </div>
+            )}
+          </Notice>
+        )}
+
+        <JobConsole
+          job={console_.job}
+          lines={console_.lines}
+          onDismiss={console_.dismiss}
+          onCancel={console_.cancel}
         />
-      )}
 
-      <StatGrid columns={4}>
-        <StatTile
-          label="Installed"
-          value={
-            <Figure settled={answered}>
-              {data?.available ? <NumberTicker value={data.packages.length} /> : "—"}
-            </Figure>
-          }
-          hint={
-            data?.available
-              ? knowsExplicit
-                ? `${(data.packages.length - data.explicitCount).toLocaleString()} arrived as dependencies`
-                : undefined
-              : data
-                ? "no supported package manager"
-                : undefined
-          }
-        />
-        <StatTile
-          label="Installed by hand"
-          value={
-            <Figure settled={answered}>
-              {knowsExplicit ? <NumberTicker value={data!.explicitCount} /> : "—"}
-            </Figure>
-          }
-          hint={
-            knowsExplicit ? (
-              <ProductsHint products={products.explicit}>asked for, not pulled in</ProductsHint>
-            ) : data?.available ? (
-              `${data.manager} does not record this`
-            ) : undefined
-          }
-        />
-        <StatTile
-          label="Updates"
-          value={
-            <Figure settled={answered}>
-              {data?.available ? <NumberTicker value={upgradeCount} /> : "—"}
-            </Figure>
-          }
-          tone={
-            securityCount > 0
-              ? "warning"
-              : upgradeCount > 0
-                ? "default"
-                : data?.available
-                  ? "success"
-                  : "default"
-          }
-          hint={
-            data?.available ? (
-              <ProductsHint products={products.behind}>
-                {securityCount > 0
-                  ? `${securityCount} security`
-                  : upgradeCount > 0
-                    ? report?.securityFiltering
-                      ? "none are security updates"
-                      : `${data.manager} publishes no advisory data`
-                    : "everything is current"}
-              </ProductsHint>
-            ) : undefined
-          }
-        />
-        <StatTile
-          label="On disk"
-          value={
-            <Figure settled={answered}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
-          }
-          hint={
-            largest?.size
-              ? `${largest.name} is the largest at ${bytes(largest.size)}`
-              : data?.available
-                ? "what the installed packages occupy"
-                : undefined
-          }
-        />
-      </StatGrid>
-
-      {/* The decision. Security updates are the reason to be on this page in a
-          hurry, and the button to act is here rather than three tabs in. */}
-      {canUpgrade && securityWaiting && (
-        <Notice
-          tone="warning"
-          icon={ShieldOff}
-          title={`${report!.securityCount} security update${report!.securityCount === 1 ? "" : "s"} waiting`}
-        >
-          Installing only these leaves everything else at the version it is on now. Services whose
-          packages change are restarted.
-          <div className="pt-2">
-            <Button size="sm" disabled={applying} onClick={() => upgrade(true)}>
-              <ShieldOff className="size-4" />
-              Install security updates
-            </Button>
-          </div>
-        </Notice>
-      )}
-
-      {report?.rebootRequired && (
-        <Notice tone="warning" icon={RotateCounterClockwise} title="This server needs a reboot">
-          An installed update cannot take effect until the machine restarts
-          {report.rebootPackages?.length ? `: ${report.rebootPackages.slice(0, 6).join(", ")}` : ""}
-          . Reboot from the Terminal when it suits you — the dashboard will not do it for you.
-        </Notice>
-      )}
-
-      {indexStale && (
-        <Notice tone="warning" icon={CloudDownload} title="The package index is out of date">
-          This host last fetched its repository list {relativeTime(data!.indexAge)}, and everything
-          on this page — what is available, what is behind — is read from it. Refresh it to search
-          against what the repositories actually carry now.
-          {canRefresh && (
-            <div className="pt-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={applying}
-                onClick={() => void refreshIndex()}
-              >
-                <CloudDownload className="size-4" />
-                Refresh index
-              </Button>
-            </div>
-          )}
-        </Notice>
-      )}
-
-      <JobConsole
-        job={console_.job}
-        lines={console_.lines}
-        onDismiss={console_.dismiss}
-        onCancel={console_.cancel}
-      />
-
-      {inventory.error && <ErrorState error={inventory.error} />}
-      {/* A package database that cannot be read is usually a transaction
+        {inventory.error && <ErrorState error={inventory.error} />}
+        {/* A package database that cannot be read is usually a transaction
           that did not finish, and apt's own log is where it says why — so
           the log stays on the page when the views it sits among cannot. */}
-      {inventory.error && !data && (
-        <Panel plain>
-          <PanelHeader title="Package log" />
-          <PanelBody flush className="pt-3">
-            <PackageLogView product={platformProduct(host?.platform)} />
-          </PanelBody>
-        </Panel>
-      )}
-      {inventory.loading && !data && <LoadingPanel />}
+        {inventory.error && !data && (
+          <Panel plain>
+            <PanelHeader title="Package log" />
+            <PanelBody flush className="pt-3">
+              <PackageLogView product={platformProduct(host?.platform)} />
+            </PanelBody>
+          </Panel>
+        )}
+        {inventory.loading && !data && <LoadingPanel />}
 
-      {data && !data.available && (
-        <EmptyState
-          icon={Puzzle}
-          title="No supported package manager"
-          description="This host does not appear to use apt, dnf, yum, zypper, pacman or apk, so there is nothing here to list, add or remove."
-        />
-      )}
+        {data && !data.available && (
+          <EmptyState
+            icon={Puzzle}
+            title="No supported package manager"
+            description="This host does not appear to use apt, dnf, yum, zypper, pacman or apk, so there is nothing here to list, add or remove."
+          />
+        )}
 
-      {data?.available && data.error && (
-        <Notice tone="warning" icon={ShieldOff} title="Could not read the package database">
-          <span className="font-mono text-xs">{data.error}</span>
-        </Notice>
-      )}
+        {data?.available && data.error && (
+          <Notice tone="warning" icon={ShieldOff} title="Could not read the package database">
+            <span className="font-mono text-xs">{data.error}</span>
+          </Notice>
+        )}
 
-      {data?.available && (
-        <div className="flex min-w-0 animate-rise flex-col gap-4">
-          {/* The same underlined strip every switcher in the product wears:
+        {data?.available && (
+          <div className="flex min-w-0 animate-rise flex-col gap-4">
+            {/* The same underlined strip every switcher in the product wears:
               the brand underline says where you are, and the label stays
               ink. The pill-shaped tab list it replaces was a control with a
               face on a page that had just stopped drawing boxes. */}
-          <nav
-            aria-label="Package views"
-            className="flex gap-1 overflow-x-auto border-b border-hairline"
-          >
-            {VIEWS.map((entry) => (
-              <button
-                key={entry.key}
-                type="button"
-                aria-pressed={view === entry.key}
-                onClick={() => setView(entry.key)}
-                className={tabClasses(view === entry.key, "h-10")}
-              >
-                {entry.label}
-                {entry.key === "updates" && upgradeCount > 0 && (
-                  <span
-                    className={cn(
-                      "numeric text-hint font-medium",
-                      securityCount > 0 ? "text-warning" : "text-muted-foreground",
-                    )}
-                  >
-                    {upgradeCount}
-                  </span>
-                )}
-              </button>
-            ))}
-          </nav>
-
-          {view === "installed" && (
-            <Panel>
-              <PanelToolbar>
-                <SearchInput
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Name, description or section"
-                  containerClassName="sm:w-72"
-                />
-                <div className="flex min-w-0 flex-wrap items-center gap-1">
-                  {knowsExplicit && (
-                    <FilterChip
-                      selected={effectiveScope === "explicit"}
-                      onClick={() => setScope("explicit")}
-                    >
-                      Installed by hand <ChipCount>{data.explicitCount}</ChipCount>
-                    </FilterChip>
-                  )}
-                  <FilterChip selected={effectiveScope === "all"} onClick={() => setScope("all")}>
-                    Everything <ChipCount>{data.packages.length}</ChipCount>
-                  </FilterChip>
-                  <FilterChip
-                    selected={effectiveScope === "upgradable"}
-                    onClick={() => setScope("upgradable")}
-                  >
-                    Behind <ChipCount>{upgradeCount}</ChipCount>
-                  </FilterChip>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="ml-auto text-muted-foreground"
-                  aria-pressed={bySize}
-                  onClick={() => setBySize((v) => !v)}
+            <nav
+              aria-label="Package views"
+              className="flex gap-1 overflow-x-auto border-b border-hairline"
+            >
+              {VIEWS.map((entry) => (
+                <button
+                  key={entry.key}
+                  type="button"
+                  aria-pressed={view === entry.key}
+                  onClick={() => setView(entry.key)}
+                  className={tabClasses(view === entry.key, "h-10")}
                 >
-                  {bySize ? "Largest first" : "By name"}
-                </Button>
-              </PanelToolbar>
-              <PanelBody flush>
-                {visible.length === 0 ? (
-                  <EmptyState
-                    icon={Puzzle}
-                    className="mt-4"
-                    title={
-                      effectiveScope === "upgradable" && !filter
-                        ? "Everything is up to date"
-                        : "Nothing matches that"
-                    }
-                    description={
-                      effectiveScope === "upgradable" && !filter
-                        ? report?.securityFiltering === false
-                          ? `${data.manager} publishes no advisory data, so a clean list here means only that nothing at all is pending.`
-                          : "No installed package has a newer version waiting."
-                        : "Try a shorter word, or switch the filter to Everything — most of what is installed arrived as a dependency."
-                    }
+                  {entry.label}
+                  {entry.key === "updates" && upgradeCount > 0 && (
+                    <span
+                      className={cn(
+                        "numeric text-hint font-medium",
+                        securityCount > 0 ? "text-warning" : "text-muted-foreground",
+                      )}
+                    >
+                      {upgradeCount}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </nav>
+
+            {view === "installed" && (
+              <Panel>
+                <PanelToolbar>
+                  <SearchInput
+                    value={filter}
+                    onChange={(e) => setFilter(e.target.value)}
+                    placeholder="Name, description or section"
+                    containerClassName="sm:w-72"
                   />
-                ) : (
-                  <div className="min-w-0 group-data-[plain]/panel:-mx-4">
-                    <PackageTable packages={visible.slice(0, MAX_ROWS)} onInspect={setInspect} />
+                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                    {knowsExplicit && (
+                      <FilterChip
+                        selected={effectiveScope === "explicit"}
+                        onClick={() => setScope("explicit")}
+                      >
+                        Installed by hand <ChipCount>{data.explicitCount}</ChipCount>
+                      </FilterChip>
+                    )}
+                    <FilterChip selected={effectiveScope === "all"} onClick={() => setScope("all")}>
+                      Everything <ChipCount>{data.packages.length}</ChipCount>
+                    </FilterChip>
+                    <FilterChip
+                      selected={effectiveScope === "upgradable"}
+                      onClick={() => setScope("upgradable")}
+                    >
+                      Behind <ChipCount>{upgradeCount}</ChipCount>
+                    </FilterChip>
                   </div>
-                )}
-              </PanelBody>
-              {visible.length > MAX_ROWS && (
-                <PanelFooter className="justify-center">
-                  {/* Rendering two thousand rows makes the tab unusable long
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto text-muted-foreground"
+                    aria-pressed={bySize}
+                    onClick={() => setBySize((v) => !v)}
+                  >
+                    {bySize ? "Largest first" : "By name"}
+                  </Button>
+                </PanelToolbar>
+                <PanelBody flush>
+                  {visible.length === 0 ? (
+                    <EmptyState
+                      icon={Puzzle}
+                      className="mt-4"
+                      title={
+                        effectiveScope === "upgradable" && !filter
+                          ? "Everything is up to date"
+                          : "Nothing matches that"
+                      }
+                      description={
+                        effectiveScope === "upgradable" && !filter
+                          ? report?.securityFiltering === false
+                            ? `${data.manager} publishes no advisory data, so a clean list here means only that nothing at all is pending.`
+                            : "No installed package has a newer version waiting."
+                          : "Try a shorter word, or switch the filter to Everything — most of what is installed arrived as a dependency."
+                      }
+                    />
+                  ) : (
+                    <div className="min-w-0 group-data-[plain]/panel:-mx-4">
+                      <PackageTable packages={visible.slice(0, MAX_ROWS)} onInspect={setInspect} />
+                    </div>
+                  )}
+                </PanelBody>
+                {visible.length > MAX_ROWS && (
+                  <PanelFooter className="justify-center">
+                    {/* Rendering two thousand rows makes the tab unusable long
                       before it runs out of memory, and a list that long is not
                       read — it is searched. */}
-                  <p className="text-xs text-muted-foreground">
-                    Showing the first {MAX_ROWS} of {visible.length.toLocaleString()} — narrow the
-                    filter to see the rest.
+                    <p className="text-xs text-muted-foreground">
+                      Showing the first {MAX_ROWS} of {visible.length.toLocaleString()} — narrow the
+                      filter to see the rest.
+                    </p>
+                  </PanelFooter>
+                )}
+              </Panel>
+            )}
+
+            {view === "updates" && (
+              <Panel>
+                <PanelToolbar className="min-h-12">
+                  <p className="text-body text-muted-foreground">
+                    {!report
+                      ? "Reading what is behind…"
+                      : report.packages.length === 0
+                        ? "Nothing is waiting to be upgraded"
+                        : `${report.packages.length} package${report.packages.length === 1 ? "" : "s"} behind${
+                            report.securityFiltering ? ` · ${report.securityCount} security` : ""
+                          }`}
                   </p>
-                </PanelFooter>
-              )}
-            </Panel>
-          )}
-
-          {view === "updates" && (
-            <Panel>
-              <PanelToolbar className="min-h-12">
-                <p className="text-body text-muted-foreground">
-                  {!report
-                    ? "Reading what is behind…"
-                    : report.packages.length === 0
-                      ? "Nothing is waiting to be upgraded"
-                      : `${report.packages.length} package${report.packages.length === 1 ? "" : "s"} behind${
-                          report.securityFiltering ? ` · ${report.securityCount} security` : ""
-                        }`}
-                </p>
-                {canUpgrade && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="ml-auto"
-                    disabled={applying}
-                    onClick={() => upgrade(false)}
-                  >
-                    <ArrowCircleUp className="size-4" />
-                    Upgrade all {report?.packages.length ?? upgradeCount}
-                  </Button>
-                )}
-              </PanelToolbar>
-              <PanelBody flush>
-                {updates.loading && !report ? (
-                  <LoadingPanel className="mt-4" />
-                ) : !report || report.packages.length === 0 ? (
-                  <EmptyState
-                    icon={Puzzle}
-                    className="mt-4"
-                    title="Everything is up to date"
-                    description={
-                      report?.securityFiltering
-                        ? "No packages are waiting to be upgraded."
-                        : `${data.manager} publishes no advisory data, so a clean list here means only that nothing at all is pending.`
-                    }
-                  />
-                ) : (
-                  <div className="min-w-0 group-data-[plain]/panel:-mx-4">
-                    <Table containerClassName="max-h-[calc(100svh-30rem)]">
-                      <TableHeader className={stickyTableHeader}>
-                        <TableRow>
-                          <TableHead>Package</TableHead>
-                          <TableHead>Installed</TableHead>
-                          <TableHead>Available</TableHead>
-                          <TableHead className="hidden w-full md:table-cell">Origin</TableHead>
-                          <TableHead className="w-px" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {report.packages.map((p) => (
-                          <TableRow key={p.name} onActivate={() => setInspect(p.name)}>
-                            <TableCell>
-                              <PackageName
-                                name={p.name}
-                                section={sections.get(p.name)}
-                                onInspect={setInspect}
-                              />
-                            </TableCell>
-                            <TableCell className="font-mono text-muted-foreground">
-                              {p.current || "—"}
-                            </TableCell>
-                            <TableCell>
-                              <VersionTo from={p.current} to={p.candidate} security={p.security} />
-                            </TableCell>
-                            <TableCell className="hidden md:table-cell">
-                              <OriginFact
-                                origin={p.origin}
-                                className="max-w-[18rem] text-hint text-muted-foreground"
-                              />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {p.security && <Tag tone="warning">security</Tag>}
-                            </TableCell>
+                  {canUpgrade && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-auto"
+                      disabled={applying}
+                      onClick={() => upgrade(false)}
+                    >
+                      <ArrowCircleUp className="size-4" />
+                      Upgrade all {report?.packages.length ?? upgradeCount}
+                    </Button>
+                  )}
+                </PanelToolbar>
+                <PanelBody flush>
+                  {updates.loading && !report ? (
+                    <LoadingPanel className="mt-4" />
+                  ) : !report || report.packages.length === 0 ? (
+                    <EmptyState
+                      icon={Puzzle}
+                      className="mt-4"
+                      title="Everything is up to date"
+                      description={
+                        report?.securityFiltering
+                          ? "No packages are waiting to be upgraded."
+                          : `${data.manager} publishes no advisory data, so a clean list here means only that nothing at all is pending.`
+                      }
+                    />
+                  ) : (
+                    <div className="min-w-0 group-data-[plain]/panel:-mx-4">
+                      <Table containerClassName="max-h-[calc(100svh-30rem)]">
+                        <TableHeader className={stickyTableHeader}>
+                          <TableRow>
+                            <TableHead>Package</TableHead>
+                            <TableHead>Installed</TableHead>
+                            <TableHead>Available</TableHead>
+                            <TableHead className="hidden w-full md:table-cell">Origin</TableHead>
+                            <TableHead className="w-px" />
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </PanelBody>
-            </Panel>
-          )}
+                        </TableHeader>
+                        <TableBody>
+                          {report.packages.map((p) => (
+                            <TableRow
+                              key={p.name}
+                              data-workspace-item={p.name}
+                              data-workspace-name={p.name}
+                              onActivate={() => setInspect(p.name)}
+                            >
+                              <TableCell>
+                                <PackageName
+                                  name={p.name}
+                                  section={sections.get(p.name)}
+                                  onInspect={setInspect}
+                                />
+                              </TableCell>
+                              <TableCell className="font-mono text-muted-foreground">
+                                {p.current || "—"}
+                              </TableCell>
+                              <TableCell>
+                                <VersionTo
+                                  from={p.current}
+                                  to={p.candidate}
+                                  security={p.security}
+                                />
+                              </TableCell>
+                              <TableCell className="hidden md:table-cell">
+                                <OriginFact
+                                  origin={p.origin}
+                                  className="max-w-[18rem] text-hint text-muted-foreground"
+                                />
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {p.security && <Tag tone="warning">security</Tag>}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </PanelBody>
+              </Panel>
+            )}
 
-          {view === "install" && (
-            <InstallPanel manager={data.manager} onJob={console_.attach} onInspect={setInspect} />
-          )}
+            {view === "install" && (
+              <InstallPanel manager={data.manager} onJob={console_.attach} onInspect={setInspect} />
+            )}
 
-          {view === "log" && (
-            <PackageLogView
-              product={platformProduct(host?.platform) ?? managerProduct(data.manager)}
-            />
-          )}
-        </div>
-      )}
+            {view === "log" && (
+              <PackageLogView
+                product={platformProduct(host?.platform) ?? managerProduct(data.manager)}
+              />
+            )}
+          </div>
+        )}
 
-      <PackageSheet
-        name={inspect}
-        canPurge={Boolean(data?.canPurge)}
-        onOpenChange={(open) => !open && setInspect(null)}
-        onJob={console_.attach}
-      />
-    </Page>
+        <PackageSheet
+          name={inspect}
+          canPurge={Boolean(data?.canPurge)}
+          onOpenChange={(open) => !open && setInspect(null)}
+          onJob={console_.attach}
+        />
+      </Page>
+    </Workspace>
   )
 }
 
@@ -792,7 +818,12 @@ function PackageTable({
       </TableHeader>
       <TableBody>
         {packages.map((p) => (
-          <TableRow key={p.name} onActivate={() => onInspect(p.name)}>
+          <TableRow
+            key={p.name}
+            data-workspace-item={p.name}
+            data-workspace-name={p.name}
+            onActivate={() => onInspect(p.name)}
+          >
             <TableCell>
               <PackageName name={p.name} section={p.section} onInspect={onInspect} />
             </TableCell>

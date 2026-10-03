@@ -297,6 +297,7 @@ export function FlowActions({
  * reading is the other half of why the chooser read as a listing.
  */
 export function ChoiceRow({
+  workspaceItem,
   leading,
   title,
   verb,
@@ -311,6 +312,7 @@ export function ChoiceRow({
   children,
   className,
 }: {
+  workspaceItem?: { id: string; name: string }
   leading?: React.ReactNode
   title: React.ReactNode
   /** The accessible name of the title control — "Import Wayy01/api". */
@@ -376,6 +378,8 @@ export function ChoiceRow({
           <span className="block max-w-full min-w-0 truncate text-body font-medium">{title}</span>
         ) : href ? (
           <Link
+            data-workspace-item={workspaceItem?.id}
+            data-workspace-name={workspaceItem?.name}
             href={href}
             aria-label={verb}
             onClick={(event) => event.stopPropagation()}
@@ -385,6 +389,8 @@ export function ChoiceRow({
           </Link>
         ) : (
           <button
+            data-workspace-item={workspaceItem?.id}
+            data-workspace-name={workspaceItem?.name}
             type="button"
             aria-label={verb}
             // The row's own handler already fires on the pointer; this one
@@ -523,7 +529,9 @@ export function GroupRule({
         <span className="numeric shrink-0 text-micro text-muted-foreground">{count}</span>
       )}
       {detail && (
-        <span className="min-w-0 truncate font-mono text-micro text-muted-foreground">{detail}</span>
+        <span className="min-w-0 truncate font-mono text-micro text-muted-foreground">
+          {detail}
+        </span>
       )}
       <span aria-hidden className="h-px min-w-0 flex-1 bg-hairline" />
     </div>

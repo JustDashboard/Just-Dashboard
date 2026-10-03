@@ -980,3 +980,66 @@ for (const width of [1280, 1720]) {
     }
   })
 }
+
+test("workspace: process focus holds row order and paused searches remain usable", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await page.goto("/processes")
+  const rows = page.locator("[data-workspace-item]")
+  await expect(rows.first()).toBeVisible()
+  await rows.first().focus()
+  await expect(page.getByText("Row order held while inspecting")).toBeVisible()
+  await page.keyboard.press("ArrowDown")
+  await expect(rows.nth(1)).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Pause updates", exact: true }).click()
+  await expect(page.getByText("Updates paused", { exact: true })).toBeVisible()
+  await page.keyboard.press("Control+f")
+  await expect(page.locator("[data-page-search]")).toBeFocused()
+  await page.locator("[data-page-search]").fill("node")
+  await expect(rows.first()).toBeVisible()
+  await page.getByRole("button", { name: "Resume updates", exact: true }).click()
+  await expect(page.getByText("Updates paused", { exact: true })).toHaveCount(0)
+})
+
+test("workspace: changing process rankings keep focused rows steady and Pause stops polling", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await mockHost(page)
+  let reads = 0
+  let reordered = false
+  await page.route("**/api/v1/processes/inventory*", (route) => {
+    reads++
+    return json(route, {
+      ...inventory,
+      processes: reordered ? [...inventory.processes].reverse() : inventory.processes,
+    })
+  })
+  await page.goto("/processes")
+  const rows = page.locator("[data-workspace-item]:visible")
+  await expect(rows.first()).toBeVisible()
+  const before = await rows.evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute("data-workspace-item")),
+  )
+  await rows.first().focus()
+  reordered = true
+  const initialReads = reads
+  await page.clock.fastForward(5000)
+  await expect.poll(() => reads).toBeGreaterThan(initialReads)
+  await expect
+    .poll(() =>
+      rows.evaluateAll((rows) => rows.map((row) => row.getAttribute("data-workspace-item"))),
+    )
+    .toEqual(before)
+  await page.getByRole("button", { name: "Pause updates", exact: true }).click()
+  await page.clock.fastForward(1000)
+  const pausedReads = reads
+  await page.clock.fastForward(30000)
+  expect(reads).toBe(pausedReads)
+  await page.keyboard.press("F5")
+  await expect.poll(() => reads).toBeGreaterThan(pausedReads)
+})

@@ -8,6 +8,7 @@ import { unusableReason } from "@/lib/db-connections"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
+import { useWorkspaceCommands } from "@/components/workspace/commands"
 import type {
   Capability,
   DbConnection,
@@ -114,6 +115,7 @@ function pagesUnder(
 }
 
 function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const { current: workspace } = useWorkspaceCommands()
   const router = useRouter()
   const { can, logout } = useAuth()
   // Projects are the one destination the nav cannot list ahead of time. Read
@@ -194,6 +196,27 @@ function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: bool
         <CommandInput placeholder="Jump to a page…" />
         <CommandList className="max-h-[60svh]">
           <CommandEmpty>Nothing matches.</CommandEmpty>
+
+          {workspace && (
+            <CommandGroup heading={`This page · ${workspace.name}`}>
+              {workspace.commands
+                .filter((command) => !command.disabled)
+                .map((command) => (
+                  <CommandItem
+                    key={command.id}
+                    value={`page ${workspace.name} ${command.label}`}
+                    onSelect={() =>
+                      run(() => requestAnimationFrame(() => requestAnimationFrame(command.run)))
+                    }
+                  >
+                    {command.label}
+                    {command.keys && (
+                      <kbd className="ml-auto text-hint text-muted-foreground">{command.keys}</kbd>
+                    )}
+                  </CommandItem>
+                ))}
+            </CommandGroup>
+          )}
 
           {NAV.map((group) => {
             const pages = group.items.flatMap((item) => pagesUnder(item, can))

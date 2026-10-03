@@ -57,7 +57,7 @@ test("every source and every configure step fits the window without the page scr
   await page.goto("/deploy/new")
   const overflow = () =>
     page.locator("[data-slot='page']").evaluate((element) => {
-      const shell = element.parentElement!
+      const shell = element.closest<HTMLElement>("[data-workspace-shell-scroll]")!
       return {
         down: shell.scrollHeight - shell.clientHeight,
         across: shell.scrollWidth - shell.clientWidth,
@@ -1628,4 +1628,30 @@ test("the public address can ask visitors for a password before the first deploy
       protection: { username: "client", hash: "fixture-sealed-password" },
     },
   ])
+})
+
+test("workspace: deployment Back and Forward restore each step and its in-progress fields", async ({
+  page,
+}) => {
+  await mockNewProject(page)
+  await page.goto("/deploy/new")
+  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await gotoStep(page, "project")
+  await page.getByRole("textbox", { name: "Project name" }).fill("history-site")
+  await gotoStep(page, "runtime")
+  await expect(page).toHaveURL(/step=runtime/)
+  const port = page.getByRole("spinbutton", { name: "Port the app listens on" })
+  await port.fill("4088")
+  await gotoStep(page, "variables")
+  await expect(page).toHaveURL(/step=variables/)
+  await page.goBack()
+  await expect(page).toHaveURL(/step=runtime/)
+  await expect(page.getByRole("heading", { name: "How should it run?" })).toBeVisible()
+  await expect(port).toHaveValue("4088")
+  await expect(port).toBeFocused()
+  await page.goForward()
+  await expect(page).toHaveURL(/step=variables/)
+  await gotoStep(page, "project")
+  await expect(page.getByRole("textbox", { name: "Project name" })).toHaveValue("history-site")
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
 })

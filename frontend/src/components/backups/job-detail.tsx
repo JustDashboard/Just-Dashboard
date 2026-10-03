@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
@@ -64,6 +64,9 @@ import {
 import { retentionLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
 import { useJobVerbs } from "@/components/backups/job-verbs"
 import { JobDialog } from "@/components/backups/job-form"
+import { useQuerySelection } from "@/hooks/use-query-selection"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { rangeSelection } from "@/components/workspace/selection"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
 
@@ -85,7 +88,9 @@ export function JobPage() {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<BackupJob | null>(null)
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedRun, selectRun] = useQuerySelection("run")
+  const selectedId = selectedRun && /^\d+$/.test(selectedRun) ? Number(selectedRun) : null
+  const setSelectedId = (id: number | null) => selectRun(id === null ? null : String(id))
   const [restore, setRestore] = useState<{ run: BackupRun; paths: string[] } | null>(null)
   const [restoreDatabase, setRestoreDatabase] = useState<BackupRun | null>(null)
   const [browsing, setBrowsing] = useState<BackupRun | null>(null)
@@ -155,7 +160,7 @@ export function JobPage() {
       icon: FolderOpen,
       run: () => {
         setSelectedId(run.id)
-        setBrowsing(run)
+        setBrowsing({ ...run })
       },
     })
     if (can("destructive")) {
@@ -195,7 +200,19 @@ export function JobPage() {
   }
 
   return (
-    <>
+    <Workspace
+      name="Backups"
+      stateKey={`backups.${jobId}`}
+      refresh={() => {
+        jobPoll.refresh()
+        runs.refresh()
+      }}
+      escape={() => {
+        if (selectedId === null) return false
+        setSelectedId(null)
+        return true
+      }}
+    >
       <Page>
         <PageContext
           eyebrow={
@@ -212,6 +229,7 @@ export function JobPage() {
               <>
                 {!job.enabled && <Tag>paused</Tag>}
                 <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />
+                <WorkspaceHelp />
               </>
             )
           }
@@ -324,6 +342,8 @@ export function JobPage() {
                     <TableBody>
                       {runs.data?.runs.map((run) => (
                         <TableRow
+                          data-workspace-item={`run:${run.id}`}
+                          data-workspace-name={`Run ${run.id}`}
                           key={run.id}
                           data-state={run.id === selectedId ? "selected" : undefined}
                           onActivate={() => setSelectedId(run.id)}
@@ -367,7 +387,7 @@ export function JobPage() {
               <RunDetail
                 key={selected.id}
                 run={selected}
-                browsing={browsing?.id === selected.id}
+                browsing={browsing}
                 onRestorePaths={(paths) => setRestore({ run: selected, paths })}
                 canRestore={can("destructive") && selected.status === "success"}
               />
@@ -402,7 +422,7 @@ export function JobPage() {
           onDone={runs.refresh}
         />
       )}
-    </>
+    </Workspace>
   )
 }
 
@@ -414,11 +434,14 @@ function RunDetail({
   onRestorePaths,
 }: {
   run: BackupRun
-  browsing: boolean
+  browsing: BackupRun | null
   canRestore: boolean
   onRestorePaths: (paths: string[]) => void
 }) {
-  const [showFiles, setShowFiles] = useSessionState(`backups.run.${run.id}.files.open`, browsing)
+  const [showFiles, setShowFiles] = useSessionState(`backups.run.${run.id}.files.open`, false)
+  useEffect(() => {
+    if (browsing?.id === run.id) setShowFiles(true)
+  }, [browsing, run.id, setShowFiles])
   const verification = run.restoreVerification
   return (
     <div className="animate-rise space-y-4">
@@ -485,7 +508,8 @@ function ArchiveBrowser({
   onRestorePaths: (paths: string[]) => void
 }) {
   const [filter, setFilter] = useSessionState(`backups.run.${run.id}.files.filter`, "")
-  const [chosen, setChosen] = useState<string[]>([])
+  const [chosen, setChosen] = useSessionState<string[]>(`backups.run.${run.id}.files.chosen`, [])
+  const [anchor, setAnchor] = useState<string | null>(null)
   const entries = usePoll(
     (signal) =>
       get<BackupArchiveEntry[]>(`/backups/runs/${run.id}/contents`, { limit: 5000 }, signal),
@@ -511,6 +535,11 @@ function ArchiveBrowser({
               </span>
             )}
             {canRestore && chosen.length > 0 && (
+              <Button size="xs" variant="ghost" onClick={() => setChosen([])}>
+                Clear selection
+              </Button>
+            )}
+            {canRestore && chosen.length > 0 && (
               <Button size="xs" onClick={() => onRestorePaths(chosen)}>
                 <CloudDownload />
                 Restore {chosen.length} selected…
@@ -522,25 +551,83 @@ function ArchiveBrowser({
       <PanelBody className="space-y-2">
         <SearchInput
           dense
+          data-workspace-search
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter by path"
           aria-label="Filter archive entries"
           containerClassName="sm:w-full"
         />
+        {canRestore && (
+          <p className="text-hint text-muted-foreground">
+            Shift+click or Shift+↑/↓ selects a range. Ctrl/⌘+A selects visible entries; Escape
+            clears selection.
+          </p>
+        )}
         {entries.loading && !entries.data && <LoadingRows rows={4} />}
         {entries.error && <FormNote tone="danger">{entries.error.message}</FormNote>}
         {entries.data && (
-          <ul className="-mx-3 max-h-80 divide-y divide-hairline overflow-y-auto px-3 font-mono text-xs">
+          <ul
+            data-workspace-scroll
+            onKeyDown={(event) => {
+              if (!canRestore) return
+              const names = visible.slice(0, 1000).map((entry) => entry.name)
+              const at = names.indexOf((event.target as HTMLElement).dataset.workspaceItem ?? "")
+              if (event.key === "Escape" && chosen.length) {
+                event.preventDefault()
+                setChosen([])
+              } else if (
+                (event.ctrlKey || event.metaKey) &&
+                event.key.toLowerCase() === "a" &&
+                at >= 0
+              ) {
+                event.preventDefault()
+                setChosen(names)
+              } else if (
+                event.shiftKey &&
+                ["ArrowDown", "ArrowUp"].includes(event.key) &&
+                at >= 0
+              ) {
+                event.preventDefault()
+                const next = Math.max(
+                  0,
+                  Math.min(names.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)),
+                )
+                const from = anchor && names.includes(anchor) ? anchor : names[at]
+                setAnchor(from)
+                setChosen((current) => rangeSelection(names, current, from, names[next]))
+                event.currentTarget
+                  .querySelectorAll<HTMLElement>("[data-workspace-item]")
+                  [next]?.focus()
+              }
+            }}
+            className="-mx-3 max-h-80 divide-y divide-hairline overflow-y-auto px-3 font-mono text-xs"
+          >
             {visible.slice(0, 1000).map((entry) => (
-              <li key={entry.name} className="flex min-w-0 items-center gap-2.5 py-1">
+              <li
+                key={entry.name}
+                className="flex min-w-0 items-center gap-2.5 py-1"
+                onClickCapture={(event) => {
+                  if (!canRestore || !(event.target as HTMLElement).closest("[role='checkbox']"))
+                    return
+                  const names = visible.slice(0, 1000).map((entry) => entry.name)
+                  if (event.shiftKey && anchor !== null && names.includes(anchor)) {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    setChosen((current) => rangeSelection(names, current, anchor, entry.name))
+                  }
+                  setAnchor(entry.name)
+                }}
+              >
                 {canRestore ? (
                   <Checkbox
+                    data-workspace-item={entry.name}
+                    data-workspace-name={entry.name}
                     checked={chosen.includes(entry.name)}
                     onCheckedChange={(checked) =>
                       setChosen((current) =>
                         checked
-                          ? [...current, entry.name]
+                          ? [...new Set([...current, entry.name])]
                           : current.filter((name) => name !== entry.name),
                       )
                     }
