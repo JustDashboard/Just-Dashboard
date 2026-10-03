@@ -35,9 +35,9 @@ test.describe("Domains", () => {
     await expect(form.getByText("api.example.test", { exact: true })).toBeVisible()
     await expect(page.getByText("Routed here", { exact: true })).toBeVisible()
     await expect(page.getByText("Certificate valid", { exact: true })).toBeVisible()
-    // The certificate's days left, and the figures over the list.
+    // The certificate's days left on its row, and no row of figures over the list.
     await expect(form.getByText("70 days left", { exact: true })).toBeVisible()
-    await expect(page.getByText("1 of 1", { exact: true })).toBeVisible()
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await expect(page.getByRole("link", { name: "Open api.example.test" })).toHaveAttribute(
       "href",
       "https://api.example.test/",
@@ -598,18 +598,20 @@ async function mockLinkedDatabase(
 }
 
 test.describe("Databases & backups evidence", () => {
-  test("the readings report the link, the policy and the dump coverage", async ({ page }) => {
+  test("the link's card reports its state, and a missing policy is said with a way to one", async ({
+    page,
+  }) => {
     await mockLinkedDatabase(page)
     await page.route("**/api/v1/backups/", (route) => json(route, []))
     await page.goto("/deploy/7/settings/databases")
 
-    await expect(page.getByText("Linked databases").first()).toBeVisible()
-    await expect(page.getByText("All connected", { exact: true })).toBeVisible()
-    // A linked database with no backup policy at all is the reading that
-    // earns its space; the gate would refuse nothing, and nothing is kept.
-    await expect(page.getByText("None", { exact: true })).toBeVisible()
-    await expect(page.getByText("A linked database with no backup policy")).toBeVisible()
-    await expect(page.getByText("0 of 1", { exact: true })).toBeVisible()
+    const linked = page.getByRole("list", { name: "Linked databases" })
+    await expect(linked.getByText("Connected", { exact: true })).toBeVisible()
+    // No row of figures over the sections: the link's state is its card's,
+    // and a linked database with no backup policy at all is the head's to say
+    // — the gate would refuse nothing, and nothing is kept.
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+    await expect(page.getByText("Persistent storage is not a backup")).toBeVisible()
     await expect(page.getByRole("link", { name: "Back up orders-db" })).toHaveAttribute(
       "href",
       "/backups?database=9",
@@ -699,7 +701,6 @@ test.describe("Databases & backups evidence", () => {
     await page.goto("/deploy/7/settings/databases")
 
     await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toBeVisible()
-    await expect(page.getByText("0 of 1", { exact: true })).toBeVisible()
 
     await page.getByRole("button", { name: "Add the dump to Nightly snapshot" }).click()
     await expect(page.getByText("Nightly snapshot now dumps this database")).toBeVisible()
@@ -709,7 +710,6 @@ test.describe("Databases & backups evidence", () => {
     expect(jobPuts[0]).not.toHaveProperty("secrets")
     expect(jobPuts[0]).toMatchObject({ name: "Nightly snapshot", schedule: "0 3 * * *" })
 
-    await expect(page.getByText("1 of 1", { exact: true })).toBeVisible()
     await expect(page.getByText("Nightly snapshot takes no native dump of orders-db")).toHaveCount(
       0,
     )
@@ -729,7 +729,11 @@ test.describe("Databases & backups evidence", () => {
     await expect(
       page.getByText("the saved database port belongs to a different container"),
     ).toBeVisible()
-    await expect(page.getByText("1 needs attention", { exact: true })).toBeVisible()
+    await expect(
+      page
+        .getByRole("list", { name: "Linked databases" })
+        .getByText("Needs reconnection", { exact: true }),
+    ).toBeVisible()
   })
 
   test("a linked database with no variable carrying it is called out", async ({ page }) => {

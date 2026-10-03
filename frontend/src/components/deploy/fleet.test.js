@@ -4,8 +4,6 @@ import {
   fleetAttention,
   fleetCounts,
   fleetHaystack,
-  fleetLive,
-  fleetTraffic,
   matchesFilter,
   needsAttention,
   sortFleet,
@@ -218,61 +216,11 @@ describe("fleetAttention", () => {
   })
 })
 
-describe("fleetLive", () => {
-  test("counts what is serving and names it, the commonest product first", () => {
-    const live = fleetLive([
-      project({ id: 1, framework: "nextjs" }),
-      project({ id: 2, sourceKind: "blueprint", sourceRepository: "n8n@1.0.0" }),
-      project({ id: 3, framework: "nextjs" }),
-      project({ id: 4, stopped: true }),
-      project({ id: 5, liveReleaseId: undefined, lastRun: undefined }),
-    ])
-    expect(live).toEqual({ serving: 3, stopped: 1, notDeployed: 1, products: ["nextjs", "n8n"] })
-  })
-
-  test("a live release is serving whatever its newest deploy is doing", () => {
-    const live = fleetLive([
-      project({ id: 1, lastRun: run({ state: "failed", releaseId: undefined }) }),
-      project({ id: 2, activeRun: run({ state: "running" }) }),
-      project({ id: 3, health: "unhealthy" }),
-      project({ id: 4, liveReleaseId: undefined, lastRun: run({ state: "failed" }) }),
-    ])
-    expect(live.serving).toBe(3)
-  })
-})
-
 describe("failingTone", () => {
   test("one colour for one share, wherever it is drawn", () => {
     expect(failingTone(0.009)).toBe("default")
     expect(failingTone(0.01)).toBe("warning")
     expect(failingTone(0.049)).toBe("warning")
     expect(failingTone(0.05)).toBe("danger")
-  })
-})
-
-describe("fleetTraffic", () => {
-  test("adds the sites up bucket by bucket and weighs the failing share by traffic", () => {
-    const traffic = fleetTraffic(
-      [project({ id: 1, name: "busy" }), project({ id: 2, name: "flaky" }), project({ id: 3 })],
-      {
-        1: pulse({ perMinute: 90, errorRate: 0, pages: 10, points: [1, 1, 1] }),
-        2: pulse({ perMinute: 10, errorRate: 0.5, pages: 5, points: [2, 2] }),
-        3: pulse({ status: "unavailable" }),
-      },
-    )
-    expect(traffic).toMatchObject({
-      sites: 2,
-      perMinute: 100,
-      pages: 15,
-      points: [1, 3, 3],
-      failingSites: 1,
-    })
-    expect(traffic.share).toBeCloseTo(0.05)
-    expect(traffic.worst).toEqual({ name: "flaky", errorRate: 0.5 })
-  })
-
-  test("nothing routed is nothing to read", () => {
-    expect(fleetTraffic([project()], {})).toBeUndefined()
-    expect(fleetTraffic([project()], undefined)).toBeUndefined()
   })
 })

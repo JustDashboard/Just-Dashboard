@@ -1597,28 +1597,25 @@ The passes, in order. Each one is a diff you can review on its own.
    generalises to every settings tab in the product: the deployment Runtime tab ran ten fields, four
    selects and two switches with not one figure among them, so none of the three loud things this
    system trades decoration for could fire, and the screen had nothing on it a reader could find
-   without reading. It opens on four readings now — where it listens, what it may use, how it is
-   replaced, and what it can reach — and each is a fact the form beneath it sets, drawn from the
-   draft rather than the saved revision, because what you are setting is what the page is about.
-   A reading is `warning` where the *absence* of an answer is the answer: an uncapped container and
-   a port open on every interface are the two facts an operator wants off that page without opening
-   a fold. Two of them now read the running container as well as the form: the memory limit is drawn
-   against what the live release peaked at in the last hour, and the release strategy is checked
+   without reading. It opened on four readings — where it listens, what it may use, how it is
+   replaced, and what it can reach — until the operator asked for them to go (below), and each was a
+   fact the form beneath it sets, drawn from the draft rather than the saved revision, because what
+   you are setting is what the page is about. A reading was `warning` where the *absence* of an
+   answer is the answer: an uncapped container and a port open on every interface are the two facts
+   an operator wants off that page without opening a fold. Two of them read the running container
+   as well as the form: the memory limit was drawn against what the live release peaked at in the
+   last hour, and the release strategy is checked
    against the rule the executor applies at the next deployment — a writable mount, a fixed host
    port or the host network cannot run two releases side by side, and blue/green on such a plan was
    offered there and then refused at start. Build took the pass it had skipped (what it builds with,
    the last build read from the live release's own build step, the release tasks, the build
    variables with a warning where a secret would be compiled into browser code), and Domains,
-   Storage, Databases and Automation open on four readings each. Those four pages draw theirs from
-   the saved configuration and what the server observed rather than from a draft, because a page's
-   readings stand above its forms, out of the drafts' reach; what is saved and not live yet is said
-   by the pending strip and by the rows themselves.
+   Storage, Databases and Automation opened on four readings each.
 
    The rest of the deployment section took the pass as a question of *which* figures. The fleet
-   opens on four the chips beneath it cannot say — how many projects are live, requests a minute
-   across the fleet, the share of them failing, the build slots in use — and leaves the per-state
-   counts to the chips, with the cards ordered worst first. The Logs page's readings each carry
-   their last hour, as the host Overview's do.
+   opened on four the chips beneath it cannot say — how many projects are live, requests a minute
+   across the fleet, the share of them failing, the build slots in use. The Logs page's readings
+   each carry their last hour, as the host Overview's do.
 
    **And the one page with no tiles, which is the shape of the argument for dropping this pass.**
    `/git` had four — repositories, uncommitted, behind, unpushed — and the operator asked for them to
@@ -1685,6 +1682,17 @@ The passes, in order. Each one is a diff you can review on its own.
    tabs. Switching status or environment reserves the results' height for the page visit, so a
    shorter list does not clamp the shell's scroll position. These rows skip the arrival stagger so
    a filter does not replay the entrance of the same history.
+
+   The rest of the deployment section took the exit in 0.7.1, because the operator asked for every
+   row of figures at the top of a deployment page to go. The fleet starts on its runs in flight:
+   each card carries its own traffic, the per-state counts are the chips', and a site failing badly
+   is an Attention finding. The Build, Runtime, Domains, Storage, Databases and Automation settings
+   start on their first section, whose head says what it currently is — Runtime's limits are drawn
+   against the last hour's peak beside their fields and a blue/green plan the executor would refuse
+   is said at the strategy, Domains' warning about a public bind address sits in its section, and
+   Databases' cards say whether the gating job dumps each one. Logs is the one deployment page that
+   keeps its row: four readings of the ingress's last hour that no row or chip says. Its fifth,
+   Container, went — the Events tab already counts the hour's disruptions.
 3. **Lists are rows — and a row you *take* is not a row you read.** `RowList`/`Row` for things with
    a title and a second line, `FindingList` for verdicts, a table for columns. Never a grid of framed
    cards standing in for rows. A scroll container that holds plain rows pads by the rows' bleed

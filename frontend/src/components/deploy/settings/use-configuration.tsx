@@ -5,7 +5,6 @@ import { get, put } from "@/lib/api"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentConfiguration, DeploymentEnvironmentConfiguration } from "@/lib/types"
-import { StatGrid } from "@/components/stat-tile"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -62,20 +61,15 @@ export function useConfiguration(projectId: number, environmentId: number) {
 /**
  * The three states a settings section passes through before it has a form
  * to show. Rendered by the section, so its head stays put while it loads.
- *
- * `readings` says the page opens on a row of figures, so the skeleton draws
- * one: a placeholder that is not the shape of what replaces it is a jump.
  */
 export function ConfigurationState({
   state,
-  readings,
   children,
 }: {
   state: ReturnType<typeof useConfiguration>
-  readings?: boolean
   children: (configuration: DeploymentEnvironmentConfiguration) => React.ReactNode
 }) {
-  if (state.loading) return <SettingsSkeleton readings={readings} />
+  if (state.loading) return <SettingsSkeleton />
   if (state.error && !state.configuration)
     return <ErrorState error={state.error} onRetry={state.refresh} />
   if (!state.configuration) return null
@@ -83,8 +77,8 @@ export function ConfigurationState({
 }
 
 /**
- * A settings page before its configuration lands: the figures, then two
- * sections, each head over three fields.
+ * A settings page before its configuration lands: two sections, each head
+ * over three fields.
  *
  * It was a framed table — a header strip over five rows — which is the one
  * shape no settings page has, so the moment the data arrived the whole
@@ -92,40 +86,22 @@ export function ConfigurationState({
  * page it stands in for, unframed like the page, and the content that
  * replaces it rises once (§11) instead of jumping.
  */
-function SettingsSkeleton({ readings }: { readings?: boolean }) {
+function SettingsSkeleton() {
   return (
-    <div className="mx-auto w-full max-w-3xl min-w-0 space-y-8">
-      {readings && (
-        <StatGrid columns={4} dense>
-          {[0, 1, 2, 3].map((cell) => (
-            // Stamped as a tile so the grid gives it a tile's padding and
-            // rules, and the figures land exactly where the bars were.
-            <div
-              key={cell}
-              data-slot="stat-tile"
-              className="flex min-w-0 flex-col gap-2.5 px-5 py-4"
-            >
-              <Skeleton className="h-2.5 w-16" />
-              <Skeleton className="h-6 w-24" />
-            </div>
-          ))}
-        </StatGrid>
-      )}
-      <div className="divide-y divide-hairline">
-        {[0, 1].map((row) => (
-          <div key={row} className="min-w-0 space-y-4 py-8 first:pt-0 last:pb-0">
-            <div className="space-y-2">
-              <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-3 w-44" />
-            </div>
-            <div className="min-w-0 space-y-3">
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-full" />
-              <Skeleton className="h-9 w-2/3" />
-            </div>
+    <div className="mx-auto w-full max-w-3xl min-w-0 divide-y divide-hairline">
+      {[0, 1].map((row) => (
+        <div key={row} className="min-w-0 space-y-4 py-8 first:pt-0 last:pb-0">
+          <div className="space-y-2">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-3 w-44" />
           </div>
-        ))}
-      </div>
+          <div className="min-w-0 space-y-3">
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-2/3" />
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -229,12 +229,13 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByRole("img", { name: "Requests over the last hour" })).toBeVisible()
     await expect(page.getByRole("img", { name: "The p95 over the last hour" })).toBeVisible()
     await expect(page.locator('[data-slot="stat-tile"] img[src="/logos/chrome.svg"]')).toBeVisible()
-    // The container is named by what happened to it last, not by a bare count,
-    // and its exit code sits beside the word.
-    const container = page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" })
-    await expect(container.getByText("Exited", { exact: true })).toBeVisible()
-    await expect(container.getByText("exit 137")).toBeVisible()
-    await expect(container.getByText(/1 exit · 1 start · newest/)).toBeVisible()
+    // Four readings, none of them the container: what it did is the Events
+    // tab's, which counts the exit.
+    await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(4)
+    await expect(
+      page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" }),
+    ).toHaveCount(0)
+    await expect(page.getByTitle("1 exit or restart in the last hour")).toBeVisible()
   })
 
   test("a request row carries its status, its timing and its path, and opens for the rest", async ({
@@ -571,11 +572,8 @@ test.describe("a deployment's traffic", () => {
     )
     await page.goto("/deploy/7/logs")
 
-    const container = page.locator('[data-slot="stat-tile"]').filter({ hasText: "Container" })
-    await expect(container.getByText("Stopped", { exact: true })).toBeVisible()
-    await expect(container.getByText("Stopped", { exact: true })).not.toHaveClass(/destructive/)
-    await expect(container.getByText("1 stop · none failed")).toBeVisible()
-    await expect(container.getByText("Exited", { exact: true })).toHaveCount(0)
+    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await expect(page.getByText("api-production-r20 exited cleanly")).toBeVisible()
     // Nothing for the Events tab to count: nothing failed.
     await expect(page.getByTitle(/exits? or restarts? in the last hour/)).toHaveCount(0)
   })
@@ -889,7 +887,7 @@ test.describe("a deployment's traffic", () => {
     await page.getByRole("button", { name: "Events", exact: true }).click()
     await expect(page.getByText("api-production-r20 exited with status 137")).toBeVisible()
     // The exit code stays on the row at every width: it is the one fact that
-    // changes what you do next. (The Container reading above says it too.)
+    // changes what you do next.
     const feed = page.getByRole("region", { name: "Container events" })
     await expect(feed.getByText("exit 137")).toBeVisible()
     // The feed reads under the hour it happened in, each event on the thing

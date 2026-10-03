@@ -3,7 +3,7 @@
 import { Archive, CloudUpload, RefreshClockwise, Terminal, type Icon } from "@/components/icons"
 import { API_BASE } from "@/lib/api"
 import { duration, plural } from "@/lib/format"
-import type { DeploymentSchedule, DeploymentTrigger } from "@/lib/types"
+import type { DeploymentTrigger } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import type { OutcomeTone } from "@/components/outcome-strip"
 import { ProductLogo, gitProviderProduct } from "@/components/product-logo"
@@ -13,8 +13,8 @@ import { humanize } from "@/components/deploy/vocabulary"
 /**
  * The words and marks the Automation page's blocks share: what a sender is
  * called and drawn as, what a delivery's decision reads as, and what a
- * schedule's step does — so the readings, the picture, the lists and the
- * sheets say each of these one way.
+ * schedule's step does — so the picture, the lists and the sheets say each
+ * of these one way.
  */
 
 /** The senders a webhook can be created for, as the form offers them. */
@@ -188,13 +188,6 @@ export function zonedMoment(iso: string | Date, timeZone: string) {
   }
 }
 
-/** The schedules a page would name first: enabled, soonest next run. */
-export function soonest(schedules: DeploymentSchedule[]) {
-  return schedules
-    .filter((one) => one.enabled && one.nextRunAt)
-    .sort((a, b) => Date.parse(a.nextRunAt!) - Date.parse(b.nextRunAt!))[0]
-}
-
 /**
  * How long past its time a firing may still be on its way: the dispatcher's
  * tick and a poll. Later than this it is not due, it was missed — a stalled
@@ -208,9 +201,9 @@ export function overdue(iso: string | undefined, now = Date.now()) {
 }
 
 /**
- * Time until a moment, as the figure a tile or a row reads: "in 4h 12m",
- * "due now" once it has passed and the dispatcher has not caught up yet,
- * "overdue" once it plainly will not.
+ * Time until a moment, as a row reads it: "in 4h 12m", "due now" once it has
+ * passed and the dispatcher has not caught up yet, "overdue" once it plainly
+ * will not.
  */
 export function untilLabel(iso: string | undefined) {
   if (!iso) return "—"

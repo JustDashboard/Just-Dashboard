@@ -70,7 +70,7 @@ import { applyDetectionChanges } from "@/components/deploy/settings/detection-ch
  * under it would draw it twice. Each figure the old "Project" card repeated
  * moved beside the control that sets it: the source, repository and branch to
  * the Source head; when the project was created and what kind it is to the
- * Name head; the release strategy to the Runtime page's Releases reading;
+ * Name head; the release strategy to the Runtime page's Releases section;
  * whether it deploys itself, how often it looks, when it last did and what
  * it watches to the Automatic deployment head.
  */

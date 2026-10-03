@@ -41,11 +41,9 @@ import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductGlyphs, ProductLogo, ProductLogos } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import type { Tone } from "@/components/tone"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
@@ -96,7 +94,7 @@ import { sectionHref } from "@/components/database/engine"
  * not apply to its first block, a backup policy that was a select, a raw cron
  * string and a cluster of underlined links, and readings that truncated to
  * "Not observed rec…". It is three sections now, in the settings frame's
- * rail, under four short readings:
+ * rail:
  *
  *   Linked databases — linking is its own write (it also writes the variable
  *   that carries the address), so it sits outside the form whose Save it
@@ -147,13 +145,7 @@ export function DatabasesSettings({
   // answer before a deployment answers it the hard way.
   const jobs = usePoll((signal) => get<BackupJob[]>("/backups/", undefined, signal), 15000)
   return (
-    <SettingsPage
-      state={state}
-      pageKinds={["dependency"]}
-      readings={(configuration) => (
-        <DatabaseReadings configuration={configuration} links={links.data} jobs={jobs.data} />
-      )}
-    >
+    <SettingsPage state={state} pageKinds={["dependency"]}>
       {(configuration) => (
         <DatabasesBody
           projectId={projectId}
@@ -757,9 +749,8 @@ function DatabasesBody({
         <SettingSection
           title="Backup before a release"
           state={
-            // Whether the release waits is the policy's own switch and the
-            // Backup policy reading; the head keeps only the warning neither
-            // of them gives.
+            // Whether the release waits is the policy's own switch to say; the
+            // head keeps only the warning the switch does not give.
             backupRows.length === 0 && databaseDependencies.length > 0
               ? "Persistent storage is not a backup"
               : undefined
@@ -1015,135 +1006,6 @@ function DatabaseRowGroup({ children }: { children: React.ReactNode }) {
       {row}
       {after.length > 0 && <li className="min-w-0 space-y-2">{after}</li>}
     </>
-  )
-}
-
-/**
- * The four figures at the top, from the saved configuration and what the
- * page has read of the links and the jobs.
- *
- * Coverage is the one worth the space: the gate refuses a release whose job
- * takes no dump of a linked database, and until this reading existed that
- * refusal arrived during the deployment it stopped. A figure that needs a
- * read says "—" until that read lands — and goes on saying it for a reader
- * the read is refused to — rather than stating the answer an empty list would
- * give; each changes its key as its read lands, so it rises into place.
- */
-function DatabaseReadings({
-  configuration,
-  links,
-  jobs,
-}: {
-  configuration: DeploymentEnvironmentConfiguration
-  links?: DeploymentDatabaseLink[]
-  jobs?: BackupJob[]
-}) {
-  const databases = configuration.dependencies.filter((d) => d.kind === "database")
-  const backupDeps = configuration.dependencies.filter((d) => d.kind === "backup")
-  const linked = databases.length
-  const observed = databases
-    .map((dependency) => links?.find((link) => String(link.connectionId) === dependency.resourceId))
-    .filter((link): link is DeploymentDatabaseLink => Boolean(link))
-  const engines = [...new Set(observed.map((link) => link.driver))]
-  const failing = observed.filter((link) => link.status === "unavailable")
-  const stale = observed.filter((link) => link.status === "stale")
-  const connected = observed.filter((link) => link.status === "connected").length
-  const network = observed[0]?.network
-
-  const declared = backupDeps
-    .map((dependency) => jobs?.find((job) => String(job.id) === dependency.resourceId))
-    .filter((job): job is BackupJob => Boolean(job))
-  const required = backupDeps.some(
-    (dependency) => (dependency.config as BackupDependencyConfig)?.requiredBeforeDeploy,
-  )
-  const dumpedLinks = observed.filter((link) =>
-    declared.some((job) => (job.databaseDumps ?? []).includes(link.connectionId)),
-  )
-  const dumped = databases.filter((dependency) =>
-    declared.some((job) => (job.databaseDumps ?? []).includes(Number(dependency.resourceId))),
-  ).length
-  const newestSuccess = declared
-    .map((job) => job.lastSuccessAt)
-    .filter((stamp): stamp is string => Boolean(stamp))
-    .sort()
-    .at(-1)
-
-  const connection: { value: string; tone: Tone; hint?: string } =
-    linked === 0
-      ? { value: "None yet", tone: "default" }
-      : !links
-        ? { value: "—", tone: "default" }
-        : failing.length > 0
-          ? {
-              value: `${failing.length} need${failing.length === 1 ? "s" : ""} attention`,
-              tone: "danger",
-              hint: `${failing[0].name} is not reachable`,
-            }
-          : stale.length > 0
-            ? {
-                value: `${stale.length} stale`,
-                tone: "warning",
-                hint: `${stale[0].name} not observed recently`,
-              }
-            : connected === linked
-              ? { value: "All connected", tone: "success", hint: network && `On ${network}` }
-              : { value: "Waiting", tone: "default", hint: "Until the first deployment" }
-  const dumps: { value: string; tone: Tone; hint?: string } =
-    linked === 0
-      ? { value: "None yet", tone: "default" }
-      : !jobs
-        ? { value: "—", tone: "default" }
-        : dumped === linked
-          ? { value: `${dumped} of ${linked}`, tone: "success", hint: "Every linked database" }
-          : {
-              value: `${dumped} of ${linked}`,
-              tone: "warning",
-              hint: "A database falls back to its files",
-            }
-  const arrived = (value: string, loaded: unknown) => (
-    <span key={loaded ? `value-${value}` : "loading"} className="animate-rise">
-      {value}
-    </span>
-  )
-
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Linked databases"
-        value={linked}
-        trailing={<ProductGlyphs ids={engines} />}
-        hint={linked === 0 ? "Start one or connect a saved one" : network && `On ${network}`}
-      />
-      <StatTile
-        label="Connection"
-        value={arrived(connection.value, links || linked === 0)}
-        tone={connection.tone}
-        hint={connection.hint}
-      />
-      <StatTile
-        label="Backup policy"
-        value={backupDeps.length === 0 ? "None" : required ? "Required" : "Declared"}
-        tone={backupDeps.length === 0 && linked > 0 ? "warning" : "default"}
-        hint={
-          backupDeps.length === 0
-            ? linked > 0
-              ? "A linked database with no backup policy"
-              : undefined
-            : !jobs
-              ? undefined
-              : newestSuccess
-                ? `Last success ${relativeTime(newestSuccess)}`
-                : "Never succeeded"
-        }
-      />
-      <StatTile
-        label="Native dumps"
-        value={arrived(dumps.value, jobs || linked === 0)}
-        tone={dumps.tone}
-        trailing={<ProductGlyphs ids={[...new Set(dumpedLinks.map((link) => link.driver))]} />}
-        hint={dumps.hint}
-      />
-    </StatGrid>
   )
 }
 

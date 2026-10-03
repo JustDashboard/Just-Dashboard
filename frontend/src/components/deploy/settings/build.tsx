@@ -5,7 +5,6 @@ import type { FormEvent } from "react"
 import { Copy, LockClosed } from "@/components/icons"
 import { ApiError, get, post, refusedIndex } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -18,7 +17,6 @@ import type {
   DeploymentEnvironmentConfiguration,
   DeploymentRecipe,
   DeploymentRunSnapshot,
-  DeploymentStep,
   NodePackageManager,
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
@@ -28,15 +26,10 @@ import {
   ProductGlyph,
   ProductGlyphs,
   ProductLogo,
-  buildMethodProduct,
-  frameworkProduct,
   imageProduct,
   imageProducts,
-  packageManagerProduct,
-  recipeProduct,
   variableProduct,
 } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -45,7 +38,6 @@ import {
   InputGroupInput,
   InputGroupText,
 } from "@/components/ui/input-group"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useProject } from "@/components/deploy/project-context"
 import {
   NODE_VERSION,
@@ -69,12 +61,7 @@ import {
   publicBuildVariable,
   validateConfiguration,
 } from "@/components/deploy/deployment-defaults"
-import {
-  BUILD_METHOD_SHORT,
-  RECIPE_SHORT,
-  formatDuration,
-  frameworkLabel,
-} from "@/components/deploy/vocabulary"
+import { RECIPE_SHORT } from "@/components/deploy/vocabulary"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import {
   SettingForm,
@@ -82,7 +69,7 @@ import {
   SettingsPage,
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
-import { ReleaseTasks, spoken, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
+import { ReleaseTasks, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
 import { Segments } from "@/components/deploy/settings/segments"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import {
@@ -355,25 +342,6 @@ const PYTHON_VERSIONS = ["3.10", "3.11", "3.12", "3.13", "3.14"]
 const NODE_VERSIONS = ["20", "22", "24"]
 const PHP_VERSIONS = ["8.2", "8.3", "8.4", "8.5"]
 
-/** What a recipe falls back to when nothing in the draft or the last build names it. */
-const RECIPE_DEFAULT: Record<DeploymentRecipe, string> = {
-  node: "lockfile decides",
-  python: ".python-version decides",
-  go: "go.mod decides",
-  rust: "Cargo",
-  java: "Maven or Gradle",
-  dotnet: ".NET SDK",
-  deno: "deno.json",
-  php: "Composer · FrankenPHP",
-  site: "its configuration decides",
-  ruby: ".ruby-version decides",
-  elixir: ".tool-versions decides",
-  scala: "sbt stage or assembly",
-  clojure: "Leiningen or tools.build",
-  dart: "pubspec.yaml decides",
-  gleam: "gleam.toml",
-}
-
 // `validateConfiguration` wants the plan's variable shape (a value or
 // reference the operator typed); the read model's `DeploymentVariable` never
 // carries a value and reports a typed reference as an object. Only the name
@@ -386,21 +354,13 @@ function planVariables(configuration: DeploymentEnvironmentConfiguration) {
   }))
 }
 
-/** The live release's Build step, as the readings and the Image section read it. */
-type LastBuild = {
-  /** `none` when nothing is live, so nothing was built for it; `unreadable` when the run could not be read. */
-  state: "none" | "loading" | "ready" | "unreadable"
-  step?: DeploymentStep
-  evidence?: DeploymentBuildEvidence
-}
-
 /**
  * The record of the build behind the live release: one read of that run's
- * steps, for how long the Build step took and the image it made. Read once
- * for the page, and handed to the readings and the form, which both draw
- * from it.
+ * steps, for what its Build step prepared — the toolchain and the base images
+ * the Build and Image heads name. Read when the page opens rather than when
+ * the form does, so it is usually in by the time the configuration is.
  */
-function useLastBuild(projectId: number): LastBuild {
+function useLastBuild(projectId: number): DeploymentBuildEvidence | undefined {
   const project = useProject()
   const runId = project.liveRelease?.runId ?? project.liveRun?.id
   const snapshot = usePoll(
@@ -409,11 +369,9 @@ function useLastBuild(projectId: number): LastBuild {
     [projectId, runId],
     { enabled: runId !== undefined },
   )
-  if (runId === undefined) return { state: "none" }
-  if (snapshot.error && !snapshot.data) return { state: "unreadable" }
-  if (!snapshot.data) return { state: "loading" }
-  const step = snapshot.data.steps.filter((one) => one.key === "build_artifact").at(-1)
-  return { state: "ready", step, evidence: step?.evidence as DeploymentBuildEvidence | undefined }
+  if (runId === undefined) return undefined
+  const step = snapshot.data?.steps.filter((one) => one.key === "build_artifact").at(-1)
+  return step?.evidence as DeploymentBuildEvidence | undefined
 }
 
 export function BuildSettings({
@@ -427,21 +385,7 @@ export function BuildSettings({
   const lastBuild = useLastBuild(projectId)
   const legacy = state.configuration?.build.method === "legacy_compose"
   return (
-    <SettingsPage
-      state={state}
-      pageKinds={["build"]}
-      readings={
-        legacy
-          ? undefined
-          : (configuration) => (
-              <BuildReadings
-                projectId={projectId}
-                configuration={configuration}
-                lastBuild={lastBuild}
-              />
-            )
-      }
-    >
+    <SettingsPage state={state} pageKinds={["build"]}>
       {(configuration) =>
         legacy ? (
           <SettingSection
@@ -482,188 +426,6 @@ export function BuildSettings({
 type Save = ReturnType<typeof useConfiguration>["save"]
 
 /**
- * What a build method builds with, as a reading says it: the short name, a
- * line of what decides the details, and the products it runs — the
- * framework detection recorded, the language, the package manager.
- */
-function builderReading(
-  build: BuildDraft,
-  saved: BuildPlan,
-  evidence: DeploymentBuildEvidence | undefined,
-  image: string | undefined,
-): { value: string; detail: string; products: string[] } {
-  if (build.method === "recipe") {
-    const recipe = build.recipe ?? "node"
-    // The server drops the framework once the method or recipe moves, so a
-    // draft that changed either no longer has one.
-    const framework =
-      saved.method === "recipe" && (saved.recipe ?? "node") === recipe ? saved.framework : undefined
-    const prepared = evidence?.result?.prepared
-    const detail =
-      recipe === "node"
-        ? (build.packageManager ?? RECIPE_DEFAULT.node)
-        : recipe === "python"
-          ? (build.pythonVersion ?? RECIPE_DEFAULT.python)
-          : recipe === "go"
-            ? (build.goVersion ?? RECIPE_DEFAULT.go)
-            : recipe === "php" && build.phpVersion
-              ? `php ${build.phpVersion}`
-              : recipe === "java" && build.javaVersion
-                ? `Java ${build.javaVersion}`
-                : recipe === "dotnet" && build.dotnetVersion
-                  ? `.NET ${build.dotnetVersion}`
-                  : prepared?.recipe === recipe && prepared.toolchain
-                    ? prepared.toolchain
-                    : RECIPE_DEFAULT[recipe]
-    return {
-      value: RECIPE_SHORT[recipe],
-      detail: framework ? `${frameworkLabel(framework)} · ${detail}` : detail,
-      products: [
-        ...new Set(
-          [
-            frameworkProduct(framework),
-            recipeProduct(recipe),
-            packageManagerProduct(build.packageManager),
-          ].filter((id): id is string => Boolean(id)),
-        ),
-      ],
-    }
-  }
-  const product = buildMethodProduct(build.method, { image })
-  const detail =
-    build.method === "dockerfile"
-      ? `${build.dockerfile || "Dockerfile"}${build.target ? ` · stage ${build.target}` : ""}`
-      : build.method === "static"
-        ? "served by nginx"
-        : build.method === "image"
-          ? (image ?? "a prebuilt image")
-          : build.method === "compose"
-            ? "the compose file"
-            : "runs what it is given"
-  return {
-    value: build.method === "none" ? "Nothing to build" : BUILD_METHOD_SHORT[build.method],
-    detail,
-    products: product ? [product] : [],
-  }
-}
-
-/**
- * The four figures this page sets or produces, above the forms that set them.
- * They read the drafts — the same session keys the forms write — so a
- * builder picked below is the builder named here before anything is saved.
- */
-function BuildReadings({
-  projectId,
-  configuration,
-  lastBuild,
-}: {
-  projectId: number
-  configuration: DeploymentEnvironmentConfiguration
-  lastBuild: LastBuild
-}) {
-  const build = useBuildDraft(projectId, configuration).value
-  const tasks = useTasksDraft(projectId, configuration).value
-  const builder = builderReading(
-    build,
-    configuration.build,
-    lastBuild.evidence,
-    configuration.source?.image,
-  )
-
-  const image = lastBuild.evidence?.result?.image
-  const { step } = lastBuild
-  const took =
-    step?.startedAt && step.endedAt
-      ? (Date.parse(step.endedAt) - Date.parse(step.startedAt)) / 1000
-      : undefined
-
-  const timeout = tasks.reduce((sum, task) => sum + (task.timeoutSeconds || 0), 0)
-
-  const buildVariables = configuration.variables.filter((variable) =>
-    variable.scopes.includes("build"),
-  )
-  const installOnly = new Set(
-    (build.secrets ?? []).filter((one) => one.step === "install").map((one) => one.variable),
-  )
-  const secret = buildVariables.filter((variable) => variable.sensitivity === "secret")
-  const exposed = secret.find(
-    (variable) => publicBuildVariable(variable.name) && !installOnly.has(variable.name),
-  )
-
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Builds with"
-        value={builder.value}
-        hint={
-          <>
-            {builder.detail} <ProductGlyphs ids={builder.products} />
-          </>
-        }
-      />
-      {lastBuild.state === "loading" ? (
-        <StatTile
-          key="loading"
-          label="Last build"
-          value={<Skeleton className="inline-block h-6 w-20 align-middle" />}
-          hint="reading the live release's build"
-        />
-      ) : (
-        <StatTile
-          key="ready"
-          className={lastBuild.state === "ready" ? "animate-rise" : undefined}
-          label="Last build"
-          value={took !== undefined ? formatDuration(took) : "—"}
-          hint={
-            took !== undefined && step?.endedAt ? (
-              <>
-                {image?.sizeBytes !== undefined && `${bytes(image.sizeBytes)} · `}
-                {image?.os && image.architecture && `${image.os}/${image.architecture} · `}
-                <time dateTime={step.endedAt} title={timestamp(step.endedAt)}>
-                  {relativeTime(step.endedAt)}
-                </time>
-              </>
-            ) : lastBuild.state === "unreadable" ? (
-              "could not read the last build"
-            ) : (
-              "nothing built yet"
-            )
-          }
-        />
-      )}
-      <StatTile
-        label="Release tasks"
-        value={tasks.length > 0 ? tasks.length : "None"}
-        hint={
-          tasks.length > 0
-            ? [
-                tasks.map((task) => task.name.trim() || "Unnamed").join(" · "),
-                // A budget someone set, said the way the task's own timeout
-                // says it — not in the measured-time format of "Last build".
-                timeout > 0 && `up to ${spoken(timeout)}`,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            : "nothing runs before the release"
-        }
-      />
-      <StatTile
-        label="Build variables"
-        value={buildVariables.length > 0 ? buildVariables.length : "None"}
-        tone={exposed ? "warning" : "default"}
-        hint={
-          exposed
-            ? `${exposed.name} ships to browsers`
-            : buildVariables.length > 0
-              ? `${installOnly.size} install-only · ${secret.length} secret`
-              : "no variable reaches the build"
-        }
-      />
-    </StatGrid>
-  )
-}
-
-/**
  * The Build form: which builder, the commands it runs, the image it makes and
  * which variables reach which stage — four section heads, one save, because one
  * PUT writes all of it.
@@ -676,7 +438,7 @@ function BuildForm({
 }: {
   projectId: number
   configuration: DeploymentEnvironmentConfiguration
-  lastBuild: LastBuild
+  lastBuild?: DeploymentBuildEvidence
   save: Save
 }) {
   const { can } = useAuth()
@@ -803,7 +565,7 @@ function BuildForm({
   const builds = buildable || build.method === "compose"
   const picks = (deployment.sourceKind === "git" || deployment.sourceKind === "local") && buildable
   const recipe = build.recipe ?? "node"
-  const evidence = lastBuild.evidence?.result
+  const evidence = lastBuild?.result
   const buildVariables = configuration.variables.filter((variable) =>
     variable.scopes.includes("build"),
   )
@@ -914,8 +676,8 @@ function BuildForm({
       <SettingSection
         id="build"
         title="Build"
-        // The builder and its products are the "Builds with" reading's; the
-        // head keeps what only the last build knows.
+        // The builder is the card picked below; the head keeps what only the
+        // last build knows.
         state={
           asLastBuilt &&
           evidence?.prepared?.toolchain && (
@@ -1497,8 +1259,6 @@ function BuildForm({
         <SettingSection
           id="image"
           title="Image"
-          // Its size and platform are the "Last build" reading's; what it was
-          // built on is only here.
           state={
             <span className="block space-y-1">
               {evidence?.prepared?.baseImages && evidence.prepared.baseImages.length > 0 && (
@@ -1820,9 +1580,8 @@ function ReleaseTasksForm({
       applies="next-deployment"
       error={error}
     >
-      {/* No state under the title: the "Release tasks" reading has the count,
-          the names and the budget, and the editor's release path says where
-          and in what order they run. */}
+      {/* No state under the title: the editor's rows are the tasks and their
+          budgets, and its release path says where and in what order they run. */}
       <SettingSection
         id="release-tasks"
         title="Release tasks"

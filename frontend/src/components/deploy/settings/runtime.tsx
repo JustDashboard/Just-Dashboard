@@ -20,7 +20,6 @@ import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Meter, utilisationTone } from "@/components/meter"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import {
@@ -63,14 +62,13 @@ import {
  * listens, what it may use, how one release replaces the next, and what it
  * can reach on the server — then the checks that decide when it is ready.
  *
- * It opens on four readings drawn from the drafts below them (§15 pass 2: a
- * page you configure is not exempt), and two of them are readings of the
- * running container rather than of the form: the memory limit is drawn
- * against what the live release actually peaked at in the last hour, and the
- * release strategy is checked against the rule the executor applies at the
- * next deployment — a writable mount, a fixed host port or the host network
- * cannot run two releases side by side, and blue/green on such a plan used
- * to be offered here and then refused at start.
+ * There is no opening row of figures: each section's head says what it
+ * currently is. Two sections read the running container rather than only the
+ * form: each limit is drawn against what the live release actually peaked at
+ * in the last hour, and the release strategy is checked against the rule the
+ * executor applies at the next deployment — a writable mount, a fixed host
+ * port or the host network cannot run two releases side by side, and
+ * blue/green on such a plan used to be offered here and then refused at start.
  *
  * Two forms, two saves: Runtime (five sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
@@ -137,7 +135,7 @@ const BIND_ADDRESSES: [string, string][] = [
   ["::", ":: · every IPv6 interface"],
 ]
 
-/** What a restart policy does, for the readings that say it back. */
+/** What a restart policy does, for the Releases head that says it back. */
 const RESTART_PHRASE: Record<string, string> = {
   "unless-stopped": "restarts unless stopped",
   always: "always restarts",
@@ -214,25 +212,6 @@ function blueGreenRefusal(
   return undefined
 }
 
-/** What decides the release is ready, in the words a reading uses. */
-function readinessPhrase(checks: Check[]) {
-  const readiness = checks.filter((check) => check.phase === "readiness" && check.required)
-  if (readiness.length > 1) return `${readiness.length} readiness checks first`
-  const [only] = readiness
-  if (!only) return "no readiness check"
-  const config = (only.config ?? {}) as { path?: string; port?: number }
-  switch (only.kind) {
-    case "http":
-      return `checks ${config.path || "/"} first`
-    case "tcp":
-      return `checks :${config.port || "port"} first`
-    case "docker_health":
-      return "waits for its HEALTHCHECK"
-    default:
-      return "runs its check first"
-  }
-}
-
 /** The live release's container over the last hour: its peaks, for the limits drawn against them. */
 type Usage =
   | { state: "none" | "loading" }
@@ -284,13 +263,7 @@ export function RuntimeSettings({
   const state = useConfiguration(projectId, environmentId)
   const usage = useLiveUsage()
   return (
-    <SettingsPage
-      state={state}
-      pageKinds={["runtime", "check"]}
-      readings={(configuration) => (
-        <RuntimeReadings projectId={projectId} configuration={configuration} usage={usage} />
-      )}
-    >
+    <SettingsPage state={state} pageKinds={["runtime", "check"]}>
       {(configuration) => (
         <>
           <RuntimeForm
@@ -307,113 +280,6 @@ export function RuntimeSettings({
 }
 
 type Save = ReturnType<typeof useConfiguration>["save"]
-
-/**
- * The four readings this page sets, above the forms that set them: where it
- * listens, how much memory it may take against what it took, how a release
- * replaces the last, and what it can reach.
- *
- * They read the drafts — the same session keys the forms below write — so a
- * limit typed below is the limit drawn here before anything is saved. A
- * reading is `warning` where the absence of an answer is the answer: an
- * uncapped container, a port open on every interface, blue/green on a plan
- * the executor will refuse, traffic moving to a release nobody checked.
- */
-function RuntimeReadings({
-  projectId,
-  configuration,
-  usage,
-}: {
-  projectId: number
-  configuration: DeploymentEnvironmentConfiguration
-  usage: Usage
-}) {
-  const { deployment } = useProject().detail
-  const runtime = runtimePlanOf(useRuntimeDraft(projectId, configuration).value)
-  const checks = useChecksDraft(projectId, configuration).value
-
-  const port = runtime.internalPort ?? 0
-  const hostPort = runtime.hostPort ?? 0
-  const bind = runtime.bindAddress || "127.0.0.1"
-  const memory = runtime.memoryMb ?? 0
-  const cpus = runtime.cpus ?? 0
-  const pids = runtime.pidsLimit ?? 0
-  const capped = [cpus > 0 && `${cpus} CPU`, pids > 0 && `${pids} processes`].filter(Boolean)
-  const peak = usage.state === "ready" ? usage.memory : undefined
-  const pct = peak !== undefined && memory > 0 ? (peak / (memory * MIB)) * 100 : undefined
-
-  const refusal = blueGreenRefusal(runtime, deployment.profile, configuration.build.method)
-  const blueGreen = runtime.strategy === "blue_green"
-  const web = deployment.profile === "web" || deployment.profile === "static"
-  const unverified = web && !hasReadiness(checks)
-  const restart = RESTART_PHRASE[runtime.restartPolicy ?? "unless-stopped"]
-
-  const capabilities = runtime.capabilities ?? []
-  const devices = runtime.devices ?? []
-  const access = runtime.privileged
-    ? { value: "Privileged", tone: "danger" as const }
-    : runtime.hostNetwork
-      ? { value: "Host network", tone: "warning" as const }
-      : { value: "Unprivileged", tone: "default" as const }
-  const accessHint =
-    [
-      // Named here only when the figure above is already spent on `privileged`.
-      // With host networking alone the figure *is* "Host network", and a hint
-      // repeating it is the fact written twice.
-      runtime.privileged && runtime.hostNetwork && "host network",
-      capabilities.length > 0 && `${capabilities.length} capabilities`,
-      devices.length > 0 && `${devices.length} devices`,
-    ]
-      .filter(Boolean)
-      .join(" · ") ||
-    (runtime.hostNetwork ? "no added capabilities" : "own network, no added capabilities")
-
-  return (
-    <StatGrid columns={4} dense>
-      <StatTile
-        label="Listening on"
-        value={port > 0 ? `:${port}` : "No port"}
-        tone={hostPort > 0 && publicBind(bind) ? "warning" : "default"}
-        hint={
-          port === 0
-            ? "runs in the background"
-            : hostPort > 0
-              ? `on the host at ${bind}:${hostPort}`
-              : "private behind its route"
-        }
-      />
-      <StatTile
-        key={usage.state}
-        className={usage.state === "ready" ? "animate-rise" : undefined}
-        label="Memory"
-        value={memory > 0 ? `${memory} MiB` : "No limit"}
-        tone={memory === 0 ? "warning" : pct !== undefined ? utilisationTone(pct) : "default"}
-        meter={pct}
-        // The peak itself is written once, under the Memory limit field and
-        // its own meter; the tile's meter is that same share at a glance.
-        hint={capped.length > 0 ? capped.join(" · ") : "no CPU or process cap"}
-      />
-      <StatTile
-        label="Releases"
-        value={blueGreen ? "Blue / green" : "Stop first"}
-        tone={(blueGreen && refusal) || unverified ? "warning" : "default"}
-        hint={
-          blueGreen && refusal
-            ? refusal
-            : unverified
-              ? "no readiness check — traffic moves unverified"
-              : `${readinessPhrase(checks)} · ${restart}`
-        }
-      />
-      <StatTile
-        label="Container access"
-        value={access.value}
-        tone={access.tone}
-        hint={accessHint}
-      />
-    </StatGrid>
-  )
-}
 
 /** One or two states for a section head, stacked, or nothing when there are none. */
 function statuses(...items: React.ReactNode[]) {
@@ -443,7 +309,6 @@ function RuntimeForm({
   const { deployment } = useProject().detail
   const draft = useRuntimeDraft(projectId, configuration)
   const runtime = draft.value
-  const checks = useChecksDraft(projectId, configuration).value
   const patch = (fields: Partial<RuntimeDraft>) => draft.set((prev) => ({ ...prev, ...fields }))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string>()
@@ -473,10 +338,6 @@ function RuntimeForm({
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
   const failsNext = blueGreen && Boolean(refusal)
-  const web = deployment.profile === "web" || deployment.profile === "static"
-  // The Releases reading's hint says the restart policy only while it has
-  // nothing more urgent to say; the head says it the rest of the time.
-  const restartUnsaid = failsNext || (web && !hasReadiness(checks))
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -820,9 +681,7 @@ function RuntimeForm({
       <SettingSection
         id="releases"
         title="Releases"
-        state={
-          restartUnsaid ? RESTART_PHRASE[runtime.restartPolicy ?? "unless-stopped"] : undefined
-        }
+        state={RESTART_PHRASE[runtime.restartPolicy ?? "unless-stopped"]}
         status={statuses(
           failsNext && (
             <Status key="fails" tone="warning" label="Will fail on the next deployment" />
@@ -1308,8 +1167,7 @@ function HealthChecksForm({
     >
       {/* The head counts only what nothing below it does: each phase's rule
           carries its own count and each check its own summary. The absence of
-          a readiness check is the head's to say — once, as a state — and the
-          Releases reading above says what it costs. */}
+          a readiness check is the head's to say — once, as a state. */}
       <SettingSection
         id="health-checks"
         title="Health checks"
