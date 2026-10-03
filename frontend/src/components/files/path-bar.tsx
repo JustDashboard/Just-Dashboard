@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { rowReveal } from "@/components/icon-action"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
+import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
 
 const clean = (p: string) => p.replace(/\/+$/, "") || "/"
 
@@ -55,12 +56,12 @@ export function PathBar({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (!filesOwnKeyboard(event) || isTypingTarget(event.target)) return
       if (event.key.toLowerCase() !== "l" || !(event.metaKey || event.ctrlKey) || event.shiftKey) {
         return
       }
       // A dialog open anywhere owns the keyboard; the editor's own Ctrl+L
       // must not flip a path bar the operator cannot see into a text field.
-      if (document.querySelector("[role='dialog']")) return
       event.preventDefault()
       setEditing(true)
     }
@@ -83,7 +84,15 @@ export function PathBar({
     return (
       <PathInput
         initial={path}
-        onCancel={() => setEditing(false)}
+        onCancel={(restoreFocus) => {
+          setEditing(false)
+          if (!restoreFocus) return
+          requestAnimationFrame(() => {
+            document
+              .querySelector<HTMLElement>("[data-file-listing]")
+              ?.focus({ preventScroll: true })
+          })
+        }}
         onSubmit={(next) => {
           setEditing(false)
           onNavigate(clean(next))
@@ -235,7 +244,7 @@ function PathInput({
 }: {
   initial: string
   onSubmit: (path: string) => void
-  onCancel: () => void
+  onCancel: (restoreFocus?: boolean) => void
   className?: string
 }) {
   const [value, setValue] = useState(initial)
@@ -275,7 +284,8 @@ function PathInput({
     switch (event.key) {
       case "Escape":
         event.preventDefault()
-        onCancel()
+        event.stopPropagation()
+        onCancel(true)
         break
       case "Enter":
         event.preventDefault()
@@ -316,6 +326,7 @@ function PathInput({
   return (
     <div className={cn("relative min-w-0 flex-1", className)}>
       <Input
+        aria-label="Folder path"
         ref={inputRef}
         value={value}
         onChange={(e) => setValue(e.target.value)}

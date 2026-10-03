@@ -198,6 +198,11 @@ on another item to add or remove it from the selection; Shift selects a range. D
 space to select a group (Ctrl/Cmd or Shift adds to it), then drag the group to a folder, breadcrumb or
 sidebar place. Ctrl or Alt copies instead of moving. Selection and clipboard actions float over the
 listing without moving it. Right-click, Shift+F10 or touch long-press opens an item's menu.
+Folder visits have their own URLs: browser Back/Forward, mouse history buttons and the Files
+navigation controls walk through folders, restoring selection and scroll position. Backspace or
+Alt+Up goes to the parent. Type a name to jump to it; Ctrl/Cmd+F finds files, Ctrl/Cmd+L types a path,
+and F5 or Ctrl/Cmd+R refreshes the folder in place. The **Files shortcuts** button lists every command.
+Text fields, dialogs, menus and the dashboard rail keep their own keys.
 The folder button in the toolbar changes every folder's colour. The inspector and folder menus can
 then set a different colour for one folder.
 

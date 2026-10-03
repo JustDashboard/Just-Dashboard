@@ -298,6 +298,27 @@ then the recent ones, each a drop target, with the browsed folder marked when it
 not change as the listing walks into folders — the walking happens in the listing. `destinations` in
 `places-menu.tsx` builds that list once for the sidebar and for the phone's menu alike, and draws each
 place as what it is (`PlaceMark`: `/` as the host's distribution, a home as a folder with a house in it).
+
+Folder navigation uses native browser history (`use-folder-navigation.ts`, `navigation.ts`). Each
+visit pushes a `?path=` address, so browser Back/Forward and mouse history buttons traverse folders;
+the toolbar and Alt+Left/Right or Cmd+brackets use the same history. The initial home or remembered
+folder replaces its address without creating an extra visit. History survives reload, a new visit
+after Back drops the forward branch, and exhausted folder history lets browser Back leave Files.
+The Parent control, Backspace, Alt+Up and Left in details view use a parent within the server's roots;
+Right in details view enters a folder. During loading, the places response supplies the root limits.
+The tab remembers up to 40 folder visits: available selections, the active item, view and scroll.
+State is saved as interaction happens; a stable history listener restores listing keyboard focus
+without stealing focus from a toolbar control. Removed entries cannot remain selected or inspected.
+
+`keyboard.ts` scopes the page and path-bar shortcuts to Files, leaving text fields, composition,
+open dialogs/menus/listboxes and the dashboard rail in charge of their own keys. F5/Ctrl/Cmd+R
+refreshes only the folder; a modified hard refresh keeps the browser's behavior. Ctrl/Cmd+F opens
+name search; Ctrl/Cmd+Shift+N creates a folder, Ctrl/Cmd+Shift+. toggles hidden files and Ctrl/Cmd+Space
+toggles the active item. Name typing jumps through entries, repeated letters cycle matches, and
+tile arrows follow the actual rendered columns. Escape clears the selection/active item before
+canceling the internal clipboard. The footer's Files shortcuts control (also `?`) opens
+`shortcuts-dialog.tsx`. New keyboard mutation paths invoke the existing guarded operations.
+
 `file-icon.tsx` is the vocabulary (~200 extensions, the files with none — Dockerfile, authorized_keys,
 lockfiles — and ~90 folders whose name says what they hold) and draws it itself rather than from an icon
 set: a folder is a two-tone folder in its colour (its label from `FolderColourProvider`, else the
