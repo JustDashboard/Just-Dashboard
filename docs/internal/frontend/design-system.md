@@ -451,8 +451,12 @@ forms in one run of sections. `SettingForm` is one `<form>` and one save, and ma
 sections, because what one PUT writes is what one Save means — Runtime is five. `SettingSection`
 is a section's head carrying what the section currently is as data (the host and branch it builds
 from, the port it answers on) and, at its far end, at most one `settingStatus`: *Not saved*,
-*Unsaved changes* or *Saved · not live yet*. `SettingFoot` ends the form with when its change
-applies, Discard and Save. Save is the outline face while the form is clean and the brand face once
+*Unsaved changes* or *Saved · not live yet*. `SettingFoot` ends the form with Save alone at the
+fields' right edge; when the change applies ("Applies immediately", "Applies on your next
+deployment") arrives with the count of unsaved edits and Discard, because it is news only once there
+is an edit — every form closing on that line in 11px grey at the column's far left, a thousand
+pixels from the button it qualified, read as stray text on every settings page. A form's own `note`
+(why it cannot be edited, what a restart still has to do) stays at rest, beside Save. Save is the outline face while the form is clean and the brand face once
 it holds an edit — the command face as a function of state, so the one blue on a page of five forms
 is the form with something to save — and on the nine settings pages it is never disabled, because
 saving an untouched Source checks it again, which is how an operator finds out a credential stopped
