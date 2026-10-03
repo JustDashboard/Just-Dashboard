@@ -527,3 +527,25 @@ for (const path of ["/git", "/git?repo=%2Fsrv%2Fapp"] as const) {
     expect(pills, `fully rounded filled chips on ${path}`).toEqual([])
   })
 }
+
+test("workspace: Git retains its commit draft and walks changed files without a mouse", async ({
+  page,
+}) => {
+  await mockGit(page)
+  await page.goto("/git?repo=%2Fsrv%2Fapp")
+  const message = page.getByPlaceholder("Describe what you changed…")
+  await message.fill("Keep this draft while reviewing history")
+  await page.getByRole("tab", { name: "History", exact: true }).click()
+  await page.getByRole("tab", { name: /^Changes/ }).click()
+  await expect(message).toHaveValue("Keep this draft while reviewing history")
+  await page.reload()
+  await expect(message).toHaveValue("Keep this draft while reviewing history")
+  const rows = page.locator("button[data-workspace-item]")
+  await rows.first().click()
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(rows.nth(1)).toBeFocused()
+  await expect(rows.nth(1)).toHaveAttribute("aria-pressed", "true")
+  await page.keyboard.press("Escape")
+  await expect(rows.nth(1)).toBeFocused()
+  await expect(rows.nth(1)).toHaveAttribute("aria-pressed", "false")
+})

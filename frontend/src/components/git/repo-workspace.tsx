@@ -3,9 +3,12 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import {
   ArrowLeft,
   Archive,
+  ChevronDown,
+  ChevronUp,
   ChevronDoubleDown,
   ChevronDoubleUp,
   CloudUpload,
@@ -45,6 +48,7 @@ import { WorktreesDialog } from "@/components/git/worktrees-dialog"
 import { useGitRun } from "@/components/git/run"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
+import { IconAction } from "@/components/icon-action"
 import { PaneHeader } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
@@ -221,6 +225,19 @@ export function RepoWorkspace({
 
   const branch = head.detached ? "" : head.branch
   const activeKey = previewKey(preview)
+  const changeBy = (direction: number) => {
+    const items = Array.from(
+      document.querySelectorAll<HTMLButtonElement>(
+        "[data-native-workspace='Git'] button[data-workspace-item]",
+      ),
+    )
+    if (!items.length) return
+    const at = items.findIndex((item) => item.getAttribute("aria-pressed") === "true")
+    const next = items[Math.max(0, Math.min(items.length - 1, at < 0 ? 0 : at + direction))]
+    next.focus()
+    next.click()
+    next.scrollIntoView({ block: "nearest" })
+  }
 
   const ctx: PreviewContext = {
     canAdmin: can("system.admin"),
@@ -351,413 +368,463 @@ export function RepoWorkspace({
   const operation = status.data?.operation
 
   return (
-    <Page fill className="gap-3 px-2 py-2 md:px-3 md:py-3">
-      {operation && (
-        <Notice tone="warning" title={`A ${operation} is in progress`}>
-          {operation === "bisect"
-            ? "Finish the bisect in the terminal with git bisect reset."
-            : "Resolve each conflicted file in Changes, then continue when the result is ready."}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button size="xs" variant="outline" onClick={() => pick("changes")}>
-              Show changes
-            </Button>
-            {operation !== "bisect" && canControl && (
-              <Button
-                size="xs"
-                disabled={
-                  !!busy || (status.data?.files.some((file) => file.label === "conflicted") ?? true)
-                }
-                onClick={() =>
-                  void run("Operation continued", () =>
-                    post<GitResult>("/git/operation/continue", {}, { query: q }),
-                  ).catch(() => undefined)
-                }
-              >
-                Continue {operation}
+    <Workspace
+      name="Git"
+      search={shown === "history"}
+      stateKey={`git.${repo.path}.${shown}`}
+      refresh={onChanged}
+      escape={() => {
+        if (!preview) return false
+        const item = document.querySelector<HTMLElement>(
+          "[data-native-workspace='Git'] [data-workspace-item][aria-pressed='true']",
+        )
+        setPreview(null)
+        requestAnimationFrame(() => item?.focus())
+        return true
+      }}
+      commands={[
+        {
+          id: "previous",
+          label: "Previous changed file",
+          keys: "Alt+↑",
+          chord: "Alt+ArrowUp",
+          run: () => changeBy(-1),
+          disabled: shown !== "changes",
+        },
+        {
+          id: "next",
+          label: "Next changed file",
+          keys: "Alt+↓",
+          chord: "Alt+ArrowDown",
+          run: () => changeBy(1),
+          disabled: shown !== "changes",
+        },
+      ]}
+    >
+      <Page fill className="gap-3 px-2 py-2 md:px-3 md:py-3">
+        {operation && (
+          <Notice tone="warning" title={`A ${operation} is in progress`}>
+            {operation === "bisect"
+              ? "Finish the bisect in the terminal with git bisect reset."
+              : "Resolve each conflicted file in Changes, then continue when the result is ready."}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Button size="xs" variant="outline" onClick={() => pick("changes")}>
+                Show changes
               </Button>
-            )}
-            {operation !== "bisect" && canDestruct && (
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={!!busy}
-                onClick={() =>
-                  confirm({
-                    title: `Abort ${operation}`,
-                    confirmLabel: "Abort operation",
-                    description:
-                      "Return to the state before the operation started. Uncommitted conflict resolutions made since it started are discarded.",
-                    action: async (phrase) => {
-                      await run("Operation aborted", () =>
-                        post<GitResult>("/git/operation/abort", {}, { query: q, confirm: phrase }),
-                      )
-                      setPreview(null)
-                    },
-                  })
-                }
-              >
-                Abort
-              </Button>
-            )}
-            {can("terminal") && (
-              <Link
-                href={`/terminal?cwd=${encodeURIComponent(repo.path)}`}
-                className="text-foreground underline underline-offset-4"
-              >
-                Open a shell here
-              </Link>
-            )}
-          </div>
-        </Notice>
-      )}
+              {operation !== "bisect" && canControl && (
+                <Button
+                  size="xs"
+                  disabled={
+                    !!busy ||
+                    (status.data?.files.some((file) => file.label === "conflicted") ?? true)
+                  }
+                  onClick={() =>
+                    void run("Operation continued", () =>
+                      post<GitResult>("/git/operation/continue", {}, { query: q }),
+                    ).catch(() => undefined)
+                  }
+                >
+                  Continue {operation}
+                </Button>
+              )}
+              {operation !== "bisect" && canDestruct && (
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  disabled={!!busy}
+                  onClick={() =>
+                    confirm({
+                      title: `Abort ${operation}`,
+                      confirmLabel: "Abort operation",
+                      description:
+                        "Return to the state before the operation started. Uncommitted conflict resolutions made since it started are discarded.",
+                      action: async (phrase) => {
+                        await run("Operation aborted", () =>
+                          post<GitResult>(
+                            "/git/operation/abort",
+                            {},
+                            { query: q, confirm: phrase },
+                          ),
+                        )
+                        setPreview(null)
+                      },
+                    })
+                  }
+                >
+                  Abort
+                </Button>
+              )}
+              {can("terminal") && (
+                <Link
+                  href={`/terminal?cwd=${encodeURIComponent(repo.path)}`}
+                  className="text-foreground underline underline-offset-4"
+                >
+                  Open a shell here
+                </Link>
+              )}
+            </div>
+          </Notice>
+        )}
 
-      {/* One frame around the whole workbench: a strip across the top, then
+        {/* One frame around the whole workbench: a strip across the top, then
           the three columns separated by hairlines. */}
-      <div
-        style={{ "--jd-tree": `${treePx}px`, "--jd-work": `${workPx}px` } as React.CSSProperties}
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
-      >
-        <PaneHeader className="gap-2 px-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
-                aria-label="Back to repositories"
-                onClick={onBack}
-              >
-                <ArrowLeft className="size-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Back to all repositories</TooltipContent>
-          </Tooltip>
-          <div className="min-w-0">
-            <p className="truncate text-body font-medium" title={repo.path}>
-              {repo.name}
-            </p>
-            <p className="truncate font-mono text-micro text-muted-foreground" title={repo.path}>
-              {repo.path}
-            </p>
-          </div>
+        <div
+          style={{ "--jd-tree": `${treePx}px`, "--jd-work": `${workPx}px` } as React.CSSProperties}
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
+        >
+          <PaneHeader className="gap-2 px-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Back to repositories"
+                  onClick={onBack}
+                >
+                  <ArrowLeft className="size-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Back to all repositories</TooltipContent>
+            </Tooltip>
+            <div className="min-w-0">
+              <p className="truncate text-body font-medium" title={repo.path}>
+                {repo.name}
+              </p>
+              <p className="truncate font-mono text-micro text-muted-foreground" title={repo.path}>
+                {repo.path}
+              </p>
+            </div>
 
-          <span className="flex-1" />
+            <span className="flex-1" />
 
-          {/* Where HEAD is. The branch is a button into the Branches tab; the
+            {/* Where HEAD is. The branch is a button into the Branches tab; the
               line under it says what it tracks, because "will this push go
               where I think" is decided by that and nowhere else. */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={() => pick("branches")}
-                className="flex min-w-0 shrink items-center gap-1.5 text-left focus-ring-inset"
-              >
-                <SourceBranch
-                  className={cn(
-                    "size-3.5 shrink-0",
-                    head.detached ? "text-destructive" : "text-muted-foreground",
-                  )}
-                />
-                <span className="min-w-0">
-                  <span
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={() => pick("branches")}
+                  className="flex min-w-0 shrink items-center gap-1.5 text-left focus-ring-inset"
+                >
+                  <SourceBranch
                     className={cn(
-                      "block max-w-[14rem] truncate font-mono text-xs font-medium",
-                      head.detached && "text-destructive",
+                      "size-3.5 shrink-0",
+                      head.detached ? "text-destructive" : "text-muted-foreground",
                     )}
-                  >
-                    {branchLabel(head.branch, head.detached)}
+                  />
+                  <span className="min-w-0">
+                    <span
+                      className={cn(
+                        "block max-w-[14rem] truncate font-mono text-xs font-medium",
+                        head.detached && "text-destructive",
+                      )}
+                    >
+                      {branchLabel(head.branch, head.detached)}
+                    </span>
+                    <span className="hidden max-w-[14rem] truncate text-micro text-muted-foreground sm:block">
+                      {head.empty
+                        ? "no commits yet"
+                        : head.detached
+                          ? "detached HEAD"
+                          : head.gone
+                            ? `${head.upstream} is gone`
+                            : head.upstream
+                              ? `tracks ${head.upstream}`
+                              : "no upstream — push publishes it"}
+                    </span>
                   </span>
-                  <span className="hidden max-w-[14rem] truncate text-micro text-muted-foreground sm:block">
-                    {head.empty
-                      ? "no commits yet"
-                      : head.detached
-                        ? "detached HEAD"
-                        : head.gone
-                          ? `${head.upstream} is gone`
-                          : head.upstream
-                            ? `tracks ${head.upstream}`
-                            : "no upstream — push publishes it"}
-                  </span>
-                </span>
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {head.detached
-                ? "HEAD is detached — switch or manage branches"
-                : "Switch or manage branches"}
-            </TooltipContent>
-          </Tooltip>
-          {head.detached && <Tag tone="danger">detached</Tag>}
-          {head.gone && <Tag tone="danger">upstream gone</Tag>}
-          <AheadBehind ahead={head.ahead} behind={head.behind} />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {head.detached
+                  ? "HEAD is detached — switch or manage branches"
+                  : "Switch or manage branches"}
+              </TooltipContent>
+            </Tooltip>
+            {head.detached && <Tag tone="danger">detached</Tag>}
+            {head.gone && <Tag tone="danger">upstream gone</Tag>}
+            <AheadBehind ahead={head.ahead} behind={head.behind} />
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!!busy}
-                pending={busy === "Fetched"}
-                onClick={() =>
-                  void run("Fetched", () =>
-                    post<GitResult>("/git/fetch", undefined, { query: { ...q, prune: true } }),
-                  ).catch(() => undefined)
-                }
-              >
-                <RefreshClockwise className="size-4" />
-                <span className="hidden md:inline">Fetch</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              Check the remote for new commits without changing your files
-            </TooltipContent>
-          </Tooltip>
-          {canControl && (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!!busy}
-                    pending={busy === "Pulled"}
-                    onClick={() =>
-                      void run("Pulled", () =>
-                        post<GitResult>("/git/pull", undefined, { query: q }),
-                      ).catch(() => undefined)
-                    }
-                  >
-                    <ChevronDoubleDown className="size-4" />
-                    <span className="hidden md:inline">Pull</span>
-                    {head.behind > 0 && <ChipCount>{head.behind}</ChipCount>}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  Bring the latest committed changes down from the remote (fast-forward only)
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    disabled={!!busy}
-                    pending={busy === "Pushed"}
-                    onClick={() =>
-                      void run("Pushed", () =>
-                        post<GitResult>("/git/push", undefined, { query: q }),
-                      ).catch(() => undefined)
-                    }
-                  >
-                    <ChevronDoubleUp className="size-4" />
-                    <span className="hidden md:inline">Push</span>
-                    {head.ahead > 0 && <ChipCount>{head.ahead}</ChipCount>}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Send your committed changes up to the remote</TooltipContent>
-              </Tooltip>
-            </>
-          )}
-          <VerbMenu verbs={more} label="More git actions" />
-          <GitHubAccountControl repoPath={repo.path} status={github} compact />
-          <GitHelp />
-        </PaneHeader>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!!busy}
+                  pending={busy === "Fetched"}
+                  onClick={() =>
+                    void run("Fetched", () =>
+                      post<GitResult>("/git/fetch", undefined, { query: { ...q, prune: true } }),
+                    ).catch(() => undefined)
+                  }
+                >
+                  <RefreshClockwise className="size-4" />
+                  <span className="hidden md:inline">Fetch</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Check the remote for new commits without changing your files
+              </TooltipContent>
+            </Tooltip>
+            {canControl && (
+              <>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!!busy}
+                      pending={busy === "Pulled"}
+                      onClick={() =>
+                        void run("Pulled", () =>
+                          post<GitResult>("/git/pull", undefined, { query: q }),
+                        ).catch(() => undefined)
+                      }
+                    >
+                      <ChevronDoubleDown className="size-4" />
+                      <span className="hidden md:inline">Pull</span>
+                      {head.behind > 0 && <ChipCount>{head.behind}</ChipCount>}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    Bring the latest committed changes down from the remote (fast-forward only)
+                  </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      disabled={!!busy}
+                      pending={busy === "Pushed"}
+                      onClick={() =>
+                        void run("Pushed", () =>
+                          post<GitResult>("/git/push", undefined, { query: q }),
+                        ).catch(() => undefined)
+                      }
+                    >
+                      <ChevronDoubleUp className="size-4" />
+                      <span className="hidden md:inline">Push</span>
+                      {head.ahead > 0 && <ChipCount>{head.ahead}</ChipCount>}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Send your committed changes up to the remote</TooltipContent>
+                </Tooltip>
+              </>
+            )}
+            <VerbMenu verbs={more} label="More git actions" />
+            <GitHubAccountControl repoPath={repo.path} status={github} compact />
+            <GitHelp />
+          </PaneHeader>
 
-        {/* The three columns. Side by side they share the frame's height and
+          {/* The three columns. Side by side they share the frame's height and
             each scrolls inside itself. Stacked on a small screen they cannot
             — three panes do not fit in a phone's viewport — so there the
             frame scrolls and each pane keeps a *definite* height of its own.
             Definite is the load-bearing word: a pane sized by its content
             puts the commit box below the fold of a page that does not
             scroll, which is exactly where it went. */}
-        <div
-          ref={rowRef}
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
-        >
-          <div className="relative flex h-[15rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-tree) lg:border-r lg:border-b-0">
-            <FileTree
-              // Remount on a branch switch: a different branch can be a different
-              // set of files, and a cached tree would keep showing the old one.
-              key={head.branch}
-              root={repo.path}
-              statusMap={statusMap}
-              canWrite={canWrite}
-              canDelete={canDestruct}
-              activeFile={preview?.kind === "file" ? preview.path : undefined}
-              onOpenFile={(path) => setPreview({ kind: "file", path })}
-              onConfirm={treeConfirm}
-              onChanged={() => status.refresh()}
-              onOpenInFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
-            />
-            <ResizeHandle
-              side="left"
-              label="File tree width"
-              value={treePx}
-              min={TREE.min}
-              max={TREE.max}
-              onChange={(px, commit) => setTreeWidth(clamp(px, TREE.min, TREE.max), commit)}
-              onReset={resetTreeWidth}
-              className="absolute inset-y-0 -right-1 z-20"
-            />
-          </div>
-
-          <div className="relative flex h-[30rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-work) lg:border-r lg:border-b-0">
-            <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1">
-              <TabButton active={shown === "changes"} onClick={() => pick("changes")}>
-                Changes
-                {changeCount > 0 && <ChipCount>{changeCount}</ChipCount>}
-              </TabButton>
-              <TabButton active={shown === "history"} onClick={() => pick("history")}>
-                History
-              </TabButton>
-              <TabButton active={shown === "branches"} onClick={() => pick("branches")}>
-                Branches
-              </TabButton>
-              <TabButton active={shown === "github"} onClick={() => pick("github")}>
-                GitHub
-              </TabButton>
-              <span className="flex-1" />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    aria-pressed={graphOpen}
-                    aria-label="Branch graph"
-                    className={cn(
-                      "size-7 shrink-0 p-0",
-                      graphOpen
-                        ? "bg-accent text-foreground"
-                        : "text-muted-foreground hover:text-foreground",
-                    )}
-                    onClick={() => setGraphOpen((v) => !v)}
-                  >
-                    <SourceFork className="size-3.5" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>See every branch and where it forked</TooltipContent>
-              </Tooltip>
-            </div>
-            {shown === "changes" && (
-              <ChangesPanel
-                repoPath={repo.path}
-                status={status}
-                stashes={stashCount > 0 ? (stashes.data ?? []) : []}
-                busy={busy}
-                canControl={canControl}
-                canDestruct={canDestruct}
-                run={run}
-                confirm={confirm}
-                onSelect={setPreview}
-                active={activeKey}
-                onChanged={onChanged}
-              />
-            )}
-            {shown === "history" && (
-              <HistoryPanel
-                // A commit, a reset or a switch changes what history is, so the
-                // list is keyed on the tip and remounts when it moves.
-                key={`${head.head ?? ""}:${head.branch}`}
-                repoPath={repo.path}
-                branch={branch || "HEAD"}
-                file={historyFile}
-                onClearFile={() => setHistoryFile(undefined)}
-                busy={busy}
-                canControl={canControl}
-                canDestruct={canDestruct}
-                run={run}
-                confirm={confirm}
-                onSelect={setPreview}
-                active={activeKey}
-                onChanged={onChanged}
-              />
-            )}
-            {shown === "branches" && (
-              <BranchesPanel
-                key={`${head.head ?? ""}:${head.branch}`}
-                repoPath={repo.path}
-                current={branch || "HEAD"}
-                busy={busy}
-                canControl={canControl}
-                canDestruct={canDestruct}
-                run={run}
-                confirm={confirm}
-                onSelect={setPreview}
-                onChanged={onChanged}
-              />
-            )}
-            {shown === "github" && (
-              <GitHubPanel
-                repoPath={repo.path}
-                branch={branch}
-                github={github.data}
-                busy={busy}
-                canControl={canControl}
-                canAdmin={can("system.admin")}
-                run={run}
-                confirm={confirm}
-                onSelect={setPreview}
-                active={activeKey}
-                activePull={activePull}
-                onChanged={onChanged}
-              />
-            )}
-            <ResizeHandle
-              side="left"
-              label="Changes panel width"
-              value={workPx}
-              min={WORK.min}
-              max={WORK.max}
-              onChange={(px, commit) => setWorkWidth(clamp(px, WORK.min, WORK.max), commit)}
-              onReset={resetWorkWidth}
-              className="absolute inset-y-0 -right-1 z-20"
-            />
-          </div>
-
           <div
-            data-slot="git-preview"
-            className="flex h-[26rem] shrink-0 flex-col lg:h-auto lg:min-h-0 lg:min-w-0 lg:flex-1 lg:shrink"
+            ref={rowRef}
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden"
           >
-            {graphOpen ? (
-              <GraphPanel
-                repoPath={repo.path}
-                onClose={() => setGraphOpen(false)}
-                onSelect={setPreview}
+            <div className="relative flex h-[15rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-tree) lg:border-r lg:border-b-0">
+              <FileTree
+                // Remount on a branch switch: a different branch can be a different
+                // set of files, and a cached tree would keep showing the old one.
+                key={head.branch}
+                root={repo.path}
+                statusMap={statusMap}
+                canWrite={canWrite}
+                canDelete={canDestruct}
+                activeFile={preview?.kind === "file" ? preview.path : undefined}
+                onOpenFile={(path) => setPreview({ kind: "file", path })}
+                onConfirm={treeConfirm}
+                onChanged={() => status.refresh()}
+                onOpenInFiles={(path) => router.push(`/files?path=${encodeURIComponent(path)}`)}
               />
-            ) : (
-              <PreviewPanel preview={preview} ctx={ctx} onClose={() => setPreview(null)} />
-            )}
+              <ResizeHandle
+                side="left"
+                label="File tree width"
+                value={treePx}
+                min={TREE.min}
+                max={TREE.max}
+                onChange={(px, commit) => setTreeWidth(clamp(px, TREE.min, TREE.max), commit)}
+                onReset={resetTreeWidth}
+                className="absolute inset-y-0 -right-1 z-20"
+              />
+            </div>
+
+            <div className="relative flex h-[30rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-work) lg:border-r lg:border-b-0">
+              <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1">
+                <TabButton active={shown === "changes"} onClick={() => pick("changes")}>
+                  Changes
+                  {changeCount > 0 && <ChipCount>{changeCount}</ChipCount>}
+                </TabButton>
+                <TabButton active={shown === "history"} onClick={() => pick("history")}>
+                  History
+                </TabButton>
+                <TabButton active={shown === "branches"} onClick={() => pick("branches")}>
+                  Branches
+                </TabButton>
+                <TabButton active={shown === "github"} onClick={() => pick("github")}>
+                  GitHub
+                </TabButton>
+                <span className="flex-1" />
+                {shown === "changes" && (
+                  <>
+                    <IconAction label="Previous changed file (Alt+↑)" onClick={() => changeBy(-1)}>
+                      <ChevronUp />
+                    </IconAction>
+                    <IconAction label="Next changed file (Alt+↓)" onClick={() => changeBy(1)}>
+                      <ChevronDown />
+                    </IconAction>
+                  </>
+                )}
+                <WorkspaceHelp compact />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      aria-pressed={graphOpen}
+                      aria-label="Branch graph"
+                      className={cn(
+                        "size-7 shrink-0 p-0",
+                        graphOpen
+                          ? "bg-accent text-foreground"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                      onClick={() => setGraphOpen((v) => !v)}
+                    >
+                      <SourceFork className="size-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>See every branch and where it forked</TooltipContent>
+                </Tooltip>
+              </div>
+              {shown === "changes" && (
+                <ChangesPanel
+                  repoPath={repo.path}
+                  status={status}
+                  stashes={stashCount > 0 ? (stashes.data ?? []) : []}
+                  busy={busy}
+                  canControl={canControl}
+                  canDestruct={canDestruct}
+                  run={run}
+                  confirm={confirm}
+                  onSelect={setPreview}
+                  active={activeKey}
+                  onChanged={onChanged}
+                />
+              )}
+              {shown === "history" && (
+                <HistoryPanel
+                  // A commit, a reset or a switch changes what history is, so the
+                  // list is keyed on the tip and remounts when it moves.
+                  key={`${head.head ?? ""}:${head.branch}`}
+                  repoPath={repo.path}
+                  branch={branch || "HEAD"}
+                  file={historyFile}
+                  onClearFile={() => setHistoryFile(undefined)}
+                  busy={busy}
+                  canControl={canControl}
+                  canDestruct={canDestruct}
+                  run={run}
+                  confirm={confirm}
+                  onSelect={setPreview}
+                  active={activeKey}
+                  onChanged={onChanged}
+                />
+              )}
+              {shown === "branches" && (
+                <BranchesPanel
+                  key={`${head.head ?? ""}:${head.branch}`}
+                  repoPath={repo.path}
+                  current={branch || "HEAD"}
+                  busy={busy}
+                  canControl={canControl}
+                  canDestruct={canDestruct}
+                  run={run}
+                  confirm={confirm}
+                  onSelect={setPreview}
+                  onChanged={onChanged}
+                />
+              )}
+              {shown === "github" && (
+                <GitHubPanel
+                  repoPath={repo.path}
+                  branch={branch}
+                  github={github.data}
+                  busy={busy}
+                  canControl={canControl}
+                  canAdmin={can("system.admin")}
+                  run={run}
+                  confirm={confirm}
+                  onSelect={setPreview}
+                  active={activeKey}
+                  activePull={activePull}
+                  onChanged={onChanged}
+                />
+              )}
+              <ResizeHandle
+                side="left"
+                label="Changes panel width"
+                value={workPx}
+                min={WORK.min}
+                max={WORK.max}
+                onChange={(px, commit) => setWorkWidth(clamp(px, WORK.min, WORK.max), commit)}
+                onReset={resetWorkWidth}
+                className="absolute inset-y-0 -right-1 z-20"
+              />
+            </div>
+
+            <div
+              data-slot="git-preview"
+              className="flex h-[26rem] shrink-0 flex-col lg:h-auto lg:min-h-0 lg:min-w-0 lg:flex-1 lg:shrink"
+            >
+              {graphOpen ? (
+                <GraphPanel
+                  repoPath={repo.path}
+                  onClose={() => setGraphOpen(false)}
+                  onSelect={setPreview}
+                />
+              ) : (
+                <PreviewPanel preview={preview} ctx={ctx} onClose={() => setPreview(null)} />
+              )}
+            </div>
           </div>
         </div>
-      </div>
-      <WorktreesDialog
-        open={worktreesOpen}
-        onOpenChange={setWorktreesOpen}
-        repoPath={repo.path}
-        canControl={canControl}
-        canDestruct={canDestruct}
-        canTerminal={can("terminal")}
-        confirm={confirm}
-        onChanged={onChanged}
-      />
-      <RemotesDialog
-        open={remotesOpen}
-        onOpenChange={setRemotesOpen}
-        repoPath={repo.path}
-        canControl={canControl}
-        canDestruct={canDestruct}
-        confirm={confirm}
-        onChanged={onChanged}
-      />
-      <IdentityDialog
-        open={identityOpen}
-        onOpenChange={setIdentityOpen}
-        repoPath={repo.path}
-        identity={status.data?.identity}
-        onSaved={onChanged}
-      />
-      {dialog}
-    </Page>
+        <WorktreesDialog
+          open={worktreesOpen}
+          onOpenChange={setWorktreesOpen}
+          repoPath={repo.path}
+          canControl={canControl}
+          canDestruct={canDestruct}
+          canTerminal={can("terminal")}
+          confirm={confirm}
+          onChanged={onChanged}
+        />
+        <RemotesDialog
+          open={remotesOpen}
+          onOpenChange={setRemotesOpen}
+          repoPath={repo.path}
+          canControl={canControl}
+          canDestruct={canDestruct}
+          confirm={confirm}
+          onChanged={onChanged}
+        />
+        <IdentityDialog
+          open={identityOpen}
+          onOpenChange={setIdentityOpen}
+          repoPath={repo.path}
+          identity={status.data?.identity}
+          onSaved={onChanged}
+        />
+        {dialog}
+      </Page>
+    </Workspace>
   )
 }
 

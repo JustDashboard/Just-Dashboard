@@ -1,5 +1,7 @@
 "use client"
 
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useFilterHistory } from "@/components/workspace/history"
 import { useMemo, useState } from "react"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import {
@@ -93,7 +95,9 @@ export function FirewallPanel({
     "security.firewall.editing",
     null,
   )
-  const [query, setQuery] = useSessionState("security.firewall.query", "")
+  const [filters, setFilters] = useFilterHistory("security.firewall.filters", { q: "" })
+  const query = filters.q
+  const setQuery = (q: string) => setFilters({ q })
   const admin = can("system.admin")
   const [handoffEdit, setHandoffEdit] = useState(handoff?.edit)
 
@@ -153,7 +157,7 @@ export function FirewallPanel({
       ? rules.find((r) => r.number === handoffEdit.number && r.port === handoffEdit.port)
       : undefined
 
-  const header = <PageContext eyebrow="Security" title="Firewall" />
+  const header = <PageContext eyebrow="Security" title="Firewall" actions={<WorkspaceHelp />} />
   // Whether the firewall is enforcing, and the switch that decides it, at the
   // right end of the identity line: the control beside the fact it changes.
   const enforcing = status?.available && (
@@ -261,7 +265,16 @@ export function FirewallPanel({
   }
 
   return (
-    <>
+    <Workspace
+      name="Firewall"
+      openItems={false}
+      refresh={refresh}
+      escape={() => {
+        if (!query) return false
+        setQuery("")
+        return true
+      }}
+    >
       {header}
 
       {/* What the page is about, as its own row (§15 pass 8): the backend by
@@ -405,6 +418,7 @@ export function FirewallPanel({
           <PanelToolbar>
             <SearchInput
               dense
+              data-workspace-search
               aria-label="Filter rules"
               placeholder="Filter rules"
               value={query}
@@ -470,7 +484,13 @@ export function FirewallPanel({
                   </TableHeader>
                   <TableBody>
                     {shown.map((rule, i) => (
-                      <TableRow key={`${rule.number}-${i}`} className="group">
+                      <TableRow
+                        key={`${rule.number}-${i}`}
+                        data-workspace-item={String(rule.number)}
+                        data-workspace-name={`${rule.to} ${rule.comment}`}
+                        tabIndex={0}
+                        className="group focus-ring-inset"
+                      >
                         <TableCell className="py-4">
                           <div className="space-y-1.5">
                             <Tag tone={rule.danger ? "danger" : "default"}>{rule.action}</Tag>
@@ -693,7 +713,7 @@ export function FirewallPanel({
           hasProfiles={caps.profiles}
         />
       )}
-    </>
+    </Workspace>
   )
 }
 

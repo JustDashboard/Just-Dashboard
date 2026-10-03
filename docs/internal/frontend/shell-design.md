@@ -128,6 +128,14 @@ initials are circular at every account-avatar size and carry `data-slot="user-av
 system's identity exception to the pill ban. `InitialsMark` for a person drawn from a bare name
 retains the compact mark radius used in commit lines and forge faces.
 
+## Workspace commands and place
+
+`components/workspace/` registers the active page's Find, read refresh, shortcuts and contextual
+actions in the existing command palette. The shell marks its scroll region, and participating pages
+restore row/field focus and scroll after navigation. Editors, terminals and portalled controls keep
+their own keys. `SidePanel` returns focus through a workspace when the sheet's trigger is gone.
+See [`workspace-interactions.md`](workspace-interactions.md) for the page contracts and storage rules.
+
 ## The design system
 
 A small set of files defines the visual language, and pages compose them rather than hand-rolling
@@ -349,7 +357,10 @@ series.
 - `metric-chart.tsx` — `MetricChart` + the `Series` descriptor. The x-axis is **numeric over time**, not a
   category axis of pre-formatted labels: a category axis spaces every bucket equally, which lies whenever
   the record has a hole in it. It owns the shared crosshair, drag-to-zoom, event markers, thresholds and
-  the one tooltip listing every series at the hovered instant.
+  the one tooltip listing every series at the hovered instant. Click or Enter/Space pins a shared
+  instant; Left/Right and Home/End inspect samples, Escape releases it, and pinned overlays show
+  each chart's values without pointer movement changing the instant. The Metrics page adds sample
+  controls and a journal History link for the surrounding two-minute window.
 - `chart-panel.tsx` — the header/chart/legend shape and the empty state. A series with no numbers anywhere
   in the window is **dropped rather than drawn flat at zero**, which is what makes a kernel without PSI
   say so instead of reporting three healthy zeroes.

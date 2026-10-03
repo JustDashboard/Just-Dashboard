@@ -1976,3 +1976,62 @@ for (const width of [1280, 1720, 390]) {
     })
   })
 }
+
+test("workspace: container name typing, adjacent details and Back retain list focus", async ({
+  page,
+}) => {
+  await mockDocker(page)
+  await page.route("**/api/v1/docker/containers/1111111111111111", (route) => json(route, detail))
+  await page.route("**/api/v1/docker/containers/2222222222222222", (route) =>
+    json(route, { ...detail, id: "2222222222222222", name: "db" }),
+  )
+  await page.goto("/docker/containers")
+  await expect(page.locator("[data-workspace-item]").first()).toBeVisible()
+  await page.locator("[data-workspace-item]").first().focus()
+  await page.keyboard.press("w")
+  await expect(page.getByRole("button", { name: "web", exact: true }).first()).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/1111111111111111$/)
+  const next = page.getByRole("button", { name: "Next container" })
+  await expect(next).toBeEnabled()
+  await next.click()
+  await expect(page).toHaveURL(/2222222222222222/)
+  await page.goBack()
+  await expect(page).toHaveURL(/1111111111111111$/)
+  await page.goBack()
+  await expect(page).toHaveURL(/\/docker\/containers$/)
+  await expect(page.getByRole("button", { name: "web", exact: true }).first()).toBeFocused()
+})
+
+test("workspace: Back restores a long container list's scroll and focused row", async ({
+  page,
+}) => {
+  await mockDocker(page)
+  const inventory = Array.from({ length: 80 }, (_, index) => ({
+    ...containers[0],
+    id: String(index + 1).padStart(16, "0"),
+    name: `web-${String(index).padStart(2, "0")}`,
+  }))
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, (socket) =>
+    socket.send(JSON.stringify({ type: "containers", data: inventory })),
+  )
+  await page.route("**/api/v1/docker/containers/0000000000000051", (route) =>
+    json(route, { ...detail, id: "0000000000000051", name: "web-50" }),
+  )
+  await page.goto("/docker/containers")
+  const row = page.getByRole("button", { name: "web-50", exact: true })
+  await row.scrollIntoViewIfNeeded()
+  await row.focus()
+  const shell = page.locator("[data-workspace-shell-scroll]")
+  const before = await shell.evaluate((element) => element.scrollTop)
+  expect(before).toBeGreaterThan(1000)
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/0000000000000051$/)
+  await page.goBack()
+  await expect(page).toHaveURL(/\/docker\/containers$/)
+  await expect(row).toBeFocused()
+  await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
+  await page.reload()
+  await expect(row).toBeFocused()
+  await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
+})

@@ -39,6 +39,9 @@ import { utilisationTone } from "@/components/meter"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { RangePicker } from "@/components/metrics/range-picker"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { MomentInspector } from "@/components/metrics/moment-inspector"
+import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
 import { NotableMoments } from "@/components/metrics/notable-moments"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import {
@@ -287,273 +290,290 @@ export default function MetricsPage() {
   }
 
   return (
-    <Page className="animate-rise">
-      <PageContext title="Metrics" />
+    <Workspace
+      name="Metrics"
+      rows={false}
+      search={false}
+      refresh={() => window.dispatchEvent(new Event("jd:metrics-refresh"))}
+      escape={() => {
+        if (!getCrosshair().pinned) return false
+        unpinCrosshair()
+        return true
+      }}
+    >
+      <Page className="animate-rise">
+        <PageContext title="Metrics" actions={<WorkspaceHelp />} />
+        <MomentInspector samples={rows} />
 
-      {/* What this machine is made of. The Overview's line says what it
+        {/* What this machine is made of. The Overview's line says what it
           runs; this one says what it runs on, drawn as the processor itself,
           because every figure below is a share of something named here. */}
-      <HostIdentity
-        mark={cpuProduct(host.cpuModel, host.kernelArch)}
-        title={host.cpuModel || "Unknown processor"}
-        facts={
-          <>
-            <span className="numeric">
-              {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
-            </span>
-            <FactDot />
-            <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
-            <FactDot />
-            <span className="numeric">
-              {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
-            </span>
-            {host.virtualization && (
-              <>
-                <FactDot />
-                <HostFact product={virtualizationProduct(host.virtualization)}>
-                  {host.virtualization}
-                </HostFact>
-              </>
-            )}
-            <FactDot />
-            <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-            <FactDot />
-            {recorded.disabled ? (
-              <Tag tone="warning">history off</Tag>
-            ) : (
-              recorded.history && (
-                <span className="numeric">
-                  sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
-                  {duration(recorded.history.retentionSeconds)}
-                </span>
-              )
-            )}
-          </>
-        }
-        aside={
-          <div className="flex max-w-full flex-wrap items-center gap-2">
-            {health && (
-              <HealthVerdict
-                partial={!!health.silences?.length}
-                status={health.status}
-                className="text-body"
-              />
-            )}
-            {live && (
-              <IconAction
-                label={paused ? "Resume live feed" : "Pause live feed"}
-                onClick={() =>
-                  setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
-                }
-              >
-                {paused ? <Play /> : <Pause />}
-              </IconAction>
-            )}
-            {/* Export the exact window and resolution on screen, peaks included. */}
-            <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
-              <Download />
-              Export CSV
-            </Button>
-            <RangePicker controls={controls} />
-          </div>
-        }
-      />
+        <HostIdentity
+          mark={cpuProduct(host.cpuModel, host.kernelArch)}
+          title={host.cpuModel || "Unknown processor"}
+          facts={
+            <>
+              <span className="numeric">
+                {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
+              </span>
+              <FactDot />
+              <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
+              <FactDot />
+              <span className="numeric">
+                {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
+              </span>
+              {host.virtualization && (
+                <>
+                  <FactDot />
+                  <HostFact product={virtualizationProduct(host.virtualization)}>
+                    {host.virtualization}
+                  </HostFact>
+                </>
+              )}
+              <FactDot />
+              <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
+              <FactDot />
+              {recorded.disabled ? (
+                <Tag tone="warning">history off</Tag>
+              ) : (
+                recorded.history && (
+                  <span className="numeric">
+                    sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
+                    {duration(recorded.history.retentionSeconds)}
+                  </span>
+                )
+              )}
+            </>
+          }
+          aside={
+            <div className="flex max-w-full flex-wrap items-center gap-2">
+              {health && (
+                <HealthVerdict
+                  partial={!!health.silences?.length}
+                  status={health.status}
+                  className="text-body"
+                />
+              )}
+              {live && (
+                <IconAction
+                  label={paused ? "Resume live feed" : "Pause live feed"}
+                  onClick={() =>
+                    setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
+                  }
+                >
+                  {paused ? <Play /> : <Pause />}
+                </IconAction>
+              )}
+              {/* Export the exact window and resolution on screen, peaks included. */}
+              <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
+                <Download />
+                Export CSV
+              </Button>
+              <RangePicker controls={controls} />
+            </div>
+          }
+        />
 
-      <Readings
-        snapshot={snapshot}
-        cores={cores}
-        stats={stats}
-        prior={priorStats}
-        priorLabel={prior ? rangeSpec(win.key).label : null}
-      />
+        <Readings
+          snapshot={snapshot}
+          cores={cores}
+          stats={stats}
+          prior={priorStats}
+          priorLabel={prior ? rangeSpec(win.key).label : null}
+        />
 
-      {/* The verdict is already in the facts row, and on the page made
+        {/* The verdict is already in the facts row, and on the page made
           entirely of the numbers it was computed from, "Warning" with no way
           to ask why is a dead end. Rendered only when there is something to
           say: a server with nothing wrong loses no height to a list saying so. */}
-      {(healthError || (health && (health.findings.length > 0 || health.silences?.length))) && (
-        <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
-      )}
+        {(healthError || (health && (health.findings.length > 0 || health.silences?.length))) && (
+          <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
+        )}
 
-      <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-        <NotableMoments rows={rows} events={events} cores={cores} onZoom={zoom} />
-        <TopProcesses />
-      </div>
-
-      <Section title="Utilisation">
-        {recorded.error && <ErrorState error={recorded.error} />}
-
-        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-          <ProcessorPanel
-            rows={rows}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            note={note}
-            now={snapshot}
-          />
-
-          <ChartPanel
-            plain
-            title="Memory and swap"
-            rows={rows}
-            series={memSeries}
-            unit="%"
-            domain={PERCENT_DOMAIN}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            note={note}
-            height={190}
-          />
+        <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+          <NotableMoments rows={rows} events={events} cores={cores} onZoom={zoom} />
+          <TopProcesses />
         </div>
 
-        <ChartPanel
-          plain
-          title="Network throughput"
-          rows={rows}
-          series={netSeries}
-          format={fmtRate}
-          axisFormat={axisBytes}
-          events={events}
-          onZoom={zoom}
-          showPeaks={showPeaks}
-          note={note}
-          height={180}
-        />
+        <Section title="Utilisation">
+          {recorded.error && <ErrorState error={recorded.error} />}
 
-        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-          {/* Two charts rather than one with two axes. A capacity percentage
-              and a byte rate share no scale, and overlaying them on twin axes
-              invites the reader to infer a relationship between two lines that
-              have nothing to do with each other. */}
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <ProcessorPanel
+              rows={rows}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              note={note}
+              now={snapshot}
+            />
+
+            <ChartPanel
+              plain
+              title="Memory and swap"
+              rows={rows}
+              series={memSeries}
+              unit="%"
+              domain={PERCENT_DOMAIN}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              note={note}
+              height={190}
+            />
+          </div>
+
           <ChartPanel
             plain
-            title="Capacity"
-            rows={storage.rows as { ts: number }[]}
-            series={storageSeries}
-            unit="%"
-            domain={PERCENT_DOMAIN}
-            format={fmtPercent0}
-            events={events}
-            onZoom={zoom}
-            showPeaks={false}
-            note={note}
-            height={165}
-            thresholds={DISK_THRESHOLD}
-          />
-          <ChartPanel
-            plain
-            title="Disk throughput"
+            title="Network throughput"
             rows={rows}
-            series={ioSeries}
+            series={netSeries}
             format={fmtRate}
             axisFormat={axisBytes}
             events={events}
             onZoom={zoom}
             showPeaks={showPeaks}
             note={note}
-            height={165}
+            height={180}
           />
-        </div>
-      </Section>
 
-      {/*
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            {/* Two charts rather than one with two axes. A capacity percentage
+              and a byte rate share no scale, and overlaying them on twin axes
+              invites the reader to infer a relationship between two lines that
+              have nothing to do with each other. */}
+            <ChartPanel
+              plain
+              title="Capacity"
+              rows={storage.rows as { ts: number }[]}
+              series={storageSeries}
+              unit="%"
+              domain={PERCENT_DOMAIN}
+              format={fmtPercent0}
+              events={events}
+              onZoom={zoom}
+              showPeaks={false}
+              note={note}
+              height={165}
+              thresholds={DISK_THRESHOLD}
+            />
+            <ChartPanel
+              plain
+              title="Disk throughput"
+              rows={rows}
+              series={ioSeries}
+              format={fmtRate}
+              axisFormat={axisBytes}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              note={note}
+              height={165}
+            />
+          </div>
+        </Section>
+
+        {/*
         Saturation is a separate question from utilisation, and the reason most
         one-server dashboards leave people stuck. "The CPU is 40% busy" and
         "requests are queueing" are both true at once far more often than they
         look like they should be, and only the charts below can say so.
       */}
-      <Section title="Saturation">
-        <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-          <ChartPanel
-            plain
-            title="Pressure"
-            rows={rows}
-            series={pressureSeries}
-            unit="%"
-            domain={FROM_ZERO}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            height={165}
-            thresholds={PRESSURE_THRESHOLD}
-            note={
-              snapshot.pressure?.supported === false
-                ? "This kernel does not expose /proc/pressure. Pressure needs Linux 4.20 or newer with PSI enabled."
-                : note
-            }
-          />
-          <ChartPanel
-            plain
-            title="Load average"
-            rows={rows}
-            series={loadSeries}
-            format={fmtLoad}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            height={165}
-            thresholds={loadThreshold}
-            note={
-              live ? "Load averages are read from the recorded series — pick a range above." : note
-            }
-          />
-          <ChartPanel
-            plain
-            title="Disk operations"
-            rows={rows}
-            series={iopsSeries}
-            format={fmtOps}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            height={165}
-            note={note}
-          />
-          <ChartPanel
-            plain
-            title="Disk latency and busy time"
-            rows={rows}
-            series={latencySeries}
-            format={fmtMillis}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            height={165}
-            note={note}
-          />
-          <ChartPanel
-            plain
-            title="Sockets"
-            rows={rows}
-            series={socketSeries}
-            format={fmtCount}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            height={165}
-            note={note}
-          />
-          <InodePanel
-            rows={storage.rows as { ts: number }[]}
-            series={inodeSeries}
-            events={events}
-            onZoom={zoom}
-            note={live ? "Inode usage is only in the recorded history — pick a range above." : note}
-          />
-        </div>
-      </Section>
+        <Section title="Saturation">
+          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <ChartPanel
+              plain
+              title="Pressure"
+              rows={rows}
+              series={pressureSeries}
+              unit="%"
+              domain={FROM_ZERO}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              thresholds={PRESSURE_THRESHOLD}
+              note={
+                snapshot.pressure?.supported === false
+                  ? "This kernel does not expose /proc/pressure. Pressure needs Linux 4.20 or newer with PSI enabled."
+                  : note
+              }
+            />
+            <ChartPanel
+              plain
+              title="Load average"
+              rows={rows}
+              series={loadSeries}
+              format={fmtLoad}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              thresholds={loadThreshold}
+              note={
+                live
+                  ? "Load averages are read from the recorded series — pick a range above."
+                  : note
+              }
+            />
+            <ChartPanel
+              plain
+              title="Disk operations"
+              rows={rows}
+              series={iopsSeries}
+              format={fmtOps}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              note={note}
+            />
+            <ChartPanel
+              plain
+              title="Disk latency and busy time"
+              rows={rows}
+              series={latencySeries}
+              format={fmtMillis}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              note={note}
+            />
+            <ChartPanel
+              plain
+              title="Sockets"
+              rows={rows}
+              series={socketSeries}
+              format={fmtCount}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              note={note}
+            />
+            <InodePanel
+              rows={storage.rows as { ts: number }[]}
+              series={inodeSeries}
+              events={events}
+              onZoom={zoom}
+              note={
+                live ? "Inode usage is only in the recorded history — pick a range above." : note
+              }
+            />
+          </div>
+        </Section>
 
-      <Section title="Hardware">
-        <PerCorePanel cores={snapshot.cpu.perCore} />
-        <SensorsPanel sensors={sensors} />
-        <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-          <MountsPanel snapshot={snapshot} />
-          <InterfacesPanel snapshot={snapshot} />
-        </div>
-      </Section>
-    </Page>
+        <Section title="Hardware">
+          <PerCorePanel cores={snapshot.cpu.perCore} />
+          <SensorsPanel sensors={sensors} />
+          <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+            <MountsPanel snapshot={snapshot} />
+            <InterfacesPanel snapshot={snapshot} />
+          </div>
+        </Section>
+      </Page>
+    </Workspace>
   )
 }
 

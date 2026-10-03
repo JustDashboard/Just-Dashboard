@@ -1,5 +1,7 @@
 "use client"
 
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+
 import { useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
@@ -157,93 +159,100 @@ export default function BackupsPage() {
   const archives = list.reduce((sum, j) => sum + j.stored.runs, 0)
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Protection" title="Backups" />
+    <Workspace name="Backup jobs" refresh={refresh} search={false}>
+      <Page className="animate-rise">
+        <PageContext eyebrow="Protection" title="Backups" actions={<WorkspaceHelp />} />
 
-      {/* Only what somebody has to act on: a run that failed, a job that has
+        {/* Only what somebody has to act on: a run that failed, a job that has
           gone quiet. What is not covered is the Coverage list's to say — a
           finding repeating its count was the same sentence twice. */}
-      {findings.length > 0 && (
-        <Panel plain>
-          <PanelHeader title="Attention" />
-          <PanelBody className="py-0">
-            <FindingList findings={findings} emptyLabel="" />
-          </PanelBody>
-        </Panel>
-      )}
+        {findings.length > 0 && (
+          <Panel plain>
+            <PanelHeader title="Attention" />
+            <PanelBody className="py-0">
+              <FindingList findings={findings} emptyLabel="" />
+            </PanelBody>
+          </Panel>
+        )}
 
-      {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
-      {jobs.data && list.length === 0 && (
-        <EmptyState
-          icon={Archive}
-          title="No backup jobs"
-          description="A job archives directories, native database dumps and consistent SQLite snapshots on a schedule, to this server or to a bucket. Start from what the server has below, or write one from scratch."
-          action={
-            admin && (
-              <Button size="sm" onClick={() => setForm({})}>
-                <Plus className="size-4" />
-                New backup
-              </Button>
-            )
-          }
-        />
-      )}
-
-      {list.length > 0 && (
-        <Panel plain>
-          <PanelHeader
-            title="Jobs"
-            actions={
-              <span className="flex items-center gap-3">
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(list.length, "job")}
-                  {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
-                </span>
-                {admin && (
-                  <Button size="sm" onClick={() => setForm({})}>
-                    <Plus className="size-4" />
-                    New backup
-                  </Button>
-                )}
-              </span>
+        {jobs.error && <ErrorState error={jobs.error} onRetry={jobs.refresh} />}
+        {jobs.data && list.length === 0 && (
+          <EmptyState
+            icon={Archive}
+            title="No backup jobs"
+            description="A job archives directories, native database dumps and consistent SQLite snapshots on a schedule, to this server or to a bucket. Start from what the server has below, or write one from scratch."
+            action={
+              admin && (
+                <Button size="sm" onClick={() => setForm({})}>
+                  <Plus className="size-4" />
+                  New backup
+                </Button>
+              )
             }
           />
-          <PanelBody flush className="pt-3">
-            <ChoiceList className="animate-rise">
-              {ordered.map((job) => (
-                <JobCard key={job.id} job={job} products={productsFor(job)} verbs={verbsFor(job)} />
-              ))}
-            </ChoiceList>
-          </PanelBody>
-        </Panel>
-      )}
-      {jobs.loading && !jobs.data && <LoadingRows rows={3} />}
+        )}
 
-      {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
-      <CoveragePanel
-        report={coverage.data}
-        containers={containers}
-        loading={coverage.loading}
-        canCreate={admin && !coverage.error}
-        onProtect={(res) => openFor(prefillFor(res))}
-        onOpenJob={(id) => router.push(`/backups/${id}`)}
-      />
+        {list.length > 0 && (
+          <Panel plain>
+            <PanelHeader
+              title="Jobs"
+              actions={
+                <span className="flex items-center gap-3">
+                  <span className="numeric text-hint text-muted-foreground">
+                    {plural(list.length, "job")}
+                    {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
+                  </span>
+                  {admin && (
+                    <Button size="sm" onClick={() => setForm({})}>
+                      <Plus className="size-4" />
+                      New backup
+                    </Button>
+                  )}
+                </span>
+              }
+            />
+            <PanelBody flush className="pt-3">
+              <ChoiceList className="animate-rise">
+                {ordered.map((job) => (
+                  <JobCard
+                    key={job.id}
+                    job={job}
+                    products={productsFor(job)}
+                    verbs={verbsFor(job)}
+                  />
+                ))}
+              </ChoiceList>
+            </PanelBody>
+          </Panel>
+        )}
+        {jobs.loading && !jobs.data && <LoadingRows rows={3} />}
 
-      {form && admin && (
-        <JobDialog
-          job={form.job}
-          prefill={form.prefill}
-          resources={coverage.data?.resources ?? []}
-          onOpenChange={(open) => {
-            if (open) return
-            setForm(null)
-            forgetMemoryState("backups.job.")
-          }}
-          onDone={refresh}
+        {coverage.error && <ErrorState error={coverage.error} onRetry={coverage.refresh} />}
+        <CoveragePanel
+          report={coverage.data}
+          containers={containers}
+          loading={coverage.loading}
+          canCreate={admin && !coverage.error}
+          onProtect={(res) => openFor(prefillFor(res))}
+          onOpenJob={(id) => router.push(`/backups/${id}`)}
         />
-      )}
-      {dialog}
-    </Page>
+
+        {form && admin && (
+          <JobDialog
+            job={form.job}
+            prefill={form.prefill}
+            resources={coverage.data?.resources ?? []}
+            onOpenChange={(open) => {
+              if (open) return
+              setForm(null)
+              forgetMemoryState("backups.job.")
+            }}
+            onDone={refresh}
+          />
+        )}
+        {dialog}
+      </Page>
+    </Workspace>
   )
 }
 

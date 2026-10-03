@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockHost } from "./host-fixture"
 
+const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
+test.use({ video: recordWorkspace ? "on" : "off" })
+
 /**
  * The metrics page after its design-system pass, against a mocked host.
  *
@@ -153,4 +156,44 @@ test("the controls stay reachable beside the machine facts on a phone", async ({
     ),
   ).toBe(false)
   await page.screenshot({ path: "test-results/metrics-phone.png", fullPage: true })
+})
+
+test("workspace: a pinned moment has readings, adjacent samples and a precise log handoff", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/metrics")
+  const chart = page.getByRole("group", { name: /chart\. Click or press Enter/ }).first()
+  await expect(chart.locator("svg.recharts-surface")).toBeVisible({ timeout: 20_000 })
+  await chart.focus()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("status", { name: "" }).filter({ hasText: "Pinned" })).toBeVisible()
+  await expect(chart.locator("[data-pinned-reading]")).toBeVisible()
+  if (recordWorkspace) {
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: testInfo.outputPath("metrics-pinned.png") })
+  }
+  const initial = await page
+    .getByRole("link", { name: "Logs around this moment" })
+    .getAttribute("href")
+  await page.keyboard.press("ArrowLeft")
+  const previous = await page
+    .getByRole("link", { name: "Logs around this moment" })
+    .getAttribute("href")
+  expect(previous).not.toEqual(initial)
+  if (recordWorkspace) await page.waitForTimeout(700)
+  const question = new URL(previous!, "http://localhost").searchParams
+  expect(question.get("source")).toBe("journal:")
+  expect(Date.parse(question.get("until")!) - Date.parse(question.get("since")!)).toBe(120000)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toHaveCount(0)
+  const bounds = (await chart.boundingBox())!
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+  await page.mouse.down()
+  await page.mouse.up()
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toBeVisible()
+  await page.mouse.move(0, 0)
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toBeVisible()
+  if (recordWorkspace) await page.waitForTimeout(700)
+  await page.getByRole("button", { name: "Release moment" }).click()
+  await expect(page.getByRole("link", { name: "Logs around this moment" })).toHaveCount(0)
 })

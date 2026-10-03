@@ -86,6 +86,8 @@ export type WorkspaceView = {
 }
 
 type WorkspaceProps = {
+  onSubmitQuestion?: () => void
+  refreshToken?: number
   source: LogSource
   sourceId: string
   units: LogSourceIndex["units"]
@@ -228,6 +230,15 @@ export function LogWorkspace(props: WorkspaceProps) {
   // Enter, Search and a zoom are the asks that carry the words in the box.
   const [insightAsk, setInsightAsk] = useState(0)
   const [insightFacets, setInsightFacets] = useState<LogSearchResult["facets"]>()
+
+  const refreshToken = props.refreshToken ?? 0
+  useEffect(() => {
+    if (!refreshToken) return
+    if (mode === "live") live.reconnect()
+    else if (mode === "search") search.run()
+    // The token is an explicit refresh, not a change to the current question.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken])
 
   // Arriving on a shared link that already says "history, this term" should
   // show the answer, not a form with the question typed into it. The workspace
@@ -408,6 +419,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           filter={filter}
           onFilterChange={onFilterChange}
           onSubmit={(next) => {
+            props.onSubmitQuestion?.()
             if (mode === "search") search.run({ filter: next })
             else if (mode === "insights") setInsightAsk((n) => n + 1)
             else if (mode === "live") switchMode("search", next)
@@ -470,7 +482,9 @@ export function LogWorkspace(props: WorkspaceProps) {
       )}
 
       {view ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-auto">{view.render()}</div>
+        <div key={refreshToken} className="flex min-h-0 flex-1 flex-col overflow-auto">
+          {view.render()}
+        </div>
       ) : mode === "insights" ? (
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
           <Insights
@@ -489,7 +503,7 @@ export function LogWorkspace(props: WorkspaceProps) {
             until={props.until}
             archives={props.archives}
             boot={props.boot}
-            ask={insightAsk}
+            ask={insightAsk + refreshToken}
             readings={props.insightReadings}
             onZoom={(from, to) => {
               props.onCustomRange(from, to)
@@ -516,6 +530,7 @@ export function LogWorkspace(props: WorkspaceProps) {
           )}
 
           <LogConsole
+            stateKey={`${sourceId}.${mode}.${JSON.stringify({ filter: applied, range: props.range, since: props.since, until: props.until, boot: props.boot, lens: forced })}`}
             lines={lines}
             filter={applied}
             leading={<LevelChips filter={filter} onFilterChange={onFilterChange} counts={counts} />}

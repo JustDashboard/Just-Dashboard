@@ -1,7 +1,9 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { useSessionState } from "@/lib/view-state"
+import { useEffect, useMemo, useState } from "react"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useFilterHistory } from "@/components/workspace/history"
+import { useHeldList } from "@/components/workspace/held-list"
 import { useRouter } from "next/navigation"
 import { ClockRewind, Logout, Users } from "@/components/icons"
 import { get, post, ApiError } from "@/lib/api"
@@ -24,6 +26,7 @@ import { ProductLogo } from "@/components/product-logo"
 import { Meter } from "@/components/meter"
 import { Status } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
+import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   stickyTableHeader,
@@ -68,8 +71,18 @@ export function LoginsPanels() {
   const attacks = attackers.data
 
   return (
-    <>
-      <PageContext eyebrow="Security" title="Logins" />
+    <Workspace
+      name="Logins"
+      memory
+      openItems={false}
+      refresh={() => {
+        sessions.refresh()
+        history.refresh()
+        attackers.refresh()
+        window.dispatchEvent(new Event("jd:logins-refresh"))
+      }}
+    >
+      <PageContext eyebrow="Security" title="Logins" actions={<WorkspaceHelp />} />
 
       <StatGrid columns={4}>
         <StatTile
@@ -115,7 +128,7 @@ export function LoginsPanels() {
         {admin && <AttackersPanel poll={attackers} />}
         <LoginHistoryPanel history={history} />
       </div>
-    </>
+    </Workspace>
   )
 }
 
@@ -390,8 +403,12 @@ function AttackersPanel({ poll }: { poll: ReturnType<typeof usePoll<AttackSummar
  */
 function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<LoginRecord[]>> }) {
   const { can } = useAuth()
-  const [failed, setFailed] = useSessionState("security.logins.failed", false)
-  const [query, setQuery] = useSessionState("security.logins.query", "")
+  const [filters, setFilters] = useFilterHistory("security.logins.filters", { q: "", failed: "" })
+  const failed = filters.failed === "1"
+  const query = filters.q
+  const setFailed = (failed: boolean) =>
+    setFilters((previous) => ({ ...previous, failed: failed ? "1" : "" }), true)
+  const setQuery = (q: string) => setFilters((previous) => ({ ...previous, q }))
   const admin = can("system.admin")
   const showFailed = failed && admin
 
@@ -401,15 +418,25 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
     [],
     { enabled: showFailed },
   )
+  useEffect(() => {
+    window.addEventListener("jd:logins-refresh", failedRecords.refresh)
+    return () => window.removeEventListener("jd:logins-refresh", failedRecords.refresh)
+  }, [failedRecords.refresh])
   const { data, error, loading } = showFailed ? failedRecords : history
 
   const unavailable = error instanceof ApiError && error.code === "login_history_unavailable"
 
-  const shown = useMemo(() => {
+  const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return data ?? []
     return (data ?? []).filter((r) => `${r.user} ${r.tty} ${r.from}`.toLowerCase().includes(q))
   }, [data, query])
+  const held = useHeldList(
+    data ? matches : undefined,
+    (record) => `${record.user}:${record.tty}:${record.loginTime}:${record.from}`,
+    JSON.stringify(filters),
+  )
+  const shown = held.rows
 
   return (
     <Panel>
@@ -423,6 +450,11 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
       />
       {!unavailable && !error && (
         <PanelToolbar>
+          {held.pending > 0 && (
+            <Button size="xs" aria-label={`Show ${held.pending} new logins`} onClick={held.reveal}>
+              <span role="status">{held.pending} new logins</span> · Show
+            </Button>
+          )}
           {admin && (
             <ToggleGroup
               type="single"
@@ -443,6 +475,7 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
           <span className="flex-1" />
           <SearchInput
             dense
+            data-workspace-search
             aria-label="Filter login records"
             placeholder="User, terminal or address"
             value={query}
@@ -494,7 +527,13 @@ function LoginHistoryPanel({ history }: { history: ReturnType<typeof usePoll<Log
               </TableHeader>
               <TableBody>
                 {shown.map((record, i) => (
-                  <TableRow key={`${record.user}-${record.loginTime ?? i}-${i}`}>
+                  <TableRow
+                    key={`${record.user}-${record.loginTime ?? i}-${i}`}
+                    data-workspace-item={`${record.user}:${record.tty}:${record.loginTime}:${record.from}`}
+                    data-workspace-name={record.user}
+                    tabIndex={0}
+                    className="focus-ring-inset"
+                  >
                     <TableCell className="py-4">
                       <div className="flex items-center gap-3">
                         {record.kind === "login" ? (

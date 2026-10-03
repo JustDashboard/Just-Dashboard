@@ -19,7 +19,7 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post, patch, ApiError } from "@/lib/api"
 import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
-import { useViewState } from "@/lib/view-state"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import type {
   ContainerDetail,
   DockerDiagnosis,
@@ -57,6 +57,7 @@ import { FileBrowser } from "@/components/files/inline-browser"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Group, Well } from "@/components/panel"
 import { FilterChip } from "@/components/tabs"
 import { Tag } from "@/components/tag"
@@ -130,6 +131,18 @@ function ContainerDetailPanel({
     [remember],
   )
   const [reloads, setReloads] = useState(0)
+  const [navigation] = useSessionState<{ id: string; name: string }[]>(
+    "docker.containers.navigation",
+    [],
+  )
+  const at = navigation.findIndex((container) => container.id === containerId)
+  const adjacent = (direction: number) => {
+    const next = at >= 0 ? navigation[at + direction] : undefined
+    if (next)
+      router.push(
+        `/docker/containers/${encodeURIComponent(next.id)}?tab=${encodeURIComponent(tab)}`,
+      )
+  }
 
   // The page's own diagnosis pass. As a panel this was handed the container
   // table's single poll, filtered to the open container; on its own route
@@ -199,174 +212,216 @@ function ContainerDetailPanel({
   }, [health, failure])
 
   return (
-    <Page fill>
-      <div className="flex min-w-0 shrink-0 flex-col gap-4">
-        <PageContext
-          eyebrow={
-            <Link
-              href="/docker/containers"
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-            >
-              <ArrowLeft className="size-3" /> Containers
-            </Link>
-          }
-          title={detail?.name ?? "Container"}
-          actions={
-            detail && (
-              <>
-                <Status
-                  state={detail.state}
-                  live={detail.state === "running"}
-                  label={statusWord(detail)}
-                />
-                {/* Start, stop and restart were reachable from the table and
+    <Workspace
+      name="Container"
+      stateKey={`container.${containerId}.${tab}`}
+      refresh={changed}
+      search={false}
+      rows={false}
+      commands={[
+        {
+          id: "previous",
+          label: "Previous container",
+          keys: "Alt+↑",
+          chord: "Alt+ArrowUp",
+          disabled: at <= 0,
+          run: () => adjacent(-1),
+        },
+        {
+          id: "next",
+          label: "Next container",
+          keys: "Alt+↓",
+          chord: "Alt+ArrowDown",
+          disabled: at < 0 || at >= navigation.length - 1,
+          run: () => adjacent(1),
+        },
+      ]}
+    >
+      <Page fill>
+        <div className="flex min-w-0 shrink-0 flex-col gap-4">
+          <PageContext
+            eyebrow={
+              <Link
+                href="/docker/containers"
+                className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+              >
+                <ArrowLeft className="size-3" /> Containers
+              </Link>
+            }
+            title={detail?.name ?? "Container"}
+            actions={
+              detail && (
+                <>
+                  <Status
+                    state={detail.state}
+                    live={detail.state === "running"}
+                    label={statusWord(detail)}
+                  />
+                  {/* Start, stop and restart were reachable from the table and
                     nowhere else, so opening a container to look at why it is
                     unhappy meant closing it again to do anything about it. */}
-                <ContainerLifecycle
-                  detail={detail}
-                  confirm={confirm}
-                  onOpenTab={setTab}
-                  onChanged={changed}
-                />
-                <ContainerActions detail={detail} confirm={confirm} onChanged={changed} />
-              </>
-            )
-          }
-        />
-        {/* What the container *is*, as its own row of facts rather than as tags
+                  <ContainerLifecycle
+                    detail={detail}
+                    confirm={confirm}
+                    onOpenTab={setTab}
+                    onChanged={changed}
+                  />
+                  <ContainerActions detail={detail} confirm={confirm} onChanged={changed} />
+                  <Button size="xs" variant="ghost" disabled={at <= 0} onClick={() => adjacent(-1)}>
+                    Previous container
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={at < 0 || at >= navigation.length - 1}
+                    onClick={() => adjacent(1)}
+                  >
+                    Next container
+                  </Button>
+                  <WorkspaceHelp />
+                </>
+              )
+            }
+          />
+          {/* What the container *is*, as its own row of facts rather than as tags
             crammed into the title (§15 pass 8, and the same call `ProjectShell`
             makes). "Which image is this" is the second question anybody opening
             a container has, and it used to need the Overview tab. */}
-        {detail && (
-          <MetricStrip className="animate-rise">
-            <Metric
-              label="Container"
-              value={
-                <span className="inline-flex items-center gap-2">
-                  <ProductLogo id={containerProduct(detail)} />
-                  {detail.name}
-                </span>
-              }
-            />
-            <Metric label="Image" value={detail.image} />
-            <Metric label="ID" value={detail.id.slice(0, 12)} />
-            {detail.composeStack && (
+          {detail && (
+            <MetricStrip className="animate-rise">
               <Metric
-                label="Compose stack"
+                label="Container"
                 value={
-                  <Link
-                    href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}`}
-                    className="rounded-sm focus-ring hover:underline"
-                  >
-                    {detail.composeStack}
-                  </Link>
+                  <span className="inline-flex items-center gap-2">
+                    <ProductLogo id={containerProduct(detail)} />
+                    {detail.name}
+                  </span>
                 }
               />
-            )}
-          </MetricStrip>
-        )}
-      </div>
+              <Metric label="Image" value={detail.image} />
+              <Metric label="ID" value={detail.id.slice(0, 12)} />
+              {detail.composeStack && (
+                <Metric
+                  label="Compose stack"
+                  value={
+                    <Link
+                      href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}`}
+                      className="rounded-sm focus-ring hover:underline"
+                    >
+                      {detail.composeStack}
+                    </Link>
+                  }
+                />
+              )}
+            </MetricStrip>
+          )}
+        </div>
 
-      {error && <ErrorState error={error} />}
-      {!detail && !error && <LoadingRows />}
+        {error && <ErrorState error={error} />}
+        {!detail && !error && <LoadingRows />}
 
-      {detail && (
-        <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
-          <TabsList className="w-fit shrink-0">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="usage">Usage</TabsTrigger>
-            <TabsTrigger value="logs">Logs</TabsTrigger>
-            <TabsTrigger value="env">Environment</TabsTrigger>
-            <TabsTrigger value="mounts">Storage</TabsTrigger>
-            <TabsTrigger value="inspect">Inspect</TabsTrigger>
-            <TabsTrigger value="configure">Configuration</TabsTrigger>
-            {shell && <TabsTrigger value="shell">Shell</TabsTrigger>}
-          </TabsList>
+        {detail && (
+          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
+            <TabsList className="w-fit shrink-0">
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="usage">Usage</TabsTrigger>
+              <TabsTrigger value="logs">Logs</TabsTrigger>
+              <TabsTrigger value="env">Environment</TabsTrigger>
+              <TabsTrigger value="mounts">Storage</TabsTrigger>
+              <TabsTrigger value="inspect">Inspect</TabsTrigger>
+              <TabsTrigger value="configure">Configuration</TabsTrigger>
+              {shell && <TabsTrigger value="shell">Shell</TabsTrigger>}
+            </TabsList>
 
-          <TabsContent value="overview" className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-            {/*
+            <TabsContent value="overview" className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+              {/*
               Why it is not working, then what is wrong with it, then the facts
               about it. An operator who opened this page opened it for the
               first of those, and the version this replaces led with the third.
             */}
-            <FailurePanel
-              data={failure.data}
-              onReadLogs={() => {
-                setCrash(true)
-                setTab("logs")
-              }}
-            />
-            <ContainerFindings diagnosis={health.data} containerId={detail.id} onAction={runFix} />
-            <OverviewFields detail={detail} />
-            <Reachability containerId={detail.id} />
-          </TabsContent>
-
-          <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto">
-            <ContainerLiveUsage key={detail.id} detail={detail} />
-            <ResourceLimitsEditor
-              detail={detail}
-              onSaved={() => {
-                health.refresh()
-                setReloads((n) => n + 1)
-                window.dispatchEvent(new Event("jd:health-changed"))
-              }}
-            />
-            <ContainerUsage containerId={detail.id} name={detail.name} plain />
-          </TabsContent>
-
-          {/* Scrolls on a phone, where the readings and a pane worth reading
-              are taller than what is left of the window under the facts. */}
-          <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
-            <ContainerLogs
-              detail={detail}
-              failure={failure.data}
-              crash={crash}
-              onCrashChange={setCrash}
-            />
-          </TabsContent>
-
-          <TabsContent value="env" className="min-h-0 flex-1">
-            <EnvironmentList env={detail.env} />
-          </TabsContent>
-
-          {/* The listing takes the tab's height and scrolls inside itself, so
-              the tab only scrolls once a writable-layer report outgrows it. */}
-          <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto">
-            <div className="flex h-full min-h-0 flex-col gap-3">
-              <MountList detail={detail} />
-              <WritableLayer containerId={detail.id} />
-            </div>
-          </TabsContent>
-
-          <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto">
-            {tab === "configure" && (
-              <ConfigurationRemedy
-                detail={detail}
-                findings={(health.data?.findings ?? []).filter(
-                  (finding) => finding.targetId === detail.id,
-                )}
-                confirm={confirm}
-                onChanged={() => {
-                  health.refresh()
-                  setReloads((n) => n + 1)
+              <FailurePanel
+                data={failure.data}
+                onReadLogs={() => {
+                  setCrash(true)
+                  setTab("logs")
                 }}
               />
-            )}
-          </TabsContent>
-
-          <TabsContent value="inspect" className="min-h-0 flex-1">
-            {tab === "inspect" && <RawInspect containerId={detail.id} />}
-          </TabsContent>
-
-          {shell && (
-            <TabsContent value="shell" className="min-h-0 flex-1">
-              {tab === "shell" && <ContainerShell detail={detail} />}
+              <ContainerFindings
+                diagnosis={health.data}
+                containerId={detail.id}
+                onAction={runFix}
+              />
+              <OverviewFields detail={detail} />
+              <Reachability containerId={detail.id} />
             </TabsContent>
-          )}
-        </Tabs>
-      )}
-      {dialog}
-    </Page>
+
+            <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto">
+              <ContainerLiveUsage key={detail.id} detail={detail} />
+              <ResourceLimitsEditor
+                detail={detail}
+                onSaved={() => {
+                  health.refresh()
+                  setReloads((n) => n + 1)
+                  window.dispatchEvent(new Event("jd:health-changed"))
+                }}
+              />
+              <ContainerUsage containerId={detail.id} name={detail.name} plain />
+            </TabsContent>
+
+            {/* Scrolls on a phone, where the readings and a pane worth reading
+              are taller than what is left of the window under the facts. */}
+            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
+              <ContainerLogs
+                detail={detail}
+                failure={failure.data}
+                crash={crash}
+                onCrashChange={setCrash}
+              />
+            </TabsContent>
+
+            <TabsContent value="env" className="min-h-0 flex-1">
+              <EnvironmentList env={detail.env} />
+            </TabsContent>
+
+            {/* The listing takes the tab's height and scrolls inside itself, so
+              the tab only scrolls once a writable-layer report outgrows it. */}
+            <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto">
+              <div className="flex h-full min-h-0 flex-col gap-3">
+                <MountList detail={detail} />
+                <WritableLayer containerId={detail.id} />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto">
+              {tab === "configure" && (
+                <ConfigurationRemedy
+                  detail={detail}
+                  findings={(health.data?.findings ?? []).filter(
+                    (finding) => finding.targetId === detail.id,
+                  )}
+                  confirm={confirm}
+                  onChanged={() => {
+                    health.refresh()
+                    setReloads((n) => n + 1)
+                  }}
+                />
+              )}
+            </TabsContent>
+
+            <TabsContent value="inspect" className="min-h-0 flex-1">
+              {tab === "inspect" && <RawInspect containerId={detail.id} />}
+            </TabsContent>
+
+            {shell && (
+              <TabsContent value="shell" className="min-h-0 flex-1">
+                {tab === "shell" && <ContainerShell detail={detail} />}
+              </TabsContent>
+            )}
+          </Tabs>
+        )}
+        {dialog}
+      </Page>
+    </Workspace>
   )
 }
 

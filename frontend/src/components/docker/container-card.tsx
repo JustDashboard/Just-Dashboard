@@ -77,6 +77,7 @@ export function ContainerCard({
 
   return (
     <ChoiceRow
+      workspaceItem={{ id: container.id, name: container.name }}
       // The name is the control's name: the row is the container, and every
       // other page that links here calls it by it.
       verb={container.name}

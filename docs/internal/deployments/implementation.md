@@ -130,9 +130,12 @@ only renderer/executor/validation authority for their feature.
   `GET /deploy/credentials`. The page is kept for the tab (`useSessionState`,
   [`../frontend/data-theming.md`](../frontend/data-theming.md)): the source tab and its form, and the
   configure screen's flow, findings and Advanced disclosure, survive a walk to another page and a
-  reload until the project is created or the source is changed, and a remembered flow whose draft has
-  expired is dropped with a notice on the way in. Unsaved environment values and visitor passwords never
-  enter the URL or browser storage. Configuration saves stage environment values in the additive
+  reload until the project is created or the source is changed. `?step=source|project|runtime|variables|review`
+  makes step changes browser history entries; Back to the chooser preserves the inspected flow and
+  Forward reopens it. Each step remembers field focus and scroll indices without field values,
+  as detailed in [`../frontend/workspace-interactions.md`](../frontend/workspace-interactions.md).
+  A remembered flow whose draft has expired is dropped with a notice on the way in. Unsaved environment
+  values and visitor passwords never enter the URL or browser storage. Configuration saves stage environment values in the additive
   `deploy_drafts.environment_enc` column, sealed with the install key; only `environmentKeys` returns
   to the browser, including names whose explicit empty override must survive a reload. An omitted
   `dotenv` preserves staged inputs, an explicit empty document clears them,

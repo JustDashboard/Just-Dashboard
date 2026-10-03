@@ -2,12 +2,14 @@
 
 import { Fragment, useMemo, useState } from "react"
 import Link from "next/link"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { NetworkDevice, Servers } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
 import type { Connections, PortsMeta } from "@/lib/types"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { useFilterHistory } from "@/components/workspace/history"
+import { useHeldList } from "@/components/workspace/held-list"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { PageContext, SearchInput } from "@/components/page"
@@ -21,6 +23,7 @@ import { useSecurity } from "@/components/security/security-context"
 import { ProductLogo, processProduct } from "@/components/product-logo"
 import { Meter } from "@/components/meter"
 import { VerbActions } from "@/components/verbs"
+import { Button } from "@/components/ui/button"
 import { chosenPort, portsHref } from "@/components/proxy/ports-list"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
@@ -50,13 +53,14 @@ export function ConnectionsPanel() {
   const { can } = useAuth()
   const { posture, applyFix } = useSecurity()
   const router = useRouter()
-  const [scope, setScope] = useViewState<"all" | "public">("security.connections.scope", "all")
-  // A link from a socket's clients arrives narrowed to its port or a peer.
-  const [query, setQuery] = useSessionState(
-    "security.connections.query",
-    "",
-    useSearchParams().get("q"),
-  )
+  const [filters, setFilters] = useFilterHistory("security.connections.filters", {
+    q: "",
+    scope: "all",
+  })
+  const query = filters.q
+  const scope = filters.scope === "public" ? "public" : "all"
+  const setQuery = (q: string) => setFilters((previous) => ({ ...previous, q }))
+  const setScope = (scope: string) => setFilters((previous) => ({ ...previous, scope }), true)
   const [blocking, setBlocking] = useState<string | null>(null)
   const { data, error, loading, refresh } = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),
@@ -68,7 +72,7 @@ export function ConnectionsPanel() {
   const range = usePoll((signal) => get<PortsMeta>("/ports/meta", undefined, signal), 0).data
     ?.ephemeralRange
 
-  const peers = useMemo(() => {
+  const matches = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (data?.peers ?? []).filter(
       (p) =>
@@ -79,10 +83,35 @@ export function ConnectionsPanel() {
             .includes(q)),
     )
   }, [data?.peers, scope, query])
+  const held = useHeldList(
+    data ? matches : undefined,
+    (peer) => peer.address,
+    JSON.stringify(filters),
+  )
+  const peers = held.rows
   const most = Math.max(1, ...(data?.peers ?? []).map((p) => p.count))
   const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
 
-  const header = <PageContext eyebrow="Security" title="Connections" />
+  const header = (
+    <PageContext
+      eyebrow="Security"
+      title="Connections"
+      actions={
+        <>
+          <WorkspaceHelp />
+          {held.pending > 0 && (
+            <Button
+              size="xs"
+              aria-label={`Show ${held.pending} new addresses`}
+              onClick={held.reveal}
+            >
+              <span role="status">{held.pending} new addresses</span> · Show
+            </Button>
+          )}
+        </>
+      }
+    />
+  )
 
   if (loading && !data) {
     return (
@@ -117,7 +146,19 @@ export function ConnectionsPanel() {
   }
 
   return (
-    <>
+    <Workspace
+      name="Connections"
+      openItems={false}
+      refresh={() => {
+        held.reveal()
+        refresh()
+      }}
+      escape={() => {
+        if (!query && scope === "all") return false
+        setFilters({ q: "", scope: "all" }, true)
+        return true
+      }}
+    >
       {header}
 
       {/* The figures, then the addresses they describe. Listening goes to the
@@ -177,6 +218,7 @@ export function ConnectionsPanel() {
           <span className="flex-1" />
           <SearchInput
             dense
+            data-workspace-search
             aria-label="Filter connections"
             placeholder="Address, port or process"
             value={query}
@@ -212,7 +254,13 @@ export function ConnectionsPanel() {
                 </TableHeader>
                 <TableBody>
                   {peers.map((peer) => (
-                    <TableRow key={peer.address} className="group">
+                    <TableRow
+                      key={peer.address}
+                      data-workspace-item={peer.address}
+                      data-workspace-name={peer.address}
+                      tabIndex={0}
+                      className="group focus-ring-inset"
+                    >
                       <TableCell className="py-4">
                         <PeerIdentity ip={peer.address} />
                       </TableCell>
@@ -295,6 +343,6 @@ export function ConnectionsPanel() {
           counts include connections still opening or closing.
         </PanelFooter>
       </Panel>
-    </>
+    </Workspace>
   )
 }

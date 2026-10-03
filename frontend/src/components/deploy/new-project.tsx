@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import {
   ArrowLeft,
   Box,
@@ -191,7 +193,31 @@ export function NewProject({
   )
   // Which of the four configure screens is open. Under the `configure.` prefix
   // so that changing the source forgets it with everything else the setup knew.
-  const [step, setStep] = useSessionState<ConfigureStepKey>("deploy.new.configure.step", "project")
+  const [rememberedStep, rememberStep] = useSessionState<ConfigureStepKey>(
+    "deploy.new.configure.step",
+    "project",
+  )
+  const requestedStep = useSearchParams().get("step")
+  const step =
+    requestedStep && ["project", "runtime", "variables", "review"].includes(requestedStep)
+      ? (requestedStep as ConfigureStepKey)
+      : rememberedStep
+  const setStep = useCallback(
+    (next: ConfigureStepKey) => {
+      rememberStep(next)
+      const url = new URL(window.location.href)
+      url.searchParams.set("step", next)
+      if (url.href !== window.location.href)
+        window.history.pushState({ jdWorkspace: "deploy-step" }, "", url)
+    },
+    [rememberStep],
+  )
+  useEffect(() => {
+    if (!flow || requestedStep) return
+    const url = new URL(window.location.href)
+    url.searchParams.set("step", rememberedStep)
+    window.history.replaceState({ jdWorkspace: "deploy-step" }, "", url)
+  }, [flow, requestedStep, rememberedStep])
   const [resuming, setResuming] = useState(Boolean(draftId))
   const [resumeError, setResumeError] = useState<Error>()
   // A link into the chooser — a README's deploy link, a `?source=` — asks for
@@ -213,8 +239,9 @@ export function NewProject({
     const address = new URL(window.location.href)
     for (const key of ["source", "profile", "repo", "ref", "draft", "template", "image"])
       address.searchParams.delete(key)
+    address.searchParams.set("step", "source")
     window.history.replaceState(
-      window.history.state,
+      { jdWorkspace: "deploy-step" },
       "",
       `${address.pathname}${address.search}${address.hash}`,
     )
@@ -319,7 +346,7 @@ export function NewProject({
   // Only the strip moves, sideways: `scrollIntoView` would also scroll the page
   // to the strip, which is the one thing this must not do on arrival.
   const strip = useRef<HTMLDivElement>(null)
-  const choosing = !flow || linkArrived
+  const choosing = !flow || linkArrived || requestedStep === "source"
   useEffect(() => {
     const row = strip.current
     const chosen = row?.querySelector<HTMLElement>(`[data-source="${tab}"]`)
@@ -347,24 +374,33 @@ export function NewProject({
     // they are, and what scrolls is the one list or form that is longer than
     // the space left — never the page around it. Stacked, below that width,
     // the page scrolls as every other page does.
-    <Page register="flow" fill="xl" className="animate-rise">
-      {choosing ? (
-        <>
-          {/* The screen asks something, and the question is the page's own
+    <Workspace
+      name="Deployment setup"
+      stateKey={`deploy.new.${choosing ? "source" : step}`}
+      search={false}
+      rows={false}
+    >
+      <Page register="flow" fill="xl" className="animate-rise">
+        <div className="flex shrink-0 justify-end">
+          <WorkspaceHelp />
+        </div>
+        {choosing ? (
+          <>
+            {/* The screen asks something, and the question is the page's own
               rank — not a sentence under a title, which is the caption §5
               removed from every page in the product. */}
-          <FlowHeader
-            eyebrow={Eyebrow}
-            question="What are you deploying?"
-            // Unfinished work is a way back, not a step of this one: a button
-            // that says how much there is, beside the question, rather than a
-            // block pushing the sources down the screen.
-            actions={
-              pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />
-            }
-            steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
-          />
-          {/* A group of pressed buttons, not a tablist: a tablist must own
+            <FlowHeader
+              eyebrow={Eyebrow}
+              question="What are you deploying?"
+              // Unfinished work is a way back, not a step of this one: a button
+              // that says how much there is, beside the question, rather than a
+              // block pushing the sources down the screen.
+              actions={
+                pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />
+              }
+              steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
+            />
+            {/* A group of pressed buttons, not a tablist: a tablist must own
               tabs, and these are five toggles for one answer. On a phone the
               five do not fit, so the strip runs to the screen's edge and
               scrolls there, and the source cut off at the edge is what says
@@ -372,70 +408,76 @@ export function NewProject({
               is drawn in the page's own ground and cannot show on it. The
               chosen one is brought into view, so a link that arrives on
               Compose does not open on a strip that hides it. */}
-          <div
-            ref={strip}
-            role="group"
-            aria-label="Project source"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline max-sm:-mx-5 max-sm:px-5 [&::-webkit-scrollbar]:hidden"
-          >
-            {TABS.map((option) => (
-              <button
-                key={option.key}
-                type="button"
-                data-source={option.key}
-                aria-pressed={tab === option.key}
-                onClick={() => setTab(option.key)}
-                className={tabClasses(tab === option.key, "h-11 max-sm:px-2")}
-              >
-                <option.icon
-                  aria-hidden
-                  className={
-                    tab === option.key ? "size-3.5 text-brand" : "size-3.5 text-muted-foreground"
-                  }
+            <div
+              ref={strip}
+              role="group"
+              aria-label="Project source"
+              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline max-sm:-mx-5 max-sm:px-5 [&::-webkit-scrollbar]:hidden"
+            >
+              {TABS.map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  data-source={option.key}
+                  aria-pressed={tab === option.key}
+                  onClick={() => setTab(option.key)}
+                  className={tabClasses(tab === option.key, "h-11 max-sm:px-2")}
+                >
+                  <option.icon
+                    aria-hidden
+                    className={
+                      tab === option.key ? "size-3.5 text-brand" : "size-3.5 text-muted-foreground"
+                    }
+                  />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            <div className="min-w-0 xl:min-h-0 xl:flex-1">
+              {tab === "git" && (
+                <SourceGit
+                  key="git"
+                  onInspected={inspected}
+                  initialUrl={repo}
+                  initialRef={repoRef}
                 />
-                {option.label}
-              </button>
-            ))}
-          </div>
-          <div className="min-w-0 xl:min-h-0 xl:flex-1">
-            {tab === "git" && (
-              <SourceGit key="git" onInspected={inspected} initialUrl={repo} initialRef={repoRef} />
-            )}
-            {tab === "image" && (
-              <SourceImage key="image" onInspected={inspected} initialReference={image} />
-            )}
-            {tab === "template" && (
-              <SourceTemplate key="template" onInspected={inspected} initialTemplate={template} />
-            )}
-            {tab === "database" && <SourceDatabase key="database" />}
-            {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
-          </div>
-        </>
-      ) : (
-        <>
-          {/* Every screen past the chooser asks its own question. The spine is
+              )}
+              {tab === "image" && (
+                <SourceImage key="image" onInspected={inspected} initialReference={image} />
+              )}
+              {tab === "template" && (
+                <SourceTemplate key="template" onInspected={inspected} initialTemplate={template} />
+              )}
+              {tab === "database" && <SourceDatabase key="database" />}
+              {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Every screen past the chooser asks its own question. The spine is
               the only thing on any of them that says the five are one
               sequence, which is why it is drawn here rather than inside each
               screen — and why splitting Configure into four changed the spine
               rather than adding a second one inside it. */}
-          <FlowHeader
-            eyebrow={Eyebrow}
-            question={QUESTIONS[step]}
-            steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
-          />
-          <div className="min-w-0 xl:min-h-0 xl:flex-1">
-            <Configure
-              flow={flow}
-              onFlowChange={setFlow}
-              onChangeSource={changeSource}
-              initialAdvanced={mode === "advanced"}
-              step={step}
-              onStepChange={setStep}
+            <FlowHeader
+              eyebrow={Eyebrow}
+              question={QUESTIONS[step]}
+              steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
             />
-          </div>
-        </>
-      )}
-    </Page>
+            <div className="min-w-0 xl:min-h-0 xl:flex-1">
+              <Configure
+                flow={flow}
+                onFlowChange={setFlow}
+                onChangeSource={changeSource}
+                initialAdvanced={mode === "advanced"}
+                step={step}
+                onStepChange={setStep}
+              />
+            </div>
+          </>
+        )}
+      </Page>
+    </Workspace>
   )
 }
 

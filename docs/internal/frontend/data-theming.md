@@ -32,6 +32,13 @@
   serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
   documents migrate on first read, with restoration and the old persistence path if splitting exceeds
   quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
+- `components/workspace/` keeps row identifiers, field indices and scroll offsets per page/step/
+  log question. Logs and Login place memory use RAM; field values and server row payloads never
+  enter these snapshots. `useFilterHistory` pushes settled Audit/Security filter questions and
+  restores native Back/Forward. `useHeldList` preserves existing row order in React state while
+  polling updates values, and exposes counted new arrivals for explicit reveal. Git commit messages
+  and per-run backup archive selections are session drafts. See
+  [`workspace-interactions.md`](workspace-interactions.md) for the complete contract.
 - `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
   thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
   sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were

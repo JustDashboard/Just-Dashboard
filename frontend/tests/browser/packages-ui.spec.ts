@@ -1,6 +1,9 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { mockHostLogs } from "./host-logs-fixture"
 
+const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
+test.use({ video: recordWorkspace ? "on" : "off" })
+
 /**
  * The Packages page, checked in a browser against a mocked host.
  *
@@ -495,3 +498,69 @@ for (const width of [1280, 1720]) {
     }
   })
 }
+
+test("workspace: package links, Back, keyboard movement and local commands preserve context", async ({
+  page,
+}, testInfo) => {
+  await mockHost(page)
+  await page.goto("/packages")
+  await expect(page.locator("[data-workspace-item]").first()).toBeVisible()
+  const first = page.locator("[data-workspace-item]").first()
+  await first.focus()
+  await page.keyboard.press("ArrowDown")
+  const second = page.locator("[data-workspace-item]").nth(1)
+  await expect(second).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page).toHaveURL(/package=/)
+  if (recordWorkspace) {
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: testInfo.outputPath("package-inspector.png") })
+  }
+  const shared = page.url()
+  await page.goBack()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(second).toBeFocused()
+  if (recordWorkspace) await page.waitForTimeout(700)
+  await page.goto(shared)
+  await expect(page.getByRole("dialog")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await page.keyboard.press("Control+f")
+  await expect(page.locator("[data-page-search]")).toBeFocused()
+  await page.locator("[data-page-search]").fill("nginx")
+  await page.keyboard.press("Escape")
+  await expect(page.locator("[data-page-search]")).toHaveValue("")
+  await page.keyboard.press("?")
+  await expect(page.getByRole("dialog", { name: "Packages shortcuts" })).toBeVisible()
+  if (recordWorkspace) {
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: testInfo.outputPath("package-shortcuts.png") })
+  }
+  await page.keyboard.press("Escape")
+  await page.keyboard.press("Control+k")
+  await page.getByRole("option", { name: /Find in Packages/ }).click()
+  await expect(page.locator("[data-page-search]")).toBeFocused()
+})
+
+test("workspace: Add software arrows inspect results without starting an installation", async ({
+  page,
+}) => {
+  await mockHost(page)
+  await page.goto("/packages")
+  await page
+    .getByRole("navigation", { name: "Package views" })
+    .getByRole("button", { name: "Add software" })
+    .click()
+  await page.getByPlaceholder(/What do you need/).fill("htop")
+  await expect(page.getByText("2 matches")).toBeVisible()
+  await page.getByPlaceholder(/What do you need/).press("Tab")
+  await page.locator("[data-workspace-item]").first().locator("[data-workspace-primary]").focus()
+  await page.keyboard.press("ArrowDown")
+  await expect(
+    page.locator("[data-workspace-item]").nth(1).locator("[data-workspace-primary]"),
+  ).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page.getByRole("dialog")).toContainText("btop")
+  await expect(page.getByText("Started", { exact: true })).toHaveCount(0)
+})

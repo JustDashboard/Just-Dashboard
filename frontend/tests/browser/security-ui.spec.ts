@@ -1397,3 +1397,23 @@ test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   ).toBeEnabled()
   expect(mutations).toEqual([])
 })
+
+test("workspace: security filters are shareable and Back restores the previous question", async ({
+  page,
+}) => {
+  await mockSecurity(page)
+  await page.goto("/security/connections")
+  const query = page.getByRole("textbox", { name: "Filter connections" })
+  await query.fill("203.0.113.50")
+  await expect(page).toHaveURL(/q=203\.0\.113\.50/)
+  await query.fill("100.110.34.9")
+  await expect(page).toHaveURL(/q=100\.110\.34\.9/)
+  await page.goBack()
+  await expect(query).toHaveValue("203.0.113.50")
+  await expect(page.locator("[data-workspace-item]")).toHaveCount(1)
+  await page.reload()
+  await expect(query).toHaveValue("203.0.113.50")
+  await query.press("Escape")
+  await expect(query).toHaveValue("")
+  await expect(page.locator("[data-workspace-item]").first()).toBeFocused()
+})

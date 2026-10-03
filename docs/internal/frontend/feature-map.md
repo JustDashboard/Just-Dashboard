@@ -70,3 +70,7 @@ Container Configuration is an administrator-only secondary editor within its rea
 Service Health links honor `?state=failed`; stack configuration links honor `?tab=compose&remedy=`.
 Security findings resolve permissions and owner routes through `security-remedies.ts`. Database and
 backup partial/stale evidence stays visible beside the completed findings and their existing controls.
+
+Page-owned keyboard commands, history, restoration and polling interactions are specified in
+[`workspace-interactions.md`](workspace-interactions.md). Their shared owner is `components/workspace/`;
+page-specific navigation, confirmations and API capabilities stay with the feature components above.

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Box, Warning } from "@/components/icons"
@@ -71,6 +72,10 @@ export default function ContainersPage() {
   const [socketError, setSocketError] = useState<string>()
   const [filter, setFilter] = useSessionState("docker.containers.query", "")
   const [state, setState] = useSessionState<StateFilter>("docker.containers.state", "all")
+  const [, rememberNavigation] = useSessionState<{ id: string; name: string }[]>(
+    "docker.containers.navigation",
+    [],
+  )
 
   /**
    * An hour of shape per container, in one request. The live socket shows what
@@ -119,10 +124,22 @@ export default function ContainersPage() {
   /** Goes to one container, optionally straight at a tab. */
   const open = useCallback(
     (id: string, tab?: string) => {
+      rememberNavigation(
+        Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-native-workspace='Docker'] [data-workspace-item]",
+          ),
+        )
+          .slice(0, 500)
+          .map((item) => ({
+            id: item.dataset.workspaceItem!,
+            name: item.dataset.workspaceName ?? "",
+          })),
+      )
       const query = tab ? `?tab=${encodeURIComponent(tab)}` : ""
       router.push(`/docker/containers/${encodeURIComponent(id)}${query}`)
     },
-    [router],
+    [router, rememberNavigation],
   )
 
   /*
@@ -216,42 +233,57 @@ export default function ContainersPage() {
   }
 
   return (
-    <Page className="animate-rise">
-      {/* Containers are deployed from the Deploy pages — there is no standalone
+    <Workspace
+      name="Docker"
+      refresh={() => {
+        health.refresh()
+        trends.refresh()
+        void get<Container[]>("/docker/containers/")
+          .then(setContainers)
+          .catch(() => setSocketError("Could not refresh containers"))
+      }}
+      escape={() => {
+        if (!filter) return false
+        setFilter("")
+        return true
+      }}
+    >
+      <Page className="animate-rise">
+        {/* Containers are deployed from the Deploy pages — there is no standalone
           create flow here anymore. */}
-      <PageContext eyebrow="Docker" title="Containers" />
+        <PageContext eyebrow="Docker" title="Containers" actions={<WorkspaceHelp />} />
 
-      {/*
+        {/*
         Runtime first, then everything else. They are separate panels because
         they answer separate questions: one clears itself when the thing it
         describes recovers, the other does not.
       */}
-      <RuntimeHealthPanel runtime={health.data?.runtime} />
-      {attention > 0 && (
-        <AttentionPanel diagnosis={health.data} onAction={runFix} onRescan={health.refresh} />
-      )}
+        <RuntimeHealthPanel runtime={health.data?.runtime} />
+        {attention > 0 && (
+          <AttentionPanel diagnosis={health.data} onAction={runFix} onRescan={health.refresh} />
+        )}
 
-      {socketError && <ErrorState error={new Error(socketError)} />}
+        {socketError && <ErrorState error={new Error(socketError)} />}
 
-      {/* Plain: every container is a card with its own edge now, and a frame
+        {/* Plain: every container is a card with its own edge now, and a frame
           around framed cards is the nesting §12 refuses. A title and a hairline
           mark where the list begins. */}
-      <Panel plain>
-        <PanelHeader
-          title={
-            <span className="inline-flex items-center gap-1.5">
-              Containers
-              <ExplainIcon name="container" />
-            </span>
-          }
-        />
-        <PanelToolbar>
-          <SearchInput
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter by name, image or stack"
+        <Panel plain>
+          <PanelHeader
+            title={
+              <span className="inline-flex items-center gap-1.5">
+                Containers
+                <ExplainIcon name="container" />
+              </span>
+            }
           />
-          {/*
+          <PanelToolbar>
+            <SearchInput
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filter by name, image or stack"
+            />
+            {/*
             "Which of these is down" is what this page is opened with most
             mornings, and answering it meant reading a column of thirty rows.
             The counts sit on the chips themselves, so the answer is often
@@ -259,75 +291,76 @@ export default function ContainersPage() {
             is in does not get a chip, because a filter that can only ever
             return nothing is furniture.
           */}
-          <div className="flex min-w-0 flex-wrap gap-1">
-            {(["all", "running", "stopped", "attention"] as const).map((key) =>
-              key === "all" || counts[key] > 0 ? (
-                <FilterChip
-                  key={key}
-                  selected={state === key}
-                  onClick={() => setState(key)}
-                  className={attentionChipTone(key, counts.attention)}
-                >
-                  {FILTER_LABEL[key]}
-                  <ChipCount>{counts[key]}</ChipCount>
-                </FilterChip>
-              ) : null,
-            )}
-          </div>
-        </PanelToolbar>
-
-        <PanelBody flush>
-          {visible.length === 0 ? (
-            <EmptyState
-              icon={narrowed ? Warning : Box}
-              title={narrowed ? "Nothing matches those filters" : "Nothing running yet"}
-              description={
-                narrowed
-                  ? "Clear the filter, or look under a different state."
-                  : "A container is one application, packaged with everything it needs. Everything here is deployed from the Deploy pages."
-              }
-              action={
-                narrowed ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setFilter("")
-                      setState("all")
-                    }}
+            <div className="flex min-w-0 flex-wrap gap-1">
+              {(["all", "running", "stopped", "attention"] as const).map((key) =>
+                key === "all" || counts[key] > 0 ? (
+                  <FilterChip
+                    key={key}
+                    selected={state === key}
+                    onClick={() => setState(key)}
+                    className={attentionChipTone(key, counts.attention)}
                   >
-                    Clear filters
-                  </Button>
-                ) : (
-                  can("service.control") && (
-                    <Button size="sm" asChild>
-                      <Link href="/deploy">Open Deploy</Link>
-                    </Button>
-                  )
-                )
-              }
-            />
-          ) : (
-            <div className="flex min-w-0 animate-rise flex-col gap-4">
-              {groups.map((group) => (
-                <section key={group.key} className="flex min-w-0 flex-col gap-2">
-                  {group.label && groups.length > 1 && (
-                    <GroupRule label={group.label} count={group.rows.length} />
-                  )}
-                  <ChoiceList aria-label={group.label || "Containers"}>
-                    {group.rows.map((container) => (
-                      <ContainerItem key={container.id} container={container} {...shared} />
-                    ))}
-                  </ChoiceList>
-                </section>
-              ))}
+                    {FILTER_LABEL[key]}
+                    <ChipCount>{counts[key]}</ChipCount>
+                  </FilterChip>
+                ) : null,
+              )}
             </div>
-          )}
-        </PanelBody>
-      </Panel>
+          </PanelToolbar>
 
-      {dialog}
-    </Page>
+          <PanelBody flush>
+            {visible.length === 0 ? (
+              <EmptyState
+                icon={narrowed ? Warning : Box}
+                title={narrowed ? "Nothing matches those filters" : "Nothing running yet"}
+                description={
+                  narrowed
+                    ? "Clear the filter, or look under a different state."
+                    : "A container is one application, packaged with everything it needs. Everything here is deployed from the Deploy pages."
+                }
+                action={
+                  narrowed ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setFilter("")
+                        setState("all")
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  ) : (
+                    can("service.control") && (
+                      <Button size="sm" asChild>
+                        <Link href="/deploy">Open Deploy</Link>
+                      </Button>
+                    )
+                  )
+                }
+              />
+            ) : (
+              <div className="flex min-w-0 animate-rise flex-col gap-4">
+                {groups.map((group) => (
+                  <section key={group.key} className="flex min-w-0 flex-col gap-2">
+                    {group.label && groups.length > 1 && (
+                      <GroupRule label={group.label} count={group.rows.length} />
+                    )}
+                    <ChoiceList aria-label={group.label || "Containers"}>
+                      {group.rows.map((container) => (
+                        <ContainerItem key={container.id} container={container} {...shared} />
+                      ))}
+                    </ChoiceList>
+                  </section>
+                ))}
+              </div>
+            )}
+          </PanelBody>
+        </Panel>
+
+        {dialog}
+      </Page>
+    </Workspace>
   )
 }
 

@@ -151,7 +151,12 @@ a link. *No sponsors yet — the space is open.*
 ![The command palette with search and shortcuts to server tools](docs/command-palette.png)
 
 **⌘K** from anywhere. The sidebar drills into a section — Docker, Databases, Security, one
-deployment — and every page comes back the way you left it.
+deployment — and every page comes back the way you left it. Processes, Git, Logs, Docker containers,
+Packages, Backups, deployment setup and Audit/Security lists add page shortcuts, focus restoration
+and browser history where you change the question. Press **?** for the page's commands; **Ctrl/⌘F**
+finds locally and **F5** refreshes its data. Walk lists with arrows or type a name. Keep a Git commit
+message while reviewing another tab, select archive ranges with Shift, or pin a chart moment and
+open its surrounding logs.
 
 ### Docker
 

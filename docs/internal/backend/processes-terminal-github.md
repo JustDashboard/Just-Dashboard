@@ -2,6 +2,11 @@
 
 ## Processes
 
+The live frontend can pause scheduled inventory reads and holds row order while a process has focus,
+using PID plus creation time as identity. Keyboard inspection and place restoration use the shared
+[workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
+still read while paused. Signal and priority route guards remain the contracts below.
+
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
 membership identifies systemd services, containers and login sessions; an empty command line identifies a
 kernel worker; PM2's own PID list is overlaid by the handler because a PM2 child otherwise inherits its

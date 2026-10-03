@@ -77,6 +77,7 @@ export function JobCard({
 
   return (
     <ChoiceRow
+      workspaceItem={{ id: String(job.id), name: job.name }}
       verb={verb}
       href={`/backups/${job.id}`}
       busy={working}

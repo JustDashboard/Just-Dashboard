@@ -117,11 +117,14 @@ that does something.
   git panel and Docker stop being two products: a repository we already pull is a build context.
 
 Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
-All but the terminal one are read once as an initial value rather than kept in sync — the URL is where
-the reader arrived, not where they are now — and the terminal one opens a session exactly once per
-mount, because a shell is a process. The audit link is how the Docker event feed hands off a correlated
-event; landing on an unfiltered list of everything the dashboard has ever done is not the entry it
-promised.
+Files and Git selections follow the address bar, while the terminal opens a session exactly once per
+mount because a shell is a process. Audit's settled filters are history entries; Back restores the
+previous question. The audit link is how the Docker event feed hands off a correlated event.
+
+Packages use `?package=` for their inspector, and backup job pages use `?run=` for their selected run.
+These, the Docker container inventory, Git and the Audit/Security lists participate in the shared
+keyboard/place controller; [`workspace-interactions.md`](workspace-interactions.md) describes their
+shortcuts, held arrivals and focus restoration.
 
 A container and a stack are their own destinations — `/docker/containers/<id>` and
 `/docker/stacks/<name>` — since 2026-09-21: each holds its logs, and the container a shell and
