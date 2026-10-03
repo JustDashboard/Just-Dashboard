@@ -116,12 +116,16 @@ Deployments open the second group because shipping something is the reason most 
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys and, for
 `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
-the rail's foot. Its button is a neutral control with a circular picture, display name and role;
-the upward chevron indicates the menu above it, while the collapsed rail shows only the picture.
-That menu opens with a larger picture, display name, sign-in name and a role `Tag`, then the five
-pages (Security carries a `Status` for two-factor) and a separate neutral Sign out row. Menu rows
-are 36px on desktop and 44px on a phone, with the current page marked by `aria-current`, an accent
-wash and a brand glyph. The picture is `components/account/user-avatar.tsx`: the stored image when
+the rail's foot. Its button is a neutral control with a circular picture, display name and role,
+with no chevron, while the collapsed rail shows only the picture. Above the expanded card the menu is
+exactly the card's width (Radix's trigger width), so it reads as the card opening rather than a panel
+overhanging the rail; beside the collapsed rail it is 240px and bottom-aligned with the picture. It
+opens with a small picture, display name, sign-in name and a role `Tag`, then the five pages
+(Security carries a `Status` for two-factor) and a separate neutral Sign out row. It grows out of the
+card on the product's ease, and its rows `rise` in an 18ms stagger starting from the row nearest the
+card; the stagger is `motion-safe` because the reduced-motion rule collapses durations, not delays.
+Menu rows are 32px on desktop and 44px on a phone, with the current page marked by `aria-current`, an
+accent wash and a brand glyph. The picture is `components/account/user-avatar.tsx`: the stored image when
 there is one, otherwise the display name's initials in a hue taken from the username (`lib/hue.ts`'s
 `LANES`, so the same person keeps one colour in the rail, the users list and their profile). Pictures and
 initials are circular at every account-avatar size and carry `data-slot="user-avatar"`, the design

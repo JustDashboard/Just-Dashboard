@@ -1,9 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, type CSSProperties } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ChevronLeft, ChevronRight, ChevronUp, Logout, MagnifyingGlass } from "@/components/icons"
+import { ChevronLeft, ChevronRight, Logout, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
@@ -595,11 +595,17 @@ function NavRow({
  * does for any other section, so the menu is how you get in and not how you
  * move around.
  *
- * The menu opens with the same picture and name as the card, larger, with the
- * sign-in name beneath and role at the edge: the one place in the product that says
+ * The menu opens with the same picture and name as the card, with the sign-in
+ * name beneath and role at the edge: the one place in the product that says
  * plainly which account this is. What used to be a caption there — "two-factor
  * not enrolled" — is now a `Status` on the Security row, where it is a reading
  * beside the page that changes it.
+ *
+ * Above the card the menu is exactly the card's width, so the two read as one
+ * object that opened rather than a wider panel overhanging the rail. It grows
+ * out of the card, and its rows `rise` one after another starting from the row
+ * nearest the card, which is what says the list came from the card rather than
+ * appearing over it.
  */
 function UserCard({ collapsed }: { collapsed: boolean }) {
   const pathname = usePathname()
@@ -608,6 +614,10 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
   const name = user ? displayNameOf(user) : "not signed in"
   const twoFactor = Boolean(user?.totpEnabled)
   const entries = PERSONAL_NAV.filter((item) => !item.capability || can(item.capability))
+  // Reduced motion collapses durations but not delays, so the stagger is motion-safe only.
+  const stagger = "animate-rise motion-safe:[animation-delay:var(--rise-at)]"
+  const lastRow = entries.length + 1
+  const riseAt = (row: number) => ({ "--rise-at": `${(lastRow - row) * 18}ms` }) as CSSProperties
 
   return (
     <DropdownMenu>
@@ -633,67 +643,76 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
               {user?.role ?? "—"}
             </span>
           </span>
-          <ChevronUp className="size-4 shrink-0 text-muted-foreground transition-colors group-hover/account:text-foreground group-data-[collapsible=icon]:hidden group-data-[state=open]/account:text-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
         side={collapsed ? "right" : "top"}
-        align="start"
+        align={collapsed ? "end" : "start"}
         aria-label="Account"
         aria-labelledby={undefined}
-        className="w-72 max-w-[calc(100vw-1rem)] rounded-xl p-1.5"
-        sideOffset={8}
+        className={cn(
+          "max-w-[calc(100vw-1rem)] rounded-lg p-1 data-[state=closed]:duration-100 data-[state=open]:duration-200 data-[state=open]:ease-[cubic-bezier(0.16,1,0.3,1)]",
+          collapsed ? "w-60" : "w-(--radix-dropdown-menu-trigger-width)",
+        )}
+        sideOffset={6}
         collisionPadding={8}
       >
         {user && (
-          <div className="flex min-w-0 items-center gap-3 px-3 py-3">
-            <UserAvatar user={user} size="lg" />
+          <div
+            style={riseAt(0)}
+            className={cn("flex min-w-0 items-center gap-2.5 px-2 py-1.5", stagger)}
+          >
+            <UserAvatar user={user} size="sm" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-title leading-tight font-semibold">{name}</p>
-              <p className="mt-1 truncate text-body leading-tight text-muted-foreground">
+              <p className="truncate text-body leading-tight font-semibold">{name}</p>
+              <p className="mt-0.5 truncate text-hint leading-tight text-muted-foreground">
                 @{user.username}
               </p>
             </div>
             <Tag className="shrink-0">{user.role}</Tag>
           </div>
         )}
-        <DropdownMenuSeparator className="mx-1.5 my-1.5 bg-hairline" />
-        <div className="space-y-0.5">
-          {entries.map((item) => (
-            <DropdownMenuItem
-              key={item.href}
-              asChild
-              className="group/account-link min-h-11 gap-3 rounded-md px-3 font-normal focus-ring-inset sm:min-h-9"
-            >
-              <Link
-                href={item.href}
-                data-active={item.href === pathname || undefined}
-                aria-current={item.href === pathname ? "page" : undefined}
-                className="data-[active]:bg-accent data-[active]:font-medium"
-              >
-                <item.icon className="size-4 text-muted-foreground group-data-[active]/account-link:text-brand" />
-                <span className="flex-1">{item.title}</span>
-                {item.href === "/account/security" && (
-                  <Status
-                    tone={twoFactor ? "running" : "notice"}
-                    label={twoFactor ? "2FA on" : "2FA off"}
-                    className="text-hint"
-                  />
-                )}
-              </Link>
-            </DropdownMenuItem>
-          ))}
-        </div>
-        <DropdownMenuSeparator className="mx-1.5 my-1.5 bg-hairline" />
-        <div>
+        <DropdownMenuSeparator className="mx-2 bg-hairline" />
+        {entries.map((item, index) => (
           <DropdownMenuItem
-            onSelect={() => logout()}
-            className="min-h-11 gap-3 rounded-md px-3 font-normal focus-ring-inset sm:min-h-9"
+            key={item.href}
+            asChild
+            style={riseAt(index + 1)}
+            className={cn(
+              "group/account-link min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
+              stagger,
+            )}
           >
-            <Logout className="size-4" />
-            Sign out
+            <Link
+              href={item.href}
+              data-active={item.href === pathname || undefined}
+              aria-current={item.href === pathname ? "page" : undefined}
+              className="data-[active]:bg-accent data-[active]:font-medium"
+            >
+              <item.icon className="size-4 text-muted-foreground group-data-[active]/account-link:text-brand" />
+              <span className="flex-1">{item.title}</span>
+              {item.href === "/account/security" && (
+                <Status
+                  tone={twoFactor ? "running" : "notice"}
+                  label={twoFactor ? "2FA on" : "2FA off"}
+                  className="text-hint"
+                />
+              )}
+            </Link>
           </DropdownMenuItem>
-        </div>
+        ))}
+        <DropdownMenuSeparator className="mx-2 bg-hairline" />
+        <DropdownMenuItem
+          onSelect={() => logout()}
+          style={riseAt(entries.length + 1)}
+          className={cn(
+            "min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
+            stagger,
+          )}
+        >
+          <Logout className="size-4" />
+          Sign out
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
