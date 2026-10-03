@@ -177,7 +177,8 @@ export function FieldRow({
  * option (14) → field (13) → hint (11) with four visible steps and nothing
  * invented for any of them. It meets a `Modal`'s own title at the same size in
  * a dialog, which is correct and not a collision: that one sits in a bordered
- * header strip above the body, and these are inside it under hairlines.
+ * header strip above the body, and these are inside it under hairlines. A
+ * rail head (`aside`) is a rung higher again, for the reason given there.
  */
 export function FormSection({
   id,
@@ -209,6 +210,16 @@ export function FormSection({
    * `hint` under a head has room to carry what the section currently *is* —
    * the address it answers at, the certificate on disk — which is data under
    * a title rather than a caption for it (§5).
+   *
+   * The rail had flattened into a row of labels. Its head was 15 beside 13px
+   * field labels on the same line, its state was 11px muted — the size and
+   * tone of every hint in the fields column — and nothing said which head the
+   * fields beside it belonged to once it had scrolled away. So the head takes
+   * the page-section rank (16, as a `Section`'s), its state reads at 12 as
+   * data between title and hint, it stays beside its fields while they scroll,
+   * and the fields stand behind a rule: the one-line containment an
+   * `OptionRow` already draws for what its switch reveals, because this fence
+   * has a head as well.
    */
   aside?: boolean
   /** Where the rail starts. Inherited from the `FormSections` around it. */
@@ -218,24 +229,23 @@ export function FormSection({
 }) {
   const inherited = useContext(RailContext)
   if (aside) {
+    const rail = RAIL[railFrom ?? inherited]
     return (
       <section
         id={id}
         data-slot={slot}
         className={cn(
-          "grid min-w-0 scroll-mt-6 gap-x-12 gap-y-4 py-8 first:pt-0 last:pb-0",
-          (railFrom ?? inherited) === "xl"
-            ? "xl:grid-cols-[15rem_minmax(0,1fr)]"
-            : "lg:grid-cols-[15rem_minmax(0,1fr)]",
+          "grid min-w-0 scroll-mt-6 gap-x-4 gap-y-4 py-10 first:pt-0 last:pb-0",
+          rail.grid,
           className,
         )}
       >
-        <div className="min-w-0 space-y-1.5">
-          <h3 className="text-title font-semibold tracking-tight">{title}</h3>
-          {hint && <div className="text-hint leading-relaxed text-muted-foreground">{hint}</div>}
-          {actions && <div className="flex flex-wrap items-center gap-1.5 pt-1">{actions}</div>}
+        <div className={cn("min-w-0", rail.head)}>
+          <h3 className="text-base font-semibold tracking-tight">{title}</h3>
+          {hint && <div className="mt-2 text-xs leading-relaxed text-muted-foreground">{hint}</div>}
+          {actions && <div className="mt-3 flex flex-wrap items-center gap-1.5">{actions}</div>}
         </div>
-        <div className="max-w-3xl min-w-0 space-y-5">{children}</div>
+        <div className={cn("max-w-3xl min-w-0 space-y-5", rail.fields)}>{children}</div>
       </section>
     )
   }
@@ -269,6 +279,25 @@ export function FormSection({
  * rail left the fields about 416px, and a row of three fields 130px each.
  */
 type RailFrom = "lg" | "xl"
+
+/**
+ * The rail's classes at each width, spelled out whole so Tailwind finds them.
+ * The fields start 18rem in either way — the 15rem rail, a 1rem gap, the rule
+ * and its 2rem inset — which is where `SettingFoot` lines its row up, and the
+ * 50rem cap is the 48rem the fields had plus that inset.
+ */
+const RAIL: Record<RailFrom, { grid: string; head: string; fields: string }> = {
+  lg: {
+    grid: "lg:grid-cols-[15rem_minmax(0,1fr)]",
+    head: "lg:sticky lg:top-6 lg:self-start",
+    fields: "lg:max-w-[50rem] lg:border-l lg:border-hairline lg:pl-8",
+  },
+  xl: {
+    grid: "xl:grid-cols-[15rem_minmax(0,1fr)]",
+    head: "xl:sticky xl:top-6 xl:self-start",
+    fields: "xl:max-w-[50rem] xl:border-l xl:border-hairline xl:pl-8",
+  },
+}
 
 const RailContext = createContext<RailFrom>("lg")
 

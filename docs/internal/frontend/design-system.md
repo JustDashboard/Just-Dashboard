@@ -415,6 +415,16 @@ navigation, where at 1024 a 15rem rail left a row of three fields about 130px ea
 once, on `FormSections`, and inherited, so the heads of one page cannot leave the rail at two
 widths.
 
+**A rail head has to outrank the fields beside it, and the fields have to say whose they are.** The
+first rail set its head at 15 on the same line as a 13px field label and its state at 11px muted —
+the size and tone of every hint in the fields column — so a section read as two labels side by side
+and a caption, and a long section's fields lost their head the moment it scrolled away. The head is
+now the page-section rank (16, as a `Section`'s), its state 12 between title and hint, and it is
+sticky beside its fields while they scroll. The fields stand behind a hairline rule, inset 2rem: the
+one-line containment an `OptionRow` draws for what its switch reveals, because this fence has a head
+too. Sections are 40px apart rather than 32, so the hairline between two of them is further from
+either than any two fields inside one. The fields still start 18rem in, where `SettingFoot` lines up.
+
 **The deployment settings are that shape, and they were the last pages in the product that were
 all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
 holding Save — on the argument that things filled in one at a time read best as bordered boxes,
@@ -666,7 +676,9 @@ name, one rung down and one degree worse. The head went to 14 first and 14 was n
 `OptionRow`'s title is 14 so that it outranks the fields it governs, which left "Public address" and
 "Publish on a public hostname" two lines apart at one size with a weight step between them and
 nothing else. At 15 the four steps are visible and every one of them is a rung the ladder already
-had. A `Disclosure` takes the section's rank, because a fold is a section (§7).
+had. A `Disclosure` takes the section's rank, because a fold is a section (§7). A rail head is the
+exception upward: it names a part of the page rather than of a dialog, so it is a `Section`'s 16, and
+its state is 12 so that it reads between the head and the 11px hints beside it (§7).
 
 A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to

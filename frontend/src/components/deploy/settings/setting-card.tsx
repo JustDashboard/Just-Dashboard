@@ -41,9 +41,10 @@ type SettingApplies = "next-deployment" | "immediately"
 
 /**
  * The fields column of a rail section, for what sits under a form rather
- * than in one of its sections: it starts past the 15rem rail and its 3rem gap
- * from `xl`, and stops where the fields stop, so Save sits under the fields it
- * saves rather than a thousand pixels to their right on a wide screen.
+ * than in one of its sections: it starts past the 15rem rail, its gap and the
+ * fields' rule and inset from `xl`, and stops where the fields stop, so Save
+ * sits under the fields it saves rather than a thousand pixels to their right
+ * on a wide screen.
  */
 const FIELDS_COLUMN = "max-w-3xl xl:max-w-[66rem] xl:pl-[18rem]"
 

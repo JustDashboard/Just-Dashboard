@@ -115,14 +115,14 @@ function SettingsSkeleton({ readings }: { readings?: boolean }) {
         {[0, 1].map((row) => (
           <div
             key={row}
-            className="grid min-w-0 gap-x-12 gap-y-4 py-8 first:pt-0 last:pb-0 xl:grid-cols-[15rem_minmax(0,1fr)]"
+            className="grid min-w-0 gap-x-4 gap-y-4 py-10 first:pt-0 last:pb-0 xl:grid-cols-[15rem_minmax(0,1fr)]"
           >
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <Skeleton className="h-4 w-28" />
-              <Skeleton className="h-2.5 w-44" />
-              <Skeleton className="h-2.5 w-32" />
+              <Skeleton className="h-3 w-44" />
+              <Skeleton className="h-3 w-32" />
             </div>
-            <div className="max-w-3xl min-w-0 space-y-3">
+            <div className="max-w-3xl min-w-0 space-y-3 xl:max-w-[50rem] xl:border-l xl:border-hairline xl:pl-8">
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-2/3" />
