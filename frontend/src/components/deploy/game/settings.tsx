@@ -45,7 +45,7 @@ import { GameIdentity, useGameOverview } from "@/components/deploy/game/identity
 
 /**
  * The server's own settings file, as a page that is a form (§7): the file's
- * name and what this page does to it in a rail beside the fields, and the
+ * name and what this page does to it under the head, over the fields, and the
  * file itself, as it sits on disk, in a second section folded away.
  *
  * Only the keys the blueprint declares get a control — a line of text full
@@ -159,12 +159,13 @@ export function GameSettings({ projectId }: { projectId: number }) {
       ) : (
         <form
           aria-label="Server settings"
+          className="mx-auto w-full max-w-3xl"
           onSubmit={(event) => {
             event.preventDefault()
             void save()
           }}
         >
-          <FormSections railFrom="xl" className="animate-rise">
+          <FormSections className="animate-rise">
             <FormSection
               aside
               title={

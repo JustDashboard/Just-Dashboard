@@ -1278,7 +1278,7 @@ test.describe("Runtime", () => {
     await expect(
       page.getByText("runtime port must be between 1 and 65535", { exact: true }),
     ).toBeVisible()
-    // The rail head of the section holding the field says the save was refused.
+    // The head of the section holding the field says the save was refused.
     await expect(card.getByText("Not saved", { exact: true })).toBeVisible()
     await expect(page.getByText("Could not save runtime settings")).toHaveCount(0)
   })

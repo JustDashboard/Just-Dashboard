@@ -153,7 +153,7 @@ The security section has eight reading pages (§15–16), all retaining their he
 `StatGrid` readings. The overview adds a picture of the observed browser → access scope → dashboard
 path using the deployment section's `SettingPicture`, `WireNode` and still `AnimatedBeam` vocabulary.
 It describes access to the dashboard, not exposure of every port on the host. The finding severity
-counts and unavailable checks sit in a rail beside the findings.
+counts and unavailable checks sit under the Findings head, over the findings.
 
 - **Firewall:** the rules are the working column, with default-policy and logging controls beside
   them on wide screens. Each row groups its destination service, port and comment; actions stay

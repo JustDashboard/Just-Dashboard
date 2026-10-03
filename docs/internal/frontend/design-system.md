@@ -77,7 +77,7 @@ taking a frame:
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
-  one thing: four on the settings pages, each inside its rail section and drawn through
+  one thing: four on the settings pages, each inside its section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
   General's automatic deployment (the repository, the watch, the deploys), Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
@@ -130,7 +130,7 @@ taking a frame:
   history (a timeline: the version in a sticky column, a rail with a mark per release, the notes at
   a readable measure), and on Configuration the stack (its checkout and three services as a
   `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
-  as `FormSection aside`s whose heads sit in a rail — the framed things on those two pages are the
+  as `FormSection aside`s, each head over its fields — the framed things on those two pages are the
   transcript console, which is a `Pane`, and the cards you pick; the Backups page —
   an attention list of the jobs that failed or went quiet, the jobs as destination cards (a
   `ChoiceList`, each drawn as the products it covers, with its destination's mark and its last
@@ -138,7 +138,7 @@ taking a frame:
   covered, every thing on it drawn as its product, with a job's own page built from a fact list and
   plain panels; the five account pages — the profile's identity line, readings and capability rows,
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
-  in a `ChoiceList`, and Security as `FormSection aside`s in a rail; and the four views on
+  in a `ChoiceList`, and Security as `FormSection aside`s; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
   (`tabClasses`) rather than a filled tab list, beneath the host's identity line — each a toolbar
@@ -404,16 +404,37 @@ already above it; a change that destroys goes through `useConfirm` with the subj
 statement from one preview. A row edit is reviewed the same way (`kit/sql-review.tsx`): the
 statements a change set will run are the server's dry run of it.
 
-**A page that is a form puts its section heads in a rail.** `FormSection aside`, stacked in
-`FormSections`, sets the title (and the section's current state, as data — the address it answers
-at, the certificate on disk) in a 15rem column beside the fields from `lg`, with a hairline between
-sections. It exists for `/dashboard/configuration`, whose five sections with their heads over their
-fields read as one column in which a head was as far from the fields above it as from its own; a
-dialog's form keeps the stacked head. `railFrom="xl"` moves that width up for a form inside a
-shell that already spends a column of its own — a project's settings, beside the project's
-navigation, where at 1024 a 15rem rail left a row of three fields about 130px each. It is said
-once, on `FormSections`, and inherited, so the heads of one page cannot leave the rail at two
-widths.
+**A page that is a form stacks each section's head over its fields, in one column.** `FormSection
+aside`, run in `FormSections`, sets the title over the fields with the section's current state under
+it as data — the address it answers at, the certificate on disk — and holds the whole section to
+`max-w-3xl`, the 48rem the fields already had. `FormSections` keeps to the same width, so the
+hairline between two sections, and between two of a settings page's forms, stops where the fields
+stop. The heads used to sit in a rail, a 15rem column beside the fields from `lg` (from `xl` inside
+a project's settings), made for `/dashboard/configuration`, whose five sections with their heads
+over their fields had read as one long run in which a head was as far from the fields above it as
+from its own. The rail spent a third of the width on a few words a section and set each head on the
+line of the first field label beside it, so a section read as two labels side by side. `aside`
+keeps its name from that column, and now means a section of the page rather than of a dialog.
+
+**Where the column sits is the page's call.** A page that is only a form centres it: the nine
+project settings pages (`SettingsPage` centres its strip and readings with it, so they line up with
+the fields), a game server's settings, the account's Security and a database's Settings. A 48rem
+column against the left edge of a wide page left the rest of it an empty band nothing explained. A
+form that is one block among full-width ones keeps their left edge instead — Configuration's
+settings under its stack and last restart, the proxy pages' password files, access lists, backups and
+watched domains, Security's findings and SSH — because centred there its title stood 180px in from
+every title above it.
+
+**Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
+purpose: 32px above and below every section, so 64px and a hairline between one section and the
+next, against 16px from a head to its own fields, which stand 20px apart — a head is always nearer
+its own fields than the ones above it. The title is `text-base` semibold, a `Section`'s 16 and a
+rung above a dialog section's 15, because it names a part of the page (§8). The state under it is
+`text-xs` muted, 12, between the title and the 11px hints in the fields, because it is data rather
+than a caption (§5). `actions` sit at the far end of the head's row, and so does a settings
+section's `settingStatus`, so "Unsaved changes", arriving with the first keystroke, takes no line of
+its own and pushes no field down. `SettingFoot` keeps to the same 48rem column, so Save sits under
+the fields it saves.
 
 **The deployment settings are that shape, and they were the last pages in the product that were
 all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
@@ -422,15 +443,16 @@ which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx
 `SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
 button: the project context row already carries the one "Deploy changes", and a second brand face a
 hundred and fifty pixels under it was two commands on one surface), the page's readings, and its
-forms in one run of rail sections. `SettingForm` is one `<form>` and one save, and may span several
+forms in one run of sections. `SettingForm` is one `<form>` and one save, and may span several
 sections, because what one PUT writes is what one Save means — Runtime is five. `SettingSection`
-is a rail head carrying what the section currently is as data (the host and branch it builds from,
-the port it answers on) and at most one `settingStatus`: *Not saved*, *Unsaved changes* or *Saved ·
-not live yet*. `SettingFoot` ends the form with when its change applies, Discard and Save. Save is
-the outline face while the form is clean and the brand face once it holds an edit — the command
-face as a function of state, so the one blue on a page of five forms is the form with something to
-save — and on the nine settings pages it is never disabled, because saving an untouched Source
-checks it again, which is how an operator finds out a credential stopped working (the game server's
+is a section's head carrying what the section currently is as data (the host and branch it builds
+from, the port it answers on) and, at its far end, at most one `settingStatus`: *Not saved*,
+*Unsaved changes* or *Saved · not live yet*. `SettingFoot` ends the form with when its change
+applies, Discard and Save. Save is the outline face while the form is clean and the brand face once
+it holds an edit — the command face as a function of state, so the one blue on a page of five forms
+is the form with something to save — and on the nine settings pages it is never disabled, because
+saving an untouched Source checks it again, which is how an operator finds out a credential stopped
+working (the game server's
 settings, which declare a range for each value, hold it only while a value is outside that range). While the form is dirty the foot follows the
 reader down it, sticky, opaque (§16 has no glass) and hairlined, its row held to the fields column;
 at rest it is the form's last line rather than a strip of chrome. Each form keeps its draft keyed on
@@ -666,7 +688,10 @@ name, one rung down and one degree worse. The head went to 14 first and 14 was n
 `OptionRow`'s title is 14 so that it outranks the fields it governs, which left "Public address" and
 "Publish on a public hostname" two lines apart at one size with a weight step between them and
 nothing else. At 15 the four steps are visible and every one of them is a rung the ladder already
-had. A `Disclosure` takes the section's rank, because a fold is a section (§7).
+had. A `Disclosure` takes the section's rank, because a fold is a section (§7). A page section's
+head is the exception upward: it names a part of the page rather than of a dialog, so it is a
+`Section`'s 16, and its state is 12 so that it reads between the head and the 11px hints in the
+fields under it (§7).
 
 A **table header** is `text-hint`, medium weight, muted — not the eyebrow's small caps. At 10px
 tracked-out caps a nine-column header was the loudest line in the table, above rows it exists only to
@@ -938,12 +963,13 @@ the width they need is measured inside the project's shell, not the window: at 1
 column beside the project's navigation is about 968px, which left a service's name 150px beside
 five readings, so the wide shape of a service and of the Overview's runs-beside-previews starts at
 `2xl`, as does the build console's rail of stages beside the transcript. Inside a settings page the
-column is narrower still, because from `xl` the rail takes its own 15rem, so there the window is
-the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a list is drawn
-in, before its first paint, and the variables (from 600px), mounts and linked databases (from 480px)
-choose beside-or-under from that — still once, still drawn once. A row that only reflows rather
-than rearranging, a domain or a mount editor, uses a container query (`@container`, `@min-[40rem]`
-for a domain and `@min-[36rem]` for a mount) and draws nothing twice by construction.
+column is narrower still, because the fields are held to 48rem however wide the window is, so there
+the window is the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a
+list is drawn in, before its first paint, and the variables (from 600px), mounts and linked
+databases (from 480px) choose beside-or-under from that — still once, still drawn once. A row that
+only reflows rather than rearranging, a domain or a mount editor, uses a container query
+(`@container`, `@min-[40rem]` for a domain and `@min-[36rem]` for a mount) and draws nothing twice
+by construction.
 
 A row drawn this way is a **click target, not a control**. `role="button"` on the wrapper is the
 obvious way to make a whole card pressable and is wrong: an ARIA button takes its accessible name
@@ -1175,10 +1201,11 @@ game nor its name again.
 retain their `StatGrid` figures. Beneath them, the overview's observed browser-to-dashboard path is
 one framed picture, using the same `SettingPicture`, `WireNode` and still `AnimatedBeam` as deployment
 settings. The picture names the access scope and this browser's address; it never claims that every
-host port has that scope. Findings put severity and skipped checks in a rail beside the list.
-Firewall's policy controls sit beside its bounded rule table; SSH groups its directives into rail
-forms, with controls aligned and the pending apply action following a dirty form. Intrusion's jail
-choices carry their watched service's mark, state and comparable readings. SSH, Firewall and
+host port has that scope. Findings carry their severity counts and skipped checks under their
+head, over the list. Firewall's policy controls sit beside its bounded rule table; SSH groups its
+directives into form sections, each head over its fields, with controls aligned and the pending
+apply action following a dirty form. Intrusion's jail choices carry their watched service's mark,
+state and comparable readings. SSH, Firewall and
 Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
 half row does not have; the last day's counts join the page's one `StatGrid` rather than drawing a
@@ -1265,9 +1292,9 @@ rail adds Signing requests at its head only while one waits — what the operato
 and a Local CA panel after DNS providers, which is an administrator's offer to create one and nothing
 to a reader until it exists.
 A watched domain opens a live report and preserves its nonstandard port. Password files, access
-lists and watched-domain setup use the deployment settings' rail sections; an access list is a row
-you read (its addresses as mono tags, its sites as links, its include line with Copy) with Edit
-inline and Delete in its menu. Certificate renewal lineages and
+lists and watched-domain setup use the deployment settings' sections, each head over its fields; an
+access list is a row you read (its addresses as mono tags, its sites as links, its include line with
+Copy) with Edit inline and Delete in its menu. Certificate renewal lineages and
 DNS providers remain readings with their own actions, laid out to fit the management column; every
 run certbot made, the timer's included, follows the two columns as Renewals, a log `Pane` across the
 page's width, which a log needs and the management column does not have. The
@@ -1621,10 +1648,10 @@ The passes, in order. Each one is a diff you can review on its own.
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
    on a page you configure is best drawn beside the control that sets it. Version's Installed,
    Latest and Checked became one identity line and the timeline's marks; Configuration's Answers
-   at, Certificate, Port and Two-factor went to the rail heads of the sections that set them and to
+   at, Certificate, Port and Two-factor went to the heads of the sections that set them and to
    the proxy's row in the stack. Both pages' doc comments name where each went.
    The account's Security page took it for the same reason — the second factor's state and how many
-   sessions are signed in are the rail heads of the sections that change them — and Sessions opens on
+   sessions are signed in sit in the heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
 
    System users kept its four and changed one: the Locked count became a filter chip over the
@@ -1640,7 +1667,7 @@ The passes, in order. Each one is a diff you can review on its own.
    card went beside the control that sets it, and the page's doc comment names where. Variables took the
    `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
    or a release task, holding a reference) is a filter chip over the list, where it also narrows
-   to what it counts, and the products the environment talks to sit under the rail head. And a
+   to what it counts, and the products the environment talks to sit under the section's head. And a
    project's Runtime page carries each count in the header of the block it counts, with the four
    moving readings — processor, memory, processes, network — as the live usage tiles.
 

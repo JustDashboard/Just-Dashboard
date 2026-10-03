@@ -20,32 +20,30 @@ import {
  * form, a footer holding Save — on the argument that a stack of things you
  * fill in one at a time reads best as bordered boxes. It was the last place
  * in the product where the whole page was containers, and it was the wrong
- * shape for a page that *is* a form: §7 puts such a page's section heads in
- * a rail, and Configuration and the account's Security page already read
- * that way. So the heads go down the left, each carrying what the section
- * currently is as data, and the fields go down the right — from `xl` rather
- * than `lg`, because beside the project's own navigation a rail at 1024
- * would leave three fields in a row about 130px each.
+ * shape for a page that *is* a form: §7 sets such a page as one column of
+ * sections divided by hairlines, each head over its fields carrying what the
+ * section currently is as data, and Configuration and the account's Security
+ * page read the same way.
  *
  * The pieces, outermost first:
  *
  *   `SettingsPage` — loads the configuration, then the pending strip, the
  *   page's readings and its forms, rising once when the first read lands.
- *   `SettingForm` — one form, one save. It may span several rail sections
+ *   `SettingForm` — one form, one save. It may span several sections
  *   (Runtime is five), because what one PUT writes is what one Save means.
- *   `SettingSection` — one rail head and its fields.
+ *   `SettingSection` — one head and its fields.
  *   `SettingFoot` — when the change applies, Discard, and Save.
  */
 
 type SettingApplies = "next-deployment" | "immediately"
 
 /**
- * The fields column of a rail section, for what sits under a form rather
- * than in one of its sections: it starts past the 15rem rail and its 3rem gap
- * from `xl`, and stops where the fields stop, so Save sits under the fields it
- * saves rather than a thousand pixels to their right on a wide screen.
+ * The sections' centred column, for the page around them and for what sits
+ * under a form rather than in one of its sections — the game server's foot
+ * included, which has no `FormSections` around it — so Save sits under the
+ * fields it saves rather than a thousand pixels to their right.
  */
-const FIELDS_COLUMN = "max-w-3xl xl:max-w-[66rem] xl:pl-[18rem]"
+const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
 
 const APPLIES: Record<SettingApplies, string> = {
   "next-deployment": "Applies on your next deployment",
@@ -54,10 +52,12 @@ const APPLIES: Record<SettingApplies, string> = {
 
 /**
  * A settings page: its configuration read, what is saved but not live, the
- * page's figures when it has any, and its forms in one run of rail sections.
+ * page's figures when it has any, and its forms in one run of sections — all
+ * of it in the one centred column, so the strip and the figures line up with
+ * the fields under them.
  *
  * No heading of its own. The project's other pages add none under the
- * project header, and the first rail head already names what the page is.
+ * project header, and the first section's head already names what the page is.
  * The content rises once when the first read lands and not on every revision
  * after it, because a save is not an arrival.
  */
@@ -77,11 +77,11 @@ export function SettingsPage({
   return (
     <ConfigurationState state={state} readings={Boolean(readings)}>
       {(configuration) => (
-        <div className="min-w-0 animate-rise space-y-8">
+        <div className={cn("min-w-0 animate-rise space-y-8", FIELDS_COLUMN)}>
           <PendingChanges pending={configuration.pending} pageKinds={pageKinds} />
           <LastFailureRemedy />
           {readings?.(configuration)}
-          <FormSections railFrom="xl">{children(configuration)}</FormSections>
+          <FormSections>{children(configuration)}</FormSections>
         </div>
       )}
     </ConfigurationState>
@@ -126,7 +126,7 @@ export function SettingForm({
 }) {
   return (
     <form aria-label={name} onSubmit={onSubmit} className="min-w-0 py-8 first:pt-0 last:pb-0">
-      <FormSections railFrom="xl">{children}</FormSections>
+      <FormSections>{children}</FormSections>
       {error && (
         <FormNote tone="danger" role="alert" className={cn("mt-6", FIELDS_COLUMN)}>
           {error}
@@ -146,13 +146,16 @@ export function SettingForm({
 }
 
 /**
- * One section of a settings form: the head in the rail, the fields beside it.
+ * One section of a settings form: the head, the fields under it.
  *
- * The head carries three things under its title, each optional and each
- * data rather than a caption (§5): `state`, what the section currently is —
- * the host and branch it builds from, the port it answers on — which may
- * hold a product glyph or a branch chip; `status`, from `settingStatus`; and
- * `actions`, the small outline buttons that add a row to the section.
+ * The head carries three things, each optional and each data rather than a
+ * caption (§5): under its title `state`, what the section currently is — the
+ * host and branch it builds from, the port it answers on — which may hold a
+ * product glyph or a branch chip; and at its far end `status`, from
+ * `settingStatus`, then `actions`, the small outline buttons that add a row
+ * to the section. The status is at the end rather than under the state so
+ * that "Unsaved changes" arriving with the first keystroke does not push the
+ * field being typed in down a line.
  */
 export function SettingSection({
   id,
@@ -177,20 +180,19 @@ export function SettingSection({
   return (
     <FormSection
       aside
-      railFrom="xl"
       id={id}
       data-slot="setting"
       className={className}
       title={tone === "danger" ? <span className="text-destructive">{title}</span> : title}
-      hint={
-        state || status ? (
+      hint={state && <div className="min-w-0 break-words">{state}</div>}
+      actions={
+        status || actions ? (
           <>
-            {state && <div className="min-w-0 break-words">{state}</div>}
-            {status && <div className="pt-1">{status}</div>}
+            {status}
+            {actions}
           </>
         ) : undefined
       }
-      actions={actions}
     >
       {children}
     </FormSection>
@@ -199,7 +201,7 @@ export function SettingSection({
 
 /**
  * Where a section stands against what is saved and what is live, as the one
- * `Status` its rail head carries — or nothing, which is the common case: a
+ * `Status` its head carries — or nothing, which is the common case: a
  * "Live" on every head would be noise.
  *
  * `notLive` is for a section that one kind of pending change maps onto

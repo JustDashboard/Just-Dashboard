@@ -23,11 +23,10 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * server is reachable from, the server's own parameters and extensions, what
  * else it holds, and the acts that end it.
  *
- * The page is a form, so its sections stand in a rail (§7): the heads down
- * the left, each carrying what the section currently is — the engine and its
- * address, the reach, how many parameters differ from their default — and the
- * fields down the right. It keeps no tiles: every figure it has is one of
- * those heads' lines.
+ * The page is a form, so it is one column of sections (§7), each head over
+ * its fields carrying what the section currently is — the engine and its
+ * address, the reach, how many parameters differ from their default. It keeps
+ * no tiles: every figure it has is one of those heads' lines.
  *
  * A section the engine lacks is not drawn. A file has no server, so no
  * reachability and no neighbours; a key–value server has modules where a SQL
@@ -75,7 +74,7 @@ export function Settings() {
   return (
     <SectionFrame section="settings">
       {sections.length > 2 && <SectionJump sections={sections} />}
-      <FormSections railFrom="xl">
+      <FormSections className="mx-auto">
         <ConnectionSection />
         {server && <ReachabilitySection confirm={confirm} />}
         {parameters && <ParametersSection />}

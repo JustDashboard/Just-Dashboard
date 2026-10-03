@@ -215,8 +215,8 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   drilling into sections; do not reintroduce a strip that changes the URL.
 - `components/form.tsx` — what goes inside a task surface: `Field` (a label, a control, one line under
   it — a hint, or the error while there is one), `FieldRow`, `FormSection` (an eyebrow and a hairline
-  opening part of a longer form), `FormSections` (a run of `FormSection aside`s; `railFrom="xl"`
-  moves the rail up for a form inside a shell that already spends a column, said once and inherited),
+  opening part of a longer form), `FormSections` (a run of `FormSection aside`s, each head over its
+  fields, held with the hairlines between them to the fields' 48rem),
   `FieldCheck` (one rule a value has to meet, lit as it is met — a run of them in an
   `aria-live="polite"` wrapper), `OptionList`/`OptionRow` (a switch with its sentence), `FormFacts`
   (what the form operates on, as data under the title), `Statement` (the SQL a schema-editing form is

@@ -382,7 +382,7 @@ export function SSHPanel({
           </span>
         </PanelToolbar>
         <PanelBody flush>
-          <FormSections railFrom="xl" className="pt-5">
+          <FormSections className="pt-5">
             {SSH_GROUPS.map((group) => {
               const settings = shown.filter((setting) => sshGroup(setting.key) === group.title)
               if (settings.length === 0) return null
