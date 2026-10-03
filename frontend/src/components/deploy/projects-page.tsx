@@ -107,7 +107,7 @@ export function FleetSkeleton({ layout = "grid" }: { layout?: "grid" | "list" })
         <ul aria-hidden className={GRID}>
           {[0, 1, 2].map((index) => (
             <li key={index}>
-              <Skeleton className="h-48 rounded-xl" />
+              <Skeleton className="h-50.5 rounded-xl" />
             </li>
           ))}
         </ul>
@@ -139,7 +139,8 @@ function Fleet() {
   // twice and hidden: the tests and a screen reader find each link by its
   // name, and a hidden twin is a second answer to every query (§12). A run
   // in flight lays its path, stage and clock beside its name only from `lg`,
-  // where the sidebar leaves the name room to be read.
+  // where the sidebar leaves the name room to be read, and a project row
+  // lays its readings beside its name from there too.
   const roomy = useMediaQuery("(min-width: 640px)")
   const wideRuns = useMediaQuery("(min-width: 1024px)")
   const wide = useMediaQuery("(min-width: 1280px)")
@@ -472,7 +473,7 @@ function Fleet() {
                   {filtered.map((deployment) => (
                     <ProjectRow
                       key={deployment.id}
-                      wide={wide}
+                      wide={wideRuns}
                       roomy={roomy}
                       deployment={deployment}
                       pulse={pulses?.[String(deployment.id)]}

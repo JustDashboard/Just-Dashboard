@@ -447,7 +447,7 @@ function DeploymentsSection({
         <ul aria-hidden className={PROJECT_GRID}>
           {[0, 1, 2].map((index) => (
             <li key={index}>
-              <Skeleton className="h-48 rounded-xl" />
+              <Skeleton className="h-50.5 rounded-xl" />
             </li>
           ))}
         </ul>

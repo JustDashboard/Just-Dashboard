@@ -18,7 +18,7 @@ import { CONTROL, ChoiceRow } from "@/components/flow"
 import { SourcePull } from "@/components/git/glyphs"
 import { BranchChip, CommitLine, ShortSha } from "@/components/git/marks"
 import { Sparkline } from "@/components/metrics/sparkline"
-import { ProductGlyph, ProductGlyphs, imageProducts } from "@/components/product-logo"
+import { ProductGlyph, ProductGlyphs, hostProduct, imageProducts } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
@@ -147,7 +147,9 @@ function InFlight({
         currentStep={work?.currentStep ?? run.currentStep?.key}
         currentStatus={work?.currentStatus ?? run.currentStep?.state}
       />
-      <TextShimmer className="truncate text-hint font-medium">{stageOf(run, work)}</TextShimmer>
+      <TextShimmer className="min-w-0 truncate text-hint font-medium">
+        {stageOf(run, work)}
+      </TextShimmer>
       <span className="numeric shrink-0">{runClock(run, work, now)}</span>
     </>
   )
@@ -225,13 +227,12 @@ export function FailingShare({ rate, className }: { rate: number; className?: st
  */
 function LastActivity({ deployment }: { deployment: DeploymentSummary }) {
   const last = deployment.lastRun
-  if (!last)
-    return <span className="whitespace-nowrap">Updated {relativeTime(deployment.updatedAt)}</span>
+  if (!last) return <span className="truncate">Updated {relativeTime(deployment.updatedAt)}</span>
   const at = last.endedAt ?? last.requestedAt
   return (
-    <span className="inline-flex items-center gap-1.5" title={runTriggerLine(last)}>
+    <span className="inline-flex min-w-0 items-center gap-1.5" title={runTriggerLine(last)}>
       <RunActorMark run={last} remote={deployment.sourceRemote} size="xs" />
-      <time dateTime={at} title={timestamp(at)} className="whitespace-nowrap">
+      <time dateTime={at} title={timestamp(at)} className="truncate">
         {operationLabel(last.operation)} {relativeTime(at)}
       </time>
     </span>
@@ -251,18 +252,28 @@ function PullLine({ pulls }: { pulls?: ProjectPulls }) {
     pulls.previews > 0 && plural(pulls.previews, "preview"),
   ].filter(Boolean)
   return (
-    <span className="inline-flex shrink-0 items-center gap-1">
+    <span className="inline-flex min-w-0 items-center gap-1">
       <SourcePull aria-hidden className="size-3 shrink-0" />
-      {words.join(" · ")}
+      <span className="truncate">{words.join(" · ")}</span>
     </span>
   )
+}
+
+/**
+ * The registry an image reference is pulled from: the host its first segment
+ * names, or Docker Hub for a bare `owner/name`.
+ */
+function imageRegistry(reference: string) {
+  const [first, ...rest] = reference.split("/")
+  return rest.length > 0 && (/[.:]/.test(first) || first === "localhost") ? first : "Docker Hub"
 }
 
 /**
  * Where a project comes from — the part of the source line it opens with. A
  * row has no room for a repository's name beside its branch and commit, so it
  * leaves it to the forge's mark; nor for the products a stack runs, which the
- * row's own mark already draws.
+ * row's own mark already draws. A card names an image's registry here, since
+ * its second line is the image itself.
  */
 function SourceOrigin({
   deployment: d,
@@ -289,8 +300,11 @@ function SourceOrigin({
           )}
           <BranchChip branch={d.sourceRef || "main"} className="max-w-[10rem] shrink-0" />
           {/* The commit line carries the revision when the engine recorded
-              what it was; without a subject the short sha is all there is. */}
-          {!runCommit(d.lastRun)?.subject && <ShortSha sha={shortRevision(d.sourceRevision)} />}
+              what it was; without a subject the short sha is all there is,
+              and a card's second line draws it. */}
+          {compact && !runCommit(d.lastRun)?.subject && (
+            <ShortSha sha={shortRevision(d.sourceRevision)} />
+          )}
           {services && <span className="shrink-0">{services}</span>}
           {services && !compact && <ProductGlyphs ids={runs} />}
           <PullLine pulls={pulls} />
@@ -298,26 +312,34 @@ function SourceOrigin({
       )
     }
     case "image": {
+      const reference = imageReference(d)
+      if (!compact) {
+        const registry = imageRegistry(reference ?? "")
+        return (
+          <>
+            <ProductGlyph id={hostProduct(registry) ?? "docker"} />
+            <span className="min-w-0 truncate">{registry}</span>
+          </>
+        )
+      }
       const product = sourceProduct(d)
       return (
         <>
           {product && <ProductGlyph id={product} />}
           <span className="min-w-0 truncate font-mono text-foreground/85">
-            {d.sourceRepository || d.sourceRef || shortRevision(d.sourceRevision) || "Docker image"}
+            {reference || "Docker image"}
           </span>
         </>
       )
     }
     case "compose":
       // The file's name is not worth a glance once several services run
-      // from it; how many, and what they are, is.
+      // from it; how many, and what they are, is — and a card's second line
+      // draws what they are.
       return (
-        <>
-          <span className="min-w-0 truncate">
-            Compose stack{services ? ` · ${services}` : d.sourceRef ? ` · ${d.sourceRef}` : ""}
-          </span>
-          {!compact && <ProductGlyphs ids={runs} />}
-        </>
+        <span className="min-w-0 truncate">
+          Compose stack{services ? ` · ${services}` : d.sourceRef ? ` · ${d.sourceRef}` : ""}
+        </span>
       )
     case "blueprint":
       return (
@@ -333,20 +355,61 @@ function SourceOrigin({
         </>
       )
     default:
-      return (
-        <>
-          <span className="min-w-0 truncate">{WORKLOAD_LABELS[d.profile]}</span>
-          {!compact && <ProductGlyphs ids={runs} />}
-        </>
-      )
+      return <span className="min-w-0 truncate">{WORKLOAD_LABELS[d.profile]}</span>
   }
+}
+
+/** The image an image project pulls, as it was configured. */
+function imageReference(d: DeploymentSummary) {
+  return d.sourceRepository || d.sourceRef || shortRevision(d.sourceRevision)
+}
+
+/**
+ * What is live, on a card's second source line: the commit a repository last
+ * built, with its author in their own hue, or else the images the project
+ * runs, each drawn as its product. Every card draws the line, so a row of
+ * them keeps one height and one baseline whatever each was deployed from.
+ */
+function LiveLine({ deployment: d }: { deployment: DeploymentSummary }) {
+  const git = d.sourceKind === "git" || d.sourceKind === "local"
+  const commit = git ? runCommit(d.lastRun) : undefined
+  if (commit?.subject)
+    return (
+      <CommitLine
+        className="h-4.5 min-w-0"
+        sha={commit.sha}
+        subject={commit.subject}
+        author={commit.author}
+        at={commit.authoredAt}
+      />
+    )
+  // A repository's images are the ones this server built from it, named for
+  // the project rather than for anything a reader would recognise.
+  const configured = d.sourceKind === "image" ? imageReference(d) : undefined
+  const images = git ? [] : d.images?.length ? d.images : configured ? [configured] : []
+  if (images.length === 0)
+    return (
+      <p className="flex h-4.5 min-w-0 items-center gap-1.5">
+        <ShortSha sha={shortRevision(d.sourceRevision)} />
+        <span className="truncate">
+          {d.liveReleaseId ? "No commit recorded" : "Not deployed yet"}
+        </span>
+      </p>
+    )
+  return (
+    <p className="flex h-4.5 min-w-0 items-center gap-1.5">
+      <ProductGlyphs ids={imageProducts(images)} max={3} />
+      <span className="min-w-0 truncate font-mono text-foreground/80">{images.join(", ")}</span>
+    </p>
+  )
 }
 
 /**
  * Where the project comes from and what last went into it: the forge and the
  * repository, the branch, and the commit with its author in their own hue —
- * the Git page's drawing of the same things. A card spends two lines on it;
- * a row's second line takes the origin and the commit's subject.
+ * the Git page's drawing of the same things. A card spends two fixed lines on
+ * it, where it comes from and what is live; a row's second line takes the
+ * origin and the commit's subject.
  */
 export function SourceSummary({
   deployment,
@@ -357,11 +420,11 @@ export function SourceSummary({
   pulls?: ProjectPulls
   compact?: boolean
 }) {
-  const commit =
-    deployment.sourceKind === "git" || deployment.sourceKind === "local"
-      ? runCommit(deployment.lastRun)
-      : undefined
   if (compact) {
+    const commit =
+      deployment.sourceKind === "git" || deployment.sourceKind === "local"
+        ? runCommit(deployment.lastRun)
+        : undefined
     return (
       <span className="flex max-w-full min-w-0 items-center gap-1.5">
         <SourceOrigin deployment={deployment} pulls={pulls} compact />
@@ -373,52 +436,71 @@ export function SourceSummary({
   }
   return (
     <div className="min-w-0 space-y-1.5 text-hint text-muted-foreground">
-      <p className="flex min-w-0 items-center gap-1.5">
+      <p className="flex h-4.5 min-w-0 items-center gap-1.5 overflow-hidden">
         <SourceOrigin deployment={deployment} pulls={pulls} />
       </p>
-      {commit?.subject && (
-        <CommitLine
-          className="min-w-0"
-          sha={commit.sha}
-          subject={commit.subject}
-          author={commit.author}
-          at={commit.authoredAt}
-        />
-      )}
+      <LiveLine deployment={deployment} />
     </div>
   )
 }
 
 /**
- * The last hour at the ingress as a line the width of the card, beside how
- * many requests a minute and what share failed. The line keeps its series
- * colour; the only red is the failing share, attached to its figure (§3).
- * Nothing is reserved for a project that takes no traffic — a worker, a game
- * server — and the row rises once when its hour of history lands (§11).
+ * The last hour at the ingress: how many requests a minute and what share
+ * failed, then the hour as a line that runs out to the card's edge and stands
+ * on the footer's rule. The line keeps its series colour; the only red is the
+ * failing share, attached to its figure (§3), and the line rises once when its
+ * hour of history lands (§11).
+ *
+ * The band is drawn on every card at one height, so a row of cards keeps one
+ * height and its footers one baseline. A project with no address on the web —
+ * a worker, a game server — says so over a flat rule; one with an address and
+ * no hour yet draws the rule beside an empty figure.
  */
-function CardTraffic({ pulse }: { pulse: TrafficPulse }) {
+function CardTraffic({
+  deployment,
+  pulse,
+}: {
+  deployment: DeploymentSummary
+  pulse?: TrafficPulse
+}) {
+  const figure = "flex min-w-18 shrink-0 flex-col justify-end gap-0.5 pb-2 leading-tight"
+  if (pulse?.status !== "available")
+    return (
+      <div className="flex h-11 min-w-0 items-end gap-3">
+        <span className={cn(figure, "text-hint text-muted-foreground")}>
+          {deploymentURL(deployment.endpoint) ? (
+            <span className="numeric text-body">
+              —<span className="text-hint">/min</span>
+            </span>
+          ) : (
+            "No web traffic"
+          )}
+        </span>
+        <span aria-hidden className="-mr-3.5 mb-2.5 flex-1 border-t border-dashed" />
+      </div>
+    )
   return (
-    <div className="flex min-w-0 animate-rise items-end gap-3">
-      <Sparkline
-        values={pulse.points}
-        width={240}
-        height={28}
-        className="h-7 min-w-0 flex-1"
-        label="Requests per minute, last hour"
-      />
-      <span className="shrink-0 text-right leading-tight">
-        <span className="numeric block text-body font-medium">
+    <div className="flex h-11 min-w-0 animate-rise items-end gap-3">
+      <span className={figure}>
+        <span className="numeric text-body font-medium">
           {perMinute(pulse.perMinute)}
           <span className="text-hint font-normal text-muted-foreground">/min</span>
         </span>
         {pulse.errorRate >= FAILING_NOTICE ? (
-          <FailingShare rate={pulse.errorRate} className="block text-hint" />
+          <FailingShare rate={pulse.errorRate} className="text-hint" />
         ) : (
-          <span className="numeric block text-hint text-muted-foreground">
+          <span className="numeric text-hint text-muted-foreground">
             {plural(pulse.pages, "view")}
           </span>
         )}
       </span>
+      <Sparkline
+        values={pulse.points}
+        width={240}
+        height={44}
+        className="-mr-3.5 h-11 min-w-0 flex-1"
+        label="Requests per minute, last hour"
+      />
     </div>
   )
 }
@@ -438,6 +520,53 @@ function RowTraffic({ pulse }: { pulse: TrafficPulse }) {
       />
       <span className="numeric text-foreground/85">{perMinute(pulse.perMinute)}/min</span>
       {pulse.errorRate >= FAILING_NOTICE && <FailingShare rate={pulse.errorRate} />}
+    </span>
+  )
+}
+
+/**
+ * The hour in a wide row's column: the line the height of both of the row's
+ * lines, the rate beside it and, under the rate, the failing share or the
+ * views — the card's band at a row's size. A project with nothing to show
+ * draws the flat rule the card does, so the column never stands empty.
+ */
+function TrafficCell({
+  deployment,
+  pulse,
+}: {
+  deployment: DeploymentSummary
+  pulse?: TrafficPulse
+}) {
+  if (pulse?.status !== "available")
+    return (
+      <span className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+        <span aria-hidden className="w-12 shrink-0 border-t border-dashed" />
+        <span className="truncate">
+          {deploymentURL(deployment.endpoint) ? "—/min" : "No web traffic"}
+        </span>
+      </span>
+    )
+  return (
+    <span className="flex min-w-0 animate-rise items-center gap-2 text-hint">
+      <Sparkline
+        values={pulse.points}
+        width={48}
+        height={28}
+        className="h-7 shrink-0"
+        label="Requests per minute, last hour"
+      />
+      <span className="flex min-w-0 flex-col leading-4">
+        <span className="numeric truncate text-foreground/85">
+          {perMinute(pulse.perMinute)}/min
+        </span>
+        {pulse.errorRate >= FAILING_NOTICE ? (
+          <FailingShare rate={pulse.errorRate} className="truncate" />
+        ) : (
+          <span className="numeric truncate text-muted-foreground">
+            {plural(pulse.pages, "view")}
+          </span>
+        )}
+      </span>
     </span>
   )
 }
@@ -499,60 +628,60 @@ export function ProjectCard({
               if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
               router.push(base)
             }}
-            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3 rounded-xl p-4"
+            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col rounded-xl"
           >
-            {/* The state sits under the name rather than beside it: four
-                cards to a row leave a name beside a state and two verbs
-                about a hundred pixels, and the name is what is read. The
-                verbs take the name's line only, so the state and the host
-                run on under them to the card's edge. */}
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
-              <ProjectMark deployment={deployment} size="md" className="row-span-2" />
-              <Link
-                href={base}
-                className="block max-w-full min-w-0 truncate rounded-sm text-title leading-tight font-medium focus-ring"
-              >
-                {deployment.name}
-              </Link>
-              <span className="-my-1 -mr-1.5 flex items-center gap-1">
-                <ArrowRight
-                  aria-hidden
-                  className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-                />
-                <VerbActions dim verbs={menu} menuLabel={`Actions for ${deployment.name}`} />
-              </span>
-              <div className="col-span-2 col-start-2 flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-                <FleetStatus
-                  deployment={deployment}
-                  progressive={progressive}
-                  className="shrink-0"
-                />
-                <Address deployment={deployment} link />
+            {/* Every part of the card is drawn at a fixed height and every
+                card draws every part, so a row of them is one height with
+                nothing stretched and no gap opened where one project has
+                less to say than its neighbour. */}
+            <div className="flex min-w-0 flex-col gap-3 px-3.5 pt-3.5">
+              {/* The state sits under the name rather than beside it: four
+                  cards to a row leave a name beside a state and two verbs
+                  about a hundred pixels, and the name is what is read. The
+                  verbs take the name's line only, so the state and the host
+                  run on under them to the card's edge. */}
+              <div className="grid h-10 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5">
+                <ProjectMark deployment={deployment} size="md" className="row-span-2" />
+                <Link
+                  href={base}
+                  className="block max-w-full min-w-0 self-end truncate rounded-sm text-title leading-tight font-medium focus-ring"
+                >
+                  {deployment.name}
+                </Link>
+                <span className="-my-2 -mr-1.5 flex items-center gap-1 self-end">
+                  <ArrowRight
+                    aria-hidden
+                    className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
+                  />
+                  <VerbActions dim verbs={menu} menuLabel={`Actions for ${deployment.name}`} />
+                </span>
+                <div className="col-span-2 col-start-2 flex min-w-0 items-center gap-2 self-start text-hint text-muted-foreground">
+                  <FleetStatus
+                    deployment={deployment}
+                    progressive={progressive}
+                    className="shrink-0"
+                  />
+                  <Address deployment={deployment} link />
+                </div>
               </div>
+              <SourceSummary deployment={deployment} pulls={pulls} />
+              <CardTraffic deployment={deployment} pulse={pulse} />
             </div>
-
-            <SourceSummary deployment={deployment} pulls={pulls} />
-
-            {/* The traffic sits on the footer rather than under the source, so
-                the lines of a row of cards share one baseline whether or not
-                each card has a commit to show. */}
-            <div className="mt-auto flex min-w-0 flex-col gap-3">
-              {pulse?.status === "available" && <CardTraffic pulse={pulse} />}
-              {/* Gaps separate the pieces rather than a middle dot, which was
-                  left dangling at the end of a line wherever this wrapped. */}
-              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline pt-3 text-hint text-muted-foreground">
-                {active ? (
-                  <InFlight deployment={deployment} work={work} now={now} />
-                ) : (
-                  <>
-                    {recent.length > 0 && <RunStrip runs={recent.slice(0, 14)} />}
-                    <LastActivity deployment={deployment} />
-                  </>
-                )}
-                {deployment.pendingChanges && !active && (
-                  <Status tone="warning" label="Changes pending" className="ml-auto" />
-                )}
-              </div>
+            {/* One line that never wraps: the strip and the clock keep their
+                width and the words give way, so a card with pending changes
+                is as tall as one without. */}
+            <div className="mt-auto flex h-9 min-w-0 items-center gap-3 border-t border-hairline px-3.5 text-hint whitespace-nowrap text-muted-foreground">
+              {active ? (
+                <InFlight deployment={deployment} work={work} now={now} />
+              ) : (
+                <>
+                  {recent.length > 0 && <RunStrip runs={recent.slice(0, 14)} />}
+                  <LastActivity deployment={deployment} />
+                </>
+              )}
+              {deployment.pendingChanges && !active && (
+                <Status tone="warning" label="Changes pending" className="ml-auto shrink-0" />
+              )}
             </div>
           </div>
         </SpotlightBorder>
@@ -562,16 +691,23 @@ export function ProjectCard({
   )
 }
 
+/** A wide row's column: two lines in the height of the name and its source line. */
+const CELL =
+  "flex h-9 min-w-0 shrink-0 flex-col justify-center gap-1 text-hint text-muted-foreground"
+const LINE = "flex h-4 min-w-0 items-center"
+
 /**
  * A row in the list, in the shape the page picks for its width.
  *
- * `wide` (from `xl`): the readings sit beside the name in fixed measures — its
- * state, its traffic, its history, when — so a column of rows scans like the
- * table it replaces. Below that they go beneath the name at the row's full
- * width and nothing is dropped (§12); `roomy` (from `sm`) keeps the state
- * beside the name, and a phone puts it first on the line beneath, where the
- * verbs beside the name would otherwise leave the source line a third of the
- * row and the commit's subject nothing.
+ * `wide` (from `lg`): the readings sit beside the name in three fixed columns
+ * — its state over its address, its traffic, its history over when it last
+ * ran — each two lines tall, so the row stays one row's height with both of
+ * its lines spent and a column of rows scans like the table it replaces.
+ * Below that they go beneath the name at the row's full width and nothing is
+ * dropped (§12); `roomy` (from `sm`) keeps the state beside the name, and a
+ * phone puts it first on the line beneath, where the verbs beside the name
+ * would otherwise leave the source line a third of the row and the commit's
+ * subject nothing.
  */
 export function ProjectRow({
   deployment,
@@ -625,20 +761,26 @@ export function ProjectRow({
       trailing={
         wide ? (
           <>
-            <span className="flex w-32 min-w-0 flex-col gap-0.5">
-              {stage ? (
-                <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <StatusDot tone="warning" />
-                  {stage}
-                </span>
-              ) : (
-                status
-              )}
-              {pending}
+            <span className={cn(CELL, "w-28 xl:w-36")}>
+              <span className={LINE}>
+                {stage ? (
+                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                    <StatusDot tone="warning" />
+                    {stage}
+                  </span>
+                ) : (
+                  status
+                )}
+              </span>
+              <span className={LINE}>{pending || <Address deployment={deployment} />}</span>
             </span>
-            <span className="flex w-48 min-w-0">{traffic && <RowTraffic pulse={traffic} />}</span>
-            <span className="flex w-28 items-center">{history}</span>
-            <span className="w-16 text-right text-hint text-muted-foreground">{when}</span>
+            <span className={cn(CELL, "w-32 xl:w-40")}>
+              <TrafficCell deployment={deployment} pulse={pulse} />
+            </span>
+            <span className={cn(CELL, "w-28")}>
+              <span className={LINE}>{history || "No runs yet"}</span>
+              <span className={LINE}>{run ? when : <LastActivity deployment={deployment} />}</span>
+            </span>
           </>
         ) : (
           roomy && status

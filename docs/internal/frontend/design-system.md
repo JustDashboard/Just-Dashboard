@@ -971,7 +971,10 @@ trail stays a table.
 
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
-measures where there is room and under it where there is not, chosen once with a media query — and
+measures where there is room and under it where there is not, chosen once with a media query — a
+project on the fleet's list does it from `lg` as three columns of two lines each, so the row keeps
+the height of its name and source line with both lines spent rather than a third line under them —
+and
 the width they need is measured inside the project's shell, not the window: at 1280 the content
 column beside the project's navigation is about 968px, which left a service's name 150px beside
 five readings, so the wide shape of a service and of the Overview's runs-beside-previews starts at
