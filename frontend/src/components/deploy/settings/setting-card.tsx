@@ -47,7 +47,7 @@ const FIELDS_COLUMN = "mx-auto w-full max-w-3xl"
 
 const APPLIES: Record<SettingApplies, string> = {
   "next-deployment": "Applies on your next deployment",
-  immediately: "Applies immediately — no deployment",
+  immediately: "Applies immediately",
 }
 
 /**
@@ -229,7 +229,17 @@ export function settingStatus({
 }
 
 /**
- * The end of a settings form: when its change takes effect, and Save.
+ * The end of a settings form: Save, and — once there is something to save —
+ * how many edits it holds and when they take effect.
+ *
+ * At rest it is Save and nothing else, at the fields' right edge where the
+ * switches above it end. Every form used to close on "Applies immediately —
+ * no deployment" at the column's far left in 11px grey, a thousand pixels from
+ * the button it qualified: on a page of three forms that was three stray lines
+ * nobody had asked a question of. When a change applies is news only once
+ * there is a change, so it arrives with the count. A `note` is the exception
+ * and stays at rest, beside Save, because it says something particular about
+ * this form — why it cannot be edited, what a restart still has to do.
  *
  * Save is the outline face while the form is clean and the brand face once
  * it holds an edit — the command face as a function of state (§16), so the
@@ -240,15 +250,14 @@ export function settingStatus({
  * While dirty the foot follows the reader down the form, as Configuration's
  * apply bar does, because a Save a screen below the field that was changed
  * is how a form gets abandoned half-edited. It is opaque rather than frosted
- * (§16 has no glass), and it takes its hairline only then: at rest it is the
- * last line of the form, not a strip of chrome. Its row keeps to the fields
- * column. On a phone it stacks, at a thumb's height: while dirty, Discard and
- * Save take half the width each; clean, Save sits alone at the right edge,
- * because a full-width slab on every form read as the page's main command
- * with nothing to save.
+ * (§16 has no glass), takes its hairline only then, and rises into place
+ * rather than snapping (§11 *arrived*). The count is the head's amber
+ * `Status` again, because the head has usually scrolled away by the time the
+ * bar is what the reader sees. Its row keeps to the fields column. On a phone,
+ * while dirty, Discard and Save take half the width each at a thumb's height
+ * under the count; clean, Save sits alone at the right edge.
  *
- * The line is `note` when there is one, else what `applies` says; with
- * neither it is empty. `invalid` holds Save while a field is out of range.
+ * `invalid` holds Save while a field is out of range.
  */
 export function SettingFoot({
   applies,
@@ -266,12 +275,14 @@ export function SettingFoot({
   changes?: number
   saving?: boolean
   invalid?: boolean
-  /** Draws Discard and Save; a reader who cannot edit sees only the line. */
+  /** Draws Discard and Save; a reader who cannot edit sees only the note. */
   canEdit?: boolean
   onDiscard?: () => void
 }) {
+  const line = note ?? (dirty && applies ? APPLIES[applies] : undefined)
+  if (!canEdit && !line) return null
   const controls = canEdit && (
-    <>
+    <div className={cn("flex shrink-0 items-center gap-2", dirty && "max-sm:w-full")}>
       {dirty && onDiscard && (
         <Button
           type="button"
@@ -294,40 +305,50 @@ export function SettingFoot({
       >
         {saving ? "Saving…" : "Save"}
       </Button>
-    </>
+    </div>
   )
   return (
     <div
       className={cn(
-        "mt-8",
+        "mt-6",
         dirty &&
           "sticky bottom-0 z-20 -mx-5 border-t border-hairline bg-background px-5 py-3 md:-mx-8 md:px-8",
       )}
     >
+      {/* Keyed on the state, so the bar rises in when the first edit lands and
+          the quiet foot rises back once it is saved or discarded. */}
       <div
+        key={dirty ? "dirty" : "clean"}
         className={cn(
-          "flex min-w-0 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between",
+          "flex min-w-0 animate-rise flex-wrap items-center justify-end gap-x-4 gap-y-2.5",
           FIELDS_COLUMN,
         )}
       >
-        <p className="min-w-0 text-hint leading-relaxed text-muted-foreground">
-          {dirty && (
-            <>
-              <span className="font-medium text-foreground">
-                {changes > 0
-                  ? `${changes} unsaved change${changes === 1 ? "" : "s"}`
-                  : "Unsaved changes"}
-              </span>
-              {" — "}
-            </>
-          )}
-          {note ?? (applies && APPLIES[applies])}
-        </p>
-        {controls && (
-          <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end">
-            {controls}
+        {dirty && (
+          <Status
+            tone="warning"
+            label={
+              changes > 0
+                ? `${changes} unsaved change${changes === 1 ? "" : "s"}`
+                : "Unsaved changes"
+            }
+          />
+        )}
+        {line && (
+          <div
+            className={cn(
+              "min-w-0 text-xs leading-snug text-muted-foreground",
+              // Beside the count while dirty, so the two read as one sentence
+              // about the edit; beside Save at rest, so a note is read as
+              // belonging to the button it qualifies.
+              dirty ? "mr-auto" : "flex-1 text-right",
+            )}
+          >
+            {line}
           </div>
         )}
+        {dirty && !line && <span aria-hidden className="mr-auto" />}
+        {controls}
       </div>
     </div>
   )

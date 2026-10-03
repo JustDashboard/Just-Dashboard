@@ -98,6 +98,10 @@ test.describe("General settings", () => {
     await expect(picture.getByText("Every 5 s", { exact: true })).toBeVisible()
     await expect(picture.getByText("each matching commit", { exact: true })).toBeVisible()
     await expect(gitCard.getByText(/deploy automatically\./)).toHaveCount(0)
+    // Drawn on the page's own ground, as the GitHub App's picture on
+    // Credentials is, rather than in a framed box among the fields.
+    await expect(gitCard.locator(".wire-grid")).toHaveCount(1)
+    await expect(gitCard.locator(".rounded-xl.border", { has: picture })).toHaveCount(0)
 
     await gitCard.getByLabel("Include paths").fill("services/api/**")
     await gitCard.getByLabel("Exclude paths").fill("docs/**")
@@ -119,6 +123,43 @@ test.describe("General settings", () => {
     expect(policy.commitStatuses).toBe(false)
     expect(policy.watchInclude).toEqual(["services/api/**"])
     expect(policy.watchExclude).toEqual(["docs/**"])
+  })
+
+  test("says what the last check decided under the picture, not in the head", async ({ page }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/environments/12/git-watch", (route) =>
+      json(route, {
+        automatic: true,
+        branch: "main",
+        status: "watching",
+        intervalSeconds: 5,
+        checkedAt: new Date().toISOString(),
+        reason: "already_attempted",
+        policy: {
+          automatic: true,
+          commitStatuses: true,
+          watchInclude: [],
+          watchExclude: [],
+          revision: 1,
+        },
+      }),
+    )
+    await page.goto("/deploy/7/settings/general")
+
+    const gitCard = page.getByRole("form", { name: "Automatic deployment" })
+    // When the watch last looked is the Watch node's own line.
+    const picture = gitCard.getByRole("list", { name: "How a push reaches a deployment" })
+    await expect(picture.getByText(/^checked /)).toBeVisible()
+    // The sentence sat in the head's status slot, which sets no size, and
+    // rendered at 16px — louder than the section's own title. It is the
+    // picture's 12px now, beside the decision's status.
+    const sentence = gitCard.getByText(
+      "This commit already has a deployment run. Use Retry if it failed.",
+    )
+    await expect(sentence).toBeVisible()
+    expect(await sentence.evaluate((node) => getComputedStyle(node).fontSize)).toBe("12px")
+    await expect(gitCard.getByText("Already deployed", { exact: true })).toBeVisible()
+    await expect(gitCard.getByText("Automatic", { exact: true })).toBeVisible()
   })
 
   test("a read-only role sees no save buttons", async ({ page }) => {

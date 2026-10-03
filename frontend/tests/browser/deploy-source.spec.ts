@@ -116,8 +116,10 @@ test.describe("Source setting card", () => {
     await expect(card.getByRole("combobox", { name: "Credential" })).toHaveText("GitHub PAT")
     await expect(card.getByLabel("Include Git LFS objects")).toBeChecked()
     await expect(card.getByLabel("Include Git submodules")).not.toBeChecked()
-    // The head says how the source is reached, beside the repository's link.
-    await expect(card.getByText("Git URL", { exact: true })).toBeVisible()
+    // How it is reached is the URL field's to say: a plain URL is read with
+    // the credential picked under it, so the head carries no "Git URL" tag.
+    await expect(card.getByText("Git URL", { exact: true })).toHaveCount(0)
+    await expect(card.getByText(/Read through the GitHub App/)).toHaveCount(0)
 
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.screenshot({ path: test.info().outputPath("source-1280.png"), fullPage: true })
@@ -367,11 +369,6 @@ test.describe("Source setting card", () => {
     await expect(card.getByLabel("Platform")).toBeVisible()
     await expect(card.getByRole("combobox", { name: "Credential" })).toHaveText("Registry login")
     await expect(card.getByLabel("Repository URL")).toHaveCount(0)
-    await expect(
-      card.getByText(
-        "A project keeps its source kind. Start a new project to move from an image to a repository.",
-      ),
-    ).toBeVisible()
   })
 
   test("a read-only role sees the source but no Save button", async ({ page }) => {

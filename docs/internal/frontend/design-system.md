@@ -77,9 +77,9 @@ taking a frame:
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
   edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
-  one thing: four on the settings pages, each inside its section and drawn through
+  one thing: three on the settings pages, each inside its section and drawn through
   `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
-  General's automatic deployment (the repository, the watch, the deploys), Runtime's where it
+  Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
   open on every interface), Databases' way the application reaches its databases (each engine, the
   managed network, the application) and Automation's what deploys it (the watched branch, each
@@ -102,7 +102,11 @@ taking a frame:
   right, dashed rings for the kinds not yet added — and the GitHub App on Credentials — the
   accounts that installed it, the App and this server, with its setup path under it — stand on the
   page's own ground over `wire-grid`, the dot grid that fades out towards its edges, which gives a
-  picture a middle where a border gave it an outline. The preview beside it is the
+  picture a middle where a border gave it an outline. General's automatic deployment (the
+  repository, the watch with when it last looked, the deploys, and the last check's decision on
+  one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
+  one box on a page of hairlines, and the decision's sentence had sat in the section head's status
+  slot at the page's 16px, louder than the head itself. The preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
@@ -447,8 +451,12 @@ forms in one run of sections. `SettingForm` is one `<form>` and one save, and ma
 sections, because what one PUT writes is what one Save means — Runtime is five. `SettingSection`
 is a section's head carrying what the section currently is as data (the host and branch it builds
 from, the port it answers on) and, at its far end, at most one `settingStatus`: *Not saved*,
-*Unsaved changes* or *Saved · not live yet*. `SettingFoot` ends the form with when its change
-applies, Discard and Save. Save is the outline face while the form is clean and the brand face once
+*Unsaved changes* or *Saved · not live yet*. `SettingFoot` ends the form with Save alone at the
+fields' right edge; when the change applies ("Applies immediately", "Applies on your next
+deployment") arrives with the count of unsaved edits and Discard, because it is news only once there
+is an edit — every form closing on that line in 11px grey at the column's far left, a thousand
+pixels from the button it qualified, read as stray text on every settings page. A form's own `note`
+(why it cannot be edited, what a restart still has to do) stays at rest, beside Save. Save is the outline face while the form is clean and the brand face once
 it holds an edit — the command face as a function of state, so the one blue on a page of five forms
 is the form with something to save — and on the nine settings pages it is never disabled, because
 saving an untouched Source checks it again, which is how an operator finds out a credential stopped
