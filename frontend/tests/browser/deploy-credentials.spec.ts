@@ -49,11 +49,14 @@ const providerToken = {
   usedBy: 0,
 }
 
-test("lists credentials as cards drawn as their hosts, under four readings", async ({ page }) => {
+test("lists credentials as one-line cards drawn as their hosts, with no tiles over them", async ({
+  page,
+}) => {
   await mockProject(page)
   await page.route("**/api/v1/deploy/credentials", async (route) => {
     if (route.request().method() !== "GET") return route.fallback()
-    await json(route, [githubToken, registryLogin])
+    // The fleet holds the first of the two projects, so one is drawn by name.
+    await json(route, [githubToken, { ...registryLogin, usedByProjectIds: [7, 8] }])
   })
   await page.route("**/api/v1/deploy/github-app/", (route) =>
     json(route, { configured: false, installations: [] }),
@@ -62,20 +65,13 @@ test("lists credentials as cards drawn as their hosts, under four readings", asy
   await page.goto("/deploy/credentials")
   await expect(page.getByRole("heading", { name: "Credentials", exact: true })).toBeVisible()
 
-  // The readings: how many are held, how many a project's source reads
-  // through, how many were never used (amber: nobody would notice one being
-  // used), and when one was last reached for.
-  const tiles = page.locator("[data-slot=stat-tile]")
-  await expect(tiles).toHaveCount(4)
-  await expect(tiles.nth(0)).toContainText("2")
-  await expect(tiles.nth(0)).toContainText("across 2 hosts")
-  await expect(tiles.nth(1)).toContainText("1")
-  await expect(tiles.nth(2)).toContainText("Never used")
-  await expect(tiles.nth(2)).toContainText("github-pat added")
-  await expect(tiles.nth(2).locator(".text-warning")).toHaveText("1")
-  await expect(tiles.nth(3)).toContainText(/ago/)
-  await expect(tiles.nth(3)).toContainText("registry-login")
-  // The App's state is said by its own section, not by a third tile.
+  // The page has no tiles: how many are held and across how many hosts is the
+  // list's header's, and the rest is on the cards.
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(
+    page.locator("[data-slot=panel-header]").filter({ hasText: "Saved credentials" }),
+  ).toContainText("2 credentials · 2 hosts")
+  // The App's state is said by its own section.
   await expect(
     page
       .locator("[data-slot=panel-header]")
@@ -92,7 +88,8 @@ test("lists credentials as cards drawn as their hosts, under four readings", asy
   await expect(github.getByText("Git token", { exact: true })).toBeVisible()
   await expect(github.getByText("github.com")).toBeVisible()
   await expect(github.getByText("not in use")).toBeVisible()
-  await expect(github.getByText("never used")).toBeVisible()
+  // Amber: a credential nobody uses is one nobody would notice being used.
+  await expect(github.locator(".text-warning")).toHaveText("never used")
   // Drawn as the host it signs in to.
   await expect(github.locator('img[src="/logos/github.svg"]')).toHaveCount(1)
   await expect(github.getByRole("button", { name: "Edit github-pat" })).toBeVisible()
@@ -102,6 +99,14 @@ test("lists credentials as cards drawn as their hosts, under four readings", asy
   await expect(registry.getByText("ghcr.io · deploy")).toBeVisible()
   await expect(registry.getByText("used by 2 projects")).toBeVisible()
   await expect(registry.getByText(/last used/)).toBeVisible()
+  await expect(registry.locator(".text-warning")).toHaveCount(0)
+  // The project reading through it is named on the card's own line, so the
+  // verbs stand on the card's middle rather than level with the name over an
+  // empty corner.
+  await expect(registry.getByText("api-production", { exact: true })).toBeVisible()
+  const card = (await registry.boundingBox())!
+  const verb = (await registry.getByRole("button", { name: "Test", exact: true }).boundingBox())!
+  expect(Math.abs(card.y + card.height / 2 - (verb.y + verb.height / 2))).toBeLessThanOrEqual(1)
 
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.screenshot({ path: test.info().outputPath("credentials-1280.png"), fullPage: true })
