@@ -576,7 +576,78 @@ async function splitEvidence(page: Page, filename: string) {
   await page.screenshot({ path: join(directory, filename), animations: "disabled" })
 }
 
+async function hoverWindowDrop(
+  page: Page,
+  source: string,
+  target: string,
+  direction: "left" | "right" | "up" | "down",
+  start = true,
+) {
+  await expect(terminalPane(page, target)).toBeVisible()
+  if (start) {
+    const tab = (await page.locator(`[data-window="${source}"]`).boundingBox())!
+    await page.mouse.move(tab.x + tab.width / 3, tab.y + tab.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(tab.x + tab.width / 3 + 12, tab.y + tab.height / 2 + 12, {
+      steps: 4,
+    })
+  }
+  const pane = (await terminalPane(page, target).boundingBox())!
+  const x = direction === "left" ? 0.1 : direction === "right" ? 0.9 : 0.5
+  const y = direction === "up" ? 0.1 : direction === "down" ? 0.9 : 0.5
+  await page.mouse.move(pane.x + pane.width * x, pane.y + pane.height * y, { steps: 12 })
+  // Some browsers only begin sending dragover after the next pointer move.
+  await page.mouse.move(pane.x + pane.width * x + 1, pane.y + pane.height * y + 1)
+}
+
+async function dragEvidence(page: Page, name: string) {
+  const directory = process.env.JD_TERMINAL_EVIDENCE
+  if (!directory) return
+  await mkdir(directory, { recursive: true })
+  await page.screenshot({ path: join(directory, name), animations: "disabled" })
+  await page.waitForTimeout(650)
+}
+
 test.describe("terminal splits", () => {
+  test("rejects same-group and undersized drops and ignores unrelated drag types", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const { connections, creates, errors, strip } = await terminalFixture(page, "dom")
+    await splitTerminal(page, "right")
+    await expect.poll(() => creates.length).toBe(1)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await hoverWindowDrop(page, "window-a", creates[0].id, "left")
+    await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+    await page.mouse.up()
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+
+    await page.getByRole("button", { name: "Hide the sessions rail", exact: true }).click()
+    await page.setViewportSize({ width: 650, height: 844 })
+    await hoverWindowDrop(page, "window-b", "window-a", "right")
+    const overlay = page.locator('[data-terminal-drop="right"]')
+    await expect(overlay).toBeVisible()
+    await expect(overlay).toHaveAttribute("data-drop-blocked", "true")
+    await expect(overlay).toContainText("Not enough space")
+    await page.mouse.up()
+    await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(strip.locator('[data-window="window-b"]')).toHaveCount(1)
+
+    const transfer = await page.evaluateHandle(() => {
+      const data = new DataTransfer()
+      data.setData("text/plain", "window-b")
+      return data
+    })
+    await terminalPane(page, "window-a").dispatchEvent("dragover", { dataTransfer: transfer })
+    await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+    await terminalPane(page, "window-a").dispatchEvent("drop", { dataTransfer: transfer })
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    expect(connections.get("window-a")).toHaveLength(1)
+    expect(creates).toHaveLength(1)
+    expect(errors).toEqual([])
+  })
+
   test("recovers a null saved layout before opening a split", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const { connections, creates, errors } = await terminalFixture(
@@ -735,6 +806,151 @@ test.describe("terminal splits", () => {
   })
 
   for (const renderer of ["dom", "webgl"] as const) {
+    test(`detaches panes and drags windows into dynamic split zones with ${renderer}`, async ({
+      page,
+    }) => {
+      test.setTimeout(process.env.JD_TERMINAL_EVIDENCE ? 180_000 : 90_000)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const { connections, creates, errors, strip } = await terminalFixture(
+        page,
+        renderer,
+        undefined,
+        true,
+      )
+      await strip.getByRole("button", { name: "window-b", exact: true }).click()
+      await expect(terminalPane(page, "window-b").locator(".xterm-helper-textarea")).toBeFocused()
+      await strip.getByRole("button", { name: "window-a", exact: true }).click()
+      await splitTerminal(page, "right")
+      await expect.poll(() => creates.length).toBe(1)
+      const created = creates[0].id
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+      await expect(strip.locator("[data-window]")).toHaveCount(2)
+      await expect(strip.locator(`[data-window="${created}"]`)).toHaveCount(0)
+      for (const id of ["window-a", created]) {
+        await expect(
+          terminalPane(page, id).getByRole("button", { name: /as separate window$/ }),
+        ).toBeVisible()
+        await expect(
+          terminalPane(page, id).getByRole("button", { name: /^Close pane/ }),
+        ).toBeVisible()
+      }
+      await dragEvidence(page, `split-panes-hidden-from-windows-${renderer}.png`)
+      await terminalPane(page, created)
+        .getByRole("button", { name: /as separate window$/ })
+        .click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+      await expect(strip.locator("[data-window]")).toHaveCount(3)
+      await expect(strip.locator(`[data-window="${created}"]`)).toHaveAttribute(
+        "data-active",
+        "true",
+      )
+      await expect(terminalPane(page, created).locator(".xterm-helper-textarea")).toBeFocused()
+      await dragEvidence(page, `detached-separate-window-${renderer}.png`)
+
+      for (const direction of ["left", "right", "up", "down"] as const) {
+        await strip.getByRole("button", { name: "window-a", exact: true }).click()
+        await hoverWindowDrop(page, "window-b", "window-a", direction)
+        const preview = terminalPane(page, "window-a").locator(
+          `[data-terminal-drop="${direction}"]`,
+        )
+        await expect(preview).toBeVisible()
+        await expect(preview).toHaveAttribute("data-drop-blocked", "false")
+        const box = (await terminalPane(page, "window-a").boundingBox())!
+        const overlay = (await preview.boundingBox())!
+        expect(overlay.width).toBeCloseTo(
+          box.width * (direction === "left" || direction === "right" ? 0.5 : 1),
+          0,
+        )
+        expect(overlay.height).toBeCloseTo(
+          box.height * (direction === "up" || direction === "down" ? 0.5 : 1),
+          0,
+        )
+        await dragEvidence(page, `drop-overlay-${direction}-${renderer}.png`)
+        await page.mouse.up()
+        await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+        await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+        await expect(strip.locator('[data-window="window-b"]')).toHaveCount(0)
+        await expect(strip.locator('[data-window="window-a"]')).toHaveAttribute(
+          "data-active",
+          "true",
+        )
+        await assertTerminalGrids(page, connections)
+        const a = (await terminalPane(page, "window-a").boundingBox())!
+        const b = (await terminalPane(page, "window-b").boundingBox())!
+        if (direction === "left") expect(b.x + b.width).toBeLessThanOrEqual(a.x)
+        if (direction === "right") expect(a.x + a.width).toBeLessThanOrEqual(b.x)
+        if (direction === "up") expect(b.y + b.height).toBeLessThanOrEqual(a.y)
+        if (direction === "down") expect(a.y + a.height).toBeLessThanOrEqual(b.y)
+        await expect(terminalPane(page, "window-b").locator(".xterm-helper-textarea")).toBeFocused()
+        await page.keyboard.type(`dropped-${direction}`)
+        await expect
+          .poll(() => connections.get("window-b")![0].input.join(""))
+          .toContain(`dropped-${direction}`)
+        expect(connections.get("window-a")![0].input.join("")).not.toContain(`dropped-${direction}`)
+        await dragEvidence(page, `dropped-split-${direction}-${renderer}.png`)
+        await terminalPane(page, "window-b")
+          .getByRole("button", { name: /as separate window$/ })
+          .click()
+      }
+
+      await strip.getByRole("button", { name: "window-a", exact: true }).click()
+      await hoverWindowDrop(page, "window-b", "window-a", "left")
+      for (const direction of ["up", "right", "down"] as const) {
+        await hoverWindowDrop(page, "window-b", "window-a", direction, false)
+        await expect(page.locator(`[data-terminal-drop="${direction}"]`)).toBeVisible()
+        await dragEvidence(page, `dynamic-hover-${direction}-${renderer}.png`)
+      }
+      await page.keyboard.press("Escape")
+      await page.mouse.up()
+      await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+
+      // Moving the pointer out of the canvas removes the preview; dropping on
+      // the title strip must not accidentally reuse the last terminal zone.
+      await hoverWindowDrop(page, "window-b", "window-a", "right")
+      await expect(page.locator("[data-terminal-drop]")).toBeVisible()
+      await page.mouse.move(20, 10, { steps: 10 })
+      await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+      await page.mouse.up()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+
+      // A menu provides the same placement without a dragging gesture.
+      await page.getByRole("button", { name: "Split terminal", exact: true }).click()
+      await page.getByRole("menuitem", { name: "window-b", exact: true }).hover()
+      const submenu = page.locator('[data-slot="dropdown-menu-sub-content"][data-state="open"]')
+      await expect(submenu).toBeVisible()
+      await submenu.getByRole("menuitem", { name: "Split right", exact: true }).click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+      const before = (await terminalPane(page, "window-a").boundingBox())!
+      await hoverWindowDrop(page, created, "window-b", "down")
+      await expect(
+        terminalPane(page, "window-b").locator('[data-terminal-drop="down"]'),
+      ).toBeVisible()
+      await dragEvidence(page, `nested-drop-overlay-${renderer}.png`)
+      await page.mouse.up()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(3)
+      await expect(strip.locator("[data-window]")).toHaveCount(1)
+      expect((await terminalPane(page, "window-a").boundingBox())!).toEqual(before)
+      await assertTerminalGrids(page, connections)
+      await dragEvidence(page, `nested-dropped-split-${renderer}.png`)
+
+      // The group owner can also detach; a surviving pane becomes its tab.
+      await terminalPane(page, "window-a")
+        .getByRole("button", { name: /as separate window$/ })
+        .click()
+      await expect(strip.locator("[data-window]")).toHaveCount(2)
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+      await strip.getByRole("button", { name: "window-b", exact: true }).click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+      await assertTerminalGrids(page, connections)
+      for (const id of ["window-a", "window-b", created]) {
+        expect(connections.get(id)).toHaveLength(1)
+        expect(connections.get(id)![0].closed).toBe(false)
+      }
+      expect(creates).toHaveLength(1)
+      expect(errors).toEqual([])
+    })
+
     test(`splits in all four directions without remounting the shell with ${renderer}`, async ({
       page,
     }) => {
@@ -782,8 +998,8 @@ test.describe("terminal splits", () => {
         expect(connections.get(created.id)![0].input.join("")).not.toContain(text)
         await splitEvidence(page, `split-${direction}-${renderer}.png`)
         await page
-          .locator(`[data-window="${created.id}"]`)
-          .getByRole("button", { name: /^Close window/ })
+          .locator(`[data-terminal-window="${created.id}"]`)
+          .getByRole("button", { name: /^Close pane/ })
           .click()
         await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
         await expect.poll(() => connections.get(created.id)![0].closed).toBe(true)
@@ -949,8 +1165,8 @@ test.describe("terminal splits", () => {
     ).not.toContain("codex --yolo")
 
     await page
-      .locator(`[data-window="${source}"]`)
-      .getByRole("button", { name: source, exact: true })
+      .locator('[data-window="window-a"]')
+      .getByRole("button", { name: "window-a", exact: true })
       .click()
     await focusTerminal(page, "window-a")
     await page.getByRole("button", { name: "Claude", exact: true }).click()
