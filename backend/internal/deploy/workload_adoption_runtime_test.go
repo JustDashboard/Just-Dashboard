@@ -60,6 +60,8 @@ func TestAdoptedContainerRequiresExactBaselineOrReleaseOwnership(t *testing.T) {
 		allowed   bool
 	}{
 		{"original", dockerx.Container{ID: "original"}, true},
+		{"empty-identity", dockerx.Container{}, false},
+		{"short-identity", dockerx.Container{ID: "orig"}, false},
 		{"managed-other-environment", dockerx.Container{ID: "new", Labels: map[string]string{"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "99", "io.just-dashboard.release-id": "34"}}, false},
 		{"managed-other-release", dockerx.Container{ID: "new", Labels: map[string]string{"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "12", "io.just-dashboard.release-id": "99"}}, false},
 		{"exact-owned-replacement", dockerx.Container{ID: "new", Labels: map[string]string{"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "12", "io.just-dashboard.release-id": "34"}}, true},
@@ -69,6 +71,31 @@ func TestAdoptedContainerRequiresExactBaselineOrReleaseOwnership(t *testing.T) {
 				t.Fatal("ownership authorization mismatch")
 			}
 		})
+	}
+}
+
+func TestComposeBaselineScopeRejectsWholeActionBeforeForeignOrAmbiguousReplica(t *testing.T) {
+	runtime := ReleaseRuntime{EnvironmentID: 12, ReleaseID: 34}
+	baseline := []AdoptedContainer{{ID: "original-web", Service: "web", Number: 1, Running: true}, {ID: "original-worker", Service: "worker", Number: 1}}
+	web := dockerx.Container{ID: "original-web", Labels: map[string]string{"com.docker.compose.service": "web", "com.docker.compose.container-number": "1"}}
+	worker := dockerx.Container{ID: "foreign-worker", Labels: map[string]string{"com.docker.compose.service": "worker", "com.docker.compose.container-number": "1", "io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": "99", "io.just-dashboard.release-id": "34"}}
+	if scope, err := composeBaselineScope([]dockerx.Container{web, worker}, baseline, runtime, true); !errors.Is(err, ErrInvalidPlan) || len(scope) != 0 {
+		t.Fatal("authorized first replica escaped a later ownership rejection")
+	}
+	worker.ID = "original-worker"
+	if scope, err := composeBaselineScope([]dockerx.Container{web, worker}, baseline, runtime, false); err != nil || len(scope) != 2 {
+		t.Fatal("complete original baseline rejected", err)
+	}
+	duplicate := worker
+	duplicate.ID = "foreign-worker"
+	if scope, err := composeBaselineScope([]dockerx.Container{web, worker, duplicate}, baseline, runtime, true); !errors.Is(err, ErrInvalidPlan) || len(scope) != 0 {
+		t.Fatal("ambiguous replica identity accepted")
+	}
+	if _, err := composeBaselineScope([]dockerx.Container{web}, baseline, runtime, false); !errors.Is(err, ErrRuntimeUnavailable) {
+		t.Fatal("missing restored replica accepted")
+	}
+	if scope, err := composeBaselineScope([]dockerx.Container{web}, baseline, runtime, true); err != nil || len(scope) != 1 {
+		t.Fatal("already missing replica prevents stopping remaining original", err)
 	}
 }
 

@@ -471,7 +471,7 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, err
 	}
 	if len(request.Snapshot.ComposeBaseline) > 0 {
-		if err := o.startComposeBaselineContainers(ctx, containers, request.Snapshot.ComposeBaseline); err != nil {
+		if err := o.startComposeBaselineContainers(ctx, containers, request.Snapshot.ComposeBaseline, ReleaseRuntime{EnvironmentID: request.Release.EnvironmentID, ReleaseID: request.Release.ID}); err != nil {
 			return StartedRuntime{}, err
 		}
 	}

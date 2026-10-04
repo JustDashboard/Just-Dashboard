@@ -69,12 +69,13 @@ func updatedComposeBaseline(containers []dockerx.Container, baseline []AdoptedCo
 	return result
 }
 
-func (o *DockerRuntimeOwner) startComposeBaselineContainers(ctx context.Context, containers []dockerx.Container, baseline []AdoptedContainer) error {
-	for _, entry := range baseline {
-		container := composeContainerForBaseline(containers, entry)
-		if container == nil {
-			return fmt.Errorf("%w: adopted Compose replica was not restored", ErrRuntimeUnavailable)
-		}
+func (o *DockerRuntimeOwner) startComposeBaselineContainers(ctx context.Context, containers []dockerx.Container, baseline []AdoptedContainer, runtime ReleaseRuntime) error {
+	scope, err := composeBaselineScope(containers, baseline, runtime, false)
+	if err != nil {
+		return err
+	}
+	for _, target := range scope {
+		container, entry := target.container, target.entry
 		if !entry.Running {
 			if container.State == "running" {
 				if err := o.client.Lifecycle(ctx, container.ID, dockerx.ActionStop, entry.StopTimeout); err != nil && !errdefs.IsNotModified(err) {
@@ -93,6 +94,9 @@ func (o *DockerRuntimeOwner) startComposeBaselineContainers(ctx context.Context,
 func (o *DockerRuntimeOwner) restoreComposeBaseline(ctx context.Context, runtime ReleaseRuntime, metadata dockerReleaseRuntimeMetadata, variables map[string]string, emit func(BuildLog) error) error {
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": metadata.ProjectName})
 	if err != nil {
+		return err
+	}
+	if _, err := composeBaselineScope(containers, metadata.BaselineContainers, runtime, true); err != nil {
 		return err
 	}
 	intact := true
@@ -121,7 +125,7 @@ func (o *DockerRuntimeOwner) restoreComposeBaseline(ctx context.Context, runtime
 			return err
 		}
 	}
-	return o.startComposeBaselineContainers(ctx, containers, metadata.BaselineContainers)
+	return o.startComposeBaselineContainers(ctx, containers, metadata.BaselineContainers, runtime)
 }
 
 func (o *DockerRuntimeOwner) stopComposeBaseline(ctx context.Context, runtime ReleaseRuntime, metadata dockerReleaseRuntimeMetadata, grace int, remove bool) error {
@@ -129,16 +133,12 @@ func (o *DockerRuntimeOwner) stopComposeBaseline(ctx context.Context, runtime Re
 	if err != nil {
 		return err
 	}
-	for _, entry := range metadata.BaselineContainers {
-		container := composeContainerForBaseline(containers, entry)
-		if container == nil {
-			continue
-		}
-		// An external replacement cannot be claimed through a reused service
-		// name. Recreated baselines have dashboard ownership labels.
-		if !adoptedContainerAuthorized(*container, entry, runtime) {
-			return fmt.Errorf("%w: adopted runtime ownership changed", ErrInvalidPlan)
-		}
+	scope, err := composeBaselineScope(containers, metadata.BaselineContainers, runtime, true)
+	if err != nil {
+		return err
+	}
+	for _, target := range scope {
+		container, entry := target.container, target.entry
 		if err := o.client.Lifecycle(ctx, container.ID, dockerx.ActionStop, entry.StopTimeout); err != nil && !errdefs.IsNotFound(err) && !errdefs.IsNotModified(err) {
 			return err
 		}
@@ -152,10 +152,53 @@ func (o *DockerRuntimeOwner) stopComposeBaseline(ctx context.Context, runtime Re
 }
 
 func adoptedContainerAuthorized(container dockerx.Container, entry AdoptedContainer, runtime ReleaseRuntime) bool {
-	return container.ID == entry.ID || (runtime.EnvironmentID > 0 && runtime.ReleaseID > 0 &&
+	return container.ID != "" && ((entry.ID != "" && container.ID == entry.ID) || (runtime.EnvironmentID > 0 && runtime.ReleaseID > 0 &&
 		container.Labels["io.just-dashboard.managed"] == "true" &&
 		container.Labels["io.just-dashboard.environment-id"] == strconv.FormatInt(runtime.EnvironmentID, 10) &&
-		container.Labels["io.just-dashboard.release-id"] == strconv.FormatInt(runtime.ReleaseID, 10))
+		container.Labels["io.just-dashboard.release-id"] == strconv.FormatInt(runtime.ReleaseID, 10)))
+}
+
+type composeBaselineTarget struct {
+	container dockerx.Container
+	entry     AdoptedContainer
+}
+
+func composeBaselineScope(containers []dockerx.Container, baseline []AdoptedContainer, runtime ReleaseRuntime, allowMissing bool) ([]composeBaselineTarget, error) {
+	var scope []composeBaselineTarget
+	seen := map[string]bool{}
+	for _, entry := range baseline {
+		key := entry.Service + ":" + strconv.Itoa(entry.Number)
+		if !validComposeServiceName(entry.Service) || entry.Number < 1 || seen[key] {
+			return nil, fmt.Errorf("%w: adopted Compose replica identity is invalid", ErrInvalidPlan)
+		}
+		seen[key] = true
+		var selected *dockerx.Container
+		for i := range containers {
+			current := &containers[i]
+			if strings.EqualFold(current.Labels["com.docker.compose.oneoff"], "true") {
+				continue
+			}
+			number, _ := strconv.Atoi(current.Labels["com.docker.compose.container-number"])
+			if current.Labels["com.docker.compose.service"] != entry.Service || number != entry.Number {
+				continue
+			}
+			if selected != nil {
+				return nil, fmt.Errorf("%w: adopted Compose replica identity is ambiguous", ErrInvalidPlan)
+			}
+			selected = current
+		}
+		if selected == nil {
+			if allowMissing {
+				continue
+			}
+			return nil, fmt.Errorf("%w: adopted Compose replica was not restored", ErrRuntimeUnavailable)
+		}
+		if !adoptedContainerAuthorized(*selected, entry, runtime) {
+			return nil, fmt.Errorf("%w: adopted runtime ownership changed", ErrInvalidPlan)
+		}
+		scope = append(scope, composeBaselineTarget{*selected, entry})
+	}
+	return scope, nil
 }
 
 func (o *DockerRuntimeOwner) stopSharedComposeRuntime(ctx context.Context, runtime ReleaseRuntime, metadata dockerReleaseRuntimeMetadata, grace int, remove bool) error {
