@@ -27,6 +27,11 @@ working directories still pass deployment-root resolution and host/dashboard pat
 never discovery JSON or audit metadata. Bare processes are fenced by PID creation time on both sides
 of the procfs read and have no automatic migration without a verified restart authority.
 
+Private configuration, entrypoint and procfs capture opens are nonblocking and inspect the opened
+descriptor before reading: FIFOs, devices and directories are refused. These authoritative readers
+retain permitted final symlinks and zero-sized regular procfs files, with their existing byte limits;
+deployment source containment and snapshot identity remain separate checks.
+
 Native baseline releases keep PM2 or systemd as their restart authority. They retain the original
 configuration and entrypoint hashes, stop only after a replacement is prepared, and can be restored
 through the original manager when activation fails. They never delete the original manager entry or

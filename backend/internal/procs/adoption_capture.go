@@ -152,7 +152,7 @@ func CaptureHostSourceFiles(paths []string) (map[string]string, error) {
 		if !filepath.IsAbs(path) || len(path) > 4096 || strings.ContainsAny(path, "\x00\r\n") {
 			return nil, fmt.Errorf("the original entrypoint cannot be verified")
 		}
-		file, err := os.Open(hostexec.HostPath(path))
+		file, err := openCaptureFile(hostexec.HostPath(path))
 		if err != nil {
 			return nil, fmt.Errorf("the original entrypoint cannot be read")
 		}
@@ -201,7 +201,7 @@ func VerifyHostSourceFiles(expected map[string]string) error {
 }
 
 func readCaptureFile(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := openCaptureFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +212,22 @@ func readCaptureFile(path string) ([]byte, error) {
 		return nil, fmt.Errorf("capture input is unavailable or too large")
 	}
 	return data, nil
+}
+
+func openCaptureFile(path string) (*os.File, error) {
+	// A path can be replaced with a FIFO before open. Nonblocking open lets
+	// the descriptor check reject it before any read; permitted symlinks and
+	// zero-sized procfs regular files retain their existing capture behavior.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		f.Close()
+		return nil, fmt.Errorf("capture input is not a readable regular file")
+	}
+	return f, nil
 }
 
 func captureNULValues(data []byte) ([]string, error) {
