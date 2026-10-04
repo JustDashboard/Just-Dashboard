@@ -1,11 +1,12 @@
 "use client"
 
 import Link from "next/link"
-import { FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
+import { Disclosure, FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import type { DeploymentConfiguration, DeploymentPreflightFinding } from "@/lib/types"
 import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findings"
@@ -107,6 +108,10 @@ export function StepReview({
       !suppliedVariables.includes(variable.name),
   )
   const mounts = configuration.runtime.mounts ?? []
+  const compose = configuration.build.method === "compose"
+  const composeMounts = (flow.detection?.compose?.services ?? []).flatMap((service) =>
+    (service.mounts ?? []).map((mount) => ({ service: service.name, mount })),
+  )
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
   const smoke = configuration.checks.filter((check) => check.phase === "smoke")
   const gated = flow.profile === "web" || flow.profile === "static"
@@ -176,11 +181,32 @@ export function StepReview({
       </FormSection>
 
       <FormSection title="Data it keeps">
+        {compose && (
+          <>
+            <FormNote>
+              Each service keeps the volumes and bind mounts declared in the Compose source. The
+              fields below are additional overrides, so an empty list does not mean the stack has no
+              persistent storage. Review the full service configuration below.
+            </FormNote>
+            {composeMounts.length > 0 && (
+              <ul aria-label="Compose service mounts" className="min-w-0 space-y-1.5 text-hint">
+                {composeMounts.map(({ service, mount }, index) => (
+                  <li key={`${service}-${index}`} className="min-w-0 break-all">
+                    <span className="font-mono text-foreground">{service}</span>{" "}
+                    <span className="font-mono text-muted-foreground">{mount}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
         {mounts.length === 0 ? (
-          <FormNote>
-            Nothing survives a rebuild. Every release starts from the image, so anything the
-            application writes is gone when the next one replaces it.
-          </FormNote>
+          !compose && (
+            <FormNote>
+              Nothing survives a rebuild. Every release starts from the image, so anything the
+              application writes is gone when the next one replaces it.
+            </FormNote>
+          )
         ) : (
           <ul className="min-w-0 space-y-1.5 text-hint">
             {mounts.map((mount) => {
@@ -212,6 +238,27 @@ export function StepReview({
           </ul>
         )}
       </FormSection>
+
+      {compose && (flow.source.composeFiles?.length ?? 0) > 0 && (
+        <Disclosure summary="Compose service configuration">
+          <FormNote>
+            These saved files carry per-service images, limits, ports, commands and storage. Private
+            inputs stay on the server behind their variable references. After adoption, edit these
+            files in Settings → General; saving changes leaves the live baseline running until you
+            choose Deploy changes.
+          </FormNote>
+          {flow.source.composeFiles!.map((document, index) => (
+            <Textarea
+              key={`${document.path}-${index}`}
+              aria-label={`Reviewed ${document.path}`}
+              readOnly
+              value={document.content || "This file is read from the source directory."}
+              rows={10}
+              className="font-mono sm:text-xs"
+            />
+          ))}
+        </Disclosure>
+      )}
 
       {generated.length > 0 && (
         <FormSection title="Secrets made on this server">

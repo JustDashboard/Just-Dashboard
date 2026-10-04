@@ -56,6 +56,7 @@ import {
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"
+import { ComposeSourceSettings } from "@/components/deploy/settings/compose-source"
 
 /**
  * What the project is called, where it is built from, and — for a Git
@@ -110,6 +111,19 @@ export function GeneralSettings({
             <Checkout record={record} />
           ) : (
             <>
+              {configuration.source?.kind === "compose" && (
+                <ComposeSourceSettings
+                  key={configuration.revision}
+                  projectId={projectId}
+                  environmentId={environmentId}
+                  canEdit={canEdit}
+                  configuration={configuration}
+                  onSaved={() => {
+                    state.refresh()
+                    project.refresh()
+                  }}
+                />
+              )}
               {/* The endpoint's own errors (git_unavailable, invalid_image) are
                   the tell: only these two kinds have a re-enterable source
                   today, so the form is scoped to them rather than to every

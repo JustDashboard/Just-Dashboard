@@ -38,7 +38,16 @@ webhook channels with event selection, pause/resume, test delivery and delivery 
 deployment section on General carries the GitHub commit-status switch. Settings → Runtime exposes memory,
 CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
 periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each
-protected volume's backup standing (`settings/volume-backup.ts`). The Runtime page's service cards carry the
+protected volume's backup standing (`settings/volume-backup.ts`). Compose projects keep per-service
+settings in their source: Runtime and Storage explain that zero or empty overrides preserve the
+Compose configuration and link to General's Compose source section (`settings/compose-source.tsx`).
+Captured inline files can be edited with the shared Compose document editor; saving goes through
+the normal source inspection endpoint with a revision guard and remains pending until Deploy changes.
+Invalid YAML stays unsaved, and document edits are held in component memory rather than browser
+storage. Read-only accounts can inspect the files. Recovered Compose review lists detection's service
+mounts and offers the captured configuration, so an empty aggregate mount list never claims all
+storage is absent. `tests/browser/deploy-compose-settings.spec.ts` covers these paths.
+The Runtime page's service cards carry the
 container's own Start, Stop, Restart and Pause/Resume verbs, every published port with its scope
 (`runtime-ports.tsx`), a failure cause for a container that is restarting or has exited
 (`runtime-failure.tsx`) and a Details panel read from `GET /docker/containers/{id}` on open

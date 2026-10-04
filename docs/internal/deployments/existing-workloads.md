@@ -99,6 +99,15 @@ PID and native log source rather than fabricated Docker IDs. Container console r
 Docker runtime; PM2 files and systemd journal supply native output before migration. Git-only features
 require a real Git source, and Docker-specific metrics/tools require a Docker runtime.
 
+Recovered Docker recipes retain per-service configuration in captured inline Compose documents.
+Review lists service mounts and makes the saved files inspectable. General settings edits those
+documents through the normal source inspection and revision-guarded save endpoint; invalid YAML
+does not create a revision, and a valid save remains pending until Deploy changes. The live baseline
+is unchanged by source editing. Runtime and Storage link to the Compose source and describe empty
+aggregate fields as absent overrides, preserving each service's existing settings rather than
+claiming zero limits or no persistent data. Private inputs remain variable references, and in-progress
+YAML edits are never placed in browser session storage.
+
 Native lifecycle operations recheck manager configuration and captured source evidence before
 controlling the original app. Port reuse requires a freshly verified listener PID and creation time,
 not just a matching port number. The stop-first deployment path uses the normal readiness, activation
