@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useId, useState } from "react"
 import { ArrowDown, ArrowUp, Cross, Filter as FilterIcon, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -183,10 +185,13 @@ export function FilterBar({
                   key={column.key}
                   onSelect={() => onSortChange([...sort, { column: column.name, desc: false }])}
                 >
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
-                  <span className="max-w-24 shrink-0 truncate text-hint text-muted-foreground">
-                    {column.typeName}
-                  </span>
+                  <MenuItemText
+                    hint={
+                      <span className="text-hint text-muted-foreground">{column.typeName}</span>
+                    }
+                  >
+                    <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
+                  </MenuItemText>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

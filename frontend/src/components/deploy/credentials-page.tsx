@@ -1339,7 +1339,7 @@ function TestCredentialDialog({
  * settings draw the same control rather than three copies of it.
  *
  * Each option is drawn the way its card is on Credentials — the host's mark
- * before the name — with the host and kind at the far end, outside the part
+ * before the name — with the host and kind below it, outside the part
  * the trigger repeats, so the closed control still reads the bare name. When
  * nothing of the right kind is saved, the line under it says so and where to
  * add one.

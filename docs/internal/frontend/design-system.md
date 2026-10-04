@@ -665,15 +665,29 @@ small caps turned `api-production` into API-PRODUCTION, which is the corruption 
 strings out of caps for, so a scope's head is printed as written at `text-hint` semibold, after its
 own mark (the project's favicon or product, the connection's engine) at the line's height.
 
-A menu reads the same way at a smaller size: a `DropdownMenuLabel` is an eyebrow over the group of
-verbs it names, and every item, like every `Select` option, is `text-body`, the size of the rows
-the menu was opened from. A `SelectLabel` naming a group of options is the same eyebrow. An option
-can carry a reading about itself in `SelectItem`'s `hint` — the host a credential signs in to and
-its kind — drawn at the option's far end and outside the item's text, which is the part Radix copies
-into the closed field and names the option by: the list says "github.com · SSH key" beside each
-name, and the chosen field says the name alone. `CredentialSelect` (`deploy/credentials-page.tsx`),
-the one picker the new-project steps and a project's Source settings share, draws each option this
-way, on its host's glyph.
+A menu reads the same way at a smaller size: a `DropdownMenuLabel` or `SelectLabel` is an
+eyebrow over the group it names, and every option and action is `text-body`. Selects, action menus,
+right-click menus and form popovers share the surface and opening motion in `ui/menu-styles.ts`;
+menu rows are at least 32px on desktop and 44px on a phone, with the same hover wash, disabled state and
+right-hand check for a selected option. Reduced motion removes the opening animation.
+
+`SelectTrigger` composes the shared outline `Button`, so its border, focus ring and press feedback
+are the button's. A select opens below its trigger with a 4px gap, aligned to its starting edge;
+Radix can flip it above or constrain it to the viewport when space runs out. Its width accommodates
+the trigger and its options, without an ownership-specific minimum width. Arrow keys, typeahead,
+Home/End, Escape, focus restoration and scrolling remain the primitive's responsibility.
+
+**An option has one text column.** `MenuItemText` draws an option's name and any useful metadata
+beneath it, never at the far end of a second column. `SelectItem` uses this for its `hint`, outside
+`ItemText`, so metadata is excluded from the option's accessible name and the value copied into the
+closed trigger. `CredentialSelect` keeps the host's glyph beside the name and the host and kind
+below it. File locations, terminal snippets, database switchers, saved queries, column pickers and
+export menus use the same text component. Keyboard shortcut hints retain their end alignment.
+
+`OwnershipSelect`, shared by deployment domains, mounts and volume dependencies, offers only
+Managed, Linked and (where supported) Observed in the menu. Its button shows the chosen word;
+the selected removal consequence stays beside it and is connected with `aria-describedby`.
+Search scope and database activity history also use the shared select, rather than native controls.
 
 **A field is 16px on a phone.** `Input` has always gone to 16px below `sm`, because iOS zooms the
 page into any smaller field that takes focus, and `SelectTrigger` and `SearchInput` now follow it —

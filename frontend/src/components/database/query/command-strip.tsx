@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { ChevronDown, FloppyDisk, Play, Route, StopCircle, TextFormat } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { Segments } from "@/components/deploy/settings/segments"
@@ -209,12 +211,18 @@ export function CommandStrip({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-72">
               <DropdownMenuItem onSelect={() => onExplain(false)}>
-                <span className="flex-1">Explain</span>
-                <span className="text-hint text-muted-foreground">runs nothing</span>
+                <MenuItemText
+                  hint={<span className="text-hint text-muted-foreground">runs nothing</span>}
+                >
+                  <span className="flex-1">Explain</span>
+                </MenuItemText>
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onExplain(true)}>
-                <span className="flex-1">Explain and measure</span>
-                <span className="text-hint text-muted-foreground">runs the statement</span>
+                <MenuItemText
+                  hint={<span className="text-hint text-muted-foreground">runs the statement</span>}
+                >
+                  <span className="flex-1">Explain and measure</span>
+                </MenuItemText>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

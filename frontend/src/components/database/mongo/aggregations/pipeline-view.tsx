@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { Fragment, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
@@ -307,10 +309,15 @@ export function PipelineView({
                     className={cn("items-baseline gap-3", entry.name === loadedName && "bg-accent")}
                     onSelect={() => load(entry)}
                   >
-                    <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-                    <span className="numeric shrink-0 text-hint text-muted-foreground">
-                      {entry.stages.length} {entry.stages.length === 1 ? "stage" : "stages"}
-                    </span>
+                    <MenuItemText
+                      hint={
+                        <span className="numeric text-hint text-muted-foreground">
+                          {entry.stages.length} {entry.stages.length === 1 ? "stage" : "stages"}
+                        </span>
+                      }
+                    >
+                      <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                    </MenuItemText>
                   </DropdownMenuItem>
                 ))
               )}

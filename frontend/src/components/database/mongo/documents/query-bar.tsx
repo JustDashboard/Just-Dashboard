@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { ClockRewind, SettingsSliders } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -182,12 +184,17 @@ export function QueryBar({
                         className="items-baseline gap-3"
                         onSelect={() => onPick(entry.draft)}
                       >
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                          {draftLabel(entry.draft)}
-                        </span>
-                        <span className="shrink-0 text-hint text-muted-foreground">
-                          {relativeTime(new Date(entry.at).toISOString())}
-                        </span>
+                        <MenuItemText
+                          hint={
+                            <span className="text-hint text-muted-foreground">
+                              {relativeTime(new Date(entry.at).toISOString())}
+                            </span>
+                          }
+                        >
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                            {draftLabel(entry.draft)}
+                          </span>
+                        </MenuItemText>
                       </DropdownMenuItem>
                     ))}
                   </div>

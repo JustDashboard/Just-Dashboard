@@ -61,6 +61,14 @@ import {
   CommandList,
 } from "@/components/ui/command"
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+
 type PaletteValue = { open: () => void; close: () => void; toggle: () => void }
 const PaletteContext = createContext<PaletteValue | null>(null)
 type PaletteItem = SearchItem & {
@@ -475,24 +483,33 @@ function Palette({
         className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b px-4 py-1.5"
         onKeyDown={controlKeys}
       >
-        <label className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-          Search in
-          <select
-            aria-label="Search scope"
+        <div className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
+          <span aria-hidden>Search in</span>
+          <Select
             value={parsed.scope}
-            onChange={(event) => {
-              changeQuery(scopeQuery(query, event.target.value as SearchScope))
-              input.current?.focus()
+            onValueChange={(value) => {
+              changeQuery(scopeQuery(query, value as SearchScope))
             }}
-            className="min-h-11 min-w-0 rounded-sm bg-popover px-1 text-body text-foreground focus-ring sm:min-h-8"
           >
-            {SEARCH_SCOPES.map(([scope, label]) => (
-              <option key={scope} value={scope}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger aria-label="Search scope" size="sm" className="max-sm:text-body">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent
+              onEscapeKeyDown={(event) => event.stopPropagation()}
+              onCloseAutoFocus={(event) => {
+                event.preventDefault()
+                input.current?.focus()
+              }}
+              onKeyDown={controlKeys}
+            >
+              {SEARCH_SCOPES.map(([scope, label]) => (
+                <SelectItem key={scope} value={scope}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <span className="shrink-0 text-hint text-muted-foreground">
           {parsed.text || parsed.scope !== "all"
             ? result.total > 60

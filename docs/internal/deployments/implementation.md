@@ -1706,7 +1706,10 @@ change can never blank a secret; the `.env` import is a sheet that previews ever
 dry run before anything is written, and cannot import while any name is refused. Domains warns in
 its section when the environment binds a public address, and checks a new hostname in its Add
 domain sheet through `GET /deploy/hostname`, showing the A record to create and, for an
-administrator, whether it already resolves here. Storage draws each host path as the Files page's
+administrator, whether it already resolves here. The ownership selector shared with mounts and
+volume dependencies shows only the chosen word in its button and plain option names in its menu.
+The selected removal consequence stays beside it and is connected as its accessible description;
+managed, linked and observed semantics are unchanged. Storage draws each host path as the Files page's
 folder in its colour, in the mount editor and the live release's mounts as cards, each volume with
 its size from Docker where that read is allowed, with a card to back up any volume nothing copies. Databases & backups links databases
 through the same sheet the creation flow uses — in a section of its own, since linking is its own write

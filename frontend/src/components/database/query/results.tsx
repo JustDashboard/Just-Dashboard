@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useEffect, useId, useRef, useState } from "react"
 import { ChevronDown, Download, StopCircle, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -632,10 +634,15 @@ function ExportMenu({
         </p>
         {engine.capabilities.exportFormats.map((format) => (
           <DropdownMenuItem key={format} onSelect={() => onExport(format, rows)}>
-            <span className="w-20 shrink-0">{EXPORT_FORMATS[format].label}</span>
-            <span className="min-w-0 truncate text-hint text-muted-foreground">
-              {EXPORT_FORMATS[format].detail}
-            </span>
+            <MenuItemText
+              hint={
+                <span className="text-hint text-muted-foreground">
+                  {EXPORT_FORMATS[format].detail}
+                </span>
+              }
+            >
+              <span className="w-20 shrink-0">{EXPORT_FORMATS[format].label}</span>
+            </MenuItemText>
           </DropdownMenuItem>
         ))}
         <DropdownMenuSeparator />
