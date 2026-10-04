@@ -68,8 +68,13 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 		return nil, errors.New("original runtime changed before its image could be recovered")
 	}
 	excludePaths = append([]string(nil), excludePaths...)
-	sort.Strings(excludePaths)
-	fingerprint := adoptionHash([]byte(adoptionImageFingerprint(before, beforeChanges)), []byte(platformName), adoptionJSON(excludePaths))
+	exclusions := adoptionArchiveExclusions(excludePaths)
+	var excludedNames []string
+	for name := range exclusions {
+		excludedNames = append(excludedNames, name)
+	}
+	sort.Strings(excludedNames)
+	fingerprint := adoptionHash([]byte(adoptionImageFingerprint(before, beforeChanges)), []byte(platformName), adoptionJSON(excludedNames))
 	directory, err := os.OpenRoot(cacheRoot)
 	if err != nil {
 		return nil, errors.New("private image recovery storage is unavailable")
@@ -111,10 +116,6 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 	writer := tar.NewWriter(io.MultiWriter(boundedWriter, hash))
 	limited := &io.LimitedReader{R: stream, N: adoptionImageArchiveLimit + 1}
 	reader := tar.NewReader(limited)
-	exclusions := map[string]bool{}
-	for _, name := range excludePaths {
-		exclusions[strings.TrimPrefix(path.Clean(name), "/")] = true
-	}
 	var size int64
 	count := 0
 	for {
@@ -137,7 +138,12 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 			archiveFile.Close()
 			return nil, errors.New("original filesystem exceeds the safe image recovery bounds")
 		}
-		if exclusions[name] {
+		exclude, exclusionErr := adoptionArchivePathExcluded(name, exclusions)
+		if exclusionErr != nil {
+			archiveFile.Close()
+			return nil, exclusionErr
+		}
+		if exclude {
 			continue
 		}
 		if err := writer.WriteHeader(header); err != nil {
@@ -231,6 +237,40 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 		return nil, errors.New("recovered image proof could not be retained")
 	}
 	return recovered, nil
+}
+
+func adoptionArchiveExclusions(paths []string) map[string]bool {
+	exclusions := map[string]bool{}
+	for _, name := range paths {
+		name = strings.TrimPrefix(path.Clean(name), "/")
+		ancestor := false
+		for _, root := range []string{n8nEditorCache, n8nUploadDirectory} {
+			if name == "" || strings.HasPrefix(strings.TrimPrefix(root, "/"), name+"/") {
+				ancestor = true
+				break
+			}
+		}
+		// Retain directory ownership and modes outside regenerated outputs.
+		if !ancestor {
+			exclusions[name] = true
+		}
+	}
+	return exclusions
+}
+
+func adoptionArchivePathExcluded(name string, exclusions map[string]bool) (bool, error) {
+	if exclusions[name] {
+		return true, nil
+	}
+	// A new upload can appear and disappear between the two Docker diffs.
+	// Refuse unproved entries inside roots verified as generated or empty.
+	for _, root := range []string{n8nEditorCache, n8nUploadDirectory} {
+		root = strings.TrimPrefix(root, "/")
+		if exclusions[root] && strings.HasPrefix(name, root+"/") {
+			return false, errors.New("the verified generated cache or empty upload directory changed during filesystem export; retry recovery")
+		}
+	}
+	return false, nil
 }
 
 func openAdoptionImageFile(root *os.Root, name string, flags int) (*os.File, error) {

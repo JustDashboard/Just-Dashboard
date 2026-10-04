@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
@@ -52,6 +53,34 @@ func TestAdoptionImageFingerprintFencesIdentityAndIgnoresHealthTicks(t *testing.
 	inspection.State.Pid++
 	if adoptionImageFingerprint(inspection, changes) == want {
 		t.Fatal("process replacement escaped the recovery fence")
+	}
+}
+
+func TestAdoptionImageExportRejectsUnprovedCacheAndUploadEntries(t *testing.T) {
+	cache := strings.TrimPrefix(n8nEditorCache, "/")
+	uploads := strings.TrimPrefix(n8nUploadDirectory, "/")
+	exclusions := adoptionArchiveExclusions([]string{"/", "/home", "/home/node", "/home/node/.cache", "/home/node/.cache/n8n", "/tmp", n8nEditorCache, n8nEditorCache + "/assets/editor.js", n8nUploadDirectory})
+	for _, name := range []string{cache, cache + "/assets/editor.js", uploads} {
+		if excluded, err := adoptionArchivePathExcluded(name, exclusions); !excluded || err != nil {
+			t.Fatal("verified generated path was not excluded")
+		}
+	}
+	for _, name := range []string{cache + "/new-unknown.js", uploads + "/live-application-upload.csv"} {
+		if _, err := adoptionArchivePathExcluded(name, exclusions); err == nil {
+			t.Fatal("an unproved cache or upload entry escaped the export-time fence")
+		}
+	}
+	for _, name := range []string{"", "home", "home/node", "home/node/.cache", "home/node/.cache/n8n", "tmp", "home/node/base-image-file", cache + "-other/file", uploads + "-other/file"} {
+		if excluded, err := adoptionArchivePathExcluded(name, exclusions); excluded || err != nil {
+			t.Fatal("cache proof changed unrelated original-image paths")
+		}
+	}
+	if excluded, err := adoptionArchivePathExcluded(cache+"/image-provided.js", nil); excluded || err != nil {
+		t.Fatal("an unverified root changed ordinary image capture")
+	}
+	python := "app/__pycache__/source.cpython-311.pyc"
+	if excluded, err := adoptionArchivePathExcluded(python, adoptionArchiveExclusions([]string{"/" + python})); !excluded || err != nil {
+		t.Fatal("n8n directory preservation changed Python bytecode exclusion")
 	}
 }
 

@@ -85,6 +85,10 @@ retain the writable-layer blocker. Files outside these exact paths receive the o
 Any upload file is application data and blocks adoption until persisted/backed up. Workflow state,
 the encryption key and real encrypted credentials remain in n8n's existing mounted storage; the
 cache exception never substitutes for preserving that storage or verifying a backup.
+During missing-image export, an unproved new entry beneath a verified generated cache or empty upload
+directory also blocks recovery, even if it disappears before the final writable-layer diff.
+Ancestor directories outside those generated roots remain in the snapshot with their ownership and
+mode metadata; removing generated contents must not change the original user's home directory access.
 
 The source rationale is n8n's pinned
 [static-asset generator](https://github.com/n8n-io/n8n/blob/n8n%402.39.10/packages/cli/src/commands/start.ts),
