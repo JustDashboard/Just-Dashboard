@@ -1795,7 +1795,14 @@ cards now, worst first and two rows at most, and the tile went to Git. And nothi
 *who* was spending the CPU the first tile reported, so the Metrics page's top processes sit beside
 the activity list, which reads the last day rather than the last hour: an hour was "Nothing in the
 last hour" on most visits. The two headers there share a height so their hairlines meet across the
-gap (§15 pass 9).
+gap (§15 pass 9). Each activity row shares the audit trail's product mark, with a
+source name in its stable lane hue. Common actions read as verbs with the target stepped back in
+monospace; the original action and complete target remain on the title. A status word and dot name
+the outcome: an audited request is Accepted, while a deploy or backup is Succeeded only when its
+recorded run detail says so. Failures and warnings keep their state hues, and pending or running
+work is never labelled successful. The exact time sits below the outcome, the elapsed time and
+recorded detail below the action. The header offers the full Audit log to administrators, matching
+the trail's `system.admin` capability, without making these readings into destination cards.
 
 Reading pages now keep their page name in a screen-reader-only `h1` through `PageContext`. The rail
 provides the visible location. A linked parent remains as a compact way back, while pages without
