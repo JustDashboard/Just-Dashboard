@@ -30,6 +30,27 @@ func (o liveReservationPreflight) Observe(ctx context.Context, request Observati
 	return observation, err
 }
 
+func assertLiveRuntimeReservation(t *testing.T, planning *PlanningStore, base *store.Store, containers RecordedContainerReader, projectID, environmentID int64) {
+	t.Helper()
+	settings, err := planning.EnvironmentConfiguration(t.Context(), projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dependencies := []PlannedDependency{}
+	for _, dependency := range settings.Dependencies {
+		if dependency.Kind == "runtime" {
+			dependencies = append(dependencies, dependency)
+		}
+	}
+	if len(dependencies) != 1 {
+		t.Fatalf("saved plan has %d original runtime reservations", len(dependencies))
+	}
+	observations, err := NewRuntimeReservationObserver(base, containers, nil).ObserveDependencies(t.Context(), dependencies)
+	if err != nil || len(observations) != 1 || !observations[0].Available || observations[0].Warning != "" {
+		t.Fatalf("normal preflight cannot verify current managed/rollback runtime reservation: %+v %v", observations, err)
+	}
+}
+
 func TestRuntimeReservationPreflightRequiresEvidenceAndReportsLostBaseline(t *testing.T) {
 	dependency := PlannedDependency{Kind: "runtime", Ownership: OwnershipManaged, ResourceKind: "docker_container", ResourceID: "original"}
 	configuration := PlanConfiguration{Build: BuildPlanConfig{Method: BuildNone}, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst}, Dependencies: []PlannedDependency{dependency}}

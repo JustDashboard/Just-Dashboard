@@ -237,12 +237,15 @@ func liveManagedStandaloneAdoption(t *testing.T, missingImage bool) {
 		}
 	}
 	assertCurrent()
+	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	rolled := enqueue(OperationRollback, 1, baseline)
 	if rolled.State != RunSucceeded {
 		t.Fatalf("standalone baseline Rollback failed: %+v", rolled)
 	}
 	assertCurrent()
+	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	evidence := map[string]any{"test": t.Name(), "fixtureName": name, "checkedAt": time.Now().UTC(), "adoptionPreservedIDsPIDsStartedAtAndSettings": true, "failedDeployRestoredOriginalContainerID": true, "failedDeployRun": failed.ID, "managedDeployRun": successful.ID, "managedDeployState": successful.State, "baselineRollbackRun": rolled.ID, "baselineRollbackState": rolled.State, "persistentDataPreserved": true, "originalNameAndCustomNetworkAliasPreserved": true, "fixtureRemovedAtCleanup": true, "originalImageMissing": missingImage, "cachedImageStableAcrossRecoveryAndAdopt": missingImage}
+	evidence["runtimeReservationAvailableAfterDeploy"], evidence["runtimeReservationAvailableAfterBaselineRollback"] = true, true
 	if location := os.Getenv("JD_ADOPTION_EVIDENCE_DIR"); location != "" {
 		if err := os.MkdirAll(location, 0o700); err != nil {
 			t.Fatal(err)

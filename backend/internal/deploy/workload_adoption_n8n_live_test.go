@@ -330,12 +330,15 @@ func TestLiveManagedN8NAdoptionAndRollback(t *testing.T) {
 		t.Fatalf("normal n8n Deploy failed: state=%s code=%s", deployed.State, deployed.TerminalCode)
 	}
 	assertCurrent()
+	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	t.Log("Normal n8n Deploy preserved SQLite workflows and decrypted credentials; restoring the frozen baseline")
 	rolled := enqueue(OperationRollback, 1, baseline)
 	if rolled.State != RunSucceeded {
 		t.Fatalf("n8n baseline rollback failed: state=%s code=%s", rolled.State, rolled.TerminalCode)
 	}
 	assertCurrent()
+	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
+	evidence["runtimeReservationAvailableAfterDeploy"], evidence["runtimeReservationAvailableAfterBaselineRollback"] = true, true
 	evidence["adoptionPreservedIDsPIDsStartedAtAndSettings"] = true
 	evidence["managedDeployRun"], evidence["managedDeployState"] = deployed.ID, deployed.State
 	evidence["baselineRollbackRun"], evidence["baselineRollbackState"] = rolled.ID, rolled.State

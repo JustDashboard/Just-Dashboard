@@ -284,6 +284,7 @@ volumes:
 	if successful.State != RunSucceeded {
 		t.Fatalf("managed Deploy failed: %+v", successful)
 	}
+	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	deployed, _ := adoptionLiveInventory(t, client, project)
 	expectedServices := 5
 	if scope == RecoveryExistingServices {
@@ -303,12 +304,14 @@ volumes:
 		t.Fatalf("baseline rollback failed: %+v", rolled)
 	}
 	adoptionLiveAssertBaseline(t, client, project, port)
+	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	orphanAfter, err = client.Inspect(ctx, orphanID)
 	if err != nil || orphanAfter.State != "running" || orphanAfter.ID != orphanBefore.ID || !orphanAfter.StartedAt.Equal(*orphanBefore.StartedAt) {
 		t.Fatalf("baseline rollback mutated external oneoff: %v", err)
 	}
 	evidence := map[string]any{"test": t.Name(), "fixtureProject": project, "checkedAt": time.Now().UTC(), "baselineReleaseId": baseline.Release.ID, "adoptionPreservedIDsPIDsStartedAtAndSettings": true, "originalContainers": 4, "originalRunning": 2, "declaredServices": 5, "failedDeployRun": failed.ID, "failedDeployState": failed.State, "managedDeployRun": successful.ID, "managedDeployState": successful.State, "baselineRollbackRun": rolled.ID, "baselineRollbackState": rolled.State, "persistentDataPreserved": true, "externalOneoffPreserved": true, "HTTPContinuityAtAdoption": true, "HTTPAdoptionSamples": httpSamples.Load(), "HTTPAdoptionFailures": httpFailures.Load(), "fixtureRemovedAtCleanup": true}
 	evidence["scope"], evidence["excludedServices"], evidence["managedRecipeServices"] = scope, recovered.Adoption.ExcludedServices, expectedServices
+	evidence["runtimeReservationAvailableAfterDeploy"], evidence["runtimeReservationAvailableAfterBaselineRollback"] = true, true
 	if location := os.Getenv("JD_ADOPTION_EVIDENCE_DIR"); location != "" {
 		if err := os.MkdirAll(location, 0o700); err != nil {
 			t.Fatal(err)

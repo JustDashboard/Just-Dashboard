@@ -206,6 +206,9 @@ to the contribution terms above, including the additional licence grant to the p
   It creates a real workflow and encrypted credential, verifies n8n's native SQLite readiness and
   credential decryption before adoption, after normal Deploy and after baseline rollback, and removes
   only its unique owned resources. `JD_ADOPTION_EVIDENCE_DIR` also writes its sanitized evidence.
+  The managed Docker/Compose and n8n fixtures read the saved runtime reservation after normal Deploy
+  and baseline rollback and require the production inventory verifier to report it available; this
+  guards the next Overview check and deployment preflight as well as lifecycle completion.
   See [the real n8n lifecycle record](docs/audits/2026-10-04-existing-workloads/n8n-lifecycle.md).
   Native capture changes also run
   `JD_PM2_ADOPTION_LIVE=1 go test ./internal/procs -run '^TestLiveExistingPM2CaptureAndManagerControls$' -count=1 -v`
