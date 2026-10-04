@@ -44,10 +44,13 @@ container's own Start, Stop, Restart and Pause/Resume verbs, every published por
 (`runtime-failure.tsx`) and a Details panel read from `GET /docker/containers/{id}` on open
 (`runtime-details.tsx`). The Console tab
 (`components/deploy/project-console.tsx`) embeds the Docker exec pane on the live release container
-for every non-game deployment, with a Shell (auto, sh, bash, ash) and Run as (image user or root)
-choice sent as the exec route's `cmd` and `user` query parameters (`console-session.ts`); the
-`docker.container.exec.open` audit entry records both. The shared vocabulary (`components/deploy/vocabulary.tsx`) is the one
-place a run state, a project state, a source line or a release path is put into words, and the one
+for every non-game deployment, using automatic shell detection and the image's user, without
+`cmd` or `user` overrides (`console-session.ts`). Its toolbar contains only Terminal actions and
+fullscreen; shell, user, container, search, snippet and terminal settings controls are absent.
+Runtime's Console action still selects a service through `?service=`. The
+`docker.container.exec.open` audit entry records the exec command and user. The shared vocabulary
+(`components/deploy/vocabulary.tsx`) is the one place a run state, a project state, a source line or a
+release path is put into words, and the one
 place a project is resolved to the product it is drawn as (`projectProduct`, `sourceProduct`); a
 project's verbs are declared once in `project-verbs.tsx` and a run's in `run-verbs.tsx`, for every
 surface that draws them. What a pull request and its preview say about themselves — the tone of the

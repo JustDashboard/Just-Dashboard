@@ -364,7 +364,8 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   The shared toolbar offers **Codex**, **Claude**, **Split terminal**, Terminal actions and fullscreen.
   Search, snippets and terminal behaviour buttons are absent from the terminal page; search remains
   available through its shortcut. Terminal actions apply to the focused pane (copy, export, working
-  folder, shortcuts and clear). Docker and deployment consoles keep their own emulator controls.
+  folder, shortcuts and clear). Docker consoles keep their own emulator controls; deployment console
+  toolbars show only Terminal actions and fullscreen, with search available through its shortcut.
   Codex/Claude create a fresh sibling window with the exact `codex --yolo` or
   `claude --dangerously-skip-permissions` command, after the native Bash/Zsh configuration loads.
   The backend reads the focused `sourceWindowId`'s directory at creation time, including a recent `cd`;

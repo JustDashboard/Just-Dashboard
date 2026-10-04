@@ -557,7 +557,9 @@ test("a legacy project's commit rollback uses ordinary confirmation", async ({ p
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/86$/)
 })
 
-test("the console tab opens a shell inside the live release container", async ({ page }) => {
+test("the console tab opens the default shell with only actions and fullscreen", async ({
+  page,
+}, testInfo) => {
   const runtime: DeploymentRuntimeServices = {
     status: "available",
     observedAt: now,
@@ -583,12 +585,38 @@ test("the console tab opens a shell inside the live release container", async ({
     ],
   }
   await mockProject(page, { normalized: true, runtime })
-  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/exec/, () => {})
-  await page.goto("/deploy/7/console")
-  await expect(page.getByText("jd-e12-r20 · deployment shell")).toBeVisible()
-  await page.getByRole("combobox", { name: "Console container" }).click()
-  await page.getByRole("option", { name: "jd-e12-r19" }).click()
-  await expect(page.getByText("jd-e12-r19 · deployment shell")).toBeVisible()
+  const socketUrls: URL[] = []
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/exec/, (socket) => {
+    socketUrls.push(new URL(socket.url()))
+  })
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    socketUrls.length = 0
+    await page.goto("/deploy/7/console")
+    await expect(page.getByText("jd-e12-r20 · deployment shell")).toBeVisible()
+    await expect
+      .poll(() => socketUrls.at(-1)?.pathname)
+      .toBe("/api/v1/docker/containers/abc123/exec")
+    expect(socketUrls.at(-1)?.searchParams.has("cmd")).toBe(false)
+    expect(socketUrls.at(-1)?.searchParams.has("user")).toBe(false)
+    await expect(page.getByRole("combobox", { name: "Shell", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("combobox", { name: "Run as", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("combobox", { name: "Console container" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^Search scrollback/ })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Send a saved command" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Terminal settings" })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Terminal actions" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Fullscreen", exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`console-${width}.png`), fullPage: true })
+  }
+
+  await page.getByRole("button", { name: "Terminal actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Save scrollback" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await page.getByRole("button", { name: "Fullscreen", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Leave fullscreen (Esc)" })).toBeVisible()
+  await page.getByRole("button", { name: "Leave fullscreen (Esc)" }).click()
+  await expect(page.getByRole("button", { name: "Fullscreen", exact: true })).toBeVisible()
 
   await mockProject(page, {
     normalized: true,
