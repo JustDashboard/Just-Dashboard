@@ -221,8 +221,12 @@ to the contribution terms above, including the additional licence grant to the p
   through **Send test** and a deployment of a GitHub-sourced project, and the pull request must say which
   providers were exercised.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
-  `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
-  the browser gate covers the project overview, build transcript and focused settings, including
+  `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`.
+  On a busy host use all local shards of `scripts/go-test-shard.sh` (from `backend/`), as the existing
+  race gate does. It skips only the reference-scale latency assertions, which must pass separately
+  without instrumentation. Engine state/side-effect waits stay bounded at 30 seconds so race overhead
+  does not turn completed work into a false three-second timeout.
+  The browser gate covers the project overview, build transcript and focused settings, including
   variables, domains, storage, dependencies, automation and lifecycle.
 - Preview changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction)$' -count=1 -v`.
