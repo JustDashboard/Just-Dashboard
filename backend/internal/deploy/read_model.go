@@ -244,7 +244,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		if livePort > 0 {
 			summary.HostPort = livePort
 		}
-		summary.PendingChanges = summary.LiveReleaseID == 0 || summary.LivePlanRevision != summary.DesiredRevision
+		summary.PendingChanges = summary.LiveReleaseID == 0
 		result.Deployments = append(result.Deployments, summary)
 	}
 	if err := rows.Err(); err != nil {
@@ -252,6 +252,20 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
+	}
+	// An undone edit advances the revision with nothing left to deploy, so a
+	// revision the live release was not built from is compared by content. Only
+	// those deployments pay for it, which is why it is not batched below.
+	for index := range result.Deployments {
+		summary := &result.Deployments[index]
+		if summary.LiveReleaseID == 0 || summary.LivePlanRevision == summary.DesiredRevision {
+			continue
+		}
+		pending, err := pendingState(ctx, s.db, summary.ID, summary.EnvironmentID)
+		if err != nil {
+			return nil, err
+		}
+		summary.PendingChanges = pending.Pending
 	}
 	projectIDs := make([]int64, 0, len(result.Deployments))
 	releaseIDs := make([]int64, 0, len(result.Deployments))

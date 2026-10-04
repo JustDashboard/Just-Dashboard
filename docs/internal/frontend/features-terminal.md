@@ -307,13 +307,27 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   working-directory/shell title.
   A tab reads as a rail row does: the program mark, the label, then the activity mark beside the close.
   Close appears under the pointer (`rowReveal`), the way a browser's does; the active tab keeps it
-  visible. There is no rename (double-click only selects) or colour action. Selecting any tab in a split
-  brings back that whole split group and focuses the selected terminal.
+  visible. There is no rename (double-click only selects) or colour action. Each standalone window or
+  split group has one tab, owned by the group's original window; split children do not add tabs.
+  The active tab remains selected whichever pane has focus. Selecting another group restores it;
+  selecting the current tab retains its focused pane. Window shortcuts traverse these same tabs,
+  while pane shortcuts traverse the visible leaves.
   Closing the last window closes its session through the session endpoint.
 - **Directional splits** use `lib/terminal-layout.ts`'s binary layout trees, grouped per session in
   `terminal.layouts`. Each new split adds a direct-PTY window above/below/left/right of the focused
   leaf; a new window or agent launch creates an independent tab. Closed leaves collapse their parent,
-  and a listing from another browser reconciles missing/new windows. Pane rectangles and dividers are
+  and a listing from another browser reconciles missing/new windows. Each group's optional `tab`
+  stores its owner; older saved trees recover their oldest live window as the owner. Removing the
+  owner promotes a surviving pane. Each split pane has close and **Open as separate window** controls;
+  detaching removes that leaf, collapses its divider and selects its new standalone tab without a
+  PTY mutation. Dragging a window tab over a visible terminal previews the half nearest the pointer's
+  normalized edge (left/right/above/below). A drop moves the existing window or entire source group
+  beside that target leaf. The target group retains its tab and the moved window receives focus.
+  `split-drop-overlay.tsx` renders the preview; insufficient room shows a blocked preview. Drops on
+  the same group are ignored; leaving the pane, cancelling or ending the drag clears the overlay.
+  Only the internal window drag type is intercepted, preserving terminal image drops. The split menu's
+  **Move window into split** submenus provide a non-drag alternative with the same size checks.
+  Pane rectangles and dividers are
   computed separately from the stable flat keyed collection of emulators: changing the layout never
   reparents xterm or reconnects its socket. Every visible pane fits and sends changed rows/columns.
   Controlled pane dimensions fit in a layout effect before composition, rather than clearing WebGL
@@ -364,7 +378,8 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   The shared toolbar offers **Codex**, **Claude**, **Split terminal**, Terminal actions and fullscreen.
   Search, snippets and terminal behaviour buttons are absent from the terminal page; search remains
   available through its shortcut. Terminal actions apply to the focused pane (copy, export, working
-  folder, shortcuts and clear). Docker and deployment consoles keep their own emulator controls.
+  folder, shortcuts and clear). Docker consoles keep their own emulator controls; deployment console
+  toolbars show only Terminal actions and fullscreen, with search available through its shortcut.
   Codex/Claude create a fresh sibling window with the exact `codex --yolo` or
   `claude --dangerously-skip-permissions` command, after the native Bash/Zsh configuration loads.
   The backend reads the focused `sourceWindowId`'s directory at creation time, including a recent `cd`;
@@ -498,13 +513,18 @@ server's replay limit, ANSI/UTF-8 split across messages, background terminal rep
 window/session switching, screen preservation, input routing and cleanup when windows/sessions close.
 It also checks all four split directions, mixed nested splits, pointer/keyboard divider resizing,
 focused-only input, pane shortcuts, reconnect focus, saved layouts, fullscreen and narrow viewport
-containment. `terminal-layout.test.js` covers the tree reconciliation, geometry and directional focus
+containment. It also checks pane detachment, one-tab groups, actual tab drags in all four directions,
+live overlay movement/cancellation, nested drops and menu placement with unchanged socket attachments.
+`terminal-layout.test.js` covers tab ownership, detachment, group docking, drop direction and size
+constraints alongside tree reconciliation, geometry and directional focus
 without a browser.
 `tests/browser/terminal-live.spec.ts` is optional proof against the isolated backend PTY harness:
 set `JD_TERMINAL_LIVE_READY` to that harness's `ready.json` and `JD_TERMINAL_EVIDENCE` to a temporary
 output directory, then run that spec against a production frontend build with `JD_BROWSER_BASE_URL`.
 It compares each xterm grid with kernel PTY dimensions after splitting and resizing, checks actual
-input routing and the launch command/directory, and records screenshots and video. Without the
+input routing and the launch command/directory, and records screenshots and video. Its separate
+detach/dock test uses real mouse drags, captures each overlay direction and checks native input after
+dropping below and beside the target, with one attachment per PTY. Without the
 readiness variable it is skipped. `JD_TERMINAL_LIVE_RENDERER=dom` selects the DOM renderer for a
 comparison recording; the default is WebGL. The harness setup is documented in
 [`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).

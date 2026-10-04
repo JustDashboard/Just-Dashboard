@@ -231,6 +231,7 @@ export function XtermPane({
   visible = active,
   layoutSize,
   hideToolbar = false,
+  minimalToolbar = false,
   actionsRef,
   flush,
   onActivity,
@@ -309,6 +310,8 @@ export function XtermPane({
   layoutSize?: { width: number; height: number }
   /** The terminal workspace owns one toolbar above all its split panes. */
   hideToolbar?: boolean
+  /** Deployment consoles keep only the actions menu and fullscreen button. */
+  minimalToolbar?: boolean
   actionsRef?: React.RefObject<XtermActions | null>
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
@@ -1325,16 +1328,20 @@ export function XtermPane({
             </div>
           ) : !hideToolbar ? (
             <>
-              <PaneButton
-                label={`Search scrollback (${formatChord(map["terminal.search"])})`}
-                onClick={() => setSearching(true)}
-              >
-                <MagnifyingGlass className="size-3.5" />
-              </PaneButton>
+              {!minimalToolbar && (
+                <>
+                  <PaneButton
+                    label={`Search scrollback (${formatChord(map["terminal.search"])})`}
+                    onClick={() => setSearching(true)}
+                  >
+                    <MagnifyingGlass className="size-3.5" />
+                  </PaneButton>
 
-              <SnippetMenu snippets={snippets} onSend={(command) => send(command + "\r")} />
+                  <SnippetMenu snippets={snippets} onSend={(command) => send(command + "\r")} />
 
-              <SettingsMenu />
+                  <SettingsMenu />
+                </>
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   failureTone,
+  isImageDigest,
   mountTargetProduct,
   publishedPorts,
   runtimeContainer,
@@ -63,6 +64,18 @@ describe("publishedPorts", () => {
 
   test("reads a container with no exposure as having none", () => {
     expect(publishedPorts(undefined)).toEqual([])
+  })
+})
+
+describe("isImageDigest", () => {
+  test("recognises an image that is only its digest", () => {
+    expect(isImageDigest(`sha256:${"ab12".repeat(16)}`)).toBe(true)
+  })
+
+  test("keeps every image a reader can name", () => {
+    expect(isImageDigest("postgres:16-alpine")).toBe(false)
+    expect(isImageDigest(`ghcr.io/acme/api@sha256:${"ab12".repeat(16)}`)).toBe(false)
+    expect(isImageDigest(undefined)).toBe(false)
   })
 })
 

@@ -888,7 +888,12 @@ only renderer/executor/validation authority for their feature.
   variable clones the source/build/runtime rows into the next complete revision and never moves the live
   release pointer. Pending state compares that desired revision with the live release's exact plan and
   frozen variable/dependency/check snapshots, by names and digests only; a run clears only the revision it
-  actually applied, so a change saved after enqueue stays pending.
+  actually applied, so a change saved after enqueue stays pending. It is pending only when that comparison
+  names a change: the revision number counts saves, so an edit undone (a variable added then removed) moves
+  it on with nothing to deploy. A variable compares by value digest, sensitivity and scope set, so a
+  scope-only edit is still named. The fleet summary's `pendingChanges` — the header's "Deploy changes",
+  the Settings dot, the fleet chip — runs the same comparison for each deployment whose desired revision
+  is not the live one.
 - Deployment variables are encrypted, immutable revisions with an exact closed scope set (`build`,
   `runtime`, `release_task`). Lists use a fixed mask; reveal is a separate session-only admin read with an
   explicit audit entry. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a

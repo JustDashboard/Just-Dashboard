@@ -32,6 +32,10 @@ a live server's resources. `shared-dropdowns.spec.ts` checks the real ownership 
 outside dismissal, option metadata placement, long-list scrolling, read-only disabling, narrow-screen bounds and
 reduced-motion action menus.
 The local changed-file gate covers the affected pages plus design-system and navigation checks.
+The initial gate passed 2,910 unit tests and 1,199 browser tests, with one browser test skipped.
+One intermittent Files history test failed; the same failure reproduced against the untouched
+starting commit `b03d4222`, with no dropdown changes. The new shared-dropdown tests passed, and
+all six existing GitHub browser shards passed the dropdown commit.
 Final check results and screenshot links are recorded in the pull request.
 
 ## Screenshots

@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test"
 import {
   SPLIT_GAP,
   canSplit,
+  detachWindow,
+  dockLayout,
+  dropDirection,
   layoutGeometry,
+  layoutTab,
   leaves,
   neighbour,
   reconcileLayouts,
@@ -134,6 +138,7 @@ describe("terminal split layouts", () => {
       id: "columns",
       axis: "x",
       ratio: 0.5,
+      tab: "a",
       first: window("a"),
       second: window("c"),
     })
@@ -160,6 +165,74 @@ describe("terminal split layouts", () => {
     const groups = reconcileLayouts(invalid, ["a", "b", "c"])
     expect(groups.flatMap(leaves)).toEqual(["a", "b", "c"])
     expect(reconcileLayouts({}, ["a", "b"])).toEqual([window("a"), window("b")])
+  })
+
+  test("splits retain their original tab for every direction and restore old layouts", () => {
+    for (const direction of ["left", "right", "up", "down"]) {
+      const tree = splitLayout(window("a"), "a", "b", direction, "split")
+      expect(layoutTab(tree)).toBe("a")
+      const { tab, ...legacy } = tree
+      expect(tab).toBe("a")
+      expect(layoutTab(reconcileLayouts([legacy], ["a", "b"])[0])).toBe("a")
+      expect(layoutTab(reconcileLayouts([{ ...tree, tab: "missing" }], ["a", "b"])[0])).toBe("a")
+    }
+  })
+
+  test("detaching either pane preserves each window exactly once and promotes a surviving tab", () => {
+    const tree = splitLayout(window("a"), "a", "b", "left", "columns")
+    for (const detached of ["a", "b"]) {
+      const groups = detachWindow([tree, window("c")], detached)
+      expect(groups.map(layoutTab)).toEqual([detached === "a" ? "b" : "a", "c", detached])
+      expect(groups.flatMap(leaves).sort()).toEqual(["a", "b", "c"])
+      expect(groups.at(-1)).toEqual(window(detached))
+    }
+    expect(detachWindow([window("a")], "a")).toEqual([window("a")])
+    expect(detachWindow([tree], "missing")).toEqual([tree])
+  })
+
+  test("a nested group's tab survives collapsing its outer divider", () => {
+    let tree = splitLayout(window("a"), "a", "b", "right", "outer")
+    tree = splitLayout(tree, "a", "c", "left", "inner")
+    expect(layoutTab(detachWindow([tree], "b")[0])).toBe("a")
+  })
+
+  test.each(["left", "right", "up", "down"])(
+    "docking %s moves a whole group beside the target leaf",
+    (direction) => {
+      const source = splitLayout(window("c"), "c", "d", "down", "source")
+      const target = splitLayout(window("a"), "a", "b", "right", "target")
+      const groups = dockLayout([target, source, window("e")], "c", "b", direction, "docked")
+      expect(groups.map(layoutTab)).toEqual(["a", "e"])
+      expect(groups.flatMap(leaves).sort()).toEqual(["a", "b", "c", "d", "e"])
+      const before = layoutGeometry(target, 1200, 900)
+      const after = layoutGeometry(groups[0], 1200, 900)
+      expect(after.panes.a).toEqual(before.panes.a)
+      expect(leaves(source)).toEqual(["c", "d"])
+      expect(dockLayout(groups, "a", "b", direction, "same-group")).toBe(groups)
+      expect(dockLayout(groups, "missing", "b", direction, "missing")).toBe(groups)
+    },
+  )
+
+  test("docking a group checks the space its nested splits require", () => {
+    const source = splitLayout(window("a"), "a", "b", "right", "split")
+    const rect = { x: 0, y: 0, width: 492, height: 246 }
+    expect(canSplit(rect, "left", source)).toBe(true)
+    expect(canSplit({ ...rect, width: 491 }, "left", source)).toBe(false)
+    expect(canSplit(rect, "down", source)).toBe(true)
+    expect(canSplit({ ...rect, width: 300 }, "down", source)).toBe(false)
+    const stacked = splitLayout(window("a"), "a", "b", "down", "rows")
+    expect(canSplit({ ...rect, height: 200 }, "right", stacked)).toBe(false)
+  })
+
+  test("drop zones follow the pointer's nearest normalized edge, including offset panes", () => {
+    const rect = { x: 200, y: 100, width: 800, height: 400 }
+    expect(dropDirection(rect, 210, 300)).toBe("left")
+    expect(dropDirection(rect, 990, 300)).toBe("right")
+    expect(dropDirection(rect, 600, 110)).toBe("up")
+    expect(dropDirection(rect, 600, 490)).toBe("down")
+    expect(dropDirection(rect, 199, 300)).toBeUndefined()
+    expect(dropDirection(rect, 600, 501)).toBeUndefined()
+    expect(dropDirection({ ...rect, width: 0 }, 200, 200)).toBeUndefined()
   })
 
   test("saved non-finite ratios recover a balanced layout and extreme ratios stay bounded", () => {
