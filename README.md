@@ -44,6 +44,12 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
   and a build that still fails names its cause and the setting that fixes it. Every release is
   immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
+- **Adopts supported applications already running on the server.** Import existing discovers Docker
+  containers and Compose stacks, PM2 applications and systemd services, recovers their configuration,
+  and records the current app as a live deployment without restarting it. Settings, sealed variables,
+  logs, history and deployment controls use the normal deployment pages. Recovery explains missing
+  requirements and refuses unsupported conversions; review the
+  [adoption and rollback boundaries](docs/internal/deployments/existing-workloads.md) before migration.
 - **Every database on the server, each as its own engine.** It finds what is here — in containers,
   installed on the machine, a SQLite file on disk — and opens each one as what it is: a table editor
   and a SQL editor for a SQL server, keys and a console for Redis, documents and pipelines for
