@@ -327,7 +327,7 @@ export function ProjectRuntime() {
           ) : services.length === 0 ? (
             <EmptyState
               mark={<ProjectMark deployment={deployment} product={project.product} />}
-              title="No runtime services"
+              title="No managed runtime services"
               description="The runtime owner returned no services for this environment. Refresh the project or check its manager."
               className="border-0 py-6"
             />

@@ -46,7 +46,9 @@ export function ProjectConsole() {
   const project = useProject()
   if (
     project.detail.deployment.profile === "game" &&
-    project.detail.runtime?.services.some(isDockerService)
+    !project.detail.runtime?.services.some(
+      (service) => service.manager && service.manager !== "docker",
+    )
   ) {
     return <GameConsole projectId={project.projectId} />
   }
