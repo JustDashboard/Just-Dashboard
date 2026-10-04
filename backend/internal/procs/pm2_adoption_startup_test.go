@@ -111,3 +111,12 @@ func TestPM2MigrationBlocksKnownManagerEnvironmentDriftAndWarnsForOpaqueArgv(t *
 		t.Fatal("PM2 manager definition was presented as attested running argv")
 	}
 }
+
+func TestPM2ManagerScalarEnvironmentKeepsTransportNumberSpelling(t *testing.T) {
+	for raw, expected := range map[string]string{"1000000": "1000000", "0.000001": "0.000001", "1e-7": "1e-7", "1e+21": "1e+21", "true": "true"} {
+		value, known := capturePM2ScalarEnvironment(json.RawMessage(raw))
+		if !known || value != expected {
+			t.Fatal("manager scalar conversion changed JavaScript's canonical transport representation")
+		}
+	}
+}

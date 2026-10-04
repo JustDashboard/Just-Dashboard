@@ -357,17 +357,17 @@ func blockPM2ManagerRuntimeDrift(capture *HostWorkloadCapture, id int, actual ma
 		for key, value := range envelope {
 			// Metadata objects are not byte-string environment values. Their
 			// ambiguity is reviewed separately; visible scalar mismatches block.
-			expected, err := captureJSONEnvironment(mustCaptureJSON(map[string]json.RawMessage{key: value}))
-			if err != nil {
+			expected, scalar := capturePM2ScalarEnvironment(value)
+			if !scalar {
 				continue
 			}
-			if current, present := actual[key]; !present || current != expected[key] {
+			if current, present := actual[key]; !present || current != expected {
 				capture.Blockers = append(capture.Blockers, "The current PM2 restart environment differs from the running process. Review and restore its actual startup definition, or verify a reviewed restart under the original manager before migration.")
 				return
 			}
 			if flat, present := config[key]; present {
-				flatExpected, flatErr := captureJSONEnvironment(mustCaptureJSON(map[string]json.RawMessage{key: flat}))
-				if flatErr == nil && actual[key] != flatExpected[key] {
+				flatExpected, flatScalar := capturePM2ScalarEnvironment(flat)
+				if flatScalar && actual[key] != flatExpected {
 					capture.Blockers = append(capture.Blockers, "The current PM2 restart environment differs from the running process. Review and restore its actual startup definition, or verify a reviewed restart under the original manager before migration.")
 					return
 				}
@@ -379,4 +379,25 @@ func blockPM2ManagerRuntimeDrift(capture *HostWorkloadCapture, id int, actual ma
 	}
 }
 
-func mustCaptureJSON(value any) json.RawMessage { raw, _ := json.Marshal(value); return raw }
+// The existing-daemon transport JSON.stringify uses the same canonical
+// primitive text as JavaScript's spawn environment conversion. Preserve its
+// number spelling instead of formatting through Go's float notation.
+func capturePM2ScalarEnvironment(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", false
+	}
+	var scalar any
+	if json.Unmarshal(raw, &scalar) != nil {
+		return "", false
+	}
+	switch value := scalar.(type) {
+	case string:
+		return value, true
+	case float64:
+		return string(raw), true
+	case bool:
+		return strconv.FormatBool(value), true
+	default:
+		return "", false
+	}
+}
