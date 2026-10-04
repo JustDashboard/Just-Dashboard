@@ -738,7 +738,9 @@ set another. A 12px `Status` or `Tag` inside it rests on that box's baseline, th
 button beside it: the database strip's "connected", a deployment's route and certificate columns,
 a container card's state, a release note's kind and the identity line's aside all shipped that way.
 A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items-start` for a state
-over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
+over its detail), or it carries its content's own type size and line height. The Audit header's
+small request count uses `leading-none` so its animated inline number does not inherit a larger
+line box and shift the count off the header's centre line. A glyph beside a title is nudged by
 the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
 pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
 field is 44px on a phone and the button is not. A view strip's tabs carry `pt-0.5` against their

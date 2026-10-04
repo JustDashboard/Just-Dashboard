@@ -52,6 +52,18 @@ settings, persistent data, original container name and network aliases. Baseline
 succeeded with the same data and HTTP response. The run passed in 11.07 seconds.
 [Sanitized lifecycle evidence](managed-container-lifecycle.json).
 
+## Real native lifecycle
+
+The PM2 fixture used an actual existing daemon with a direct Node service and the normal Node recipe;
+the systemd fixture used an owned persistent unit and its real Dockerfile. Both imported without
+restarting the app, exposed native logs, built real Docker candidates, intentionally failed the first
+readiness gate and restored the native service, then migrated successfully through the deployment
+engine. Docker UID, working directory, private/empty environment and linked persistent data were
+verified. The absolute `APP_DATA_DIR` value was translated to `/app/data` for Docker while the original
+private environment remained separately snapshotted. Baseline rollback returned control to the
+original manager and preserved data. The PM2 run passed in 57.24 seconds; systemd in 65.09 seconds.
+[PM2 evidence](managed-pm2-lifecycle.json), [systemd evidence](managed-systemd-lifecycle.json).
+
 ## Real deleted-image lifecycle
 
 A separate standalone fixture deleted its original local image while leaving the container running.
@@ -77,8 +89,7 @@ establish continuity, cutover and rollback behavior separately.
 ## Production boundaries
 
 These tests use owned fixtures and isolated databases. They do not deploy changes to the operator's
-production applications. Real native-stack browser evidence, PM2/systemd migration evidence and the
-final integrated verification are recorded below when completed.
+production applications. Real native-stack browser evidence and the final integrated verification are recorded below when completed.
 
 Recovery fails closed for missing authoritative files, unrepresentable Engine/native-manager
 settings, unsafe replica differences, unknown toolchains, unresolved source/private files, meaningful
