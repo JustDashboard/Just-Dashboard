@@ -103,6 +103,7 @@ type moduleSet struct {
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
 	deployRuntime    *deploy.DockerRuntimeOwner
+	deployNative     *deploy.NativeRuntimeOwner
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
@@ -248,6 +249,7 @@ func (s *Server) initModules() {
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd)
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
@@ -258,7 +260,7 @@ func (s *Server) initModules() {
 		s.modules.deployPlanning,
 		s.modules.deploySources,
 		s.modules.deployArtifacts,
-		runtimeOwner,
+		s.modules.deployNative,
 		deploy.NewCheckRunner(s.modules.docker),
 		s.modules.proxy,
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),

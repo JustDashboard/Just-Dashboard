@@ -320,13 +320,10 @@ func (s *Server) handleDeployGet(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapDeployError(err)
 	}
-	var runtimeOwner deploy.RuntimeObserver
+	runtimeOwner := s.deploymentRuntimeObserver()
 	imported := []deploy.DeploymentSummary{*summary}
 	s.refreshImportedDeployments(r.Context(), imported)
 	*summary = imported[0]
-	if s.modules.docker != nil {
-		runtimeOwner = s.modules.docker
-	}
 	runtime := deploy.ObserveRuntimeServices(r.Context(), runtimeOwner, summary.EnvironmentID, summary.LiveReleaseID)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"project": p, "running": running, "deployment": summary, "runtime": runtime,
@@ -1121,10 +1118,7 @@ func (s *Server) handleDeploymentRunLogs(w http.ResponseWriter, r *http.Request)
 	if snapshot.Run.ProjectID != projectID {
 		return mapDeployError(deploy.ErrRunNotFound)
 	}
-	var owner deploy.RuntimeObserver
-	if s.modules.docker != nil {
-		owner = s.modules.docker
-	}
+	owner := s.deploymentRuntimeObserver()
 	httpx.JSON(w, http.StatusOK, deploy.ObserveRunLogs(r.Context(), owner, *snapshot))
 	return nil
 }

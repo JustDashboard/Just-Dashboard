@@ -23,6 +23,9 @@ type RuntimeServices struct {
 }
 
 type RuntimeService struct {
+	Manager     string     `json:"manager,omitempty"`
+	ResourceID  string     `json:"resourceId,omitempty"`
+	LogSource   string     `json:"logSource,omitempty"`
 	ContainerID string     `json:"containerId"`
 	Name        string     `json:"name"`
 	ReleaseID   int64      `json:"releaseId"`
@@ -61,6 +64,11 @@ func ReleaseRuntimeDown(ctx context.Context, owner RuntimeObserver, runtime Rele
 }
 
 func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID, onlyReleaseID int64) RuntimeServices {
+	if recorded, ok := owner.(interface {
+		RecordedRuntimeServices(context.Context, int64, int64, int64) RuntimeServices
+	}); ok {
+		return recorded.RecordedRuntimeServices(ctx, environmentID, liveReleaseID, onlyReleaseID)
+	}
 	result := RuntimeServices{Status: "unavailable", Services: []RuntimeService{}}
 	if owner == nil {
 		result.Reason = "Docker runtime evidence is unavailable. Open Docker to check the connection."
@@ -105,6 +113,7 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 			health = "unavailable"
 		}
 		result.Services = append(result.Services, RuntimeService{
+			Manager: "docker", ResourceID: item.ID, LogSource: "docker:" + item.ID,
 			ContainerID: item.ID, Name: item.Name, ReleaseID: releaseID,
 			LiveRelease: releaseID == liveReleaseID, State: item.State,
 			Health: health, ImageID: item.ImageID, Stack: item.ComposeStack,
