@@ -1,0 +1,61 @@
+package deploy
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+)
+
+var ErrRecoveryBlocked = errors.New("this workload cannot yet be safely adopted")
+
+type AdoptionIssue struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Service  string `json:"service,omitempty"`
+	Field    string `json:"field,omitempty"`
+	Blocking bool   `json:"blocking"`
+}
+
+// WorkloadAdoption contains only sanitized, server-produced recovery evidence.
+// Baseline values are stored separately under encryption; a source document
+// references their variable names rather than containing their values.
+type WorkloadAdoption struct {
+	Key                   string              `json:"key"`
+	Digest                string              `json:"digest"`
+	Kind                  string              `json:"kind"`
+	ResourceID            string              `json:"resourceId"`
+	Manager               string              `json:"manager"`
+	Name                  string              `json:"name"`
+	Warnings              []string            `json:"warnings"`
+	Blockers              []string            `json:"blockers"`
+	Issues                []AdoptionIssue     `json:"issues"`
+	ServiceCount          int                 `json:"serviceCount"`
+	RunningCount          int                 `json:"runningCount"`
+	OriginalSourcePath    string              `json:"originalSourcePath,omitempty"`
+	ConfigFiles           []string            `json:"configFiles,omitempty"`
+	BaselineSource        DraftSourceConfig   `json:"baselineSource"`
+	BaselineConfiguration PlanConfiguration   `json:"baselineConfiguration"`
+	BaselineDigest        string              `json:"baselineDigest"`
+	Runtime               ReleaseRuntimeInput `json:"runtime"`
+	Snapshot              json.RawMessage     `json:"snapshot"`
+	RecoveryDirectory     string              `json:"recoveryDirectory,omitempty"`
+}
+
+// WorkloadAdoptionOrigin is kept as a named alias for feature owners which
+// need the capture origin independently of the recovered draft.
+type WorkloadAdoptionOrigin = WorkloadAdoption
+
+type RecoveredWorkload struct {
+	Source        DraftSourceConfig `json:"source"`
+	Configuration PlanConfiguration `json:"configuration"`
+	Detection     DetectionResult   `json:"detection"`
+	Adoption      *WorkloadAdoption `json:"adoption"`
+	Environment   map[string]string `json:"-"`
+}
+
+type DockerWorkloadRecoveryReader interface {
+	CaptureAdoptionContainer(context.Context, string) (*dockerx.AdoptionContainer, error)
+	InspectImage(context.Context, string) (*dockerx.ImageDetail, error)
+	ReadComposeAdoptionConfiguration(context.Context, string, string, []string, []string) ([]byte, error)
+}
