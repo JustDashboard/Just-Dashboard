@@ -213,7 +213,8 @@ to the contribution terms above, including the additional licence grant to the p
   temporary `PM2_HOME`; it verifies HTTP, secret and empty variables, UID, PID identity, native logs,
   exact original-manager stop/start restoration, and refusal to stop after a matching saved startup
   entry appears in either `dump.pm2` or `dump.pm2.bak`, while its original PID and HTTP response remain
-  unchanged. It never touches the account's normal daemon.
+  unchanged. Its separately owned daemon directory uses a compact name so Go's descriptive test
+  paths do not exceed the Unix socket limit. It never touches the account's normal daemon.
   The API and Docker fixtures require a working Docker daemon and `caddy:2-alpine` already available
   locally. The API fixture creates and
   removes only its own uniquely named four-container project, checks two running and two stopped

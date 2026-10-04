@@ -324,7 +324,17 @@ func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, a
 		if err != nil {
 			t.Fatal("the current account must have PM2 on PATH")
 		}
-		daemon := filepath.Join(root, ".pm2")
+		// PM2's Unix socket must fit even when Go gives a long test its full
+		// descriptive directory name. This separate directory remains owned.
+		daemon, err := os.MkdirTemp(os.TempDir(), "jd-pm2-")
+		if err != nil {
+			t.Fatal("the owned PM2 fixture directory could not be created")
+		}
+		t.Cleanup(func() {
+			if err := os.RemoveAll(daemon); err != nil {
+				t.Error("owned PM2 fixture directory cleanup failed")
+			}
+		})
 		environment := []string{"HOME=" + account.HomeDir, "PM2_HOME=" + daemon, "PATH=" + filepath.Dir(binary) + ":/usr/local/bin:/usr/bin:/bin", "PORT=" + strconv.Itoa(port), "APP_DATA_DIR=" + filepath.Join(source, "data"), "PROOF_TOKEN=owned-native-private-value", "PROOF_EMPTY="}
 		command := func(ctx context.Context, args ...string) error {
 			process := exec.CommandContext(ctx, binary, args...)

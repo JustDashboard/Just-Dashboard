@@ -35,7 +35,17 @@ func TestLiveExistingPM2CaptureAndManagerControls(t *testing.T) {
 	if err := os.Mkdir(source, 0755); err != nil {
 		t.Fatal(err)
 	}
-	home := pm2Home{home: account.HomeDir, bin: bin, daemonDir: filepath.Join(root, ".pm2")}
+	// The owned daemon socket is independent of Go's descriptive test path.
+	daemon, err := os.MkdirTemp(os.TempDir(), "jd-pm2-")
+	if err != nil {
+		t.Fatal("the owned PM2 fixture directory could not be created")
+	}
+	t.Cleanup(func() {
+		if err := os.RemoveAll(daemon); err != nil {
+			t.Error("owned PM2 fixture directory cleanup failed")
+		}
+	})
+	home := pm2Home{home: account.HomeDir, bin: bin, daemonDir: daemon}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
