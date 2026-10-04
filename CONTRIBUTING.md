@@ -106,13 +106,14 @@ to the contribution terms above, including the additional licence grant to the p
   files (the whole tree when the rules or the dependencies change), type-checks, and runs the unit
   tests. `browser` runs the specs `scripts/test-changed.sh` would pick, except that a change reaching
   the dashboard's shell runs the whole suite rather than the two specs that open every page; the specs
-  are split by test across up to eight jobs. A change to the workflow or its scripts runs everything,
+  are dealt into up to eight jobs of about two hundred tests each, in name order, so that a slow
+  section is spread over the jobs. A change to the workflow or its scripts runs everything,
   as does a manual run, and a documentation-only change runs nothing past `plan`.
   GitHub runs twenty jobs of a public repository's at once across every branch, so the suites are
   split only as far as a runner's four cores are full: more jobs than that queue behind each other and
   behind every other pull request. Go and Bun come from `go.mod` and `package.json`, and dependencies
   use the frozen Bun lockfile. The module, build, Bun, Playwright, Next and `tsc` caches are saved only
-  by pushes to `main` and `patch/*` and restored by pull requests into them, because a run can read
+  by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
   the caches of its base branch and never those of another task branch.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run.

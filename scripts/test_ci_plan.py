@@ -91,10 +91,11 @@ class PlanTest(unittest.TestCase):
         return out["go_packages"].split(), out["go_plain"].split(), [job["name"] for job in json.loads(out["race"])]
 
     def specs(self, *changed):
-        out = self.plan(*changed)
-        if json.loads(out["browser"]) and not out["browser_specs"]:
-            return "all"
-        return [name.removeprefix("tests/browser/").removesuffix(".spec.ts") for name in out["browser_specs"].split()]
+        jobs = json.loads(self.plan(*changed)["browser"])
+        names = sorted(
+            name.removeprefix("tests/browser/").removesuffix(".spec.ts") for job in jobs for name in job["specs"].split()
+        )
+        return "all" if names == ["database", "deploy", "design-system", "files"] else names
 
     def test_a_package_is_checked_with_everything_that_imports_it(self):
         packages, plain, race = self.go("backend/internal/store/store.go")
@@ -165,8 +166,8 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(self.specs("frontend/tests/browser/fixtures/files/tree.ts"), ["files"])
 
     def test_a_backend_file_a_fixture_imports_runs_its_specs_and_the_frontend_job(self):
-        out = self.plan("backend/internal/api/testdata/drivers.json")
-        self.assertEqual((out["frontend"], out["browser_specs"]), ("true", "tests/browser/database.spec.ts"))
+        self.assertEqual(self.plan("backend/internal/api/testdata/drivers.json")["frontend"], "true")
+        self.assertEqual(self.specs("backend/internal/api/testdata/drivers.json"), ["database"])
 
     def test_a_module_only_a_unit_test_uses_runs_no_browser(self):
         out = self.plan("frontend/src/lib/format.ts")
@@ -190,13 +191,18 @@ class PlanTest(unittest.TestCase):
                 self.assertEqual(self.specs(*changed), "all")
                 self.assertEqual(len(json.loads(out["live"])), 5)
 
-    def test_shards_follow_the_number_of_tests(self):
-        spec = self.root / "frontend/tests/browser/deploy.spec.ts"
-        self.assertEqual(ci_plan.shards(self.root, ["frontend/tests/browser/deploy.spec.ts"]), 1)
-        spec.write_text('test("one", async () => {})\n' * 450)
-        self.assertEqual(ci_plan.shards(self.root, ["frontend/tests/browser/deploy.spec.ts"]), 3)
-        spec.write_text('test("one", async () => {})\n' * 5000)
-        self.assertEqual(ci_plan.shards(self.root, ["frontend/tests/browser/deploy.spec.ts"]), ci_plan.MOST_SHARDS)
+    def test_specs_are_dealt_into_jobs_by_how_many_tests_they_hold(self):
+        # In name order, each to the job holding the fewest so far.
+        tests = {"a": 150, "b": 140, "c": 90, "d": 20}
+        for name, count in tests.items():
+            (self.root / f"frontend/tests/browser/{name}.spec.ts").write_text('test("one", async () => {})\n' * count)
+        jobs = ci_plan.shards(self.root, [f"frontend/tests/browser/{name}.spec.ts" for name in tests])
+        self.assertEqual(
+            [[pathlib.Path(spec).name.removesuffix(".spec.ts") for spec in job] for job in jobs], [["a", "d"], ["b", "c"]]
+        )
+        self.assertEqual(len(ci_plan.shards(self.root, ["frontend/tests/browser/d.spec.ts"])), 1)
+        (self.root / "frontend/tests/browser/a.spec.ts").write_text('test("one", async () => {})\n' * 5000)
+        self.assertEqual(len(ci_plan.shards(self.root, ["frontend/tests/browser/a.spec.ts"])), ci_plan.MOST_SHARDS)
 
 
 if __name__ == "__main__":

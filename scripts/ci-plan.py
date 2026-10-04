@@ -227,14 +227,14 @@ def naming(page):
 
 
 def browser_specs(root, imports, changed):
-    """The browser specs a change reaches, and whether that is all of them."""
+    """The browser specs a change reaches."""
     importers = {}
     for name, modules in imports.items():
         for module in modules:
             importers.setdefault(module, set()).add(name)
     every = {name for name in imports if name.startswith(SPECS) and name.endswith(".spec.ts")}
     if any(BROWSER_ALL.match(name) for name in changed):
-        return every, True
+        return every
 
     seen, queue = set(), list(changed)
     while queue:
@@ -248,16 +248,26 @@ def browser_specs(root, imports, changed):
 
     pages = [name for name in seen if re.match(r"^frontend/src/app/(.*/)?(page|layout)\.tsx$", name)]
     if any(re.match(r"^frontend/src/app/(\([^)]*\)/)?layout\.tsx$", page) for page in pages):
-        return every, True
+        return every
     for page in pages:
         pattern = naming(page)
         specs |= {spec for spec in every if pattern.search((root / spec).read_text(errors="replace"))}
-    return specs & every, specs >= every
+    return specs & every
 
 
 def shards(root, specs):
-    tests = sum(len(re.findall(r"(?<![\w.])test\(", (root / spec).read_text(errors="replace"))) for spec in specs)
-    return max(1, min(MOST_SHARDS, math.ceil(tests / TESTS_PER_SHARD)))
+    """The specs dealt into jobs of about TESTS_PER_SHARD tests each."""
+    tests = {spec: len(re.findall(r"(?<![\w.])test\(", (root / spec).read_text(errors="replace"))) for spec in specs}
+    jobs = [[] for _ in range(max(1, min(MOST_SHARDS, math.ceil(sum(tests.values()) / TESTS_PER_SHARD))))]
+    # In name order, each spec to the job with the fewest tests so far. The
+    # specs of one section sit together by name and cost alike — a database
+    # test takes twice what a deployment test does — so this spreads a slow
+    # section over the jobs, where Playwright's own --shard cuts the list into
+    # consecutive runs and handed one job most of it.
+    for spec in sorted(specs):
+        lightest = min(jobs, key=lambda job: sum(tests[name] for name in job))
+        lightest.append(spec)
+    return jobs
 
 
 def go_paths(packages):
@@ -302,9 +312,9 @@ def plan(root, changed):
     out["live"] = json.dumps(live)
 
     imports = frontend_imports(root)
-    specs, whole = browser_specs(root, imports, changed)
+    specs = browser_specs(root, imports, changed)
     if everything:
-        specs, whole = {name for name in imports if name.startswith(SPECS) and name.endswith(".spec.ts")}, True
+        specs = {name for name in imports if name.startswith(SPECS) and name.endswith(".spec.ts")}
     imported = {module for modules in imports.values() for module in modules}
     out["frontend"] = str(everything or any(
         name.startswith("frontend/") or module_of(name) in imported for name in changed
@@ -316,8 +326,10 @@ def plan(root, changed):
             name.removeprefix("frontend/") for name in changed
             if re.match(r"^frontend/.*\.(ts|tsx|js|mjs)$", name) and (root / name).exists()
         )
-    out["browser"] = json.dumps(list(range(1, shards(root, specs) + 1)) if specs else [])
-    out["browser_specs"] = "" if whole else " ".join(sorted(spec.removeprefix("frontend/") for spec in specs))
+    out["browser"] = json.dumps([
+        {"shard": number, "specs": " ".join(spec.removeprefix("frontend/") for spec in job)}
+        for number, job in enumerate(shards(root, specs) if specs else [], 1)
+    ])
     return out
 
 

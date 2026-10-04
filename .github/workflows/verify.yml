@@ -40,6 +40,11 @@ concurrency:
 # run waiting whenever that service was down.
 
 env:
+  # A push to a release branch, or a manual run on one.
+  SAVE_CACHES: ${{ github.event_name != 'pull_request' && (github.ref_name == 'main' || startsWith(github.ref_name, 'patch/')) }}
+  # Where the caches below are restored to, said rather than assumed.
+  GOMODCACHE: /home/runner/go/pkg/mod
+  GOCACHE: /home/runner/.cache/go-build
   JD_TEST_POSTGRES_DSN: postgres://jd_test:jd_test@127.0.0.1:1/jd_test?sslmode=disable
   JD_TEST_MYSQL_DSN: jd_test:jd_test@tcp(127.0.0.1:1)/jd_test
   JD_TEST_MSSQL_DSN: sqlserver://jd_test:jd_test@127.0.0.1:1?database=jd_test
@@ -62,7 +67,6 @@ jobs:
       frontend: ${{ steps.plan.outputs.frontend }}
       lint: ${{ steps.plan.outputs.lint }}
       browser: ${{ steps.plan.outputs.browser }}
-      browser_specs: ${{ steps.plan.outputs.browser_specs }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -116,11 +120,11 @@ jobs:
       - id: modules
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/go/pkg/mod
+          path: ${{ env.GOMODCACHE }}
           key: go-mod-${{ hashFiles('backend/go.sum') }}
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/go-build
+          path: ${{ env.GOCACHE }}
           key: go-build-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
           restore-keys: go-build-${{ hashFiles('backend/go.sum') }}-
       - name: Build, vet and test
@@ -154,15 +158,19 @@ jobs:
           name: backend-evidence
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
-      - if: github.event_name == 'push' && steps.modules.outputs.cache-hit != 'true'
+      # A key is saved once, so what is saved has to be all of it: this run
+      # downloaded only what its own packages import.
+      - if: env.SAVE_CACHES == 'true' && steps.modules.outputs.cache-hit != 'true'
+        run: go mod download
+      - if: env.SAVE_CACHES == 'true' && steps.modules.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/go/pkg/mod
+          path: ${{ env.GOMODCACHE }}
           key: go-mod-${{ hashFiles('backend/go.sum') }}
-      - if: github.event_name == 'push'
+      - if: env.SAVE_CACHES == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/go-build
+          path: ${{ env.GOCACHE }}
           key: go-build-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
 
   race:
@@ -189,11 +197,11 @@ jobs:
           cache: false
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/go/pkg/mod
+          path: ${{ env.GOMODCACHE }}
           key: go-mod-${{ hashFiles('backend/go.sum') }}
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/go-build
+          path: ${{ env.GOCACHE }}
           key: go-race-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
           restore-keys: go-race-${{ hashFiles('backend/go.sum') }}-
       - name: Race gate
@@ -210,10 +218,10 @@ jobs:
           retention-days: 30
       # ./internal/api imports nearly every package, so what it compiled is
       # what the other job needs as well.
-      - if: github.event_name == 'push' && matrix.name == 'api'
+      - if: env.SAVE_CACHES == 'true' && matrix.name == 'api'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/go-build
+          path: ${{ env.GOCACHE }}
           key: go-race-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
 
   frontend:
@@ -266,12 +274,12 @@ jobs:
           name: frontend-evidence
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
-      - if: github.event_name == 'push' && steps.bun.outputs.cache-hit != 'true'
+      - if: env.SAVE_CACHES == 'true' && steps.bun.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
           key: bun-${{ hashFiles('frontend/bun.lock') }}
-      - if: github.event_name == 'push'
+      - if: env.SAVE_CACHES == 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/tsc
@@ -285,7 +293,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.plan.outputs.browser) }}
+        include: ${{ fromJSON(needs.plan.outputs.browser) }}
     name: ${{ matrix.shard && format('browser ({0}/{1})', matrix.shard, strategy.job-total) || 'browser' }}
     defaults:
       run:
@@ -321,13 +329,12 @@ jobs:
           bunx playwright install --with-deps chromium
       - name: Production build and browser specs
         env:
-          SPECS: ${{ needs.plan.outputs.browser_specs }}
+          SPECS: ${{ matrix.specs }}
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
           # shellcheck disable=SC2086
-          bunx playwright test $SPECS --shard=${{ matrix.shard }}/${{ strategy.job-total }} 2>&1 |
-            tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
+          bunx playwright test $SPECS 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -339,12 +346,12 @@ jobs:
             frontend/test-results/
           retention-days: 30
       # Every shard built the same thing; one of them keeps it.
-      - if: github.event_name == 'push' && matrix.shard == 1 && steps.playwright.outputs.cache-hit != 'true'
+      - if: env.SAVE_CACHES == 'true' && matrix.shard == 1 && steps.playwright.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ hashFiles('frontend/bun.lock') }}
-      - if: github.event_name == 'push' && matrix.shard == 1
+      - if: env.SAVE_CACHES == 'true' && matrix.shard == 1
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: frontend/.next/cache
@@ -376,11 +383,11 @@ jobs:
           cache: false
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/go/pkg/mod
+          path: ${{ env.GOMODCACHE }}
           key: go-mod-${{ hashFiles('backend/go.sum') }}
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/go-build
+          path: ${{ env.GOCACHE }}
           key: go-build-${{ hashFiles('backend/go.sum') }}-${{ github.sha }}
           restore-keys: go-build-${{ hashFiles('backend/go.sum') }}-
       - name: Upgrade the Docker daemon
