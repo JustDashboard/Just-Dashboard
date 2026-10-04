@@ -110,7 +110,7 @@ readiness gate and restored the native service, then migrated successfully throu
 engine. Docker UID, working directory, private/empty environment and linked persistent data were
 verified. The absolute `APP_DATA_DIR` value was translated to `/app/data` for Docker while the original
 private environment remained separately snapshotted. Baseline rollback returned control to the
-original manager and preserved data. The final PM2 run passed in 58.20 seconds; systemd in 50.67 seconds.
+original manager and preserved data. The final PM2 run passed in 49.56 seconds; persistent systemd in 97.78 seconds.
 [PM2 evidence](managed-pm2-lifecycle.json), [systemd evidence](managed-systemd-lifecycle.json).
 
 ## Real deleted-image lifecycle
@@ -147,7 +147,9 @@ production applications. The real bet-bot recording above used read-only recover
 Recovery fails closed for missing authoritative files, unrepresentable Engine/native-manager
 settings, unsafe replica differences, unknown toolchains, unresolved source/private files, meaningful
 writable-layer application data, and unmanaged processes with no verified restart authority. Git
-history cannot be inferred from a running image. External proxy routes, certificates, schedulers and integrations retain their original ownership and require a reviewed handoff; managed Domains are configured separately. Data/schema changes require application-appropriate
+history cannot be inferred from a running image. External proxy routes, certificates, schedulers and
+integrations retain their original ownership and require a reviewed handoff; managed Domains are
+configured separately. Data/schema changes require application-appropriate
 backup/restore; image/configuration rollback does not reverse them. The coverage matrix and manager
 limits are in [existing-workloads.md](../../internal/deployments/existing-workloads.md).
 
