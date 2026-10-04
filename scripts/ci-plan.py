@@ -287,29 +287,32 @@ def plan(root, changed):
     out["go_packages"] = "./..." if affected == set(packages) else go_paths(affected)
     out["go_plain"] = go_paths(affected - raced | read)
     out["go_budgets"] = go_paths(package for package in affected & raced if has_budgets(root, package))
-    out["race"] = json.dumps([
-        {"name": name, "procs": procs, "packages": go_paths(set(group) & affected)}
+    # Each matrix is a list of names, which is what GitHub shows beside the
+    # job, and what a name stands for is looked up in the object beside it.
+    race = {
+        name: {"procs": procs, "packages": go_paths(set(group) & affected)}
         for name, procs, group in RACE if set(group) & affected
-    ])
+    }
+    out["race"], out["race_jobs"] = json.dumps(list(race)), json.dumps(race)
 
-    live = []
+    live = {}
     fixtures = [package for package in LIVE if package in affected]
     if fixtures:
         tests = [test for package in fixtures for test in LIVE[package]]
-        live.append({
-            "name": "fixtures", "packages": go_paths(fixtures), "run": "^(%s)$" % "|".join(tests), "skip": "",
+        live["fixtures"] = {
+            "packages": go_paths(fixtures), "run": "^(%s)$" % "|".join(tests), "skip": "",
             "tests": " ".join(tests), "docker": "backend/internal/api" in fixtures,
-        })
+        }
     if "backend/internal/deploy" in affected:
         named = [name for job in FRAMEWORK_JOBS if job for name in job]
         for number, job in enumerate(FRAMEWORK_JOBS, 1):
-            live.append({
-                "name": "frameworks-%d" % number, "packages": "./internal/deploy",
+            live["frameworks-%d" % number] = {
+                "packages": "./internal/deploy",
                 "run": "^%s$" % FRAMEWORKS + ("/^(%s)$" % "|".join(job) if job else ""),
                 "skip": "" if job else "^%s$/^(%s)$" % (FRAMEWORKS, "|".join(named)),
                 "tests": FRAMEWORKS, "docker": False,
-            })
-    out["live"] = json.dumps(live)
+            }
+    out["live"], out["live_jobs"] = json.dumps(list(live)), json.dumps(live)
 
     imports = frontend_imports(root)
     specs = browser_specs(root, imports, changed)
@@ -326,10 +329,10 @@ def plan(root, changed):
             name.removeprefix("frontend/") for name in changed
             if re.match(r"^frontend/.*\.(ts|tsx|js|mjs)$", name) and (root / name).exists()
         )
-    out["browser"] = json.dumps([
-        {"shard": number, "specs": " ".join(spec.removeprefix("frontend/") for spec in job)}
-        for number, job in enumerate(shards(root, specs) if specs else [], 1)
-    ])
+    jobs = shards(root, specs) if specs else []
+    out["browser"] = json.dumps(list(range(1, len(jobs) + 1)))
+    # Job n reads entry n, so the first entry is nobody's.
+    out["browser_specs"] = json.dumps([""] + [" ".join(spec.removeprefix("frontend/") for spec in job) for job in jobs])
     return out
 
 
