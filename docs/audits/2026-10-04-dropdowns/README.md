@@ -31,6 +31,8 @@ a live server's resources. `shared-dropdowns.spec.ts` checks the real ownership 
 1280, 1720 and 390px, saving ownership changes, mount ownership, keyboard/typeahead, Escape,
 outside dismissal, option metadata placement, long-list scrolling, read-only disabling, narrow-screen bounds and
 reduced-motion action menus.
+Touch-target measurements wait for the opening animation to settle, and keyboard checks wait for
+the selected option to receive focus before sending the next key.
 The local changed-file gate covers the affected pages plus design-system and navigation checks.
 The initial gate passed 2,910 unit tests and 1,199 browser tests, with one browser test skipped.
 One intermittent Files history test failed; the same failure reproduced against the untouched
