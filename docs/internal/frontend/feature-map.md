@@ -47,6 +47,12 @@ Invalid YAML stays unsaved, and document edits are held in component memory rath
 storage. Read-only accounts can inspect the files. Recovered Compose review lists detection's service
 mounts and offers the captured configuration, so an empty aggregate mount list never claims all
 storage is absent. `tests/browser/deploy-compose-settings.spec.ts` covers these paths.
+Native `local_directory` sources expose General's build directory and subdirectory
+(`settings/local-source.tsx`). A normal inspected, revision-guarded save retains all source metadata
+and the read-only data exclusions, while the original source remains available for baseline
+rollback. Rejected fields stay on screen, accepted changes remain pending until Deploy changes,
+and paths stay in component memory. Readers can inspect the fields without editing.
+`tests/browser/deploy-local-source.spec.ts` covers saves, refused paths, stale revisions and readers.
 The Runtime page's service cards carry the
 container's own Start, Stop, Restart and Pause/Resume verbs, every published port with its scope
 (`runtime-ports.tsx`), a failure cause for a container that is restarting or has exited

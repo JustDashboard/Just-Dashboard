@@ -121,6 +121,13 @@ aggregate fields as absent overrides, preserving each service's existing setting
 claiming zero limits or no persistent data. Private inputs remain variable references, and in-progress
 YAML edits are never placed in browser session storage.
 
+General settings also exposes the build directory and optional subdirectory for native
+`local_directory` sources. Select a separate allowed directory for new code: a source save inspects
+it and creates a pending revision, while the frozen original source remains the baseline rollback
+input. Captured data exclusions are shown read-only and retained on save along with the source's
+other metadata. Rejected paths or revision conflicts keep the unsaved fields visible; readers can
+inspect them without editing, and source paths are not remembered in browser storage.
+
 Native lifecycle operations recheck manager configuration and captured source evidence before
 controlling the original app. The reviewed original source directory remains frozen while its native
 baseline is retained: a full bounded tree digest covers modules as well as the executable/entrypoint
