@@ -192,12 +192,14 @@ to the contribution terms above, including the additional licence grant to the p
 - Existing-workload import changes also run the isolated live fixture from `backend/`:
   `JD_WORKLOAD_IMPORT_LIVE=1 go test ./internal/api -run '^TestLiveWorkloadAdoptionKeepsFourContainerStackAndHTTPServiceUnchanged$' -count=1 -v`.
   Managed Docker recovery/runtime changes additionally run
-  `JD_DOCKER_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveManaged(Compose|StandaloneContainer|DeletedImageContainer)AdoptionAndRollback$' -count=1 -v`.
+  `JD_DOCKER_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveManaged(Compose|ScopedCompose|StandaloneContainer|DeletedImageContainer)AdoptionAndRollback$' -count=1 -v`.
   These use unique owned projects/containers and a temporary database to verify import continuity,
   a failed first replacement, normal deployment and baseline rollback with persistent data. Compose
   acceptance includes existing stopped replicas, a declared missing service and an external one-off
   container which must remain untouched. Deleted-image acceptance verifies bounded read-only export,
-  stable cached identity, normal managed deployment and baseline rollback. `JD_ADOPTION_EVIDENCE_DIR` writes sanitized lifecycle
+  stable cached identity, normal managed deployment and baseline rollback. Scoped Compose acceptance
+  explicitly excludes an absent declaration whose image is unavailable and verifies the retained
+  four-container/two-running baseline through failure recovery, Deploy and rollback. `JD_ADOPTION_EVIDENCE_DIR` writes sanitized lifecycle
   evidence when set.
   Real n8n data continuity additionally uses the catalogue pin `n8nio/n8n:2.39.10` already available
   locally: `JD_N8N_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveManagedN8NAdoptionAndRollback$' -count=1 -v -timeout=20m`.

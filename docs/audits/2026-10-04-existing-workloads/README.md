@@ -43,6 +43,17 @@ running services and the missing fifth service remaining absent. Named-volume da
 An external one-off container under the same Compose project was untouched throughout. The run passed
 in 46.07 seconds. [Sanitized lifecycle evidence](managed-compose-lifecycle.json).
 
+## Real existing-services Compose lifecycle
+
+A separate real fixture declared five services, with four existing containers and two running, while
+the fifth service's image was deliberately unavailable. Explicit `existing_services` recovery listed
+and acknowledged that exclusion. Adoption preserved all existing stopped/running containers and had
+104 HTTP samples with zero failures. A failed first deployment restored the original runtime;
+a successful Deploy started only the four reviewed services, and baseline rollback restored the
+original four-container/two-running set. Persistent volume data and an external one-off were retained.
+The unavailable service was never created. The run passed in 35.26 seconds.
+[Sanitized evidence](managed-scoped-compose-lifecycle.json).
+
 ## Real standalone Docker lifecycle
 
 An isolated container with a persistent volume, custom Docker network and aliases was adopted without
