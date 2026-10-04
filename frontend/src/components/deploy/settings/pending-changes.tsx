@@ -96,14 +96,7 @@ export function PendingChanges({
       ) : firstRelease ? (
         <Status tone="notice" label="Not deployed yet — the first deployment takes all of this" />
       ) : (
-        <Status
-          tone="warning"
-          label={
-            count === 0
-              ? "Saved changes not live"
-              : `${count} saved change${count === 1 ? "" : "s"} not live`
-          }
-        />
+        <Status tone="warning" label={`${count} saved change${count === 1 ? "" : "s"} not live`} />
       )}
       {project.liveRelease && (
         <p className="min-w-0 text-body text-muted-foreground">

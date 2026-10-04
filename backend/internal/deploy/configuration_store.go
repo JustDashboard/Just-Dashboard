@@ -1038,9 +1038,13 @@ func parsePositiveReferenceID(value string) (int64, error) {
 // the live release. It reports only names and digests: a configuration diff is
 // useful operational evidence, but it is not a second secret reveal surface.
 func (s *PlanningStore) PendingState(ctx context.Context, projectID, environmentID int64) (*PendingState, error) {
+	return pendingState(ctx, s.db, projectID, environmentID)
+}
+
+func pendingState(ctx context.Context, db *sql.DB, projectID, environmentID int64) (*PendingState, error) {
 	var desired int
 	var liveID int64
-	if err := s.db.QueryRowContext(ctx, `
+	if err := db.QueryRowContext(ctx, `
 		SELECT desired_revision, live_release_id FROM deploy_environments
 		 WHERE id = ? AND project_id = ? AND archived_at = 0`, environmentID, projectID).
 		Scan(&desired, &liveID); err != nil {
@@ -1057,7 +1061,7 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 	}
 	var liveRunID int64
 	var liveSourceID, liveBuildID, liveRuntimeID int64
-	if err := s.db.QueryRowContext(ctx, `
+	if err := db.QueryRowContext(ctx, `
 		SELECT plan_revision, run_id, source_id, build_plan_id, runtime_plan_id
 		  FROM deploy_releases WHERE id = ? AND environment_id = ?`, liveID, environmentID).
 		Scan(&state.LivePlanRevision, &liveRunID, &liveSourceID, &liveBuildID, &liveRuntimeID); err != nil {
@@ -1072,10 +1076,10 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 		{"runtime", "deploy_runtime_plans", liveRuntimeID},
 	} {
 		var before, after string
-		if err := s.db.QueryRowContext(ctx, `SELECT digest FROM `+component.table+` WHERE id = ?`, component.liveID).Scan(&before); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT digest FROM `+component.table+` WHERE id = ?`, component.liveID).Scan(&before); err != nil {
 			return nil, err
 		}
-		if err := s.db.QueryRowContext(ctx, `SELECT digest FROM `+component.table+` WHERE environment_id = ? AND revision = ?`, environmentID, desired).Scan(&after); err != nil {
+		if err := db.QueryRowContext(ctx, `SELECT digest FROM `+component.table+` WHERE environment_id = ? AND revision = ?`, environmentID, desired).Scan(&after); err != nil {
 			return nil, err
 		}
 		if before != after {
@@ -1085,14 +1089,14 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 			})
 		}
 	}
-	currentVariables, err := variableDigestMap(ctx, s.db, `
-		SELECT key, value_digest FROM deploy_variable_revisions
+	currentVariables, err := variableDigestMap(ctx, db, `
+		SELECT key, value_digest, sensitivity, scopes FROM deploy_variable_revisions
 		 WHERE environment_id = ? AND active = 1 ORDER BY key`, environmentID)
 	if err != nil {
 		return nil, err
 	}
-	liveVariables, err := variableDigestMap(ctx, s.db, `
-		SELECT v.key, v.value_digest FROM deploy_run_variable_revisions rv
+	liveVariables, err := variableDigestMap(ctx, db, `
+		SELECT v.key, v.value_digest, v.sensitivity, v.scopes FROM deploy_run_variable_revisions rv
 		 JOIN deploy_variable_revisions v ON v.id = rv.variable_revision_id
 		 WHERE rv.run_id = ? ORDER BY v.key`, liveRunID)
 	if err != nil {
@@ -1101,7 +1105,7 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 	state.Changes = append(state.Changes, diffNamedDigests("variable", liveVariables, currentVariables)...)
 
 	currentDependencies := []json.RawMessage{}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := db.QueryContext(ctx, `
 		SELECT json_object('kind', kind, 'ownership', ownership, 'resourceKind', resource_kind,
 		                   'resourceId', resource_id, 'config', json(config_json))
 		  FROM deploy_dependencies WHERE environment_id = ? AND release_id = 0
@@ -1121,7 +1125,7 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 		return nil, err
 	}
 	var liveDependenciesJSON, liveChecksJSON string
-	if err := s.db.QueryRowContext(ctx, `
+	if err := db.QueryRowContext(ctx, `
 		SELECT dependencies_json, checks_json FROM deploy_run_plan_snapshots WHERE run_id = ?`, liveRunID).
 		Scan(&liveDependenciesJSON, &liveChecksJSON); err != nil {
 		return nil, err
@@ -1134,7 +1138,7 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 		})
 	}
 	currentChecks := []json.RawMessage{}
-	rows, err = s.db.QueryContext(ctx, `
+	rows, err = db.QueryContext(ctx, `
 		SELECT json_object('name', name, 'kind', kind, 'phase', phase, 'config', json(config_json),
 		                   'required', json(CASE WHEN required <> 0 THEN 'true' ELSE 'false' END))
 		  FROM deploy_checks WHERE environment_id = ? ORDER BY ordinal, name`, environmentID)
@@ -1159,7 +1163,9 @@ func (s *PlanningStore) PendingState(ctx context.Context, projectID, environment
 			BeforeDigest: digestBytes([]byte(liveChecksJSON)), AfterDigest: digestBytes(currentChecksJSON),
 		})
 	}
-	state.Pending = state.LivePlanRevision != desired || len(state.Changes) != 0
+	// The revision only counts saves: a variable added and then removed again
+	// advances it twice and leaves nothing for a deployment to take live.
+	state.Pending = len(state.Changes) != 0
 	return state, nil
 }
 
@@ -1687,11 +1693,15 @@ func variableDigestMap(ctx context.Context, query digestQuery, statement string,
 	defer rows.Close()
 	result := map[string]string{}
 	for rows.Next() {
-		var name, digest string
-		if err := rows.Scan(&name, &digest); err != nil {
+		var name, valueDigest, sensitivity, scopes string
+		if err := rows.Scan(&name, &valueDigest, &sensitivity, &scopes); err != nil {
 			return nil, err
 		}
-		result[name] = digest
+		// Scopes are stored in the order they were sent; the same set in
+		// another order is the same variable.
+		scopeList := strings.Split(scopes, ",")
+		sort.Strings(scopeList)
+		result[name] = digestBytes([]byte(valueDigest), []byte(sensitivity), []byte(strings.Join(scopeList, ",")))
 	}
 	return result, rows.Err()
 }

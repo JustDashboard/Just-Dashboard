@@ -310,6 +310,60 @@ func TestPendingStateClearsAppliedRevisionButKeepsChangeSavedAfterEnqueue(t *tes
 	}
 }
 
+func TestPendingStateComparesWhatIsSavedNotHowManyTimes(t *testing.T) {
+	ctx := context.Background()
+	fixture := newReleaseStoreFixture(t)
+	fixture.addPlan(t, 1, strings.Repeat("a", 40))
+	value := "kept"
+	write := func(revision int, scopes ...string) int {
+		t.Helper()
+		result, err := fixture.variables.PutVariable(ctx, fixture.projectID, fixture.envID, "TOKEN", "admin", VariableWriteRequest{
+			Revision: revision, Value: &value, Sensitivity: "secret", Scopes: scopes,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.DesiredRevision
+	}
+	revision := write(1, "build", "runtime")
+	run, lease := fixture.claimedRun(t, revision)
+	release := fixture.candidate(t, *run, lease, fakeContentDigest("live-at-revision-two"))
+	fixture.finishCandidate(t, release.Release.ID, run.ID, lease.Token)
+	assertPending := func(label string, want bool, changes int) {
+		t.Helper()
+		state, err := fixture.variables.PendingState(ctx, fixture.projectID, fixture.envID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Pending != want || len(state.Changes) != changes || state.LivePlanRevision != 2 {
+			t.Fatalf("%s: pending state = %#v", label, state)
+		}
+		if summary := fixture.deploymentSummary(t); summary.PendingChanges != want {
+			t.Fatalf("%s: summary pending = %v at desired revision %d", label, summary.PendingChanges, summary.DesiredRevision)
+		}
+	}
+
+	added, err := fixture.variables.PutVariable(ctx, fixture.projectID, fixture.envID, "TEMPORARY", "admin", VariableWriteRequest{
+		Revision: revision, Value: &value, Sensitivity: "plain", Scopes: []string{"runtime"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPending("variable added", true, 1)
+	revision, err = fixture.variables.DeleteVariable(ctx, fixture.projectID, fixture.envID, "TEMPORARY", added.DesiredRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPending("variable added and removed", false, 0)
+
+	revision = write(revision, "runtime", "build")
+	assertPending("same scopes in another order", false, 0)
+	revision = write(revision, "runtime")
+	assertPending("same value with fewer scopes", true, 1)
+	write(revision, "build", "runtime")
+	assertPending("scopes put back", false, 0)
+}
+
 func insertConfigurationFixture(t *testing.T, fixture *planningStoreFixture) (int64, int64) {
 	t.Helper()
 	return insertConfigurationFixtureWithEvidence(t, fixture, `{}`)
