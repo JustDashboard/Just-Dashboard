@@ -2,13 +2,196 @@ package term
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 )
+
+func TestAgentStartupArgvKeepsLaunchValuesSeparate(t *testing.T) {
+	for _, shell := range []string{"/bin/bash", "/bin/zsh"} {
+		m := &Manager{shell: shell, shellDir: "/shared/startup", account: Account{UID: 0}}
+		cwd := "/srv/a 'quoted' path; $(touch never)"
+		args := m.startupArgv(true, "codex", cwd)
+		if !slices.Equal(args[len(args)-4:], []string{shell, m.shellDir, "codex", cwd}) {
+			t.Fatalf("launch values were not positional: %q", args)
+		}
+		if strings.Contains(args[3], cwd) || strings.Contains(args[3], "codex") {
+			t.Fatalf("request value reached bootstrap source: %q", args[3])
+		}
+	}
+}
+
+func TestAgentStartupRejectsUnknownAgentsAndUnsupportedShells(t *testing.T) {
+	m := &Manager{enabled: true, shell: "/bin/bash", shellDir: "/shared/startup"}
+	for _, agent := range []string{"CODEX", "codex --yolo", "claude; id", "other"} {
+		if _, err := m.Create(context.Background(), CreateOptions{Agent: agent}); !errors.Is(err, ErrUnknownAgent) {
+			t.Fatalf("agent %q = %v, want unknown agent", agent, err)
+		}
+	}
+	for _, shell := range []string{"/bin/sh", "/bin/fish"} {
+		m.shell = shell
+		if _, err := m.Create(context.Background(), CreateOptions{Agent: "codex"}); !errors.Is(err, ErrAgentShellUnavailable) {
+			t.Fatalf("shell %q = %v, want unavailable startup", shell, err)
+		}
+	}
+	m.shell, m.shellDir = "/bin/bash", ""
+	if _, err := m.Create(context.Background(), CreateOptions{Agent: "claude"}); !errors.Is(err, ErrAgentShellUnavailable) {
+		t.Fatalf("missing startup = %v", err)
+	}
+	if len(m.List()) != 0 || m.pending != 0 {
+		t.Fatal("an invalid launch consumed a terminal slot")
+	}
+}
+
+func TestAgentStartupLoadsNativePATHAndKeepsShell(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh"} {
+		for _, agent := range []string{"codex", "claude"} {
+			t.Run(shell+"/"+agent, func(t *testing.T) {
+				binary, err := exec.LookPath(shell)
+				if err != nil {
+					t.Skip(err)
+				}
+				home := t.TempDir()
+				bin := filepath.Join(home, "native-bin")
+				cwd := filepath.Join(home, "work 'quotes' $ dollars; folder")
+				for _, dir := range []string{bin, cwd} {
+					if err := os.Mkdir(dir, 0700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				stub := `#!/bin/sh
+printf 'agent-cwd:%s\nargc:%s flag:%s env:%s/%s\n' "$PWD" "$#" "$1" "${JD_TERMINAL_START_AGENT-unset}" "${JD_TERMINAL_START_DIR-unset}"
+exit 17
+`
+				if err := os.WriteFile(filepath.Join(bin, agent), []byte(stub), 0700); err != nil {
+					t.Fatal(err)
+				}
+				// Only the native interactive rc adds the binary. It also changes
+				// directory, which an explicit focused-directory launch must undo.
+				rc := fmt.Sprintf("export PATH=%q:$PATH\ncd /\n", bin)
+				if err := os.WriteFile(filepath.Join(home, "."+shell+"rc"), []byte(rc), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if shell == "zsh" {
+					// .zshenv can itself spawn a shell: consume the launch before
+					// any native configuration, rather than waiting for .zshrc.
+					zshenv := `[[ -z ${JD_TERMINAL_START_AGENT:-} && -z ${JD_TERMINAL_START_DIR:-} ]] || printf 'leaked-launch-env\n'` + "\n"
+					if err := os.WriteFile(filepath.Join(home, ".zshenv"), []byte(zshenv), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				m := &Manager{shell: binary, clipboard: newClipboardStore(filepath.Join(home, "terminal")), account: Account{UID: os.Geteuid()}}
+				if err := m.SetupShell(); err != nil {
+					t.Fatal(err)
+				}
+				out, write := startAgentShell(t, m, agent, cwd, home)
+				flag := "--yolo"
+				if agent == "claude" {
+					flag = "--dangerously-skip-permissions"
+				}
+				seen := await(t, out, "", "argc:1 flag:"+flag+" env:unset/unset")
+				if !strings.Contains(seen, "agent-cwd:"+cwd) {
+					t.Fatalf("native startup lost the focused directory: %q", seen)
+				}
+				if strings.Contains(seen, "leaked-launch-env") {
+					t.Fatalf("native config inherited the launch: %q", seen)
+				}
+				write("printf 'shell-alive:%s flags:%s/%s\\n' yes \"${JD_TERMINAL_START_AGENT-unset}\" \"${JD_TERMINAL_START_DIR-unset}\"\n")
+				await(t, out, seen, "shell-alive:yes flags:unset/unset")
+			})
+		}
+	}
+}
+
+func TestMissingAgentLeavesNativeShellUsable(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh"} {
+		t.Run(shell, func(t *testing.T) {
+			binary, err := exec.LookPath(shell)
+			if err != nil {
+				t.Skip(err)
+			}
+			home := t.TempDir()
+			// A nonexistent PATH gives a deterministic missing tool even when
+			// the developer has Codex installed somewhere in the system PATH.
+			if err := os.WriteFile(filepath.Join(home, "."+shell+"rc"), []byte("export PATH=/jd-missing-agent-fixture\nset -e\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			m := &Manager{shell: binary, clipboard: newClipboardStore(filepath.Join(home, "terminal")), account: Account{UID: os.Geteuid()}}
+			if err := m.SetupShell(); err != nil {
+				t.Fatal(err)
+			}
+			out, write := startAgentShell(t, m, "codex", home, home)
+			seen := await(t, out, "", "codex")
+			write("printf 'missing-agent-shell:%s\\n' alive\n")
+			await(t, out, seen, "missing-agent-shell:alive")
+		})
+	}
+}
+
+func startAgentShell(t *testing.T, m *Manager, agent, cwd, home string) (<-chan []byte, func(string)) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	args := m.startupArgv(true, agent, cwd)
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	cmd.Dir = cwd
+	cmd.Env = append(os.Environ(), "HOME="+home, "TERM=xterm-256color", "ZDOTDIR="+home)
+	f, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 140})
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	out := make(chan []byte, 64)
+	go func() {
+		defer close(out)
+		buffer := make([]byte, 4096)
+		for {
+			n, err := f.Read(buffer)
+			if n > 0 {
+				out <- append([]byte(nil), buffer[:n]...)
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		// Let the native shell shut down its async editor helpers and finish
+		// history writes. Waiting only for a killed parent can leave a helper
+		// recreating files after TempDir has started removing HOME.
+		f.Write([]byte("builtin exit\n"))
+		timeout := time.NewTimer(5 * time.Second)
+		defer timeout.Stop()
+	drain:
+		for {
+			select {
+			case _, open := <-out:
+				if !open {
+					break drain
+				}
+			case <-timeout.C:
+				t.Error("agent shell fixture did not finish its PTY output after exit")
+				break drain
+			}
+		}
+		cancel()
+		f.Close()
+		cmd.Wait()
+	})
+	return out, func(text string) {
+		t.Helper()
+		if _, err := f.Write([]byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestBundledShellPromptAndCompletion(t *testing.T) {
 	for _, shell := range []string{"bash", "zsh"} {

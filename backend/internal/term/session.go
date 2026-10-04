@@ -28,6 +28,10 @@ var (
 	ErrNotFound               = errors.New("terminal session not found")
 	ErrTooMany                = errors.New("too many terminal sessions are already open")
 	ErrPersistenceUnavailable = errors.New("terminal sessions cannot be opened until restart protection is available")
+	ErrUnknownAgent           = errors.New("terminal agent must be codex or claude")
+	ErrAgentShellUnavailable  = errors.New("automatic agent launch requires the bundled bash or zsh startup")
+	ErrInvalidSourceWindow    = errors.New("the source terminal is not a window in this session")
+	ErrCWDUnavailable         = errors.New("cannot determine the source terminal's working directory")
 	// The limit counts PTY windows, because each direct window owns a process,
 	// file descriptor and reader goroutine even when no browser is attached.
 	maxSessions  = 32
@@ -402,8 +406,8 @@ func (s *Session) Close() error {
 	return nil
 }
 
-// CWD reports the shell's current directory, which is what in-session file
-// upload and download resolve relative paths against.
+// CWD reports the foreground shell or program's directory, which is what
+// in-session files and new terminals resolve relative paths against.
 func (s *Session) CWD() string {
 	s.mu.Lock()
 	pid, tmuxName := s.PID, s.TmuxName
@@ -424,19 +428,40 @@ func (s *Session) CWD() string {
 	if pid == 0 {
 		return ""
 	}
-	// The process we spawned is no longer the shell: a session is nsenter,
-	// then su, then the login shell, and each of those only forwards to the
-	// next. Their cwd never changes, so reading the leader's would pin this to
-	// wherever the session started and quietly stop tracking `cd` — the one
-	// thing this function exists to follow.
-	//
-	// Walking down to the innermost descendant finds the shell again, and
-	// keeps finding it when the shell itself forks (tmux adds another layer,
-	// and a running command adds one more).
-	if link, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", leafDescendant(pid))); err == nil {
+	// A shell can have exactly one child that is a background job in another
+	// directory. Following the whole single-child chain would mistake that
+	// job for the foreground prompt, so start with the kernel's foreground
+	// group and only walk through known wrappers such as su or sudo.
+	current := pid
+	if foreground := s.foregroundGroup(); foreground > 0 {
+		// argv can be empty while a live process execs, or deliberately have
+		// an empty argv[0]. Its cwd is the fact needed here and its liveness
+		// evidence; an empty command line must not send us back to the shell.
+		if _, err := processCWD(foreground); err == nil {
+			current = foreground
+		} else if member := groupMemberPID(foreground, pid); member > 0 {
+			current = member
+		}
+	}
+	for depth := 0; depth < 16; depth++ {
+		argv := cmdline(current)
+		if len(argv) == 0 || !wrappers[programName(argv[0])] {
+			break
+		}
+		children := childrenOf(current)
+		if len(children) != 1 {
+			break
+		}
+		current = children[0]
+	}
+	if link, err := processCWD(current); err == nil {
 		return link
 	}
 	return s.CWDHint
+}
+
+func processCWD(pid int) (string, error) {
+	return os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 }
 
 // leafDescendant follows the single-child chain from pid to its innermost

@@ -33,3 +33,14 @@ __jd_prompt() { PROMPT=$'%{\e]0;%1~\a%}%F{cyan}%~%f\n%F{cyan}>%f '; RPROMPT=''; 
 precmd_functions+=(__jd_prompt)
 __jd_prompt
 unset __jd_config_dir __jd_user_dir
+# Match the bash startup: load the native PATH first and consume this launch
+# once, retaining an interactive shell after a missing or finished tool.
+if [[ -n $__jd_start_agent ]]; then
+  if [[ -z $__jd_start_dir ]] || builtin cd -- "$__jd_start_dir"; then
+    case "$__jd_start_agent" in
+      codex) codex --yolo || true ;;
+      claude) claude --dangerously-skip-permissions || true ;;
+    esac
+  fi
+fi
+unset __jd_start_agent __jd_start_dir

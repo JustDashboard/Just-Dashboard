@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { IDisposable, Terminal } from "@xterm/xterm"
 import type { SearchAddon } from "@xterm/addon-search"
 import {
@@ -60,6 +60,13 @@ import { ShortcutsDialog } from "@/components/terminal/shortcuts-dialog"
 import { Modal } from "@/components/modal"
 import { Pane } from "@/components/panel"
 import { copyText, copyTextQuietly } from "@/lib/clipboard"
+
+export type XtermActions = {
+  copy: () => void
+  save: () => void
+  clear: () => void
+  shortcuts: () => void
+}
 
 type Query = Record<string, string | number | boolean | undefined | null>
 
@@ -219,6 +226,10 @@ export function XtermPane({
   fullscreenActive,
   terminalSessionId,
   active = true,
+  visible = active,
+  layoutSize,
+  hideToolbar = false,
+  actionsRef,
   flush,
   onActivity,
 }: {
@@ -288,8 +299,15 @@ export function XtermPane({
    * container's stdin.
    */
   terminalSessionId?: string
-  /** Hidden windows keep parsing output at their last visible grid size. */
+  /** Only the focused pane auto-focuses and publishes the server focus frame. */
   active?: boolean
+  /** Every visible split fits independently; hidden windows retain their grid. */
+  visible?: boolean
+  /** The controlled pane box in pixels, fitted before the browser paints it. */
+  layoutSize?: { width: number; height: number }
+  /** The terminal workspace owns one toolbar above all its split panes. */
+  hideToolbar?: boolean
+  actionsRef?: React.RefObject<XtermActions | null>
 }) {
   const frameRef = useRef<HTMLDivElement>(null)
   const hostRef = useRef<HTMLDivElement>(null)
@@ -372,6 +390,14 @@ export function XtermPane({
   // finishes. It is assigned by the live socket effect so a returned path
   // travels through the same transport and copy-mode handling as typing.
   const inputRef = useRef<((data: string) => boolean) | null>(null)
+  const visibleRef = useRef(visible)
+  useLayoutEffect(() => {
+    visibleRef.current = visible
+    // A later fit animation frame can clear WebGL after xterm already painted
+    // that frame. Fit a controlled split during commit, so its repaint is queued
+    // before composition; the observer still handles fonts and internal bars.
+    if (visible) fitRef.current?.fit()
+  }, [visible, layoutSize?.width, layoutSize?.height])
   const activeRef = useRef(active)
   useEffect(() => {
     activeRef.current = active
@@ -561,7 +587,7 @@ export function XtermPane({
       }
 
       const fitTerminal = () => {
-        if (!activeRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
+        if (!visibleRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
         fit.fit()
         return term.rows > 0 && term.cols > 0
       }
@@ -669,7 +695,7 @@ export function XtermPane({
         syncPtySize(socket)
       }
       const refreshTerminal = () => {
-        if (disposed || !activeRef.current || document.visibilityState !== "visible") return
+        if (disposed || !visibleRef.current || document.visibilityState !== "visible") return
         sendResize()
         // Returning to a hidden window may not change its dimensions. Repaint
         // its retained screen even when the PTY needs no resize notification.
@@ -999,6 +1025,31 @@ export function XtermPane({
     }
   }, [active, focusRef, terminalSessionId])
 
+  useEffect(() => {
+    if (visible) fitRef.current?.fit()
+  }, [visible])
+
+  useEffect(() => {
+    if (!active || !actionsRef) return
+    const actions: XtermActions = {
+      copy: () => {
+        if (termRef.current) void copySelection(termRef.current)
+      },
+      save: () => {
+        if (termRef.current) downloadScrollback(termRef.current)
+      },
+      clear: () => {
+        termRef.current?.clear()
+        termRef.current?.focus()
+      },
+      shortcuts: () => setShortcuts(true),
+    }
+    actionsRef.current = actions
+    return () => {
+      if (actionsRef.current === actions) actionsRef.current = null
+    }
+  }, [active, actionsRef])
+
   // Clipboard images and dragged images take an authenticated HTTP path to
   // the server, then only the returned filename goes through the PTY socket.
   // A native capture listener is deliberate: xterm owns the hidden textarea
@@ -1183,7 +1234,7 @@ export function XtermPane({
   return (
     <Pane
       ref={frameRef}
-      inert={!active}
+      inert={!visible}
       // In fullscreen the pane is the whole screen, so the corners and border
       // would draw a frame around nothing.
       flush={flush || fullscreen}
@@ -1191,157 +1242,159 @@ export function XtermPane({
         "relative bg-surface-sunken",
         copyMode && "terminal-tmux",
         className,
-        !active && "hidden",
+        !visible && "hidden",
       )}
     >
       {/* 40px, the height of the terminal page's rail and tools strips, so the
           three hairlines meet as one line across the workbench. */}
-      <div className="flex min-h-10 shrink-0 items-center gap-1 border-b border-hairline bg-surface-header px-2 py-0.5">
-        {headerContent ? (
-          <div className="flex min-w-0 flex-1 items-center gap-1">{headerContent}</div>
-        ) : (
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-            {subtitle ?? path}
-            {shellTitle && (
-              <span className="ml-2 rounded-sm bg-muted px-1 py-px text-micro text-foreground">
-                {shellTitle}
-              </span>
-            )}
-          </span>
-        )}
+      {(!hideToolbar || headerContent || searching) && (
+        <div className="flex min-h-10 min-w-0 shrink-0 flex-wrap items-center gap-1 border-b border-hairline bg-surface-header px-2 py-0.5">
+          {headerContent ? (
+            <div className="flex min-w-0 flex-1 items-center gap-1">{headerContent}</div>
+          ) : (
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+              {subtitle ?? path}
+              {shellTitle && (
+                <span className="ml-2 rounded-sm bg-muted px-1 py-px text-micro text-foreground">
+                  {shellTitle}
+                </span>
+              )}
+            </span>
+          )}
 
-        {searching ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
-            <Input
-              autoFocus
-              value={needle}
-              onChange={(e) => setNeedle(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") runSearch(e.shiftKey ? "previous" : "next")
-                if (e.key === "Escape") {
+          {searching ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
+              <Input
+                autoFocus
+                value={needle}
+                onChange={(e) => setNeedle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runSearch(e.shiftKey ? "previous" : "next")
+                  if (e.key === "Escape") {
+                    setSearching(false)
+                    searchRef.current?.clearDecorations()
+                    termRef.current?.focus()
+                  }
+                }}
+                aria-label="Find in scrollback"
+                placeholder="Find in scrollback"
+                className="h-7 w-44 text-xs"
+              />
+              <span className="numeric w-14 shrink-0 text-center text-micro text-muted-foreground">
+                {needle ? (matches.count ? `${matches.index + 1}/${matches.count}` : "none") : ""}
+              </span>
+              <FindToggle
+                label="Match case"
+                on={findOptions.caseSensitive}
+                onClick={() => setFindOptions((o) => ({ ...o, caseSensitive: !o.caseSensitive }))}
+              >
+                <TextUppercase className="size-3.5" />
+              </FindToggle>
+              <FindToggle
+                label="Whole word"
+                on={findOptions.word}
+                onClick={() => setFindOptions((o) => ({ ...o, word: !o.word }))}
+              >
+                <TextTitle className="size-3.5" />
+              </FindToggle>
+              <FindToggle
+                label="Regular expression"
+                on={findOptions.regex}
+                onClick={() => setFindOptions((o) => ({ ...o, regex: !o.regex }))}
+              >
+                <SlashForward className="size-3.5" />
+              </FindToggle>
+              <PaneButton label="Previous match" onClick={() => runSearch("previous")}>
+                <ArrowUp className="size-3.5" />
+              </PaneButton>
+              <PaneButton label="Next match" onClick={() => runSearch("next")}>
+                <ArrowDown className="size-3.5" />
+              </PaneButton>
+              <PaneButton
+                label="Close search"
+                onClick={() => {
                   setSearching(false)
                   searchRef.current?.clearDecorations()
                   termRef.current?.focus()
-                }
-              }}
-              aria-label="Find in scrollback"
-              placeholder="Find in scrollback"
-              className="h-7 w-44 text-xs"
-            />
-            <span className="numeric w-14 shrink-0 text-center text-micro text-muted-foreground">
-              {needle ? (matches.count ? `${matches.index + 1}/${matches.count}` : "none") : ""}
-            </span>
-            <FindToggle
-              label="Match case"
-              on={findOptions.caseSensitive}
-              onClick={() => setFindOptions((o) => ({ ...o, caseSensitive: !o.caseSensitive }))}
-            >
-              <TextUppercase className="size-3.5" />
-            </FindToggle>
-            <FindToggle
-              label="Whole word"
-              on={findOptions.word}
-              onClick={() => setFindOptions((o) => ({ ...o, word: !o.word }))}
-            >
-              <TextTitle className="size-3.5" />
-            </FindToggle>
-            <FindToggle
-              label="Regular expression"
-              on={findOptions.regex}
-              onClick={() => setFindOptions((o) => ({ ...o, regex: !o.regex }))}
-            >
-              <SlashForward className="size-3.5" />
-            </FindToggle>
-            <PaneButton label="Previous match" onClick={() => runSearch("previous")}>
-              <ArrowUp className="size-3.5" />
-            </PaneButton>
-            <PaneButton label="Next match" onClick={() => runSearch("next")}>
-              <ArrowDown className="size-3.5" />
-            </PaneButton>
-            <PaneButton
-              label="Close search"
-              onClick={() => {
-                setSearching(false)
-                searchRef.current?.clearDecorations()
-                termRef.current?.focus()
-              }}
-            >
-              <Cross className="size-3.5" />
-            </PaneButton>
-          </div>
-        ) : (
-          <>
-            <PaneButton
-              label={`Search scrollback (${formatChord(map["terminal.search"])})`}
-              onClick={() => setSearching(true)}
-            >
-              <MagnifyingGlass className="size-3.5" />
-            </PaneButton>
+                }}
+              >
+                <Cross className="size-3.5" />
+              </PaneButton>
+            </div>
+          ) : !hideToolbar ? (
+            <>
+              <PaneButton
+                label={`Search scrollback (${formatChord(map["terminal.search"])})`}
+                onClick={() => setSearching(true)}
+              >
+                <MagnifyingGlass className="size-3.5" />
+              </PaneButton>
 
-            <SnippetMenu snippets={snippets} onSend={(command) => send(command + "\r")} />
+              <SnippetMenu snippets={snippets} onSend={(command) => send(command + "\r")} />
 
-            <SettingsMenu />
+              <SettingsMenu />
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon-sm" aria-label="Terminal actions">
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-60">
-                <DropdownMenuLabel>Terminal actions</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onSelect={() => termRef.current && copySelection(termRef.current)}
-                >
-                  <Copy className="size-4" /> Copy selection
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => termRef.current && downloadScrollback(termRef.current)}
-                >
-                  <Download className="size-4" /> Save scrollback
-                </DropdownMenuItem>
-                {cwd && onOpenFiles && (
-                  <DropdownMenuItem onSelect={() => onOpenFiles(cwd)}>
-                    <FolderOpen className="size-4" /> Open working folder
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Terminal actions">
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel>Terminal actions</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    onSelect={() => termRef.current && copySelection(termRef.current)}
+                  >
+                    <Copy className="size-4" /> Copy selection
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => termRef.current && downloadScrollback(termRef.current)}
+                  >
+                    <Download className="size-4" /> Save scrollback
+                  </DropdownMenuItem>
+                  {cwd && onOpenFiles && (
+                    <DropdownMenuItem onSelect={() => onOpenFiles(cwd)}>
+                      <FolderOpen className="size-4" /> Open working folder
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => setShortcuts(true)}>
+                    <Command className="size-4" /> Keyboard shortcuts
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      termRef.current?.clear()
+                      termRef.current?.focus()
+                    }}
+                  >
+                    <Trash className="size-4" /> Clear screen
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+
+              <PaneButton
+                label={
+                  (onToggleFullscreen ? fullscreenActive : fullscreen)
+                    ? "Leave fullscreen (Esc)"
+                    : "Fullscreen"
+                }
+                onClick={onToggleFullscreen ?? toggleFullscreen}
+              >
+                {(onToggleFullscreen ? fullscreenActive : fullscreen) ? (
+                  <FullscreenClose className="size-3.5" />
+                ) : (
+                  <Fullscreen className="size-3.5" />
                 )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setShortcuts(true)}>
-                  <Command className="size-4" /> Keyboard shortcuts
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => {
-                    termRef.current?.clear()
-                    termRef.current?.focus()
-                  }}
-                >
-                  <Trash className="size-4" /> Clear screen
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </PaneButton>
+            </>
+          ) : null}
 
-            <PaneButton
-              label={
-                (onToggleFullscreen ? fullscreenActive : fullscreen)
-                  ? "Leave fullscreen (Esc)"
-                  : "Fullscreen"
-              }
-              onClick={onToggleFullscreen ?? toggleFullscreen}
-            >
-              {(onToggleFullscreen ? fullscreenActive : fullscreen) ? (
-                <FullscreenClose className="size-3.5" />
-              ) : (
-                <Fullscreen className="size-3.5" />
-              )}
-            </PaneButton>
-          </>
-        )}
-
-        {/* No connection badge. A socket that is up is the unremarkable case
+          {/* No connection badge. A socket that is up is the unremarkable case
             and said nothing worth a pill in a row of controls; the one state
             worth knowing about announces itself — a dropped socket writes
             "— disconnected —" into the pane and the error banner takes over. */}
-      </div>
+        </div>
+      )}
 
       {/*
         A dashboard session's dropped socket is retried on its own (see the

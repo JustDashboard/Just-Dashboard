@@ -303,12 +303,35 @@ split matters — the pane is reused by the compose runner and knows nothing abo
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
   toggles: sessions on the left and Files/Diff on the right. Each draws the side its panel is on and
   the way pressing it moves the panel (`SidebarLeftOpen`/`Close`, `SidebarRightOpen`/`Close`). The strip
-  is embedded in the emulator's own title bar; there is no separate workspace bar or
+  lives in the shared terminal title bar above the pane canvas; there is no separate workspace bar or
   working-directory/shell title.
   A tab reads as a rail row does: the program mark, the label, then the activity mark beside the close.
   Close appears under the pointer (`rowReveal`), the way a browser's does; the active tab keeps it
-  visible. There is no rename (double-click only selects) and no split, layout or colour action.
+  visible. There is no rename (double-click only selects) or colour action. Selecting any tab in a split
+  brings back that whole split group and focuses the selected terminal.
   Closing the last window closes its session through the session endpoint.
+- **Directional splits** use `lib/terminal-layout.ts`'s binary layout trees, grouped per session in
+  `terminal.layouts`. Each new split adds a direct-PTY window above/below/left/right of the focused
+  leaf; a new window or agent launch creates an independent tab. Closed leaves collapse their parent,
+  and a listing from another browser reconciles missing/new windows. Pane rectangles and dividers are
+  computed separately from the stable flat keyed collection of emulators: changing the layout never
+  reparents xterm or reconnects its socket. Every visible pane fits and sends changed rows/columns.
+  Controlled pane dimensions fit in a layout effect before composition, rather than clearing WebGL
+  in an application animation frame after xterm has painted. The observer still covers font and
+  internal-header changes.
+  Only the focused pane auto-focuses and sends the `focus` frame. Pointer and keyboard focus capture
+  selects a pane before xterm can stop propagation. An active inset rule and pane title identify where
+  typing goes; Files/Diff follows that pane. Hidden groups continue parsing at their last visible size.
+  `split-divider.tsx` supports pointer capture, arrows (Shift for larger steps), Home and double-click
+  balance. Pointer moves stay in component state; the final ratio is remembered. Nested minimum sizes
+  bound each divider. On narrower viewports existing groups shrink proportionally within the canvas;
+  splits that cannot give both new panes usable space are disabled. The split canvas clips output and
+  all hosts remain absolutely inset, so an emulator cannot expand its parent.
+  A successful create inserts the returned window immediately; a failed follow-up listing cannot
+  discard it. Each session's listing revision prevents a pre-create/pre-close poll from replacing
+  newer windows. Creation also merges into the latest in-progress divider layout, so releasing a
+  pointer after an asynchronous split cannot remove the new pane. The split menu returns keyboard
+  focus to the terminal instead of its trigger; the new pane takes focus when its socket attaches.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.
 - `workspace-tools.tsx` is the Files/Diff companion. Its header is two section tabs (`tabClasses`, the
@@ -338,8 +361,16 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   with no mark of its own (`htop`, Codex, OpenCode), is drawn as a terminal
   (`public/logos/terminal.svg`, drawn for this product): left empty, an agent with no logo read as a
   window with nothing in it.
-  The emulator toolbar keeps search, snippets, appearance and fullscreen visible, with copy, export,
-  folder navigation, shortcuts and clear in Terminal actions. Text size lives in Appearance.
+  The shared toolbar offers **Codex**, **Claude**, **Split terminal**, Terminal actions and fullscreen.
+  Search, snippets and terminal behaviour buttons are absent from the terminal page; search remains
+  available through its shortcut. Terminal actions apply to the focused pane (copy, export, working
+  folder, shortcuts and clear). Docker and deployment consoles keep their own emulator controls.
+  Codex/Claude create a fresh sibling window with the exact `codex --yolo` or
+  `claude --dangerously-skip-permissions` command, after the native Bash/Zsh configuration loads.
+  The backend reads the focused `sourceWindowId`'s directory at creation time, including a recent `cd`;
+  the existing pane's running program is unaffected. Missing tools print the shell error and leave
+  that new shell usable. Unsupported shells report the launch limitation rather than silently opening
+  an ordinary terminal.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and
   Zsh startup files install a compact directory/chevron prompt — which also sets the window title to
   the directory (`\W`, `%1~`), the title the tab shows at a prompt — and native Tab completion in new
@@ -368,7 +399,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   survives a Romanian layout. Actions carry a **scope** — `navigation` is the page's (it alone knows the
   sessions), `terminal` is the pane's (the compose runner needs copy/paste/search with no session at all)
   — and that split is what stops one keydown being handled twice. `shortcuts-dialog.tsx` is both cheatsheet
-  and editor, because a read-only list is opened once and a hidden settings page never.
+  and editor, because a read-only list is opened once and a hidden settings page never. Split creation
+  defaults to Ctrl+Alt+Shift plus a direction arrow; pane focus defaults to Ctrl+Alt+H/L/I/K
+  (left/right/up/down), and Ctrl+Alt+P cycles visible panes. These appear in that same editable dialog.
 
 In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
@@ -382,7 +415,8 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   reason when they cannot, shown in a danger notice while existing windows remain usable. The empty
   state disables Open session until protection is available, and the API refuses all new terminals
   and windows with HTTP 503 rather than falling back to a terminal that would end on restart. A host
-  reboot ends running terminals. There is still no pane model and no multiplexer.
+  reboot ends running terminals. Splits are a browser layout of independent window PTYs; there is
+  no multiplexer.
 - **A dropped socket reconnects by itself.** A terminal-page pane whose socket closes (the dashboard
   restarting, a laptop waking, the network) retries on its own, backing off from one second to ten,
   and the banner says the session is still running and that it is reconnecting; Reconnect only skips
@@ -396,8 +430,8 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   The page retains visited windows until their window/session is removed from the live lists or the page
   is left. Window lists are cached per session so switching sessions never borrows the previous session's
   windows while its request is pending. Hidden panes keep parsing bytes and answering live terminal
-  queries, but remain inert and retain their last visible grid size. Selection fits, refreshes and focuses
-  the visible pane; browser visibility/focus changes refresh it even if the dimensions have not changed.
+  queries, but remain inert and retain their last visible grid size. Selection fits and refreshes every
+  visible pane and focuses only the selected one; browser visibility/focus changes refresh it even if the dimensions have not changed.
 - **`clipboardKey`**: Ctrl+C copies **only when something is selected** and clears the selection as it
   goes, so the interrupt is never more than one keypress away. Ctrl+V returns false *without*
   `preventDefault`, so xterm leaves the key alone instead of sending ^V and the browser's own paste runs —
@@ -460,6 +494,18 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 `tests/browser/terminal-ui.spec.ts` exercises both DOM and WebGL renderers with output exceeding the
 server's replay limit, ANSI/UTF-8 split across messages, background terminal replies, resize while hidden,
 window/session switching, screen preservation, input routing and cleanup when windows/sessions close.
+It also checks all four split directions, mixed nested splits, pointer/keyboard divider resizing,
+focused-only input, pane shortcuts, reconnect focus, saved layouts, fullscreen and narrow viewport
+containment. `terminal-layout.test.js` covers the tree reconciliation, geometry and directional focus
+without a browser.
+`tests/browser/terminal-live.spec.ts` is optional proof against the isolated backend PTY harness:
+set `JD_TERMINAL_LIVE_READY` to that harness's `ready.json` and `JD_TERMINAL_EVIDENCE` to a temporary
+output directory, then run that spec against a production frontend build with `JD_BROWSER_BASE_URL`.
+It compares each xterm grid with kernel PTY dimensions after splitting and resizing, checks actual
+input routing and the launch command/directory, and records screenshots and video. Without the
+readiness variable it is skipped. `JD_TERMINAL_LIVE_RENDERER=dom` selects the DOM renderer for a
+comparison recording; the default is WebGL. The harness setup is documented in
+[`../backend/processes-terminal-github.md`](../backend/processes-terminal-github.md#the-terminal).
 
 **Open-shell links are consumed once.** The page removes `cwd` from the current history
 entry before creating the session, preserving other query parameters and the hash. A refresh cannot

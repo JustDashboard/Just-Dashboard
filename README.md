@@ -181,7 +181,15 @@ even with nobody connected. Terminals have no idle timeout. Restart protection r
 systemd and the dashboard's data directory mounted at the same path on the host; if that protection
 cannot be set up, new sessions are refused with a reason instead of opening a terminal that would end
 on restart. Existing held sessions remain running. Rebooting the Linux server ends running terminals.
-Files and Git sit beside the shell.
+
+Split a terminal above, below, left or right, then drag the divider to resize it. Click a pane to
+move typing focus; the Keyboard shortcuts menu lists editable split and focus bindings. Windows
+retain their screens when switching tabs or sessions, and each browser remembers its split layout.
+The Codex and Claude buttons open a fresh terminal in the focused pane's current directory and run
+`codex --yolo` or `claude --dangerously-skip-permissions`. The tools must already be installed for
+the terminal account; automatic launch supports Bash and Zsh. Search remains available with its
+keyboard shortcut.
+Files and Diff sit beside the shell.
 
 ### Boards
 
