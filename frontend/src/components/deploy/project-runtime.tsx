@@ -842,6 +842,7 @@ function ServiceCard({
       : statusDetail(current)
   const state = (
     <Status
+      className="items-baseline"
       state={pending ? "restarting" : service.state}
       label={
         pending ? (
@@ -910,18 +911,20 @@ function ServiceCard({
       }
       trailing={
         wide ? (
-          <>
+          // One baseline across the four, so the words and figures of different
+          // sizes sit on the same line instead of the same centre.
+          <span className="flex items-baseline gap-2">
             <span className="w-28 min-w-0">
               <ReleaseCell service={service} release={release} />
             </span>
-            <span className="flex w-44 min-w-0 items-center gap-2">
+            <span className="flex w-44 min-w-0 items-baseline gap-2">
               {state}
               <span className="min-w-0 truncate text-hint text-muted-foreground">{detail}</span>
               {runLink}
             </span>
             <span className="w-28">{cpu}</span>
             <span className="w-40">{memory}</span>
-          </>
+          </span>
         ) : (
           state
         )
@@ -990,6 +993,7 @@ function ReleaseCell({
   // dialog draw it, not a tag beside one.
   const tag = (
     <Status
+      className="items-baseline"
       tone={service.liveRelease ? "running" : "stopped"}
       label={service.liveRelease ? "Live" : "Other release"}
     />
@@ -999,7 +1003,7 @@ function ReleaseCell({
     <span className="numeric truncate text-hint text-muted-foreground">{facts}</span>
   )
   return (
-    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
+    <span className="inline-flex max-w-full min-w-0 items-baseline gap-1.5">
       {tag}
       {line}
     </span>

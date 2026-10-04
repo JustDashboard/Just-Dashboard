@@ -234,7 +234,7 @@ function Reading({
 }) {
   if (compact)
     return (
-      <span className="flex min-w-0 cursor-help items-center gap-1.5 text-left whitespace-nowrap">
+      <span className="flex min-w-0 cursor-help items-baseline gap-1.5 text-left whitespace-nowrap">
         <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
           {label}
         </span>
@@ -253,7 +253,7 @@ function Reading({
             height={12}
             label={`${label} over the last hour`}
             color="var(--chart-1)"
-            className="shrink-0 animate-rise"
+            className="shrink-0 animate-rise self-center"
           />
         )}
       </span>
