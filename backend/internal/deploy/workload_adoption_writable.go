@@ -12,7 +12,7 @@ func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
 	additions := []string{}
 	bytecode := false
 	for _, change := range capture.Changes {
-		if engineGeneratedFile(change.Path) {
+		if engineGeneratedFile(change.Path) || verifiedMountDirectory(capture, change) {
 			continue
 		}
 		mode, known := capture.ChangeModes[change.Path]
@@ -26,7 +26,7 @@ func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
 		}
 	}
 	for _, change := range capture.Changes {
-		if engineGeneratedFile(change.Path) {
+		if engineGeneratedFile(change.Path) || verifiedMountDirectory(capture, change) {
 			continue
 		}
 		covered := false
@@ -46,4 +46,17 @@ func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
 		}
 	}
 	return true, bytecode
+}
+
+func verifiedMountDirectory(capture *dockerx.AdoptionContainer, change container.FilesystemChange) bool {
+	mode, known := capture.ChangeModes[change.Path]
+	if !known || !mode.IsDir() || (change.Kind != container.ChangeAdd && change.Kind != container.ChangeModify) {
+		return false
+	}
+	for _, mount := range capture.Inspection.Mounts {
+		if mount.Destination == change.Path {
+			return true
+		}
+	}
+	return false
 }
