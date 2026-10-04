@@ -147,7 +147,7 @@ production applications. The real bet-bot recording above used read-only recover
 Recovery fails closed for missing authoritative files, unrepresentable Engine/native-manager
 settings, unsafe replica differences, unknown toolchains, unresolved source/private files, meaningful
 writable-layer application data, and unmanaged processes with no verified restart authority. Git
-history cannot be inferred from a running image. Data/schema changes require application-appropriate
+history cannot be inferred from a running image. External proxy routes, certificates, schedulers and integrations retain their original ownership and require a reviewed handoff; managed Domains are configured separately. Data/schema changes require application-appropriate
 backup/restore; image/configuration rollback does not reverse them. The coverage matrix and manager
 limits are in [existing-workloads.md](../../internal/deployments/existing-workloads.md).
 

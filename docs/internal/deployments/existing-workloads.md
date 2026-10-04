@@ -189,6 +189,12 @@ PID and native log source rather than fabricated Docker IDs. Container console r
 Docker runtime; PM2 files and systemd journal supply native output before migration. Git-only features
 require a real Git source, and Docker-specific metrics/tools require a Docker runtime.
 
+Recovery captures the application runtime. Existing external reverse-proxy routes, certificates,
+schedulers and integrations retain their original ownership. Review their addresses, credentials and
+startup handoff before cutover. Native recovery preserves the host listening port; Docker recovery
+preserves supported names, aliases and network identity. Configure managed Domains separately when
+moving ingress into the dashboard.
+
 Recovered Docker recipes retain per-service configuration in captured inline Compose documents.
 Review lists service mounts and makes the saved files inspectable. General settings edits those
 documents through the normal source inspection and revision-guarded save endpoint; invalid YAML
