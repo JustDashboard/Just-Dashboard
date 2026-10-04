@@ -249,7 +249,7 @@ func TestLocalDirectoryInspectionReadsPrivateReviewedSnapshot(t *testing.T) {
 	}
 	writePlanningFixture(t, filepath.Join(root, "data", "state.json"), `{"live":true}`)
 	writePlanningFixture(t, filepath.Join(root, ".env"), "TOKEN=private")
-	source := DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: root, ExcludePaths: []string{"data"}}
+	source := DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: root, ExcludePaths: []string{"data/"}}
 	detection, err := analyzer.Analyze(t.Context(), source)
 	if err != nil {
 		t.Fatal(err)

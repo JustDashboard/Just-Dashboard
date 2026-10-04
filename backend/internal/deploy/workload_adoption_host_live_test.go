@@ -23,14 +23,21 @@ func TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testin
 	if os.Getenv("JD_PM2_ADOPTION_LIVE") != "1" {
 		t.Skip("set JD_PM2_ADOPTION_LIVE=1 for an isolated PM2-to-Docker deployment lifecycle")
 	}
+	testLiveNativeAdoption(t, "pm2")
+}
+
+func TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testing.T) {
+	if os.Getenv("JD_SYSTEMD_ADOPTION_LIVE") != "1" {
+		t.Skip("set JD_SYSTEMD_ADOPTION_LIVE=1 for an isolated systemd-to-Docker deployment lifecycle")
+	}
+	testLiveNativeAdoption(t, "systemd")
+}
+
+func testLiveNativeAdoption(t *testing.T, kind string) {
 	client := liveC4Docker(t)
 	account, err := user.Current()
 	if err != nil {
 		t.Fatal("fixture account unavailable")
-	}
-	pm2, err := exec.LookPath("pm2")
-	if err != nil {
-		t.Fatal("the current account must have PM2 on PATH")
 	}
 	root := t.TempDir()
 	source := filepath.Join(root, "source")
@@ -44,42 +51,21 @@ func TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testin
 		t.Fatal(err)
 	}
 	port := liveC5LoopbackPort(t)
-	daemon := filepath.Join(root, ".pm2")
-	managerEnvironment := []string{"HOME=" + account.HomeDir, "PM2_HOME=" + daemon, "PATH=" + filepath.Dir(pm2) + ":/usr/local/bin:/usr/bin:/bin", "PORT=" + strconv.Itoa(port), "PROOF_TOKEN=owned-native-private-value", "PROOF_EMPTY="}
-	managerCommand := func(ctx context.Context, args ...string) error {
-		command := exec.CommandContext(ctx, pm2, args...)
-		command.Dir, command.Env = source, managerEnvironment
-		_, err := command.Output()
-		return err
-	}
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		if err := managerCommand(ctx, "kill"); err != nil {
-			t.Error("owned PM2 daemon cleanup failed")
-		}
-	})
-	if err := managerCommand(t.Context(), "start", filepath.Join(source, "server.js"), "--name", "jd-owned-native-adoption", "--cwd", source); err != nil {
-		t.Fatal("owned PM2 fixture failed to start")
-	}
-	manager, err := procs.NewPM2ForExistingDaemon(account.Username, daemon)
-	if err != nil {
-		t.Fatal(err)
-	}
+	native := setupLiveNativeManager(t, kind, root, source, port, account)
 	assertLiveNativeResponse(t, port, source, account.Uid)
-	capture, err := manager.CaptureExisting(t.Context(), account.Username, "default", "jd-owned-native-adoption")
+	capture, err := native.capture(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	originalPID := capture.Processes[0].PID
-	candidate := WorkloadCandidate{Key: "pm2:" + capture.ResourceID, Kind: "pm2", ResourceID: capture.ResourceID, Name: capture.Name, Running: 1, Total: 1, Digest: "owned-live-fixture", Services: []WorkloadService{{Name: capture.Name, PID: originalPID, CreatedAt: capture.Processes[0].CreateTime, Ports: []dockerx.PortMapping{{HostIP: "127.0.0.1", HostPort: port, ContainerPort: port, Protocol: "tcp"}}}}}
+	candidate := WorkloadCandidate{Key: kind + ":" + capture.ResourceID, Kind: kind, ResourceID: capture.ResourceID, Name: capture.Name, Running: 1, Total: 1, Digest: "owned-live-fixture", Services: []WorkloadService{{Name: capture.Name, PID: originalPID, CreatedAt: capture.Processes[0].CreateTime, Ports: []dockerx.PortMapping{{HostIP: "127.0.0.1", HostPort: port, ContainerPort: port, Protocol: "tcp"}}}}}
 	analyzer := NewHostSourceAnalyzer([]string{root}, nil, filepath.Join(root, "source-cache"), client, nil)
 	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), filepath.Join(root, "recovery-cache"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(recovered.Adoption.Blockers) > 0 {
-		t.Fatalf("standard PM2 Node recovery blocked: %v", recovered.Adoption.Blockers)
+		t.Fatalf("standard %s Node recovery blocked: %v", kind, recovered.Adoption.Blockers)
 	}
 	fixture := newPlanningStoreFixture(t)
 	fixture.plans = NewPlanningStore(fixture.store, fixture.sealer, []string{root})
@@ -95,10 +81,10 @@ func TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testin
 	}
 	runs := NewOrchestrationStore(fixture.store)
 	dockerOwner := NewDockerRuntimeOwner(client)
-	owner := NewNativeRuntimeOwner(dockerOwner, manager, nil)
+	owner := native.owner(dockerOwner)
 	owner.WithRecordedRuntimeObserver(NewRecordedRuntimeObserver(runs, dockerOwner, client, owner))
 	observer := NewNativePreflightObserver(NewHostPreflightObserver([]string{root}, root, client), owner, runs)
-	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "owned-pm2-managed", Profile: ProfileService}, recovered)
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "owned-" + kind + "-managed", Profile: ProfileService}, recovered)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,17 +113,18 @@ func TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	registered, err := manager.CaptureExisting(t.Context(), account.Username, "default", capture.Name)
+	registered, err := native.capture(t.Context())
 	if err != nil || registered.Processes[0].PID != originalPID {
 		t.Fatal("adoption restarted the original workload")
 	}
 	assertLiveNativeResponse(t, port, source, account.Uid)
 	observation := ObserveRuntimeServices(t.Context(), owner, adopted.EnvironmentID, baseline.Release.ID)
-	if observation.Status != "available" || len(observation.Services) != 1 || observation.Services[0].Manager != "pm2" || observation.Services[0].LogSource == "" {
+	if observation.Status != "available" || len(observation.Services) != 1 || observation.Services[0].Manager != kind || observation.Services[0].LogSource == "" {
 		t.Fatalf("native runtime/logs unavailable: %+v", observation)
 	}
+	native.assertLogs(t.Context())
 	settings, err := fixture.plans.EnvironmentConfiguration(t.Context(), adopted.ProjectID, adopted.EnvironmentID)
-	if err != nil || settings.Source == nil || settings.Source.Mode != SourceModeLocalDirectory || settings.Build.Method != BuildRecipe {
+	if err != nil || settings.Source == nil || settings.Source.Mode != SourceModeLocalDirectory || settings.Build.Method != native.buildMethod {
 		t.Fatal("adoption did not create a regular source/build/settings plan")
 	}
 	if strings.Contains(string(mustJSON(settings)), "owned-native-private-value") {
@@ -282,9 +269,9 @@ func TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testin
 	if !logged {
 		t.Fatal("normal deployment Docker logs did not include the running app")
 	}
-	stopped, err := manager.CaptureExisting(t.Context(), account.Username, "default", capture.Name)
-	if err != nil || stopped.Processes[0].State != "stopped" {
-		t.Fatal("original PM2 manager was not stopped at successful cutover")
+	stopped, err := native.capture(t.Context())
+	if err != nil || (stopped.Processes[0].State != "stopped" && stopped.Processes[0].State != "inactive") {
+		t.Fatal("original native manager was not stopped at successful cutover")
 	}
 	rolled := operation(OperationRollback, baseline.Release.PlanRevision, baseline)
 	if rolled.State != RunSucceeded {
@@ -296,19 +283,142 @@ func TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline(t *testin
 		t.Fatal(err)
 	}
 	afterRuntime, err := runs.RuntimeForRelease(t.Context(), afterRollback.Release.ID)
-	if err != nil || afterRuntime.Kind != "pm2" {
+	if err != nil || afterRuntime.Kind != kind {
 		t.Fatal("rollback did not activate the retained original manager")
 	}
-	result := map[string]any{"manager": "PM2", "adoptionRestartedOriginal": false, "managedBuild": "Node recipe", "capturedEnvironmentPrivate": true, "emptyEnvironmentPreserved": true, "runtimeUIDPreserved": true, "workingDirectoryTranslated": "/app", "persistentDataRetained": true, "nativeLogsAvailable": true, "dockerLogsAvailable": true, "builtCandidateFailureRestoredNative": true, "normalDockerMigrationSucceeded": true, "originalManagerRollbackSucceeded": true}
-	if directory := os.Getenv("JD_PM2_ADOPTION_EVIDENCE_DIR"); directory != "" {
+	result := map[string]any{"manager": kind, "adoptionRestartedOriginal": false, "managedBuild": native.buildMethod, "capturedEnvironmentPrivate": true, "emptyEnvironmentPreserved": true, "runtimeUIDPreserved": true, "workingDirectoryTranslated": "/app", "persistentDataRetained": true, "nativeLogsAvailable": true, "dockerLogsAvailable": true, "builtCandidateFailureRestoredNative": true, "normalDockerMigrationSucceeded": true, "originalManagerRollbackSucceeded": true}
+	if directory := os.Getenv("JD_" + strings.ToUpper(kind) + "_ADOPTION_EVIDENCE_DIR"); directory != "" {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(directory, "pm2-managed-adoption.json"), mustJSON(result), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(directory, kind+"-managed-adoption.json"), mustJSON(result), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Log(string(mustJSON(result)))
+}
+
+type ownedLiveNativeManager struct {
+	capture     func(context.Context) (*procs.HostWorkloadCapture, error)
+	owner       func(RuntimeOwner) *NativeRuntimeOwner
+	assertLogs  func(context.Context)
+	buildMethod BuildMethod
+}
+
+func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, account *user.User) ownedLiveNativeManager {
+	t.Helper()
+	if kind == "pm2" {
+		binary, err := exec.LookPath("pm2")
+		if err != nil {
+			t.Fatal("the current account must have PM2 on PATH")
+		}
+		daemon := filepath.Join(root, ".pm2")
+		environment := []string{"HOME=" + account.HomeDir, "PM2_HOME=" + daemon, "PATH=" + filepath.Dir(binary) + ":/usr/local/bin:/usr/bin:/bin", "PORT=" + strconv.Itoa(port), "PROOF_TOKEN=owned-native-private-value", "PROOF_EMPTY="}
+		command := func(ctx context.Context, args ...string) error {
+			process := exec.CommandContext(ctx, binary, args...)
+			process.Dir, process.Env = source, environment
+			_, err := process.Output()
+			return err
+		}
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := command(ctx, "kill"); err != nil {
+				t.Error("owned PM2 daemon cleanup failed")
+			}
+		})
+		if err := command(t.Context(), "start", filepath.Join(source, "server.js"), "--name", "jd-owned-native-adoption", "--cwd", source); err != nil {
+			t.Fatal("owned PM2 fixture failed to start")
+		}
+		manager, err := procs.NewPM2ForExistingDaemon(account.Username, daemon)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ownedLiveNativeManager{buildMethod: BuildRecipe,
+			capture: func(ctx context.Context) (*procs.HostWorkloadCapture, error) {
+				return manager.CaptureExisting(ctx, account.Username, "default", "jd-owned-native-adoption")
+			},
+			owner: func(docker RuntimeOwner) *NativeRuntimeOwner { return NewNativeRuntimeOwner(docker, manager, nil) },
+			assertLogs: func(ctx context.Context) {
+				path, _, err := manager.LogPathsTarget(ctx, "jd-owned-native-adoption", account.Username, 0)
+				if err != nil || !strings.HasPrefix(path, daemon+string(filepath.Separator)) {
+					t.Fatal("PM2 did not expose its owned fixture log path")
+				}
+				contents, err := os.ReadFile(path)
+				if err != nil || !strings.Contains(string(contents), "JD_NATIVE_ADOPTION_READY") {
+					t.Fatal("native PM2 logs did not include the running app")
+				}
+			}}
+	}
+	if kind != "systemd" {
+		t.Fatal("unknown owned fixture manager")
+	}
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Fatal("the current account must have Node on PATH")
+	}
+	if err := exec.CommandContext(t.Context(), "sudo", "-n", "true").Run(); err != nil {
+		t.Fatal("the opt-in systemd fixture requires root or passwordless sudo")
+	}
+	unit := fmt.Sprintf("jd-owned-native-adoption-%d.service", time.Now().UnixNano())
+	destination := filepath.Join("/run/systemd/system", unit)
+	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
+		t.Fatal("the fixture unit path is already occupied")
+	}
+	configuration := "[Unit]\nDescription=Just Dashboard isolated adoption fixture\n[Service]\nType=exec\nUser=" + account.Username + "\nGroup=" + account.Gid + "\nWorkingDirectory=" + source + "\nExecStart=" + node + " " + filepath.Join(source, "server.js") + "\nRestart=on-failure\nRestartSec=100ms\nKillSignal=SIGTERM\nTimeoutStopSec=3s\nEnvironment=\"PORT=" + strconv.Itoa(port) + "\" \"PROOF_TOKEN=owned-native-private-value\" \"PROOF_EMPTY=\"\n"
+	privateUnit := filepath.Join(root, unit)
+	if err := os.WriteFile(privateUnit, []byte(configuration), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.CommandContext(t.Context(), "sudo", "-n", "install", "-m", "0644", "--", privateUnit, destination).Run(); err != nil {
+		t.Fatal("the owned systemd fixture unit could not be installed")
+	}
+	manager := &ownedLiveSystemd{Systemd: procs.NewSystemd(), unit: unit}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if _, err := manager.Control(ctx, unit, procs.UnitStop); err != nil {
+			t.Error("owned systemd fixture cleanup could not stop its unit")
+		}
+		_ = exec.CommandContext(ctx, "sudo", "-n", "systemctl", "reset-failed", "--", unit).Run()
+		if err := exec.CommandContext(ctx, "sudo", "-n", "rm", "--", destination).Run(); err != nil {
+			t.Error("owned systemd fixture cleanup could not remove its unit file")
+		}
+	})
+	// A newly named unit is loaded on start. Reloading the manager here would
+	// also reload unrelated operator unit files, which the fixture must avoid.
+	if _, err := manager.Control(t.Context(), unit, procs.UnitStart); err != nil {
+		t.Fatal("the host could not load the new owned unit without a global manager reload")
+	}
+	writeBuildFixture(t, source, "Dockerfile", "FROM node:24-alpine\nWORKDIR /app\nCOPY . .\nENTRYPOINT []\n")
+	return ownedLiveNativeManager{buildMethod: BuildDockerfile,
+		capture: func(ctx context.Context) (*procs.HostWorkloadCapture, error) {
+			return manager.CaptureExisting(ctx, unit)
+		},
+		owner: func(docker RuntimeOwner) *NativeRuntimeOwner {
+			owner := NewNativeRuntimeOwner(docker, nil, nil)
+			owner.systemd = manager
+			return owner
+		},
+		assertLogs: func(ctx context.Context) {
+			contents, err := exec.CommandContext(ctx, "sudo", "-n", "journalctl", "--unit", unit, "--no-pager", "-n", "50", "--output=cat").Output()
+			if err != nil || !strings.Contains(string(contents), "JD_NATIVE_ADOPTION_READY") {
+				t.Fatal("native systemd journal did not include the running app")
+			}
+		}}
+}
+
+type ownedLiveSystemd struct {
+	*procs.Systemd
+	unit string
+}
+
+func (s *ownedLiveSystemd) Control(ctx context.Context, unit string, action procs.UnitAction) (*procs.CommandResult, error) {
+	if unit != s.unit || (action != procs.UnitStart && action != procs.UnitStop) {
+		return nil, fmt.Errorf("fixture refused control of an unowned unit")
+	}
+	output, err := exec.CommandContext(ctx, "sudo", "-n", "systemctl", string(action), "--", unit).Output()
+	return &procs.CommandResult{Stdout: string(output)}, err
 }
 
 func assertLiveNativeResponse(t *testing.T, port int, cwd, uid string) {

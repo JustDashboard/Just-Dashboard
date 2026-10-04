@@ -2336,6 +2336,11 @@ func canonicalSourceConfig(source DraftSourceConfig) DraftSourceConfig {
 		source.LocalPath = filepath.Clean(source.LocalPath)
 	}
 	source.ExcludePaths = append([]string{}, source.ExcludePaths...)
+	for index, path := range source.ExcludePaths {
+		if safeRelativePath(path) {
+			source.ExcludePaths[index] = filepath.Clean(path)
+		}
+	}
 	sort.Strings(source.ExcludePaths)
 	if source.Subdirectory != "" {
 		source.Subdirectory = filepath.ToSlash(filepath.Clean(source.Subdirectory))

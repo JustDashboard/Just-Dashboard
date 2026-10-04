@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -160,10 +161,21 @@ func CaptureHostSourceFiles(paths []string) (map[string]string, error) {
 			return nil, fmt.Errorf("the original entrypoint is unavailable or too large")
 		}
 		hash := sha256.New()
+		metadata, ok := info.Sys().(*syscall.Stat_t)
+		if !ok {
+			file.Close()
+			return nil, fmt.Errorf("the original entrypoint ownership cannot be verified")
+		}
+		fmt.Fprintf(hash, "%d:%d:%d\x00", info.Mode(), metadata.Uid, metadata.Gid)
 		n, readErr := io.Copy(hash, io.LimitReader(file, 512<<20+1))
+		after, statErr := file.Stat()
 		file.Close()
-		if readErr != nil || n > 512<<20 {
+		if readErr != nil || n > 512<<20 || statErr != nil || after.Size() != info.Size() || after.Mode() != info.Mode() || !after.ModTime().Equal(info.ModTime()) {
 			return nil, fmt.Errorf("the original entrypoint could not be verified")
+		}
+		afterMetadata, ok := after.Sys().(*syscall.Stat_t)
+		if !ok || afterMetadata.Uid != metadata.Uid || afterMetadata.Gid != metadata.Gid {
+			return nil, ErrHostWorkloadChanged
 		}
 		out[path] = hex.EncodeToString(hash.Sum(nil))
 	}

@@ -161,7 +161,16 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		if err != nil {
 			block("host_restart_authority_unavailable", "The original manager identity cannot be retained as a verified rollback baseline.", "source")
 		} else {
+			var metadata NativeBaselineMetadata
+			if json.Unmarshal(origin.Runtime.Metadata, &metadata) != nil {
+				return nil, ErrInvalidPlan
+			}
+			metadata.SourceRoot = root
+			metadata.SourceDigest = detection.Source.Digest
+			metadata.SourceExclusions = append([]string{}, recovered.Source.ExcludePaths...)
+			origin.Runtime.Metadata = mustJSON(metadata)
 			origin.Runtime.Host, origin.Runtime.Port = host, port
+			origin.Warnings = append(origin.Warnings, "The original source directory is frozen as native rollback evidence. Keep it unchanged while this manager is a live or retained baseline; use a separate managed checkout for new code. Changed modules block native stop, compensation and rollback until the captured source is restored. Linked data remains writable.")
 			origin.Snapshot = mustJSON(runtimeReleaseSnapshot{Version: 1, Plan: origin.BaselineConfiguration.Runtime, NativeBaseline: &origin.Runtime, Checks: origin.BaselineConfiguration.Checks, Dependencies: []PlannedDependency{}, Domains: []PlannedDomain{}, Variables: []ReleaseVariableSnapshot{}})
 		}
 	}

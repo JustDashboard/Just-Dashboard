@@ -58,6 +58,11 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 		if err != nil {
 			return nil, err
 		}
+		for key, expected := range map[string]string{"pm_id": strconv.Itoa(proc.ID), "pm_exec_path": capture.SourcePath, "pm_cwd": capture.SourceDirectory, "name": capture.Name, "namespace": namespace} {
+			if value, present := actual.Environment[key]; present && value != expected {
+				return nil, ErrHostWorkloadChanged
+			}
+		}
 		sourceFiles = append(sourceFiles, actual.SourcePath)
 		if actual.SourceDirectory != capture.SourceDirectory {
 			capture.Blockers = append(capture.Blockers, "The PM2 process has changed its working directory. Review its filesystem dependencies before migration.")
@@ -86,6 +91,21 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 	capture.SourceFiles, err = CaptureHostSourceFiles(uniqueCaptureStrings(sourceFiles))
 	if err != nil {
 		capture.Blockers = append(capture.Blockers, "The original PM2 entrypoint cannot be verified for safe restoration.")
+	}
+	// A daemon row can race a process exit/restart while /proc is read. Read
+	// the same existing daemon again before accepting that PID as its app.
+	latestData, err := readExistingPM2(ctx, home, account)
+	if err != nil {
+		return nil, err
+	}
+	latest, err := parsePM2Capture(latestData, account, namespace, name)
+	if err != nil || latest.ConfigurationDigest != capture.ConfigurationDigest || len(latest.Processes) != len(capture.Processes) {
+		return nil, ErrHostWorkloadChanged
+	}
+	for index, original := range capture.Processes {
+		if latest.Processes[index].ID != original.ID || latest.Processes[index].PID != original.PID {
+			return nil, ErrHostWorkloadChanged
+		}
 	}
 	return capture, nil
 }

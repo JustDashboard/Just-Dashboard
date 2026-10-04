@@ -214,6 +214,13 @@ to the contribution terms above, including the additional licence grant to the p
   database and reserved runtime namespace prove adoption without a restart, real image builds,
   failed-candidate restoration, normal Docker migration, retained data/settings/logs and rollback
   to the original PM2 manager. `JD_PM2_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
+  The corresponding persistent systemd-unit path runs
+  `JD_SYSTEMD_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
+  It requires a reachable host systemd manager, Node and root/passwordless sudo. It installs one
+  uniquely named unit in `/run/systemd/system`, operates only on that unit, and removes that exact
+  file; it never reloads the global manager or modifies an existing unit. It proves native journal
+  output and the same adoption/build/compensation/Docker-migration/original-unit rollback sequence.
+  `JD_SYSTEMD_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
   The opt-in native browser server and recording commands are documented in
   [the workload-import acceptance record](docs/audits/2026-10-04-existing-workloads/README.md).
 - Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are

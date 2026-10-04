@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
@@ -29,6 +31,9 @@ type NativeBaselineMetadata struct {
 	ConfigurationDigest string            `json:"configurationDigest"`
 	LogSources          []string          `json:"logSources"`
 	SourceFiles         map[string]string `json:"sourceFiles,omitempty"`
+	SourceRoot          string            `json:"sourceRoot,omitempty"`
+	SourceDigest        string            `json:"sourceDigest,omitempty"`
+	SourceExclusions    []string          `json:"sourceExclusions,omitempty"`
 }
 
 func NativeBaselineRuntimeInput(capture *procs.HostWorkloadCapture, releaseID int64) (ReleaseRuntimeInput, error) {
@@ -156,6 +161,16 @@ func (o *NativeRuntimeOwner) capture(ctx context.Context, runtime ReleaseRuntime
 	}
 	if err := procs.VerifyHostSourceFiles(metadata.SourceFiles); err != nil {
 		return nil, metadata, err
+	}
+	if metadata.SourceRoot != "" || metadata.SourceDigest != "" || len(metadata.SourceExclusions) > 0 {
+		source := DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: metadata.SourceRoot, ExcludePaths: metadata.SourceExclusions}
+		if !filepath.IsAbs(metadata.SourceRoot) || !contentDigestRE.MatchString(metadata.SourceDigest) || source.Validate() != nil {
+			return nil, metadata, ErrInvalidPlan
+		}
+		digest, err := localDirectoryDigest(ctx, hostexec.HostPath(metadata.SourceRoot), metadata.SourceExclusions)
+		if err != nil || digest != metadata.SourceDigest {
+			return nil, metadata, fmt.Errorf("%w: the original source tree changed; restore the captured source before controlling its native baseline", procs.ErrHostWorkloadChanged)
+		}
 	}
 	if runtime.Kind == "pm2" {
 		ids := make([]int, 0, len(capture.Processes))

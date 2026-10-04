@@ -58,7 +58,7 @@ An absent service with no image or container still requires its original image/s
 | Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
 | Standalone Docker | A Compose recipe capturing environment, command/entrypoint, user/cwd, ports, mounts, networks/aliases, restart policy, health check, logging, resource limits and supported security/host options. Live baseline initially points to the unchanged original container. | Unmapped Engine options, unsupported namespace/resource relationships, Swarm tasks, missing image identity, or meaningful writable-layer data. The first Deploy changes creates a managed container name; original aliases and resources are reviewed explicitly. |
 | PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. |
-| systemd | Exact unit and drop-in/configuration identity, private environment/argv and supported source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Socket activation, credentials, complex execution chains, unsupported sandbox/dependency semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. |
+| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. |
 | Bare listening process | PID plus creation time and safe inventory; capture can explain the source and missing requirements. | No verified manager can restart the original process for compensation. Automatic managed adoption is refused until a reproducible source and restart authority exist. A port or framework name alone cannot supply these. |
 
 The source of an image-only workload is its immutable local image. Recovery cannot manufacture the
@@ -122,7 +122,13 @@ claiming zero limits or no persistent data. Private inputs remain variable refer
 YAML edits are never placed in browser session storage.
 
 Native lifecycle operations recheck manager configuration and captured source evidence before
-controlling the original app. Port reuse requires a freshly verified listener PID and creation time,
+controlling the original app. The reviewed original source directory remains frozen while its native
+baseline is retained: a full bounded tree digest covers modules as well as the executable/entrypoint
+ownership and permission fences. Already reviewed linked data and excluded private files remain
+outside the source digest. Changed source blocks stop-first cutover and baseline restart/rollback
+before manager control; restore the captured source or use a separate managed checkout for new code.
+This avoids claiming a restart of modified original files is an immutable release restoration.
+Port reuse requires a freshly verified listener PID and creation time,
 not just a matching port number. The stop-first deployment path uses the normal readiness, activation
 and compensation engine. A failed replacement restores the retained original baseline; native
 baseline restoration leaves the original manager record/unit available. Persistent volume or database

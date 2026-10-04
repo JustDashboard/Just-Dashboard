@@ -165,3 +165,53 @@ func TestPM2ControlClientVerifiesConfigurationBeforeExactIDMutation(t *testing.T
 		t.Fatal("wrong original process mutated")
 	}
 }
+
+func TestSystemdCapturePreservesRepresentableLifecycleAndBlocksTransientAuthority(t *testing.T) {
+	properties := map[string]string{"Type": "exec", "User": "ubuntu", "Restart": "on-failure", "KillMode": "control-group", "KillSignal": "15", "TimeoutStopUSec": "1min 30s"}
+	unit := &Unit{Name: "owned-api.service", Fragment: "/run/systemd/system/owned-api.service"}
+	capture := systemdCaptureProperties(unit, properties)
+	if len(capture.Blockers) != 0 || capture.RestartPolicy != "on-failure" || capture.StopSignal != "SIGTERM" || capture.GracePeriodSeconds != 90 {
+		t.Fatalf("simple systemd lifecycle not preserved: %+v", capture)
+	}
+	before, _ := json.Marshal(stableSystemdProperties(properties))
+	properties["ProtectKernelTunables"] = "yes"
+	after, _ := json.Marshal(stableSystemdProperties(properties))
+	if string(before) == string(after) {
+		t.Fatal("changed effective security policy was not fenced")
+	}
+	delete(properties, "ProtectKernelTunables")
+	properties["Transient"] = "yes"
+	properties["Restart"] = "on-watchdog"
+	properties["TimeoutStopUSec"] = "infinity"
+	properties["KillMode"] = "process"
+	capture = systemdCaptureProperties(unit, properties)
+	if len(capture.Blockers) < 4 {
+		t.Fatal("transient restart authority and unrepresentable lifecycle semantics accepted")
+	}
+}
+
+func TestNativeSourceFenceRejectsPermissionAndContentChanges(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "entrypoint.js")
+	if err := os.WriteFile(path, []byte("original source"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	captured, err := CaptureHostSourceFiles([]string{path})
+	if err != nil || VerifyHostSourceFiles(captured) != nil {
+		t.Fatal("original entrypoint could not be verified")
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if VerifyHostSourceFiles(captured) != ErrHostWorkloadChanged {
+		t.Fatal("changed entrypoint permission was accepted")
+	}
+	if err := os.Chmod(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("changed source"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if VerifyHostSourceFiles(captured) != ErrHostWorkloadChanged {
+		t.Fatal("changed entrypoint content was accepted")
+	}
+}

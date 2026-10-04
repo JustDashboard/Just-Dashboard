@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -161,6 +163,50 @@ func TestNativeBaselineRefusesChangedConfigAndReusedProcessIDs(t *testing.T) {
 	}
 	if len(manager.actions) != 0 {
 		t.Fatal("changed original manager was mutated")
+	}
+}
+
+func TestNativeBaselineSourceFenceRejectsModuleDriftButRetainsMutableData(t *testing.T) {
+	owner, manager, runtime := nativeFixture(t)
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	module := filepath.Join(root, "imported-module.js")
+	if err := os.WriteFile(module, []byte("captured module"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := localDirectoryDigest(t.Context(), root, []string{"data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata NativeBaselineMetadata
+	if err := json.Unmarshal(runtime.Metadata, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	metadata.SourceRoot, metadata.SourceDigest, metadata.SourceExclusions = root, digest, []string{"data"}
+	runtime.Metadata = mustJSON(metadata)
+	if err := os.WriteFile(filepath.Join(root, "data", "state.json"), []byte("application writes"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("excluded private environment"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := owner.StartExisting(t.Context(), runtime, nil, nil); err != nil {
+		t.Fatalf("unchanged source with linked data writes refused: %v", err)
+	}
+	manager.actions = nil
+	if err := os.WriteFile(module, []byte("changed module"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Stop(t.Context(), runtime, RuntimePlanConfig{}, nil, false, nil); !errors.Is(err, procs.ErrHostWorkloadChanged) {
+		t.Fatalf("changed module accepted for stop-first compensation: %v", err)
+	}
+	if err := owner.StartExisting(t.Context(), runtime, nil, nil); !errors.Is(err, procs.ErrHostWorkloadChanged) {
+		t.Fatalf("changed module accepted as the immutable baseline: %v", err)
+	}
+	if len(manager.actions) != 0 {
+		t.Fatal("source drift mutated the original manager")
 	}
 }
 

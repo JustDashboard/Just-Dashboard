@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/shirou/gopsutil/v4/process"
@@ -71,8 +72,13 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		out.Processes = live.Processes
 		out.Processes[0].State = unit.ActiveState
 		out.Processes[0].LogSources = []string{"journal:" + unit.Name}
-		current, _, err := s.Show(ctx, name)
+		current, currentProperties, err := s.Show(ctx, name)
 		if err != nil || current.MainPID != unit.MainPID || current.LoadState != "loaded" {
+			return nil, ErrHostWorkloadChanged
+		}
+		before, _ := json.Marshal(stableSystemdProperties(props))
+		after, _ := json.Marshal(stableSystemdProperties(currentProperties))
+		if string(before) != string(after) {
 			return nil, ErrHostWorkloadChanged
 		}
 	} else {
@@ -90,7 +96,26 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 	}
 	out.Blockers = uniqueCaptureStrings(out.Blockers)
 	if unit.MainPID > 1 {
-		out.SourceFiles, err = CaptureHostSourceFiles([]string{out.SourcePath})
+		paths := []string{out.SourcePath}
+		for _, argument := range out.Command[1:] {
+			switch strings.ToLower(filepath.Ext(argument)) {
+			case ".js", ".mjs", ".cjs", ".ts", ".tsx", ".py", ".rb", ".php", ".pl", ".sh", ".jar", ".dll", ".exs":
+			default:
+				continue
+			}
+			path := argument
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(out.SourceDirectory, path)
+			}
+			relative, relativeErr := filepath.Rel(out.SourceDirectory, path)
+			if relativeErr != nil || relative == ".." || strings.HasPrefix(relative, "../") {
+				continue
+			}
+			if info, statErr := os.Stat(hostexec.HostPath(path)); statErr == nil && info.Mode().IsRegular() {
+				paths = append(paths, path)
+			}
+		}
+		out.SourceFiles, err = CaptureHostSourceFiles(paths)
 		if err != nil {
 			out.Blockers = append(out.Blockers, "The original service executable cannot be verified for safe restoration.")
 		}
@@ -106,6 +131,29 @@ func systemdCaptureProperties(unit *Unit, props map[string]string) *HostWorkload
 	out := &HostWorkloadCapture{Manager: "systemd", ResourceID: unit.Name, Name: unit.Name, Account: account,
 		SourceDirectory: props["WorkingDirectory"], SourcePath: unit.Fragment, Processes: []HostProcessCapture{},
 		Environment: map[string]string{}, EnvironmentNames: []string{}, Blockers: []string{}, Warnings: []string{}}
+	switch props["Restart"] {
+	case "no", "always", "on-failure":
+		out.RestartPolicy = props["Restart"]
+	default:
+		out.Blockers = append(out.Blockers, "The systemd Restart policy cannot be represented by the managed container restart policy.")
+	}
+	if signal := systemdContainerSignal(props["KillSignal"]); signal != "" {
+		out.StopSignal = signal
+	} else {
+		out.Blockers = append(out.Blockers, "The original systemd stop signal cannot be translated safely.")
+	}
+	stopTimeout, timeoutErr := time.ParseDuration(strings.ReplaceAll(strings.ReplaceAll(props["TimeoutStopUSec"], "min", "m"), " ", ""))
+	if timeoutErr != nil || stopTimeout <= 0 || stopTimeout > 300*time.Second {
+		out.Blockers = append(out.Blockers, "The original systemd stop timeout is unavailable or exceeds the supported 300-second managed grace period.")
+	} else {
+		out.GracePeriodSeconds = int((stopTimeout + time.Second - 1) / time.Second)
+	}
+	if props["KillMode"] != "control-group" {
+		out.Blockers = append(out.Blockers, "The systemd KillMode requires an explicit process-tree shutdown plan before container migration.")
+	}
+	if props["Transient"] == "yes" {
+		out.Blockers = append(out.Blockers, "This transient systemd unit can disappear when stopped. A persistent unit is required as a verified compensation and rollback authority.")
+	}
 	if props["NeedDaemonReload"] == "yes" {
 		out.Blockers = append(out.Blockers, "The systemd unit files differ from the loaded manager configuration. Reload and review the unit before migration.")
 	}
@@ -132,7 +180,21 @@ func systemdCaptureProperties(unit *Unit, props map[string]string) *HostWorkload
 		}
 	}
 	out.Warnings = append(out.Warnings, "The original unit, drop-ins, account and journal are retained as the baseline. Migration requires reviewing source, operating-system dependencies, persistence and external unit dependencies.")
+	out.Warnings = append(out.Warnings, "Container restart backoff and child-process signal delivery can differ from systemd. Review application shutdown and restart behavior before deploying changes.")
 	return out
+}
+
+func systemdContainerSignal(value string) string {
+	signals := map[string]string{"1": "SIGHUP", "2": "SIGINT", "3": "SIGQUIT", "6": "SIGABRT", "9": "SIGKILL", "10": "SIGUSR1", "12": "SIGUSR2", "14": "SIGALRM", "15": "SIGTERM"}
+	if signal := signals[value]; signal != "" {
+		return signal
+	}
+	for _, signal := range signals {
+		if value == signal {
+			return signal
+		}
+	}
+	return ""
 }
 
 // The full default set is not portable across kernel/systemd versions; an
@@ -141,7 +203,7 @@ const systemdAllCapabilities = "cap_chown cap_dac_override cap_dac_read_search c
 
 func stableSystemdProperties(props map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, field := range []string{"Id", "FragmentPath", "DropInPaths", "Type", "User", "Group", "WorkingDirectory", "ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost", "Environment", "EnvironmentFiles", "PassEnvironment", "UnsetEnvironment", "Restart", "RestartUSec", "KillMode", "KillSignal", "TimeoutStopUSec", "RootDirectory", "RootImage", "DynamicUser", "PrivateNetwork", "PrivateUsers", "PrivateTmp", "PrivateDevices", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "LoadCredential", "LoadCredentialEncrypted", "SetCredential", "SetCredentialEncrypted", "RuntimeDirectory", "StateDirectory", "CacheDirectory", "LogsDirectory", "ConfigurationDirectory", "BindPaths", "BindReadOnlyPaths", "ReadWritePaths", "ReadOnlyPaths", "InaccessiblePaths", "DeviceAllow", "SupplementaryGroups", "Sockets", "TriggeredBy", "NeedDaemonReload"} {
+	for _, field := range []string{"Id", "FragmentPath", "DropInPaths", "Type", "User", "Group", "WorkingDirectory", "ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost", "Environment", "EnvironmentFiles", "PassEnvironment", "UnsetEnvironment", "Restart", "RestartUSec", "KillMode", "KillSignal", "TimeoutStopUSec", "RootDirectory", "RootImage", "DynamicUser", "PrivateNetwork", "PrivateUsers", "PrivateTmp", "PrivateDevices", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "LoadCredential", "LoadCredentialEncrypted", "SetCredential", "SetCredentialEncrypted", "RuntimeDirectory", "StateDirectory", "CacheDirectory", "LogsDirectory", "ConfigurationDirectory", "BindPaths", "BindReadOnlyPaths", "ReadWritePaths", "ReadOnlyPaths", "InaccessiblePaths", "DeviceAllow", "SupplementaryGroups", "Sockets", "TriggeredBy", "NeedDaemonReload", "Transient", "RemainAfterExit", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictRealtime", "RestrictSUIDSGID", "MemoryDenyWriteExecute", "RestrictAddressFamilies", "SystemCallFilter", "IPAddressAllow", "IPAddressDeny", "AmbientCapabilities", "CapabilityBoundingSet"} {
 		value := props[field]
 		if strings.HasPrefix(field, "Exec") {
 			value = stableSystemdExec(value)
