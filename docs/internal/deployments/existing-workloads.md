@@ -75,6 +75,11 @@ Node recipe recovery selects the supported catalogue image for the captured inte
 its patch version and container operating system can differ from the original host. Applications
 which rely on host packages, native dependencies or PM2 IPC need an appropriate Dockerfile and
 compatibility review before migration.
+Whole filesystem environment values within the captured source and local `file`/`sqlite` URIs map
+to the same `/app` layout, while the original values remain privately sealed for the native baseline.
+Source-read application variables which point outside that tree require verified mounts before
+recovery. Static-serving recipes cannot reproduce a running Node development server's command;
+those migrations require a reviewed Dockerfile instead of an automatic runtime override.
 
 Docker writable-layer checks block application data, altered source and unknown file changes.
 Verified Docker-generated files and narrowly identified regenerable Python bytecode caches are

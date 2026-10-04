@@ -46,7 +46,7 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 		t.Fatal(err)
 	}
 	writeBuildFixture(t, source, "package.json", `{"name":"jd-native-adoption-proof","version":"1.0.0","scripts":{"start":"node server.js"}}`)
-	writeBuildFixture(t, source, "server.js", `const fs=require("fs"),http=require("http");http.createServer((req,res)=>{res.setHeader("Content-Type","application/json");res.end(JSON.stringify({marker:"native-adoption-owned",token:process.env.PROOF_TOKEN,empty:process.env.PROOF_EMPTY,uid:process.getuid(),cwd:process.cwd(),data:JSON.parse(fs.readFileSync("data/state.json","utf8"))}));console.log("JD_NATIVE_ADOPTION_HTTP");}).listen(Number(process.env.PORT),"127.0.0.1",()=>console.log("JD_NATIVE_ADOPTION_READY"));`)
+	writeBuildFixture(t, source, "server.js", `const fs=require("fs"),path=require("path"),http=require("http");http.createServer((req,res)=>{res.setHeader("Content-Type","application/json");res.end(JSON.stringify({marker:"native-adoption-owned",token:process.env.PROOF_TOKEN,empty:process.env.PROOF_EMPTY,uid:process.getuid(),cwd:process.cwd(),data:JSON.parse(fs.readFileSync(path.join(process.env.APP_DATA_DIR,"state.json"),"utf8"))}));console.log("JD_NATIVE_ADOPTION_HTTP");}).listen(Number(process.env.PORT),"127.0.0.1",()=>console.log("JD_NATIVE_ADOPTION_READY"));`)
 	if err := os.WriteFile(filepath.Join(data, "state.json"), []byte(`{"value":42}`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +66,9 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	}
 	if len(recovered.Adoption.Blockers) > 0 {
 		t.Fatalf("standard %s Node recovery blocked: %v", kind, recovered.Adoption.Blockers)
+	}
+	if recovered.Environment["APP_DATA_DIR"] != "/app/data" || recovered.BaselineEnvironment["APP_DATA_DIR"] != data {
+		t.Fatal("absolute data-directory variable did not preserve independent original and container values")
 	}
 	fixture := newPlanningStoreFixture(t)
 	fixture.plans = NewPlanningStore(fixture.store, fixture.sealer, []string{root})
@@ -286,7 +289,7 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	if err != nil || afterRuntime.Kind != kind {
 		t.Fatal("rollback did not activate the retained original manager")
 	}
-	result := map[string]any{"manager": kind, "adoptionRestartedOriginal": false, "managedBuild": native.buildMethod, "capturedEnvironmentPrivate": true, "emptyEnvironmentPreserved": true, "runtimeUIDPreserved": true, "workingDirectoryTranslated": "/app", "persistentDataRetained": true, "nativeLogsAvailable": true, "dockerLogsAvailable": true, "builtCandidateFailureRestoredNative": true, "normalDockerMigrationSucceeded": true, "originalManagerRollbackSucceeded": true}
+	result := map[string]any{"manager": kind, "adoptionRestartedOriginal": false, "managedBuild": native.buildMethod, "capturedEnvironmentPrivate": true, "emptyEnvironmentPreserved": true, "runtimeUIDPreserved": true, "workingDirectoryTranslated": "/app", "absoluteDataDirectoryTranslated": true, "originalEnvironmentSnapshotPreserved": true, "persistentDataRetained": true, "nativeLogsAvailable": true, "dockerLogsAvailable": true, "builtCandidateFailureRestoredNative": true, "normalDockerMigrationSucceeded": true, "originalManagerRollbackSucceeded": true}
 	if directory := os.Getenv("JD_" + strings.ToUpper(kind) + "_ADOPTION_EVIDENCE_DIR"); directory != "" {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			t.Fatal(err)
@@ -313,7 +316,7 @@ func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, a
 			t.Fatal("the current account must have PM2 on PATH")
 		}
 		daemon := filepath.Join(root, ".pm2")
-		environment := []string{"HOME=" + account.HomeDir, "PM2_HOME=" + daemon, "PATH=" + filepath.Dir(binary) + ":/usr/local/bin:/usr/bin:/bin", "PORT=" + strconv.Itoa(port), "PROOF_TOKEN=owned-native-private-value", "PROOF_EMPTY="}
+		environment := []string{"HOME=" + account.HomeDir, "PM2_HOME=" + daemon, "PATH=" + filepath.Dir(binary) + ":/usr/local/bin:/usr/bin:/bin", "PORT=" + strconv.Itoa(port), "APP_DATA_DIR=" + filepath.Join(source, "data"), "PROOF_TOKEN=owned-native-private-value", "PROOF_EMPTY="}
 		command := func(ctx context.Context, args ...string) error {
 			process := exec.CommandContext(ctx, binary, args...)
 			process.Dir, process.Env = source, environment
@@ -365,7 +368,7 @@ func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, a
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		t.Fatal("the fixture unit path is already occupied")
 	}
-	configuration := "[Unit]\nDescription=Just Dashboard isolated adoption fixture\n[Service]\nType=exec\nUser=" + account.Username + "\nGroup=" + account.Gid + "\nWorkingDirectory=" + source + "\nExecStart=" + node + " " + filepath.Join(source, "server.js") + "\nRestart=on-failure\nRestartSec=100ms\nKillSignal=SIGTERM\nTimeoutStopSec=3s\nEnvironment=\"PORT=" + strconv.Itoa(port) + "\" \"PROOF_TOKEN=owned-native-private-value\" \"PROOF_EMPTY=\"\n"
+	configuration := "[Unit]\nDescription=Just Dashboard isolated adoption fixture\n[Service]\nType=exec\nUser=" + account.Username + "\nGroup=" + account.Gid + "\nWorkingDirectory=" + source + "\nExecStart=" + node + " " + filepath.Join(source, "server.js") + "\nRestart=on-failure\nRestartSec=100ms\nKillSignal=SIGTERM\nTimeoutStopSec=3s\nEnvironment=\"PORT=" + strconv.Itoa(port) + "\" \"APP_DATA_DIR=" + filepath.Join(source, "data") + "\" \"PROOF_TOKEN=owned-native-private-value\" \"PROOF_EMPTY=\"\n"
 	privateUnit := filepath.Join(root, unit)
 	if err := os.WriteFile(privateUnit, []byte(configuration), 0600); err != nil {
 		t.Fatal(err)

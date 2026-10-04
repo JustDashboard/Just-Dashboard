@@ -306,3 +306,74 @@ func TestLocalDirectoryExecutionRequiresReviewedContentDigest(t *testing.T) {
 		t.Fatalf("Git checkout without immutable revision accepted: %v", err)
 	}
 }
+
+func TestHostEnvironmentPathTranslationPreservesUrisAndRefusesEscapes(t *testing.T) {
+	for _, test := range []struct {
+		name, root, value, want string
+		changed, supported      bool
+	}{
+		{"absolute data", "/srv/app", "/srv/app/data", "/app/data", true, true},
+		{"source root", "/srv/app", "/srv/app", "/app", true, true},
+		{"sqlite uri", "/srv/app", "sqlite:///srv/app/data/state.db?mode=rw", "sqlite:///app/data/state.db?mode=rw", true, true},
+		{"file uri", "/srv/app", "file:/srv/app/data/state.db", "file:/app/data/state.db", true, true},
+		{"encoded uri", "/srv/app name", "file:///srv/app%20name/data/state.db", "file:///app/data/state.db", true, true},
+		{"relative data", "/srv/app", "data/state.db", "data/state.db", false, true},
+		{"relative escape", "/srv/app", "../shared/state.db", "../shared/state.db", false, false},
+		{"outside host", "/srv/app", "/srv/shared/state.db", "/srv/shared/state.db", false, false},
+		{"normalized escape", "/srv/app", "/srv/app/../shared/state.db", "/srv/app/../shared/state.db", false, false},
+		{"network credentials", "/srv/app", "postgres://user:private@127.0.0.1:5432/app", "postgres://user:private@127.0.0.1:5432/app", false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			value, changed, supported := translateHostEnvironmentPath(test.value, test.root)
+			if value != test.want || changed != test.changed || supported != test.supported {
+				t.Fatalf("filesystem environment translation mismatch: changed=%t supported=%t", changed, supported)
+			}
+		})
+	}
+}
+
+func TestHostRecoverySealsOriginalAndTranslatedDirectoryVariablesSeparately(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	paths := files.New([]string{root})
+	if err := os.Mkdir(filepath.Join(root, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writePlanningFixture(t, filepath.Join(root, "server.js"), `const fs=require("fs");fs.readFileSync(process.env.APP_DATA_DIR+"/state.json");`)
+	capture.Environment["APP_DATA_DIR"] = filepath.Join(root, "data")
+	before := capture.Environment["APP_DATA_DIR"]
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, paths, t.TempDir())
+	if err != nil || len(recovered.Adoption.Blockers) != 0 {
+		t.Fatalf("source-contained path recovery failed: %v", err)
+	}
+	if recovered.Environment["APP_DATA_DIR"] != "/app/data" || recovered.BaselineEnvironment["APP_DATA_DIR"] != before || capture.Environment["APP_DATA_DIR"] != before {
+		t.Fatal("source path translation changed the original environment or baseline")
+	}
+	capture.Environment["APP_DATA_DIR"] = "/unreviewed-host-storage/app"
+	recovered, err = RecoverHostWorkload(t.Context(), candidate, capture, analyzer, paths, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range recovered.Adoption.Issues {
+		found = found || issue.Code == "host_environment_path_unsupported"
+	}
+	if !found {
+		t.Fatal("source-read host path outside the captured tree was silently migrated")
+	}
+}
+
+func TestHostRecoveryBlocksStaticImageForARunningNodeServer(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	writePlanningFixture(t, filepath.Join(root, "package.json"), `{"name":"existing-vite-server","scripts":{"dev":"vite","build":"vite build","start":"vite --host"},"dependencies":{"vite":"7.0.0","react":"19.0.0"}}`)
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range recovered.Adoption.Issues {
+		found = found || issue.Code == "host_runtime_layout_unsupported"
+	}
+	if !found {
+		t.Fatal("a running Node command was accepted for a static nginx recipe")
+	}
+}

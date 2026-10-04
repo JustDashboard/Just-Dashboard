@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,10 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		ServiceCount: candidate.Total, RunningCount: candidate.Running, Warnings: append([]string{}, capture.Warnings...), Blockers: append([]string{}, capture.Blockers...), Issues: []AdoptionIssue{},
 		OriginalSourcePath: capture.SourceDirectory, BaselineDigest: capture.ConfigurationDigest}
 	recovered := &RecoveredWorkload{Adoption: origin, Environment: map[string]string{}}
+	recovered.BaselineEnvironment = make(map[string]string, len(capture.Environment))
+	for name, value := range capture.Environment {
+		recovered.BaselineEnvironment[name] = value
+	}
 	issues := map[string]bool{}
 	block := func(code, message, field string) {
 		key := code + "\x00" + field
@@ -82,6 +87,20 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			block("host_variable_unsupported", "The original environment contains a variable name the managed deployment cannot represent.", "variables")
 			continue
 		}
+		used := false
+		if selected != nil {
+			for _, variable := range selected.Variables {
+				used = used || variable.Name == name
+			}
+		}
+		translated, changed, supported := translateHostEnvironmentPath(value, root)
+		if !supported && used {
+			block("host_environment_path_unsupported", "The application variable "+name+" refers to a host filesystem path outside its captured source. Configure a verified retained mount or a supported container path before migration.", "runtime.mounts")
+		}
+		if changed {
+			value = translated
+			origin.Warnings = append(origin.Warnings, "The application variable "+name+" uses the source's /app container layout. Its original value is retained separately for the native baseline.")
+		}
 		recovered.Environment[name] = value
 		scopes := []string{"runtime"}
 		if selected != nil {
@@ -106,6 +125,9 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			origin.Warnings = append(origin.Warnings, "The Dockerfile must provide the original application's operating-system and interpreter dependencies. Review its entrypoint and user permissions before cutover.")
 		case BuildRecipe:
 			origin.Warnings = append(origin.Warnings, "The managed Node recipe uses the captured interpreter major with the catalogue image's patch version and container operating system. Confirm the application works without host-installed packages, native host dependencies or PM2 IPC before deploying changes; provide a Dockerfile when it needs them.")
+			if selected.Profile == ProfileStatic || strings.TrimSpace(recovered.Configuration.Build.OutputDirectory) != "" {
+				block("host_runtime_layout_unsupported", "The detected recipe creates a static serving image whose files and command differ from this running Node process. Provide a reviewed Dockerfile preserving the original source, interpreter and command before migration.", "build.method")
+			}
 			if selected.Recipe != "node" {
 				block("host_runtime_compatibility_unknown", "Automatic host recovery currently requires a Node recipe or an existing Dockerfile. Other interpreters need a reviewed Dockerfile before migration.", "build.method")
 			}
@@ -137,6 +159,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			}
 			name := prefix + strconv.Itoa(index)
 			recovered.Environment[name] = arg
+			recovered.BaselineEnvironment[name] = capture.Command[index]
 			recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}})
 			args = append(args, `"$`+name+`"`)
 		}
@@ -214,6 +237,49 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	}{capture.ConfigurationDigest, detection.Source.Digest, canonicalSourceConfig(recovered.Source), canonicalConfiguration(recovered.Configuration), recovered.Environment}))
 	origin.BaselineDigest = hex.EncodeToString(baseline[:])
 	return recovered, nil
+}
+
+func translateHostEnvironmentPath(value, root string) (string, bool, bool) {
+	prefix, path, suffix, escaped := "", value, "", false
+	for _, scheme := range []string{"file:", "sqlite:", "sqlite3:"} {
+		if strings.HasPrefix(value, scheme) {
+			parsed, err := url.Parse(value)
+			if err != nil || (parsed.Host != "" && parsed.Host != "localhost") || parsed.User != nil {
+				return value, false, false
+			}
+			path = parsed.EscapedPath()
+			if !filepath.IsAbs(parsed.Path) {
+				clean := filepath.Clean(parsed.Path)
+				return value, false, clean != ".." && !strings.HasPrefix(clean, "../")
+			}
+			start := strings.Index(value[len(scheme):], path)
+			if start < 0 {
+				return value, false, false
+			}
+			start += len(scheme)
+			prefix, suffix = value[:start], value[start+len(path):]
+			path = parsed.Path
+			escaped = true
+			break
+		}
+	}
+	if !filepath.IsAbs(path) {
+		clean := filepath.Clean(path)
+		return value, false, clean != ".." && !strings.HasPrefix(clean, "../")
+	}
+	clean := filepath.Clean(path)
+	if clean != root && !strings.HasPrefix(clean, root+string(filepath.Separator)) {
+		return value, false, clean == "/tmp" || clean == "/var/tmp"
+	}
+	relative, err := filepath.Rel(root, clean)
+	if err != nil {
+		return value, false, false
+	}
+	containerPath := filepath.Join("/app", relative)
+	if escaped {
+		containerPath = (&url.URL{Path: containerPath}).EscapedPath()
+	}
+	return prefix + containerPath + suffix, true, true
 }
 
 func selectedHostRecoveryCandidate(detection DetectionResult) *DetectedCandidate {
