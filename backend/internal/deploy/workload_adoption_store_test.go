@@ -160,3 +160,78 @@ func TestWorkloadAdoptionFailureLeavesNoProjectOrLiveRelease(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkloadAdoptionUnchangedRecipeHasNoPendingChanges(t *testing.T) {
+	fixture := newPlanningStoreFixture(t)
+	recovered := recoveredStoreFixture(t)
+	recovered.Configuration.Runtime.ComposeProjectName = "original-stack"
+	recovered.Adoption.BaselineConfiguration = recovered.Configuration
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "unchanged-import", Profile: ProfileCompose}, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft = checkRecoveredDraft(t, fixture, draft)
+	ack := []string{}
+	for _, finding := range draft.Findings {
+		if finding.Severity == PreflightWarning {
+			ack = append(ack, finding.Code)
+		}
+	}
+	result, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision, AcknowledgedWarnings: ack})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := fixture.plans.PendingState(t.Context(), result.ProjectID, result.EnvironmentID)
+	if err != nil || pending.Pending {
+		t.Fatalf("pending=%+v err=%v", pending, err)
+	}
+	config, err := fixture.plans.EnvironmentConfiguration(t.Context(), result.ProjectID, result.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := fixture.plans.SaveEnvironmentConfiguration(t.Context(), result.ProjectID, result.EnvironmentID, ConfigurationWriteRequest{Revision: config.Revision, Build: config.Build, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst}, Dependencies: config.Dependencies, Checks: config.Checks, Domains: config.Domains})
+	if err != nil || saved.Runtime.ComposeProjectName != "original-stack" {
+		t.Fatalf("lost project identity: %+v %v", saved, err)
+	}
+	foreign := saved.Runtime
+	foreign.ComposeProjectName = "another-app"
+	if _, err := fixture.plans.SaveEnvironmentConfiguration(t.Context(), result.ProjectID, result.EnvironmentID, ConfigurationWriteRequest{Revision: saved.Revision, Build: saved.Build, Runtime: foreign, Dependencies: saved.Dependencies}); !errors.Is(err, ErrInvalidPlan) {
+		t.Fatalf("claimed another stack: %v", err)
+	}
+}
+
+func TestWorkloadAdoptionReviewChecksRemainDesiredUntilDeploy(t *testing.T) {
+	fixture := newPlanningStoreFixture(t)
+	recovered := recoveredStoreFixture(t)
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "edited-check-import", Profile: ProfileCompose}, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := *draft.Data.Configuration
+	configuration.Checks = []PlannedCheck{{Name: "new-readiness", Kind: "http", Phase: "readiness", Required: true, Config: json.RawMessage(`{"path":"/health"}`)}}
+	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft = checkRecoveredDraft(t, fixture, draft)
+	ack := []string{}
+	for _, finding := range draft.Findings {
+		if finding.Severity == PreflightWarning {
+			ack = append(ack, finding.Code)
+		}
+	}
+	result, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision, AcknowledgedWarnings: ack})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := fixture.plans.PendingState(t.Context(), result.ProjectID, result.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range pending.Changes {
+		if change.Kind == "check" {
+			return
+		}
+	}
+	t.Fatalf("review falsely rewrote live checks: %+v", pending)
+}

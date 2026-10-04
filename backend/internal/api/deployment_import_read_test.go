@@ -76,6 +76,11 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 		s.modules.docker.Close()
 	}
 	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
+	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning)
+	s.modules.deployPreflight = deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker)
+	s.modules.deployRuntime = deploy.NewDockerRuntimeOwner(s.modules.docker)
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd)
 	listener, err := net.Listen("tcp", "127.0.0.1:44119")
 	if err != nil {
 		t.Fatal(err)

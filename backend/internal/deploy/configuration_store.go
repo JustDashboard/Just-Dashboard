@@ -1328,6 +1328,22 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if current != request.Revision {
 		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
 	}
+	var originalRuntimeJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT config_json FROM deploy_runtime_plans WHERE environment_id=? AND revision=?`, environmentID, current).Scan(&originalRuntimeJSON); err != nil {
+		return nil, err
+	}
+	var originalRuntime RuntimePlanConfig
+	if json.Unmarshal([]byte(originalRuntimeJSON), &originalRuntime) != nil {
+		return nil, fmt.Errorf("%w: desired runtime configuration is malformed", ErrInvalidPlan)
+	}
+	if configuration.Runtime.ComposeProjectName != "" && configuration.Runtime.ComposeProjectName != originalRuntime.ComposeProjectName {
+		return nil, fmt.Errorf("%w: the original Compose project identity cannot be changed through settings", ErrInvalidPlan)
+	}
+	configuration.Runtime.ComposeProjectName = originalRuntime.ComposeProjectName
+	configuration.Dependencies, err = retainRuntimeOwnershipTx(ctx, tx, environmentID, configuration.Dependencies)
+	if err != nil {
+		return nil, err
+	}
 	if sourceKind.String == string(SourceImport) {
 		var source DraftSourceConfig
 		if json.Unmarshal([]byte(sourceConfig.String), &source) != nil {
@@ -1752,4 +1768,47 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 		})
 	}
 	return changes
+}
+
+// Settings control deployable inputs, not the identity reserved by migration.
+// Preserve that server-owned relationship even when a client omits it.
+func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int64, requested []PlannedDependency) ([]PlannedDependency, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND kind='runtime' ORDER BY resource_kind,resource_id`, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	originals := []PlannedDependency{}
+	for rows.Next() {
+		var dependency PlannedDependency
+		var config string
+		if err := rows.Scan(&dependency.Kind, &dependency.Ownership, &dependency.ResourceKind, &dependency.ResourceID, &config); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		dependency.Config = json.RawMessage(config)
+		originals = append(originals, dependency)
+	}
+	readErr := rows.Err()
+	rows.Close()
+	if readErr != nil {
+		return nil, readErr
+	}
+	result := []PlannedDependency{}
+	for _, dependency := range requested {
+		if dependency.Kind != "runtime" {
+			result = append(result, dependency)
+			continue
+		}
+		valid := false
+		for _, original := range originals {
+			if string(mustJSON(dependency)) == string(mustJSON(original)) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return nil, fmt.Errorf("%w: runtime ownership cannot be changed through settings", ErrInvalidPlan)
+		}
+	}
+	return append(result, originals...), nil
 }

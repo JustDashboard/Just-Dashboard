@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -117,13 +118,13 @@ func (s *Server) discoverWorkloads(ctx context.Context) (*deploy.WorkloadDiscove
 				candidate.ConfigurationAvailable = statErr == nil && info.Mode().IsRegular()
 			}
 			if !candidate.ConfigurationAvailable {
-				candidate.Warnings = append(candidate.Warnings, "The original source or configuration file is missing or outside deployment roots. Monitoring can still be imported.")
+				candidate.Warnings = append(candidate.Warnings, "The original source or configuration file is missing or outside deployment roots. Recovery will check whether a complete deployment recipe can be reconstructed.")
 			}
 		}
 		candidate.Digest = deploy.WorkloadDigest(*candidate)
 	}
 	if s.Store != nil {
-		rows, err := s.Store.DB.QueryContext(ctx, `SELECT e.project_id,d.resource_kind,d.resource_id,d.config_json FROM deploy_dependencies d JOIN deploy_environments e ON e.id=d.environment_id WHERE d.kind='runtime' AND d.ownership='observed' AND d.release_id=0`)
+		rows, err := s.Store.DB.QueryContext(ctx, `SELECT e.project_id,d.resource_kind,d.resource_id,d.config_json FROM deploy_dependencies d JOIN deploy_environments e ON e.id=d.environment_id WHERE d.kind='runtime' AND d.ownership IN ('observed','managed') AND d.release_id=0`)
 		if err != nil && ctx.Err() == nil {
 			return nil, err
 		}
@@ -479,4 +480,116 @@ func workloadImportResource(kind string) (string, deploy.SourceMode) {
 	default:
 		return "", ""
 	}
+}
+
+// recoverWorkload never changes the original runtime. Capture errors are kept
+// behind a safe message because manager responses can contain credentials.
+func (s *Server) recoverWorkload(ctx context.Context, candidate *deploy.WorkloadCandidate) (*deploy.RecoveredWorkload, error) {
+	root := filepath.Join(s.Cfg.DataDir, "deployment-recovery")
+	paths := files.New(s.Cfg.DeployRoots)
+	switch candidate.Kind {
+	case "stack", "container":
+		if s.modules.docker == nil {
+			return nil, deploy.ErrSourceUnavailable
+		}
+		return deploy.RecoverDockerWorkload(ctx, *candidate, s.modules.docker, paths, root)
+	default:
+		capture, err := s.captureHostWorkload(ctx, candidate)
+		if err != nil {
+			return nil, err
+		}
+		return deploy.RecoverHostWorkload(ctx, *candidate, capture, s.modules.deploySources, paths, root)
+	}
+}
+
+func (s *Server) captureHostWorkload(ctx context.Context, candidate *deploy.WorkloadCandidate) (*procs.HostWorkloadCapture, error) {
+	switch candidate.Kind {
+	case "pm2":
+		if s.modules.pm2 == nil {
+			return nil, deploy.ErrSourceUnavailable
+		}
+		parts := strings.Split(candidate.ResourceID, "/")
+		if len(parts) != 3 {
+			return nil, deploy.ErrInvalidPlan
+		}
+		for i := range parts {
+			value, err := url.PathUnescape(parts[i])
+			if err != nil {
+				return nil, deploy.ErrInvalidPlan
+			}
+			parts[i] = value
+		}
+		return s.modules.pm2.CaptureExisting(ctx, parts[0], parts[1], parts[2])
+	case "systemd":
+		if s.modules.systemd == nil {
+			return nil, deploy.ErrSourceUnavailable
+		}
+		return s.modules.systemd.CaptureExisting(ctx, candidate.ResourceID)
+	case "process":
+		if len(candidate.Services) != 1 {
+			return nil, deploy.ErrInvalidPlan
+		}
+		service := candidate.Services[0]
+		return procs.CaptureExistingProcess(ctx, service.PID, service.CreatedAt)
+	default:
+		return nil, deploy.ErrInvalidPlan
+	}
+}
+
+func recoveryError(recovered *deploy.RecoveredWorkload, err error) error {
+	if errors.Is(err, deploy.ErrRecoveryBlocked) && recovered != nil && recovered.Adoption != nil {
+		return httpx.Err(http.StatusUnprocessableEntity, "recovery_blocked", strings.Join(recovered.Adoption.Blockers, "\n"))
+	}
+	if errors.Is(err, procs.ErrHostWorkloadChanged) {
+		return httpx.Err(http.StatusConflict, "workload_changed", "The workload changed during recovery. Inspect it again.")
+	}
+	return httpx.Err(http.StatusUnprocessableEntity, "recovery_unavailable", "The current configuration could not be captured safely. Check access to its original manager, files and local images, then inspect it again.")
+}
+
+func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.Request) error {
+	var request struct {
+		Key    string `json:"key"`
+		Name   string `json:"name"`
+		Digest string `json:"digest"`
+	}
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		return err
+	}
+	if request.Key == "" || len(request.Key) > 1024 || len(request.Digest) != 64 {
+		return httpx.BadRequest("an inspected workload key and digest are required")
+	}
+	candidate, err := s.importedWorkload(r.Context(), request.Key)
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	if candidate.Digest != request.Digest {
+		return httpx.Err(http.StatusConflict, "workload_changed", "The workload changed since inspection. Inspect it again before recovering it.")
+	}
+	if candidate.ImportedProjectID != 0 {
+		return httpx.Err(http.StatusConflict, "workload_already_imported", "This workload is already imported. Open its existing deployment.")
+	}
+	recovered, err := s.recoverWorkload(r.Context(), candidate)
+	if err != nil {
+		return recoveryError(recovered, err)
+	}
+	profile := deploy.ProfileService
+	if recovered.Detection.SelectedID != "" {
+		for _, item := range recovered.Detection.Candidates {
+			if item.ID == recovered.Detection.SelectedID {
+				profile = item.Profile
+				break
+			}
+		}
+	}
+	principal := httpx.MustPrincipal(r)
+	draft, err := s.modules.deployPlanning.CreateRecoveredDraft(r.Context(), principal.UserID(), principal.Username(), deploy.DraftIntentConfig{Name: request.Name, Profile: profile}, recovered)
+	if errors.Is(err, deploy.ErrWorkloadAlreadyImported) {
+		return httpx.Err(http.StatusConflict, "workload_already_imported", "This workload is already imported. Open its existing deployment.")
+	}
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	httpx.SetAudit(r, "deploy.import.recover", candidate.ResourceID, map[string]any{"kind": candidate.Kind, "draftId": draft.ID, "services": candidate.Total})
+	httpx.JSON(w, http.StatusCreated, draft)
+	return nil
 }

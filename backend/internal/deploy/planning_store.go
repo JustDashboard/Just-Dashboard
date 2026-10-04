@@ -704,6 +704,11 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: configuration step requires only configuration data", ErrInvalidPlan)
 		}
 		copy := canonicalConfiguration(*request.Configuration)
+		for _, dependency := range copy.Dependencies {
+			if dependency.Kind == "runtime" {
+				return nil, fmt.Errorf("%w: runtime ownership is assigned only by recovery", ErrInvalidPlan)
+			}
+		}
 		if draft.Data.Adoption != nil {
 			copy.Runtime.ComposeProjectName = draft.Data.Adoption.BaselineConfiguration.Runtime.ComposeProjectName
 		} else if copy.Runtime.ComposeProjectName != "" {

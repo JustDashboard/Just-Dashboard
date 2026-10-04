@@ -372,6 +372,7 @@ func (e *NormalizedStepExecutor) analyzePlan(
 			return normalizedStepFailure(runtimeErr)
 		}
 		deployment.RuntimeID, deployment.RuntimeKind = runtime.RuntimeID, runtime.Kind
+		deployment.RuntimeMetadata = runtime.Metadata
 	} else if !errors.Is(liveErr, ErrArtifactMissing) {
 		return normalizedStepFailure(liveErr)
 	}

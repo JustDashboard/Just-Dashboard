@@ -166,6 +166,7 @@ func TestWorkloadImportRoutesRequireAdministratorSession(t *testing.T) {
 	for _, item := range []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/deploy/import/discovery", ""},
 		{http.MethodPost, "/api/v1/deploy/import/inspect", `{"key":"container:any"}`},
+		{http.MethodPost, "/api/v1/deploy/import/recover", `{"key":"container:any","name":"app","digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
 		{http.MethodPost, "/api/v1/deploy/import/register", `{"key":"container:any","name":"app","digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
 	} {
 		response := reader.do(item.method, item.path, item.body, nil)

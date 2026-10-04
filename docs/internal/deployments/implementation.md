@@ -121,7 +121,11 @@ only renderer/executor/validation authority for their feature.
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
   is re-detected rather than refused. `?mode=advanced` opens Advanced, and legacy existing-checkout
   imports adopt through `/deploy/import/adopt` without a run. Existing runtime workloads use the
-  discovery/review flow at `/deploy/import` and register through `/deploy/import/register`.
+  discovery/recovery flow at `/deploy/import`, then normal Configure/Variables/Review.
+  `/deploy/import/recover` creates a server-owned draft; `/deploy/import/adopt` records a pinned
+  original live baseline and reviewed desired plan without enqueueing a run. See
+  [existing workload adoption](existing-workloads.md) for translation and compensation boundaries.
+  `/deploy/import/register` remains the legacy observation-only endpoint.
   For a Git source the commit carries a `gitPolicy`
   (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
   `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so

@@ -102,6 +102,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
 				r.Method(http.MethodGet, "/import/discovery", s.handle(s.handleDeploymentWorkloadDiscovery))
 				r.Method(http.MethodPost, "/import/inspect", s.handle(s.handleDeploymentWorkloadInspect))
+				r.Method(http.MethodPost, "/import/recover", s.handle(s.handleDeploymentWorkloadRecover))
 				r.Method(http.MethodPost, "/import/register", s.handle(s.handleDeploymentWorkloadRegister))
 				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
@@ -879,11 +880,7 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 			return nil, deploy.ErrAlreadyStopped
 		}
 		if operation == deploy.OperationStart && runtime.State != "stopped" {
-			var observer deploy.RuntimeObserver
-			if s.modules.docker != nil {
-				observer = s.modules.docker
-			}
-			if runtime.State != "live" || !deploy.ReleaseRuntimeDown(ctx, observer, *runtime) {
+			if runtime.State != "live" || !deploy.ReleaseRuntimeDown(ctx, s.deploymentRuntimeObserver(), *runtime) {
 				return nil, deploy.ErrNotStopped
 			}
 		}

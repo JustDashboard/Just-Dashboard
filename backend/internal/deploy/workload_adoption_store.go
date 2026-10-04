@@ -217,7 +217,7 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 	 VALUES(?,0,'runtime','managed',?,?,?,?)`, environmentID, dependency.ResourceKind, dependency.ResourceID, string(dependency.Config), now.Unix()); err != nil {
 		return err
 	}
-	if err := snapshotRunPlanInputsTx(ctx, tx, runID, environmentID, 0, now); err != nil {
+	if err := snapshotAdoptionPlanInputsTx(ctx, tx, runID, environmentID, configuration, dependency, now); err != nil {
 		return err
 	}
 	var planDigest string
@@ -303,5 +303,55 @@ func (s *PlanningStore) snapshotAdoptionVariablesTx(ctx context.Context, tx *sql
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE deploy_variable_revisions SET active=1 WHERE environment_id=? AND revision=1`, environmentID)
+	return err
+}
+
+// The live baseline must describe the original checks and dependencies, even
+// when the operator edits the desired configuration during migration review.
+func snapshotAdoptionPlanInputsTx(ctx context.Context, tx *sql.Tx, runID, environmentID int64, configuration PlanConfiguration, ownership PlannedDependency, now time.Time) error {
+	dependencies := append([]PlannedDependency(nil), configuration.Dependencies...)
+	dependencies = append(dependencies, ownership)
+	for _, domain := range configuration.Domains {
+		config := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
+		if domain.Protection != nil {
+			config["protection"] = domain.Protection
+		}
+		dependencies = append(dependencies, PlannedDependency{Kind: "domain", Ownership: domain.Ownership, ResourceKind: "proxy_site", ResourceID: domain.Hostname, Config: mustJSON(config)})
+	}
+	sort.SliceStable(dependencies, func(i, j int) bool {
+		a, b := dependencies[i], dependencies[j]
+		if a.Kind != b.Kind {
+			return a.Kind < b.Kind
+		}
+		if a.ResourceKind != b.ResourceKind {
+			return a.ResourceKind < b.ResourceKind
+		}
+		return a.ResourceID < b.ResourceID
+	})
+	encodedDependencies, encodedChecks := []json.RawMessage{}, []json.RawMessage{}
+	for _, dependency := range dependencies {
+		config := dependency.Config
+		if len(config) == 0 {
+			config = json.RawMessage(`{}`)
+		}
+		var encoded string
+		if err := tx.QueryRowContext(ctx, `SELECT json_object('kind', ?, 'ownership', ?, 'resourceKind', ?, 'resourceId', ?, 'config', json(?))`, dependency.Kind, dependency.Ownership, dependency.ResourceKind, dependency.ResourceID, string(config)).Scan(&encoded); err != nil {
+			return err
+		}
+		encodedDependencies = append(encodedDependencies, json.RawMessage(encoded))
+	}
+	for _, check := range configuration.Checks {
+		config := check.Config
+		if len(config) == 0 {
+			config = json.RawMessage(`{}`)
+		}
+		var encoded string
+		if err := tx.QueryRowContext(ctx, `SELECT json_object('name', ?, 'kind', ?, 'phase', ?, 'config', json(?), 'required', json(CASE WHEN ? <> 0 THEN 'true' ELSE 'false' END))`, check.Name, check.Kind, check.Phase, string(config), boolInt(check.Required)).Scan(&encoded); err != nil {
+			return err
+		}
+		encodedChecks = append(encodedChecks, json.RawMessage(encoded))
+	}
+	deps, checks := mustJSON(encodedDependencies), mustJSON(encodedChecks)
+	_, err := tx.ExecContext(ctx, `INSERT INTO deploy_run_plan_snapshots(run_id,environment_id,dependencies_json,checks_json,digest,copied_from_run_id,created_at) VALUES(?,?,?,?,?,0,?)`, runID, environmentID, string(deps), string(checks), digestBytes(deps, checks), now.Unix())
 	return err
 }

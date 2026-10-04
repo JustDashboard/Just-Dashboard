@@ -125,14 +125,15 @@ type ObservationRequest struct {
 	// ExistingProxySite is the deployment-owned route being replaced. It is
 	// excluded from conflict detection while every other matching site remains
 	// a hard ownership conflict.
-	ExistingProxySite   string
-	ExistingRuntimeID   string
-	ExistingRuntimeKind string
-	Paths               []string
-	Ports               []PortObservation
-	Domains             []PlannedDomain
-	Dependencies        []PlannedDependency
-	NeedsFirewall       bool
+	ExistingProxySite       string
+	ExistingRuntimeID       string
+	ExistingRuntimeKind     string
+	ExistingRuntimeMetadata json.RawMessage
+	Paths                   []string
+	Ports                   []PortObservation
+	Domains                 []PlannedDomain
+	Dependencies            []PlannedDependency
+	NeedsFirewall           bool
 	// DatabaseExtensions are the schema extensions detection says a linked
 	// PostgreSQL must offer; only then is each linked server asked.
 	DatabaseExtensions []string
@@ -531,6 +532,10 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 		Domains:      append([]PlannedDomain(nil), configuration.Domains...),
 		Dependencies: append([]PlannedDependency(nil), configuration.Dependencies...),
 	}
+	if adoption := draft.Data.Adoption; adoption != nil {
+		request.ExistingRuntimeID, request.ExistingRuntimeKind = adoption.Runtime.RuntimeID, adoption.Runtime.Kind
+		request.ExistingRuntimeMetadata = adoption.Runtime.Metadata
+	}
 	if source.LocalPath != "" {
 		request.Paths = append(request.Paths, source.LocalPath)
 	}
@@ -586,6 +591,25 @@ func preflightFindings(
 	advancedAllowed bool,
 ) []PreflightFinding {
 	findings := []PreflightFinding{}
+	if adoption := draft.Data.Adoption; adoption != nil {
+		for index, message := range adoption.Warnings {
+			findings = append(findings, finding(fmt.Sprintf("adoption_warning_%d", index+1), PreflightWarning,
+				"Review recovered runtime behavior", message,
+				"Import registers the current runtime. A later Deploy applies the reviewed recipe and may restart services.",
+				"Review this limitation before adopting the workload.", "deploy", "adoption"))
+		}
+		for index, message := range adoption.Blockers {
+			findings = append(findings, finding(fmt.Sprintf("adoption_blocked_%d", index+1), PreflightBlocked,
+				"Recovery has an unresolved limitation", message, "A complete replacement cannot yet be reproduced safely.",
+				"Resolve the original configuration and inspect again.", "deploy", "adoption"))
+		}
+	}
+	if facility, ok := observation.Facilities["native-runtime"]; ok && !facility.Available {
+		findings = append(findings, finding("native_runtime_changed", PreflightBlocked,
+			"Original runtime ownership could not be verified", facility.Detail,
+			"Stopping or reusing an unverified runtime would put another application at risk.",
+			"Inspect the original workload again or restore its captured manager configuration.", "deploy", "adoption"))
+	}
 	detection := draft.Data.Detection
 	if detection.Unavailable != "" {
 		findings = append(findings, finding("source_unavailable", PreflightUnavailable,
