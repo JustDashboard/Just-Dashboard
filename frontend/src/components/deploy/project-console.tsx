@@ -3,16 +3,13 @@
 import { get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import type { ContainerDetail } from "@/lib/types"
-import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { ArrowRight, Slash, Terminal, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { Pane, PaneFooter } from "@/components/panel"
-import { Toolbar } from "@/components/page"
 import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -20,21 +17,9 @@ import { Tag } from "@/components/tag"
 import { XtermPane } from "@/components/xterm-pane"
 import { Button } from "@/components/ui/button"
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  type ConsoleChoice,
-  RUN_AS,
-  SHELLS,
+  DEFAULT_CHOICE,
   execQuery,
   healthReading,
-  readChoice,
-  readRunAs,
-  readShell,
   restartsLabel,
   runsAsRoot,
 } from "@/components/deploy/console-session"
@@ -67,7 +52,7 @@ export function ProjectConsole() {
 /**
  * The shell, as one working region sized to the window: a single 40px strip
  * says what it is inside — the container drawn as its product, its name and
- * which release it belongs to, and the switch to another container — and the
+ * which release it belongs to — and the
  * terminal takes the rest. Two strips stacked before the first line of output
  * were 76px of chrome on a phone.
  *
@@ -79,32 +64,12 @@ function DockerConsole() {
   const { can } = useAuth()
   const project = useProject()
   const search = useSearchParams()
-  // The selectors leave the strip until the content column can hold them
-  // beside the name: below this, with the sidebar open, they crushed the one
-  // thing saying which container this is to nothing.
-  const wide = useMediaQuery("(min-width: 1280px)")
   const { runtime, deployment } = project.detail
   const services = runtime?.status === "available" ? runtime.services : []
   const running = services.filter((service) => service.state === "running")
   const preferred = running.find((service) => service.liveRelease) ?? running[0]
-  const [selected, setSelected] = useSessionState<string | undefined>(
-    `deploy.${project.projectId}.console.service`,
-    undefined,
-    search.get("service"),
-  )
+  const selected = search.get("service")
   const service = running.find((item) => item.containerId === selected) ?? preferred
-  // Per container: bash is the image's to have, so a choice made for one
-  // container must not follow the switch into another that has no such shell.
-  const [choices, setChoices] = useSessionState<Record<string, Partial<ConsoleChoice>>>(
-    `deploy.${project.projectId}.console.session`,
-    {},
-  )
-  const choice = readChoice(service && choices[service.containerId])
-  const choose = (next: Partial<ConsoleChoice>) => {
-    if (!service) return
-    const id = service.containerId
-    setChoices((all) => ({ ...all, [id]: { ...readChoice(all[id]), ...next } }))
-  }
   // The restart count and the image's user are not on the runtime list; they
   // are the container's own, and the strip says what it shows without them.
   const containerId = service?.containerId
@@ -160,79 +125,20 @@ function DockerConsole() {
     )
   }
 
-  // Chosen from the strip or, where the strip has no room, the toolbar above
-  // it. The selects are named by what they set, in the trigger itself, because
-  // "bash" and "root" alone do not say which question they answer.
-  const controls = (
-    <>
-      <Select value={choice.shell} onValueChange={(value) => choose({ shell: readShell(value) })}>
-        <SelectTrigger size="sm" className="w-full sm:w-32" aria-label="Shell">
-          <span className="text-muted-foreground">Shell</span>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {SHELLS.map((shell) => (
-            <SelectItem key={shell.id} value={shell.id}>
-              {shell.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select value={choice.runAs} onValueChange={(value) => choose({ runAs: readRunAs(value) })}>
-        <SelectTrigger size="sm" className="w-full sm:w-44" aria-label="Run as">
-          <span className="text-muted-foreground">Run as</span>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {RUN_AS.map((one) => (
-            <SelectItem key={one.id} value={one.id}>
-              {one.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {running.length > 1 && (
-        <Select value={service.containerId} onValueChange={setSelected}>
-          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Console container">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {running.map((item) => {
-              // The release's number, as Runtime's switch says it: "live" beside
-              // every container of the live release told them apart by nothing.
-              const number = releaseNumber(item.releaseId)
-              return (
-                <SelectItem
-                  key={item.containerId}
-                  value={item.containerId}
-                  hint={number !== undefined ? `#${number}` : undefined}
-                >
-                  <ProductGlyph id={product(item.image)} />
-                  <span className="truncate">{item.service || item.name}</span>
-                </SelectItem>
-              )
-            })}
-          </SelectContent>
-        </Select>
-      )}
-    </>
-  )
-
   const health = healthReading(service.health)
   const started = relativeTime(service.startedAt)
   const number = releaseNumber(service.releaseId)
-  const root = runsAsRoot(choice.runAs, detail?.user)
+  const root = runsAsRoot(DEFAULT_CHOICE.runAs, detail?.user)
 
   return (
     <div className="space-y-3">
-      {!wide && <Toolbar>{controls}</Toolbar>}
       <Pane className={CONSOLE_HEIGHT}>
         <XtermPane
-          // A new shell or user is a new session, so the old screen goes with it.
-          key={`${service.containerId}:${choice.shell}:${choice.runAs}`}
+          key={service.containerId}
           flush
+          minimalToolbar
           path={`/docker/containers/${service.containerId}/exec`}
-          query={execQuery(choice)}
+          query={execQuery(DEFAULT_CHOICE)}
           className="min-h-0 flex-1"
           headerContent={
             <>
@@ -252,12 +158,7 @@ function DockerConsole() {
                 className="mx-1.5 max-sm:hidden"
               />
               {root && <Tag tone="warning">root</Tag>}
-              <span
-                className={cn(
-                  "mx-1.5 flex items-center gap-3 text-xs whitespace-nowrap text-muted-foreground",
-                  wide ? "max-2xl:hidden" : "max-md:hidden",
-                )}
-              >
+              <span className="mx-1.5 flex items-center gap-3 text-xs whitespace-nowrap text-muted-foreground max-md:hidden">
                 {health && <Status tone={health.tone} label={health.label} />}
                 {started !== "—" && <span className="numeric">Started {started}</span>}
                 {detail && (
@@ -266,9 +167,6 @@ function DockerConsole() {
                   </span>
                 )}
               </span>
-              {wide && (
-                <span className="ml-auto flex shrink-0 items-center gap-1.5 pr-1">{controls}</span>
-              )}
             </>
           }
         />

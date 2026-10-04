@@ -444,8 +444,10 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   usage tiles, domains with their issuer and days left, storage beside backups from `xl`,
   dependencies linking to the backup job or connection they name, and usage history last. Each
   join that fails leaves its block saying so in its header. The Docker console is one strip over a
-  pane sized to the window; a game server's three pages carry one line under the header with the
-  join address, the edition and how many are online, its console is a transcript with players in
+  pane sized to the window, with only Terminal actions and fullscreen in its toolbar. It opens the
+  automatic shell as the image's user; Runtime's Console action selects another service. A game
+  server's three pages carry one line under the header with the join address, the edition and how
+  many are online, its console is a transcript with players in
   their own colours, and its server settings are a railed form saved from the settings pages'
   floating bar.
 - **Settings.** All nine are rail forms (`settings/setting-card.tsx`), with a pending strip that no
