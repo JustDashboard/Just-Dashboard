@@ -140,6 +140,11 @@ ownership and permission fences. Already reviewed linked data and excluded priva
 outside the source digest. Changed source blocks stop-first cutover and baseline restart/rollback
 before manager control; restore the captured source or use a separate managed checkout for new code.
 This avoids claiming a restart of modified original files is an immutable release restoration.
+Before adoption, known runtime-source edits later than the active process birth time block recovery,
+including module edits while the entrypoint remains unchanged. The comparison allows two seconds
+for procfs/filesystem clock precision and excludes reviewed data/private paths. A filesystem snapshot
+cannot attest every in-memory module, backdated file or dynamic setting: verify the actual running
+source and startup authority, restoring or reviewing a restart under the original manager when needed.
 Port reuse requires a freshly verified listener PID and creation time,
 not just a matching port number. The stop-first deployment path uses the normal readiness, activation
 and compensation engine. A failed replacement restores the retained original baseline; native

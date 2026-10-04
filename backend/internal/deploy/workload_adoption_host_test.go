@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
@@ -74,7 +75,7 @@ func hostRecoveryFixture(t *testing.T) (string, *HostSourceAnalyzer, WorkloadCan
 	}
 	analyzer := NewHostSourceAnalyzer([]string{root}, nil, t.TempDir(), nil, nil)
 	candidate := WorkloadCandidate{Key: "pm2:alice/default/api", Kind: "pm2", ResourceID: "alice/default/api", Name: "api", Running: 1, Total: 1, Digest: "fresh-discovery", Services: []WorkloadService{{Name: "api", Ports: []dockerx.PortMapping{{HostIP: "127.0.0.1", HostPort: 3000, ContainerPort: 3000, Protocol: "tcp"}}}}}
-	capture := &procs.HostWorkloadCapture{Manager: "pm2", ResourceID: candidate.ResourceID, Name: "api", Account: "alice", UID: 1000, GID: 1001, SourceDirectory: root, SourcePath: filepath.Join(root, "server.js"), InterpreterVersion: "24.12.0", ConfigurationDigest: "fresh-config", Environment: map[string]string{"PORT": "3000", "TOKEN": "private-production-value"}, EnvironmentNames: []string{"PORT", "TOKEN"}, Command: []string{"/usr/local/bin/node", filepath.Join(root, "server.js")}, Processes: []procs.HostProcessCapture{{ID: 7, PID: 123, State: "online", LogSources: []string{"pm2:alice/7/api"}}}}
+	capture := &procs.HostWorkloadCapture{Manager: "pm2", ResourceID: candidate.ResourceID, Name: "api", Account: "alice", UID: 1000, GID: 1001, SourceDirectory: root, SourcePath: filepath.Join(root, "server.js"), InterpreterVersion: "24.12.0", ConfigurationDigest: "fresh-config", Environment: map[string]string{"PORT": "3000", "TOKEN": "private-production-value"}, EnvironmentNames: []string{"PORT", "TOKEN"}, Command: []string{"/usr/local/bin/node", filepath.Join(root, "server.js")}, Processes: []procs.HostProcessCapture{{ID: 7, PID: 123, CreateTime: time.Now().UnixMilli(), State: "online", LogSources: []string{"pm2:alice/7/api"}}}}
 	return root, analyzer, candidate, capture
 }
 
@@ -375,5 +376,37 @@ func TestHostRecoveryBlocksStaticImageForARunningNodeServer(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("a running Node command was accepted for a static nginx recipe")
+	}
+}
+
+func TestHostRecoveryRefusesClearlyNewerLoadedModuleWithUnchangedEntrypoint(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	if err := os.Mkdir(filepath.Join(root, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	data := filepath.Join(root, "data", "mutable.json")
+	module := filepath.Join(root, "loaded-module.js")
+	writePlanningFixture(t, data, `{"mutable":true}`)
+	writePlanningFixture(t, module, "module.exports = 'changed since start'")
+	newer := time.UnixMilli(capture.Processes[0].CreateTime).Add(10 * time.Second)
+	if err := os.Chtimes(data, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+	if drift, err := knownHostSourceDrift(t.Context(), root, capture, []string{"data"}); err != nil || drift {
+		t.Fatal("linked data writes were mistaken for loaded-code drift")
+	}
+	if err := os.Chtimes(module, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range recovered.Adoption.Issues {
+		found = found || issue.Code == "host_running_source_changed"
+	}
+	if !found {
+		t.Fatal("newer loaded module was accepted as the currently running source")
 	}
 }

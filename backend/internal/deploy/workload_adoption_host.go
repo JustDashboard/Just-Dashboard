@@ -11,8 +11,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
@@ -60,6 +62,13 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		return recovered, nil
 	}
 	recovered.Detection = detection
+	drift, driftErr := knownHostSourceDrift(ctx, root, capture, recovered.Source.ExcludePaths)
+	if driftErr != nil {
+		block("host_running_source_unverified", "The current source cannot be verified against a running process. Review its current startup source under the original manager before migration.", "source.localPath")
+	} else if drift {
+		block("host_running_source_changed", "Runtime source files changed after this application started. Its loaded code can differ from the captured files. Restore and review the actual running source, or verify the reviewed source by restarting under its original manager before recovery.", "source.localPath")
+	}
+	origin.Warnings = append(origin.Warnings, "A filesystem snapshot cannot prove every module loaded in memory matches the current files, or recover dynamic in-memory settings. Confirm this is the source and startup configuration the original manager should restore; preserved/backdated timestamps require that same review.")
 	recovered.Configuration = configurationFromDetection(detection)
 	recovered.Configuration.Build.Secrets = []BuildSecretConfig{}
 	recovered.Configuration.Build.ReleaseTasks = []ReleaseTaskConfig{}
@@ -237,6 +246,70 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	}{capture.ConfigurationDigest, detection.Source.Digest, canonicalSourceConfig(recovered.Source), canonicalConfiguration(recovered.Configuration), recovered.Environment}))
 	origin.BaselineDigest = hex.EncodeToString(baseline[:])
 	return recovered, nil
+}
+
+// Procfs birth timestamps and filesystem wall-clock timestamps have different
+// precision. Only clear edits beyond that uncertainty are treated as known drift.
+const hostSourceClockTolerance = 2 * time.Second
+
+func knownHostSourceDrift(ctx context.Context, root string, capture *procs.HostWorkloadCapture, exclusions []string) (bool, error) {
+	var started int64
+	for _, process := range capture.Processes {
+		if process.PID > 1 && process.CreateTime > 0 && (process.State == "online" || process.State == "launching" || process.State == "active" || process.State == "running") {
+			if started == 0 || process.CreateTime < started {
+				started = process.CreateTime
+			}
+		}
+	}
+	if started == 0 {
+		return false, ErrSourceUnavailable
+	}
+	changed := false
+	check := func(info os.FileInfo) {
+		if info.Mode().IsRegular() && info.ModTime().UnixMilli() > started+hostSourceClockTolerance.Milliseconds() {
+			changed = true
+		}
+	}
+	for path := range capture.SourceFiles {
+		info, err := os.Stat(hostexec.HostPath(path))
+		if err != nil {
+			return false, ErrSourceUnavailable
+		}
+		check(info)
+	}
+	entries := 0
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if walkErr != nil {
+			return ErrSourceUnavailable
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if excludedLocalSourcePath(relative, exclusions) || privateSourceEntry(entry.Name()) || (entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".just-dashboard")) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		entries++
+		if entries > (copyTreeLimits{}).normalized().MaxFiles {
+			return ErrSourceUnavailable
+		}
+		switch strings.ToLower(filepath.Ext(entry.Name())) {
+		case ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte", ".json", ".py", ".rb", ".php", ".pl", ".sh", ".go", ".rs", ".jar", ".dll", ".class", ".so", ".pyd", ".wasm":
+			info, err := entry.Info()
+			if err != nil {
+				return ErrSourceUnavailable
+			}
+			check(info)
+		}
+		return nil
+	})
+	return changed, err
 }
 
 func translateHostEnvironmentPath(value, root string) (string, bool, bool) {
