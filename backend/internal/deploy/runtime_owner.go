@@ -462,7 +462,7 @@ func (o *DockerRuntimeOwner) startCompose(
 		if err := configureComposeBaseline(&spec, request.Snapshot.ComposeBaseline); err != nil {
 			return StartedRuntime{}, err
 		}
-		if err := o.removeOwnedBaselineExtras(ctx, project, request.Release.EnvironmentID, request.Snapshot.ComposeBaseline); err != nil {
+		if err := o.removeOwnedBaselineExtras(ctx, project, request.Release.EnvironmentID, request.Snapshot.ComposeBaseline, request.Release.ID, request.Release.PredecessorReleaseID); err != nil {
 			return StartedRuntime{}, err
 		}
 	}

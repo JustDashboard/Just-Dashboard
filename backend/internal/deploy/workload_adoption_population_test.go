@@ -145,3 +145,63 @@ func TestSharedComposeCandidatePopulationRefusalPrecedesEveryStopAndUp(t *testin
 		})
 	}
 }
+
+func TestSharedComposeBaselineExtraCleanupRequiresWholeExpectedReleaseScope(t *testing.T) {
+	previous := populationContainer("previous-extra", "previous_service", 1, 12, 33)
+	previous.State = "exited"
+	candidate := populationContainer("candidate-extra", "candidate_service", 1, 12, 34)
+	candidate.State = "created"
+	foreign := populationContainer("other-release-extra", "other_service", 1, 12, 99)
+	foreign.State = "exited"
+	paused := previous
+	paused.State = "paused"
+	oneoff := foreign
+	oneoff.Labels = map[string]string{}
+	for key, value := range foreign.Labels {
+		oneoff.Labels[key] = value
+	}
+	oneoff.Labels["com.docker.compose.oneoff"] = "True"
+	for _, test := range []struct {
+		name       string
+		containers []dockerx.Container
+		removed    int
+		blocked    bool
+	}{
+		{"previous_release", []dockerx.Container{previous}, 1, false},
+		{"candidate_release", []dockerx.Container{candidate}, 1, false},
+		{"other_release", []dockerx.Container{foreign}, 0, true},
+		{"validate_all_before_removal", []dockerx.Container{previous, foreign}, 0, true},
+		{"paused_runtime", []dockerx.Container{paused}, 0, true},
+		{"true_oneoff", []dockerx.Container{oneoff}, 0, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			removed := 0
+			engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/_ping"):
+					w.Header().Set("API-Version", "1.47")
+				case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/containers/json"):
+					items := []map[string]any{}
+					for _, current := range test.containers {
+						items = append(items, map[string]any{"Id": current.ID, "State": current.State, "Labels": current.Labels})
+					}
+					json.NewEncoder(w).Encode(items)
+				case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/containers/"):
+					removed++
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected Engine request: %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(http.StatusInternalServerError)
+				}
+			}))
+			defer engine.Close()
+			client := dockerx.New(engine.URL)
+			defer client.Close()
+			err := NewDockerRuntimeOwner(client).removeOwnedBaselineExtras(t.Context(), "original", 12, []AdoptedContainer{{Service: "web", Number: 1}}, 34, 33)
+			if errors.Is(err, ErrInvalidPlan) != test.blocked || (err != nil && !test.blocked) || removed != test.removed {
+				t.Fatalf("baseline cleanup escaped expected authority: blocked=%t removed=%d err=%v", test.blocked, removed, err)
+			}
+		})
+	}
+}

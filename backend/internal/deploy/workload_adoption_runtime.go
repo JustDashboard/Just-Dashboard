@@ -265,7 +265,7 @@ func (o *DockerRuntimeOwner) stopSharedComposeRuntime(ctx context.Context, runti
 	return nil
 }
 
-func (o *DockerRuntimeOwner) removeOwnedBaselineExtras(ctx context.Context, project string, environmentID int64, baseline []AdoptedContainer) error {
+func (o *DockerRuntimeOwner) removeOwnedBaselineExtras(ctx context.Context, project string, environmentID int64, baseline []AdoptedContainer, releaseIDs ...int64) error {
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": project, "io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10)})
 	if err != nil {
 		return err
@@ -274,15 +274,25 @@ func (o *DockerRuntimeOwner) removeOwnedBaselineExtras(ctx context.Context, proj
 	for _, entry := range baseline {
 		services[entry.Service] = true
 	}
+	var scope []string
 	for _, current := range containers {
 		if services[current.Labels["com.docker.compose.service"]] || strings.EqualFold(current.Labels["com.docker.compose.oneoff"], "true") {
 			continue
 		}
-		releaseID, _ := strconv.ParseInt(current.Labels["io.just-dashboard.release-id"], 10, 64)
-		if releaseID <= 0 || current.State == "running" {
+		owned := false
+		for _, releaseID := range releaseIDs {
+			if adoptedContainerAuthorized(current, AdoptedContainer{}, ReleaseRuntime{EnvironmentID: environmentID, ReleaseID: releaseID}) {
+				owned = true
+				break
+			}
+		}
+		if !owned || (current.State != "created" && current.State != "exited" && current.State != "dead") {
 			return fmt.Errorf("%w: baseline has an unexpected active or unowned managed service", ErrInvalidPlan)
 		}
-		if err := o.client.RemoveContainer(ctx, current.ID, false, false); err != nil && !errdefs.IsNotFound(err) {
+		scope = append(scope, current.ID)
+	}
+	for _, id := range scope {
+		if err := o.client.RemoveContainer(ctx, id, false, false); err != nil && !errdefs.IsNotFound(err) {
 			return err
 		}
 	}

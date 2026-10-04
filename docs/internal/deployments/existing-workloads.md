@@ -167,6 +167,10 @@ and true Compose one-off containers remain outside the operation; adopted Compos
 Runtime metadata records the included service names. Older metadata derives that scope only from
 captured baseline identities or a complete current match of its recorded container IDs; unavailable
 evidence blocks control rather than guessing a service scope.
+Baseline rollback removes a stopped service added by a managed release only when its labels match
+that candidate or its trusted predecessor release. It validates every such removal before deleting
+the first container, preserves one-off containers and never treats an arbitrary positive release
+label as cleanup authority.
 
 Initial runtime observation joins exact captured Docker IDs without changing their labels. Recreated
 baseline containers are accepted only with the exact environment/release ownership labels and
