@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -76,6 +77,49 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 		s.modules.docker.Close()
 	}
 	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+	// An isolated database still shares the real daemon. Its runtime label
+	// namespace must never overlap an installed deployment's environment.
+	if _, err := s.Store.DB.Exec(`INSERT INTO sqlite_sequence(name,seq) SELECT 'deploy_environments',? WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='deploy_environments')`, time.Now().UnixMicro()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE sqlite_sequence SET seq=? WHERE name='deploy_environments'`, time.Now().UnixMicro()); err != nil {
+		t.Fatal(err)
+	}
+	initialImages, err := s.modules.docker.ListImages(t.Context(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingImages := map[string]bool{}
+	for _, image := range initialImages {
+		existingImages[image.ID] = true
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		// Discard only images created by this temporary capture database. A
+		// production app, volume, original image or pre-existing cache is never
+		// part of fixture cleanup, and removal is never forced.
+		_ = filepath.WalkDir(filepath.Join(s.Cfg.DataDir, "deployment-recovery"), func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil || entry.Name() != "manifest.json" || !entry.Type().IsRegular() {
+				return nil
+			}
+			var manifest struct {
+				ID           string `json:"id"`
+				SourceDigest string `json:"sourceDigest"`
+			}
+			content, err := os.ReadFile(path)
+			if err != nil || len(content) > 8192 || json.Unmarshal(content, &manifest) != nil || existingImages[manifest.ID] {
+				return nil
+			}
+			image, err := s.modules.docker.InspectImage(ctx, manifest.ID)
+			if err == nil && image.ID == manifest.ID && manifest.SourceDigest != "" && image.Labels["io.just-dashboard.adoption-source"] == manifest.SourceDigest {
+				if _, err := s.modules.docker.RemoveImage(ctx, manifest.ID, false, false); err != nil {
+					t.Errorf("remove only the evidence server's recovered image: %v", err)
+				}
+			}
+			return nil
+		})
+	})
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
 	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning)
 	s.modules.deployPreflight = deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker)
