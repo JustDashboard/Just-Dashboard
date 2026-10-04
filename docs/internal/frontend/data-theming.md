@@ -1,5 +1,10 @@
 # Frontend data flow and theming
 
+- Legacy `/deploy/new?source=import` and `?profile=imported` links without a draft redirect to
+  `/deploy/import`. Resumed or remembered external import drafts show an explicit discovery link
+  before Configure, including drafts that never reached detection. The old draft remains saved;
+  existing-checkout imports retain the Configure and adoption flow.
+
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding

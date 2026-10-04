@@ -19,11 +19,20 @@ import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import type { DeploymentDraftSummary } from "@/lib/types"
+import type { DeploymentDraft, DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageContext, PageState } from "@/components/page"
-import { ChoiceList, ChoiceRow, FlowHeader, FlowSteps } from "@/components/flow"
+import {
+  ChoiceList,
+  ChoiceRow,
+  FlowActions,
+  FlowHeader,
+  FlowPanel,
+  FlowPanelBody,
+  FlowPanelHeader,
+  FlowSteps,
+} from "@/components/flow"
 import { DimActions, IconAction } from "@/components/icon-action"
-import { ErrorState } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -179,6 +188,7 @@ export function NewProject({
     null,
   )
   const flow = liveFlow ?? savedFlow
+  const [legacyImportDraft, setLegacyImportDraft] = useState<DeploymentDraft>()
   const setFlow = useCallback(
     (update: FlowUpdate) =>
       setSavedFlow((persisted) => {
@@ -298,9 +308,20 @@ export function NewProject({
     if (!draftId) return
     let cancelled = false
     loadDraft(draftId)
-      .then(resumeFlow)
-      .then((resumed) => {
+      .then(async (draft) => {
         if (cancelled) return
+        // External imports now require fresh discovery. Even an incomplete
+        // old draft must reach that path without detecting or changing it.
+        if (
+          draft.data.source?.kind === "import" &&
+          draft.data.source.mode !== "existing_checkout"
+        ) {
+          setLegacyImportDraft(draft)
+          return
+        }
+        const resumed = await resumeFlow(draft)
+        if (cancelled) return
+        setLegacyImportDraft(undefined)
         // A draft chosen from the list replaces whatever was in progress,
         // environment included: the two are different setups.
         forgetConfigure()
@@ -347,6 +368,11 @@ export function NewProject({
   // to the strip, which is the one thing this must not do on arrival.
   const strip = useRef<HTMLDivElement>(null)
   const choosing = !flow || linkArrived || requestedStep === "source"
+  const externalImport =
+    (legacyImportDraft?.id === draftId ? legacyImportDraft : undefined) ??
+    (!choosing && flow.source.kind === "import" && flow.source.mode !== "existing_checkout"
+      ? flow.draft
+      : undefined)
   useEffect(() => {
     const row = strip.current
     const chosen = row?.querySelector<HTMLElement>(`[data-source="${tab}"]`)
@@ -384,7 +410,25 @@ export function NewProject({
         <div className="flex shrink-0 justify-end">
           <WorkspaceHelp />
         </div>
-        {choosing ? (
+        {externalImport ? (
+          <>
+            <FlowHeader eyebrow={Eyebrow} question="Import this existing workload?" />
+            <FlowPanel className="max-h-full self-start xl:w-full xl:max-w-3xl">
+              <FlowPanelHeader title={externalImport.data.intent?.name || "Existing workload"} />
+              <FlowPanelBody>
+                <Notice title="Discover this workload again">
+                  Existing workloads now start with fresh discovery and review. Your saved setup
+                  remains available; importing preserves the original configuration and manager.
+                </Notice>
+              </FlowPanelBody>
+              <FlowActions>
+                <Button asChild>
+                  <Link href="/deploy/import">Discover existing workloads</Link>
+                </Button>
+              </FlowActions>
+            </FlowPanel>
+          </>
+        ) : choosing ? (
           <>
             {/* The screen asks something, and the question is the page's own
               rank — not a sentence under a title, which is the caption §5
