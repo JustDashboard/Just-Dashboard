@@ -4481,6 +4481,12 @@ export type DeploymentConfiguration = {
     cpus?: number
     pidsLimit?: number
     restartPolicy?: DeploymentRestartPolicy
+    /** The signal that asks the container to stop; empty is the image's own, SIGTERM. */
+    stopSignal?: string
+    /** Seconds the container has to exit after that signal before it is killed; empty is 10. */
+    gracePeriodSeconds?: number
+    /** Seconds the previous release keeps running beside the new one before it is stopped. */
+    drainSeconds?: number
     /** The largest request body the route lets through, in MB; empty is 64. */
     maxRequestBodyMb?: number
     mounts?: {

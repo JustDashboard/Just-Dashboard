@@ -36,9 +36,17 @@ while permanent run URLs retain their global identifiers. `/deploy/notifications
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Telegram, e-mail and signed
 webhook channels with event selection, pause/resume, test delivery and delivery history; the Automatic
 deployment section on General carries the GitHub commit-status switch. Settings → Runtime exposes memory,
-CPU and process limits, the restart policy and the health-check editor. The Console tab
+CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
+periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each
+protected volume's backup standing (`settings/volume-backup.ts`). The Runtime page's service cards carry the
+container's own Start, Stop, Restart and Pause/Resume verbs, every published port with its scope
+(`runtime-ports.tsx`), a failure cause for a container that is restarting or has exited
+(`runtime-failure.tsx`) and a Details panel read from `GET /docker/containers/{id}` on open
+(`runtime-details.tsx`). The Console tab
 (`components/deploy/project-console.tsx`) embeds the Docker exec pane on the live release container
-for every non-game deployment. The shared vocabulary (`components/deploy/vocabulary.tsx`) is the one
+for every non-game deployment, with a Shell (auto, sh, bash, ash) and Run as (image user or root)
+choice sent as the exec route's `cmd` and `user` query parameters (`console-session.ts`); the
+`docker.container.exec.open` audit entry records both. The shared vocabulary (`components/deploy/vocabulary.tsx`) is the one
 place a run state, a project state, a source line or a release path is put into words, and the one
 place a project is resolved to the product it is drawn as (`projectProduct`, `sourceProduct`); a
 project's verbs are declared once in `project-verbs.tsx` and a run's in `run-verbs.tsx`, for every

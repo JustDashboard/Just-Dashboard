@@ -8,6 +8,7 @@ import { GroupRule } from "@/components/flow"
 import { Field, FieldRow, OptionRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Group } from "@/components/panel"
+import { ProductGlyph, programProduct } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -253,6 +254,7 @@ function CheckEditor({
   const id = (field: string) => `check-${index}-${field}`
   const updateConfig = (patch: Partial<Config>) =>
     onChange({ config: { ...config, ...patch } as Record<string, unknown> })
+  const program = programProduct(argvOf(config.command ?? [])[0])
   const number = (value: string) => (value === "" ? 0 : Number(value))
   const portPlaceholder = port ? String(port) : "app port"
 
@@ -444,6 +446,9 @@ function CheckEditor({
         <Field
           label="Command argv"
           htmlFor={id("command")}
+          // A textarea has no addon to carry the program's mark, so it rides
+          // the label's edge, where it cannot move the words.
+          trailing={program && <ProductGlyph id={program} />}
           info="One argument per line, run inside the new release's container; it passes when the command exits 0."
           className="animate-rise"
         >

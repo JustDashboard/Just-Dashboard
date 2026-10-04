@@ -553,7 +553,11 @@ func (s *Server) handleContainerExec(w http.ResponseWriter, r *http.Request) err
 		return s.dockerErr(err)
 	}
 	p := httpx.MustPrincipal(r)
-	s.recordAudit(r, "docker.container.exec.open", detail.Name, map[string]any{"id": id})
+	// The shell and account are what make an exec session root-equivalent inside the
+	// container, so the trail names them rather than only the container.
+	s.recordAudit(r, "docker.container.exec.open", detail.Name, map[string]any{
+		"id": id, "cmd": r.URL.Query().Get("cmd"), "user": r.URL.Query().Get("user"),
+	})
 
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
