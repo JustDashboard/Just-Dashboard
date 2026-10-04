@@ -41,7 +41,7 @@ concurrency:
 
 env:
   # A push to a release branch, or a manual run on one.
-  SAVE_CACHES: "true" # TEMPORARY: measure a warm run on this pull request
+  SAVE_CACHES: ${{ github.event_name != 'pull_request' && (github.ref_name == 'main' || startsWith(github.ref_name, 'patch/')) }}
   # Where the caches below are restored to, said rather than assumed.
   GOMODCACHE: /home/runner/go/pkg/mod
   GOCACHE: /home/runner/.cache/go-build
