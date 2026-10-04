@@ -276,6 +276,14 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	if err != nil || (stopped.Processes[0].State != "stopped" && stopped.Processes[0].State != "inactive") {
 		t.Fatal("original native manager was not stopped at successful cutover")
 	}
+	assertReservation := func(stage string) {
+		t.Helper()
+		observations, err := NewRuntimeReservationObserver(fixture.store, client, owner).ObserveDependencies(t.Context(), settings.Dependencies)
+		if err != nil || len(observations) != 1 || !observations[0].Available || observations[0].Warning != "" {
+			t.Fatalf("%s reservation did not retain verified runtime authority: %+v, %v", stage, observations, err)
+		}
+	}
+	assertReservation("managed Docker cutover")
 	rolled := operation(OperationRollback, baseline.Release.PlanRevision, baseline)
 	if rolled.State != RunSucceeded {
 		t.Fatalf("native baseline rollback failed: state=%s code=%s reason=%s", rolled.State, rolled.TerminalCode, rolled.TerminalReason)
@@ -289,7 +297,8 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	if err != nil || afterRuntime.Kind != kind {
 		t.Fatal("rollback did not activate the retained original manager")
 	}
-	result := map[string]any{"manager": kind, "adoptionRestartedOriginal": false, "managedBuild": native.buildMethod, "capturedEnvironmentPrivate": true, "emptyEnvironmentPreserved": true, "runtimeUIDPreserved": true, "workingDirectoryTranslated": "/app", "absoluteDataDirectoryTranslated": true, "originalEnvironmentSnapshotPreserved": true, "persistentDataRetained": true, "nativeLogsAvailable": true, "dockerLogsAvailable": true, "builtCandidateFailureRestoredNative": true, "normalDockerMigrationSucceeded": true, "originalManagerRollbackSucceeded": true}
+	assertReservation("cloned native baseline rollback")
+	result := map[string]any{"manager": kind, "adoptionRestartedOriginal": false, "managedBuild": native.buildMethod, "capturedEnvironmentPrivate": true, "emptyEnvironmentPreserved": true, "runtimeUIDPreserved": true, "workingDirectoryTranslated": "/app", "absoluteDataDirectoryTranslated": true, "originalEnvironmentSnapshotPreserved": true, "persistentDataRetained": true, "nativeLogsAvailable": true, "dockerLogsAvailable": true, "builtCandidateFailureRestoredNative": true, "normalDockerMigrationSucceeded": true, "originalManagerRollbackSucceeded": true, "managedRuntimeReservationVerified": true, "clonedNativeRollbackReservationVerified": true}
 	if directory := os.Getenv("JD_" + strings.ToUpper(kind) + "_ADOPTION_EVIDENCE_DIR"); directory != "" {
 		if err := os.MkdirAll(directory, 0700); err != nil {
 			t.Fatal(err)

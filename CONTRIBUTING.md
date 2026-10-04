@@ -224,7 +224,9 @@ to the contribution terms above, including the additional licence grant to the p
   This requires Docker Buildx and a supported Node recipe base. Its private PM2 daemon, temporary
   database and reserved runtime namespace prove adoption without a restart, real image builds,
   failed-candidate restoration, normal Docker migration, retained data/settings/logs and rollback
-  to the original PM2 manager. `JD_PM2_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
+  to the original PM2 manager. Production runtime-reservation evidence must remain available after
+  Docker migration and after rollback creates a new native release; the fixtures assert both states.
+  `JD_PM2_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
   The corresponding persistent systemd-unit path runs
   `JD_SYSTEMD_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
   It requires a reachable host systemd manager, Node and root/passwordless sudo. It installs one
