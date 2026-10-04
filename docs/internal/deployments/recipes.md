@@ -18,6 +18,12 @@ produce explicit migration blockers. A bare process has no restart authority and
 automatically. Review must resolve these limits before cutover; a build and readiness check remain
 required even when capture succeeds.
 
+Automatic host recovery of a custom Dockerfile requires a verified `/app` source copy and workdir,
+plus an explicit `ENTRYPOINT []`. An inherited or nonempty image entrypoint would alter the captured
+command, and a different image layout would invalidate its translated paths; both block migration
+instead of relying on the first replacement failing. Baseline recovery identity includes the source
+content, translated settings, private environment values, and original manager configuration.
+
 `just-dashboard-recipes-v4` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
 commands execute inside the build container; source inspection never executes repository configuration
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot

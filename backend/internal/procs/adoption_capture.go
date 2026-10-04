@@ -34,6 +34,9 @@ type HostWorkloadCapture struct {
 	InterpreterVersion  string               `json:"interpreterVersion,omitempty"`
 	UID                 uint32               `json:"uid"`
 	GID                 uint32               `json:"gid"`
+	RestartPolicy       string               `json:"restartPolicy,omitempty"`
+	StopSignal          string               `json:"stopSignal,omitempty"`
+	GracePeriodSeconds  int                  `json:"gracePeriodSeconds,omitempty"`
 	SourceDirectory     string               `json:"sourceDirectory,omitempty"`
 	SourcePath          string               `json:"sourcePath,omitempty"`
 	ConfigurationDigest string               `json:"configurationDigest"`

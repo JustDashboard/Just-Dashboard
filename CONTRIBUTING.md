@@ -191,6 +191,11 @@ to the contribution terms above, including the additional licence grant to the p
   changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
 - Existing-workload import changes also run the isolated live fixture from `backend/`:
   `JD_WORKLOAD_IMPORT_LIVE=1 go test ./internal/api -run '^TestLiveWorkloadImportKeepsFourContainerStackAndHTTPServiceUnchanged$' -count=1 -v`.
+  Native capture changes also run
+  `JD_PM2_ADOPTION_LIVE=1 go test ./internal/procs -run '^TestLiveExistingPM2CaptureAndManagerControls$' -count=1 -v`
+  on a host with PM2 installed for the current account. The fixture starts and removes only its own
+  temporary `PM2_HOME`; it verifies HTTP, secret and empty variables, UID, PID identity, native logs,
+  and exact original-manager stop/start restoration without touching the account's normal daemon.
   It requires a working Docker daemon and `caddy:2-alpine` already available locally. It creates and
   removes only its own uniquely named four-container project, checks two running and two stopped
   containers, persistent data, configuration continuity and HTTP requests during import, and leaves

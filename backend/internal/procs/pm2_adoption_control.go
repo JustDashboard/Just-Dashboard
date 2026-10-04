@@ -33,7 +33,7 @@ const close = code => { socket.close(); process.exit(code) }
 const timer = setTimeout(() => close(2), 65000)
 socket.on("error", () => close(2))
 socket.connect(path.join(process.env.PM2_HOME, "rpc.sock"))
-const volatile = new Set(["status","pm_uptime","restart_time","unstable_restarts","exit_code","prev_restart_delay","restart_task","vizion_running","axm_actions","axm_monitor","axm_options","axm_dynamic","versioning","node_version","km_link"])
+const volatile = new Set(["status","pm_uptime","restart_time","unstable_restarts","exit_code","prev_restart_delay","restart_task","vizion_running","axm_actions","axm_monitor","axm_options","axm_dynamic","versioning","node_version","km_link","_tree_pids"])
 const stable = value => {
   const result = {}
   for (const key of Object.keys(value).sort()) if (!volatile.has(key)) result[key] = value[key]

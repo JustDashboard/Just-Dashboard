@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/shirou/gopsutil/v4/process"
 )
 
 // CaptureExisting selects one application in one existing account's daemon.
@@ -37,7 +39,51 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 	if err != nil {
 		return nil, err
 	}
-	capture.SourceFiles, err = CaptureHostSourceFiles([]string{capture.SourcePath})
+	var runtimeEnvironment map[string]string
+	sourceFiles := []string{capture.SourcePath}
+	for index := range capture.Processes {
+		proc := &capture.Processes[index]
+		if proc.PID <= 1 || (proc.State != "online" && proc.State != "launching") {
+			continue
+		}
+		original, err := process.NewProcessWithContext(ctx, proc.PID)
+		if err != nil {
+			return nil, ErrHostWorkloadChanged
+		}
+		created, err := original.CreateTimeWithContext(ctx)
+		if err != nil {
+			return nil, ErrHostWorkloadChanged
+		}
+		actual, err := CaptureExistingProcess(ctx, proc.PID, created)
+		if err != nil {
+			return nil, err
+		}
+		sourceFiles = append(sourceFiles, actual.SourcePath)
+		if actual.SourceDirectory != capture.SourceDirectory {
+			capture.Blockers = append(capture.Blockers, "The PM2 process has changed its working directory. Review its filesystem dependencies before migration.")
+		}
+		if runtimeEnvironment == nil {
+			capture.UID, capture.GID = actual.UID, actual.GID
+			runtimeEnvironment = actual.Environment
+		} else if !equalCaptureEnvironment(runtimeEnvironment, actual.Environment) || capture.UID != actual.UID || capture.GID != actual.GID {
+			capture.Blockers = append(capture.Blockers, "PM2 instances have different runtime accounts or effective environments.")
+		}
+		proc.Environment, proc.CreateTime = actual.Environment, created
+	}
+	if runtimeEnvironment != nil {
+		capture.Environment, capture.EnvironmentNames = runtimeEnvironment, captureEnvironmentNames(runtimeEnvironment)
+		// PM2's nested env can also hold ecosystem metadata objects. The
+		// fenced process environment is the exact byte-string environment the
+		// running app received and supersedes that ambiguous manager envelope.
+		filtered := capture.Blockers[:0]
+		for _, blocker := range capture.Blockers {
+			if blocker != "PM2 environment values cannot be represented safely." {
+				filtered = append(filtered, blocker)
+			}
+		}
+		capture.Blockers = filtered
+	}
+	capture.SourceFiles, err = CaptureHostSourceFiles(uniqueCaptureStrings(sourceFiles))
 	if err != nil {
 		capture.Blockers = append(capture.Blockers, "The original PM2 entrypoint cannot be verified for safe restoration.")
 	}
@@ -89,6 +135,16 @@ func parsePM2Capture(data []byte, account *user.User, namespace, name string) (*
 			out.Blockers = append(out.Blockers, "PM2 instances run different interpreter versions.")
 		}
 		out.InterpreterVersion = version
+		out.RestartPolicy, out.StopSignal, out.GracePeriodSeconds = "unless-stopped", "SIGINT", 2
+		if string(row.Env["autorestart"]) == "false" {
+			out.RestartPolicy = "no"
+		}
+		if timeout := captureInt(row.Env["kill_timeout"]); timeout > 0 {
+			out.GracePeriodSeconds = (timeout + 999) / 1000
+			if out.GracePeriodSeconds > 300 {
+				out.Blockers = append(out.Blockers, "The original PM2 shutdown grace period exceeds the managed deployment limit.")
+			}
+		}
 		args, argsErr := captureJSONArgs(row.Env["args"])
 		nodeArgs, nodeErr := captureJSONArgs(row.Env["node_args"])
 		if argsErr != nil || nodeErr != nil {
@@ -125,7 +181,12 @@ func parsePM2Capture(data []byte, account *user.User, namespace, name string) (*
 		if instanceVar := captureString(row.Env["instance_var"]); instanceVar != "" && instanceVar != "NODE_APP_INSTANCE" {
 			out.Blockers = append(out.Blockers, "A custom PM2 instance variable needs an equivalent managed runtime configuration before migration.")
 		}
-		for _, key := range []string{"watch", "cron_restart", "wait_ready", "shutdown_with_message", "post_update", "increment_var", "max_memory_restart", "exp_backoff_restart_delay", "stop_exit_codes"} {
+		for key, defaults := range map[string]int{"min_uptime": 1000, "max_restarts": 16} {
+			if value := captureInt(row.Env[key]); value != 0 && value != defaults {
+				out.Blockers = append(out.Blockers, "The PM2 setting "+key+" needs an equivalent managed restart policy before migration.")
+			}
+		}
+		for _, key := range []string{"watch", "cron_restart", "wait_ready", "shutdown_with_message", "post_update", "increment_var", "max_memory_restart", "exp_backoff_restart_delay", "stop_exit_codes", "restart_delay"} {
 			if rawCaptureEnabled(row.Env[key]) {
 				out.Blockers = append(out.Blockers, "The PM2 setting "+key+" needs an equivalent managed runtime configuration before migration.")
 			}
@@ -157,7 +218,7 @@ func stablePM2Config(env map[string]json.RawMessage) map[string]json.RawMessage 
 	for key, value := range env {
 		out[key] = value
 	}
-	for _, key := range []string{"status", "pm_uptime", "restart_time", "unstable_restarts", "exit_code", "prev_restart_delay", "restart_task", "vizion_running", "axm_actions", "axm_monitor", "axm_options", "axm_dynamic", "versioning", "node_version", "km_link"} {
+	for _, key := range []string{"status", "pm_uptime", "restart_time", "unstable_restarts", "exit_code", "prev_restart_delay", "restart_task", "vizion_running", "axm_actions", "axm_monitor", "axm_options", "axm_dynamic", "versioning", "node_version", "km_link", "_tree_pids"} {
 		delete(out, key)
 	}
 	return out

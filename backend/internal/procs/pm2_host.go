@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -31,7 +32,48 @@ type pm2Home struct {
 	home string
 	// bin is the PM2 binary that serves it. Absolute when a per-user copy was
 	// found, plain "pm2" when only the host PATH has one.
-	bin string
+	bin       string
+	daemonDir string
+}
+
+func (home pm2Home) daemonDirectory() string {
+	if home.daemonDir != "" {
+		return home.daemonDir
+	}
+	return filepath.Join(home.home, ".pm2")
+}
+
+// NewPM2ForExistingDaemon binds trusted server configuration to one already
+// running daemon. It also lets isolated integration fixtures exercise real
+// managers without touching an account's ordinary PM2_HOME.
+func NewPM2ForExistingDaemon(accountName, daemonDirectory string) (*PM2, error) {
+	if err := ValidateName(accountName); err != nil || !filepath.IsAbs(daemonDirectory) || strings.ContainsAny(daemonDirectory, "\x00\r\n") {
+		return nil, fmt.Errorf("invalid existing PM2 daemon identity")
+	}
+	var account *user.User
+	for _, home := range pm2HomeDirs() {
+		if verified, err := pm2Account(home); err == nil && verified.Username == accountName {
+			account = verified
+			break
+		}
+	}
+	if account == nil {
+		return nil, fmt.Errorf("the existing PM2 daemon account cannot be verified")
+	}
+	info, err := os.Stat(filepath.Join(daemonDirectory, "rpc.sock"))
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("the existing PM2 daemon socket is unavailable")
+	}
+	uid, err := strconv.ParseUint(account.Uid, 10, 32)
+	owner, ok := info.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || uint64(owner.Uid) != uid {
+		return nil, fmt.Errorf("the existing PM2 daemon socket belongs to another account")
+	}
+	bin := findPM2Bin(account.HomeDir)
+	if bin == "" {
+		return nil, fmt.Errorf("the existing PM2 client is unavailable")
+	}
+	return &PM2{homes: []pm2Home{{home: account.HomeDir, bin: bin, daemonDir: filepath.Clean(daemonDirectory)}}}, nil
 }
 
 // hostPathRoots are the directories bind-mounted from the host under the same
@@ -130,7 +172,7 @@ func pm2Env(home pm2Home) []string {
 	}
 	return []string{
 		"HOME=" + home.home,
-		"PM2_HOME=" + filepath.Join(home.home, ".pm2"),
+		"PM2_HOME=" + home.daemonDirectory(),
 		"PATH=" + path,
 		"LANG=C.UTF-8",
 	}

@@ -121,6 +121,13 @@ socket-activated service's port.
   credential, lifecycle, or source settings block automatic container migration. The original manager
   entry is retained after migration so failed cutover can restore it. Runtime observation and logs name
   the native manager directly, without presenting a native PID as a Docker container.
+  Active PM2 captures fence the actual procfs PID birth time and read the process's effective initial
+  environment and numeric UID:GID; the daemon account can differ from its child's configured account.
+  PM2's volatile process-tree cache is excluded from configuration identity because a stop populates
+  it. Autorestart, SIGINT shutdown, and supported grace periods become the managed runtime settings;
+  custom delayed/backoff restart policies remain explicit blockers. Trusted server integrations can
+  select one existing custom `PM2_HOME` with `NewPM2ForExistingDaemon`; the constructor requires an
+  existing socket owned by the verified host account and never starts a daemon.
 - **The per-feature log routes are gone.** `GET /systemd/{name}/journal`, `/systemd/{name}/journal/stream`
   and `/pm2/{name}/logs/stream` had no caller once the sheets embedded the service logs, and they read
   a unit's journal and a process's files around what the `/logs` routes decide — the auth-data gate

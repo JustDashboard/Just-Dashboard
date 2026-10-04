@@ -29,7 +29,7 @@ type PM2Daemon struct {
 // Daemons lists the accounts a PM2 can be driven for, with their boot facts.
 func (p *PM2) Daemons() []PM2Daemon {
 	out := []PM2Daemon{}
-	for _, home := range discoverPM2Homes() {
+	for _, home := range p.daemonHomes() {
 		account, err := pm2Account(home.home)
 		if err != nil {
 			continue
@@ -229,7 +229,7 @@ func (p *PM2) homeFor(account string) (pm2Home, error) {
 	if err := ValidateName(account); err != nil {
 		return pm2Home{}, err
 	}
-	for _, home := range discoverPM2Homes() {
+	for _, home := range p.daemonHomes() {
 		if info, err := pm2Account(home.home); err == nil && info.Username == account {
 			return home, nil
 		}

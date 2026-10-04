@@ -261,8 +261,12 @@ func (o *NativeRuntimeOwner) ListContainersWithLabels(ctx context.Context, label
 	return owner.ListContainersWithLabels(ctx, labels)
 }
 
-func (o *NativeRuntimeOwner) RecordedRuntimeServices(ctx context.Context, environmentID, liveReleaseID int64) RuntimeServices {
-	return observeRuntimeServices(ctx, o, environmentID, liveReleaseID, 0)
+func (o *NativeRuntimeOwner) RecordedRuntimeServices(ctx context.Context, environmentID, liveReleaseID, onlyReleaseID int64) RuntimeServices {
+	if o.recorded != nil {
+		return observeRuntimeServices(ctx, o.recorded, environmentID, liveReleaseID, onlyReleaseID)
+	}
+	owner, _ := o.docker.(RuntimeObserver)
+	return observeRuntimeServices(ctx, owner, environmentID, liveReleaseID, onlyReleaseID)
 }
 
 func (o *NativeRuntimeOwner) RunReleaseTask(ctx context.Context, request ReleaseTaskRuntimeRequest, emit func(BuildLog) error) (int, bool, error) {

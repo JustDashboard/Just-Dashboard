@@ -24,6 +24,23 @@ func (f *fakeNativePM2) ControlCapturedProcesses(ctx context.Context, capture *p
 
 type nativeDockerDelegationFixture struct{ calls []string }
 
+type nativeRecordedObserverFixture struct{ labels map[string]string }
+
+func (f *nativeRecordedObserverFixture) ListContainersWithLabels(_ context.Context, labels map[string]string) ([]dockerx.Container, error) {
+	f.labels = labels
+	return []dockerx.Container{}, nil
+}
+
+func TestNativeBaselineRecordedObserverDelegatesExactReleaseFilter(t *testing.T) {
+	docker := &nativeDockerDelegationFixture{}
+	recorded := &nativeRecordedObserverFixture{}
+	owner := (&NativeRuntimeOwner{docker: docker}).WithRecordedRuntimeObserver(recorded)
+	_ = owner.RecordedRuntimeServices(context.Background(), 2, 3, 4)
+	if recorded.labels["io.just-dashboard.environment-id"] != "2" || recorded.labels["io.just-dashboard.release-id"] != "4" || len(docker.calls) != 0 {
+		t.Fatal("recorded observer lost the requested release filter or fell back to Docker")
+	}
+}
+
 func (f *nativeDockerDelegationFixture) StartCandidate(context.Context, CandidateRuntimeRequest, func(BuildLog) error) (StartedRuntime, error) {
 	f.calls = append(f.calls, "candidate")
 	return StartedRuntime{}, nil

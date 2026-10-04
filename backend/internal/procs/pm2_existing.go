@@ -46,8 +46,8 @@ client.call("getMonitorData", {}, (error, processes) => {
 func (p *PM2) ListExisting(ctx context.Context) ([]PM2Process, error) {
 	out := []PM2Process{}
 	var firstErr error
-	for _, home := range discoverPM2Homes() {
-		info, err := os.Stat(filepath.Join(home.home, ".pm2", "rpc.sock"))
+	for _, home := range p.daemonHomes() {
+		info, err := os.Stat(filepath.Join(home.daemonDirectory(), "rpc.sock"))
 		if err != nil || info.Mode()&os.ModeSocket == 0 {
 			continue
 		}
@@ -80,7 +80,7 @@ func (p *PM2) ListExisting(ctx context.Context) ([]PM2Process, error) {
 }
 
 func readExistingPM2(ctx context.Context, home pm2Home, account *user.User) ([]byte, error) {
-	info, err := os.Stat(filepath.Join(home.home, ".pm2", "rpc.sock"))
+	info, err := os.Stat(filepath.Join(home.daemonDirectory(), "rpc.sock"))
 	if err != nil || info.Mode()&os.ModeSocket == 0 {
 		return nil, fmt.Errorf("the original PM2 daemon is unavailable")
 	}

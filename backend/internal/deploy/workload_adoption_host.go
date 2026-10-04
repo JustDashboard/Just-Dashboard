@@ -2,6 +2,8 @@ package deploy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -64,6 +66,11 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	// a later reviewed networking change can move the app behind managed ingress.
 	recovered.Configuration.Runtime.HostNetwork = true
 	recovered.Configuration.Runtime.RestartPolicy = "unless-stopped"
+	if capture.RestartPolicy != "" {
+		recovered.Configuration.Runtime.RestartPolicy = capture.RestartPolicy
+	}
+	recovered.Configuration.Runtime.StopSignal = capture.StopSignal
+	recovered.Configuration.Runtime.GracePeriodSeconds = capture.GracePeriodSeconds
 	recovered.Configuration.Variables = []PlannedVariable{}
 	selected := selectedHostRecoveryCandidate(detection)
 	for name, value := range capture.Environment {
@@ -91,6 +98,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		recovered.Configuration.Build.Framework = selected.Framework
 		switch selected.BuildMethod {
 		case BuildDockerfile:
+			verifyHostDockerfileLayout(root, recovered.Configuration.Build, block)
 			origin.Warnings = append(origin.Warnings, "The Dockerfile must provide the original application's operating-system and interpreter dependencies. Review its entrypoint and user permissions before cutover.")
 		case BuildRecipe:
 			if selected.Recipe != "node" {
@@ -182,6 +190,14 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		return recovered.Configuration.Build.Secrets[i].Variable < recovered.Configuration.Build.Secrets[j].Variable
 	})
 	origin.Blockers = uniqueHostRecoveryStrings(origin.Blockers)
+	baseline := sha256.Sum256(mustJSON(struct {
+		ConfigurationDigest string
+		SourceDigest        string
+		Source              DraftSourceConfig
+		Configuration       PlanConfiguration
+		Environment         map[string]string
+	}{capture.ConfigurationDigest, detection.Source.Digest, canonicalSourceConfig(recovered.Source), canonicalConfiguration(recovered.Configuration), recovered.Environment}))
+	origin.BaselineDigest = hex.EncodeToString(baseline[:])
 	return recovered, nil
 }
 
@@ -195,6 +211,60 @@ func selectedHostRecoveryCandidate(detection DetectionResult) *DetectedCandidate
 		return &detection.Candidates[0]
 	}
 	return nil
+}
+
+func verifyHostDockerfileLayout(root string, build BuildPlanConfig, block func(string, string, string)) {
+	tree := openDetectionTree(root)
+	defer tree.close()
+	content, ok := tree.read(filepath.ToSlash(filepath.Join(build.RootDirectory, build.Dockerfile)), 1<<20)
+	if !ok {
+		block("host_dockerfile_unavailable", "The original Dockerfile cannot be inspected safely before migration.", "build.dockerfile")
+		return
+	}
+	model := modelDockerfile(content)
+	if len(model.stages) == 0 {
+		block("host_dockerfile_layout", "The Dockerfile has no verifiable runtime stage. Provide a build that copies this source into /app.", "build.dockerfile")
+		return
+	}
+	lineage := model.lineage(model.finalStage(build.Target))
+	workdir, copied, entryKnown, entryEmpty := "/", false, false, false
+	for position := len(lineage) - 1; position >= 0; position-- {
+		index := lineage[position]
+		for _, instruction := range model.stages[index].Instructions {
+			switch instruction.Keyword {
+			case "WORKDIR":
+				value := expandDockerfileWord(strings.TrimSpace(instruction.Args), model.variables(index))
+				if filepath.IsAbs(value) {
+					workdir = filepath.Clean(value)
+				} else {
+					workdir = filepath.Join(workdir, value)
+				}
+			case "ENTRYPOINT":
+				entryKnown, entryEmpty = true, instruction.IsJSON && len(instruction.JSON) == 0
+			case "COPY":
+				if _, fromStage := instruction.flag("from"); fromStage {
+					continue
+				}
+				words := instruction.commandWords(model.escape)
+				if len(words) != 2 || (words[0] != "." && words[0] != "./") {
+					continue
+				}
+				destination := words[1]
+				if !filepath.IsAbs(destination) {
+					destination = filepath.Join(workdir, destination)
+				}
+				if filepath.Clean(destination) == "/app" {
+					copied = true
+				}
+			}
+		}
+	}
+	if workdir != "/app" || !copied || build.RootDirectory != "" && build.RootDirectory != "." {
+		block("host_dockerfile_layout", "Automatic host migration requires this source copied into /app with WORKDIR /app. Other image layouts need an explicit migration plan.", "build.dockerfile")
+	}
+	if !entryKnown || !entryEmpty {
+		block("host_dockerfile_entrypoint", "The Dockerfile must explicitly clear its inherited entrypoint with ENTRYPOINT [] so the captured command runs unchanged.", "build.dockerfile")
+	}
 }
 
 func hostCommandForContainer(command []string, root, recipe string) ([]string, error) {

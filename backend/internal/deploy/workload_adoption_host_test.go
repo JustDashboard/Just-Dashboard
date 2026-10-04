@@ -14,6 +14,56 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
+func TestHostRecoveryRequiresVerifiableDockerfileLayoutAndEmptyEntrypoint(t *testing.T) {
+	for _, fixture := range []struct {
+		name, dockerfile string
+		blocked          bool
+	}{
+		{"supported", "FROM node:24\nWORKDIR /app\nCOPY . .\nENTRYPOINT []\n", false},
+		{"wrong layout", "FROM node:24\nWORKDIR /srv/site\nCOPY . .\nENTRYPOINT []\n", true},
+		{"unknown inherited entrypoint", "FROM node:24\nWORKDIR /app\nCOPY . .\n", true},
+		{"command entrypoint", "FROM node:24\nWORKDIR /app\nCOPY . .\nENTRYPOINT [\"node\",\"server.js\"]\n", true},
+		{"missing source", "FROM node:24\nWORKDIR /app\nENTRYPOINT []\n", true},
+		{"inherited known layout", "FROM node:24 AS base\nWORKDIR /app\nCOPY . .\nENTRYPOINT []\nFROM base AS prod\n", false},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.WriteFile(filepath.Join(root, "Dockerfile"), []byte(fixture.dockerfile), 0644); err != nil {
+				t.Fatal(err)
+			}
+			var blockers []string
+			verifyHostDockerfileLayout(root, BuildPlanConfig{Method: BuildDockerfile, Dockerfile: "Dockerfile"}, func(code, _, _ string) { blockers = append(blockers, code) })
+			if (len(blockers) > 0) != fixture.blocked {
+				t.Fatalf("layout blockers=%v", blockers)
+			}
+		})
+	}
+}
+
+func TestHostRecoveryBaselineDigestFencesSourceAndPrivateEnvironment(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	recover := func() string {
+		t.Helper()
+		result, err := RecoverHostWorkload(context.Background(), candidate, capture, analyzer, files.New([]string{root}), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Adoption.BaselineDigest
+	}
+	first := recover()
+	capture.Environment["TOKEN"] = "another-private-value"
+	second := recover()
+	if first == second {
+		t.Fatal("private environment change reused baseline digest")
+	}
+	if err := os.WriteFile(filepath.Join(root, "server.js"), []byte("console.log('source changed')"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if recover() == second {
+		t.Fatal("source change reused baseline digest")
+	}
+}
+
 func hostRecoveryFixture(t *testing.T) (string, *HostSourceAnalyzer, WorkloadCandidate, *procs.HostWorkloadCapture) {
 	t.Helper()
 	root := t.TempDir()

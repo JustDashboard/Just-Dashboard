@@ -89,9 +89,17 @@ type PM2 struct {
 	mu       sync.Mutex
 	cached   []PM2Process
 	cachedAt time.Time
+	homes    []pm2Home
 }
 
 func NewPM2() *PM2 { return &PM2{} }
+
+func (p *PM2) daemonHomes() []pm2Home {
+	if p.homes != nil {
+		return append([]pm2Home{}, p.homes...)
+	}
+	return discoverPM2Homes()
+}
 
 // Available reports whether any PM2 installation can be driven from here:
 // a binary on this process's PATH, one on the host's, or a per-user daemon
@@ -100,7 +108,7 @@ func (p *PM2) Available() bool {
 	if binaryExists("pm2") {
 		return true
 	}
-	if len(discoverPM2Homes()) > 0 {
+	if len(p.daemonHomes()) > 0 {
 		return true
 	}
 	return hostexec.Available("pm2")
@@ -120,7 +128,7 @@ func (p *PM2) List(ctx context.Context) ([]PM2Process, error) {
 	// Non-nil: a nil slice serialises as JSON null, and the PM2 tab reads
 	// `.length` off it.
 	out := make([]PM2Process, 0)
-	if homes := discoverPM2Homes(); len(homes) > 0 {
+	if homes := p.daemonHomes(); len(homes) > 0 {
 		// One daemon per account, each asked in its own home. A stopped
 		// daemon for one account must not hide another's running processes.
 		var firstErr error
@@ -264,7 +272,7 @@ func (p *PM2) ControlTarget(ctx context.Context, name, daemon string, id int, ac
 	if err != nil {
 		return nil, err
 	}
-	for _, home := range discoverPM2Homes() {
+	for _, home := range p.daemonHomes() {
 		account, err := pm2Account(home.home)
 		if err != nil || account.Username != proc.DaemonID {
 			continue
@@ -316,7 +324,7 @@ func (p *PM2) target(ctx context.Context, name, daemon string, id int) (PM2Proce
 // platform-specific configuration, while this action makes the current list
 // match what an existing hook will restore.
 func (p *PM2) Save(ctx context.Context) (*CommandResult, error) {
-	if homes := discoverPM2Homes(); len(homes) > 0 {
+	if homes := p.daemonHomes(); len(homes) > 0 {
 		// Each account's resurrection list is its own: saving only one leaves
 		// the others unrestored after a reboot.
 		var last *CommandResult
