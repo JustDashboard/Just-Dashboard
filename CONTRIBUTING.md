@@ -198,6 +198,12 @@ to the contribution terms above, including the additional licence grant to the p
   acceptance includes existing stopped replicas, a declared missing service and an external one-off
   container which must remain untouched. `JD_ADOPTION_EVIDENCE_DIR` writes sanitized lifecycle
   evidence when set.
+  Real n8n data continuity additionally uses the catalogue pin `n8nio/n8n:2.39.10` already available
+  locally: `JD_N8N_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveManagedN8NAdoptionAndRollback$' -count=1 -v -timeout=20m`.
+  It creates a real workflow and encrypted credential, verifies n8n's native SQLite readiness and
+  credential decryption before adoption, after normal Deploy and after baseline rollback, and removes
+  only its unique owned resources. `JD_ADOPTION_EVIDENCE_DIR` also writes its sanitized evidence.
+  See [the real n8n lifecycle record](docs/audits/2026-10-04-existing-workloads/n8n-lifecycle.md).
   Native capture changes also run
   `JD_PM2_ADOPTION_LIVE=1 go test ./internal/procs -run '^TestLiveExistingPM2CaptureAndManagerControls$' -count=1 -v`
   on a host with PM2 installed for the current account. The fixture starts and removes only its own

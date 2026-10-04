@@ -1,0 +1,71 @@
+{
+  "adoptionPreservedIDsPIDsStartedAtAndSettings": true,
+  "baselineRollbackRun": 3,
+  "baselineRollbackState": "succeeded",
+  "checkedAt": "2026-10-04T19:42:02.864707582Z",
+  "credentialId": "RpWiiPfMgoMJRIxk",
+  "dataStore": "SQLite in original /home/node/.n8n volume",
+  "fixtureCleanupConfirmed": true,
+  "fixtureName": "jd-n8n-adoption-proof-1791142759389653247",
+  "image": "n8nio/n8n:2.39.10",
+  "imageDigest": "sha256:94d70bcbc868123de206d6f89786bb90f753c26b8f28889f8ddc5e224b230247",
+  "imageUserAndResourceLimitsPreserved": true,
+  "managedDeployRun": 2,
+  "managedDeployState": "succeeded",
+  "originalAndDesiredEnvironmentIndependentlySealed": true,
+  "originalEncryptedCredentialDecryptedAfterDeployAndRollback": true,
+  "originalNamedVolumePreserved": true,
+  "originalProcess": {
+    "containerId": "e58e9c8e6bd86240fd50ca057607b503b8407f9f8bcdeef1c3976b39c76ae80d",
+    "pid": 2005630,
+    "startedAt": "2026-10-04T19:39:19.767438152Z"
+  },
+  "originalWorkflowDataAndDecryptedCredentialVerified": true,
+  "privateInputsAbsentFromRecoveryJSON": true,
+  "readinessPath": "/healthz/readiness",
+  "test": "TestLiveManagedN8NAdoptionAndRollback",
+  "testPassed": true,
+  "workflowDataPreserved": true,
+  "workflowId": "zAaSMOnSROoKKPHW",
+  "originalWritableLayerProof": {
+    "changes": 1595,
+    "verifiedModes": 1595,
+    "cacheRoot": "/home/node/.cache/n8n/public",
+    "nonCacheChanges": [
+      {
+        "Kind": 0,
+        "Path": "/tmp"
+      },
+      {
+        "Kind": 1,
+        "Path": "/tmp/n8nDataTableUploads"
+      },
+      {
+        "Kind": 0,
+        "Path": "/home"
+      },
+      {
+        "Kind": 0,
+        "Path": "/home/node"
+      },
+      {
+        "Kind": 1,
+        "Path": "/home/node/.cache"
+      },
+      {
+        "Kind": 1,
+        "Path": "/home/node/.cache/n8n"
+      },
+      {
+        "Kind": 1,
+        "Path": "/home/node/.cache/n8n/public"
+      }
+    ],
+    "addedGeneratedTypeFiles": [
+      "/home/node/.cache/n8n/public/types/credentials.json",
+      "/home/node/.cache/n8n/public/types/node-versions.json",
+      "/home/node/.cache/n8n/public/types/nodes.json"
+    ],
+    "emptyUploadDirectoryVerified": true
+  }
+}
