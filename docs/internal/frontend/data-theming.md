@@ -141,6 +141,17 @@
   ignores obsolete inspection responses. The new-project flow keeps secret-bearing inputs in memory;
   saved environment values resume as masked names from the encrypted server draft. Hostname changes
   update only unchanged template-derived URL defaults, and retain visitor password protection.
+- Existing-workload import (`/deploy/import`) keeps its search, source filter, reviewed inventory and
+  project name in component state, rather than the new-project draft stores. Its JSON shapes live in
+  `lib/workload-import.ts`. Discovery is a snapshot refreshed explicitly; choosing a workload always
+  inspects it afresh, and registration sends only its key, project name and reviewed digest. A
+  `workload_changed` conflict replaces the import command with **Inspect again**, preserves the chosen
+  project name and requires another explicit import after the new review. A name conflict stays beside
+  its field; an idempotent result links to the existing project. The review shows all service states,
+  Docker health separately from running state, ports, the original configuration location, warnings
+  and discovery silences. It never renders raw configuration, environment values or process arguments.
+  The original manager remains responsible for the workload; see
+  [`existing-workloads.md`](../deployments/existing-workloads.md).
 - Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
   action's existing capability. Stack pages hide those controls from limited accounts, explain the
   restriction, and retain stack/config/log read views. Direct container controls retain their separate
