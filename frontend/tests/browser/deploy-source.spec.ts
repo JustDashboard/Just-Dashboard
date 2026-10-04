@@ -1,5 +1,13 @@
 import { expect, test, type Page } from "@playwright/test"
-import { deployment, json, mockProject, now, project } from "./deploy-fixture"
+import {
+  deployment,
+  expectSaved,
+  json,
+  mockProject,
+  now,
+  project,
+  saveSettings,
+} from "./deploy-fixture"
 
 /**
  * Settings → General's "Source" form: changing a committed project's
@@ -125,8 +133,8 @@ test.describe("Source setting card", () => {
     await page.screenshot({ path: test.info().outputPath("source-1280.png"), fullPage: true })
 
     await card.getByLabel("Branch or tag").fill("release/1.0")
-    await card.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Source updated")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     expect(puts.at(-1)).toEqual({
       revision: 3,
@@ -223,8 +231,8 @@ test.describe("Source setting card", () => {
     // Editing something else on the card must not itself convert a connected
     // repository into a bare URL — only editing the URL field does that.
     await card.getByLabel("Branch or tag").fill("release/2.0")
-    await card.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Source updated")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     expect(puts.at(-1)).toEqual({
       revision: 3,
@@ -260,8 +268,8 @@ test.describe("Source setting card", () => {
     await page.goto("/deploy/7/settings/general")
     const card = sourceCard(page)
     await card.getByLabel("Repository URL").fill("https://gitlab.com/acme/mirror.git")
-    await card.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Source updated")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     const body = puts.at(-1)
     expect(body).toMatchObject({ mode: "git_url", url: "https://gitlab.com/acme/mirror.git" })
@@ -306,7 +314,9 @@ test.describe("Source setting card", () => {
 
     await page.goto("/deploy/7/settings/general")
     const card = sourceCard(page)
-    await card.getByRole("button", { name: "Save" }).click()
+    // Save is the page's bar, which is there once something is edited.
+    await card.getByLabel("Branch or tag").fill("release/9")
+    await saveSettings(page)
     await expect(card.getByText("The branch could not be found on the remote.")).toBeVisible()
     await expect(page.getByText("Could not update source")).toHaveCount(0)
   })
@@ -330,7 +340,8 @@ test.describe("Source setting card", () => {
 
     await page.goto("/deploy/7/settings/general")
     const card = sourceCard(page)
-    await card.getByRole("button", { name: "Save" }).click()
+    await card.getByLabel("Branch or tag").fill("release/9")
+    await saveSettings(page)
     await expect(card.getByText("Unknown credential.")).toBeVisible()
     await expect(page.getByText("Could not update source")).toHaveCount(0)
   })

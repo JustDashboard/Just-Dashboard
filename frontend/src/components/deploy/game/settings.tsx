@@ -24,7 +24,7 @@ import { LogText } from "@/components/logs/log-text"
 import { Well } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { SettingFoot } from "@/components/deploy/settings/setting-card"
+import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
 import { Input } from "@/components/ui/input"
 import {
   InputGroup,
@@ -111,7 +111,7 @@ export function GameSettings({ projectId }: { projectId: number }) {
   const invalid = changed.some(([key]) => errors[key])
 
   const save = async () => {
-    if (changed.length === 0 || invalid) return
+    if (changed.length === 0 || invalid) return false
     setSaving(true)
     try {
       const result = await put<{ applied: string[]; restartRequired: boolean }>(
@@ -134,15 +134,32 @@ export function GameSettings({ projectId }: { projectId: number }) {
       )
       setDraft({})
       properties.refresh()
+      return true
     } catch (error) {
       notify.error("Could not save these settings", error)
+      return false
     } finally {
       setSaving(false)
     }
   }
 
+  // The page's Save is the settings pages' floating bar; the restart the
+  // toast offers stays, because saving writes the file and does not apply it.
+  const saveAll = useSaveBarEntry(
+    admin,
+    {
+      name: "Server settings",
+      dirty: changed.length > 0,
+      changes: changed.length,
+      saving,
+      invalid,
+      applies: "immediately",
+    },
+    { save, discard: () => setDraft({}) },
+  )
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20">
       {overview.data && <GameIdentity overview={overview.data} />}
       {properties.error ? (
         <ErrorState error={properties.error} />
@@ -162,7 +179,7 @@ export function GameSettings({ projectId }: { projectId: number }) {
           className="mx-auto w-full max-w-3xl"
           onSubmit={(event) => {
             event.preventDefault()
-            void save()
+            void saveAll?.()
           }}
         >
           <FormSections className="animate-rise">
@@ -202,27 +219,11 @@ export function GameSettings({ projectId }: { projectId: number }) {
             {data.raw && <RawFile raw={data.raw} />}
           </FormSections>
 
-          <SettingFoot
-            dirty={changed.length > 0}
-            changes={changed.length}
-            saving={saving}
-            invalid={invalid}
-            canEdit={admin}
-            onDiscard={() => setDraft({})}
-            note={
-              <>
-                {changed.length > 0 && (
-                  <span className="font-mono">{changed.map(([key]) => key).join(", ")}</span>
-                )}
-                {data.restartRequired && (
-                  <span className={cn("block", changed.length > 0 && "text-warning")}>
-                    The server reads this file on start. Saving writes the change; restarting
-                    applies it.
-                  </span>
-                )}
-              </>
-            }
-          />
+          {data.restartRequired && (
+            <FormNote className={cn("mt-6", changed.length > 0 && "text-warning")}>
+              The server reads this file on start. Saving writes the change; restarting applies it.
+            </FormNote>
+          )}
         </form>
       )}
     </div>

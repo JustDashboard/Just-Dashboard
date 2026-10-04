@@ -78,10 +78,11 @@ taking a frame:
   row in them that is *taken* rather than read (a project, a run, a credential, a channel, a
   service, a webhook, a schedule, a variable, a linked database) a lit card — a `ChoiceRow` in a
   `ChoiceList`, or on the fleet's grid a project's own `SpotlightBorder` card with the same lit
-  edge (what keeps a frame there is, first, a *picture*, because a picture needs an edge to read as
-  one thing: three on the settings pages, each inside its section and drawn through
-  `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`:
-  Runtime's where it
+  edge (what kept a frame there was, first, a *picture*, on the argument that a picture needs an
+  edge to read as one thing — the settings pages' four were framed until 0.7.1 and now stand
+  unframed over `wire-grid`, as below, each inside its section and drawn through
+  `settings/setting-picture.tsx` or, for Automation's, `settings/automation/wiring.tsx`: General's
+  push to a deployment, Runtime's where it
   listens (the domain, this server, the container, with an amber *Anywhere* node when the port is
   open on every interface), Databases' way the application reaches its databases (each engine, the
   managed network, the application) and Automation's what deploys it (the watched branch, each
@@ -108,7 +109,10 @@ taking a frame:
   repository, the watch with when it last looked, the deploys, and the last check's decision on
   one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
   one box on a page of hairlines, and the decision's sentence had sat in the section head's status
-  slot at the page's 16px, louder than the head itself. The preview beside it is the
+  slot at the page's 16px, louder than the head itself. Runtime's, Databases' and Automation's
+  followed with the rest of the settings pages, through `SettingPicture`; Security's exposure path
+  draws through the same component and keeps its frame, as a block among framed readings. The
+  preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
@@ -439,8 +443,7 @@ rung above a dialog section's 15, because it names a part of the page (§8). The
 `text-xs` muted, 12, between the title and the 11px hints in the fields, because it is data rather
 than a caption (§5). `actions` sit at the far end of the head's row, and so does a settings
 section's `settingStatus`, so "Unsaved changes", arriving with the first keystroke, takes no line of
-its own and pushes no field down. `SettingFoot` keeps to the same 48rem column, so Save sits under
-the fields it saves.
+its own and pushes no field down.
 
 **The deployment settings are that shape, and they were the last pages in the product that were
 all containers.** Each of the nine was a stack of framed cards — a title strip, the form, a footer
@@ -449,23 +452,28 @@ which is the wrong shape for a page that *is* a form. `settings/setting-card.tsx
 `SettingsPage` reads the configuration, then draws what is saved but not live yet (a strip with no
 button: the project context row already carries the one "Deploy changes", and a second brand face a
 hundred and fifty pixels under it was two commands on one surface), the page's readings, and its
-forms in one run of sections. `SettingForm` is one `<form>` and one save, and may span several
-sections, because what one PUT writes is what one Save means — Runtime is five. `SettingSection`
+forms in one run of sections. `SettingForm` is one `<form>` and one write, and may span several
+sections, because what one PUT writes is one form — Runtime is five. `SettingSection`
 is a section's head carrying what the section currently is as data (the host and branch it builds
 from, the port it answers on) and, at its far end, at most one `settingStatus`: *Not saved*,
-*Unsaved changes* or *Saved · not live yet*. `SettingFoot` ends the form with Save alone at the
-fields' right edge; when the change applies ("Applies immediately", "Applies on your next
-deployment") arrives with the count of unsaved edits and Discard, because it is news only once there
-is an edit — every form closing on that line in 11px grey at the column's far left, a thousand
-pixels from the button it qualified, read as stray text on every settings page. A form's own `note`
-(why it cannot be edited, what a restart still has to do) stays at rest, beside Save. Save is the outline face while the form is clean and the brand face once
-it holds an edit — the command face as a function of state, so the one blue on a page of five forms
-is the form with something to save — and on the nine settings pages it is never disabled, because
-saving an untouched Source checks it again, which is how an operator finds out a credential stopped
-working (the game server's
-settings, which declare a range for each value, hold it only while a value is outside that range). While the form is dirty the foot follows the
-reader down it, sticky, opaque (§16 has no glass) and hairlined, its row held to the fields column;
-at rest it is the form's last line rather than a strip of chrome. Each form keeps its draft keyed on
+*Unsaved changes* or *Saved · not live yet*. A form draws no Save of its own. Each one ended on
+its own button at the fields' right edge, so a page of three forms carried three Saves in three
+places and none of them was where the eye was after an edit two screens up. The page has one Save
+instead (`settings/save-bar.tsx`): `SettingsPage` mounts a `SaveBarProvider`, every `SettingForm`
+puts itself on it with its dirty state, its count and its `onSave` (which resolves true when the
+write went through), and while any form holds an edit a bar floats at the foot of the content area,
+centred on the column it saves. It is the one thing on a settings page that floats, so it takes a
+popover's surface and shadow (§2), and it rises in (§11). It counts the edits across the page,
+names the parts they are in and when they apply, and carries Discard and Save; ⌘S (Ctrl+S) and
+Enter in a field are the same Save. Save writes each dirty form in page order, one after another,
+because two forms on one page write the same configuration: `useConfiguration.save` sends the
+revision the last write handed back and fills what a form does not own from that copy, and a form
+that owns only a field of a part (Build's release tasks are a field of `build`) passes a function
+of the latest copy. A refused form keeps its edits and says why under the field, and the bar stays
+with what is left; when everything went through it says *Saved* and when it applies, then leaves —
+so the forms no longer toast their own success. A clean page has nothing to save and no button:
+re-checking an untouched Source means saving an edit to it. The game server's settings take the
+same bar, and hold its Save while a value is outside its declared range. Each form keeps its draft keyed on
 a digest of its own saved value (`useSettingDraft`): every save writes a new revision of the whole
 configuration, and a draft keyed on the revision was thrown away by a save of the section beside it.
 
@@ -974,12 +982,29 @@ trail stays a table.
 measures where there is room and under it where there is not, chosen once with a media query — and
 the width they need is measured inside the project's shell, not the window: at 1280 the content
 column beside the project's navigation is about 968px, which left a service's name 150px beside
-five readings, so the wide shape of a service and of the Overview's runs-beside-previews starts at
-`2xl`, as does the build console's rail of stages beside the transcript. Inside a settings page the
-column is narrower still, because the fields are held to 48rem however wide the window is, so there
-the window is the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a
-list is drawn in, before its first paint, and the variables (from 600px), mounts and linked
-databases (from 480px) choose beside-or-under from that — still once, still drawn once. A row that
+five readings, so the wide shape of the Overview's runs-beside-previews starts at `2xl`, as does
+the build console's rail of stages beside the transcript. Inside a settings page the column is
+narrower still, because the fields are held to 48rem however wide the window is, so there the
+window is the wrong thing to ask at all: `settings/use-column-width.ts` measures the column a list
+is drawn in, before its first paint, and the variables and linked databases (from 600px), the
+storage page's mounts (from 480px) and Automation's webhooks, schedules, approvals and previews
+(from 560px) choose beside-or-under from that — still once, still drawn once.
+
+**Wide, a lit card is one line** — the Notifications channel card is the reference. The mark, the
+name over one truncating line of its secondary facts joined with " · ", and at its far end the state
+word and the outcome strip, the strip in a fixed `w-27.5` column so that down a list the strips are
+one column and the states end on one edge, then the arrow and the verbs on the card's middle. A
+second band under the name — a strip, a preview address, a run's trigger — left the card two or
+three lines tall with the verbs level with the name over an empty corner, and 0.7.1 took it off
+every deployment card that had one: webhooks, schedules, approvals and previews; linked databases,
+the gate evidence, the live mounts and a variable's linked database; a backup job (`JobCard`, which
+measures its own width because it is drawn on /backups as well); a runtime service (one line from
+1280, its ports from 1536), a domain (from 1024), a mount and a dependency; the fleet's list rows
+(from `lg`, traffic joining at `xl`), the runs in flight (from `sm`) and the archive (from `sm`).
+Narrow, each keeps one short second line, as the channel card does on a phone; a fact that fitted
+neither line and is not needed to recognise or judge the card went to the page or sheet it opens.
+A revealed variable value and an isolation note on a preview keep their line, because one is a
+control and the other is the thing to do. A row that
 only reflows rather than rearranging, a domain or a mount editor, uses a container query
 (`@container`, `@min-[40rem]` for a domain and `@min-[36rem]` for a mount) and draws nothing twice
 by construction.

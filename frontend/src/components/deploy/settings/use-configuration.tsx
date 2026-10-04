@@ -8,9 +8,15 @@ import type { DeploymentConfiguration, DeploymentEnvironmentConfiguration } from
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 
-type ConfigurationChanges = Partial<
-  Pick<DeploymentConfiguration, "build" | "runtime" | "dependencies" | "checks" | "domains">
+type Owned = Pick<
+  DeploymentConfiguration,
+  "build" | "runtime" | "dependencies" | "checks" | "domains"
 >
+
+/** A part a form owns: its value, or how to make it from the latest copy. */
+type ConfigurationChanges = {
+  [K in keyof Owned]?: Owned[K] | ((latest: DeploymentEnvironmentConfiguration) => Owned[K])
+}
 
 /**
  * The environment's desired configuration, and the one way to change it.
@@ -18,7 +24,14 @@ type ConfigurationChanges = Partial<
  * Every settings section reads the same document and writes it back with
  * the revision it read, so a save made from a stale tab is refused rather
  * than silently overwriting somebody else's. `save` takes only the parts a
- * form owns and fills the rest from the copy on screen.
+ * form owns and fills the rest from the latest copy.
+ *
+ * The latest copy is the one the last write handed back, not the one on
+ * screen: the page's save bar writes its dirty forms one after another, and
+ * the second used to go out with the revision the first had just replaced —
+ * refused — and with the first form's part as it was before, which would
+ * have undone it. A form that owns only some of a part (Build's release
+ * tasks are a field of `build`) passes a function and changes just that.
  */
 export function useConfiguration(projectId: number, environmentId: number) {
   const state = usePoll(
@@ -34,17 +47,29 @@ export function useConfiguration(projectId: number, environmentId: number) {
   )
   const current = state.data
   const refresh = state.refresh
+  const written = useRef<DeploymentEnvironmentConfiguration>(undefined)
   const save = useCallback(
     async (changes: ConfigurationChanges) => {
-      if (!current) throw new Error("The configuration has not loaded yet")
-      await put(`/deploy/${projectId}/environments/${environmentId}/configuration`, {
-        revision: current.revision,
-        build: changes.build ?? current.build,
-        runtime: changes.runtime ?? current.runtime,
-        dependencies: changes.dependencies ?? current.dependencies,
-        checks: changes.checks ?? current.checks,
-        domains: changes.domains ?? current.domains,
-      })
+      const pending = written.current
+      const latest = pending && current && pending.revision > current.revision ? pending : current
+      if (!latest) throw new Error("The configuration has not loaded yet")
+      const part = <K extends keyof Owned>(key: K): Owned[K] => {
+        const change = changes[key] as
+          Owned[K] | ((latest: DeploymentEnvironmentConfiguration) => Owned[K]) | undefined
+        if (change === undefined) return latest[key]
+        return typeof change === "function" ? change(latest) : change
+      }
+      written.current = await put<DeploymentEnvironmentConfiguration>(
+        `/deploy/${projectId}/environments/${environmentId}/configuration`,
+        {
+          revision: latest.revision,
+          build: part("build"),
+          runtime: part("runtime"),
+          dependencies: part("dependencies"),
+          checks: part("checks"),
+          domains: part("domains"),
+        },
+      )
       refresh()
     },
     [current, projectId, environmentId, refresh],

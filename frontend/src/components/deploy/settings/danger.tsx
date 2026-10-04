@@ -58,11 +58,16 @@ import { archiveRequest, purgeRequest, useProjectVerbs } from "@/components/depl
  * One frame, in the danger rule, around all of them: it is the page's only
  * block, and everything inside it changes what the deployment is, so the
  * edge says "careful" once instead of four red cards saying it four times.
- * Each act is one row — its name, one sentence, what exactly it touches as
- * data, and its one button beside them — so the button is never a thousand
- * pixels from the sentence that explains it. An act the reader cannot take
- * *yet* stays drawn, quiet, saying what comes first; an act their role cannot
- * take is not drawn at all.
+ * Each act is one row — its name, what it costs in a sentence, what exactly
+ * it touches as data, and its one button beside them — so the button is
+ * never a thousand pixels from the sentence that explains it. An act the
+ * reader cannot take *yet* stays drawn, quiet, saying what comes first; an
+ * act their role cannot take is not drawn at all.
+ *
+ * The sentence is the consequence and nothing the row says elsewhere: the
+ * title already names the act, and what it stops, keeps, forgets or removes
+ * is the data under it. So the sentence changes with the row's state — once
+ * the managed resources are listed, it no longer lists them in prose.
  */
 export function DangerZoneSettings({
   projectId,
@@ -127,13 +132,28 @@ function DangerZone({ configuration }: { configuration: DeploymentEnvironmentCon
 function Lifecycle({ archived }: { archived: boolean }) {
   const steps = ["In use", "Archived", "Deleted"]
   const at = archived ? 1 : 0
-  return <StageStrip steps={steps} current={at} label={`Now: ${steps[at]}`} />
+  // Keyed on the step, so archiving or restoring moves the lit bar by
+  // arriving at its new place rather than repainting under the reader.
+  return (
+    <span key={at} className="block animate-rise">
+      <StageStrip steps={steps} current={at} label={`Now: ${steps[at]}`} />
+    </span>
+  )
 }
 
 /**
- * One act: its name, one sentence, what it touches, and its button beside
+ * One act: its name, what it costs, what it touches, and its button beside
  * them. With no button it is an act that cannot be taken yet, and its title
  * goes quiet.
+ *
+ * Three ranks, one step apart on the ladder: the act at 14, its consequence
+ * at 12, the data at 11. The consequence was at the data's 11 and muted, so
+ * the line a reader most needs before pressing was the hardest one to read.
+ *
+ * The act's own block is keyed on its name and on whether it can be taken,
+ * so Stop turning into Start, or a held act getting its button when the
+ * deployment is archived, arrives (§11) rather than being repainted. Only
+ * that block: `children` carries the confirmation, which must outlive it.
  */
 function DangerRow({
   title,
@@ -143,18 +163,23 @@ function DangerRow({
   children,
 }: {
   title: string
-  sentence: React.ReactNode
+  sentence?: React.ReactNode
   facts?: React.ReactNode
   action?: React.ReactNode
   children?: React.ReactNode
 }) {
   return (
     <div className="min-w-0 px-5 py-4">
-      <div className="grid min-w-0 gap-x-8 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div
+        key={`${title}-${action ? "open" : "held"}`}
+        className="grid min-w-0 animate-rise gap-x-8 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+      >
         <div className="min-w-0 space-y-1">
           {/* Under the section's own "Danger zone" heading, not beside it. */}
           <h4 className={cn("text-sm font-medium", !action && "text-muted-foreground")}>{title}</h4>
-          <p className="max-w-prose text-hint leading-relaxed text-muted-foreground">{sentence}</p>
+          {sentence && (
+            <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">{sentence}</p>
+          )}
           {facts && <div className="space-y-0.5 pt-1">{facts}</div>}
         </div>
         {action && <div className="flex max-sm:[&>*]:w-full">{action}</div>}
@@ -212,13 +237,10 @@ function StopStartRow({
   const containers = runtime?.services.length ?? deployment.serviceCount
   const hosts = configuration.domains.map((domain) => domain.hostname)
   return (
+    // Starting has no cost to warn of, so its title is the whole of it.
     <DangerRow
       title={stopped ? "Start the application" : "Stop the application"}
-      sentence={
-        stopped
-          ? "Start the stopped containers and check they answer."
-          : "Stop the live containers. Visitors get an error until you start it again."
-      }
+      sentence={stopped ? undefined : "Visitors get an error until you start it again."}
       facts={
         <>
           <FormFacts>
@@ -330,9 +352,11 @@ function ArchiveRow({ configuration }: { configuration: DeploymentEnvironmentCon
     </>
   )
   return (
+    // "Turn off everything that deploys it by itself" was the Stops line
+    // under it, said first as prose.
     <DangerRow
       title="Archive this deployment"
-      sentence="Turn off everything that deploys it by itself and take it off the active list. What runs keeps running."
+      sentence="Takes it off the active list. What runs keeps running."
       facts={facts}
       action={
         <Button
@@ -387,13 +411,14 @@ function RestoreRow() {
     }
   }
   return (
+    // What stays off is a consequence, so it is the sentence; the facts
+    // line under it is the one datum, when it was archived.
     <DangerRow
       title="Restore this deployment"
-      sentence="Put it back on the active list under its own name."
+      sentence="Puts it back on the active list under its own name. Webhooks and schedules stay off until you turn them on."
       facts={
         <FormFacts>
           <FormFact label="Archived">{archivedAt ? relativeTime(archivedAt) : "just now"}</FormFact>
-          <span>webhooks and schedules stay off until you turn them back on</span>
         </FormFacts>
       }
       action={
@@ -505,7 +530,7 @@ function RemovalRow() {
     return (
       <DangerRow
         title="Remove managed resources"
-        sentence="Remove the containers, volumes, routes and other resources this deployment created. Linked and observed resources are never touched."
+        sentence="Removes what this deployment created — containers, volumes, routes. Linked and observed resources are never touched."
         facts={
           <FormFacts>
             <span>Archive the deployment first</span>
@@ -514,14 +539,18 @@ function RemovalRow() {
       />
     )
 
+  // Archived, the resources are listed under the row, so the sentence keeps
+  // only what the list cannot say: what is left alone.
   return (
     <DangerRow
       title="Remove managed resources"
-      sentence="Remove the containers, volumes, routes and other resources this deployment created. Linked and observed resources are never touched."
+      sentence="Linked and observed resources are never touched."
       facts={
         plan.data && (
           <FormFacts>
-            <span>
+            {/* Keyed on the figures, so a removal landing changes them by
+                arriving rather than by a digit swapping under the reader. */}
+            <span key={`${targets.length}-${holding}`} className="animate-rise">
               <span className="numeric text-foreground">
                 {plural(targets.length, "managed resource")}
               </span>
@@ -555,7 +584,7 @@ function RemovalRow() {
         ) : plan.loading && !plan.data ? (
           <LoadingRows rows={2} />
         ) : targets.length === 0 ? (
-          <EmptyNote className="px-0 py-2 text-left">
+          <EmptyNote className="animate-rise px-0 py-2 text-left">
             No managed resource is left to remove.
           </EmptyNote>
         ) : (
@@ -651,7 +680,7 @@ function PurgeRow({ configuration }: { configuration: DeploymentEnvironmentConfi
     return (
       <DangerRow
         title="Delete permanently"
-        sentence="Forget this deployment's configuration, variables and history. Host resources are left as they are."
+        sentence="Forgets its configuration, variables and history. What it made on the server stays."
         facts={
           <FormFacts>
             <span>Archive the deployment first</span>
@@ -659,10 +688,12 @@ function PurgeRow({ configuration }: { configuration: DeploymentEnvironmentConfi
         }
       />
     )
+  // Ready, Forgets and Leaves under it say what goes and what stays item by
+  // item, so the sentence is the one thing they do not: there is no way back.
   return (
     <DangerRow
       title="Delete permanently"
-      sentence="Forget this deployment's configuration, variables and history. Host resources are left as they are."
+      sentence="Cannot be undone."
       facts={facts}
       action={
         <Button

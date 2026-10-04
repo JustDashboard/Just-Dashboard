@@ -2,7 +2,6 @@
 
 import { Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { plural } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { Field } from "@/components/form"
 import { Well } from "@/components/panel"
@@ -41,6 +40,13 @@ import {
  * block currently is as data, the webhooks, schedules and previews as cards
  * that open their own sheets, and the alert rules as sentences.
  *
+ * A head's state is one line — how many there are, how many are off, who is
+ * told — and holds nothing its cards or the picture already say; its far end
+ * holds the one button that adds to the block, as every settings head does.
+ * The counts sat beside that button at 11px, a second line of data in a
+ * second place, and the state under the title restated what the first card
+ * said: the repository, the timezone, the sentence about what a webhook is.
+ *
  * Every block reads from one set of polls (`useAutomation`), so the picture
  * and the lists agree. The Add webhook and Add schedule sheets are
  * held here rather than in their blocks: the picture's rings and the previews'
@@ -78,7 +84,12 @@ export function AutomationSettings({
               <SettingSection
                 id="wiring"
                 title="What deploys it"
-                state={senders(automation, watching?.automatic ? watching.branch : undefined)}
+                state={
+                  byHandOnly(automation, Boolean(watching?.automatic)) && (
+                    // General's picture says it in the same words, for the same state.
+                    <span className="block animate-rise">Only when you press Deploy</span>
+                  )
+                }
               >
                 <AutomationWiring
                   deployment={summary}
@@ -101,7 +112,6 @@ export function AutomationSettings({
                 environmentId={environmentId}
                 automation={automation}
                 sheet={webhookSheet}
-                branch={watching?.automatic ? watching.branch : undefined}
               />
               <Schedules
                 projectId={projectId}
@@ -146,14 +156,16 @@ export function AutomationSettings({
   )
 }
 
-/** "on push to main · 2 webhooks · 1 schedule" — what starts it, as a line of data. */
-function senders(automation: Automation, branch?: string) {
-  const parts = [
-    branch && `on push to ${branch}`,
-    automation.triggers.data?.length && plural(automation.triggers.data.length, "webhook"),
-    automation.schedules.data?.length && plural(automation.schedules.data.length, "schedule"),
-  ].filter(Boolean)
-  return parts.length > 0 ? parts.join(" · ") : "Nothing yet — it deploys when you press Deploy."
+/**
+ * Whether nothing deploys it by itself, once the lists have been read. The
+ * head says so only then: every sender there is stands in the picture right
+ * under it, and a line counting them was each of them said twice. With none
+ * to draw, the picture shows rings where one could go, and nothing in it says
+ * that until one is added only Deploy deploys it.
+ */
+function byHandOnly(automation: Automation, watching: boolean) {
+  const { triggers, schedules } = automation
+  return !watching && triggers.data?.length === 0 && schedules.data?.length === 0
 }
 
 /**
