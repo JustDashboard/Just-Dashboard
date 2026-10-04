@@ -21,7 +21,9 @@ Managed adoption has separate private host captures. PM2 captures one account/na
 through its existing monitor socket without executing ecosystem JavaScript, and lifecycle operations
 compare the captured configuration before calling the exact existing process IDs over that socket.
 Systemd captures its unit, drop-ins and effective execution properties; a running process supplies its
-actual argv and initial environment. These values are private input for encrypted deployment variables,
+actual argv and initial environment. Unit/drop-in paths are manager-provided absolute paths with
+bounded reads and configuration digests, and can lie outside deployment roots. Native source and
+working directories still pass deployment-root resolution and host/dashboard path-identity checks. These values are private input for encrypted deployment variables,
 never discovery JSON or audit metadata. Bare processes are fenced by PID creation time on both sides
 of the procfs read and have no automatic migration without a verified restart authority.
 

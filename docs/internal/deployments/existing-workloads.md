@@ -38,8 +38,12 @@ engine, with the original manager retained as the baseline recovery authority.
 
 These routes require an administrator's browser session, CSRF for writes, and audited mutations.
 Discovery accepts only a discovered resource identity, not a host command. Host commands use explicit
-`hostexec` arguments. Original paths are contained by `files.Resolve` and `JD_DEPLOY_ROOTS`, including
-Compose files, includes, environment files, bind mounts and native source/configuration paths. The
+`hostexec` arguments. Client source and storage paths use `files.Resolve` and `JD_DEPLOY_ROOTS`,
+including Compose files, includes, environment files, bind mounts and native working/source
+directories. Systemd unit and drop-in paths come from the authoritative manager rather than a client
+path: their absolute paths can be outside deployment roots, such as `/etc/systemd/system`. Capture
+reads them with per-file size limits and binds their configuration to the retained original-manager
+digest; it never exposes their private contents or grants a client an arbitrary host-file read. The
 private capture never enters discovery, audit data or browser remembered setup. Secret values are
 sealed in draft and variable storage; recovered source documents use variable references instead
 of embedding captured environment, credential arguments or label values.
