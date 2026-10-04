@@ -134,6 +134,59 @@ retains the compact mark radius used in commit lines and forge faces.
 
 ## Workspace commands and place
 
+### Global command search
+
+`command-palette.tsx` opens with Ctrl/Cmd+K or the rail's Search button. An empty search puts the
+previous distinct destination first, then the other recent destinations, current page commands
+and permission-visible navigation. Enter on that first result switches back to the previous
+place without a browser history traversal; native Back/Forward remain available. The bounded
+12-destination history observes pathname and query changes from every navigation entry point,
+keeps resource selections, and uses `useMemoryState` per account. Filter and tab edits update the
+current place without displacing the previous page; switching a query-selected resource creates
+a distinct destination. Reload and sign-out discard it.
+
+`components/command-search/inventory.ts` projects explicitly selected metadata from ten existing
+authenticated GET routes: the deployment fleet, proxy vhosts, saved database connections, Docker
+containers and stacks, Git repositories, systemd services, PM2 applications, backup jobs and boards.
+The dialog mounts its index only while open, with at most four concurrent inventory requests and
+an eight-second timeout per source. Closing aborts reads; reopening reads fresh inventory rather
+than retaining deleted resources. Reads settle independently; a failed source contributes no
+stale rows and is named as incomplete search with a retry control. Retry refreshes all inventories.
+Backend route permissions remain authoritative. No aggregate backend route or database migration
+is introduced. Database rows, arbitrary files, logs, credentials, environment values and board
+scenes are outside this index; URL userinfo, queries and fragments are excluded from addresses.
+
+`model.ts` supplies scope aliases, AND matching of query terms, accent/punctuation normalization,
+ranking (exact name/address, prefix, substring, one-edit typo), result limits and recent-history
+logic. `domain:`/`site:`, `db:`/`database:`, `container:`, `stack:`, `project:`, `repo:`, `service:`,
+`pm2:`/`app:`, `backup:`, `board:`, `page:`, `command:` and `recent:` narrow the same input; a
+labelled scope selector makes the types discoverable. Global searches omit duplicate recent
+entries; the Recent scope searches history explicitly. At most 60 results are shown with a
+matching count and a suggestion to narrow when there are more.
+
+Each resource result uses its existing detail address. Sites open `/proxy/sites/<name>` for
+inspection rather than the legacy `?site=` editing link. Containers and stacks open their dedicated
+pages; Git, systemd and PM2 retain query-selection links, including PM2's daemon and numeric ID.
+Names with the same spelling retain separate identities. The current database keeps the existing
+engine-dependent pages and broken-connection restriction; saved databases also retain the
+`open <name>` search phrase. Page commands, proxy commands and
+account navigation retain capability filtering. Reload nginx and Sign out require an explicit
+search or the Commands scope, so neither becomes the blank menu's default action.
+
+cmdk keeps combobox focus, arrow movement, Home/End, wraparound and active-option announcements;
+the selected identity survives independently arriving results. Its Ctrl+K vim binding is disabled
+so the global shortcut also closes the menu. Escape first clears a non-empty search through
+`PaletteModal.onEscapeKeyDown`, then dismisses the dialog and restores focus. Native scope and
+retry controls own their keys. The shortcut ignores composition, repeats and additional modifiers.
+Ctrl/Cmd+K is reserved in window capture so Monaco's chord and the terminal do not consume the
+same keystroke before the launcher opens.
+
+Pure ranking/history and metadata-projection contracts are tested with Bun in
+`components/command-search/`; `tests/browser/command-search.spec.ts` verifies keyboard navigation,
+real detail rendering with API fixtures, live refresh, partial failures, delayed reads, permissions,
+database engine navigation and mobile bounds. The design and recording are in the
+[command-search audit](../../audits/2026-10-04-command-search/README.md).
+
 `components/workspace/` registers the active page's Find, read refresh, shortcuts and contextual
 actions in the existing command palette. The shell marks its scroll region, and participating pages
 restore row/field focus and scroll after navigation. Editors, terminals and portalled controls keep

@@ -24,6 +24,7 @@ export function StatTile({
   value,
   hint,
   meter,
+  meterLabel,
   trend,
   tone = "default",
   trailing,
@@ -35,6 +36,8 @@ export function StatTile({
   hint?: React.ReactNode
   /** 0–100. Draws the utilisation bar under the figure. */
   meter?: number
+  /** Names the bar when `label` is a node (a mark beside the word) rather than a string. */
+  meterLabel?: string
   /**
    * The figure's recent shape, drawn where the meter would be — for a reading
    * that moves rather than one that fills. The Overview's tiles carry their
@@ -81,7 +84,7 @@ export function StatTile({
           tone={tone}
           size="thin"
           className="mt-1"
-          label={typeof label === "string" ? label : undefined}
+          label={meterLabel ?? (typeof label === "string" ? label : undefined)}
         />
       )}
 

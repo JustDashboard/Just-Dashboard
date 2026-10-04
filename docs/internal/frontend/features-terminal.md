@@ -402,6 +402,8 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   and editor, because a read-only list is opened once and a hidden settings page never. Split creation
   defaults to Ctrl+Alt+Shift plus a direction arrow; pane focus defaults to Ctrl+Alt+H/L/I/K
   (left/right/up/down), and Ctrl+Alt+P cycles visible panes. These appear in that same editable dialog.
+  Ctrl/Cmd+K remains the shell's global command search: the window capture listener opens it before
+  xterm receives the keystroke, so opening search does not also alter the shell's current line.
 
 In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 

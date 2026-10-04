@@ -88,8 +88,8 @@ describe("hostProduct", () => {
   })
 })
 
-test("gitProviderProduct names the four forges and nothing else", () => {
-  for (const provider of ["github", "gitlab", "bitbucket", "gitea"]) {
+test("gitProviderProduct names the six forges and nothing else", () => {
+  for (const provider of ["github", "gitlab", "bitbucket", "gitea", "forgejo", "codeberg"]) {
     expect(seen(gitProviderProduct(provider))).toBe(provider)
   }
   expect(gitProviderProduct("generic_hook")).toBeUndefined()
@@ -373,6 +373,9 @@ test("processProduct does not draw the X server as the site", () => {
   expect(seen(processProduct("node"))).toBe("nodejs")
   expect(seen(processProduct("python3"))).toBe("python")
   expect(seen(processProduct("php-fpm"))).toBe("php")
+  // Both names the web server goes by draw the one Apache mark.
+  expect(seen(processProduct("apache2"))).toBe("apache")
+  expect(seen(processProduct("httpd"))).toBe("apache")
   expect(processProduct("bash")).toBeUndefined()
   expect(processProduct("kworker/0:1")).toBeUndefined()
 })

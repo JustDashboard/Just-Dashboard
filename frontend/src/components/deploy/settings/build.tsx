@@ -20,13 +20,13 @@ import type {
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionRow } from "@/components/form"
-import { Well } from "@/components/panel"
 import {
   ProductGlyph,
   ProductGlyphs,
   ProductLogo,
   imageProduct,
   imageProducts,
+  recipeProduct,
   variableProduct,
 } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
@@ -69,6 +69,7 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { ReleaseTasks, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
 import { Segments } from "@/components/deploy/settings/segments"
+import { DockerfileView, dockerfileFacts } from "@/components/deploy/settings/dockerfile-view"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import {
   applyDetectionChanges,
@@ -176,6 +177,20 @@ const FIELD_SECTION: Record<string, "build" | "commands" | "image"> = {
 }
 
 const GO_ERROR = `Use Go ${GO_VERSIONS.slice(0, -1).join(", ")} or ${GO_VERSIONS.at(-1)}, or leave empty to follow go.mod.`
+
+/**
+ * A version picker is a row of segments, so there is no input to carry the
+ * runtime's mark the way Go's version box does; it leads the label instead.
+ */
+function RuntimeLabel({ recipe, children }: { recipe: string; children: React.ReactNode }) {
+  const product = recipeProduct(recipe)
+  return (
+    <>
+      {product && <ProductGlyph id={product} />}
+      {children}
+    </>
+  )
+}
 
 /**
  * A hint that answers the reader's last press — the install a package manager
@@ -855,7 +870,7 @@ function BuildForm({
           (recipe === "node" ||
             (installsAssetsWithNode(recipe) && (detected?.nodeInstalls?.length ?? 0) > 0)) && (
             <Field
-              label="Node version"
+              label={<RuntimeLabel recipe="node">Node version</RuntimeLabel>}
               hint={detected?.nodeVersion && `Auto builds on Node ${detected.nodeVersion}`}
               info="Auto reads .nvmrc, .node-version, .tool-versions, volta and engines.node; a version here outranks the repository."
               error={errorFor("build-node-version")}
@@ -887,7 +902,7 @@ function BuildForm({
 
         {build.method === "recipe" && recipe === "python" && (
           <Field
-            label="Python version"
+            label={<RuntimeLabel recipe="python">Python version</RuntimeLabel>}
             info="Auto reads .python-version, runtime.txt, .tool-versions, Pipfile or pyproject.toml, and stays below a version a pinned package has no wheels for."
             error={errorFor("build-python-version")}
             className="animate-rise"
@@ -920,7 +935,7 @@ function BuildForm({
 
         {build.method === "recipe" && recipe === "php" && (
           <Field
-            label="PHP version"
+            label={<RuntimeLabel recipe="php">PHP version</RuntimeLabel>}
             info="Auto reads composer.json, config.platform.php and what composer.lock's packages accept."
             error={errorFor("build-php-version")}
             className="animate-rise"
@@ -957,7 +972,7 @@ function BuildForm({
 
         {build.method === "recipe" && recipe === "java" && (
           <Field
-            label="Java version"
+            label={<RuntimeLabel recipe="java">Java version</RuntimeLabel>}
             hint={javaVersionReading(detected)}
             info="Auto reads the build files, .java-version, .sdkmanrc, .tool-versions and mise.toml."
             error={errorFor("build-java-version")}
@@ -985,7 +1000,7 @@ function BuildForm({
 
         {build.method === "recipe" && recipe === "dotnet" && (
           <Field
-            label=".NET version"
+            label={<RuntimeLabel recipe="dotnet">.NET version</RuntimeLabel>}
             hint={dotnetVersionReading(detected)}
             info="Auto reads the project's target framework and the SDK global.json pins."
             error={errorFor("build-dotnet-version")}
@@ -1363,7 +1378,7 @@ function BuildForm({
                   ? "Dockerfile the last build used"
                   : "Dockerfile the recipe wrote"
               }
-              facts={`${preview.split("\n").length} lines`}
+              facts={dockerfileFacts(preview)}
             >
               <div className="space-y-1.5">
                 <div className="flex justify-end">
@@ -1377,7 +1392,7 @@ function BuildForm({
                     Copy
                   </Button>
                 </div>
-                <Well className="max-h-72 whitespace-pre">{preview}</Well>
+                <DockerfileView source={preview} />
               </div>
             </Disclosure>
           )}

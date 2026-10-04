@@ -7,6 +7,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type { ContainerHistory, ContainerStats } from "@/lib/types"
 import { utilisationTone } from "@/components/meter"
+import { ProductGlyph } from "@/components/product-logo"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { StatusDot } from "@/components/status-dot"
 import { TileTrend } from "@/components/metrics/sparkline"
@@ -50,6 +51,11 @@ function throughput(previous: ContainerStats, next: ContainerStats) {
  * a dash and `reason` under the first, so the row never reflows when one
  * appears. `href` makes each tile a way to the page that has the rest.
  *
+ * `product` is the service the container is, drawn as its own mark in front
+ * of each tile's name (§15 pass 4's wayfinding glyph) so that, with several
+ * services behind one selector, a row of figures says whose they are. The
+ * Overview's glance has one container and passes none.
+ *
  * `initial` is a polled reading of the same container, shown until the first
  * frame lands, so a slow socket leaves the tiles with a figure rather than a
  * dash; `onStats` hands each frame on, so a card elsewhere on the page can
@@ -62,6 +68,7 @@ export function UsageTiles({
   columns = 2,
   href,
   initial,
+  product,
   onStats,
 }: {
   containerId?: string
@@ -72,6 +79,7 @@ export function UsageTiles({
   columns?: 2 | 4
   href?: string
   initial?: ContainerStats
+  product?: string
   onStats?: (stats: ContainerStats) => void
 }) {
   const [reading, setReading] = useState<Reading>()
@@ -239,15 +247,33 @@ export function UsageTiles({
     )
   }
 
+  // The eyebrow keeps its word as the link's name; the mark in front of it is
+  // decoration. A 12px glyph, as the sidebar's and a module tile's are.
+  const named = (tile: (typeof tiles)[number]) => ({
+    ...tile,
+    meterLabel: tile.label,
+    label: product ? (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <ProductGlyph id={product} className="size-3" />
+        <span className="truncate">{tile.label}</span>
+      </span>
+    ) : (
+      tile.label
+    ),
+  })
+
   return (
     <StatGrid columns={columns} dense>
       {tiles.map((tile) =>
         href ? (
           <StatLink key={tile.label} href={href} label={`${tile.label} on Runtime`}>
-            <StatTile {...tile} className="h-full transition-colors group-hover:bg-row-hover" />
+            <StatTile
+              {...named(tile)}
+              className="h-full transition-colors group-hover:bg-row-hover"
+            />
           </StatLink>
         ) : (
-          <StatTile key={tile.label} {...tile} />
+          <StatTile key={tile.label} {...named(tile)} />
         ),
       )}
     </StatGrid>

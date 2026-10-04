@@ -19,6 +19,7 @@ import {
   Inspect,
   Key,
   Layers,
+  Rocket,
   LineChart,
   ListOrdered,
   LockClosed,
@@ -146,7 +147,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       {
         title: "Deployments",
         href: "/deploy",
-        icon: CloudUpload,
+        icon: Rocket,
         children: [
           { title: "Projects", href: "/deploy", icon: GridMasonry },
           // Reading the credential list needs system.admin — the backend seals

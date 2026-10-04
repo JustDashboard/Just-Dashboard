@@ -7,7 +7,6 @@ import {
   Code,
   Envelope,
   GitBranch,
-  GitHubMark,
   Globe,
   GridMasonry,
   Inspect,
@@ -497,11 +496,11 @@ export const SOURCE_KIND_LABELS: Record<DeploymentSourceKind, string> = {
  * "Git repository" was shown a different product's icon for the thing they had
  * chosen. One mapping, so step one and step two cannot drift again (§4).
  *
- * GitHub is spelled with its own brand mark rather than a generic git glyph,
- * for the same reason the chooser does: the identity that reaches the
- * repository is the fact the reader is checking here, and a repository on some
- * other host is genuinely a different thing. A non-GitHub remote keeps the
- * branch glyph — a made-up logo would be worse than none.
+ * A repository is drawn as the forge it lives on — GitHub, GitLab, Codeberg,
+ * Bitbucket, Gitea, Forgejo — in that product's own artwork, for the same
+ * reason the chooser does: the identity that reaches the repository is the
+ * fact the reader is checking here. A remote on a host that names no forge
+ * keeps the branch glyph — a made-up logo would be worse than none.
  */
 export function SourceMark({
   source,
@@ -522,21 +521,27 @@ export function SourceMark({
       return <GridMasonry className={className} />
     case "import":
       return <Inspect className={className} />
-    default:
-      return isGitHubSource(source) ? (
-        <GitHubMark className={className} />
+    default: {
+      const forge = gitSourceProduct(source)
+      return forge ? (
+        <ProductGlyph id={forge} className={className} />
       ) : (
         <GitBranch className={className} />
       )
+    }
   }
 }
 
-/** Whether a git source is on github.com, which is what `githubRepo` means. */
-function isGitHubSource(source: DeploymentDraftSource) {
-  if (source.kind !== "git" && source.kind !== "local") return false
+/** The forge a git source is on, from its host. */
+function gitSourceProduct(source: DeploymentDraftSource) {
+  if (source.kind !== "git" && source.kind !== "local") return undefined
   // A connected repository is always GitHub — it arrived through the App —
-  // and a pasted URL is one when it names the host.
-  return source.mode === "connected_repository" || /github\.com/i.test(source.url ?? "")
+  // and a pasted URL is a forge when it names the host.
+  return (
+    hostProduct(source.url) ??
+    gitProviderProduct(source.provider) ??
+    (source.mode === "connected_repository" ? "github" : undefined)
+  )
 }
 
 /**

@@ -5,6 +5,7 @@ import { Clock, External } from "@/components/icons"
 import { ApiError, get, put } from "@/lib/api"
 import { plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { LANES, hueFor } from "@/lib/hue"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -666,7 +667,12 @@ function SourceForm({
               <Field label="Branch or tag" htmlFor="source-ref" error={fieldErrors.ref}>
                 <InputGroup>
                   <InputGroupAddon align="inline-start">
-                    <SourceBranch aria-hidden />
+                    {/* The branch's own hue, as the git views draw it, so the
+                        same name is the same colour wherever it is read. */}
+                    <SourceBranch
+                      aria-hidden
+                      style={value.ref ? { color: hueFor(value.ref, LANES) } : undefined}
+                    />
                   </InputGroupAddon>
                   <InputGroupInput
                     id="source-ref"

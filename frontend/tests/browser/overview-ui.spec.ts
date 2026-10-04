@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { fleet, mockOverview } from "./overview-fixture"
+import { iso, json, now, user } from "./host-fixture"
 
 /**
  * The host Overview, against a server with something in every place: the
@@ -123,6 +124,92 @@ test("who is spending the machine sits beside the day's activity", async ({ page
   // hours ago is still on it.
   await expect(activity.locator("li").first()).toContainText("shop-stack deployed")
   await expect(activity).toContainText("Installed 4 package updates")
+})
+
+for (const width of [1280, 390]) {
+  test(`activity shows product identities and truthful outcomes at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.route("**/api/v1/system/metrics/events**", (route) =>
+      json(route, [
+        {
+          ts: iso(now - 180_000),
+          kind: "deploy",
+          title: "shop-stack",
+          detail: "deploy running (push) by operator",
+          severity: "info",
+        },
+        {
+          ts: iso(now - 120_000),
+          kind: "action",
+          title: "docker.container.restart shop-web",
+          detail: "by operator",
+          severity: "error",
+        },
+        {
+          ts: iso(now - 60_000),
+          kind: "action",
+          title: "terminal.kill d4a0e8350b641a59",
+          detail: "by operator",
+          severity: "info",
+        },
+      ]),
+    )
+    await page.goto("/")
+    const activity = page.locator("[data-slot=panel]", {
+      has: page.getByRole("heading", { name: "Recent activity", exact: true }),
+    })
+    const rows = activity.getByRole("list", { name: "Recent server activity" }).locator("li")
+    await expect(rows).toHaveCount(3)
+    await expect(rows.first()).toContainText("Close terminal")
+    await expect(rows.first()).toContainText("Accepted")
+    await expect(rows.first().locator('img[src="/logos/terminal.svg"]')).toBeVisible()
+    await expect(rows.first().locator('[title="terminal.kill d4a0e8350b641a59"]')).toBeVisible()
+    await expect(rows.nth(1)).toContainText("Failed")
+    await expect(rows.nth(1).locator('img[src="/logos/docker.svg"]')).toBeVisible()
+    await expect(rows.nth(2)).toContainText("Running")
+    await expect(activity.getByText("Succeeded", { exact: true })).toHaveCount(0)
+    await expect(rows.first().locator("time")).toHaveAttribute("datetime", iso(now - 60_000))
+    const bounds = await activity.locator('[data-slot="panel-body"]').evaluate((panel) => ({
+      width: panel.clientWidth,
+      scrollWidth: panel.scrollWidth,
+    }))
+    expect(bounds.scrollWidth).toBe(bounds.width)
+    await expect(activity.getByRole("link", { name: "Audit log" })).toHaveAttribute(
+      "href",
+      "/audit",
+    )
+    await activity.getByRole("link", { name: "Audit log" }).click()
+    await expect(page).toHaveURL(/\/audit$/)
+  })
+}
+
+test("an empty activity panel keeps the way to the audit trail", async ({ page }) => {
+  await page.route("**/api/v1/system/metrics/events**", (route) => json(route, []))
+  await page.goto("/")
+  const activity = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Recent activity", exact: true }),
+  })
+  await expect(activity).toContainText("Nothing in the last 24 hours.")
+  await expect(activity.getByRole("link", { name: "Audit log" })).toBeVisible()
+})
+
+test("read-only accounts see activity without an administrator's audit-log link", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, {
+      ...user,
+      capabilities: ["read"],
+      user: { ...user.user, role: "viewer" },
+    }),
+  )
+  await page.goto("/")
+  const activity = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Recent activity", exact: true }),
+  })
+  await expect(activity.getByRole("list", { name: "Recent server activity" })).toBeVisible()
+  await expect(activity.getByText("Last 24 hours")).toBeVisible()
+  await expect(activity.getByRole("link", { name: "Audit log" })).toHaveCount(0)
 })
 
 test("a service tile names what it counts with the products", async ({ page }) => {

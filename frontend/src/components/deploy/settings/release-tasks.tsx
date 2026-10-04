@@ -16,6 +16,7 @@ import type {
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Group } from "@/components/panel"
+import { ProductGlyph, programProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -52,10 +53,16 @@ type TaskEvidence = { name: string; durationMs: number; exitCode: number; variab
  * was the label again. It used to sit under Command, a field away from the
  * choice it described.
  */
-const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] = [
+const RUNNERS: {
+  runner: ReleaseTask["runner"]
+  label: string
+  hint: string
+  product?: string
+}[] = [
   {
     runner: "image",
     label: "Release image",
+    product: "docker",
     hint: "Once, before it starts, with its volumes, its runtime variables and the ones below",
   },
   {
@@ -72,6 +79,12 @@ const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] 
  */
 const COMPOSE_IMAGE_HINT =
   "Once, in the primary service's image but outside the Compose stack, so its network and environment: entries do not apply"
+
+/** The program a command runs, drawn as itself when it is one the product knows. */
+function ProgramGlyph({ command }: { command: string }) {
+  const product = programProduct(command)
+  return product ? <ProductGlyph id={product} /> : null
+}
 
 function runnerHint(runner: ReleaseTask["runner"], buildMethod?: DeploymentBuildMethod) {
   if (runner === "image" && buildMethod === "compose") return COMPOSE_IMAGE_HINT
@@ -160,6 +173,25 @@ export function ReleaseTasks({
     requestAnimationFrame(() => document.getElementById(`${id}-task-${to}-${arrow}`)?.focus())
   }
 
+  // A task just added takes the keyboard at the field it cannot do without
+  // — its name, or its command when a starter already named it — once it has
+  // been drawn.
+  function add(name = "") {
+    onChange([
+      ...tasks,
+      {
+        name,
+        command: "",
+        workingDirectory: "",
+        timeoutSeconds: 300,
+        env: [],
+        runner: defaultReleaseTaskRunner(buildMethod),
+      },
+    ])
+    const added = `${id}-task-${tasks.length}-${name ? "command" : "name"}`
+    requestAnimationFrame(() => document.getElementById(added)?.focus())
+  }
+
   return (
     <div className="space-y-4">
       {/* Where the tasks run: the run page's seven stages, with Release lit. */}
@@ -170,7 +202,26 @@ export function ReleaseTasks({
       />
       <FormNote>A failing task stops the release; the live version keeps serving.</FormNote>
       {tasks.length === 0 ? (
-        <p className="text-body text-muted-foreground">No release tasks configured.</p>
+        <div className="space-y-2">
+          <p className="text-body text-muted-foreground">No release tasks configured.</p>
+          {!disabled && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-hint text-muted-foreground">Start from</span>
+              {STARTERS.map((starter) => (
+                <Button
+                  key={starter}
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => add(starter)}
+                >
+                  <Plus className="size-3" />
+                  {starter}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <ol className="space-y-3">
           {tasks.map((task, index) => {
@@ -303,12 +354,19 @@ export function ReleaseTasks({
                             task.runner !== option.runner && "border-border",
                           )}
                         >
+                          {option.product && <ProductGlyph id={option.product} />}
                           {option.label}
                         </FilterChip>
                       ))}
                     </div>
                   </Field>
-                  <Field label="Command" htmlFor={`${id}-task-${index}-command`}>
+                  <Field
+                    label="Command"
+                    htmlFor={`${id}-task-${index}-command`}
+                    // A textarea has no addon to carry the program's mark, so
+                    // it rides the label's edge, where it cannot move the words.
+                    trailing={<ProgramGlyph command={task.command} />}
+                  >
                     <Textarea
                       id={`${id}-task-${index}-command`}
                       aria-label={`Release task ${n} command`}
@@ -396,28 +454,7 @@ export function ReleaseTasks({
         </ol>
       )}
       {!disabled && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            onChange([
-              ...tasks,
-              {
-                name: "",
-                command: "",
-                workingDirectory: "",
-                timeoutSeconds: 300,
-                env: [],
-                runner: defaultReleaseTaskRunner(buildMethod),
-              },
-            ])
-            // A task just added takes the keyboard at its name, the field it
-            // cannot do without — once it has been drawn.
-            const added = `${id}-task-${tasks.length}-name`
-            requestAnimationFrame(() => document.getElementById(added)?.focus())
-          }}
-        >
+        <Button type="button" size="sm" variant="outline" onClick={() => add()}>
           <Plus className="size-3.5" />
           Add release task
         </Button>
@@ -425,6 +462,9 @@ export function ReleaseTasks({
     </div>
   )
 }
+
+/** Names a first task is usually given; the command is left for the operator. */
+const STARTERS = ["Database migrations", "Clear cache", "Warm up"]
 
 /** A timeout the way it is said: "5 min", "90 s", "1 h". */
 export function spoken(seconds: number) {
