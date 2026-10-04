@@ -18,7 +18,7 @@ MODULE = "example.test/dashboard/backend"
 BACKEND = {
     "go.mod": f"module {MODULE}\n",
     "go.sum": "",
-    "internal/api/routes.go": f'package api\nimport "{MODULE}/internal/deploy"\n',
+    "internal/api/routes.go": f'package api\nimport "{MODULE}/internal/deploy"\nimport "{MODULE}/internal/shell"\n',
     "internal/api/testdata/drivers.json": "{}\n",
     "internal/deploy/engine.go": f'package deploy\nimport "{MODULE}/internal/store"\n',
     "internal/deploy/engine_test.go": (
@@ -38,6 +38,7 @@ BACKEND = {
         'var companions = []string{"../api"}\n'
     ),
     "internal/term/term.go": "package term\n",
+    "internal/shell/shell.go": "package shell\n",
     "scripts/generate.go": "//go:build ignore\n\npackage main\n",
 }
 
@@ -133,6 +134,10 @@ class PlanTest(unittest.TestCase):
     def test_the_budgets_run_plainly_for_a_raced_package_that_has_them(self):
         self.assertEqual(self.plan("backend/internal/deploy/engine.go")["go_budgets"], "./internal/deploy")
         self.assertEqual(self.plan("backend/internal/api/routes.go")["go_budgets"], "")
+
+    def test_a_package_outside_the_deployment_six_builds_no_containers(self):
+        out = self.plan("backend/internal/shell/shell.go")
+        self.assertEqual((out["go_packages"], out["race"], out["live"]), ("./internal/api ./internal/shell", '["api"]', "[]"))
 
     def test_live_fixtures_follow_the_packages_being_checked(self):
         out = self.plan("backend/internal/api/routes.go")

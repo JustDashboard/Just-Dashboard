@@ -118,10 +118,11 @@ to the contribution terms above, including the additional licence grant to the p
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run.
 - The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
-  they run there like the other jobs, each job on a fresh daemon, and only for the packages being
-  checked: `live (fixtures)` runs the artifact, activation, preview, runtime-fault, database, Compose
-  and cutover fixtures of whichever of `internal/{deploy,api,dockerx,proxysvc}` the change reaches, and
-  a change reaching `internal/deploy` also builds the framework fixtures in four jobs. The lists are
+  they run there like the other jobs, each job on a fresh daemon, and only when one of the six
+  deployment packages (those of the race gate) or `go.mod` changed: `live (fixtures)` runs the
+  artifact, activation, preview, runtime-fault, database, Compose and cutover fixtures of whichever of
+  `internal/{deploy,api,dockerx,proxysvc}` the change reaches, and a change reaching `internal/deploy`
+  also builds the framework fixtures in four jobs. The lists are
   in `scripts/ci-plan.py`; the last framework job runs every framework the others do not name, so a
   new one is built without being added there. They used to run on a self-hosted runner on the release
   host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
