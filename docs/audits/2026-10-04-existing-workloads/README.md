@@ -81,7 +81,7 @@ readiness gate and restored the native service, then migrated successfully throu
 engine. Docker UID, working directory, private/empty environment and linked persistent data were
 verified. The absolute `APP_DATA_DIR` value was translated to `/app/data` for Docker while the original
 private environment remained separately snapshotted. Baseline rollback returned control to the
-original manager and preserved data. The PM2 run passed in 57.24 seconds; systemd in 65.09 seconds.
+original manager and preserved data. The final PM2 run passed in 58.20 seconds; systemd in 50.67 seconds.
 [PM2 evidence](managed-pm2-lifecycle.json), [systemd evidence](managed-systemd-lifecycle.json).
 
 ## Real deleted-image lifecycle
@@ -91,7 +91,8 @@ Recovery exported its filesystem without pause/stop/exec, verified its platform/
 created a private, reusable recovery image. Adoption retained the original ID/PID/start/settings;
 repeat capture used the same cached image. An intentionally failed first deployment restored the
 original container ID, and a successful managed deployment and baseline rollback preserved its
-persistent volume, name and network alias. The run passed in 30.23 seconds.
+persistent volume, name and network alias. The final run passed in 20.36 seconds, including the
+staging-space reservation checks.
 [Sanitized evidence](managed-deleted-image-lifecycle.json).
 
 ## Interface evidence
