@@ -47,6 +47,9 @@ const (
 	SourceModeExistingCheckout    SourceMode = "existing_checkout"
 	SourceModeExistingContainer   SourceMode = "existing_container"
 	SourceModeExistingStack       SourceMode = "existing_stack"
+	SourceModeExistingPM2         SourceMode = "existing_pm2"
+	SourceModeExistingSystemd     SourceMode = "existing_systemd"
+	SourceModeExistingProcess     SourceMode = "existing_process"
 )
 
 type Draft struct {
@@ -931,9 +934,13 @@ func (c DraftSourceConfig) Validate() error {
 		if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
 			return err
 		}
-	case SourceModeExistingContainer, SourceModeExistingStack:
+	case SourceModeExistingContainer, SourceModeExistingStack, SourceModeExistingPM2, SourceModeExistingSystemd, SourceModeExistingProcess:
 		allowed = sourceFieldSet("resourceId")
-		if c.ResourceID == "" || len(c.ResourceID) > 256 || strings.ContainsAny(c.ResourceID, "\x00\r\n") {
+		limit := 256
+		if c.Mode == SourceModeExistingPM2 {
+			limit = 1000
+		}
+		if c.ResourceID == "" || len(c.ResourceID) > limit || strings.ContainsAny(c.ResourceID, "\x00\r\n") {
 			return fmt.Errorf("%w: import resource id is required", ErrInvalidSource)
 		}
 	case SourceModeBlueprint:
@@ -1028,7 +1035,8 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 	case SourceBlueprint:
 		return mode == SourceModeBlueprint
 	case SourceImport:
-		return mode == SourceModeExistingCheckout || mode == SourceModeExistingContainer || mode == SourceModeExistingStack
+		return mode == SourceModeExistingCheckout || mode == SourceModeExistingContainer || mode == SourceModeExistingStack ||
+			mode == SourceModeExistingPM2 || mode == SourceModeExistingSystemd || mode == SourceModeExistingProcess
 	default:
 		return false
 	}

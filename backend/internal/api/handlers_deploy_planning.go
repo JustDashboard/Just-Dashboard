@@ -267,6 +267,10 @@ func (s *Server) handleDeploymentImportAdopt(w http.ResponseWriter, r *http.Requ
 	if draft.Data.Source == nil || draft.Data.Source.Kind != deploy.SourceImport {
 		return httpx.BadRequest("only an observed import draft can be adopted")
 	}
+	if draft.Data.Source.Mode != deploy.SourceModeExistingCheckout {
+		return httpx.Err(http.StatusConflict, "discovery_import_required",
+			"Discover and inspect the existing workload before importing it through /deploy/import/register.")
+	}
 	preview, err := s.modules.deploySources.PreviewImport(r.Context(), *draft.Data.Source)
 	if err != nil {
 		return mapDeploymentPlanningError(err)
@@ -361,6 +365,8 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(http.StatusNotFound, "deploy_not_found", "deployment import resource was not found")
 	case errors.Is(err, deploy.ErrDraftRevision):
 		return httpx.Err(http.StatusConflict, "draft_revision_conflict", err.Error())
+	case errors.Is(err, deploy.ErrNameTaken):
+		return httpx.Err(http.StatusConflict, "name_taken", err.Error())
 	case errors.Is(err, deploy.ErrRevisionConflict):
 		return httpx.Err(http.StatusConflict, "revision_conflict", err.Error())
 	case errors.Is(err, deploy.ErrEnvironmentNotFound):
