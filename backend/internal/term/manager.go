@@ -97,6 +97,8 @@ type CreateOptions struct {
 	Cols    uint16
 	CWD     string
 	Persist bool
+	// Agent is a closed launch vocabulary, never request-defined shell source.
+	Agent string
 	// Folder files the new session away as it is created, so a shell opened
 	// from a stack lands in that stack's group without a second step.
 	Folder string
@@ -116,6 +118,9 @@ type CreateOptions struct {
 func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, error) {
 	if !m.enabled {
 		return nil, ErrDisabled
+	}
+	if err := m.validateAgent(opts.Agent); err != nil {
+		return nil, err
 	}
 	if !(m.useTmux && opts.Persist) {
 		if err := m.PersistenceError(); err != nil {
@@ -180,13 +185,16 @@ func (m *Manager) Create(ctx context.Context, opts CreateOptions) (*Session, err
 	// and it is a real directory on the host, so everything below can treat a
 	// non-empty value as settled.
 	startDir := hostDir(ctx, opts.CWD)
+	if opts.Agent != "" && opts.CWD != "" && startDir == "" {
+		return nil, ErrCWDUnavailable
+	}
 	cmdDir := ""
 
 	// What ssh would have run: become the account and exec its login shell.
 	// A requested directory changes *how* the login is assembled rather than
 	// being applied on top of it — see loginArgv, where a plain login's
 	// chdir-to-home is the thing standing in the way.
-	argv := m.loginArgv(startDir != "")
+	argv := m.startupArgv(startDir != "", opts.Agent, startDir)
 	if startDir != "" {
 		// The directory the command itself starts in. It has to be handed to
 		// hostexec rather than set on cmd.Dir: a host command crosses into the
@@ -432,18 +440,58 @@ func (m *Manager) Workspace(id string) []*Session {
 // then home — and every step is validated on the host, so a stale directory
 // can only move the new window home, never kill it on arrival.
 func (m *Manager) NewDirectWindow(ctx context.Context, workspaceID, name, cwd string, rows, cols uint16) (*Session, error) {
+	return m.NewDirectWindowWithOptions(ctx, workspaceID, DirectWindowOptions{
+		Name: name, CWD: cwd, Rows: rows, Cols: cols,
+	})
+}
+
+type DirectWindowOptions struct {
+	Name           string
+	CWD            string
+	SourceWindowID string
+	Agent          string
+	Rows           uint16
+	Cols           uint16
+}
+
+// NewDirectWindowWithOptions resolves a focused window on the server rather
+// than relying on a polled directory that can miss the operator's latest cd.
+func (m *Manager) NewDirectWindowWithOptions(ctx context.Context, workspaceID string, opts DirectWindowOptions) (*Session, error) {
+	if err := m.validateAgent(opts.Agent); err != nil {
+		return nil, err
+	}
 	windows := m.Workspace(workspaceID)
 	if len(windows) == 0 {
 		return nil, ErrNotFound
 	}
 	root := windows[0]
 	meta := root.Meta()
+	cwd := opts.CWD
+	if opts.SourceWindowID != "" {
+		var source *Session
+		for _, window := range windows {
+			if window.ID == opts.SourceWindowID {
+				source = window
+				break
+			}
+		}
+		if source == nil {
+			return nil, ErrInvalidSourceWindow
+		}
+		cwd = source.CWD()
+		if cwd == "" {
+			return nil, ErrCWDUnavailable
+		}
+	}
 	if hostDir(ctx, cwd) == "" {
+		if opts.Agent != "" && opts.SourceWindowID != "" {
+			return nil, ErrCWDUnavailable
+		}
 		cwd = root.CWD()
 	}
 	created, err := m.Create(ctx, CreateOptions{
-		Title: meta.Title, Owner: root.Owner, Rows: rows, Cols: cols, CWD: cwd,
-		Folder: meta.Folder, WorkspaceID: root.WorkspaceID, WindowName: name,
+		Title: meta.Title, Owner: root.Owner, Rows: opts.Rows, Cols: opts.Cols, CWD: cwd,
+		Folder: meta.Folder, WorkspaceID: root.WorkspaceID, WindowName: opts.Name, Agent: opts.Agent,
 	})
 	if err != nil {
 		return nil, err

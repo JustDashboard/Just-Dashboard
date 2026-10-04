@@ -123,8 +123,8 @@ socket-activated service's port.
 
 `internal/term` runs direct PTYs. Three properties are load-bearing:
 
-**Every window is a direct PTY.** There is no multiplexer and no pane/split layer. A dashboard session
-is a workspace grouping independent PTYs as windows; each window therefore keeps native terminal
+**Every window is a direct PTY.** There is no multiplexer; browser splits arrange independent windows.
+A dashboard session is a workspace grouping independent PTYs as windows; each window keeps native terminal
 capability negotiation. Each new PTY must be held on the host rather than by this
 process, so it outlives the dashboard (below). Closing a session ends all of its windows, while closing
 one window leaves its siblings running.
@@ -143,6 +143,48 @@ the new PTY on arrival. `hostDir` runs `test -d` through `hostexec.CommandOnHost
 containerised and runs locally otherwise. A new window inherits the directory of the window the operator
 was looking at, falling back to the workspace's first window and then home; because every step is
 validated, a stale directory can only send the new window home, never kill it.
+
+`POST /terminal/{workspace}/windows` accepts `sourceWindowId` to read the focused window's live
+directory on the server, after validating that the window belongs to the same workspace. This takes
+precedence over the optional legacy `cwd` field, avoiding stale directory metadata after `cd`.
+Direct directory lookup starts with the PTY's foreground process group and unwraps only known login
+wrappers. A shell's background job in another directory cannot change the prompt's reported directory;
+a busy foreground program or a nested account shell still reports its own directory.
+Foreground process liveness comes from its cwd symlink, rather than its command line: an empty argv
+during exec, or a deliberate empty argv[0], does not redirect lookup back to the parent shell.
+The optional `agent` is a closed vocabulary: `codex` launches `codex --yolo`, and `claude` launches
+`claude --dangerously-skip-permissions`, always in a newly held PTY. Unknown agents and foreign or
+missing source windows return HTTP 400 without opening anything. An unavailable source directory
+returns HTTP 503 for an agent launch instead of silently running the tool somewhere else.
+
+Automatic agent launch uses the bundled bash or zsh startup and refuses other shells or unavailable
+startup files with HTTP 400 (`terminal_agent_shell_unavailable`). The fixed login bootstrap receives
+the agent and directory as positional arguments; it carries them into the interactive startup as
+one-shot variables, which are unset before loading the account's native rc. After that rc establishes
+the account's PATH, the startup restores the requested directory (an rc may have changed it) and runs
+the exact approved command. A missing tool prints the native shell error and leaves the shell usable;
+an agent that exits also returns to that shell. Nested shells never inherit the launch variables, so
+they do not restart the agent. The create audit records the source window, agent and starting directory.
+
+The shell tests cover both agents in bash and zsh, native interactive PATH, quoted directory names,
+an rc that changes directory, a nonzero agent exit, a missing tool and removal of the launch variables
+before native configuration runs. Their cleanup requests a native shell exit and drains PTY output,
+including asynchronous editor helpers, before removing temporary HOME directories.
+PTY tests keep a background job in a different directory while
+checking the foreground prompt and new window, and also check a busy foreground program's directory,
+an empty argv and a pipeline whose leader has exited. These directory fixtures own and wait for their
+detached holders before removing temporary HOME directories, so shell history writes cannot race cleanup.
+API tests exercise live `cd` in a sibling source window, launch with a background job elsewhere, reject
+unknown agents and foreign source windows, and refuse an agent in a deleted source directory.
+For optional browser proof against real PTYs, set `JD_TERMINAL_BROWSER_EVIDENCE_DIR` to a temporary
+directory and run `go test ./internal/api -run '^TestTerminalBrowserEvidenceServer$' -count=1 -v
+-timeout=20m` from `backend/`. This test-only server listens on `127.0.0.1:43128`, accepts browser
+origins on loopback ports 43117–43131, and writes `ready.json` with its initial workspace, working
+directory and stop-file path. Its isolated HOME and PATH provide stub Codex/Claude commands and
+`jd-resize-tui`, which renders the kernel PTY dimensions and responds to SIGWINCH and keyboard input.
+Create the recorded stop file to close the fixture; it otherwise expires after fifteen minutes.
+`JD_TERMINAL_BROWSER_REAL_AGENTS=1` uses installed agent binaries with the same isolated HOME and no
+copied authentication. This harness is skipped by normal local verification.
 
 **Session organisation is intentionally lightweight.** `GET /terminal/` groups live `Session` values by
 `WorkspaceID`; naming, folder membership and pinning are copied across the workspace's windows in memory

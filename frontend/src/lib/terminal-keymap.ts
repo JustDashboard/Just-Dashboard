@@ -30,6 +30,9 @@ export type ShortcutAction =
   | "window.prev"
   | "window.new"
   | "window.close"
+  | `pane.split.${"left" | "right" | "up" | "down"}`
+  | `pane.focus.${"left" | "right" | "up" | "down"}`
+  | "pane.next"
   | `window.${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
   | "terminal.search"
   | "terminal.copy"
@@ -127,6 +130,35 @@ export const SHORTCUTS: ShortcutSpec[] = [
     label: `Window ${n}`,
     chord: `Ctrl+Shift+Digit${n}`,
   })),
+
+  ...(["left", "right", "up", "down"] as const).map((direction) => ({
+    action: `pane.split.${direction}` as ShortcutAction,
+    scope: "navigation" as const,
+    group: "Split panes",
+    label: `Split ${direction}`,
+    chord: `Ctrl+Alt+Shift+Arrow${direction[0].toUpperCase()}${direction.slice(1)}`,
+  })),
+  ...(
+    [
+      ["left", "H"],
+      ["right", "L"],
+      ["up", "I"],
+      ["down", "K"],
+    ] as const
+  ).map(([direction, key]) => ({
+    action: `pane.focus.${direction}` as ShortcutAction,
+    scope: "navigation" as const,
+    group: "Split panes",
+    label: `Focus pane ${direction}`,
+    chord: `Ctrl+Alt+Key${key}`,
+  })),
+  {
+    action: "pane.next",
+    scope: "navigation",
+    group: "Split panes",
+    label: "Next visible pane",
+    chord: "Ctrl+Alt+KeyP",
+  },
 
   // The workspace panels. Both are one chord that shows and hides, rather than
   // a pair: a panel you cannot see is the only reason to press either, so two

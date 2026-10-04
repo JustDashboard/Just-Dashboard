@@ -17,6 +17,7 @@ export function WindowStrip({
   disconnected,
   onSelect,
   onNew,
+  newDisabled,
   onClose,
   onReorder,
 }: {
@@ -28,6 +29,7 @@ export function WindowStrip({
   disconnected: ReadonlySet<string>
   onSelect: (id: string) => void
   onNew: () => void
+  newDisabled?: boolean
   onClose: (id: string) => void
   onReorder: (id: string, position: number) => void
 }) {
@@ -60,7 +62,12 @@ export function WindowStrip({
           onDragEnd={() => setDropAt(null)}
         />
       ))}
-      <IconAction label="New window" className="size-7 shrink-0" onClick={onNew}>
+      <IconAction
+        label="New window"
+        className="size-7 shrink-0"
+        disabled={newDisabled}
+        onClick={onNew}
+      >
         <Plus />
       </IconAction>
     </div>

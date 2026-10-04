@@ -1,4 +1,21 @@
-import { expect, test, type Page, type WebSocketRoute } from "@playwright/test"
+import { mkdir } from "node:fs/promises"
+import { join } from "node:path"
+import { expect, test, type Locator, type Page, type WebSocketRoute } from "@playwright/test"
+
+test.use({
+  video: process.env.JD_TERMINAL_EVIDENCE
+    ? { mode: "on", size: { width: 1440, height: 900 } }
+    : "off",
+})
+const TERMINAL_TIMEOUT = process.env.JD_TERMINAL_EVIDENCE ? 90_000 : 60_000
+test.setTimeout(TERMINAL_TIMEOUT)
+
+type WindowCreation = {
+  id: string
+  session: string
+  sourceWindowId?: string
+  agent?: "codex" | "claude"
+}
 
 type Connection = {
   socket: WebSocketRoute
@@ -9,21 +26,37 @@ type Connection = {
   focus: number
 }
 
-async function terminalFixture(page: Page, renderer: "dom" | "webgl", persistenceError?: string) {
+async function terminalFixture(
+  page: Page,
+  renderer: "dom" | "webgl",
+  persistenceError?: string,
+  redraw = false,
+  layouts?: Record<string, unknown> | null,
+) {
   const connections = new Map<string, Connection[]>()
+  const typed = new Map<string, string>()
   const errors: string[] = []
+  const creates: WindowCreation[] = []
   const windows = new Map([
     ["session-a", ["window-a", "window-b"]],
     ["session-b", ["window-c"]],
   ])
   page.on("pageerror", (error) => errors.push(error.message))
-  await page.addInitScript((renderer) => {
-    localStorage.setItem("jd.terminal.renderer", renderer)
-    localStorage.setItem(
-      "jd.view.state",
-      JSON.stringify({ "terminal.rail": true, "terminal.tools": false, "shell.sidebar": false }),
-    )
-  }, renderer)
+  await page.addInitScript(
+    ({ renderer, layouts }) => {
+      localStorage.setItem("jd.terminal.renderer", renderer)
+      localStorage.setItem(
+        "jd.view.state",
+        JSON.stringify({
+          "terminal.rail": true,
+          "terminal.tools": false,
+          "shell.sidebar": false,
+          "terminal.layouts": layouts,
+        }),
+      )
+    },
+    { renderer, layouts },
+  )
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace("/api/v1", "")
     if (path === "/auth/session") {
@@ -57,6 +90,13 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl", persistenc
     const match = path.match(/^\/terminal\/([^/]+)\/windows(?:\/([^/]+))?$/)
     if (match) {
       const [, session, id] = match
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as Omit<WindowCreation, "id" | "session">
+        const created = { id: `window-new-${creates.length + 1}`, session, ...body }
+        creates.push(created)
+        windows.set(session, [...(windows.get(session) ?? []), created.id])
+        return route.fulfill({ status: 201, json: { id: created.id } })
+      }
       if (route.request().method() === "DELETE") {
         windows.set(
           session,
@@ -65,8 +105,16 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl", persistenc
         return route.fulfill({ json: {} })
       }
       return route.fulfill({
-        json: (windows.get(session) ?? []).map((id, index) => ({ id, name: id, index })),
+        json: (windows.get(session) ?? []).map((id, index) => ({
+          id,
+          name: id,
+          index,
+          cwd: "/home/operator/project",
+        })),
       })
+    }
+    if (/^\/terminal\/[^/]+\/cwd$/.test(path)) {
+      return route.fulfill({ json: { cwd: "/home/operator/project" } })
     }
     if (path.startsWith("/terminal/") && route.request().method() === "DELETE") {
       const id = path.split("/").at(-1)!
@@ -92,10 +140,32 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl", persistenc
     socket.onMessage((message) => {
       if (typeof message === "string") {
         const control = JSON.parse(message)
-        if (control.type === "resize") connection.sizes.push(control)
+        if (control.type === "resize") {
+          connection.sizes.push(control)
+          if (redraw) {
+            socket.send(
+              Buffer.from(
+                terminalFrame(
+                  id,
+                  control.rows,
+                  control.cols,
+                  creates.find((item) => item.id === id),
+                  typed.get(id),
+                ),
+              ),
+            )
+          }
+        }
         if (control.type === "focus") connection.focus++
       } else {
-        connection.input.push(Buffer.from(message).toString("utf8"))
+        const text = Buffer.from(message).toString("utf8")
+        connection.input.push(text)
+        const grid = connection.sizes.at(-1)
+        if (redraw && grid && /^[\x20-\x7e]+$/.test(text)) {
+          typed.set(id, (typed.get(id) ?? "") + text)
+          const content = `Input: ${typed.get(id)}`.slice(0, Math.max(0, grid.cols - 2))
+          socket.send(Buffer.from(`\x1b[${Math.max(2, grid.rows - 2)};2H${content}`))
+        }
       }
     })
     // These cells are painted once, like a TUI's unchanged frame. Later output
@@ -105,17 +175,63 @@ async function terminalFixture(page: Page, renderer: "dom" | "webgl", persistenc
         `shell history ${id}\r\n\x1b[?1049h\x1b[?25l\x1b[2J\x1b[HSession frame: ${id}\x1b[3;1HReady ▀█\x1b[6n`,
       ),
     )
+    const agent = creates.find((item) => item.id === id)?.agent
+    if (redraw) {
+      socket.send(
+        JSON.stringify({
+          type: "state",
+          data: agent
+            ? { busy: true, process: agent, title: agent === "codex" ? "Codex" : "Claude Code" }
+            : { busy: false },
+        }),
+      )
+    }
   })
   await page.goto("/terminal")
   await expect(page.locator("[data-terminal-renderer]:visible")).toHaveAttribute(
     "data-terminal-renderer",
     renderer,
+    { timeout: 15_000 },
   )
-  await expect.poll(() => connections.get("window-a")?.[0].input.length).toBeGreaterThan(0)
+  await expect
+    .poll(() => connections.get("window-a")?.[0].input.length, { timeout: 15_000 })
+    .toBeGreaterThan(0)
   // Window tabs live in the strip. An unnamed session's rail row carries its
   // current window's label as well, so a page-wide lookup by name finds both.
   const strip = page.getByLabel("Terminal windows")
-  return { connections, errors, strip }
+  return { connections, errors, strip, creates }
+}
+
+// A full-screen program repaints for the PTY's reported grid, rather than for
+// browser pixels. Drawing its border at that edge exposes stale resize controls.
+function terminalFrame(
+  id: string,
+  rows: number,
+  cols: number,
+  creation?: WindowCreation,
+  input?: string,
+) {
+  const width = Math.max(2, cols)
+  const line = (row: number, text: string) =>
+    row < rows ? `\x1b[${row};2H${text.slice(0, Math.max(0, width - 3))}` : ""
+  const agent = creation?.agent
+  const command = agent === "codex" ? "codex --yolo" : "claude --dangerously-skip-permissions"
+  let frame = "\x1b[?25l\x1b[2J\x1b[H\x1b[38;2;110;170;205m"
+  frame += "┌" + "─".repeat(width - 2) + "┐"
+  for (let row = 2; row < rows; row++) {
+    frame += `\x1b[${row};1H│\x1b[${row};${width}H│`
+  }
+  if (rows > 1) frame += `\x1b[${rows};1H└${"─".repeat(width - 2)}┘`
+  frame += "\x1b[0m"
+  frame += line(2, agent ? (agent === "codex" ? "Codex" : "Claude Code") : "Project terminal")
+  frame += line(4, "/home/operator/project")
+  frame += line(6, agent ? `$ ${command}` : "$ bun test src")
+  frame += line(8, agent ? "Ready for your next instruction." : "✓ 1,286 tests passed")
+  frame += line(10, `PTY ${cols} columns × ${rows} rows`)
+  frame += line(12, id)
+  frame += line(14, "Unicode: ✓ ▀█ ━┳━")
+  if (input) frame += line(Math.max(2, rows - 2), `Input: ${input}`)
+  return frame
 }
 
 test("explains unavailable restart protection while keeping existing terminals usable", async ({
@@ -340,6 +456,8 @@ test("a dropped connection is red until it is back", async ({ page }) => {
   const tabA = page.locator('[data-window="window-a"]')
   const rowA = page.locator('[data-session="session-a"]')
 
+  await page.clock.install({ time: new Date("2026-10-04T00:00:00Z") })
+  await page.clock.pauseAt(new Date("2026-10-04T01:00:00Z"))
   connections.get("window-a")![0].socket.close()
   await expect(tabA).toHaveAttribute("data-disconnected", "true")
   await expect(rowA).toHaveAttribute("data-disconnected", "true")
@@ -355,6 +473,8 @@ test("a dropped connection is red until it is back", async ({ page }) => {
   ).toBeVisible()
   // Nobody presses anything. The server sends the window's state the moment a
   // socket attaches.
+  await page.clock.runFor(1100)
+  await page.clock.resume()
   await expect.poll(() => connections.get("window-a")?.length).toBe(2)
   connections
     .get("window-a")![1]
@@ -362,4 +482,489 @@ test("a dropped connection is red until it is back", async ({ page }) => {
   await expect(tabA).not.toHaveAttribute("data-disconnected", "true")
   await expect(rowA).not.toHaveAttribute("data-disconnected", "true")
   expect(errors).toEqual([])
+})
+
+const terminalPane = (page: Page, id: string) => page.locator(`[data-terminal-window="${id}"]`)
+
+async function focusTerminal(page: Page, id: string) {
+  const pane = terminalPane(page, id)
+  await pane.locator(".xterm-screen").click({ position: { x: 30, y: 30 } })
+  await expect(pane).toHaveAttribute("data-focused", "true")
+  await expect(pane.locator(".xterm-helper-textarea")).toBeFocused()
+}
+
+async function splitTerminal(page: Page, direction: "left" | "right" | "up" | "down") {
+  await page.getByRole("button", { name: "Split terminal", exact: true }).click()
+  await page.getByRole("menuitem", { name: `Split ${direction}`, exact: true }).click()
+}
+
+async function assertTerminalGrids(page: Page, connections: Map<string, Connection[]>) {
+  const panes = page.locator("[data-terminal-window]:visible")
+  expect(await panes.count()).toBeGreaterThan(0)
+  const renderer = await panes
+    .first()
+    .locator("[data-terminal-renderer]")
+    .getAttribute("data-terminal-renderer")
+  for (const pane of await panes.all()) {
+    const id = (await pane.getAttribute("data-terminal-window"))!
+    const host = pane.locator("[data-terminal-renderer]")
+    await expect(host).toHaveAttribute("data-terminal-renderer", renderer!)
+    await expect
+      .poll(async () => {
+        const grid = await host.evaluate((element) => ({
+          rows: Number(element.getAttribute("data-terminal-rows")),
+          cols: Number(element.getAttribute("data-terminal-cols")),
+        }))
+        const reported = connections.get(id)?.at(-1)?.sizes.at(-1)
+        return (
+          grid.rows > 0 &&
+          grid.cols > 0 &&
+          reported?.rows === grid.rows &&
+          reported.cols === grid.cols
+        )
+      })
+      .toBe(true)
+    await expect
+      .poll(async () => {
+        const hostBox = await host.boundingBox()
+        const screenBox = await pane.locator(".xterm-screen").boundingBox()
+        return Boolean(
+          hostBox &&
+          screenBox &&
+          screenBox.x >= hostBox.x - 1 &&
+          screenBox.y >= hostBox.y - 1 &&
+          screenBox.x + screenBox.width <= hostBox.x + hostBox.width + 1 &&
+          screenBox.y + screenBox.height <= hostBox.y + hostBox.height + 1,
+        )
+      })
+      .toBe(true)
+    for (const canvas of await pane.locator(".xterm-screen canvas").all()) {
+      await expect
+        .poll(async () =>
+          canvas.evaluate((element) => {
+            const screen = element.closest(".xterm-screen")!.getBoundingClientRect()
+            const box = element.getBoundingClientRect()
+            return (
+              box.width > 0 &&
+              box.height > 0 &&
+              Math.abs(box.width - screen.width) < 2 &&
+              Math.abs(box.height - screen.height) < 2
+            )
+          }),
+        )
+        .toBe(true)
+    }
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+}
+
+async function dragDivider(page: Page, divider: Locator, dx: number, dy: number) {
+  const box = (await divider.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 8 })
+  await page.mouse.up()
+}
+
+async function splitEvidence(page: Page, filename: string) {
+  const directory = process.env.JD_TERMINAL_EVIDENCE
+  if (!directory) return
+  await mkdir(directory, { recursive: true })
+  await page.mouse.move(0, 0)
+  await page.screenshot({ path: join(directory, filename), animations: "disabled" })
+}
+
+test.describe("terminal splits", () => {
+  test("recovers a null saved layout before opening a split", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const { connections, creates, errors } = await terminalFixture(
+      page,
+      "webgl",
+      undefined,
+      true,
+      null,
+    )
+    await expect(terminalPane(page, "window-a").locator(".xterm-helper-textarea")).toBeFocused()
+    await page.getByRole("button", { name: "Split terminal", exact: true }).click()
+    await expect(page.getByRole("menuitem", { name: "Split right", exact: true })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(terminalPane(page, "window-a").locator(".xterm-helper-textarea")).toBeFocused()
+    expect(creates).toHaveLength(0)
+    await splitTerminal(page, "right")
+    await expect.poll(() => creates.length).toBe(1)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await assertTerminalGrids(page, connections)
+    expect(connections.get("window-a")).toHaveLength(1)
+    expect(errors).toEqual([])
+  })
+
+  test("keeps a divider drag when a pending split is created before pointer release", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const { connections, creates, errors } = await terminalFixture(page, "webgl", undefined, true)
+    await splitTerminal(page, "right")
+    await expect.poll(() => creates.length).toBe(1)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    let releaseCreation = () => {}
+    const released = new Promise<void>((resolve) => {
+      releaseCreation = resolve
+    })
+    let held = false
+    await page.route("**/api/v1/terminal/session-a/windows", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback()
+      held = true
+      await released
+      return route.fallback()
+    })
+    await splitTerminal(page, "down")
+    await expect.poll(() => held).toBe(true)
+    const divider = page.getByRole("separator", { name: "Terminal split width", exact: true })
+    const box = (await divider.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(box.x + box.width / 2 + 80, box.y + box.height / 2, { steps: 8 })
+    await expect
+      .poll(async () => Number(await divider.getAttribute("aria-valuenow")))
+      .toBeGreaterThan(55)
+    const draggedRatio = await divider.getAttribute("aria-valuenow")
+    releaseCreation()
+    await expect.poll(() => creates.length).toBe(2)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(3)
+    await expect(divider).toHaveAttribute("aria-valuenow", draggedRatio!)
+    await page.mouse.up()
+    await expect(divider).toHaveAttribute("aria-valuenow", draggedRatio!)
+    await assertTerminalGrids(page, connections)
+    for (const id of ["window-a", ...creates.map((item) => item.id)])
+      expect(connections.get(id)).toHaveLength(1)
+    await splitEvidence(page, "split-during-divider-drag.png")
+    expect(errors).toEqual([])
+  })
+
+  test("ignores an older in-flight listing after creating a split", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const { connections, creates, errors } = await terminalFixture(page, "webgl", undefined, true)
+    let releaseListing = () => {}
+    const released = new Promise<void>((resolve) => {
+      releaseListing = resolve
+    })
+    let holdNextRead = true
+    let held = false
+    let reads = 0
+    await page.route("**/api/v1/terminal/session-a/windows", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      reads++
+      if (!holdNextRead) return route.fallback()
+      holdNextRead = false
+      held = true
+      await released
+      return route.fulfill({
+        headers: { "X-Terminal-Stale-Listing": "1" },
+        json: ["window-a", "window-b"].map((id, index) => ({
+          id,
+          name: id,
+          index,
+          cwd: "/home/operator/project",
+        })),
+      })
+    })
+    await expect.poll(() => held, { timeout: 10_000 }).toBe(true)
+    await splitTerminal(page, "right")
+    await expect.poll(() => creates.length).toBe(1)
+    const created = creates[0].id
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(terminalPane(page, created).locator(".xterm-helper-textarea")).toBeFocused()
+    await expect.poll(() => reads).toBeGreaterThan(1)
+    const staleResponse = page.waitForResponse(
+      (response) => response.headers()["x-terminal-stale-listing"] === "1",
+    )
+    const readsBeforeRelease = reads
+    releaseListing()
+    await (await staleResponse).finished()
+    // Wait through the following authoritative poll as well: a stale response
+    // must never briefly unmount the pane and reconstruct it from byte replay.
+    await expect.poll(() => reads, { timeout: 10_000 }).toBeGreaterThan(readsBeforeRelease)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(terminalPane(page, created)).toHaveAttribute("data-focused", "true")
+    expect(creates).toHaveLength(1)
+    expect(connections.get("window-a")).toHaveLength(1)
+    expect(connections.get(created)).toHaveLength(1)
+    await assertTerminalGrids(page, connections)
+    expect(errors).toEqual([])
+  })
+
+  test("keeps a successfully created split when the following window listing fails", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const { connections, creates, errors } = await terminalFixture(page, "webgl", undefined, true)
+    let recovered = false
+    let failedReads = 0
+    let healthyReads = 0
+    await page.route("**/api/v1/terminal/session-a/windows", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      if (recovered) {
+        healthyReads++
+        return route.fallback()
+      }
+      failedReads++
+      return route.fulfill({
+        status: 503,
+        json: { error: { code: "unavailable", message: "Transient window listing failure" } },
+      })
+    })
+    await splitTerminal(page, "right")
+    await expect.poll(() => creates.length).toBe(1)
+    await expect.poll(() => failedReads).toBeGreaterThan(0)
+    const created = creates[0].id
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(terminalPane(page, created)).toHaveAttribute("data-focused", "true")
+    await expect(terminalPane(page, created).locator(".xterm-helper-textarea")).toBeFocused()
+    await assertTerminalGrids(page, connections)
+    recovered = true
+    await expect.poll(() => healthyReads, { timeout: 10_000 }).toBeGreaterThan(0)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(terminalPane(page, created)).toHaveAttribute("data-focused", "true")
+    expect(creates).toHaveLength(1)
+    expect(connections.get("window-a")).toHaveLength(1)
+    expect(connections.get(created)).toHaveLength(1)
+    await splitEvidence(page, "split-after-transient-listing-failure.png")
+    expect(errors).toEqual([])
+  })
+
+  for (const renderer of ["dom", "webgl"] as const) {
+    test(`splits in all four directions without remounting the shell with ${renderer}`, async ({
+      page,
+    }) => {
+      test.setTimeout(TERMINAL_TIMEOUT)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const { connections, creates, errors } = await terminalFixture(
+        page,
+        renderer,
+        undefined,
+        true,
+      )
+      const original = connections.get("window-a")![0]
+      const originalSize = original.sizes.at(-1)!
+      await expect(page.getByRole("button", { name: /^Search scrollback/ })).toHaveCount(0)
+      await expect(page.getByRole("button", { name: /snippets|terminal behavior/i })).toHaveCount(0)
+
+      for (const direction of ["left", "right", "up", "down"] as const) {
+        await focusTerminal(page, "window-a")
+        const previousCreates = creates.length
+        await splitTerminal(page, direction)
+        await expect.poll(() => creates.length).toBe(previousCreates + 1)
+        const created = creates.at(-1)!
+        expect(created.sourceWindowId).toBe("window-a")
+        expect(created.agent).toBeUndefined()
+        await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+        await expect(terminalPane(page, created.id)).toHaveAttribute("data-focused", "true")
+        await assertTerminalGrids(page, connections)
+        const firstBox = (await terminalPane(page, "window-a").boundingBox())!
+        const addedBox = (await terminalPane(page, created.id).boundingBox())!
+        if (direction === "left")
+          expect(addedBox.x + addedBox.width).toBeLessThanOrEqual(firstBox.x)
+        if (direction === "right")
+          expect(firstBox.x + firstBox.width).toBeLessThanOrEqual(addedBox.x)
+        if (direction === "up") expect(addedBox.y + addedBox.height).toBeLessThanOrEqual(firstBox.y)
+        if (direction === "down")
+          expect(firstBox.y + firstBox.height).toBeLessThanOrEqual(addedBox.y)
+        await expect.poll(() => original.sizes.at(-1)).not.toEqual(originalSize)
+        expect(connections.get("window-a")).toHaveLength(1)
+        expect(original.closed).toBe(false)
+
+        await focusTerminal(page, "window-a")
+        const text = `original-${direction}`
+        await page.keyboard.type(text)
+        await expect.poll(() => original.input.join("")).toContain(text)
+        expect(connections.get(created.id)![0].input.join("")).not.toContain(text)
+        await splitEvidence(page, `split-${direction}-${renderer}.png`)
+        await page
+          .locator(`[data-window="${created.id}"]`)
+          .getByRole("button", { name: /^Close window/ })
+          .click()
+        await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+        await expect.poll(() => connections.get(created.id)![0].closed).toBe(true)
+        await expect.poll(() => original.sizes.at(-1)).toEqual(originalSize)
+      }
+      expect(errors).toEqual([])
+    })
+
+    test(`resizes nested panes and routes keyboard focus with ${renderer}`, async ({ page }) => {
+      test.setTimeout(process.env.JD_TERMINAL_EVIDENCE ? 300_000 : 120_000)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      const { connections, creates, errors, strip } = await terminalFixture(
+        page,
+        renderer,
+        undefined,
+        true,
+      )
+      const original = connections.get("window-a")![0]
+      await focusTerminal(page, "window-a")
+      const inputBeforeSplit = original.input.join("")
+      await page.keyboard.press("Control+Alt+Shift+ArrowRight")
+      await expect.poll(() => creates.length).toBe(1)
+      const top = creates[0].id
+      await expect(terminalPane(page, top)).toHaveAttribute("data-focused", "true")
+      await page.keyboard.press("Control+Alt+Shift+ArrowDown")
+      await expect.poll(() => creates.length).toBe(2)
+      const bottom = creates[1].id
+      expect(creates[1].sourceWindowId).toBe(top)
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(3)
+      await expect(terminalPane(page, bottom).locator(".xterm-helper-textarea")).toBeFocused()
+      expect(original.input.join("")).toBe(inputBeforeSplit)
+      await assertTerminalGrids(page, connections)
+
+      const width = page.getByRole("separator", { name: "Terminal split width", exact: true })
+      const height = page.getByRole("separator", { name: "Terminal split height", exact: true })
+      const originalWidth = (await terminalPane(page, "window-a").boundingBox())!.width
+      const originalHeight = (await terminalPane(page, top).boundingBox())!.height
+      await dragDivider(page, width, 80, 0)
+      await expect
+        .poll(async () => (await terminalPane(page, "window-a").boundingBox())!.width)
+        .toBeGreaterThan(originalWidth + 50)
+      await assertTerminalGrids(page, connections)
+      await dragDivider(page, height, 0, 65)
+      await expect
+        .poll(async () => (await terminalPane(page, top).boundingBox())!.height)
+        .toBeGreaterThan(originalHeight + 40)
+      await assertTerminalGrids(page, connections)
+      await splitEvidence(page, `nested-resized-${renderer}.png`)
+
+      await width.focus()
+      const beforeArrow = Number(await width.getAttribute("aria-valuenow"))
+      await page.keyboard.press("ArrowLeft")
+      await expect
+        .poll(async () => Number(await width.getAttribute("aria-valuenow")))
+        .toBeLessThan(beforeArrow)
+      await page.keyboard.press("Home")
+      await expect(width).toHaveAttribute("aria-valuenow", "50")
+      await height.focus()
+      const beforeHeightArrow = Number(await height.getAttribute("aria-valuenow"))
+      await page.keyboard.press("ArrowUp")
+      await expect
+        .poll(async () => Number(await height.getAttribute("aria-valuenow")))
+        .toBeLessThan(beforeHeightArrow)
+      await height.dblclick()
+      await expect(height).toHaveAttribute("aria-valuenow", "50")
+      await assertTerminalGrids(page, connections)
+
+      for (const id of ["window-a", top, bottom]) {
+        await focusTerminal(page, id)
+        const text = `typed-in-${id}`
+        await page.keyboard.type(text)
+        await expect.poll(() => connections.get(id)![0].input.join("")).toContain(text)
+        for (const other of ["window-a", top, bottom].filter((other) => other !== id)) {
+          expect(connections.get(other)![0].input.join("")).not.toContain(text)
+        }
+      }
+      const inputBeforeFocus = ["window-a", top, bottom].map((id) =>
+        connections.get(id)![0].input.join(""),
+      )
+      await page.keyboard.press("Control+Alt+KeyI")
+      await expect(terminalPane(page, top).locator(".xterm-helper-textarea")).toBeFocused()
+      await page.keyboard.press("Control+Alt+KeyH")
+      await expect(terminalPane(page, "window-a").locator(".xterm-helper-textarea")).toBeFocused()
+      await page.keyboard.press("Control+Alt+KeyL")
+      await expect(terminalPane(page, top).locator(".xterm-helper-textarea")).toBeFocused()
+      await page.keyboard.press("Control+Alt+KeyK")
+      await expect(terminalPane(page, bottom).locator(".xterm-helper-textarea")).toBeFocused()
+      await page.keyboard.press("Control+Alt+KeyP")
+      await expect(terminalPane(page, "window-a").locator(".xterm-helper-textarea")).toBeFocused()
+      expect(["window-a", top, bottom].map((id) => connections.get(id)![0].input.join(""))).toEqual(
+        inputBeforeFocus,
+      )
+
+      await page.getByRole("button", { name: "Terminal actions", exact: true }).click()
+      await page.getByRole("menuitem", { name: "Keyboard shortcuts", exact: true }).click()
+      await expect(page.getByRole("dialog")).toBeVisible()
+      // The dialog guard also applies while no control owns focus, which can
+      // happen as a modal opens or closes.
+      await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+      await page.keyboard.press("Control+Alt+Shift+ArrowRight")
+      expect(creates).toHaveLength(2)
+      await page.keyboard.press("Escape")
+      await expect(page.getByRole("dialog")).toHaveCount(0)
+
+      await strip.getByRole("button", { name: "window-b", exact: true }).click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+      await strip.getByRole("button", { name: "window-a", exact: true }).click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(3)
+      await page.locator('[data-session="session-b"]').getByRole("button").first().click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+      await page.locator('[data-session="session-a"]').getByRole("button").first().click()
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(3)
+      for (const id of ["window-a", top, bottom]) expect(connections.get(id)).toHaveLength(1)
+
+      await focusTerminal(page, "window-a")
+      connections.get(bottom)![0].socket.close()
+      await expect.poll(() => connections.get(bottom)?.length).toBe(2)
+      await expect(terminalPane(page, "window-a").locator(".xterm-helper-textarea")).toBeFocused()
+      await assertTerminalGrids(page, connections)
+      await page.getByRole("button", { name: "Fullscreen", exact: true }).click()
+      await assertTerminalGrids(page, connections)
+      await splitEvidence(page, `nested-fullscreen-${renderer}.png`)
+      await page.getByRole("button", { name: /^Leave fullscreen/ }).click()
+      await page.getByRole("button", { name: "Hide the sessions rail", exact: true }).click()
+      await page.setViewportSize({ width: 390, height: 844 })
+      await assertTerminalGrids(page, connections)
+      await splitEvidence(page, `nested-mobile-${renderer}.png`)
+      await page.setViewportSize({ width: 1440, height: 900 })
+      await focusTerminal(page, bottom)
+      await page.keyboard.press("Control+Alt+KeyW")
+      await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+      await expect(height).toHaveCount(0)
+      await assertTerminalGrids(page, connections)
+      expect(errors).toEqual([])
+    })
+  }
+
+  test("launches agents from the focused shell and keeps the launch separate from reconnect", async ({
+    page,
+  }) => {
+    test.setTimeout(TERMINAL_TIMEOUT)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const { connections, creates, errors } = await terminalFixture(page, "webgl", undefined, true)
+    await splitTerminal(page, "right")
+    await expect.poll(() => creates.length).toBe(1)
+    const source = creates[0].id
+    await expect(terminalPane(page, source).locator(".xterm-helper-textarea")).toBeFocused()
+    await page.getByRole("button", { name: "Codex", exact: true }).click()
+    await expect.poll(() => creates.length).toBe(2)
+    expect(creates[1]).toMatchObject({ sourceWindowId: source, agent: "codex" })
+    const codex = creates[1].id
+    await expect(terminalPane(page, codex).locator(".xterm-helper-textarea")).toBeFocused()
+    await assertTerminalGrids(page, connections)
+    await splitEvidence(page, "codex-launch.png")
+    connections.get(codex)![0].socket.close()
+    await expect.poll(() => connections.get(codex)?.length).toBe(2)
+    expect(creates).toHaveLength(2)
+    expect(
+      connections
+        .get(codex)!
+        .flatMap((connection) => connection.input)
+        .join(""),
+    ).not.toContain("codex --yolo")
+
+    await page
+      .locator(`[data-window="${source}"]`)
+      .getByRole("button", { name: source, exact: true })
+      .click()
+    await focusTerminal(page, "window-a")
+    await page.getByRole("button", { name: "Claude", exact: true }).click()
+    await expect.poll(() => creates.length).toBe(3)
+    expect(creates[2]).toMatchObject({ sourceWindowId: "window-a", agent: "claude" })
+    const claude = creates[2].id
+    await expect(terminalPane(page, claude).locator(".xterm-helper-textarea")).toBeFocused()
+    await assertTerminalGrids(page, connections)
+    await splitEvidence(page, "claude-launch.png")
+    await page.getByRole("button", { name: "New window", exact: true }).click()
+    await expect.poll(() => creates.length).toBe(4)
+    expect(creates[3].sourceWindowId).toBe(claude)
+    expect(creates[3].agent).toBeUndefined()
+    await expect(terminalPane(page, creates[3].id).locator(".xterm-helper-textarea")).toBeFocused()
+    expect(errors).toEqual([])
+  })
 })
