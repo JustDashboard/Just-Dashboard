@@ -117,8 +117,8 @@ engine. Docker UID, working directory, private/empty environment and linked pers
 verified. The absolute `APP_DATA_DIR` value was translated to `/app/data` for Docker while the original
 private environment remained separately snapshotted. Baseline rollback returned control to the
 original manager and preserved data. Fresh normal checks verified the server-owned runtime reservation after Docker cutover and again
-after rollback created a new live native release. The final PM2 run passed in 75.11 seconds;
-persistent systemd in 153.77 seconds.
+after rollback created a new live native release. The final PM2 run passed in 61.47 seconds;
+persistent systemd in 113.66 seconds, with both source/configuration reader fixes applied.
 [PM2 evidence](managed-pm2-lifecycle.json), [systemd evidence](managed-systemd-lifecycle.json).
 
 ## Real deleted-image lifecycle
@@ -160,6 +160,34 @@ integrations retain their original ownership and require a reviewed handoff; man
 configured separately. Data/schema changes require application-appropriate
 backup/restore; image/configuration rollback does not reverse them. The coverage matrix and manager
 limits are in [existing-workloads.md](../../internal/deployments/existing-workloads.md).
+
+## Final local verification and documentation review
+
+- A fresh production frontend build passed. Its source matches the final UI tree; the later changes
+  affect backend readers, tests and evidence only.
+- `scripts/test-changed.sh patch/0.7.1` passed: changed-file Prettier/ESLint, TypeScript, all 2,942 fast
+  tests, backend build, changed-package vet, and selected tests in `api`, `deploy`, `dockerx`, `procs`,
+  `store` and `netsec`. Its selected browser run passed 639 cases in 16.9 minutes. Two cases were
+  skipped: the separately verified real-stack opt-in and an existing Redis scan-cursor `fixme`.
+- All required API/deployment race shards passed, together with the proxy, backup and store race
+  packages. Reference-scale latency assertions passed separately without instrumentation. Later
+  configuration and runtime-reservation changes passed focused API/deployment/Docker/process races.
+- The final reader changes received a fresh backend build and API/deployment/process vet, the complete
+  process race package (6.767 seconds), and focused source/native/reservation deployment races
+  (10.687 seconds). The FIFO tests refuse replaced special files without an external writer; ordinary
+  files, supported authoritative symlinks, procfs and source identity/permission fences remain tested.
+  Both real native lifecycle reruns above use these final readers. The isolated PM2 saved-startup
+  regression also passed in 5.07 seconds without changing its PID or HTTP service.
+- Required isolated artifact, activation, failed-gate diagnostic, release-task, preview quarantine
+  and Compose-storage fixtures passed. `scripts/e2e-deployments.py` passed all 29 real-backend checks.
+  Notification providers use the existing fake-provider tests; no live provider messages were sent.
+
+Before push, the complete diff was compared with `docs/internal/`, `AGENTS.md`, `README.md` and
+`CONTRIBUTING.md`. Affected recovery, architecture, source/private-input, runtime, UI, security,
+configuration and verification documentation is updated. `AGENTS.md` and the existing security
+invariant definitions need no change: their workflow and contracts are preserved. Independent
+frontend, native and Docker reviews found no remaining material documentation mismatch; every local
+link in the changed Markdown documents resolves. No CI or GitHub automation was added or changed.
 
 ## Reproduction
 
