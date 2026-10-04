@@ -140,17 +140,6 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		var image *dockerx.ImageDetail
 		if len(captures) > 0 {
 			image = captures[0].Image
-			for _, other := range captures[1:] {
-				if containerSettingsDigest(other) != containerSettingsDigest(captures[0]) {
-					r.issue("replica_configuration_differs", "Replicas of this service have different images or runtime settings. Reconcile them before adoption.", name, "", true)
-				}
-				if replicaStorageDigest(other) != replicaStorageDigest(captures[0]) {
-					r.issue("replica_storage_differs", "Replicas use different resolved storage. A single Compose service cannot preserve their separate volumes or bind destinations; review and reconcile the replica storage before adoption.", name, "volumes", true)
-				}
-				if replicaNetworkDigest(other) != replicaNetworkDigest(captures[0]) {
-					r.issue("replica_network_identity_differs", "Replicas have different endpoint addresses, MAC identities or aliases. Those per-replica network settings cannot be applied as one Compose service; review the original network configuration before adoption.", name, "networks", true)
-				}
-			}
 			if image == nil {
 				r.issue("original_image_unavailable", "The original image is missing and its filesystem/platform could not be safely recovered. Restore that image or attach the original build source before adoption.", name, "image", true)
 				continue

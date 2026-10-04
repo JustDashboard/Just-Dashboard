@@ -358,6 +358,10 @@ func (r *dockerRecovery) recoverNetworks(name string, service map[string]any, ca
 	}
 	attached := map[string]any{}
 	for actual, endpoint := range insp.NetworkSettings.Networks {
+		if endpoint == nil {
+			r.issue("network_endpoint_unavailable", "An original network endpoint has incomplete inspection data. Restore readable endpoint configuration in the original manager before adoption.", name, "networks", true)
+			continue
+		}
 		key := "network_" + strings.TrimPrefix(digestBytes([]byte(actual)), "sha256:")[:12]
 		networks[key] = map[string]any{"name": actual, "external": true}
 		settings := map[string]any{}

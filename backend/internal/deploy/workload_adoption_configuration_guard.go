@@ -39,6 +39,18 @@ func (r *dockerRecovery) checkCapturedRuntimeConfiguration(name string, capture 
 
 func (r *dockerRecovery) checkCapturedServiceMappings(stack bool) {
 	for _, name := range sortedRecoveryServices(r.containers) {
+		captures := r.containers[name]
+		for _, other := range captures[1:] {
+			if containerSettingsDigest(other) != containerSettingsDigest(captures[0]) {
+				r.issue("replica_configuration_differs", "Replicas of this service have different images or runtime settings. Reconcile them before adoption.", name, "", true)
+			}
+			if replicaStorageDigest(other) != replicaStorageDigest(captures[0]) {
+				r.issue("replica_storage_differs", "Replicas use different resolved storage. A single Compose service cannot preserve their separate volumes or bind destinations; review and reconcile the replica storage before adoption.", name, "volumes", true)
+			}
+			if replicaNetworkDigest(other) != replicaNetworkDigest(captures[0]) {
+				r.issue("replica_network_identity_differs", "Replicas have different endpoint addresses, MAC identities or aliases. Those per-replica network settings cannot be applied as one Compose service; review the original network configuration before adoption.", name, "networks", true)
+			}
+		}
 		for _, capture := range r.containers[name] {
 			probe := *capture
 			if probe.Image == nil {

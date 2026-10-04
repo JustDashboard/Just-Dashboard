@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ type unrepresentedImageRecoveryReader struct {
 
 func TestRecoverDockerKnownUnrepresentableConfigurationBlocksEveryImageRecovery(t *testing.T) {
 	for _, kind := range []string{"container", "stack"} {
-		for _, option := range []string{"network_disabled", "shell", "legacy_mac", "console_size", "empty_masks", "empty_readonly", "privileged_masks", "unknown_raw", "stdin_once", "escaped_args", "unmapped_host"} {
+		for _, option := range []string{"network_disabled", "shell", "legacy_mac", "console_size", "empty_masks", "empty_readonly", "privileged_masks", "unknown_raw", "stdin_once", "escaped_args", "unmapped_host", "nil_endpoint"} {
 			t.Run(kind+"/"+option, func(t *testing.T) {
 				root := t.TempDir()
 				unsafe := adoptionCaptureFixture(t, "worker", true)
@@ -65,6 +66,9 @@ func TestRecoverDockerKnownUnrepresentableConfigurationBlocksEveryImageRecovery(
 				case "unmapped_host":
 					unsafe.Inspection.HostConfig.AutoRemove = true
 					code = "engine_option_unsupported"
+				case "nil_endpoint":
+					unsafe.Inspection.NetworkSettings.Networks["original_default"] = nil
+					code = "network_endpoint_unavailable"
 				}
 				unsafe.Image, unsafe.MissingImage = nil, true
 				candidate := WorkloadCandidate{Key: kind + ":original", Kind: kind, ResourceID: unsafe.Inspection.ID, Name: "original", Total: 1, Running: 1, Services: []WorkloadService{{Name: "worker", ResourceID: unsafe.Inspection.ID}}}
@@ -108,6 +112,50 @@ func TestRecoverDockerKnownUnrepresentableConfigurationBlocksEveryImageRecovery(
 				}
 			})
 		}
+	}
+}
+
+func TestRecoverDockerDivergentReplicasBlockBeforeAnyImageRecovery(t *testing.T) {
+	for _, difference := range []string{"configuration", "storage", "network"} {
+		t.Run(difference, func(t *testing.T) {
+			root := t.TempDir()
+			first, second := adoptionCaptureFixture(t, "web", true), adoptionCaptureFixture(t, "worker", true)
+			second.Inspection.Image = first.Inspection.Image
+			source := filepath.Join(root, "compose.yml")
+			if err := os.WriteFile(source, []byte("services:\n  web: {image: example/web}\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for index, capture := range []*dockerx.AdoptionContainer{first, second} {
+				capture.Image, capture.MissingImage = nil, true
+				capture.Inspection.Config = &container.Config{Image: "example/web", Hostname: "fixed-host", Env: []string{"PRIVATE_VALUE=artificial-private-value"}, Labels: map[string]string{"com.docker.compose.project": "original", "com.docker.compose.service": "web", "com.docker.compose.container-number": strconv.Itoa(index + 1), "com.docker.compose.project.working_dir": root, "com.docker.compose.project.config_files": source}}
+				capture.Inspection.HostConfig.PortBindings = nil
+			}
+			code := ""
+			switch difference {
+			case "configuration":
+				second.Inspection.Config.Env = append(second.Inspection.Config.Env, "EXTRA=artificial-private-extra")
+				code = "replica_configuration_differs"
+			case "storage":
+				second.Inspection.Mounts[0].Name = "other_existing_data"
+				code = "replica_storage_differs"
+			case "network":
+				second.Inspection.NetworkSettings.Networks["original_default"].IPAMConfig.IPv4Address = "172.22.0.9"
+				code = "replica_network_identity_differs"
+			}
+			candidate := WorkloadCandidate{Kind: "stack", ResourceID: "original", Total: 2, Running: 2, Services: []WorkloadService{{Name: "web", ResourceID: first.Inspection.ID}, {Name: "web", ResourceID: second.Inspection.ID}}}
+			reader := &unrepresentedImageRecoveryReader{adoptionReaderFake: &adoptionReaderFake{captures: map[string]*dockerx.AdoptionContainer{first.Inspection.ID: first, second.Inspection.ID: second}, compose: []byte(`{"services":{"web":{"image":"example/web"}}}`)}}
+			result, err := RecoverDockerWorkload(t.Context(), candidate, reader, files.New([]string{root}), filepath.Join(root, "recovery"))
+			if !errors.Is(err, ErrRecoveryBlocked) || reader.imageRecoveries != 0 {
+				t.Fatal("replica divergence was discovered after image export/import", err, reader.imageRecoveries)
+			}
+			found := false
+			for _, issue := range result.Adoption.Issues {
+				found = found || (issue.Code == code && issue.Blocking)
+			}
+			if !found {
+				t.Fatal("replica divergence has no exact actionable blocker")
+			}
+		})
 	}
 }
 

@@ -94,6 +94,8 @@ with nil or empty lists retain their unmasked behavior. Explicit zero memory swa
 remain explicit zero values in the recovered recipe rather than being replaced by daemon defaults.
 Every existing member is captured and checked for these and unknown raw fields before any missing
 image is exported or imported; an unsafe later service also blocks image recovery for an earlier one.
+Incomplete network endpoint inspection and divergent replica settings, storage or network identity
+also block before image recovery, with a specific reason instead of a partial recipe or a panic.
 
 | Runtime | Recovered plan and baseline | Cases that require resolution before adoption |
 | --- | --- | --- |
