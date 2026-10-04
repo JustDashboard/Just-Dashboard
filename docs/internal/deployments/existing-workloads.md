@@ -116,6 +116,8 @@ can later attach supported Compose source for builds. A native plain/dirty direc
 `local_directory`: a bounded content identity and private copy preserve uncommitted files without
 pretending they are a Git commit. Excluded persistent data remains linked rather than copied into
 an image. Source-copy containment, symlink checks and size/count limits fail closed.
+Source hashes and private copies open regular files through no-follow, nonblocking descriptors and
+verify descriptor identity before reading; a file replaced by a FIFO cannot stall recovery.
 The dashboard-visible source directory must be the same filesystem object as the host directory.
 Custom deployment roots require matching host mounts; a similarly named directory inside the
 dashboard image cannot substitute for the original application's source.

@@ -60,6 +60,10 @@ applications can be migrated without operator compatibility checks.
    key/keystore files are excluded from source copies and block automatic application-source recovery.
    Native restart evidence hashes original private contents without publishing or copying them into
    images. Regression tests verify credential files do not enter staged build copies.
+   Source hashing and copying additionally reject a regular file replaced by a FIFO or another
+   inode before reading, using no-follow/nonblocking descriptors and immediate identity checks.
+   The FIFO regression uses a bounded test-owned subprocess so a reader regression cannot hang
+   the main test process.
    Location: `source_local_directory.go` (`privateSourceEntry`).
 4. **Medium, host/container source identity:** a custom root may name an unrelated directory inside
    the dashboard image when the host directory has not been mounted. Recovery requires filesystem

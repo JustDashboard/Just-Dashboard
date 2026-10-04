@@ -161,7 +161,7 @@ func localDirectoryDigestWithPolicy(ctx context.Context, root string, native boo
 				return fmt.Errorf("%w: a source symlink escapes its root", ErrInvalidSource)
 			}
 		case mode.IsRegular():
-			file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+			file, err := openRegularSnapshotFile(path, info)
 			if err != nil {
 				return fmt.Errorf("%w: a source file changed or could not be read", ErrSourceUnavailable)
 			}
@@ -236,15 +236,15 @@ func (r contextSourceReader) Read(p []byte) (int, error) {
 }
 
 func copyRegularSnapshotFile(source, target string, mode os.FileMode, size int64) error {
-	input, err := os.OpenFile(source, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	expected, err := os.Lstat(source)
+	if err != nil || !expected.Mode().IsRegular() || expected.Size() != size || expected.Mode().Perm() != mode.Perm() {
+		return fmt.Errorf("%w: source file changed during capture", ErrSourceUnavailable)
+	}
+	input, err := openRegularSnapshotFile(source, expected)
 	if err != nil {
 		return fmt.Errorf("%w: source file changed during capture", ErrSourceUnavailable)
 	}
 	defer input.Close()
-	info, err := input.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != size {
-		return fmt.Errorf("%w: source file changed during capture", ErrSourceUnavailable)
-	}
 	output, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
@@ -255,4 +255,26 @@ func copyRegularSnapshotFile(source, target string, mode os.FileMode, size int64
 		return fmt.Errorf("%w: source file changed during capture", ErrSourceUnavailable)
 	}
 	return os.Chmod(target, mode)
+}
+
+func openRegularSnapshotFile(path string, expected os.FileInfo) (*os.File, error) {
+	// A source entry can become a FIFO after enumeration. Open without waiting
+	// for a writer, then verify the exact regular file before reading anything.
+	input, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	actual, err := input.Stat()
+	if err != nil || expected == nil || !actual.Mode().IsRegular() || !os.SameFile(expected, actual) ||
+		expected.Size() != actual.Size() || !expected.ModTime().Equal(actual.ModTime()) || expected.Mode() != actual.Mode() {
+		input.Close()
+		return nil, ErrSourceUnavailable
+	}
+	beforeOwner, beforeOK := expected.Sys().(*syscall.Stat_t)
+	afterOwner, afterOK := actual.Sys().(*syscall.Stat_t)
+	if beforeOK != afterOK || (beforeOK && (beforeOwner.Uid != afterOwner.Uid || beforeOwner.Gid != afterOwner.Gid)) {
+		input.Close()
+		return nil, ErrSourceUnavailable
+	}
+	return input, nil
 }
