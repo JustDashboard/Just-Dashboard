@@ -735,7 +735,7 @@ test("what needs attention leads to the page that acts on it", async ({ page }) 
     .getByRole("button", { name: "Review the fix in Query" })
     .click()
   await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  expect(new URL(page.url()).searchParams.get("sql")).toBe(ADVISOR.findings[1].sql)
+  await expect.poll(() => new URL(page.url()).searchParams.get("sql")).toBe(ADVISOR.findings[1].sql)
 })
 
 test("an advisor link that leaves this database is not followed", async ({ page }) => {

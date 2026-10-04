@@ -28,8 +28,12 @@ for (const width of [1280, 1720, 390]) {
     await expect(menu.getByRole("option")).toHaveText(["Managed", "Linked"])
     await expect(menu.locator("[data-slot=menu-item-hint]")).toHaveCount(0)
     await fitsViewport(page, menu)
+    // The menu slides in, so its first measured position can sit a fraction of
+    // a pixel short of where it settles.
+    await expect
+      .poll(async () => (await menu.boundingBox())!.y)
+      .toBeGreaterThanOrEqual(triggerBounds.y + triggerBounds.height + 3)
     const menuBounds = (await menu.boundingBox())!
-    expect(menuBounds.y).toBeGreaterThanOrEqual(triggerBounds.y + triggerBounds.height + 3)
     expect(menuBounds.width).toBeLessThan(180)
     if (width === 390) {
       await expect

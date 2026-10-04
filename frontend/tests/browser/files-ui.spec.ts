@@ -283,6 +283,24 @@ test.describe("native Files interactions", () => {
   test("browser and toolbar history traverse folders, survive reload and branch after Back", async ({
     page,
   }) => {
+    // A traversal is finished once the page's history entry and the saved trail
+    // agree on where they are. The address changes first, and a shortcut pressed
+    // in between meets the handler of the render before it.
+    const settledAt = (index: number) =>
+      expect
+        .poll(() =>
+          page.evaluate(() => {
+            const marker = history.state?.jdFiles
+            const saved = Object.entries(sessionStorage).find(([key]) =>
+              key.includes("files.history"),
+            )?.[1]
+            const trail = saved ? JSON.parse(saved) : null
+            return marker && trail && marker.id === trail.id && marker.index === trail.index
+              ? marker.index
+              : -1
+          }),
+        )
+        .toBe(index)
     await mockFiles(page)
     await openFiles(page)
     await expect.poll(() => folderPath(page)).toBe(home)
@@ -298,14 +316,19 @@ test.describe("native Files interactions", () => {
     await expect(page.getByRole("button", { name: "Forward to next folder" })).toBeEnabled()
     await page.getByRole("button", { name: "Forward to next folder" }).click()
     await expect(item(page, "site")).toBeVisible()
+    await settledAt(2)
     await page.keyboard.press("Alt+ArrowLeft")
     await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await settledAt(1)
     await page.keyboard.press("Alt+ArrowRight")
     await expect(item(page, "site")).toBeVisible()
+    await settledAt(2)
     await page.keyboard.press("Meta+[")
     await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
+    await settledAt(1)
     await page.keyboard.press("Meta+]")
     await expect(item(page, "site")).toBeVisible()
+    await settledAt(2)
     await page.getByRole("button", { name: "Back to previous folder" }).click()
     await expect.poll(() => folderPath(page)).toBe(`${home}/photos`)
     await page.getByRole("navigation", { name: "Places" }).locator("button[title='/etc']").click()
