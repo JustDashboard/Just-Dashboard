@@ -13,6 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -148,6 +149,20 @@ func TestWorkloadImportRoutesRequireAdministratorSession(t *testing.T) {
 	s := testServer(t)
 	routes := s.Routes()
 	reader := &client{t: t, h: routes, cookie: signInAs(t, s, "workload-reader", auth.RoleReadOnly)}
+	admin := &client{t: t, h: routes, cookie: signInAs(t, s, "workload-admin", auth.RoleAdmin)}
+	var adminID int64
+	if err := s.Store.DB.QueryRow(`SELECT id FROM users WHERE username='workload-admin'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	adminUser, err := s.Auth.UserByID(t.Context(), adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Auth.CreateAPIToken(t.Context(), adminUser, "workload-import-token", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unauthenticated := &client{t: t, h: routes}
 	for _, item := range []struct{ method, path, body string }{
 		{http.MethodGet, "/api/v1/deploy/import/discovery", ""},
 		{http.MethodPost, "/api/v1/deploy/import/inspect", `{"key":"container:any"}`},
@@ -156,6 +171,20 @@ func TestWorkloadImportRoutesRequireAdministratorSession(t *testing.T) {
 		response := reader.do(item.method, item.path, item.body, nil)
 		if response.Code != http.StatusForbidden {
 			t.Fatalf("%s = %d %s", item.path, response.Code, response.Body.String())
+		}
+		response = unauthenticated.do(item.method, item.path, item.body, nil)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated %s = %d %s", item.path, response.Code, response.Body.String())
+		}
+		response = unauthenticated.do(item.method, item.path, item.body, map[string]string{"Authorization": "Bearer " + token})
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "session_required") {
+			t.Fatalf("API token %s = %d %s", item.path, response.Code, response.Body.String())
+		}
+		if item.method == http.MethodPost {
+			response = admin.do(item.method, item.path, item.body, map[string]string{httpx.CSRFHeader: ""})
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("missing CSRF %s = %d %s", item.path, response.Code, response.Body.String())
+			}
 		}
 	}
 }

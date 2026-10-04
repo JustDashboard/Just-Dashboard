@@ -33,4 +33,10 @@ describe("existing workloads without dashboard releases", () => {
       "archived",
     )
   })
+
+  test("legacy checkout imports retain the managed deployment state", () => {
+    expect(projectState({ ...summary(undefined), importMode: "existing_checkout" })).toBe(
+      "not_deployed",
+    )
+  })
 })

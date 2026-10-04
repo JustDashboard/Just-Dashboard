@@ -86,6 +86,6 @@ Page-owned keyboard commands, history, restoration and polling interactions are 
 [`workspace-interactions.md`](workspace-interactions.md). Their shared owner is `components/workspace/`;
 page-specific navigation, confirmations and API capabilities stay with the feature components above.
 
-Existing-workload discovery at `/deploy/import` uses `components/deploy/import-existing.tsx` and
+Existing-workload discovery at `/deploy/import` uses `components/deploy/import-workload.tsx` and
 `lib/workload-import.ts`; imported projects use `imported-project.tsx` and `imported-workload.ts`
 for original-manager links and observed status. See [existing-workloads](../deployments/existing-workloads.md).

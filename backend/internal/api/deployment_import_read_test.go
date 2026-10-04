@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
@@ -67,6 +68,8 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, s := newClient(t)
+	s.Auth = auth.NewService(s.Store, s.Sealer, time.Hour, time.Hour, false)
+	s.Authn.Svc = s.Auth
 	s.Cfg.DeployRoots = []string{"/opt", "/srv", "/home", "/tmp"}
 	s.Cfg.ComposeRoots = []string{}
 	if s.modules.docker != nil {

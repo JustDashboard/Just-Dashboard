@@ -2,6 +2,14 @@
 
 ## Processes
 
+Deployment discovery uses a separate `PM2.ListExisting` reader. It connects directly to already
+existing default-home daemon sockets using the monitor RPC transport under the owning host account;
+it does not invoke the PM2 CLI or start a missing daemon. Successful accounts remain visible when
+another account cannot be read. Application identity includes account, namespace and name, so cluster
+instances group without combining identically named applications in different namespaces. Only
+sanitized identity, status, PID and script path reach the import inventory; process environment and
+arguments remain with PM2. See [existing workload import](../deployments/existing-workloads.md).
+
 The live frontend can pause scheduled inventory reads and holds row order while a process has focus,
 using PID plus creation time as identity. Keyboard inspection and place restoration use the shared
 [workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters

@@ -119,8 +119,10 @@ only renderer/executor/validation authority for their feature.
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
-  is re-detected rather than refused. `?mode=advanced` opens Advanced, and existing workloads adopt
-  through `/deploy/import/adopt` without a run. For a Git source the commit carries a `gitPolicy`
+  is re-detected rather than refused. `?mode=advanced` opens Advanced, and legacy existing-checkout
+  imports adopt through `/deploy/import/adopt` without a run. Existing runtime workloads use the
+  discovery/review flow at `/deploy/import` and register through `/deploy/import/register`.
+  For a Git source the commit carries a `gitPolicy`
   (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
   `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so
   every caller that does not ask keeps the defaults in `gitDeploymentPolicy` exactly as they were.

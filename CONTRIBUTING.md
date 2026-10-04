@@ -189,6 +189,14 @@ to the contribution terms above, including the additional licence grant to the p
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
   listens, and a restart. It needs Docker and Go and touches only the containers it creates; run it after
   changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
+- Existing-workload import changes also run the isolated live fixture from `backend/`:
+  `JD_WORKLOAD_IMPORT_LIVE=1 go test ./internal/api -run '^TestLiveWorkloadImportKeepsFourContainerStackAndHTTPServiceUnchanged$' -count=1 -v`.
+  It requires a working Docker daemon and `caddy:2-alpine` already available locally. It creates and
+  removes only its own uniquely named four-container project, checks two running and two stopped
+  containers, persistent data, configuration continuity and HTTP requests during import, and leaves
+  installed workloads untouched. `JD_WORKLOAD_IMPORT_EVIDENCE_DIR` writes sanitized acceptance JSON.
+  The opt-in native browser server and recording commands are documented in
+  [the workload-import acceptance record](docs/audits/2026-10-04-existing-workloads/README.md).
 - Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are
   covered by component tests with fake providers; a real provider or GitHub post is verified manually
   through **Send test** and a deployment of a GitHub-sourced project, and the pull request must say which

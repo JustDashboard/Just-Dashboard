@@ -80,7 +80,9 @@ export function workloadMatches(item: WorkloadCandidate, query: string) {
 }
 
 export function workloadManagerUrl(item: WorkloadCandidate) {
-  return item.managerUrl.startsWith("/") && !item.managerUrl.startsWith("//")
+  return item.managerUrl.startsWith("/") &&
+    !item.managerUrl.startsWith("//") &&
+    !/[\\\u0000-\u0020]/.test(item.managerUrl)
     ? item.managerUrl
     : undefined
 }

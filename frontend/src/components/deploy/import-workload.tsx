@@ -218,7 +218,7 @@ export function ImportWorkload() {
                       value={items.reduce((sum, item) => sum + item.running, 0)}
                     />
                     <StatTile
-                      label="Services stopped"
+                      label="Services not running"
                       value={items.reduce(
                         (sum, item) => sum + Math.max(0, item.total - item.running),
                         0,
@@ -353,7 +353,7 @@ export function ImportWorkload() {
                 )}
                 <FormSection
                   title="Services"
-                  hint={`${plural(selected.total, "service")} · ${selected.running} running · ${Math.max(0, selected.total - selected.running)} stopped`}
+                  hint={`${plural(selected.total, "service")} · ${selected.running} running · ${Math.max(0, selected.total - selected.running)} not running`}
                 >
                   <RowList aria-label="Services to import">
                     {selected.services.map((service) => (
@@ -522,8 +522,8 @@ export function ImportWorkload() {
             <PanelHeader title="What import preserves" />
             <PanelBody className="space-y-3 text-xs leading-relaxed text-muted-foreground">
               <p>
-                Services keep running under their current manager. Import adds their identity and
-                current settings to a project.
+                Services keep running under their current manager. Import records their identity and
+                current state in a project.
               </p>
               <ul className="space-y-2">
                 {[

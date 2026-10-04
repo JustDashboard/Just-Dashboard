@@ -13,11 +13,16 @@ page: discover → review → imported. It uses the existing FlowPanel/FlowSteps
 system, search and source filters. Discovery reports silences separately from workloads so a missing
 manager is never presented as proof there are no applications.
 
+Legacy `/deploy/new?source=import` and `/deploy/new?profile=imported` links lead to this importer.
+Saved or remembered external import setups offer an explicit discovery link before configuration
+or detection, preserving the old draft. Existing-checkout setups retain their original flow.
+
 - `GET /deploy/import/discovery` returns `checkedAt`, `items` and `silences`.
 - `POST /deploy/import/inspect` accepts `{key}` and refreshes the selected workload.
 - `POST /deploy/import/register` accepts `{key,name,digest}`, re-observes the workload and commits
   only when its stable identity and visible topology match the review. `409 workload_changed`
-  requires another inspection. Ordinary start/stop state changes do not invalidate the review.
+  requires another inspection. State/health changes alone do not invalidate the review; visible
+  identity, port topology and source-availability changes require a fresh review.
 
 These endpoints require an administrator's browser session. Mutating requests retain CSRF protection
 and audit entries. Clients provide a discovered identity, never a command or a file to execute.
@@ -25,9 +30,9 @@ Source paths are resolved against `JD_DEPLOY_ROOTS` before checking availability
 not read source contents, environment values, arbitrary labels or process argv into its response.
 There is no confirmation phrase because registration does not remove or interrupt any resource.
 
-Registration is an atomic, idempotent database operation. Repeating the same resource returns its
-existing project. A different resource cannot reuse a project name; a container already belonging to
-an imported Compose stack cannot also become a separate imported project. Archives retain the
+Registration is an atomic, idempotent database operation. Repeating the same resource and project name
+returns its existing project. A different resource cannot reuse a project name; a container already
+belonging to an imported Compose stack cannot also become a separate imported project. Archives retain the
 relationship until the archived record is permanently deleted.
 
 ## What is discovered
@@ -40,8 +45,9 @@ relationship until the archived record is permanently deleted.
 | systemd | Unit name, including inactive loaded services | Unit files, drop-ins, dependencies, execution account, sandbox and environment files remain in systemd. App identity survives PID changes. PM2 daemon units and dashboard/container infrastructure are excluded where identifiable. |
 | Listening host process | PID plus creation time, with its listening ports grouped | Handles a Node/Next/React/Vue development or production server without requiring a framework guess. It observes this process only: no reliable boot, restart or deployment recipe can be recovered from a listener. PID reuse is fenced; non-listening unmanaged workers are not discovered. |
 
-The dashboard's own workload and dashboard-managed resources are excluded. If an inventory is
-unavailable, discovery keeps successful results and reports the failed owner. Managers are queried
+Docker discovery reads the configured daemon; additional rootless daemons, Podman and other remote
+engines are not enumerated. The dashboard's own workload and dashboard-managed resources are excluded.
+If an inventory is unavailable, discovery keeps successful results and reports the failed owner. Managers are queried
 concurrently under a bounded deadline. Already imported resources remain identifiable in discovery.
 
 ## Project behavior and ownership
@@ -59,8 +65,14 @@ project does not appear as having pending deployment changes simply because it h
 
 The imported Overview lists its services and points to its original manager. Navigation exposes the
 Overview and archive controls rather than configuration that does not control the application.
-Run enqueue and source/configuration conversion are refused at the backend. Archive and permanent
-record deletion retain external resources, because observed dependencies never enter managed-only
+Run enqueue, source/configuration conversion, schedule/trigger creation and schedule/trigger updates
+are refused at the backend for external runtime imports. Retained schedules and verified provider
+deliveries are fenced before a feature owner can execute a command or create a preview environment.
+Full legacy project updates, signed legacy webhook enqueue, rollback and retained-run retries are
+also refused for observed runtime imports. Renaming the dashboard project remains available.
+The legacy `existing_checkout` import retains its established build, source-edit and duplication
+behavior, including its established automation. Archive and permanent record deletion retain
+external resources, because observed dependencies never enter managed-only
 removal plans. Importing is reversible by removing its project record after archiving.
 
 ## Why migration is separate
@@ -83,6 +95,10 @@ Docker documents Compose's project/service labels and its wider runtime configur
 [Compose ls](https://docs.docker.com/reference/cli/docker/compose/ls/) distinguishes inclusion of
 stopped projects. PM2 documents that [boot restoration requires saved process state and a startup
 hook](https://pm2.keymetrics.io/docs/usage/startup/); a process list alone is not that configuration.
+The PM2 adapter uses the existing [monitor RPC](https://github.com/Unitech/pm2/blob/master/lib/Client.js)
+without entering the CLI start path. The initial scan finds default PM2 homes under mounted host
+`/home` and `/root`; arbitrary custom `PM2_HOME` locations and user systemd managers are not enumerated.
+Systemd socket activation can have no application PID yet. These limits are not automatic migrations.
 These contracts support preserving the original manager rather than synthesizing a new deployment.
 
 Local acceptance and visual evidence are recorded in

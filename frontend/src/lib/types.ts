@@ -2623,6 +2623,9 @@ export type DeploymentSourceMode =
   | "existing_checkout"
   | "existing_container"
   | "existing_stack"
+  | "existing_pm2"
+  | "existing_systemd"
+  | "existing_process"
 
 export type DeploymentRunState =
   | "requested"

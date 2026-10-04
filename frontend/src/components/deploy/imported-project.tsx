@@ -6,7 +6,7 @@ import { importedWorkloadOf } from "@/components/deploy/imported-workload"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Button } from "@/components/ui/button"
-import { Status } from "@/components/status-dot"
+import { Status, toneFor } from "@/components/status-dot"
 import { workloadManagerUrl, workloadPort } from "@/lib/workload-import"
 
 const MANAGERS = {
@@ -102,21 +102,17 @@ export function ImportedProject() {
                 </div>
                 <Status
                   tone={
-                    available && service.health === "unhealthy"
-                      ? "danger"
-                      : available
-                        ? service.state === "running" ||
-                          service.state === "online" ||
-                          service.state === "active"
-                          ? "running"
-                          : "stopped"
-                        : "unknown"
+                    available
+                      ? service.health === "unhealthy"
+                        ? "danger"
+                        : toneFor(service.state)
+                      : "unknown"
                   }
                   label={
                     available
                       ? service.health
                         ? `${service.state} · ${service.health}`
-                        : service.state
+                        : service.state || "Not observed"
                       : "Not observed"
                   }
                 />
