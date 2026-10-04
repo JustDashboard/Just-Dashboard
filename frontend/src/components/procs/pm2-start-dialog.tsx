@@ -172,9 +172,8 @@ export function PM2StartDialog({
               </SelectTrigger>
               <SelectContent>
                 {daemons.map((d) => (
-                  <SelectItem key={d.account} value={d.account}>
+                  <SelectItem key={d.account} value={d.account} hint={d.home}>
                     {d.account}
-                    <span className="text-muted-foreground">{d.home}</span>
                   </SelectItem>
                 ))}
               </SelectContent>

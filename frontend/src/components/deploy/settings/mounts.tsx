@@ -1,5 +1,6 @@
 "use client"
 
+import { useId } from "react"
 import { ArrowRight, LockClosed, Servers, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
@@ -54,13 +55,7 @@ export const OWNERSHIP: Record<Ownership, { word: string; hint: string }> = {
   observed: { word: "Observed", hint: "watched only; never removed" },
 }
 
-/**
- * Who owns a mount, a volume or a hostname, drawn one way wherever it is
- * asked: the word "Ownership" inside the trigger, so the value never floats
- * with nothing saying what it is, and what removal does to each choice as the
- * option's hint. A hostname can only be managed or linked, so its caller
- * narrows `options`.
- */
+/** Ownership uses the shared select; removal consequences stay beside the chosen value. */
 export function OwnershipSelect<T extends Ownership>({
   value,
   onChange,
@@ -77,27 +72,29 @@ export function OwnershipSelect<T extends Ownership>({
   disabled?: boolean
   className?: string
 }) {
+  const descriptionId = useId()
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as T)} disabled={disabled}>
-      {/* The body size at every width: this sits in a line of other small
-          controls and readings, where the phone's 16px select face was the
-          loudest word in the row. */}
-      <SelectTrigger aria-label={label} className={cn("gap-1.5 max-sm:text-body", className)}>
-        <span className="text-muted-foreground">Ownership</span>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent position="popper" align="start" className="min-w-72">
-        {options.map((ownership) => (
-          <SelectItem
-            key={ownership}
-            value={ownership}
-            hint={<span aria-hidden>{OWNERSHIP[ownership].hint}</span>}
-          >
-            {OWNERSHIP[ownership].word}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1", className)}>
+      <Select value={value} onValueChange={(next) => onChange(next as T)} disabled={disabled}>
+        <SelectTrigger
+          aria-label={label}
+          aria-describedby={descriptionId}
+          className="max-sm:text-body"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((ownership) => (
+            <SelectItem key={ownership} value={ownership}>
+              {OWNERSHIP[ownership].word}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span id={descriptionId} className="text-hint text-muted-foreground">
+        {OWNERSHIP[value].hint}
+      </span>
+    </div>
   )
 }
 

@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useState } from "react"
 import { ChipCount } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -259,10 +261,11 @@ export function GridColumnsMenu({
                 onLayoutChange(setColumnHidden(layout, column.key, !checked))
               }
             >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
-              <span className="max-w-24 shrink-0 truncate text-hint text-muted-foreground">
-                {column.typeName}
-              </span>
+              <MenuItemText
+                hint={<span className="text-hint text-muted-foreground">{column.typeName}</span>}
+              >
+                <span className="min-w-0 flex-1 truncate font-mono text-xs">{column.name}</span>
+              </MenuItemText>
             </DropdownMenuCheckboxItem>
           ))}
           {shown.length === 0 && (

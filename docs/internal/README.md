@@ -70,6 +70,9 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
+  select/menu inventory, single-column option layout, opening behavior and verification coverage.
+
 - [`../audits/2026-10-04-command-search/README.md`](../audits/2026-10-04-command-search/README.md) — global
   command search research, keyboard navigation plan, metadata inventory and recorded workflow.
 - [`operations/terminal-tools.md`](operations/terminal-tools.md) — installer stages and completion guide,

@@ -5,6 +5,13 @@ import { Check, ChevronDown, ChevronUp } from "@/components/icons"
 import { Select as SelectPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { MenuItemText } from "@/components/ui/menu-item-text"
+import {
+  menuIndicatorClasses,
+  menuItemClasses,
+  menuSurfaceClasses,
+} from "@/components/ui/menu-styles"
 import { usePortalContainer } from "@/lib/portal-container"
 
 function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
@@ -35,19 +42,25 @@ function SelectTrigger({
   size?: "sm" | "default"
 }) {
   return (
-    <SelectPrimitive.Trigger
-      data-slot="select-trigger"
-      data-size={size}
-      className={cn(
-        "flex w-fit items-center justify-between gap-2 rounded-md border border-input bg-control px-3 py-2 text-body whitespace-nowrap focus-ring transition-[color,box-shadow] hover:bg-control-hover active:bg-control-active disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 data-[placeholder]:text-muted-foreground data-[size=default]:h-11 data-[size=sm]:h-10 *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 max-sm:text-base sm:data-[size=default]:h-9 sm:data-[size=sm]:h-8 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-      <SelectPrimitive.Icon asChild>
-        <ChevronDown className="size-4 opacity-50" />
-      </SelectPrimitive.Icon>
+    <SelectPrimitive.Trigger asChild {...props}>
+      <Button
+        data-slot="select-trigger"
+        variant="outline"
+        size={size === "sm" ? "sm" : "default"}
+        className={cn(
+          "w-fit min-w-0 justify-between text-body font-normal data-[placeholder]:text-muted-foreground *:data-[slot=select-value]:flex *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-2 *:data-[slot=select-value]:truncate max-sm:h-11 max-sm:text-base [&_svg:not([class*='text-'])]:text-muted-foreground",
+          size === "sm" && "max-sm:h-10",
+          className,
+        )}
+      >
+        {children}
+        <SelectPrimitive.Icon asChild>
+          <ChevronDown
+            aria-hidden
+            className="size-4 transition-transform duration-150 in-data-[state=open]:rotate-180 motion-reduce:transition-none"
+          />
+        </SelectPrimitive.Icon>
+      </Button>
     </SelectPrimitive.Trigger>
   )
 }
@@ -55,8 +68,10 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
-  position = "item-aligned",
-  align = "center",
+  position = "popper",
+  align = "start",
+  sideOffset = 4,
+  collisionPadding = 8,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
@@ -64,23 +79,19 @@ function SelectContent({
       <SelectPrimitive.Content
         data-slot="select-content"
         className={cn(
-          "relative z-50 max-h-(--radix-select-content-available-height) min-w-[8rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-md border bg-popover text-popover-foreground shadow-md data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
-          position === "popper" &&
-            "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
+          menuSurfaceClasses,
+          "relative max-h-(--radix-select-content-available-height) max-w-(--radix-select-content-available-width) origin-(--radix-select-content-transform-origin)",
+          position === "popper" && "min-w-(--radix-select-trigger-width)",
           className,
         )}
         position={position}
         align={align}
+        sideOffset={sideOffset}
+        collisionPadding={collisionPadding}
         {...props}
       >
         <SelectScrollUpButton />
-        <SelectPrimitive.Viewport
-          className={cn(
-            "p-1",
-            position === "popper" &&
-              "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1",
-          )}
-        >
+        <SelectPrimitive.Viewport className="w-full scroll-my-1">
           {children}
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />
@@ -100,14 +111,7 @@ function SelectLabel({ className, ...props }: React.ComponentProps<typeof Select
   )
 }
 
-/**
- * One option. `hint` is a reading about it — the host a credential signs in
- * to, the kind it is — drawn at the option's far end and *outside* the item's
- * text, which is the part Radix copies into the trigger once it is chosen: the
- * list says "github.com · SSH key" beside each name, and the closed field says
- * the name and nothing else. It is outside the option's accessible name too,
- * which Radix takes from the same text.
- */
+/** Keep metadata below its name and out of the value copied into the trigger. */
 function SelectItem({
   className,
   children,
@@ -118,28 +122,20 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-body outline-hidden select-none focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 *:data-[slot=select-item-text]:flex *:data-[slot=select-item-text]:items-center *:data-[slot=select-item-text]:gap-2 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
+        menuItemClasses,
+        "w-full pr-8 [&_[data-slot=select-item-text]]:flex [&_[data-slot=select-item-text]]:min-w-0 [&_[data-slot=select-item-text]]:items-center [&_[data-slot=select-item-text]]:gap-2",
         className,
       )}
       {...props}
     >
-      <span
-        data-slot="select-item-indicator"
-        className="absolute right-2 flex size-3.5 items-center justify-center"
-      >
+      <span data-slot="select-item-indicator" className={menuIndicatorClasses}>
         <SelectPrimitive.ItemIndicator>
-          <Check className="size-4" />
+          <Check aria-hidden className="size-4" />
         </SelectPrimitive.ItemIndicator>
       </span>
-      <SelectPrimitive.ItemText data-slot="select-item-text">{children}</SelectPrimitive.ItemText>
-      {hint && (
-        <span
-          data-slot="select-item-hint"
-          className="ml-auto min-w-0 truncate pl-3 text-hint text-muted-foreground"
-        >
-          {hint}
-        </span>
-      )}
+      <MenuItemText hint={hint}>
+        <SelectPrimitive.ItemText data-slot="select-item-text">{children}</SelectPrimitive.ItemText>
+      </MenuItemText>
     </SelectPrimitive.Item>
   )
 }

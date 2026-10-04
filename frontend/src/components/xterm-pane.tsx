@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { IDisposable, Terminal } from "@xterm/xterm"
 import type { SearchAddon } from "@xterm/addon-search"
@@ -1647,10 +1649,13 @@ function SnippetMenu({
         <DropdownMenuSeparator />
         {snippets.map((snippet) => (
           <DropdownMenuItem key={snippet.id} onSelect={() => onSend(snippet.command)}>
-            <span className="min-w-0 flex-1 truncate">{snippet.label}</span>
-            <span className="max-w-[50%] shrink truncate font-mono text-hint text-muted-foreground">
-              {snippet.command}
-            </span>
+            <MenuItemText
+              hint={
+                <span className="font-mono text-hint text-muted-foreground">{snippet.command}</span>
+              }
+            >
+              <span className="min-w-0 flex-1 truncate">{snippet.label}</span>
+            </MenuItemText>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

@@ -353,16 +353,19 @@ file in the tree and the current sidebar entry all take the same neutral wash. N
 nor the brand hue is ever the mark for "this one is chosen": the brand is the *command* face and *where
 you are*, and a filter borrowing either reads as the page's main action.
 
-`components/ui/*` is generated shadcn/ui (new-york, zinc) with its icons rewired to
-the Heroicons vocabulary in `components/icons.tsx` — compose rather than
-edit. Every side-panel toggle — the navigation rail's trigger, the terminal's rail and Files/Diff, the
-Files sidebar and details, the logs sources, the ER diagram's inspector — draws its panel's side and
+`components/ui/*` originated as shadcn/ui (new-york, zinc), with its icons rewired to
+the Heroicons vocabulary in `components/icons.tsx`. Compose these shared primitives in features;
+product-wide control changes belong in the primitives. Select triggers compose `Button`, while
+select, dropdown and context-menu rows share `ui/menu-styles.ts`. `ui/menu-item-text.tsx` keeps
+option names and metadata in one text column. The shared select replaces native selectors for
+search scope and database activity history. Every side-panel toggle — the navigation rail's trigger,
+the terminal's rail and Files/Diff, the Files sidebar and details, the logs sources, the ER diagram's inspector — draws its panel's side and
 state with `SidebarLeftOpen`/`Close` or `SidebarRightOpen`/`Close` (drawn inline in `icons.tsx`,
 since Heroicons has no sidebar): a rounded window with a bar inset on the panel's side, solid while
 the panel shows and an empty outline of the same bar while it is hidden. They are drawn one pixel
 wide on a 16px grid and render at 16px, where every line lands on a pixel. They mean a panel toggle and nothing else, which is why the Files page's
-Places menu is a map pin. `ui/context-menu.tsx` is the right-click menu, drawn with the dropdown's classes so the two
-read as one menu; a feature that needs both (the file listing) renders one verb list into whichever
+Places menu is a map pin. `ui/context-menu.tsx` is the right-click menu, drawn from `ui/menu-styles.ts`
+alongside the dropdown and select so all three read as one menu; a feature that needs both (the file listing) renders one verb list into whichever
 opened. Feature pieces live in `components/<feature>/`: `database/`, `docker/`, `files/`, `git/`, `logs/`,
 `metrics/`, `packages/`, `procs/`, `proxy/`, `security/`, `terminal/`, `update/`.
 

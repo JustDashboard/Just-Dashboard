@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useId, useRef, useState } from "react"
 import { MoreHorizontal } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -166,12 +168,17 @@ export function RowField({
               <DropdownMenuLabel>Set to</DropdownMenuLabel>
               {states.map((state) => (
                 <DropdownMenuItem key={state.key} onSelect={state.run}>
-                  <span className="shrink-0">{state.label}</span>
-                  {state.detail && (
-                    <span className="ml-auto max-w-40 min-w-0 truncate pl-3 font-mono text-hint text-muted-foreground">
-                      {state.detail}
-                    </span>
-                  )}
+                  <MenuItemText
+                    hint={
+                      state.detail && (
+                        <span className="font-mono text-hint text-muted-foreground">
+                          {state.detail}
+                        </span>
+                      )
+                    }
+                  >
+                    <span className="shrink-0">{state.label}</span>
+                  </MenuItemText>
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>

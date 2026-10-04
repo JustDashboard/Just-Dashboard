@@ -1,5 +1,13 @@
 "use client"
 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+
 import { NotUpdating } from "@/components/database/home/blocks"
 import {
   CHART_UNITS,
@@ -82,21 +90,20 @@ export const Activity = memo(function Activity({
         title="Activity"
         actions={
           <>
-            <label className="flex items-center gap-2 pb-2.5 text-hint text-muted-foreground">
-              <span className="sr-only">Activity history range</span>
-              <select
-                aria-label="Activity history range"
-                value={hours}
-                onChange={(event) => onHours(Number(event.target.value))}
-                className="h-9 rounded-md border border-input bg-background px-2 text-foreground focus-ring"
-              >
-                {HISTORY_RANGES.map((range) => (
-                  <option key={range.hours} value={range.hours}>
-                    {range.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="pb-2.5">
+              <Select value={String(hours)} onValueChange={(value) => onHours(Number(value))}>
+                <SelectTrigger aria-label="Activity history range" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {HISTORY_RANGES.map((range) => (
+                    <SelectItem key={range.hours} value={String(range.hours)}>
+                      {range.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             {error && samples.length > 0 && (
               <span className={several ? "flex pb-2.5" : "flex"}>
                 <NotUpdating error={error} />

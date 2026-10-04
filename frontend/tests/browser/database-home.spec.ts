@@ -651,7 +651,8 @@ test("the chart opens on saved activity and keeps its range and view after reloa
   await expect(activity).toContainText("Transactions")
   await expect(activity).toContainText("10/s")
   await expect(activity.locator(".recharts-area-curve").first()).toHaveAttribute("d", /^M/)
-  await activity.getByRole("combobox", { name: "Activity history range" }).selectOption("24")
+  await activity.getByRole("combobox", { name: "Activity history range" }).click()
+  await page.getByRole("option", { name: "24 hours", exact: true }).click()
   await expect(activity.getByRole("combobox", { name: "Activity history range" })).toHaveValue("24")
 
   // The view is the reader's arrangement of this database's home: it is there on return.

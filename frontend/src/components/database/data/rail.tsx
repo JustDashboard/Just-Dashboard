@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
@@ -450,12 +452,17 @@ function SchemaItem({
     <DropdownMenuItem asChild className={cn(schema.name === current && "bg-accent")}>
       <Link href={href("data", { schema: schema.name, table: null })}>
         <SchemaMark name={schema.name} />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        {schema.tables >= 0 && (
-          <span className="numeric shrink-0 text-hint text-muted-foreground">
-            {grouped(schema.tables)}
-          </span>
-        )}
+        <MenuItemText
+          hint={
+            schema.tables >= 0 && (
+              <span className="numeric text-hint text-muted-foreground">
+                {grouped(schema.tables)}
+              </span>
+            )
+          }
+        >
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+        </MenuItemText>
       </Link>
     </DropdownMenuItem>
   )

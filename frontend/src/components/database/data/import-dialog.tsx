@@ -675,12 +675,9 @@ export function ImportDialog({
                                 </SelectTrigger>
                                 <SelectContent>
                                   {keys.map((key, at) => (
-                                    <SelectItem key={key.label} value={String(at)}>
+                                    <SelectItem key={key.label} value={String(at)} hint={key.label}>
                                       <span className="font-mono text-xs">
                                         {key.columns.join(", ")}
-                                      </span>
-                                      <span className="text-hint text-muted-foreground">
-                                        {key.label}
                                       </span>
                                     </SelectItem>
                                   ))}
