@@ -223,7 +223,7 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 		if candidate == nil {
 			candidate = &deploy.WorkloadCandidate{
 				Key: "pm2:" + resource, Kind: "pm2", Name: process.Name, ResourceID: resource,
-				SourcePath: process.ScriptPath, Services: []deploy.WorkloadService{}, ManagerURL: "/processes?tab=pm2",
+				SourcePath: process.ScriptPath, Services: []deploy.WorkloadService{}, ManagerURL: "/processes/pm2",
 				Warnings: []string{"PM2 keeps this application's account, runtime, environment, cluster mode and startup settings. No Docker conversion is performed."},
 			}
 			pm2Groups[resource] = candidate
@@ -250,7 +250,7 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 		unitNames[unit.Name] = true
 		candidate := deploy.WorkloadCandidate{
 			Key: "systemd:" + unit.Name, Kind: "systemd", Name: strings.TrimSuffix(unit.Name, ".service"), ResourceID: unit.Name,
-			State: unit.ActiveState, Total: 1, Services: []deploy.WorkloadService{}, ManagerURL: "/processes?tab=systemd",
+			State: unit.ActiveState, Total: 1, Services: []deploy.WorkloadService{}, ManagerURL: "/processes/services",
 			Warnings: []string{"Systemd keeps the unit, drop-ins, environment files, dependencies, account and startup policy. Import never rewrites or reloads the unit."},
 		}
 		ports := []dockerx.PortMapping{}
