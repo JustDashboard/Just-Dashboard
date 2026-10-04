@@ -146,11 +146,8 @@ test("imports the real existing bet-bot stack without changing its containers", 
   expect(detail.ok()).toBe(true)
   const payload = await detail.json()
   expect(payload.deployment.liveReleaseId).toBeGreaterThan(0)
-  const runtimeResponse = await page.request.get(
-    new URL(`/api/v1${new URL(page.url()).pathname}/runtime`, page.url()).toString(),
-  )
-  expect(runtimeResponse.ok()).toBe(true)
-  const runtime = await runtimeResponse.json()
+  const runtime = payload.runtime
+  expect(runtime.status).toBe("available")
   expect(runtime.services).toHaveLength(before.length)
   const managedContainerIds = runtime.services
     .map((service: { containerId: string }) => service.containerId)
