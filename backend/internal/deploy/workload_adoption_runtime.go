@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/docker/docker/errdefs"
@@ -155,6 +156,88 @@ func adoptedContainerAuthorized(container dockerx.Container, entry AdoptedContai
 		container.Labels["io.just-dashboard.managed"] == "true" &&
 		container.Labels["io.just-dashboard.environment-id"] == strconv.FormatInt(runtime.EnvironmentID, 10) &&
 		container.Labels["io.just-dashboard.release-id"] == strconv.FormatInt(runtime.ReleaseID, 10))
+}
+
+func (o *DockerRuntimeOwner) stopSharedComposeRuntime(ctx context.Context, runtime ReleaseRuntime, metadata dockerReleaseRuntimeMetadata, grace int, remove bool) error {
+	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": metadata.ProjectName})
+	if err != nil {
+		return err
+	}
+	scope := []string{}
+	for _, id := range metadata.ContainerIDs {
+		var current *dockerx.Container
+		for i := range containers {
+			if containers[i].ID == id {
+				current = &containers[i]
+				break
+			}
+		}
+		if current == nil {
+			continue
+		}
+		if !adoptedContainerAuthorized(*current, AdoptedContainer{}, runtime) {
+			return fmt.Errorf("%w: adopted runtime ownership changed", ErrInvalidPlan)
+		}
+		scope = append(scope, id)
+	}
+	// Compose services retain their individual stop_grace_period. Stop in
+	// bounded parallel groups so a large stack cannot consume the recovery
+	// deadline by multiplying one service's timeout by its container count.
+	var workers sync.WaitGroup
+	gate := make(chan struct{}, 8)
+	errors := make(chan error, len(scope))
+	for _, id := range scope {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case gate <- struct{}{}:
+				defer func() { <-gate }()
+			case <-ctx.Done():
+				errors <- ctx.Err()
+				return
+			}
+			if err := o.client.Lifecycle(ctx, id, dockerx.ActionStop, nil); err != nil && !errdefs.IsNotFound(err) && !errdefs.IsNotModified(err) {
+				errors <- err
+				return
+			}
+			if remove {
+				if err := o.client.RemoveContainer(ctx, id, false, false); err != nil && !errdefs.IsNotFound(err) {
+					errors <- err
+				}
+			}
+		}()
+	}
+	workers.Wait()
+	close(errors)
+	for err := range errors {
+		return err
+	}
+	return nil
+}
+
+func (o *DockerRuntimeOwner) removeOwnedBaselineExtras(ctx context.Context, project string, environmentID int64, baseline []AdoptedContainer) error {
+	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": project, "io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10)})
+	if err != nil {
+		return err
+	}
+	services := map[string]bool{}
+	for _, entry := range baseline {
+		services[entry.Service] = true
+	}
+	for _, current := range containers {
+		if services[current.Labels["com.docker.compose.service"]] || strings.EqualFold(current.Labels["com.docker.compose.oneoff"], "true") {
+			continue
+		}
+		releaseID, _ := strconv.ParseInt(current.Labels["io.just-dashboard.release-id"], 10, 64)
+		if releaseID <= 0 || current.State == "running" {
+			return fmt.Errorf("%w: baseline has an unexpected active or unowned managed service", ErrInvalidPlan)
+		}
+		if err := o.client.RemoveContainer(ctx, current.ID, false, false); err != nil && !errdefs.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 func finalizedAdoptionOverride(runtime ReleaseRuntime, metadata dockerReleaseRuntimeMetadata) (string, error) {

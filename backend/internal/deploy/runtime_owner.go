@@ -108,6 +108,7 @@ type RuntimeNetworkOwner interface {
 
 type dockerReleaseRuntimeMetadata struct {
 	Adopted            bool               `json:"adopted,omitempty"`
+	SharedProject      bool               `json:"sharedProject,omitempty"`
 	BaselineContainers []AdoptedContainer `json:"baselineContainers,omitempty"`
 	Version            int                `json:"version"`
 	Strategy           string             `json:"strategy"`
@@ -450,6 +451,9 @@ func (o *DockerRuntimeOwner) startCompose(
 		if err := configureComposeBaseline(&spec, request.Snapshot.ComposeBaseline); err != nil {
 			return StartedRuntime{}, err
 		}
+		if err := o.removeOwnedBaselineExtras(ctx, project, request.Release.EnvironmentID, request.Snapshot.ComposeBaseline); err != nil {
+			return StartedRuntime{}, err
+		}
 	}
 	if err := o.client.RunComposeRelease(ctx, spec, dockerx.ComposeReleaseUp, runtimeGrace(request.Snapshot.Plan), composeBuildEmitter(emit)); err != nil {
 		return StartedRuntime{}, err
@@ -492,7 +496,8 @@ func (o *DockerRuntimeOwner) startCompose(
 	}
 	sort.Strings(variableNames)
 	metadata := dockerReleaseRuntimeMetadata{
-		Version: 1, Strategy: string(request.Snapshot.Plan.Strategy), PortLeaseToken: request.PortLeaseToken,
+		SharedProject: request.Snapshot.Plan.ComposeProjectName != "",
+		Version:       1, Strategy: string(request.Snapshot.Plan.Strategy), PortLeaseToken: request.PortLeaseToken,
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		ComposeFiles: append([]string(nil), resolved.Files...), OverrideFile: override,
 		PrimaryContainerID: primaryID, ContainerIDs: containerIDs, VariableNames: variableNames,
@@ -749,6 +754,11 @@ func (o *DockerRuntimeOwner) Stop(
 			evidence.Removed = remove && err == nil
 			break
 		}
+		if metadata.SharedProject {
+			err = o.stopSharedComposeRuntime(ctx, runtime, metadata, grace, remove)
+			evidence.Removed = remove && err == nil
+			break
+		}
 		spec := composeSpecFromMetadata(metadata, variables)
 		action := dockerx.ComposeReleaseStop
 		if remove {
@@ -791,7 +801,7 @@ func composeSpecFromMetadata(metadata dockerReleaseRuntimeMetadata, variables ma
 	return dockerx.ComposeReleaseSpec{
 		ProjectName: metadata.ProjectName, ProjectDirectory: metadata.ProjectDirectory,
 		Files: append([]string(nil), metadata.ComposeFiles...), OverrideFile: metadata.OverrideFile,
-		Environment: variables,
+		Environment: variables, KeepOrphans: metadata.SharedProject,
 	}
 }
 

@@ -659,6 +659,18 @@ func (b *ArtifactBuilder) Build(
 	default:
 		return result, ErrUnsupportedBuilder
 	}
+	// Multiple services can share one immutable image. Service identities
+	// remain in the Compose snapshot; the artifact table stores that image once.
+	unique := make([]ReleaseArtifactInput, 0, len(result.Artifacts))
+	seenArtifacts := map[string]bool{}
+	for _, artifact := range result.Artifacts {
+		key := string(artifact.Kind) + "\x00" + artifact.Reference + "\x00" + artifact.Digest
+		if !seenArtifacts[key] {
+			seenArtifacts[key] = true
+			unique = append(unique, artifact)
+		}
+	}
+	result.Artifacts = unique
 	return result, nil
 }
 

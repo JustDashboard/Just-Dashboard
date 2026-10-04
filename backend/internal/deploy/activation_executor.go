@@ -1036,8 +1036,18 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
+		imageMatches := snapshot.Image.Digest == release.Release.ImageDigest
+		if snapshot.Compose != nil {
+			imageMatches = false
+			for _, service := range snapshot.Compose.Services {
+				if service.Digest == release.Release.ImageDigest {
+					imageMatches = true
+					break
+				}
+			}
+		}
 		if snapshot.Plan.Strategy != release.Release.Strategy ||
-			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
+			(release.Release.ImageDigest != "" && !imageMatches) {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
 		return snapshot, nil

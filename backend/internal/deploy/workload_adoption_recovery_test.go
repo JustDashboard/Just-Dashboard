@@ -103,6 +103,11 @@ func TestRecoverDockerContainerKeepsFullSettingsAndPrivateValues(t *testing.T) {
 	if len(recovered.Environment) < 4 {
 		t.Fatal("captured values were not staged privately")
 	}
+	for _, variable := range recovered.Configuration.Variables {
+		if recovered.Environment[variable.Name] == "" && variable.Required {
+			t.Fatal("an intentionally empty original value is incorrectly required to be nonempty")
+		}
+	}
 	if recovered.Adoption.Runtime.RuntimeID != capture.Inspection.ID || recovered.Adoption.Runtime.Kind != "container" {
 		t.Fatal("baseline does not point to the original runtime")
 	}
@@ -116,7 +121,7 @@ func TestRecoverDockerContainerKeepsFullSettingsAndPrivateValues(t *testing.T) {
 			t.Fatalf("baseline file is not private: %v", err)
 		}
 	}
-	if recovered.Adoption.BaselineDigest != RecoveredWorkloadDigest(recovered.Source, recovered.Configuration, recovered.Environment) {
+	if recovered.Adoption.BaselineDigest != recoveredDockerBaselineDigest(recovered) {
 		t.Fatal("baseline fingerprint differs from its source/settings/private values")
 	}
 }
@@ -230,7 +235,7 @@ func TestComposeAdoptedLocalImagesNeverResolveOrPull(t *testing.T) {
 		t.Fatalf("local identity normalized into a mutable registry reference: %q %v", normalized, err)
 	}
 	backend := &artifactBackendFake{inspected: map[string]ResolvedImage{id: {Reference: id, Digest: id, ConfigDigest: id, OS: "linux", Architecture: "amd64"}}}
-	analysis := &ComposeAnalysis{Digest: fakeContentDigest("compose"), Files: []string{"compose.yml"}, Services: []ComposeServicePlan{{Name: "app", Image: id}}}
+	analysis := &ComposeAnalysis{Digest: fakeContentDigest("compose"), Files: []string{"compose.yml"}, Services: []ComposeServicePlan{{Name: "app", Image: id}, {Name: "worker", Image: id}}}
 	result, err := NewArtifactBuilder(backend).Build(context.Background(), t.TempDir(), "adopted", BuildPlanConfig{Method: BuildCompose}, PreparedBuild{Method: BuildCompose}, nil, nil, "", SourceIdentity{Kind: SourceCompose, Digest: analysis.Digest}, analysis, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +243,7 @@ func TestComposeAdoptedLocalImagesNeverResolveOrPull(t *testing.T) {
 	if len(backend.pulls) > 0 || len(backend.resolves) > 0 || len(backend.builds) > 0 {
 		t.Fatal("local image adoption contacted a registry or rebuilt the source")
 	}
-	if result.Compose == nil || result.Compose.Services[0].ConfigDigest != id {
+	if result.Compose == nil || len(result.Compose.Services) != 2 || result.Compose.Services[0].ConfigDigest != id || len(result.Artifacts) != 2 {
 		t.Fatal("local image artifact did not retain its exact identity")
 	}
 	backend.inspected[id] = ResolvedImage{Reference: id, Digest: id, ConfigDigest: fakeContentDigest("different")}

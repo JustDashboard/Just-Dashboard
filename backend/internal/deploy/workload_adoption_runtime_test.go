@@ -1,6 +1,8 @@
 package deploy
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +11,25 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/docker/docker/api/types/container"
 )
+
+func TestComposeReleaseIdentityRequiresCapturedServiceDigest(t *testing.T) {
+	compose := &ResolvedComposeSnapshot{Services: []ResolvedComposeService{{Digest: fakeContentDigest("first")}, {Digest: fakeContentDigest("second")}}}
+	snapshot := runtimeReleaseSnapshot{Version: 1, Plan: RuntimePlanConfig{Strategy: StrategyStopFirst}, Compose: compose}
+	raw := mustJSON(snapshot)
+	release := &ReleaseWithArtifacts{Release: Release{Strategy: StrategyStopFirst, ConfigDigest: digestBytes(raw), ImageDigest: compose.Services[0].Digest}, Artifacts: []ReleaseArtifact{{Kind: ArtifactRuntimeConfig, State: "available", Digest: digestBytes(raw), Metadata: mustJSON(map[string]any{"snapshot": json.RawMessage(raw)})}}}
+	if _, err := decodeReleaseRuntimeSnapshot(release); err != nil {
+		t.Fatal("valid Compose release rejected", err)
+	}
+	release.Release.ImageDigest = fakeContentDigest("not-in-snapshot")
+	if _, err := decodeReleaseRuntimeSnapshot(release); !errors.Is(err, ErrInvalidPlan) {
+		t.Fatal("foreign image digest accepted", err)
+	}
+	release.Release.ImageDigest = compose.Services[0].Digest
+	release.Release.ConfigDigest = fakeContentDigest("altered-config")
+	if _, err := decodeReleaseRuntimeSnapshot(release); !errors.Is(err, ErrArtifactMissing) {
+		t.Fatal("altered configuration digest accepted", err)
+	}
+}
 
 func TestAdoptedContainerRequiresExactBaselineOrReleaseOwnership(t *testing.T) {
 	runtime := ReleaseRuntime{EnvironmentID: 12, ReleaseID: 34}
@@ -67,7 +88,7 @@ func TestAdoptionOwnershipOverrideIsPrivateImmutableAndContained(t *testing.T) {
 }
 
 func TestWritableLayerPermitsOnlyVerifiedAddedRegenerableFiles(t *testing.T) {
-	for _, name := range []string{"added-bytecode", "missing-stat", "modified-bytecode", "modified-source", "unknown-ancestor", "unrelated-data", "docker-init", "fake-docker-init"} {
+	for _, name := range []string{"added-bytecode", "missing-stat", "modified-bytecode", "modified-source", "unknown-ancestor", "unrelated-data", "docker-init", "fake-docker-init", "mount-directory", "mount-file", "mount-child"} {
 		t.Run(name, func(t *testing.T) {
 			capture := adoptionCaptureFixture(t, "web", true)
 			capture.Changes = []container.FilesystemChange{{Path: "/app", Kind: container.ChangeModify}, {Path: "/app/__pycache__", Kind: container.ChangeAdd}, {Path: "/app/__pycache__/server.cpython-311.pyc", Kind: container.ChangeAdd}}
@@ -90,6 +111,16 @@ func TestWritableLayerPermitsOnlyVerifiedAddedRegenerableFiles(t *testing.T) {
 				capture.Changes = []container.FilesystemChange{{Path: "/usr", Kind: container.ChangeModify}, {Path: "/usr/sbin", Kind: container.ChangeModify}, {Path: "/usr/sbin/docker-init", Kind: container.ChangeAdd}}
 				capture.ChangeModes = map[string]os.FileMode{"/usr": os.ModeDir, "/usr/sbin": os.ModeDir, "/usr/sbin/docker-init": 0o755}
 				want, cache = init, false
+			case "mount-directory", "mount-file", "mount-child":
+				capture.Changes = []container.FilesystemChange{{Path: "/data", Kind: container.ChangeAdd}}
+				capture.ChangeModes = map[string]os.FileMode{"/data": os.ModeDir}
+				if name == "mount-file" {
+					capture.ChangeModes["/data"] = 0o644
+				}
+				if name == "mount-child" {
+					capture.Changes = append(capture.Changes, container.FilesystemChange{Path: "/data/unowned.db", Kind: container.ChangeAdd})
+				}
+				want, cache = name == "mount-directory", false
 			}
 			if actual, regenerated := recoverableWritableLayer(capture); actual != want || regenerated != cache {
 				t.Fatalf("safe=%v cache=%v want=%v,%v", actual, regenerated, want, cache)

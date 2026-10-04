@@ -59,6 +59,9 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 			}
 		}
 		r.containers[name] = append(r.containers[name], captured)
+		if captured.Inspection.State != nil && captured.Inspection.State.Paused {
+			r.issue("paused_runtime", "Resume the paused container in its original manager before adoption. The deployment lifecycle cannot faithfully restore its suspended process state.", name, "state", true)
+		}
 		if len(captured.Inspection.Mounts) > 0 {
 			r.issue("persistent_data_reused", "Existing storage is reused. Image and configuration rollback does not undo database, schema or file changes; configure and verify a backup before Deploy changes.", name, "volumes", false)
 		}
@@ -165,7 +168,7 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 		result.Configuration.Runtime.ComposeProjectName = candidate.ResourceID
 	}
 	for _, name := range sortedStringMapKeys(result.Environment) {
-		result.Configuration.Variables = append(result.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, Required: true})
+		result.Configuration.Variables = append(result.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, Required: result.Environment[name] != ""})
 	}
 	analysis, analyzeErr := analyzeComposeDocuments(result.Source.ComposeFiles)
 	if analyzeErr != nil {
@@ -192,7 +195,7 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 	r.result.Adoption.BaselineSource = result.Source
 	r.result.Adoption.BaselineConfiguration = result.Configuration
 	r.result.Adoption.BaselineConfiguration.Build.PrimaryService = resolved.PrimaryService
-	r.result.Adoption.BaselineDigest = RecoveredWorkloadDigest(result.Source, result.Configuration, result.Environment)
+	r.result.Adoption.BaselineDigest = recoveredDockerBaselineDigest(result)
 	var baseline dockerReleaseRuntimeMetadata
 	_ = json.Unmarshal(result.Adoption.Runtime.Metadata, &baseline)
 	r.result.Adoption.Snapshot = mustJSON(runtimeReleaseSnapshot{Version: 1, Plan: result.Configuration.Runtime, Compose: resolved, ComposeBaseline: baseline.BaselineContainers, SourceIdentity: result.Detection.Source, Variables: []ReleaseVariableSnapshot{}, Dependencies: []PlannedDependency{}, Checks: []PlannedCheck{}, Domains: []PlannedDomain{}})
@@ -220,6 +223,16 @@ func RecoveredWorkloadDigest(source DraftSourceConfig, configuration PlanConfigu
 		values[name] = digestBytes([]byte(value))
 	}
 	return digestBytes(mustJSON(source), mustJSON(configuration), mustJSON(values))
+}
+
+func recoveredDockerBaselineDigest(result *RecoveredWorkload) string {
+	var metadata dockerReleaseRuntimeMetadata
+	_ = json.Unmarshal(result.Adoption.Runtime.Metadata, &metadata)
+	return digestBytes([]byte(RecoveredWorkloadDigest(result.Source, result.Configuration, result.Environment)), mustJSON(struct {
+		Kind       string             `json:"kind"`
+		RuntimeID  string             `json:"runtimeId"`
+		Containers []AdoptedContainer `json:"containers"`
+	}{result.Adoption.Runtime.Kind, result.Adoption.Runtime.RuntimeID, metadata.BaselineContainers}))
 }
 
 func (r *dockerRecovery) issue(code, message, service, field string, blocking bool) {
@@ -284,7 +297,7 @@ func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *
 			baseline = append(baseline, AdoptedContainer{ID: capture.Inspection.ID, Service: name, Number: number, Running: running, StopTimeout: capture.Inspection.Config.StopTimeout})
 			score := 0
 			if running {
-				score += 2
+				score += 8
 			}
 			if name == resolved.PrimaryService {
 				score++
@@ -300,8 +313,14 @@ func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *
 	// A declared service may not have a container yet. The immutable live
 	// baseline needs a real primary for restoration, logs and checks.
 	resolved.PrimaryService = primaryService
+	sort.Slice(baseline, func(i, j int) bool {
+		if baseline[i].Service != baseline[j].Service {
+			return baseline[i].Service < baseline[j].Service
+		}
+		return baseline[i].Number < baseline[j].Number
+	})
 	sort.Strings(ids)
-	metadata := dockerReleaseRuntimeMetadata{Version: 1, Adopted: true, BaselineContainers: baseline, Strategy: string(StrategyStopFirst), ContainerIDs: ids, PrimaryContainerID: primary, VariableNames: sortedStringMapKeys(r.result.Environment)}
+	metadata := dockerReleaseRuntimeMetadata{Version: 1, Adopted: true, SharedProject: candidate.Kind == "stack", BaselineContainers: baseline, Strategy: string(StrategyStopFirst), ContainerIDs: ids, PrimaryContainerID: primary, VariableNames: sortedStringMapKeys(r.result.Environment)}
 	kind, id, name := "compose", candidate.ResourceID, candidate.Name
 	if candidate.Kind == "container" {
 		kind, id = "container", primary
@@ -317,7 +336,7 @@ func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *
 			continue
 		}
 		for _, port := range service.Ports {
-			if port.Protocol == "tcp" || port.Protocol == "" {
+			if port.HostPort > 0 && port.ContainerPort > 0 && (port.Protocol == "tcp" || port.Protocol == "") {
 				r.result.Adoption.Runtime.Host, r.result.Adoption.Runtime.Port = port.HostIP, port.HostPort
 				r.result.Configuration.Runtime.InternalPort = port.ContainerPort
 				return
