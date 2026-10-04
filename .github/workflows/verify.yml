@@ -117,6 +117,10 @@ jobs:
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
 
+  # GitHub runs twenty jobs of a public repository's at once and queues the
+  # rest, so the shard counts below are what fits beside the other jobs rather
+  # than as many as will go: each race shard already runs its tests in four
+  # processes (scripts/go-test-shard.sh).
   race:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
@@ -126,14 +130,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: api-1, shard: 1, of: 5, packages: ./internal/api }
-          - { name: api-2, shard: 2, of: 5, packages: ./internal/api }
-          - { name: api-3, shard: 3, of: 5, packages: ./internal/api }
-          - { name: api-4, shard: 4, of: 5, packages: ./internal/api }
-          - { name: api-5, shard: 5, of: 5, packages: ./internal/api }
-          - { name: deploy-1, shard: 1, of: 3, packages: ./internal/deploy }
-          - { name: deploy-2, shard: 2, of: 3, packages: ./internal/deploy }
-          - { name: deploy-3, shard: 3, of: 3, packages: ./internal/deploy }
+          - { name: api-1, shard: 1, of: 4, packages: ./internal/api }
+          - { name: api-2, shard: 2, of: 4, packages: ./internal/api }
+          - { name: api-3, shard: 3, of: 4, packages: ./internal/api }
+          - { name: api-4, shard: 4, of: 4, packages: ./internal/api }
+          - { name: deploy-1, shard: 1, of: 2, packages: ./internal/deploy }
+          - { name: deploy-2, shard: 2, of: 2, packages: ./internal/deploy }
           - name: rest
             shard: 1
             of: 1

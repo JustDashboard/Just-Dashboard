@@ -99,8 +99,9 @@ to the contribution terms above, including the additional licence grant to the p
   the workflow or its scripts starts everything, as does a new branch or a manual run, and a
   documentation-only push runs nothing past that first job. The backend, race, frontend and browser
   jobs run on GitHub's hosted runners, in parallel — the repository is public, so they cost nothing —
-  and the two long suites are sharded: the race gate is nine jobs (`./internal/api` in five,
-  `./internal/deploy` in three, the rest in one, split by `scripts/go-test-shard.sh`) and the browser
+  and the two long suites are sharded: the race gate is seven jobs (`./internal/api` in four,
+  `./internal/deploy` in two, the rest in one, split by `scripts/go-test-shard.sh`, which runs each
+  shard's tests as four processes on the runner's four cores) and the browser
   suite ten (`playwright test --shard`). The plain backend run leaves `./internal/api` to the race jobs,
   which run all of its tests. The latency budgets are asserted in the plain test run and
   skipped under the race detector, which multiplies a SQLite read ten- to twenty-five-fold and so
