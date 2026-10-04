@@ -28,7 +28,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ptyhold"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -54,7 +54,7 @@ func terminalServerWithShell(t *testing.T, tlsMode, shell string) (*Server, http
 			t.Fatal(err)
 		}
 	}
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

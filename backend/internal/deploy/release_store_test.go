@@ -11,6 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 type releaseStoreFixture struct {
@@ -24,7 +25,7 @@ type releaseStoreFixture struct {
 
 func newReleaseStoreFixture(t *testing.T) *releaseStoreFixture {
 	t.Helper()
-	base, err := basestore.Open(t.TempDir())
+	base, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 type orchestrationFixture struct {
@@ -24,7 +25,7 @@ type orchestrationFixture struct {
 
 func newOrchestrationFixture(t *testing.T) *orchestrationFixture {
 	t.Helper()
-	st, err := basestore.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

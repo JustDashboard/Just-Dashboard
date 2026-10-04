@@ -25,7 +25,15 @@ import (
 func MongoClient(ctx context.Context, uri string) (*mongo.Client, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri).SetServerSelectionTimeout(8*time.Second))
+	// Eight seconds is the longest a request waits for a server to turn up. A
+	// connection string that asks for less is given it: this used to replace
+	// whatever it said, so a test naming an address nothing listens on waited
+	// the whole eight seconds however short a timeout it wrote.
+	opts := options.Client().ApplyURI(uri)
+	if opts.ServerSelectionTimeout == nil || *opts.ServerSelectionTimeout > 8*time.Second {
+		opts.SetServerSelectionTimeout(8 * time.Second)
+	}
+	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
 		return nil, err
 	}

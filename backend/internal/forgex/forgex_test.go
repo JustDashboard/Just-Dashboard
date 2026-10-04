@@ -10,14 +10,14 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 const testSHA = "0123456789012345678901234567890123456789"
 
 func fixture(t *testing.T, kind string, handler http.HandlerFunc) (*Service, string) {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

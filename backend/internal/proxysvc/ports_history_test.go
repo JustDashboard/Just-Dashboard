@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func observed(id int64, protocol, family, address string, port uint32, process, user string, pid int32) ListenerObservation {
@@ -193,7 +193,7 @@ func (h *fakeHost) now() time.Time                           { return h.at }
 
 func testRecorder(t *testing.T) (*PortRecorder, *fakeHost) {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

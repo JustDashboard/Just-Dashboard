@@ -1877,7 +1877,7 @@ func stoppedServers(h *connHarness) map[dbx.Driver]int64 {
 		dbx.DriverMSSQL:      h.add("ms", dbx.DriverMSSQL, "sqlserver://sa:pw@127.0.0.1:1?database=shop&encrypt=disable"),
 		dbx.DriverClickHouse: h.add("ch", dbx.DriverClickHouse, "clickhouse://app:pw@127.0.0.1:1/shop"),
 		dbx.DriverOracle:     h.add("ora", dbx.DriverOracle, "oracle://app:pw@127.0.0.1:1/FREEPDB1"),
-		dbx.DriverMongo:      h.add("doc", dbx.DriverMongo, "mongodb://127.0.0.1:1/shop"),
+		dbx.DriverMongo:      h.add("doc", dbx.DriverMongo, "mongodb://127.0.0.1:1/shop?serverSelectionTimeoutMS=200"),
 		dbx.DriverRedis:      h.add("kv", dbx.DriverRedis, "redis://127.0.0.1:1/0"),
 	}
 }

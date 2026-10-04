@@ -420,7 +420,7 @@ func TestBlockingMaintenanceIsCheckedByContent(t *testing.T) {
 func TestRoleRequestsTheEngineCannotHonourAreRefused(t *testing.T) {
 	h := newOpsHarness(t)
 	redis := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "kv", dbx.DriverRedis, "redis://127.0.0.1:1/0"))
-	mongo := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "doc", dbx.DriverMongo, "mongodb://127.0.0.1:1/x"))
+	mongo := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "doc", dbx.DriverMongo, "mongodb://127.0.0.1:1/x?serverSelectionTimeoutMS=200"))
 	clickhouse := fmt.Sprintf("/api/v1/databases/%d", saveOpsConnection(t, h.s, "ch", dbx.DriverClickHouse, "clickhouse://u:p@127.0.0.1:1/x"))
 	for _, c := range []struct {
 		method, path, body, want string

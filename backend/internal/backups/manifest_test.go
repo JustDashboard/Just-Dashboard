@@ -8,12 +8,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func manifestFixture(t *testing.T, sources []string, excludes []string) (*Store, *Runner, *Job, *Run) {
 	t.Helper()
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
