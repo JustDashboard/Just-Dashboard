@@ -145,6 +145,9 @@ The opt-in native browser server uses a temporary authenticated database and the
 it never starts the deployment engine or background reconciler. Its default target is the existing
 `bet-bot` stack. `ready.json` contains a temporary session and must remain private. The server stops
 on its stop file or after fifteen minutes.
+The browser proof compares full container IDs, PIDs, running state, status, start times, restart
+counts and configuration digests before and after adoption. It checks the normal runtime/settings
+links and deployment controls without invoking any runtime action.
 
 ```bash
 cd backend

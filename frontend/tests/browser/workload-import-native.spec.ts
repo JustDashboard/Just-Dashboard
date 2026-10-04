@@ -10,7 +10,7 @@ test.use({ video: { mode: "on", size: { width: 1280, height: 900 } } })
 
 type InspectedContainer = {
   Id: string
-  State: { StartedAt: string }
+  State: { StartedAt: string; Pid: number; Running: boolean; Status: string }
   RestartCount: number
   Config: unknown
   HostConfig: unknown
@@ -32,6 +32,9 @@ function existingStackEvidence() {
   const inspected = JSON.parse(execFileSync("docker", ["inspect", ...ids], { encoding: "utf8" }))
   return inspected.map((container: InspectedContainer) => ({
     id: container.Id,
+    pid: container.State.Pid,
+    running: container.State.Running,
+    status: container.State.Status,
     startedAt: container.State.StartedAt,
     restartCount: container.RestartCount,
     configurationDigest: createHash("sha256")
@@ -127,9 +130,14 @@ test("imports the real existing bet-bot stack without changing its containers", 
   await page.screenshot({ path: join(output, "native-adoption-review-1280.png"), fullPage: true })
   await page.getByRole("button", { name: "Adopt deployment", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/\d+$/, { timeout: 30000 })
-  await expect(page.getByRole("link", { name: "Runtime", exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Deploy", exact: true })).toBeVisible()
+  const projectUrl = page.url()
+  const projectPath = new URL(projectUrl).pathname
+  const runtimeLink = page.locator(`a[href="${projectPath}/runtime"]`)
+  const settingsLink = page.locator(`a[href="${projectPath}/settings/general"]`)
+  await expect(runtimeLink).toBeVisible()
+  await expect(settingsLink).toBeVisible()
+  await expect(page.getByRole("button", { name: "Redeploy", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Deployment actions", exact: true })).toBeVisible()
   await page.screenshot({ path: join(output, "native-project-1280.png"), fullPage: true })
   const detail = await page.request.get(
     new URL(`/api/v1${new URL(page.url()).pathname}`, page.url()).toString(),
@@ -149,14 +157,15 @@ test("imports the real existing bet-bot stack without changing its containers", 
   expect(managedContainerIds).toEqual(
     before.map((container: { id: string }) => container.id).sort(),
   )
-  await page.getByRole("link", { name: "Runtime", exact: true }).click()
-  await expect(page.getByText("high-market-tracker", { exact: true }).first()).toBeVisible({
-    timeout: 30000,
-  })
+  await runtimeLink.click()
+  for (const service of runtime.services as { name: string }[]) {
+    await expect(page.getByText(service.name, { exact: true }).first()).toBeVisible({
+      timeout: 30000,
+    })
+  }
   await page.screenshot({ path: join(output, "native-runtime-1280.png"), fullPage: true })
-  await page.getByRole("link", { name: "Settings", exact: true }).click()
+  await settingsLink.click()
   await page.screenshot({ path: join(output, "native-settings-1280.png"), fullPage: true })
-  const projectUrl = page.url()
   await page.goto("/deploy")
   await expect(page.getByRole("link", { name: /bet-bot/ }).first()).toBeVisible()
   await page.screenshot({ path: join(output, "native-after-deployments.png"), fullPage: true })
@@ -178,6 +187,8 @@ test("imports the real existing bet-bot stack without changing its containers", 
         isolatedProjectUrl: projectUrl,
         existingContainerCount: before.length,
         configurationsAndStartTimesUnchanged: true,
+        processIdentityAndStateUnchanged: true,
+        noRuntimeActionsInvoked: true,
         before,
         after,
       },
