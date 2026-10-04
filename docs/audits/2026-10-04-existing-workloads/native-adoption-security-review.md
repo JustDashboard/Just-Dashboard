@@ -61,6 +61,21 @@ applications can be migrated without operator compatibility checks.
    analyzing or committing a baseline. A regression rejects another directory with matching source
    content and an unavailable host path. Location: `workload_adoption_host.go` (`hostSourceDirectoryMatches`).
 
+5. **High, original startup resurrection:** a stopped enabled systemd unit or saved PM2 process can
+   return after reboot alongside its Docker replacement. Matching entries in either saved PM2 list
+   block; malformed/unreadable lists fail closed. Systemd requires a disabled original unit, rejects
+   known loaded activation/control relationships, and inspects a bounded installed service/timer/path/socket/
+   target and alias inventory for unloaded activation references. Matching private evidence is fenced
+   into configuration identity and rechecked before lifecycle control. No enablement or shared saved
+   list is rewritten. Regression tests cover unloaded installed timers, alias/default triggers,
+   ordinary service dependencies, explicit template references, ambiguous enabled templates,
+   unreadable private startup data and both PM2 dumps. The real PM2 adapter also proves a newly added
+   saved entry prevents stop while its original HTTP server and PID remain unchanged.
+6. **High, discarded native unit policy:** explicit unsupported unit directives, including resource
+   limits, rlimits, scheduling and additional execution/security/dependency behavior, block recovery.
+   Inherited host/kernel/manager policies cannot be universally reconstructed; every native review
+   carries an actionable compatibility warning requiring application-relevant Docker/runtime policy.
+
 ## Real adapter validation
 
 Separate owned PM2 daemons and uniquely named owned persistent systemd units were exercised through
@@ -87,6 +102,11 @@ the implementation; the root task records the complete integrated verification.
 - Automatic Node builds install from manifests/locks rather than copying the host `node_modules`.
   Patched dependencies or undeclared global modules need a reviewed Dockerfile/source plan; recovery
   includes an explicit dependency-tree warning before cutover.
+- Startup inventory cannot prove absence of cron, arbitrary scripts, future administrator commands
+  or every external launcher. Review the reversible startup handoff before cutover; importing never
+  disables shared startup authority. Unresolved enabled template service/target references block recovery.
+- Explicit unit directive checks do not clone every inherited process limit, umask, scheduling,
+  capability or security default. These application-relevant policies require compatibility review.
 - Automatic migration fails closed for unknown build/command layouts, unsupported interpreter or
   manager semantics, missing restart authority, special files or unsafe symlinks, and source limits.
   A listening process alone does not prove sufficient configuration to restart it safely.

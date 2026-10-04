@@ -39,6 +39,7 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 	if err != nil {
 		return nil, err
 	}
+	startup, startupBlockers := capturePM2Startup(home, namespace, name)
 	var runtimeEnvironment map[string]string
 	sourceFiles := []string{capture.SourcePath}
 	for index := range capture.Processes {
@@ -107,6 +108,13 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 			return nil, ErrHostWorkloadChanged
 		}
 	}
+	latestStartup, latestBlockers := capturePM2Startup(home, namespace, name)
+	if string(startup) != string(latestStartup) {
+		return nil, ErrHostWorkloadChanged
+	}
+	capture.StartupEvidence = startup
+	capture.Blockers = uniqueCaptureStrings(append(capture.Blockers, append(startupBlockers, latestBlockers...)...))
+	capture.ConfigurationDigest = captureDigest(append(append([]byte(capture.ConfigurationDigest), 0), startup...))
 	return capture, nil
 }
 

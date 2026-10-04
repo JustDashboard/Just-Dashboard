@@ -44,8 +44,53 @@ const canonical = value => {
   if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map(key => [key,canonical(value[key])]))
   return value
 }
+const startup = () => {
+  const result = {}
+  for (const filename of ["dump.pm2","dump.pm2.bak"]) {
+    const file = path.join(process.env.PM2_HOME, filename)
+    let before
+    try { before = fs.lstatSync(file) } catch (error) {
+      if (error.code === "ENOENT") { result[filename] = []; continue }
+      throw error
+    }
+    if (!before.isFile() || !(before.mode & 0o444) || before.size > 4*1024*1024) throw new Error("unverified startup authority")
+    const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK)
+    let data
+    try {
+      const opened = fs.fstatSync(fd)
+      if (!opened.isFile() || !(opened.mode & 0o444) || opened.dev !== before.dev || opened.ino !== before.ino || opened.size > 4*1024*1024) throw new Error("changed startup authority")
+      const chunks = []
+      let total = 0
+      while (true) {
+        const chunk = Buffer.alloc(Math.min(65536, 4*1024*1024 + 1 - total))
+        const length = fs.readSync(fd, chunk, 0, chunk.length, null)
+        if (!length) break
+        total += length
+        if (total > 4*1024*1024) throw new Error("unverified startup authority")
+        chunks.push(chunk.subarray(0,length))
+      }
+      data = Buffer.concat(chunks,total)
+    } finally { fs.closeSync(fd) }
+    const after = fs.lstatSync(file)
+    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) throw new Error("changed startup authority")
+    const rows = JSON.parse(data)
+    if (!Array.isArray(rows) || rows.length > 100000) throw new Error("unverified startup authority")
+    const selected = []
+    for (const row of rows) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) throw new Error("unverified startup authority")
+      const values = Object.hasOwn(row,"name") ? row : row.pm2_env
+      if (!values || typeof values.name !== "string" || !values.name || (values.namespace != null && typeof values.namespace !== "string")) throw new Error("unverified startup authority")
+      if (values.name === request.name && (values.namespace || "default") === (request.namespace || "default")) selected.push(row)
+    }
+    result[filename] = selected.sort((a,b) => JSON.stringify(canonical(a)).localeCompare(JSON.stringify(canonical(b))))
+  }
+  return result
+}
 client.call("getMonitorData", {}, (error, rows) => {
   if (error || !Array.isArray(rows)) return close(2)
+  try {
+    if (!request.startupEvidence || JSON.stringify(canonical(startup())) !== JSON.stringify(canonical(request.startupEvidence))) return close(3)
+  } catch { return close(3) }
   const selected = rows.filter(row => row.name === request.name && (row.namespace || row.pm2_env.namespace || "") === request.namespace)
   if (selected.length !== request.configuration.length) return close(3)
   for (const expected of request.configuration) {
@@ -104,12 +149,13 @@ func controlExistingPM2Capture(ctx context.Context, home pm2Home, account *user.
 		return fmt.Errorf("the original PM2 configuration is unavailable")
 	}
 	request, _ := json.Marshal(struct {
-		Action        string                       `json:"action"`
-		Name          string                       `json:"name"`
-		Namespace     string                       `json:"namespace"`
-		Configuration []map[string]json.RawMessage `json:"configuration"`
-		TargetIDs     []int                        `json:"targetIds"`
-	}{action, capture.Name, namespace, configuration, ids})
+		Action          string                       `json:"action"`
+		Name            string                       `json:"name"`
+		Namespace       string                       `json:"namespace"`
+		Configuration   []map[string]json.RawMessage `json:"configuration"`
+		TargetIDs       []int                        `json:"targetIds"`
+		StartupEvidence json.RawMessage              `json:"startupEvidence"`
+	}{action, capture.Name, namespace, configuration, ids, capture.StartupEvidence})
 	commandCtx, cancel := context.WithTimeout(ctx, 70*time.Second)
 	defer cancel()
 	command, err := hostexec.CommandOnHostAsUser(commandCtx, account, pm2Env(home), "node", "-e", existingPM2ControlClient, home.bin)

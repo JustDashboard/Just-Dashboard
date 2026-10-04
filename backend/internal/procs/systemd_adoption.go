@@ -22,7 +22,19 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 	if err != nil || unit.LoadState != "loaded" || !strings.HasSuffix(unit.Name, ".service") {
 		return nil, fmt.Errorf("the original systemd service is unavailable")
 	}
+	startup, startupBlockers, err := captureInstalledSystemdStartup(ctx, run, unit.Name, strings.Fields(props["Names"]))
+	if err != nil {
+		return nil, err
+	}
+	// Reading installed activation metadata may load its reverse relationships.
+	// Capture the original unit after that read, never reload or start a unit.
+	unit, props, err = s.Show(ctx, name)
+	if err != nil || unit.LoadState != "loaded" {
+		return nil, ErrHostWorkloadChanged
+	}
 	out := systemdCaptureProperties(unit, props)
+	out.StartupEvidence = startup
+	out.Blockers = append(out.Blockers, startupBlockers...)
 	out.UID, out.GID, err = ResolveHostAccount(out.Account)
 	if err != nil {
 		out.Blockers = append(out.Blockers, "The original systemd account cannot be verified.")
@@ -44,10 +56,12 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		}
 		files[path] = string(content)
 	}
+	out.Blockers = append(out.Blockers, systemdMigrationDirectiveBlockers(files)...)
 	private, _ := json.Marshal(struct {
 		Properties map[string]string
 		Files      map[string]string
-	}{stableSystemdProperties(props), files})
+		Startup    json.RawMessage
+	}{stableSystemdProperties(props), files, startup})
 	out.OriginalConfig = private
 	out.ConfigurationDigest = captureDigest(private)
 	if unit.MainPID > 1 {
@@ -131,6 +145,18 @@ func systemdCaptureProperties(unit *Unit, props map[string]string) *HostWorkload
 	out := &HostWorkloadCapture{Manager: "systemd", ResourceID: unit.Name, Name: unit.Name, Account: account,
 		SourceDirectory: props["WorkingDirectory"], SourcePath: unit.Fragment, Processes: []HostProcessCapture{},
 		Environment: map[string]string{}, EnvironmentNames: []string{}, Blockers: []string{}, Warnings: []string{}}
+	state := props["UnitFileState"]
+	if state == "" {
+		state = unit.UnitFile
+	}
+	if state != "disabled" {
+		out.Blockers = append(out.Blockers, "The original systemd startup authority is not verifiably disabled. Enabled, static, alias, indirect, generated or unknown units can restart beside the Docker deployment after reboot; review a reversible startup handoff before migration.")
+	}
+	for _, field := range []string{"WantedBy", "RequiredBy", "TriggeredBy", "BoundBy", "UpheldBy", "ConsistsOf", "OnFailureOf", "OnSuccessOf"} {
+		if value := strings.TrimSpace(props[field]); value != "" && value != "[]" {
+			out.Blockers = append(out.Blockers, "Other systemd units can activate or control this application. Review its external startup authority and a reversible handoff before container migration.")
+		}
+	}
 	switch props["Restart"] {
 	case "no", "always", "on-failure":
 		out.RestartPolicy = props["Restart"]
@@ -181,6 +207,7 @@ func systemdCaptureProperties(unit *Unit, props map[string]string) *HostWorkload
 	}
 	out.Warnings = append(out.Warnings, "The original unit, drop-ins, account and journal are retained as the baseline. Migration requires reviewing source, operating-system dependencies, persistence and external unit dependencies.")
 	out.Warnings = append(out.Warnings, "Container restart backoff and child-process signal delivery can differ from systemd. Review application shutdown and restart behavior before deploying changes.")
+	out.Warnings = append(out.Warnings, "Container process defaults and inherited resource or file-descriptor limits can differ from the host manager. Verify the reviewed runtime limits; explicit untranslatable unit settings block migration.")
 	return out
 }
 
@@ -203,7 +230,7 @@ const systemdAllCapabilities = "cap_chown cap_dac_override cap_dac_read_search c
 
 func stableSystemdProperties(props map[string]string) map[string]string {
 	out := map[string]string{}
-	for _, field := range []string{"Id", "FragmentPath", "DropInPaths", "Type", "User", "Group", "WorkingDirectory", "ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost", "Environment", "EnvironmentFiles", "PassEnvironment", "UnsetEnvironment", "Restart", "RestartUSec", "KillMode", "KillSignal", "TimeoutStopUSec", "RootDirectory", "RootImage", "DynamicUser", "PrivateNetwork", "PrivateUsers", "PrivateTmp", "PrivateDevices", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "LoadCredential", "LoadCredentialEncrypted", "SetCredential", "SetCredentialEncrypted", "RuntimeDirectory", "StateDirectory", "CacheDirectory", "LogsDirectory", "ConfigurationDirectory", "BindPaths", "BindReadOnlyPaths", "ReadWritePaths", "ReadOnlyPaths", "InaccessiblePaths", "DeviceAllow", "SupplementaryGroups", "Sockets", "TriggeredBy", "NeedDaemonReload", "Transient", "RemainAfterExit", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictRealtime", "RestrictSUIDSGID", "MemoryDenyWriteExecute", "RestrictAddressFamilies", "SystemCallFilter", "IPAddressAllow", "IPAddressDeny", "AmbientCapabilities", "CapabilityBoundingSet"} {
+	for _, field := range []string{"Id", "FragmentPath", "DropInPaths", "Type", "User", "Group", "WorkingDirectory", "ExecStart", "ExecStartPre", "ExecStartPost", "ExecReload", "ExecStop", "ExecStopPost", "Environment", "EnvironmentFiles", "PassEnvironment", "UnsetEnvironment", "Restart", "RestartUSec", "KillMode", "KillSignal", "TimeoutStopUSec", "RootDirectory", "RootImage", "DynamicUser", "PrivateNetwork", "PrivateUsers", "PrivateTmp", "PrivateDevices", "NoNewPrivileges", "ProtectSystem", "ProtectHome", "LoadCredential", "LoadCredentialEncrypted", "SetCredential", "SetCredentialEncrypted", "RuntimeDirectory", "StateDirectory", "CacheDirectory", "LogsDirectory", "ConfigurationDirectory", "BindPaths", "BindReadOnlyPaths", "ReadWritePaths", "ReadOnlyPaths", "InaccessiblePaths", "DeviceAllow", "SupplementaryGroups", "Sockets", "TriggeredBy", "NeedDaemonReload", "Transient", "RemainAfterExit", "ProtectKernelTunables", "ProtectKernelModules", "ProtectControlGroups", "RestrictRealtime", "RestrictSUIDSGID", "MemoryDenyWriteExecute", "RestrictAddressFamilies", "SystemCallFilter", "IPAddressAllow", "IPAddressDeny", "AmbientCapabilities", "CapabilityBoundingSet", "UnitFileState", "WantedBy", "RequiredBy", "BoundBy", "UpheldBy", "ConsistsOf", "OnFailureOf", "OnSuccessOf", "MemoryMax", "MemoryHigh", "MemorySwapMax", "CPUQuotaPerSecUSec", "CPUQuotaPeriodUSec", "CPUWeight", "TasksMax", "LimitNOFILE", "LimitNOFILESoft", "LimitNPROC", "LimitNPROCSoft", "LimitAS", "LimitASSoft", "LimitMEMLOCK", "LimitMEMLOCKSoft", "Nice", "OOMScoreAdjust", "UMask", "CPUSchedulingPolicy", "CPUSchedulingPriority", "CPUAffinity", "IOSchedulingClass", "IOSchedulingPriority"} {
 		value := props[field]
 		if strings.HasPrefix(field, "Exec") {
 			value = stableSystemdExec(value)

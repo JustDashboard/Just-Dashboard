@@ -3,6 +3,7 @@ package procs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -96,6 +97,13 @@ func TestLiveExistingPM2CaptureAndManagerControls(t *testing.T) {
 		t.Fatal("the owned fixture did not serve its expected environment and account")
 	}
 	assertServing()
+	// Valid saved entries for another application must remain untouched and
+	// must not prevent the exact owned application's lifecycle operations.
+	for _, filename := range []string{"dump.pm2", "dump.pm2.bak"} {
+		if err := os.WriteFile(filepath.Join(home.daemonDir, filename), []byte(`[{"name":"another-owned-app","namespace":"default"}]`), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
 	capture, err := manager.CaptureExisting(ctx, account.Username, "default", name)
 	if err != nil {
 		t.Fatal(err)
@@ -160,5 +168,26 @@ func TestLiveExistingPM2CaptureAndManagerControls(t *testing.T) {
 	if err != nil || restarted.ConfigurationDigest != capture.ConfigurationDigest {
 		t.Fatal("the original manager configuration was not retained across restoration")
 	}
-	t.Log("real PM2 capture preserved HTTP response, secret/empty environment, UID, exact PID identity, logs, and original manager restart configuration")
+	for _, filename := range []string{"dump.pm2", "dump.pm2.bak"} {
+		path := filepath.Join(home.daemonDir, filename)
+		if err := os.WriteFile(path, []byte(`[{"name":"`+name+`","namespace":"default","pm_id":987,"TOKEN":"owned-saved-private-value"}]`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		saved, err := manager.CaptureExisting(ctx, account.Username, "default", name)
+		if err != nil || len(saved.Blockers) == 0 || saved.ConfigurationDigest == restarted.ConfigurationDigest {
+			t.Fatal("real saved startup authority was not blocked and fenced")
+		}
+		if err := manager.ControlCaptured(ctx, restarted, "default", "stop"); !errors.Is(err, ErrHostWorkloadChanged) {
+			t.Fatal("saved startup authority added after capture did not prevent lifecycle control")
+		}
+		current, err := manager.ListExisting(ctx)
+		if err != nil || len(current) != 1 || current[0].PID != int(restarted.Processes[0].PID) {
+			t.Fatal("startup authority guard mutated the original process")
+		}
+		assertServing()
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Log("real PM2 capture preserved HTTP response, secret/empty environment, UID, exact PID identity, logs, original manager restart configuration, and no-mutation guards for both saved startup lists")
 }

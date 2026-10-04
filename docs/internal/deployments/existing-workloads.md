@@ -87,8 +87,8 @@ This prevents a newer Engine option from silently disappearing through typed JSO
 | --- | --- | --- |
 | Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
 | Standalone Docker | A Compose recipe capturing environment, command/entrypoint, user/cwd, ports, mounts, networks/aliases, restart policy, health check, logging, resource limits and supported security/host options. Live baseline initially points to the unchanged original container. | Unmapped Engine options, unsupported namespace/resource relationships, Swarm tasks, missing image identity, or meaningful writable-layer data. The first Deploy changes preserves the original container name, aliases and reviewed resources. |
-| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. |
-| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. |
+| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Matching entries in `dump.pm2` or `dump.pm2.bak`, or an unverifiable saved list, require a reviewed startup handoff before migration. |
+| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. Original startup authority must be verifiably disabled; known loaded or installed activation relationships and unsupported resource/scheduling directives block migration. |
 | Bare listening process | PID plus creation time and safe inventory; capture can explain the source and missing requirements. | No verified manager can restart the original process for compensation. Automatic managed adoption is refused until a reproducible source and restart authority exist. A port or framework name alone cannot supply these. |
 
 The source of an image-only workload is its immutable local image. Recovery cannot manufacture the
@@ -112,6 +112,16 @@ Automatic Node recipes install dependencies from reviewed manifests and lockfile
 host's `node_modules` from the build context. They do not reproduce patched dependency files or
 undeclared global modules. Verify the manifests/locks represent the running dependency tree, or use
 a reviewed Dockerfile and source plan which preserves those dependencies before cutover.
+Native recovery does not universally reconstruct inherited host process/file-descriptor limits,
+umask, scheduling, capabilities or security defaults. The review includes a mandatory compatibility
+warning: preserve application-relevant policies in a reviewed Dockerfile/runtime plan before cutover.
+Explicit systemd directives outside the supported unit subset fail closed, including resource limits,
+rlimits, scheduling, watchdog/backoff, additional lifecycle commands, dependencies and sandbox policy.
+The supported file directives are `Description`/`Documentation`, `Type`, `User`/`Group`,
+`WorkingDirectory`, `ExecStart`, `Environment`, `Restart`, `KillMode`/`KillSignal` and `TimeoutStopSec`;
+install metadata is retained only alongside verifiably disabled startup authority. Unknown directives
+or sections require explicit review instead of silently losing their behavior.
+
 Whole filesystem environment values within the captured source and local `file`/`sqlite` URIs map
 to the same `/app` layout, while the original values remain privately sealed for the native baseline.
 Unknown application filesystem values and interpreter path variables (including `NODE_PATH`, CA
@@ -197,6 +207,34 @@ input. Captured data exclusions are shown read-only and retained on save along w
 other metadata. Rejected paths or revision conflicts keep the unsaved fields visible; readers can
 inspect them without editing, and source paths are not remembered in browser storage.
 
+Original startup authority also needs a reversible handoff before container migration. PM2 capture
+checks both `dump.pm2` and `dump.pm2.bak` by application namespace/name, independent of numeric IDs.
+Matching saved entries block; malformed, unreadable, nonregular or oversized lists cannot prove absence
+and block too. Other applications' valid saved entries remain untouched. The controller rechecks this
+private evidence using bounded no-follow descriptor reads immediately before its exact lifecycle RPC.
+The importer never runs `pm2 save` or rewrites a shared startup list.
+
+Systemd recovery permits only verifiably disabled original units and rejects current reverse activation
+or control relationships (`WantedBy`, `RequiredBy`, `TriggeredBy`, `BoundBy`, `UpheldBy`, `ConsistsOf`,
+`OnFailureOf`, `OnSuccessOf`). A bounded installed inventory reads service/timer/path/socket/target metadata,
+service aliases and their authoritative files using read-only `systemctl` arguments; this can load
+metadata but never starts, enables or reloads a unit. Explicit activation/dependency references and
+same-basename default triggers are checked against canonical and alias service names even when those
+startup units were previously unloaded. Matching references block, and their private evidence joins
+the baseline configuration digest. Unreadable or ambiguous inventory also blocks. The limits are
+10,000 listed entries, 512 inspected units, 4 MiB per command/file and 8 MiB of inspected file contents.
+Concrete template instances are included, and uninstantiated templates are inspected through bounded
+`systemctl cat` and authoritative-file reads. Explicit template activation references block; enabled
+templates with ambiguous service/target specifiers fail closed. Unrelated templates such as getty do
+not substitute for the application's startup authority. The real adapter recaptures startup/configuration and PID identity before manager
+control. No global enablement or startup settings are changed by import or cutover.
+
+These checks cannot prove absence of cron, custom scripts, future administrator actions or every
+external launcher. The mandatory review warning requires checking all external startup authority,
+including additional targets and template launchers, so the original app cannot restart beside Docker
+after reboot. Clearing a startup blocker requires an operator-reviewed reversible handoff, followed
+by fresh recovery; it is not permission to disable shared production startup services globally.
+
 Native lifecycle operations recheck manager configuration and captured source evidence before
 controlling the original app. The reviewed original source directory remains frozen while its native
 baseline is retained: a full bounded original-tree digest covers modules, private files and directory
@@ -239,7 +277,11 @@ alone is insufficient. The capture uses the existing daemon's
 Node's [CLI and environment contract](https://nodejs.org/docs/latest-v24.x/api/cli.html) defines
 `NODE_OPTIONS`, module and CA-file inputs; systemd's
 [resource pressure protocol](https://systemd.io/PRESSURE/) identifies the manager's pressure-watch
-paths which require explicit review when moving an application into a container.
+paths which require explicit review when moving an application into a container. The upstream
+[systemctl contract](https://github.com/systemd/systemd/blob/main/man/systemctl.xml) explains why
+loaded reverse dependencies alone cannot inventory every installed launcher, while
+[resource control](https://github.com/systemd/systemd/blob/main/man/systemd.resource-control.xml)
+describes inherited cgroup policy beyond a service's explicit directives.
 
 Acceptance uses temporary databases and uniquely named fixture resources. Live proof and its exact
 limits are recorded in [`2026-10-04-existing-workloads`](../../audits/2026-10-04-existing-workloads/README.md).

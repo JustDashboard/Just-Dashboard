@@ -73,6 +73,8 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		block("host_running_source_changed", "Runtime source files changed after this application started. Its loaded code can differ from the captured files. Restore and review the actual running source, or verify the reviewed source by restarting under its original manager before recovery.", "source.localPath")
 	}
 	origin.Warnings = append(origin.Warnings, "A filesystem snapshot cannot prove every module loaded in memory matches the current files, or recover dynamic in-memory settings. Confirm this is the source and startup configuration the original manager should restore; preserved/backdated timestamps require that same review.")
+	origin.Warnings = append(origin.Warnings, "Review inherited host process and file-descriptor limits, umask, scheduling, capabilities and security defaults. Capture does not universally reconstruct these policies in Docker; application-relevant settings require a reviewed Dockerfile and runtime policy before cutover.")
+	origin.Warnings = append(origin.Warnings, "Review every external startup authority before cutover, including unloaded systemd timers, paths, sockets and targets, cron and custom scripts. Captured manager state and saved PM2 lists cannot prove no other launcher exists. Keep a reversible handoff plan so the original app cannot restart beside Docker after reboot.")
 	recovered.Configuration = configurationFromDetection(detection)
 	recovered.Configuration.Build.Secrets = []BuildSecretConfig{}
 	recovered.Configuration.Build.ReleaseTasks = []ReleaseTaskConfig{}

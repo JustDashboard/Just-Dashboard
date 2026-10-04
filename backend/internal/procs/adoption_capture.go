@@ -48,6 +48,7 @@ type HostWorkloadCapture struct {
 	Environment         map[string]string    `json:"-"`
 	Command             []string             `json:"-"`
 	OriginalConfig      json.RawMessage      `json:"-"`
+	StartupEvidence     json.RawMessage      `json:"-"`
 	SourceFiles         map[string]string    `json:"-"`
 }
 

@@ -368,7 +368,7 @@ func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, a
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		t.Fatal("the fixture unit path is already occupied")
 	}
-	configuration := "[Unit]\nDescription=Just Dashboard isolated adoption fixture\n[Service]\nType=exec\nUser=" + account.Username + "\nGroup=" + account.Gid + "\nWorkingDirectory=" + source + "\nExecStart=" + node + " " + filepath.Join(source, "server.js") + "\nRestart=on-failure\nRestartSec=100ms\nKillSignal=SIGTERM\nTimeoutStopSec=3s\nEnvironment=\"PORT=" + strconv.Itoa(port) + "\" \"APP_DATA_DIR=" + filepath.Join(source, "data") + "\" \"PROOF_TOKEN=owned-native-private-value\" \"PROOF_EMPTY=\"\n"
+	configuration := "[Unit]\nDescription=Just Dashboard isolated adoption fixture\n[Service]\nType=exec\nUser=" + account.Username + "\nGroup=" + account.Gid + "\nWorkingDirectory=" + source + "\nExecStart=" + node + " " + filepath.Join(source, "server.js") + "\nRestart=on-failure\nKillSignal=SIGTERM\nTimeoutStopSec=3s\nEnvironment=\"PORT=" + strconv.Itoa(port) + "\" \"APP_DATA_DIR=" + filepath.Join(source, "data") + "\" \"PROOF_TOKEN=owned-native-private-value\" \"PROOF_EMPTY=\"\n[Install]\nWantedBy=multi-user.target\n"
 	privateUnit := filepath.Join(root, unit)
 	if err := os.WriteFile(privateUnit, []byte(configuration), 0600); err != nil {
 		t.Fatal(err)
@@ -414,6 +414,16 @@ func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, a
 type ownedLiveSystemd struct {
 	*procs.Systemd
 	unit string
+}
+
+func (s *ownedLiveSystemd) ControlCaptured(ctx context.Context, capture *procs.HostWorkloadCapture, action procs.UnitAction) (*procs.CommandResult, error) {
+	if capture == nil || capture.ResourceID != s.unit {
+		return nil, fmt.Errorf("fixture refused control of an unowned unit")
+	}
+	if err := s.Systemd.VerifyCaptured(ctx, capture); err != nil {
+		return nil, err
+	}
+	return s.Control(ctx, capture.ResourceID, action)
 }
 
 func (s *ownedLiveSystemd) Control(ctx context.Context, unit string, action procs.UnitAction) (*procs.CommandResult, error) {

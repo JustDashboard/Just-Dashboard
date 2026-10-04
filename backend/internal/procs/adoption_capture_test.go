@@ -143,7 +143,7 @@ func TestPM2ControlClientVerifiesConfigurationBeforeExactIDMutation(t *testing.T
 	write("bin/pm2", `throw Error("must not invoke the CLI")`)
 	write("node_modules/pm2-axon/index.js", `exports.socket=()=>({on(){},connect(){},close(){}})`)
 	write("node_modules/pm2-axon-rpc/index.js", `exports.Client=class { call(method,args,callback){ if(method==="getMonitorData")return callback(null,[{pm_id:7,name:"api",pm2_env:{namespace:"production",status:"online",pm_exec_path:"/srv/api.js",env:{TOKEN:"private"}}}]); if(method!=="stopProcessId"||args!==7)throw Error("wrong action"); require("fs").writeFileSync(process.env.PM2_HOME+"/acted","7"); callback(null,{}) } }`)
-	request := `{"action":"stop","name":"api","namespace":"production","configuration":[{"pm_id":7,"namespace":"production","pm_exec_path":"/srv/api.js","env":{"TOKEN":"private"}}]}`
+	request := `{"action":"stop","name":"api","namespace":"production","startupEvidence":{"dump.pm2":[],"dump.pm2.bak":[]},"configuration":[{"pm_id":7,"namespace":"production","pm_exec_path":"/srv/api.js","env":{"TOKEN":"private"}}]}`
 	run := func(body string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -168,7 +168,7 @@ func TestPM2ControlClientVerifiesConfigurationBeforeExactIDMutation(t *testing.T
 
 func TestSystemdCapturePreservesRepresentableLifecycleAndBlocksTransientAuthority(t *testing.T) {
 	properties := map[string]string{"Type": "exec", "User": "ubuntu", "Restart": "on-failure", "KillMode": "control-group", "KillSignal": "15", "TimeoutStopUSec": "1min 30s"}
-	unit := &Unit{Name: "owned-api.service", Fragment: "/run/systemd/system/owned-api.service"}
+	unit := &Unit{Name: "owned-api.service", Fragment: "/run/systemd/system/owned-api.service", UnitFile: "disabled"}
 	capture := systemdCaptureProperties(unit, properties)
 	if len(capture.Blockers) != 0 || capture.RestartPolicy != "on-failure" || capture.StopSignal != "SIGTERM" || capture.GracePeriodSeconds != 90 {
 		t.Fatalf("simple systemd lifecycle not preserved: %+v", capture)

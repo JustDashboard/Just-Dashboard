@@ -224,7 +224,7 @@ func (o *NativeRuntimeOwner) StartExisting(ctx context.Context, runtime ReleaseR
 	if !metadata.WasActive {
 		return nil
 	}
-	_, err = o.systemd.Control(ctx, metadata.Unit, procs.UnitStart)
+	_, err = controlCapturedSystemd(ctx, o.systemd, capture, metadata.Unit, procs.UnitStart)
 	if err != nil {
 		return fmt.Errorf("the original systemd service could not be restored")
 	}
@@ -246,7 +246,7 @@ func (o *NativeRuntimeOwner) Stop(ctx context.Context, runtime ReleaseRuntime, p
 	if runtime.Kind == "pm2" {
 		err = o.pm2.ControlCaptured(ctx, capture, metadata.Namespace, "stop")
 	} else {
-		_, err = o.systemd.Control(ctx, metadata.Unit, procs.UnitStop)
+		_, err = controlCapturedSystemd(ctx, o.systemd, capture, metadata.Unit, procs.UnitStop)
 		if err != nil {
 			err = fmt.Errorf("the original systemd service could not be stopped")
 		}
@@ -351,4 +351,13 @@ func (o *NativeRuntimeOwner) ObserveNativeBaseline(ctx context.Context, runtime 
 		result.Services = append(result.Services, item)
 	}
 	return result
+}
+
+func controlCapturedSystemd(ctx context.Context, manager nativeSystemd, capture *procs.HostWorkloadCapture, unit string, action procs.UnitAction) (*procs.CommandResult, error) {
+	if authoritative, ok := manager.(interface {
+		ControlCaptured(context.Context, *procs.HostWorkloadCapture, procs.UnitAction) (*procs.CommandResult, error)
+	}); ok {
+		return authoritative.ControlCaptured(ctx, capture, action)
+	}
+	return manager.Control(ctx, unit, action)
 }
