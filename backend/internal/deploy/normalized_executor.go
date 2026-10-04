@@ -142,6 +142,7 @@ type runtimeReleaseSnapshot struct {
 	Plan           RuntimePlanConfig         `json:"plan"`
 	Image          ResolvedImage             `json:"image,omitempty"`
 	Compose        *ResolvedComposeSnapshot  `json:"compose,omitempty"`
+	NativeBaseline *ReleaseRuntimeInput      `json:"nativeBaseline,omitempty"`
 	Variables      []ReleaseVariableSnapshot `json:"variables"`
 	Dependencies   []PlannedDependency       `json:"dependencies"`
 	Checks         []PlannedCheck            `json:"checks"`

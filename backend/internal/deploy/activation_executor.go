@@ -822,7 +822,8 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	// containers were already replaced by `up`; stopping that identity here
 	// would stop the newly activated release.
 	sharedComposeProject := previous.Kind == "compose" && current.Kind == "compose" && previous.RuntimeID == current.RuntimeID
-	if !sharedComposeProject {
+	sharedNativeRuntime := (previous.Kind == "pm2" || previous.Kind == "systemd") && previous.Kind == current.Kind && previous.RuntimeID == current.RuntimeID
+	if !sharedComposeProject && !sharedNativeRuntime {
 		if snapshot.Plan.DrainSeconds > 0 {
 			timer := time.NewTimer(time.Duration(snapshot.Plan.DrainSeconds) * time.Second)
 			select {

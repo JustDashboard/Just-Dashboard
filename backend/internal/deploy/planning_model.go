@@ -68,8 +68,10 @@ type Draft struct {
 	EnvironmentKeys    []string           `json:"environmentKeys,omitempty"`
 	// Values live only in the separately sealed draft column, never data_json,
 	// plan previews, or the draft returned to a browser.
-	environment    map[string]string
-	environmentEnc string
+	environment         map[string]string
+	environmentEnc      string
+	adoptionEnvironment map[string]string
+	adoptionEnc         string
 }
 
 type DraftData struct {
@@ -77,6 +79,7 @@ type DraftData struct {
 	Source        *DraftSourceConfig `json:"source,omitempty"`
 	Detection     *DetectionResult   `json:"detection,omitempty"`
 	Configuration *PlanConfiguration `json:"configuration,omitempty"`
+	Adoption      *WorkloadAdoption  `json:"adoption,omitempty"`
 }
 
 // DraftSummary is what the new-project page shows to offer resuming an
@@ -593,6 +596,9 @@ type ReleaseTaskConfig struct {
 }
 
 type RuntimePlanConfig struct {
+	// Imported Compose projects retain their identity so fixed names and
+	// external clients keep addressing the same stack after a reviewed deploy.
+	ComposeProjectName string          `json:"composeProjectName,omitempty"`
 	PreviewIsolation   bool            `json:"previewIsolation,omitempty"`
 	Protocol           string          `json:"protocol,omitempty"`
 	Image              string          `json:"image,omitempty"`

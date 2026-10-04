@@ -420,6 +420,9 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, fmt.Errorf("%w: Compose runtime snapshot is incomplete", ErrArtifactMissing)
 	}
 	project := fmt.Sprintf("jd-e%d", request.Release.EnvironmentID)
+	if request.Snapshot.Plan.ComposeProjectName != "" {
+		project = request.Snapshot.Plan.ComposeProjectName
+	}
 	override := filepath.Join(request.SourceRoot, ".just-dashboard", "release.yml")
 	content, err := renderComposeReleaseOverride(request)
 	if err != nil {
