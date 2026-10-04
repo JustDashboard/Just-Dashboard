@@ -17,7 +17,8 @@ activity headers remain aligned, and the page and activity panel have no horizon
 
 The browser coverage in `frontend/tests/browser/overview-ui.spec.ts` checks the product marks, original
 action/target tooltip, exact timestamp, audit-log navigation, empty state and running-run outcome at
-1280px and 390px. Run it against a production frontend built from this worktree:
+1280px and 390px. A read-only account keeps the activity readings and is not offered the
+administrator-only audit-log link. Run it against a production frontend built from this worktree:
 
 ```bash
 JD_BROWSER_BASE_URL=http://127.0.0.1:43121 scripts/test-changed.sh patch/0.7.1

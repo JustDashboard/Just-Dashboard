@@ -8,6 +8,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
+import { useAuth } from "@/hooks/use-auth"
 import { clock, duration, relativeTime, timestamp } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
 import type { MetricEvent } from "@/lib/types"
@@ -22,6 +23,7 @@ const SOURCES = {
 
 /** The day's events carry the same product identities as the full audit trail. */
 export function ActivityPanel({ events }: { events: MetricEvent[] }) {
+  const { can } = useAuth()
   const newestFirst = useMemo(() => [...events].reverse(), [events])
 
   return (
@@ -32,12 +34,14 @@ export function ActivityPanel({ events }: { events: MetricEvent[] }) {
           // Keep the processes panel's control height so their hairlines meet.
           <div className="flex h-8 items-center gap-3 text-hint">
             <span className="text-muted-foreground">Last 24 hours</span>
-            <Link
-              href="/audit"
-              className="flex items-center gap-1 rounded-md font-medium text-muted-foreground focus-ring transition-colors hover:text-foreground"
-            >
-              Audit log <ArrowRight aria-hidden className="size-3" />
-            </Link>
+            {can("system.admin") && (
+              <Link
+                href="/audit"
+                className="flex items-center gap-1 rounded-md font-medium text-muted-foreground focus-ring transition-colors hover:text-foreground"
+              >
+                Audit log <ArrowRight aria-hidden className="size-3" />
+              </Link>
+            )}
           </div>
         }
       />

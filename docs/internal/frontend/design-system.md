@@ -1801,8 +1801,8 @@ monospace; the original action and complete target remain on the title. A status
 the outcome: an audited request is Accepted, while a deploy or backup is Succeeded only when its
 recorded run detail says so. Failures and warnings keep their state hues, and pending or running
 work is never labelled successful. The exact time sits below the outcome, the elapsed time and
-recorded detail below the action. The header offers the full Audit log without making these
-readings into destination cards.
+recorded detail below the action. The header offers the full Audit log to administrators, matching
+the trail's `system.admin` capability, without making these readings into destination cards.
 
 Reading pages now keep their page name in a screen-reader-only `h1` through `PageContext`. The rail
 provides the visible location. A linked parent remains as a compact way back, while pages without

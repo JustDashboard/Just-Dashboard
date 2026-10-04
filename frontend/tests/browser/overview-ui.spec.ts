@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { fleet, mockOverview } from "./overview-fixture"
-import { iso, json, now } from "./host-fixture"
+import { iso, json, now, user } from "./host-fixture"
 
 /**
  * The host Overview, against a server with something in every place: the
@@ -191,6 +191,25 @@ test("an empty activity panel keeps the way to the audit trail", async ({ page }
   })
   await expect(activity).toContainText("Nothing in the last 24 hours.")
   await expect(activity.getByRole("link", { name: "Audit log" })).toBeVisible()
+})
+
+test("read-only accounts see activity without an administrator's audit-log link", async ({
+  page,
+}) => {
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, {
+      ...user,
+      capabilities: ["read"],
+      user: { ...user.user, role: "viewer" },
+    }),
+  )
+  await page.goto("/")
+  const activity = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Recent activity", exact: true }),
+  })
+  await expect(activity.getByRole("list", { name: "Recent server activity" })).toBeVisible()
+  await expect(activity.getByText("Last 24 hours")).toBeVisible()
+  await expect(activity.getByRole("link", { name: "Audit log" })).toHaveCount(0)
 })
 
 test("a service tile names what it counts with the products", async ({ page }) => {
