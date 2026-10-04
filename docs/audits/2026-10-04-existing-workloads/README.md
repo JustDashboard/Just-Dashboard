@@ -16,6 +16,33 @@ The previous implementation only registered external observations. Its
 [historical evidence](observation-only-history.md) is retained explicitly as history and does not
 prove this managed behavior.
 
+## Real bet-bot adoption and browser recording
+
+The existing operator stack was discovered and adopted through authenticated public routes into an
+isolated temporary dashboard database. The run passed in 45.6 seconds (46.8 seconds including browser
+setup). Its two existing running containers became the initial managed live release. The two declared
+services without containers or available images, `eurobet-doubles-tracker` and
+`eurobet-high-market-tracker`, were named and acknowledged as `existing_services` exclusions.
+
+Full original container IDs, PIDs, start times, restart counts and configuration/mount/network digests
+matched before and after. No runtime actions were invoked and the installed dashboard database was
+unchanged. The original containers already reported unhealthy health checks; adoption did not invent
+healthy application status. Missing-image recovery used read-only exports and removed only the proof
+server's newly created cache images at cleanup.
+
+The recording opens the ordinary deployment shell, Runtime and General settings. Displayed numeric
+CPU and memory matched a fresh real Docker stats frame for the selected Runtime service. The normal
+authenticated one-line Docker log tail was read successfully, with all output discarded rather than
+published. Captured Compose settings were loaded and editable with private values represented only
+by variable references. These checks prove nonmutating adoption of the real stack; destructive
+migration and rollback are separately exercised on the owned fixtures below.
+
+- [Discovery](managed-native-discovery-1280.png), [configuration](managed-native-configuration-1280.png),
+  [adoption review](managed-native-adoption-review-1280.png).
+- [Managed project](managed-native-project-1280.png), [live Runtime](managed-native-runtime-1280.png),
+  [editable Compose settings](managed-native-settings-1280.png).
+- [Real stack recording](managed-native-import.webm), [sanitized continuity evidence](managed-native-continuity.json).
+
 ## Real Docker API continuity
 
 An authenticated API fixture created a unique four-container Compose project with two containers
@@ -115,7 +142,7 @@ canonicalized-plan acknowledgement checks.
 ## Production boundaries
 
 These tests use owned fixtures and isolated databases. They do not deploy changes to the operator's
-production applications. Real native-stack browser evidence and the final integrated verification are recorded below when completed.
+production applications. The real bet-bot recording above used read-only recovery and metadata adoption; migration and rollback tests used only uniquely owned fixtures.
 
 Recovery fails closed for missing authoritative files, unrepresentable Engine/native-manager
 settings, unsafe replica differences, unknown toolchains, unresolved source/private files, meaningful
