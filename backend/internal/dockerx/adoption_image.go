@@ -91,19 +91,26 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 			}
 		}
 	}
-	stream, err := cli.ContainerExport(ctx, before.ID)
-	if err != nil {
-		return nil, errors.New("original root filesystem cannot be read without changing the workload")
-	}
-	defer stream.Close()
 	archiveFile, err := openAdoptionImageFile(directory, base+"rootfs.tmp", os.O_CREATE|os.O_TRUNC|os.O_WRONLY)
 	if err != nil {
 		return nil, errors.New("private filesystem snapshot cannot be staged")
 	}
 	defer directory.Remove(base + "rootfs.tmp")
+	boundedWriter, err := newAdoptionArchiveWriter(archiveFile)
+	if err != nil {
+		archiveFile.Close()
+		return nil, err
+	}
+	stream, err := cli.ContainerExport(ctx, before.ID)
+	if err != nil {
+		archiveFile.Close()
+		return nil, errors.New("original root filesystem cannot be read without changing the workload")
+	}
+	defer stream.Close()
 	hash := sha256.New()
-	writer := tar.NewWriter(io.MultiWriter(archiveFile, hash))
-	reader := tar.NewReader(io.LimitReader(stream, (2<<30)+1))
+	writer := tar.NewWriter(io.MultiWriter(boundedWriter, hash))
+	limited := &io.LimitedReader{R: stream, N: adoptionImageArchiveLimit + 1}
+	reader := tar.NewReader(limited)
 	exclusions := map[string]bool{}
 	for _, name := range excludePaths {
 		exclusions[strings.TrimPrefix(path.Clean(name), "/")] = true
@@ -113,6 +120,10 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 	for {
 		header, readErr := reader.Next()
 		if readErr == io.EOF {
+			if limited.N <= 0 {
+				archiveFile.Close()
+				return nil, errors.New("original filesystem exceeds the safe image recovery bounds")
+			}
 			break
 		}
 		if readErr != nil {
@@ -122,7 +133,7 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 		name := strings.TrimPrefix(path.Clean(header.Name), "/")
 		count++
 		size += header.Size
-		if name == ".." || strings.HasPrefix(name, "../") || count > 100000 || header.Size < 0 || size > 2<<30 {
+		if name == ".." || strings.HasPrefix(name, "../") || count > 100000 || header.Size < 0 || size > adoptionImageArchiveLimit {
 			archiveFile.Close()
 			return nil, errors.New("original filesystem exceeds the safe image recovery bounds")
 		}
@@ -131,14 +142,23 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 		}
 		if err := writer.WriteHeader(header); err != nil {
 			archiveFile.Close()
+			if errors.Is(err, errAdoptionImageSpace) {
+				return nil, err
+			}
 			return nil, errors.New("private filesystem snapshot could not be staged")
 		}
 		if _, err := io.CopyN(writer, reader, header.Size); err != nil {
 			archiveFile.Close()
+			if errors.Is(err, errAdoptionImageSpace) {
+				return nil, err
+			}
 			return nil, errors.New("private filesystem snapshot could not be staged")
 		}
 	}
 	if err := errors.Join(writer.Close(), archiveFile.Sync(), archiveFile.Close()); err != nil {
+		if errors.Is(err, errAdoptionImageSpace) {
+			return nil, errAdoptionImageSpace
+		}
 		return nil, errors.New("private filesystem snapshot could not be completed")
 	}
 	after, err := cli.ContainerInspect(ctx, before.ID)
@@ -157,6 +177,13 @@ func (c *Client) RecoverAdoptionImage(ctx context.Context, capture *AdoptionCont
 		return nil, errors.New("private filesystem snapshot is unavailable")
 	}
 	defer archive.Close()
+	archiveInfo, err := archive.Stat()
+	if err != nil {
+		return nil, errors.New("private filesystem snapshot is unavailable")
+	}
+	if err := checkAdoptionImageImportSpace(archive, archiveInfo.Size()); err != nil {
+		return nil, err
+	}
 	response, err := cli.ImageImport(ctx, image.ImportSource{Source: archive, SourceName: "-"}, "just-dashboard/adoption-recovery", image.ImportOptions{Tag: fingerprint, Platform: platformName, Changes: []string{"LABEL io.just-dashboard.adoption-source=" + fingerprint}})
 	if err != nil {
 		return nil, errors.New("private filesystem snapshot could not be imported")

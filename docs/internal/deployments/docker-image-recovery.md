@@ -14,11 +14,19 @@ existing network identities. An export is not a database backup. Review and veri
 backup before Deploy changes because an image/configuration rollback cannot undo database, schema or
 file changes in those existing mounts.
 
-Only the already verified regenerable Python bytecode additions are removed from the captured archive.
+Only verified regenerable Python bytecode and n8n editor/type-cache artifacts are removed from the archive.
 Unknown additions, source modifications, unverified directory changes and writable-layer data still
 block adoption. The archive preserves rootfs metadata and is capped at 2 GiB and 100,000 entries. It is
 staged in a private cache directory, using regular files with mode 0600 and rejecting symlink artifacts.
 No archive is returned to the browser.
+
+Before exporting, recovery measures available space through the opened private staging file's
+descriptor. It keeps 256 MiB available and reserves room for both the archive and a second copy during
+image import, reducing the 2 GiB archive limit when necessary. Every archive write rechecks available
+space and counts encoded tar headers and padding as well as file contents; import is refused if its
+reserved room has disappeared. An already verified cached image needs no export or staging-space
+reservation. This protects the cache filesystem; Docker may store image layers on a different
+filesystem or in a separate containerd store, whose free capacity is not claimed by this check.
 
 Image import sets only the dashboard's source-identity label. Captured environment variables,
 entrypoint, command and original labels stay in encrypted deployment inputs, outside the imported image
