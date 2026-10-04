@@ -29,7 +29,7 @@ func wireWorkloadImportEvidenceDeployModules(s *Server) {
 	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd)
 	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
 	observer := deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker, s.modules.proxy).
-		WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions))
+		WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions).withNativeRuntime(s.modules.deployNative))
 	s.modules.deployPreflight = deploy.NewNativePreflightObserver(observer, s.modules.deployNative, s.modules.deployRuns)
 	// The advisory checker captures these adapters at construction too. Replacing
 	// only draft preflight leaves Overview probing the closed original client.
