@@ -111,11 +111,11 @@ to the contribution terms above, including the additional licence grant to the p
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run.
 - The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
-  they run there like the other jobs, each time on a fresh daemon. They used to run on a self-hosted
+  they run there like the other jobs, as eight parallel jobs (one per fixture group), each on a fresh daemon. They used to run on a self-hosted
   runner on the release host, which put the fixtures' builds on the daemon that serves the dashboard,
   needed its BuildKit cache pruned after every run, and left every run waiting whenever that service
-  was down. The framework and artifact command has a 90-minute test timeout and the live job allows
-  150 minutes in all. Required live fixtures fail CI if skipped or absent. Logs and browser failure
+  was down. The framework, artifact, activation and preview groups have a 90-minute test timeout and
+  each live job allows 150 minutes in all. Required live fixtures fail CI if skipped or absent. Logs and browser failure
   traces are retained for 30 days, including failed runs. CI does not replace public TLS, clean-host installation, remote-host,
   architecture or soak acceptance.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release

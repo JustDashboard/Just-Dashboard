@@ -258,13 +258,62 @@ jobs:
             frontend/test-results/
           retention-days: 30
 
+  # The fixtures are independent `go test` invocations, so each is its own job
+  # on its own fresh daemon instead of one long sequence: the framework and
+  # artifact fixtures alone ran for over half an hour on a cold daemon.
   deployment-live:
     needs: changes
     if: needs.changes.outputs.live == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: artifact-adapters
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveC4ArtifactAdapters
+            tests: TestLiveC4ArtifactAdapters
+          - name: framework-build
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: activation-adapters
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveC5ActivationAdapters
+            tests: TestLiveC5ActivationAdapters
+          - name: preview
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction|RuntimeDiagnoserReadsExitedContainer)
+            tests: TestLivePreviewStorageCredentialsNetworkAndCleanup TestLiveLegacyPreviewQuarantinePreservesProduction TestLiveRuntimeDiagnoserReadsExitedContainer
+          - name: runtime-fault
+            pkg: ./internal/deploy
+            timeout: 15m
+            run: TestLive(RuntimeLossKeepsExactlyOneReleaseLive|BackendKillAtEveryStepLeavesOneRecoveredRun)
+            tests: TestLiveRuntimeLossKeepsExactlyOneReleaseLive TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun
+          - name: database
+            pkg: ./internal/api
+            timeout: 15m
+            run: TestLive(DeploymentDatabaseConnection|SQLiteApplicationRecoveryVerification|BackupDumpsAndRestoresAPostgresDatabase)
+            tests: TestLiveDeploymentDatabaseConnection TestLiveSQLiteApplicationRecoveryVerification TestLiveBackupDumpsAndRestoresAPostgresDatabase
+          - name: compose
+            pkg: ./internal/dockerx
+            timeout: 15m
+            run: TestLive(DeploymentComposeStorageUsesMergedMountsAndFrozenVariables|ComposeDatabaseNetworkMerge)
+            tests: TestLiveDeploymentComposeStorageUsesMergedMountsAndFrozenVariables TestLiveComposeDatabaseNetworkMerge
+          - name: cutover
+            pkg: ./internal/proxysvc
+            timeout: 20m
+            run: TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)
+            tests: TestLiveCutoverTrafficContinuity TestLiveCutoverSurvivesProxyLoss
+    name: deployment-live (${{ matrix.name }})
     env:
       JD_DEPLOY_LIVE: "1"
+      JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
     defaults:
       run:
         working-directory: backend
@@ -276,35 +325,25 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-      - name: Verify runner tooling
+          cache-dependency-path: backend/go.sum
+      - name: Live fixtures
+        env:
+          PKG: ${{ matrix.pkg }}
+          TIMEOUT: ${{ matrix.timeout }}
+          RUN: ${{ matrix.run }}
+          TESTS: ${{ matrix.tests }}
+          NAME: ${{ matrix.name }}
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           docker version | tee "$RUNNER_TEMP/jd-ci/docker-version.txt"
-          docker compose version | tee "$RUNNER_TEMP/jd-ci/compose-version.txt"
-          docker buildx version | tee "$RUNNER_TEMP/jd-ci/buildx-version.txt"
           go version | tee "$RUNNER_TEMP/jd-ci/go-version.txt"
-      - name: Artifact, framework, activation and preview fixtures
-        run: |
-          go test -count=1 -timeout 90m -json ./internal/deploy -run 'TestLive(C4ArtifactAdapters|DetectedFrameworkBuildAndServing|C5ActivationAdapters|PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction|RuntimeDiagnoserReadsExitedContainer)$' | tee "$RUNNER_TEMP/jd-ci/deploy-live.jsonl"
-          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/deploy-live.jsonl" TestLiveC4ArtifactAdapters TestLiveDetectedFrameworkBuildAndServing TestLiveC5ActivationAdapters TestLivePreviewStorageCredentialsNetworkAndCleanup TestLiveLegacyPreviewQuarantinePreservesProduction TestLiveRuntimeDiagnoserReadsExitedContainer
-      - name: Database replacement and Compose storage/network fixtures
-        run: |
-          go test -count=1 -timeout 15m -json ./internal/api -run '^TestLive(DeploymentDatabaseConnection|SQLiteApplicationRecoveryVerification|BackupDumpsAndRestoresAPostgresDatabase)$' | tee "$RUNNER_TEMP/jd-ci/database-live.jsonl"
-          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/database-live.jsonl" TestLiveDeploymentDatabaseConnection TestLiveSQLiteApplicationRecoveryVerification TestLiveBackupDumpsAndRestoresAPostgresDatabase
-          go test -count=1 -json ./internal/dockerx -run '^TestLive(DeploymentComposeStorageUsesMergedMountsAndFrozenVariables|ComposeDatabaseNetworkMerge)$' | tee "$RUNNER_TEMP/jd-ci/compose-live.jsonl"
-          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/compose-live.jsonl" TestLiveDeploymentComposeStorageUsesMergedMountsAndFrozenVariables TestLiveComposeDatabaseNetworkMerge
-      - name: Cutover continuity and runtime fault matrix
-        env:
-          JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
-        run: |
-          go test -count=1 -timeout 20m -json ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' | tee "$RUNNER_TEMP/jd-ci/cutover-live.jsonl"
-          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/cutover-live.jsonl" TestLiveCutoverTrafficContinuity TestLiveCutoverSurvivesProxyLoss
-          go test -count=1 -timeout 15m -json ./internal/deploy -run '^TestLive(RuntimeLossKeepsExactlyOneReleaseLive|BackendKillAtEveryStepLeavesOneRecoveredRun)$' | tee "$RUNNER_TEMP/jd-ci/runtime-fault.jsonl"
-          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/runtime-fault.jsonl" TestLiveRuntimeLossKeepsExactlyOneReleaseLive TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun
+          go test -count=1 -timeout "$TIMEOUT" -json "$PKG" -run "^($RUN)\$" | tee "$RUNNER_TEMP/jd-ci/live-$NAME.jsonl"
+          # shellcheck disable=SC2086
+          python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/live-$NAME.jsonl" $TESTS
       - name: Retain live evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: deployment-live-evidence
+          name: deployment-live-evidence-${{ matrix.name }}
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
