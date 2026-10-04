@@ -59,11 +59,13 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 			}
 		}
 		r.containers[name] = append(r.containers[name], captured)
-		for _, change := range captured.Changes {
-			if !engineGeneratedFile(change.Path) {
-				r.issue("writable_layer_data", "The container has writable-layer changes. Move or back up that data into persistent storage before adoption; image-based redeployment would lose it.", name, "writableLayer", true)
-				break
-			}
+		if len(captured.Inspection.Mounts) > 0 {
+			r.issue("persistent_data_reused", "Existing storage is reused. Image and configuration rollback does not undo database, schema or file changes; configure and verify a backup before Deploy changes.", name, "volumes", false)
+		}
+		if safe, regenerable := recoverableWritableLayer(captured); !safe {
+			r.issue("writable_layer_data", "The container has writable-layer changes. Move or back up that data into persistent storage before adoption; image-based redeployment would lose it.", name, "writableLayer", true)
+		} else if regenerable {
+			r.issue("regenerable_python_cache", "Added Python bytecode caches are regenerated from the unchanged image. They are excluded from the preserved persistent data; all other writable-layer changes still block adoption.", name, "writableLayer", false)
 		}
 		if captured.Inspection.Config.Labels["com.docker.swarm.service.id"] != "" {
 			r.issue("swarm_owner", "This container is owned by a Swarm service. Adopt its service specification through Swarm rather than replacing this task.", name, "", true)
@@ -77,7 +79,7 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 	}
 	if candidate.Kind == "container" {
 		r.model = map[string]any{"services": map[string]any{"app": map[string]any{}}}
-		r.issue("container_name_changes", "The first redeploy creates a new managed container name. The original container remains available for recovery until the replacement passes its checks; original network aliases are retained.", "app", "containerName", false)
+		r.issue("container_name_changes", "The first Deploy changes action creates a new managed container name. The original container remains available for recovery until the replacement passes its checks; original network aliases are retained.", "app", "containerName", false)
 	}
 	services := object(r.model["services"])
 	if services == nil {
@@ -189,6 +191,7 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 	result.Configuration = canonicalConfiguration(result.Configuration)
 	r.result.Adoption.BaselineSource = result.Source
 	r.result.Adoption.BaselineConfiguration = result.Configuration
+	r.result.Adoption.BaselineConfiguration.Build.PrimaryService = resolved.PrimaryService
 	r.result.Adoption.BaselineDigest = RecoveredWorkloadDigest(result.Source, result.Configuration, result.Environment)
 	var baseline dockerReleaseRuntimeMetadata
 	_ = json.Unmarshal(result.Adoption.Runtime.Metadata, &baseline)
@@ -268,7 +271,8 @@ func (r *dockerRecovery) stageBaseline(root string, content []byte) error {
 func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *ResolvedComposeSnapshot) {
 	ids := []string{}
 	baseline := []AdoptedContainer{}
-	primary := ""
+	primary, primaryService := "", ""
+	primaryScore := -1
 	for _, name := range sortedRecoveryServices(r.containers) {
 		for _, capture := range r.containers[name] {
 			ids = append(ids, capture.Inspection.ID)
@@ -278,11 +282,24 @@ func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *
 			}
 			running := capture.Inspection.State != nil && capture.Inspection.State.Running
 			baseline = append(baseline, AdoptedContainer{ID: capture.Inspection.ID, Service: name, Number: number, Running: running, StopTimeout: capture.Inspection.Config.StopTimeout})
-			if primary == "" || name == resolved.PrimaryService {
-				primary = capture.Inspection.ID
+			score := 0
+			if running {
+				score += 2
+			}
+			if name == resolved.PrimaryService {
+				score++
+			}
+			if len(capture.Inspection.HostConfig.PortBindings) > 0 {
+				score += 4
+			}
+			if score > primaryScore {
+				primary, primaryService, primaryScore = capture.Inspection.ID, name, score
 			}
 		}
 	}
+	// A declared service may not have a container yet. The immutable live
+	// baseline needs a real primary for restoration, logs and checks.
+	resolved.PrimaryService = primaryService
 	sort.Strings(ids)
 	metadata := dockerReleaseRuntimeMetadata{Version: 1, Adopted: true, BaselineContainers: baseline, Strategy: string(StrategyStopFirst), ContainerIDs: ids, PrimaryContainerID: primary, VariableNames: sortedStringMapKeys(r.result.Environment)}
 	kind, id, name := "compose", candidate.ResourceID, candidate.Name

@@ -689,7 +689,7 @@ func (o *DockerRuntimeOwner) StartExisting(
 			return err
 		}
 		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
-			return o.restoreComposeBaseline(ctx, metadata, variables, emit)
+			return o.restoreComposeBaseline(ctx, runtime, metadata, variables, emit)
 		}
 		return o.client.RunComposeRelease(ctx, composeSpecFromMetadata(metadata, variables),
 			dockerx.ComposeReleaseUp, 0, composeBuildEmitter(emit))
@@ -744,7 +744,7 @@ func (o *DockerRuntimeOwner) Stop(
 			break
 		}
 		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
-			err = o.stopComposeBaseline(ctx, metadata, grace, remove)
+			err = o.stopComposeBaseline(ctx, runtime, metadata, grace, remove)
 			evidence.Removed = remove && err == nil
 			break
 		}

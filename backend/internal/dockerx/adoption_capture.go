@@ -3,6 +3,7 @@ package dockerx
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -13,9 +14,10 @@ import (
 // AdoptionContainer is a private, read-only capture. Config and HostConfig
 // contain credentials and must never be sent directly to a browser or audit log.
 type AdoptionContainer struct {
-	Inspection container.InspectResponse    `json:"-"`
-	Image      *ImageDetail                 `json:"-"`
-	Changes    []container.FilesystemChange `json:"-"`
+	Inspection  container.InspectResponse    `json:"-"`
+	Image       *ImageDetail                 `json:"-"`
+	Changes     []container.FilesystemChange `json:"-"`
+	ChangeModes map[string]os.FileMode       `json:"-"`
 }
 
 func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*AdoptionContainer, error) {
@@ -35,7 +37,17 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 	if err != nil {
 		return nil, errors.New("the container writable layer could not be checked")
 	}
-	return &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes}, nil
+	modes := map[string]os.FileMode{}
+	for _, change := range changes {
+		if change.Kind == container.ChangeDelete {
+			continue
+		}
+		stat, err := cli.ContainerStatPath(ctx, inspection.ID, change.Path)
+		if err == nil {
+			modes[change.Path] = stat.Mode
+		}
+	}
+	return &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes}, nil
 }
 
 // ReadComposeAdoptionConfiguration resolves the original files without writing
