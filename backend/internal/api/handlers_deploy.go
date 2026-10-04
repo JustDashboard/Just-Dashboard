@@ -258,6 +258,7 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		if err != nil {
 			return httpx.Internal(err)
 		}
+		s.refreshImportedDeployments(r.Context(), fleet.Deployments)
 		httpx.JSON(w, http.StatusOK, fleet)
 		return nil
 	}
@@ -317,6 +318,9 @@ func (s *Server) handleDeployGet(w http.ResponseWriter, r *http.Request) error {
 		return mapDeployError(err)
 	}
 	var runtimeOwner deploy.RuntimeObserver
+	imported := []deploy.DeploymentSummary{*summary}
+	s.refreshImportedDeployments(r.Context(), imported)
+	*summary = imported[0]
 	if s.modules.docker != nil {
 		runtimeOwner = s.modules.docker
 	}
@@ -828,6 +832,15 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	}
 	if target.BuildMethod == deploy.BuildLegacyCompose {
 		return nil, fmt.Errorf("%w: normalized action requires a normalized deployment", deploy.ErrInvalidPlan)
+	}
+	var sourceKind string
+	if err := s.Store.DB.QueryRowContext(ctx,
+		`SELECT kind FROM deploy_sources WHERE environment_id = ? AND revision = ?`,
+		environmentID, target.DesiredRevision).Scan(&sourceKind); err != nil {
+		return nil, err
+	}
+	if sourceKind == string(deploy.SourceImport) {
+		return nil, fmt.Errorf("%w: imported workloads stay with their original manager; open that manager to change or restart them", deploy.ErrInvalidPlan)
 	}
 	if operation == deploy.OperationPreviewRemove && (target.Kind != deploy.EnvironmentPreview || trigger != deploy.TriggerPreview) {
 		return nil, fmt.Errorf("%w: preview cleanup requires an authorized preview lifecycle event", deploy.ErrInvalidPlan)

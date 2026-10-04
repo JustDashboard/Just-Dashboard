@@ -48,6 +48,7 @@ import {
   rememberDeploymentCheck,
 } from "@/components/deploy/deploy-check-state"
 import { runPlanIsStale } from "@/components/deploy/failure-cause"
+import { importedWorkloadOf } from "@/components/deploy/imported-workload"
 import {
   deploymentURL,
   hostOf,
@@ -260,7 +261,8 @@ export function useProjectVerbs(
   // The compatibility pipeline takes only "deploy"; the engine's other
   // operations belong to the projects it runs.
   const normalized = summary.buildMethod !== "legacy_compose"
-  const control = can("service.control") && !archived
+  const imported = summary.sourceKind === "import"
+  const control = can("service.control") && !archived && !imported
   const canRun = control && normalized
   const active = summary.activeRun
   const last = summary.lastRun
@@ -327,6 +329,16 @@ export function useProjectVerbs(
   }
 
   const verbs: Verb[] = []
+  const workload = importedWorkloadOf(summary)
+  if (imported && workload) {
+    verbs.push({
+      key: "manager",
+      label: "Open original manager",
+      icon: Servers,
+      group: "Project",
+      run: () => router.push(workload.managerUrl),
+    })
+  }
   if (navigation && url) {
     verbs.push({
       key: "visit",
@@ -498,7 +510,7 @@ export function useProjectVerbs(
       },
     )
   }
-  if (can("system.admin") && !archived && onDuplicate) {
+  if (can("system.admin") && !archived && !imported && onDuplicate) {
     verbs.push({
       key: "duplicate",
       label: "Duplicate project…",

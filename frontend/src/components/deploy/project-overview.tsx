@@ -55,6 +55,7 @@ import { UsageTiles } from "@/components/deploy/usage-tiles"
 import { BeforeYouDeploy } from "@/components/deploy/deploy-check"
 import { attentionFindings } from "@/components/deploy/deploy-check-state"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
+import { ImportedProject } from "@/components/deploy/imported-project"
 
 /**
  * The project's front page, in the order a visitor asks: is something
@@ -80,6 +81,12 @@ import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
  * beat, and a block whose read settles later rises when it does (§11).
  */
 export function ProjectOverview() {
+  const project = useProject()
+  if (project.detail.deployment.sourceKind === "import") return <ImportedProject />
+  return <ManagedProjectOverview />
+}
+
+function ManagedProjectOverview() {
   const project = useProject()
   const router = useRouter()
   const { can } = useAuth()

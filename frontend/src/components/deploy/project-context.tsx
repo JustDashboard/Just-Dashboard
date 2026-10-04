@@ -252,7 +252,8 @@ export function ProjectProvider({
       !archived &&
       can("service.control") &&
       detail.data !== undefined &&
-      detail.data.deployment.buildMethod !== "legacy_compose",
+      detail.data.deployment.buildMethod !== "legacy_compose" &&
+      detail.data.deployment.sourceKind !== "import",
   })
   const recheck = check.recheck
   // The same request the projects grid's cards make, so a refused start is
