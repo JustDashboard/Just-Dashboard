@@ -45,9 +45,10 @@ export const RANGES: RangeSpec[] = [
 /**
  * The windows that come from the server.
  *
- * A container has no in-browser live buffer to fall back on — nothing
- * accumulates its stats across a page load — so its charts offer only the
- * recorded ranges rather than a "Live" option that would draw nothing.
+ * Docker's container page keeps no live buffer for its charts — its live
+ * readings are a section of their own — so it offers only the recorded ranges
+ * rather than a "Live" option that would draw nothing. A project's Runtime
+ * does keep one (`useContainerLive`) and offers every range.
  */
 export const HISTORY_RANGES = RANGES.filter((r) => r.query)
 
@@ -516,7 +517,7 @@ function toContainerRow(point: ContainerHistoryPoint, ts: number, step: number):
   }
 }
 
-function containerGapRow(ts: number): ContainerRow {
+export function containerGapRow(ts: number): ContainerRow {
   return {
     t: "",
     ts,

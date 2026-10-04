@@ -63,7 +63,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ContainerUsage } from "@/components/docker/container-usage"
 import {
   ContainerIdentity,
   CpuReading,
@@ -90,7 +89,7 @@ import {
 } from "@/components/deploy/runtime-model"
 import { RuntimePorts } from "@/components/deploy/runtime-ports"
 import { serviceProduct, volumeProduct } from "@/components/deploy/service-product"
-import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { RuntimeUsage } from "@/components/deploy/runtime-usage"
 import {
   CertificateReading,
   DATABASE_ENGINE_LABELS,
@@ -121,14 +120,14 @@ const KIND_GLYPH: Record<string, Icon> = { database_connection: Database }
 
 /**
  * Everything Docker and the operational owners say about the live release, in
- * the order a reader checks it: the services and what they are using now, the
- * names they answer on, where their data lives and how it is backed up, what
- * else they reach, and — last, because it is the longest and the least often
- * read — the charts of what they used before you looked.
+ * the order a reader checks it: the services, what they are using now and how
+ * they got there, the names they answer on, where their data lives and how it
+ * is backed up, and what else they reach.
  *
  * There is no opening row of figures (§15 pass 2's exit): each count sits in
- * the header of the block it counts, and the four live readings that move are
- * the Resource usage tiles, each carrying its last hour. Every row here opens
+ * the header of the block it counts, and the five live readings that move are
+ * Resource usage's tiles, over the charts they move on — the socket's last
+ * five minutes, or the recorded history for a longer range. Every row here opens
  * something — a container, a proxy site, a volume, a backup job, a database —
  * so every list is a `ChoiceList` with the lit edge (§16), and every thing in
  * it is drawn as the product it is.
@@ -367,9 +366,15 @@ export function ProjectRuntime() {
       </Panel>
 
       {selected && (
-        <Panel plain>
-          <PanelHeader title="Resource usage">
-            {running.length > 1 && (
+        <RuntimeUsage
+          key={selected.containerId}
+          containerId={selected.containerId}
+          name={selected.name || selected.containerId}
+          product={selectedProduct === "docker" ? undefined : selectedProduct}
+          initial={polledStat(selected.containerId)}
+          onStats={(frame) => setLiveStat({ containerId: selected.containerId, stats: frame })}
+          picker={
+            running.length > 1 && (
               // Its own line on a phone, where a fixed width beside the title
               // would push the title off the start of the header.
               <div className="w-full sm:w-56">
@@ -397,19 +402,9 @@ export function ProjectRuntime() {
                   </SelectContent>
                 </Select>
               </div>
-            )}
-          </PanelHeader>
-          <PanelBody>
-            <UsageTiles
-              key={selected.containerId}
-              containerId={selected.containerId}
-              product={selectedProduct === "docker" ? undefined : selectedProduct}
-              columns={4}
-              initial={polledStat(selected.containerId)}
-              onStats={(frame) => setLiveStat({ containerId: selected.containerId, stats: frame })}
-            />
-          </PanelBody>
-        </Panel>
+            )
+          }
+        />
       )}
 
       <Panel plain>
@@ -589,15 +584,6 @@ export function ProjectRuntime() {
             <Silence subjects={["dependencies"]} silences={silences} />
           </PanelBody>
         </Panel>
-      )}
-
-      {selected && (
-        <ContainerUsage
-          key={selected.containerId}
-          plain
-          containerId={selected.containerId}
-          name={selected.name || selected.containerId}
-        />
       )}
 
       {/* Drawn here and not in a card: a press inside a dialog or a sheet

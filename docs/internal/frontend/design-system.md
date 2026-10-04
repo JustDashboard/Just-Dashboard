@@ -766,7 +766,16 @@ rather than assembling its own recharts tree — adding a measurement should mea
   slope, with no date and no scale to read it against. It is a bar on its day now, a tick on a
   day nothing succeeded, the window's median ruled across and the top of the scale named.
 - **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
-  magnitude.
+  magnitude. Where a page offers both, Live is a range of its own beside the recorded ones: a
+  project's Runtime draws the container's stats socket a frame a second over its last five minutes
+  (`useContainerLive`, which keeps the window per container so the Overview's minutes are already
+  on it), and 1h–7d from the record, in the same panels.
+- **An axis ends on a round figure and ticks at its quarters.** Fitted to the data, recharts split a
+  3.1 MB/s peak into 781.3 KB/s steps, and a container idling at 0.2% drew five ticks that all read
+  "0%". A container's charts take `byteScale` and `cpuScale` (`lib/container-usage.ts`): byte
+  tops whose quarters print as whole figures, a processor axis of at least 1% that grows by the
+  hundred past one core, headroom so a peak never sits on the top rule. A percentage tick keeps the
+  decimals it needs and drops the zeros it does not ("0.25%", "50%").
 - The hovered instant lives outside React, as a timestamp rather than a row index.
 - **One formatter decides how a series prints**, and it is `seriesFormat` in `metric-chart.tsx`. The
   axis gutter, the tooltip and the legend each used to carry their own
@@ -784,7 +793,7 @@ rather than assembling its own recharts tree — adding a measurement should mea
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
-  container page and on a project's Runtime alike, since both draw `ContainerUsage`.
+  container page and on a project's Runtime alike, since both draw `ContainerCharts`.
 - **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
   one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
@@ -1704,8 +1713,11 @@ The passes, in order. Each one is a diff you can review on its own.
    `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
    or a release task, holding a reference) is a filter chip over the list, where it also narrows
    to what it counts, and the products the environment talks to sit under the section's head. And a
-   project's Runtime page carries each count in the header of the block it counts, with the four
-   moving readings — processor, memory, processes, network — as the live usage tiles.
+   project's Runtime page carries each count in the header of the block it counts, with five
+   moving readings — processor, memory, what it receives and what it sends, processes — over the
+   charts they move on. Those tiles carry no trend of their own: a 36px band could only say that
+   something moved, where the chart beneath has an axis to read it against, and in and out are two
+   readings because a flood and a large download share a sum.
 
    Deployment history also takes this exit: each pair of readings stands over the chart it explains.
    Success and weekly frequency sit over releases per day; median duration and recovery time sit over

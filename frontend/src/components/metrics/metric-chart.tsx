@@ -331,12 +331,13 @@ export function MetricChart({
             tickLine={false}
             axisLine={false}
             fontSize={10}
-            // The gutter is the one place a whole number is right: recharts
-            // picks the ticks, and "25.0%" beside "50.0%" spends four
-            // characters saying nothing the scale did not already say.
+            // No trailing zeros in the gutter: "25.0%" beside "50.0%" spends
+            // four characters saying nothing the scale did not already say.
+            // Not rounded to whole numbers either — on a 0–1% scale every
+            // tick read "0%".
             tickFormatter={(v: number) =>
               unit === "%"
-                ? `${Math.round(v)}${unit}`
+                ? `${Number(v.toFixed(2))}${unit}`
                 : (axisFormat ?? seriesFormat(undefined, format, unit))(v)
             }
           />

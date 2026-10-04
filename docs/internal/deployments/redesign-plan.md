@@ -440,9 +440,12 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   console's colours; Insights opens on a response-time ladder whose marks narrow the rows to
   requests that slow; Events are grouped under hour rules with each event on its product's tile.
 - **Runtime and the consoles.** Services are cards drawn as their image's product with processor,
-  memory and ports joined from Docker, the candidate of a run in flight lit; then the four live
-  usage tiles, domains with their issuer and days left, storage beside backups from `xl`,
-  dependencies linking to the backup job or connection they name, and usage history last. Each
+  memory and ports joined from Docker, the candidate of a run in flight lit; then Resource usage —
+  five live readings (processor, memory, received, sent, processes) over the container's charts,
+  Live from the stats socket a frame a second and 1h–7d from the recorded history (until 0.7.1 four
+  tiles with a sparkline each, and the charts a separate Usage history block at the foot) — then
+  domains with their issuer and days left, storage beside backups from `xl`, and dependencies
+  linking to the backup job or connection they name. Each
   join that fails leaves its block saying so in its header. The Docker console is one strip over a
   pane sized to the window; a game server's three pages carry one line under the header with the
   join address, the edition and how many are online, its console is a transcript with players in
