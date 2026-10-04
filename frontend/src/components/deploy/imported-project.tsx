@@ -7,6 +7,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Button } from "@/components/ui/button"
 import { Status } from "@/components/status-dot"
+import { workloadManagerUrl, workloadPort } from "@/lib/workload-import"
 
 const MANAGERS = {
   stack: "Docker Compose",
@@ -33,6 +34,7 @@ export function ImportedProject() {
     )
 
   const available = !["missing", "unavailable"].includes(workload.state)
+  const managerUrl = workloadManagerUrl(workload)
   return (
     <>
       <StatGrid>
@@ -45,9 +47,11 @@ export function ImportedProject() {
         <PanelHeader
           title="Original workload"
           actions={
-            <Button variant="outline" size="sm" asChild>
-              <Link href={workload.managerUrl}>Open {MANAGERS[workload.kind]}</Link>
-            </Button>
+            managerUrl && (
+              <Button variant="outline" size="sm" asChild>
+                <Link href={managerUrl}>Open {MANAGERS[workload.kind]}</Link>
+              </Button>
+            )
           }
         />
         <PanelBody className="space-y-4">
@@ -92,22 +96,29 @@ export function ImportedProject() {
                       key={`${port.hostPort}:${port.containerPort}:${port.protocol}`}
                       className="font-mono text-xs text-muted-foreground"
                     >
-                      {port.hostIp || "*"}:{port.hostPort} → {port.containerPort}/
-                      {port.protocol || "tcp"}
+                      {workloadPort(port)}
                     </p>
                   ))}
                 </div>
                 <Status
                   tone={
-                    available
-                      ? service.state === "running" ||
-                        service.state === "online" ||
-                        service.state === "active"
-                        ? "running"
-                        : "stopped"
-                      : "unknown"
+                    available && service.health === "unhealthy"
+                      ? "danger"
+                      : available
+                        ? service.state === "running" ||
+                          service.state === "online" ||
+                          service.state === "active"
+                          ? "running"
+                          : "stopped"
+                        : "unknown"
                   }
-                  label={available ? service.state : "Not observed"}
+                  label={
+                    available
+                      ? service.health
+                        ? `${service.state} · ${service.health}`
+                        : service.state
+                      : "Not observed"
+                  }
                 />
               </li>
             ))}
