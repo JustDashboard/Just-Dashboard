@@ -98,8 +98,18 @@ which rely on host packages, native dependencies or PM2 IPC need an appropriate 
 compatibility review before migration.
 Whole filesystem environment values within the captured source and local `file`/`sqlite` URIs map
 to the same `/app` layout, while the original values remain privately sealed for the native baseline.
-Source-read application variables which point outside that tree require verified mounts before
-recovery. Static-serving recipes cannot reproduce a running Node development server's command;
+Unknown application filesystem values and interpreter path variables (including `NODE_PATH`, CA
+files and OpenSSL configuration) which point outside that tree require verified mounts before
+recovery. Standard manager/tool metadata such as `HOME`, `PATH` and PM2 log paths retain their private
+values with an explicit filesystem warning unless source detection uses them, in which case an
+external path blocks recovery. `NODE_OPTIONS` carries a bounded set of memory and boolean options;
+loaders, filesystem operands and unknown options require explicit interpreter review. Captured argv
+keeps argument boundaries, translates source-contained absolute flag operands, and rejects external,
+escaping or ambiguous interpreter operands. Network URLs are not rewritten as filesystem paths.
+Recognizable credential files (`.env`, registry/account credentials, SSH/cloud configuration and
+key/certificate/keystore filenames) are conservatively excluded from build copies and block automatic migration when
+they appear in application source. Arbitrary configuration files still require operator review;
+filename checks cannot identify every embedded secret. Static-serving recipes cannot reproduce a running Node development server's command;
 those migrations require a reviewed Dockerfile instead of an automatic runtime override.
 
 Docker writable-layer checks block application data, altered source and unknown file changes.
@@ -158,14 +168,16 @@ inspect them without editing, and source paths are not remembered in browser sto
 
 Native lifecycle operations recheck manager configuration and captured source evidence before
 controlling the original app. The reviewed original source directory remains frozen while its native
-baseline is retained: a full bounded tree digest covers modules as well as the executable/entrypoint
-ownership and permission fences. Already reviewed linked data and excluded private files remain
-outside the source digest. Changed source blocks stop-first cutover and baseline restart/rollback
+baseline is retained: a full bounded original-tree digest covers modules, private files and directory
+permissions/ownership as well as the executable/entrypoint evidence. Private file values remain
+excluded from build copies; native metadata retains only bounded content hashes. Already reviewed
+linked data remains outside this native digest. Changed source blocks stop-first cutover and baseline restart/rollback
 before manager control; restore the captured source or use a separate managed checkout for new code.
 This avoids claiming a restart of modified original files is an immutable release restoration.
 Before adoption, known runtime-source edits later than the active process birth time block recovery,
-including module edits while the entrypoint remains unchanged. The comparison allows two seconds
-for procfs/filesystem clock precision and excludes reviewed data/private paths. A filesystem snapshot
+including module or recognizable private startup-file edits while the entrypoint remains unchanged.
+The comparison allows two seconds for procfs/filesystem clock precision and excludes reviewed data
+paths. A filesystem snapshot
 cannot attest every in-memory module, backdated file or dynamic setting: verify the actual running
 source and startup authority, restoring or reviewing a restart under the original manager when needed.
 Port reuse requires a freshly verified listener PID and creation time,
@@ -193,6 +205,10 @@ existing storage identity. PM2's [application declaration](https://pm2.keymetric
 and [startup restoration](https://pm2.keymetrics.io/docs/usage/startup/) explain why a process list
 alone is insufficient. The capture uses the existing daemon's
 [monitor RPC](https://github.com/Unitech/pm2/blob/master/lib/Client.js).
+Node's [CLI and environment contract](https://nodejs.org/docs/latest-v24.x/api/cli.html) defines
+`NODE_OPTIONS`, module and CA-file inputs; systemd's
+[resource pressure protocol](https://systemd.io/PRESSURE/) identifies the manager's pressure-watch
+paths which require explicit review when moving an application into a container.
 
 Acceptance uses temporary databases and uniquely named fixture resources. Live proof and its exact
 limits are recorded in [`2026-10-04-existing-workloads`](../../audits/2026-10-04-existing-workloads/README.md).

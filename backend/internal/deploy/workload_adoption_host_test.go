@@ -320,6 +320,7 @@ func TestHostEnvironmentPathTranslationPreservesUrisAndRefusesEscapes(t *testing
 		{"encoded uri", "/srv/app name", "file:///srv/app%20name/data/state.db", "file:///app/data/state.db", true, true},
 		{"relative data", "/srv/app", "data/state.db", "data/state.db", false, true},
 		{"relative escape", "/srv/app", "../shared/state.db", "../shared/state.db", false, false},
+		{"opaque file escape", "/srv/app", "file:../shared/state.db", "file:../shared/state.db", false, false},
 		{"outside host", "/srv/app", "/srv/shared/state.db", "/srv/shared/state.db", false, false},
 		{"normalized escape", "/srv/app", "/srv/app/../shared/state.db", "/srv/app/../shared/state.db", false, false},
 		{"network credentials", "/srv/app", "postgres://user:private@127.0.0.1:5432/app", "postgres://user:private@127.0.0.1:5432/app", false, true},
@@ -328,6 +329,110 @@ func TestHostEnvironmentPathTranslationPreservesUrisAndRefusesEscapes(t *testing
 			value, changed, supported := translateHostEnvironmentPath(test.value, test.root)
 			if value != test.want || changed != test.changed || supported != test.supported {
 				t.Fatalf("filesystem environment translation mismatch: changed=%t supported=%t", changed, supported)
+			}
+		})
+	}
+}
+
+func TestHostRecoveryGuardsImplicitInterpreterAndUnknownFilesystemVariables(t *testing.T) {
+	for _, test := range []struct {
+		name, value, issue string
+	}{
+		{"NODE_EXTRA_CA_CERTS", "/host-only/corporate-ca.crt", "host_environment_path_unsupported"},
+		{"SSL_CERT_FILE", "/host-only/corporate-ca.crt", "host_environment_path_unsupported"},
+		{"NODE_PATH", "/usr/local/lib/node_modules", "host_environment_path_unsupported"},
+		{"APP_LIBRARY_CONFIG", "/host-only/private.config", "host_environment_path_unsupported"},
+		{"NODE_OPTIONS", "--require /host-only/register.js", "host_node_options_unsupported"},
+		{"NODE_OPTIONS", "--experimental-loader=./loader.mjs", "host_node_options_unsupported"},
+		{"LD_PRELOAD", "libcustom.so", "host_environment_path_unsupported"},
+	} {
+		t.Run(test.name+test.issue, func(t *testing.T) {
+			root, analyzer, candidate, capture := hostRecoveryFixture(t)
+			capture.Environment[test.name] = test.value
+			recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, issue := range recovered.Adoption.Issues {
+				found = found || issue.Code == test.issue
+			}
+			if !found || recovered.BaselineEnvironment[test.name] != test.value {
+				t.Fatal("implicit original filesystem authority was silently lost or modified")
+			}
+			encoded := string(mustJSON(recovered))
+			if strings.Contains(encoded, test.value) {
+				t.Fatal("blocked private runtime value entered the public recovery result")
+			}
+		})
+	}
+}
+
+func TestHostRecoveryPreservesStandardManagerMetadataWithReviewWarning(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	capture.Environment["HOME"] = "/home/original-account"
+	capture.Environment["NODE_OPTIONS"] = "--max-old-space-size=2048 --enable-source-maps"
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+	if err != nil || len(recovered.Adoption.Blockers) != 0 {
+		t.Fatal("standard manager metadata or memory options were blocked")
+	}
+	found := false
+	for _, warning := range recovered.Adoption.Warnings {
+		found = found || strings.Contains(warning, "HOME retains an original host path")
+	}
+	if !found || recovered.Environment["HOME"] != "/home/original-account" || recovered.Environment["NODE_OPTIONS"] != capture.Environment["NODE_OPTIONS"] {
+		t.Fatal("standard metadata was changed or its filesystem limitation hidden")
+	}
+}
+
+func TestHostCommandKeepsContainedFlagPathsAndRefusesOutsideOperands(t *testing.T) {
+	for _, test := range []struct {
+		arg, want string
+		blocked   bool
+	}{
+		{"--require=/srv/app/register.js", "--require=/app/register.js", false},
+		{"--import=file:///srv/app/loader.mjs", "--import=file:///app/loader.mjs", false},
+		{"--require=/outside/register.js", "", true},
+		{"--require=../outside/register.js", "", true},
+		{"--import=file:///tmp/loader.mjs", "", true},
+		{"-r/outside/register.js", "", true},
+		{"../outside/server.js", "", true},
+		{"--eval=process.env.PRIVATE", "", true},
+		{"--redirect=https://example.test/path", "--redirect=https://example.test/path", false},
+	} {
+		t.Run(test.arg, func(t *testing.T) {
+			command, err := hostCommandForContainer([]string{"/usr/bin/node", test.arg, "/srv/app/server.js"}, "/srv/app", "node")
+			if test.blocked {
+				if !errors.Is(err, ErrRecoveryBlocked) {
+					t.Fatal("outside or ambiguous interpreter operand was silently preserved")
+				}
+				return
+			}
+			if err != nil || len(command) != 3 || command[1] != test.want || command[2] != "/app/server.js" {
+				t.Fatal("contained interpreter operand or network argument changed incorrectly")
+			}
+		})
+	}
+}
+
+func TestHostRecoveryNeverCopiesRecognizablePrivateCredentialFiles(t *testing.T) {
+	for _, name := range []string{".npmrc", ".netrc", ".pypirc", ".git-credentials", "tls.key", "tls.pem", "keystore.p12", "keystore.jks"} {
+		t.Run(name, func(t *testing.T) {
+			root, analyzer, candidate, capture := hostRecoveryFixture(t)
+			writePlanningFixture(t, filepath.Join(root, name), "owned-private-fixture-value")
+			recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, issue := range recovered.Adoption.Issues {
+				found = found || issue.Code == "host_private_source_file"
+			}
+			if !found {
+				t.Fatal("recognizable credential file was accepted into the migration")
+			}
+			if _, err := os.Lstat(filepath.Join(recovered.Adoption.RecoveryDirectory, name)); !os.IsNotExist(err) {
+				t.Fatal("recognizable credential file entered a build snapshot")
 			}
 		})
 	}
@@ -408,5 +513,18 @@ func TestHostRecoveryRefusesClearlyNewerLoadedModuleWithUnchangedEntrypoint(t *t
 	}
 	if !found {
 		t.Fatal("newer loaded module was accepted as the currently running source")
+	}
+}
+
+func TestHostSourceDriftIncludesKnownPrivateRuntimeFiles(t *testing.T) {
+	root, _, _, capture := hostRecoveryFixture(t)
+	private := filepath.Join(root, ".env")
+	writePlanningFixture(t, private, "private fixture")
+	newer := time.UnixMilli(capture.Processes[0].CreateTime).Add(10 * time.Second)
+	if err := os.Chtimes(private, newer, newer); err != nil {
+		t.Fatal(err)
+	}
+	if drift, err := knownHostSourceDrift(t.Context(), root, capture, nil); err != nil || !drift {
+		t.Fatal("known private startup configuration newer than the process was accepted")
 	}
 }

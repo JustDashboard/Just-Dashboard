@@ -102,9 +102,13 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 				used = used || variable.Name == name
 			}
 		}
-		translated, changed, supported := translateHostEnvironmentPath(value, root)
-		if !supported && used {
+		translated, changed, supported := translateHostRuntimeEnvironment(name, value, root)
+		if name == "NODE_OPTIONS" && !supported {
+			block("host_node_options_unsupported", "NODE_OPTIONS contains a loader, filesystem operand or option outside the reviewed migration set. Review its container-specific interpreter configuration before migration.", "runtime.command")
+		} else if !supported && (used || !hostManagerEnvironmentPath(name)) {
 			block("host_environment_path_unsupported", "The application variable "+name+" refers to a host filesystem path outside its captured source. Configure a verified retained mount or a supported container path before migration.", "runtime.mounts")
+		} else if !supported {
+			origin.Warnings = append(origin.Warnings, "The standard manager environment variable "+name+" retains an original host path. Confirm the application does not depend on it as a filesystem resource; host-only manager paths are not mounted into the container.")
 		}
 		if changed {
 			value = translated
@@ -198,8 +202,12 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 				return nil, ErrInvalidPlan
 			}
 			metadata.SourceRoot = root
-			metadata.SourceDigest = detection.Source.Digest
 			metadata.SourceExclusions = append([]string{}, recovered.Source.ExcludePaths...)
+			metadata.SourceDigest, err = nativeDirectoryDigest(ctx, root, metadata.SourceExclusions)
+			if err != nil {
+				block("host_native_source_fence_unavailable", "The original source could not be fenced safely for native restart authority. Review its private files, permissions and source limits before migration.", "source.localPath")
+			}
+			metadata.SourcePrivateFence = true
 			origin.Runtime.Metadata = mustJSON(metadata)
 			origin.Runtime.Host, origin.Runtime.Port = host, port
 			origin.Warnings = append(origin.Warnings, "The original source directory is frozen as native rollback evidence. Keep it unchanged while this manager is a live or retained baseline; use a separate managed checkout for new code. Changed modules block native stop, compensation and rollback until the captured source is restored. Linked data remains writable.")
@@ -289,7 +297,7 @@ func knownHostSourceDrift(ctx context.Context, root string, capture *procs.HostW
 		if err != nil {
 			return err
 		}
-		if excludedLocalSourcePath(relative, exclusions) || privateSourceEntry(entry.Name()) || (entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".just-dashboard")) {
+		if excludedLocalSourcePath(relative, exclusions) || (entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".just-dashboard")) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -298,6 +306,17 @@ func knownHostSourceDrift(ctx context.Context, root string, capture *procs.HostW
 		entries++
 		if entries > (copyTreeLimits{}).normalized().MaxFiles {
 			return ErrSourceUnavailable
+		}
+		private := false
+		for _, part := range strings.Split(relative, string(filepath.Separator)) {
+			private = private || privateSourceEntry(part)
+		}
+		if private && !entry.IsDir() {
+			info, err := entry.Info()
+			if err != nil {
+				return ErrSourceUnavailable
+			}
+			check(info)
 		}
 		switch strings.ToLower(filepath.Ext(entry.Name())) {
 		case ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".vue", ".svelte", ".json", ".py", ".rb", ".php", ".pl", ".sh", ".go", ".rs", ".jar", ".dll", ".class", ".so", ".pyd", ".wasm":
@@ -322,7 +341,11 @@ func translateHostEnvironmentPath(value, root string) (string, bool, bool) {
 			}
 			path = parsed.EscapedPath()
 			if !filepath.IsAbs(parsed.Path) {
-				clean := filepath.Clean(parsed.Path)
+				relative := parsed.Path
+				if relative == "" {
+					relative = parsed.Opaque
+				}
+				clean := filepath.Clean(relative)
 				return value, false, clean != ".." && !strings.HasPrefix(clean, "../")
 			}
 			start := strings.Index(value[len(scheme):], path)
@@ -353,6 +376,81 @@ func translateHostEnvironmentPath(value, root string) (string, bool, bool) {
 		containerPath = (&url.URL{Path: containerPath}).EscapedPath()
 	}
 	return prefix + containerPath + suffix, true, true
+}
+
+func translateHostRuntimeEnvironment(name, value, root string) (string, bool, bool) {
+	if name == "NODE_OPTIONS" {
+		// Only options with no filesystem operands are carried implicitly.
+		// A loader or unknown option needs a reviewed container-specific plan;
+		// parsing it as a shell command would change Node's own token rules.
+		return value, false, supportedHostNodeOptions(value)
+	}
+	switch name {
+	case "NODE_PATH", "SSL_CERT_DIR", "LD_LIBRARY_PATH", "PYTHONPATH", "PERL5LIB", "RUBYLIB":
+		parts := strings.Split(value, string(os.PathListSeparator))
+		changed := false
+		for index, part := range parts {
+			translated, partChanged, supported := translateHostEnvironmentPath(part, root)
+			if !supported {
+				return value, false, false
+			}
+			parts[index], changed = translated, changed || partChanged
+		}
+		return strings.Join(parts, string(os.PathListSeparator)), changed, true
+	case "LD_PRELOAD":
+		if strings.TrimSpace(value) != "" {
+			return value, false, false
+		}
+	}
+	return translateHostEnvironmentPath(value, root)
+}
+
+func supportedHostNodeOptions(value string) bool {
+	if len(value) > 4096 || strings.ContainsAny(value, "\"'\\\x00") {
+		return false
+	}
+	options := strings.Fields(value)
+	if len(options) > 128 {
+		return false
+	}
+	for index := 0; index < len(options); index++ {
+		option, argument, assigned := strings.Cut(options[index], "=")
+		switch option {
+		case "--enable-source-maps", "--no-warnings", "--trace-warnings", "--trace-deprecation", "--throw-deprecation", "--no-deprecation", "--abort-on-uncaught-exception":
+			if assigned {
+				return false
+			}
+		case "--max-old-space-size", "--max_old_space_size", "--max-semi-space-size", "--max_semi_space_size", "--stack-size", "--stack_size":
+			if !assigned {
+				index++
+				if index >= len(options) {
+					return false
+				}
+				argument = options[index]
+			}
+			limit, err := strconv.ParseUint(argument, 10, 32)
+			if err != nil || limit == 0 {
+				return false
+			}
+		case "--unhandled-rejections":
+			if !assigned || (argument != "strict" && argument != "throw" && argument != "warn" && argument != "warn-with-error-code" && argument != "none") {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func hostManagerEnvironmentPath(name string) bool {
+	switch name {
+	case "HOME", "PATH", "SHELL", "PWD", "OLDPWD", "TMPDIR", "TMP", "TEMP", "XDG_RUNTIME_DIR", "SSH_AUTH_SOCK", "MEMORY_PRESSURE_WATCH", "CPU_PRESSURE_WATCH", "IO_PRESSURE_WATCH",
+		"PM2_HOME", "PM2_AGENT_HOME", "pm_out_log_path", "pm_err_log_path", "pm_pid_path", "exec_interpreter",
+		"NVM_DIR", "NVM_BIN", "BUN_INSTALL", "PNPM_HOME", "GOPATH", "GOROOT", "GOCACHE", "GOMODCACHE":
+		return true
+	}
+	return false
 }
 
 func selectedHostRecoveryCandidate(detection DetectionResult) *DetectedCandidate {
@@ -426,6 +524,7 @@ func hostCommandForContainer(command []string, root, recipe string) ([]string, e
 		return nil, ErrRecoveryBlocked
 	}
 	out := append([]string{}, command...)
+	nodeCommand := filepath.Base(command[0]) == "node" || filepath.Base(command[0]) == "nodejs"
 	for index, arg := range command {
 		if strings.ContainsRune(arg, 0) || len(arg) > 4096 {
 			return nil, ErrRecoveryBlocked
@@ -433,6 +532,23 @@ func hostCommandForContainer(command []string, root, recipe string) ([]string, e
 		if index == 0 && (filepath.Base(arg) == "node" || filepath.Base(arg) == "nodejs") {
 			out[index] = "node"
 			continue
+		}
+		if strings.HasPrefix(arg, "-") {
+			flag, operand, assigned := strings.Cut(arg, "=")
+			if assigned && (filepath.IsAbs(operand) || strings.HasPrefix(operand, "file:") || strings.HasPrefix(operand, "../")) {
+				translated, changed, supported := translateHostEnvironmentPath(operand, root)
+				if !supported || ((filepath.IsAbs(operand) || strings.HasPrefix(operand, "file:/")) && !changed) {
+					return nil, ErrRecoveryBlocked
+				}
+				out[index] = flag + "=" + translated
+				continue
+			}
+			if nodeCommand && ((strings.HasPrefix(arg, "-r/") || strings.HasPrefix(arg, "-r../")) || strings.HasPrefix(arg, "-e") || strings.HasPrefix(arg, "-p") || flag == "--eval" || flag == "--print") {
+				return nil, ErrRecoveryBlocked
+			}
+		}
+		if clean := filepath.Clean(arg); clean == ".." || strings.HasPrefix(clean, "../") {
+			return nil, ErrRecoveryBlocked
 		}
 		if arg == root || strings.HasPrefix(arg, root+string(filepath.Separator)) {
 			relative, err := filepath.Rel(root, arg)

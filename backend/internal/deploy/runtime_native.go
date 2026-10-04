@@ -34,6 +34,7 @@ type NativeBaselineMetadata struct {
 	SourceRoot          string            `json:"sourceRoot,omitempty"`
 	SourceDigest        string            `json:"sourceDigest,omitempty"`
 	SourceExclusions    []string          `json:"sourceExclusions,omitempty"`
+	SourcePrivateFence  bool              `json:"sourcePrivateFence,omitempty"`
 }
 
 func NativeBaselineRuntimeInput(capture *procs.HostWorkloadCapture, releaseID int64) (ReleaseRuntimeInput, error) {
@@ -167,7 +168,13 @@ func (o *NativeRuntimeOwner) capture(ctx context.Context, runtime ReleaseRuntime
 		if !filepath.IsAbs(metadata.SourceRoot) || !contentDigestRE.MatchString(metadata.SourceDigest) || source.Validate() != nil {
 			return nil, metadata, ErrInvalidPlan
 		}
-		digest, err := localDirectoryDigest(ctx, hostexec.HostPath(metadata.SourceRoot), metadata.SourceExclusions)
+		var digest string
+		var err error
+		if metadata.SourcePrivateFence {
+			digest, err = nativeDirectoryDigest(ctx, hostexec.HostPath(metadata.SourceRoot), metadata.SourceExclusions)
+		} else {
+			digest, err = localDirectoryDigest(ctx, hostexec.HostPath(metadata.SourceRoot), metadata.SourceExclusions)
+		}
 		if err != nil || digest != metadata.SourceDigest {
 			return nil, metadata, fmt.Errorf("%w: the original source tree changed; restore the captured source before controlling its native baseline", procs.ErrHostWorkloadChanged)
 		}

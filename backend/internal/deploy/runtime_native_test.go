@@ -221,6 +221,50 @@ func TestNativeBaselineRestoresAfterFailedStop(t *testing.T) {
 	}
 }
 
+func TestNativeBaselineSourceFenceIncludesPrivateFilesAndRootPermissions(t *testing.T) {
+	for _, change := range []string{"private content", "private addition", "root permissions"} {
+		t.Run(change, func(t *testing.T) {
+			owner, manager, runtime := nativeFixture(t)
+			root := t.TempDir()
+			private := filepath.Join(root, ".npmrc")
+			if err := os.WriteFile(private, []byte("private original fixture"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			digest, err := nativeDirectoryDigest(t.Context(), root, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var metadata NativeBaselineMetadata
+			if json.Unmarshal(runtime.Metadata, &metadata) != nil {
+				t.Fatal("fixture metadata unavailable")
+			}
+			metadata.SourceRoot, metadata.SourceDigest, metadata.SourcePrivateFence = root, digest, true
+			runtime.Metadata = mustJSON(metadata)
+			if err := owner.StartExisting(t.Context(), runtime, nil, nil); err != nil {
+				t.Fatal("unchanged private native source was refused")
+			}
+			manager.actions = nil
+			switch change {
+			case "private content":
+				err = os.WriteFile(private, []byte("different private fixture"), 0600)
+			case "private addition":
+				err = os.WriteFile(filepath.Join(root, "added.pem"), []byte("different private fixture"), 0600)
+			case "root permissions":
+				err = os.Chmod(root, 0750)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := owner.Stop(t.Context(), runtime, RuntimePlanConfig{}, nil, false, nil); !errors.Is(err, procs.ErrHostWorkloadChanged) {
+				t.Fatal("private file or source-root permission drift was accepted")
+			}
+			if len(manager.actions) != 0 {
+				t.Fatal("drifted source mutated the original manager")
+			}
+		})
+	}
+}
+
 func TestNativeBaselineCandidateRestartsExactBaselineForRollback(t *testing.T) {
 	owner, manager, runtime := nativeFixture(t)
 	baseline := ReleaseRuntimeInput{ReleaseID: runtime.ReleaseID, Kind: runtime.Kind, RuntimeID: runtime.RuntimeID, Host: "127.0.0.1", Port: 3000, Metadata: runtime.Metadata}

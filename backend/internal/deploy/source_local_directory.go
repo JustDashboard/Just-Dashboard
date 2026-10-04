@@ -73,17 +73,33 @@ func (a *HostSourceAnalyzer) inspectLocalDirectory(ctx context.Context, source D
 }
 
 func privateSourceEntry(name string) bool {
-	if name == ".env" || strings.HasPrefix(name, ".env.") {
+	lower := strings.ToLower(name)
+	if lower == ".env" || strings.HasPrefix(lower, ".env.") {
 		return true
 	}
-	switch strings.ToLower(name) {
-	case ".pm2", ".ssh", ".gnupg", "id_rsa", "id_ed25519", "credentials.json", "service-account.json":
+	switch lower {
+	case ".pm2", ".ssh", ".gnupg", ".aws", ".kube", ".docker", ".dockercfg", ".npmrc", ".yarnrc.yml", ".netrc", ".pypirc", ".git-credentials", ".gitconfig",
+		"id_rsa", "id_ed25519", "credentials.json", "service-account.json":
+		return true
+	}
+	switch filepath.Ext(lower) {
+	case ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore":
 		return true
 	}
 	return false
 }
 
 func localDirectoryDigest(ctx context.Context, root string, excludeLists ...[]string) (string, error) {
+	return localDirectoryDigestWithPolicy(ctx, root, false, excludeLists...)
+}
+
+func nativeDirectoryDigest(ctx context.Context, root string, exclusions []string) (string, error) {
+	// Native restart authority still reads the original tree. Fence private
+	// file contents and ownership there without copying those files into builds.
+	return localDirectoryDigestWithPolicy(ctx, root, true, exclusions)
+}
+
+func localDirectoryDigestWithPolicy(ctx context.Context, root string, native bool, excludeLists ...[]string) (string, error) {
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return "", fmt.Errorf("%w: local source root is unavailable", ErrInvalidSource)
@@ -103,7 +119,7 @@ func localDirectoryDigest(ctx context.Context, root string, excludeLists ...[]st
 		if err != nil {
 			return err
 		}
-		if relative == "." {
+		if relative == "." && !native {
 			return nil
 		}
 		for _, list := range excludeLists {
@@ -117,7 +133,7 @@ func localDirectoryDigest(ctx context.Context, root string, excludeLists ...[]st
 		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".just-dashboard") {
 			return filepath.SkipDir
 		}
-		if privateSourceEntry(entry.Name()) {
+		if !native && privateSourceEntry(entry.Name()) {
 			if entry.IsDir() {
 				return filepath.SkipDir
 			}
@@ -151,6 +167,19 @@ func localDirectoryDigest(ctx context.Context, root string, excludeLists ...[]st
 			}
 			fileHash := sha256.New()
 			n, readErr := io.Copy(fileHash, io.LimitReader(contextSourceReader{ctx, file}, limits.MaxBytes-total+1))
+			if native && readErr == nil {
+				after, statErr := file.Stat()
+				entryAfter, entryErr := os.Lstat(path)
+				if statErr != nil || entryErr != nil || !os.SameFile(info, after) || !os.SameFile(info, entryAfter) || info.Size() != after.Size() || !info.ModTime().Equal(after.ModTime()) || info.Mode() != after.Mode() {
+					readErr = ErrSourceUnavailable
+				} else {
+					beforeOwner, beforeOK := info.Sys().(*syscall.Stat_t)
+					afterOwner, afterOK := after.Sys().(*syscall.Stat_t)
+					if !beforeOK || !afterOK || beforeOwner.Uid != afterOwner.Uid || beforeOwner.Gid != afterOwner.Gid {
+						readErr = ErrSourceUnavailable
+					}
+				}
+			}
 			file.Close()
 			total += n
 			if readErr != nil || total > limits.MaxBytes {
@@ -160,11 +189,21 @@ func localDirectoryDigest(ctx context.Context, root string, excludeLists ...[]st
 		default:
 			return fmt.Errorf("%w: local source contains unsupported sockets, devices or special files", ErrInvalidSource)
 		}
+		var uid, gid *uint32
+		if native {
+			ownership, ok := info.Sys().(*syscall.Stat_t)
+			if !ok {
+				return fmt.Errorf("%w: source ownership is unavailable", ErrSourceUnavailable)
+			}
+			uid, gid = &ownership.Uid, &ownership.Gid
+		}
 		encoded, _ := json.Marshal(struct {
 			Path     string
 			Mode     uint32
 			Contents string
-		}{relative, uint32(mode.Perm()), contents})
+			UID      *uint32 `json:",omitempty"`
+			GID      *uint32 `json:",omitempty"`
+		}{relative, uint32(mode.Perm()), contents, uid, gid})
 		_, _ = hash.Write(encoded)
 		_, _ = hash.Write([]byte{0})
 		return nil

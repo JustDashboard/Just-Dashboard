@@ -7,6 +7,11 @@ its digest fences every later materialization. Copies are private, bounded to 10
 configuration. `.git`, dashboard build output, private configuration names such as `.env`, and
 explicit `excludePaths` are omitted. Linked application data directories are excluded from the
 source digest and retained as runtime mounts rather than copied from a running database.
+Recognizable registry/account credentials, cloud/SSH configuration and key/certificate/keystore
+filenames are also omitted and require explicit application-source review. Native restart evidence
+uses a separate bounded original-tree digest including private contents and ownership; those private
+values are never copied into builds or exposed as metadata. A native baseline therefore refuses new
+or altered private startup files even when the desired build copy excludes them.
 
 Recovered PM2 and simple systemd applications use the original interpreter major (the supported catalogue supplies its patch and container OS) when a supported
 Node recipe can represent it, or a reviewed existing Dockerfile. The managed command keeps argument
