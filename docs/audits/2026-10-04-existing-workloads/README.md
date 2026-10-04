@@ -59,7 +59,7 @@ were enqueued. [Sanitized evidence](managed-api-continuity.json).
 ## Real managed Compose lifecycle
 
 The fixture declared five services, with four existing containers and two initially running. Adoption
-preserved their identities/settings and had zero failures across 80 continuous HTTP checks. An
+preserved their identities/settings and had zero failures across 137 continuous HTTP checks. An
 intentional first readiness failure restored the original four-container/two-running baseline and
 persistent volume data. The failed run correctly finished `failed` before activation; restoration
 was checked independently rather than inferred from its status.
@@ -68,7 +68,7 @@ A subsequent ordinary Deploy changes succeeded, starting the five-service review
 rollback succeeded and restored exactly the original four containers' service/replica set, two
 running services and the missing fifth service remaining absent. Named-volume data and HTTP survived.
 An external one-off container under the same Compose project was untouched throughout. The run passed
-in 30.27 seconds after the final population and cleanup guards.
+in 42.31 seconds after the final configuration, population and cleanup guards.
 [Sanitized lifecycle evidence](managed-compose-lifecycle.json).
 
 ## Real existing-services Compose lifecycle
@@ -76,11 +76,11 @@ in 30.27 seconds after the final population and cleanup guards.
 A separate real fixture declared five services, with four existing containers and two running, while
 the fifth service's image was deliberately unavailable. Explicit `existing_services` recovery listed
 and acknowledged that exclusion. Adoption preserved all existing stopped/running containers and had
-80 HTTP samples with zero failures. A failed first deployment restored the original runtime;
+120 HTTP samples with zero failures. A failed first deployment restored the original runtime;
 a successful Deploy started only the four reviewed services, and baseline rollback restored the
 original four-container/two-running set. Persistent volume data and an external one-off were retained.
-The unavailable service was never created. The final run passed in 29.51 seconds with the complete
-included-service population guard.
+The unavailable service was never created. The final run passed in 42.51 seconds with the final configuration and
+included-service population guards.
 [Sanitized evidence](managed-scoped-compose-lifecycle.json).
 
 ## Real standalone Docker lifecycle
@@ -89,7 +89,7 @@ An isolated container with a persistent volume, custom Docker network and aliase
 changing its ID, PID, start time or settings. A failed first deployment restored the original
 container ID and HTTP service. A successful ordinary deployment preserved the image, resource
 settings, persistent data, original container name and network aliases. Baseline rollback then
-succeeded with the same data and HTTP response. The run passed in 11.07 seconds.
+succeeded with the same data and HTTP response. The run passed in 18.28 seconds.
 [Sanitized lifecycle evidence](managed-container-lifecycle.json).
 
 ## Real n8n data lifecycle
@@ -120,7 +120,7 @@ Recovery exported its filesystem without pause/stop/exec, verified its platform/
 created a private, reusable recovery image. Adoption retained the original ID/PID/start/settings;
 repeat capture used the same cached image. An intentionally failed first deployment restored the
 original container ID, and a successful managed deployment and baseline rollback preserved its
-persistent volume, name and network alias. The final run passed in 20.36 seconds, including the
+persistent volume, name and network alias. The final run passed in 27.82 seconds, including the
 staging-space reservation checks.
 [Sanitized evidence](managed-deleted-image-lifecycle.json).
 
@@ -169,7 +169,7 @@ cd backend
 JD_WORKLOAD_IMPORT_LIVE=1 JD_WORKLOAD_IMPORT_EVIDENCE_DIR=/tmp/jd-managed-api-proof \
   go test ./internal/api -run '^TestLiveWorkloadAdoptionKeepsFourContainerStackAndHTTPServiceUnchanged$' -count=1 -v
 JD_DOCKER_ADOPTION_LIVE=1 JD_ADOPTION_EVIDENCE_DIR=/tmp/jd-managed-lifecycle-proof \
-  go test ./internal/deploy -run '^TestLiveManaged(Compose|StandaloneContainer)AdoptionAndRollback$' -count=1 -v
+  go test ./internal/deploy -run '^TestLiveManaged(Compose|ScopedCompose|StandaloneContainer|DeletedImageContainer)AdoptionAndRollback$' -count=1 -v
 ```
 
 The opt-in native browser server uses a temporary authenticated database and the real Docker socket;
