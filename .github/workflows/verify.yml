@@ -325,6 +325,14 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
+      - name: Upgrade the Docker daemon
+        # The hosted image ships Docker 28, which refuses a fixed container
+        # address on a network with an automatic subnet; the database fixture
+        # holds an address that way, as the release host's daemon allows.
+        if: matrix.name == 'database'
+        run: |
+          curl -fsSL https://get.docker.com | sudo sh
+          docker version --format '{{.Server.Version}}'
       - name: Live fixtures
         env:
           JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
