@@ -393,7 +393,7 @@ func NewDeploymentChecker(
 	runs *OrchestrationStore,
 	planning *PlanningStore,
 	sources *HostSourceAnalyzer,
-	observer *HostPreflightObserver,
+	observer PreflightObserver,
 ) *DeploymentChecker {
 	checker := &DeploymentChecker{
 		runs: runs, planning: planning,
@@ -405,7 +405,16 @@ func NewDeploymentChecker(
 	if sources != nil {
 		checker.sources = sources
 	}
-	if observer != nil {
+	switch typed := observer.(type) {
+	case *HostPreflightObserver:
+		if typed != nil {
+			checker.observer = typed
+		}
+	case *NativePreflightObserver:
+		if typed != nil {
+			checker.observer = typed
+		}
+	default:
 		checker.observer = observer
 	}
 	return checker

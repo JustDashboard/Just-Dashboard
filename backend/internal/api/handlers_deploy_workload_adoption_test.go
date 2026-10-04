@@ -142,4 +142,46 @@ func TestWorkloadAdoptionAPIRecoversReviewsAndRegistersWithoutDockerMutations(t 
 	if mutations.Load() != 0 {
 		t.Fatalf("recovery mutated Docker %d times", mutations.Load())
 	}
+	// Settings edits use the ordinary source endpoint, but can only change
+	// the desired recipe. The captured release and its sealed values remain
+	// the rollback baseline even when the operator changes an image or command.
+	base := fmt.Sprintf("/api/v1/deploy/%d/environments/%d", result.ProjectID, result.EnvironmentID)
+	configuration, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), result.ProjectID, result.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedSource := *draft.Data.Source
+	changedSource.ComposeFiles = append([]deploy.ComposeDocument(nil), changedSource.ComposeFiles...)
+	changedSource.ComposeFiles[0].Content = "services: [broken YAML"
+	invalid := doPlanningJSON(t, c, http.MethodPut, base+"/source", deploymentSourceUpdateRequest{Revision: configuration.Revision, DraftSourceConfig: changedSource})
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("invalid source edit %d %s", invalid.Code, invalid.Body.String())
+	}
+	unchanged, err := s.modules.deployPlanning.EnvironmentConfiguration(t.Context(), result.ProjectID, result.EnvironmentID)
+	if err != nil || unchanged.Revision != configuration.Revision {
+		t.Fatalf("refused source advanced revision: %+v %v", unchanged, err)
+	}
+	changedSource.ComposeFiles[0].Content = strings.Replace(draft.Data.Source.ComposeFiles[0].Content, "300", "301", 1)
+	if changedSource.ComposeFiles[0].Content == draft.Data.Source.ComposeFiles[0].Content {
+		t.Fatal("fixture command was not captured")
+	}
+	edited := doPlanningJSON(t, c, http.MethodPut, base+"/source", deploymentSourceUpdateRequest{Revision: configuration.Revision, DraftSourceConfig: changedSource})
+	if edited.Code != http.StatusOK {
+		t.Fatalf("valid source edit %d %s", edited.Code, edited.Body.String())
+	}
+	pending, err := s.modules.deployPlanning.PendingState(t.Context(), result.ProjectID, result.EnvironmentID)
+	if err != nil || !pending.Pending {
+		t.Fatalf("source edit was not pending: %+v %v", pending, err)
+	}
+	liveAfter, err := s.modules.deployRuns.LiveRelease(t.Context(), result.EnvironmentID)
+	if err != nil || liveAfter.Release.ID != live.Release.ID || string(liveAfter.Release.Provenance) != string(live.Release.Provenance) || liveAfter.Release.ConfigDigest != live.Release.ConfigDigest {
+		t.Fatalf("source edit replaced the live baseline: %v", err)
+	}
+	variablesAfter, err := s.modules.deployPlanning.OpenRunScopedVariables(t.Context(), live.Release.RunID, result.EnvironmentID, "runtime")
+	if err != nil || len(variablesAfter) != len(variables) || variablesAfter[0].Value != variables[0].Value {
+		t.Fatalf("source edit changed original private settings: %v", err)
+	}
+	if mutations.Load() != 0 {
+		t.Fatalf("source review mutated Docker %d times", mutations.Load())
+	}
 }

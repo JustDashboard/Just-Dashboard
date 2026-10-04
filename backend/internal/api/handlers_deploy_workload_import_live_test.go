@@ -26,7 +26,7 @@ import (
 // This fixture owns only its unique Compose project and the temporary source
 // directory. Import is checked against a separate test database, never the
 // installed dashboard's records or any pre-existing workload.
-func TestLiveWorkloadImportKeepsFourContainerStackAndHTTPServiceUnchanged(t *testing.T) {
+func TestLiveWorkloadAdoptionKeepsFourContainerStackAndHTTPServiceUnchanged(t *testing.T) {
 	if os.Getenv("JD_WORKLOAD_IMPORT_LIVE") != "1" {
 		t.Skip("set JD_WORKLOAD_IMPORT_LIVE=1 on a Docker host with caddy:2-alpine already pulled")
 	}
@@ -54,7 +54,7 @@ func TestLiveWorkloadImportKeepsFourContainerStackAndHTTPServiceUnchanged(t *tes
     image: caddy:2-alpine
     command: [caddy, file-server, --root, /www, --listen, ":8080"]
     ports: ["127.0.0.1::8080"]
-    volumes: ["./web:/www:ro"]
+    volumes: ["./web:/www:ro", "caddy_data:/data", "caddy_config:/config"]
     environment:
       FIXTURE_PASSWORD: import-fixture-secret-retained-in-place
     restart: unless-stopped
@@ -71,6 +71,8 @@ func TestLiveWorkloadImportKeepsFourContainerStackAndHTTPServiceUnchanged(t *tes
     command: [sleep, "300"]
 volumes:
   persistent: {}
+  caddy_data: {}
+  caddy_config: {}
 `
 	if err := os.WriteFile(composePath, []byte(compose), 0600); err != nil {
 		t.Fatal(err)
@@ -95,6 +97,9 @@ volumes:
 	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
 	s.modules.pm2, s.modules.systemd = nil, nil
 	s.Cfg.ComposeRoots, s.Cfg.DeployRoots = []string{root}, []string{root}
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, []string{root})
+	s.modules.deploySources = deploy.NewHostSourceAnalyzer([]string{root}, []string{root}, filepath.Join(s.Cfg.DataDir, "detect"), s.modules.docker, s.modules.deployPlanning)
+	s.modules.deployPreflight = deploy.NewHostPreflightObserver([]string{root}, s.Cfg.DataDir, s.modules.docker)
 	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "workload-live-proof", auth.RoleAdmin)}
 	containers, err := s.modules.docker.ListContainersWithLabels(t.Context(), map[string]string{"com.docker.compose.project": project})
 	if err != nil || len(containers) != 4 {
@@ -202,16 +207,41 @@ volumes:
 	if strings.Contains(inspected.Body.String(), "import-fixture-secret-retained-in-place") {
 		t.Fatal("source environment leaked into import response")
 	}
-	registered := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/import/register", map[string]any{"key": candidate.Key, "name": project, "digest": candidate.Digest})
-	if registered.Code != http.StatusCreated {
-		current, _ := s.importedWorkload(t.Context(), candidate.Key)
-		initialJSON, _ := json.Marshal(candidate)
-		currentJSON, _ := json.Marshal(current)
-		t.Logf("initial=%s current=%s", initialJSON, currentJSON)
-		t.Fatalf("register = %d %s", registered.Code, registered.Body.String())
+	recovered := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/import/recover", map[string]any{"key": candidate.Key, "name": project, "digest": candidate.Digest})
+	if recovered.Code != http.StatusCreated {
+		for _, id := range ids {
+			if captured, err := s.modules.docker.CaptureAdoptionContainer(t.Context(), id); err == nil {
+				t.Logf("fixture writable changes %s: %+v", captured.Inspection.Name, captured.Changes)
+			}
+		}
+		t.Fatalf("recover = %d %s", recovered.Code, recovered.Body.String())
+	}
+	if strings.Contains(recovered.Body.String(), "import-fixture-secret-retained-in-place") {
+		t.Fatal("capture leaked into recovered draft")
+	}
+	var draft deploy.Draft
+	decodePlanningResponse(t, recovered.Body.Bytes(), &draft)
+	checked := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/drafts/"+draft.ID+"/preflight", map[string]any{"revision": draft.Revision})
+	if checked.Code != http.StatusOK {
+		t.Fatalf("preflight = %d %s", checked.Code, checked.Body.String())
+	}
+	var review struct {
+		Draft deploy.Draft `json:"draft"`
+	}
+	decodePlanningResponse(t, checked.Body.Bytes(), &review)
+	draft = review.Draft
+	ack := []string{}
+	for _, finding := range draft.Findings {
+		if finding.Severity == deploy.PreflightWarning {
+			ack = append(ack, finding.Code)
+		}
+	}
+	adopted := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/import/adopt", importAdoptRequest{DraftID: draft.ID, Revision: draft.Revision, AcknowledgedWarnings: ack})
+	if adopted.Code != http.StatusCreated {
+		t.Fatalf("adopt = %d %s", adopted.Code, adopted.Body.String())
 	}
 	var result deploy.DraftCommitResult
-	decodePlanningResponse(t, registered.Body.Bytes(), &result)
+	decodePlanningResponse(t, adopted.Body.Bytes(), &result)
 	stopRequests()
 	after := snapshot()
 	if !bytes.Equal(before, after) {
@@ -229,14 +259,18 @@ volumes:
 	}
 	for _, table := range []string{"deploy_runs", "deploy_releases", "deploy_release_runtimes", "deploy_variable_revisions"} {
 		var count int
-		if err := s.Store.DB.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("import created %s rows=%d err=%v", table, count, err)
+		if err := s.Store.DB.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count == 0 {
+			t.Fatalf("adoption lacks %s rows=%d err=%v", table, count, err)
 		}
+	}
+	var queued int
+	if err := s.Store.DB.QueryRow(`SELECT count(*) FROM deploy_runs WHERE state NOT IN ('succeeded','failed','cancelled')`).Scan(&queued); err != nil || queued != 0 {
+		t.Fatalf("adoption enqueued a runtime change: %d %v", queued, err)
 	}
 	proof := map[string]any{
 		"project": project, "importedProjectId": result.ProjectID, "containers": 4, "running": 2,
 		"containerIdentityConfigurationMountNetworkPortStartTimesUnchanged": true,
-		"sourceComposeUnchanged": true, "environmentValuesCopied": false, "deploymentRunsCreated": 0,
+		"sourceComposeUnchanged": true, "environmentValuesCopiedAndSealed": true, "completedMigrationRuns": 1, "deploymentRunsEnqueued": 0,
 		"persistentVolumeBytesUnchanged": true,
 		"httpRequestsDuringImport":       requests.Load(), "httpFailures": failures.Load(),
 	}
@@ -248,7 +282,7 @@ volumes:
 		if err := os.MkdirAll(destination, 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(destination, "live-workload-import.json"), append(encoded, '\n'), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(destination, "live-workload-adoption.json"), append(encoded, '\n'), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}

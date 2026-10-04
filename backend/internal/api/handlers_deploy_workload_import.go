@@ -498,7 +498,11 @@ func (s *Server) recoverWorkload(ctx context.Context, candidate *deploy.Workload
 		if err != nil {
 			return nil, err
 		}
-		return deploy.RecoverHostWorkload(ctx, *candidate, capture, s.modules.deploySources, paths, root)
+		recovered, recoverErr := deploy.RecoverHostWorkload(ctx, *candidate, capture, s.modules.deploySources, paths, root)
+		if recoverErr == nil && recovered != nil && recovered.Adoption != nil && len(recovered.Adoption.Blockers) != 0 {
+			recoverErr = deploy.ErrRecoveryBlocked
+		}
+		return recovered, recoverErr
 	}
 }
 
@@ -537,7 +541,7 @@ func (s *Server) captureHostWorkload(ctx context.Context, candidate *deploy.Work
 }
 
 func recoveryError(recovered *deploy.RecoveredWorkload, err error) error {
-	if errors.Is(err, deploy.ErrRecoveryBlocked) && recovered != nil && recovered.Adoption != nil {
+	if errors.Is(err, deploy.ErrRecoveryBlocked) && recovered != nil && recovered.Adoption != nil && len(recovered.Adoption.Blockers) > 0 {
 		return httpx.Err(http.StatusUnprocessableEntity, "recovery_blocked", strings.Join(recovered.Adoption.Blockers, "\n"))
 	}
 	if errors.Is(err, procs.ErrHostWorkloadChanged) {
