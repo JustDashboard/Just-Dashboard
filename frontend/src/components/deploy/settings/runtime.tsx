@@ -19,7 +19,7 @@ import type {
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Meter, utilisationTone } from "@/components/meter"
-import { ProductGlyph, imageProduct } from "@/components/product-logo"
+import { ProductGlyph, imageProduct, portProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import {
@@ -50,6 +50,15 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { Segments } from "@/components/deploy/settings/segments"
+import {
+  DEFAULT_GRACE_SECONDS,
+  DEFAULT_STOP_SIGNAL,
+  MAX_SHUTDOWN_SECONDS,
+  STOP_SIGNALS,
+  shutdownSeconds,
+  shutdownSummary,
+} from "@/components/deploy/settings/shutdown"
 import {
   HealthChecks,
   hasReadiness,
@@ -70,7 +79,7 @@ import {
  * port or the host network cannot run two releases side by side, and
  * blue/green on such a plan used to be offered here and then refused at start.
  *
- * Two forms, two saves: Runtime (five sections, one PUT) and Health
+ * Two forms, two saves: Runtime (six sections, one PUT) and Health
  * checks. Each keeps its own draft keyed on its own saved value, so saving
  * one no longer restarts the other.
  *
@@ -152,6 +161,9 @@ const RUNTIME_FIELD_IDS: Record<string, string> = {
   "runtime.cpus": "runtime-cpus",
   "runtime.pidsLimit": "runtime-pids",
   "runtime.restartPolicy": "runtime-restart",
+  "runtime.stopSignal": "runtime-stop-signal",
+  "runtime.gracePeriodSeconds": "runtime-grace",
+  "runtime.drainSeconds": "runtime-drain",
   "runtime.maxRequestBodyMb": "runtime-max-body",
   "runtime.capabilities": "runtime-capabilities",
   "runtime.devices": "runtime-devices",
@@ -170,6 +182,9 @@ const FIELD_SECTION: Record<string, string> = {
   "runtime-pids": "resources",
   "runtime-strategy": "releases",
   "runtime-restart": "releases",
+  "runtime-stop-signal": "shutdown",
+  "runtime-grace": "shutdown",
+  "runtime-drain": "shutdown",
   "runtime-capabilities": "access",
   "runtime-devices": "access",
 }
@@ -290,9 +305,9 @@ function statuses(...items: React.ReactNode[]) {
 }
 
 /**
- * The Runtime form: five section heads — the image and command, where it
- * listens, what it may use, how releases replace each other, what it can
- * reach — and one save, because one PUT writes all of it.
+ * The Runtime form: six section heads — the image and command, where it
+ * listens, what it may use, how releases replace each other, how it is
+ * stopped, what it can reach — and one save, because one PUT writes all of it.
  */
 function RuntimeForm({
   projectId,
@@ -339,6 +354,7 @@ function RuntimeForm({
   const refusal = blueGreenRefusal(runtime, deployment.profile, method)
   const blueGreen = runtime.strategy === "blue_green"
   const failsNext = blueGreen && Boolean(refusal)
+  const portMark = portProduct(port)
 
   const submit = async () => {
     setError(undefined)
@@ -491,6 +507,7 @@ function RuntimeForm({
           >
             <InputGroup>
               <InputGroupAddon align="inline-start">
+                {portMark && <ProductGlyph id={portMark} />}
                 <InputGroupText className="font-mono">container :</InputGroupText>
               </InputGroupAddon>
               <InputGroupInput
@@ -769,6 +786,93 @@ function RuntimeForm({
             </SelectContent>
           </Select>
         </Field>
+      </SettingSection>
+
+      {/* A head that says what the three fields add up to, since the defaults
+          are not on any of them: the server stops a container with SIGTERM and
+          waits ten seconds before it kills it, whatever the image says. */}
+      <SettingSection
+        id="shutdown"
+        title="Shutdown"
+        state={
+          <span key={shutdownSummary(runtime)} className="block animate-rise">
+            {shutdownSummary(runtime)}
+          </span>
+        }
+        status={settingStatus({
+          dirty: draft.changed(["stopSignal", "gracePeriodSeconds", "drainSeconds"]),
+          refused: refusedIn("shutdown"),
+        })}
+      >
+        <Field
+          label="Stop signal"
+          info="What the container is sent when it is asked to stop. Most applications finish their work on SIGTERM; Node and Python programs that handle Ctrl-C only may want SIGINT, and nginx shuts down gracefully on SIGQUIT."
+          error={errorFor("runtime-stop-signal")}
+        >
+          <Segments
+            id="runtime-stop-signal"
+            label="Stop signal"
+            value={runtime.stopSignal || DEFAULT_STOP_SIGNAL}
+            options={STOP_SIGNALS.map((signal) => ({ value: signal, label: signal, mono: true }))}
+            disabled={!canEdit}
+            // The default is the field left out, as the server writes it back.
+            onChange={(stopSignal) =>
+              patch({ stopSignal: stopSignal === DEFAULT_STOP_SIGNAL ? undefined : stopSignal })
+            }
+          />
+        </Field>
+        <FieldRow>
+          <Field
+            label="Grace period"
+            htmlFor="runtime-grace"
+            info="How long the container has to exit after the stop signal before it is killed. Raise it for an application that finishes long requests or flushes a queue."
+            error={errorFor("runtime-grace")}
+          >
+            <InputGroup>
+              <InputGroupInput
+                id="runtime-grace"
+                type="number"
+                min={0}
+                max={MAX_SHUTDOWN_SECONDS}
+                value={runtime.gracePeriodSeconds ?? ""}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-grace"))}
+                className="font-mono"
+                placeholder={String(DEFAULT_GRACE_SECONDS)}
+                onChange={(event) =>
+                  patch({ gracePeriodSeconds: shutdownSeconds(event.target.value) })
+                }
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>seconds</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+          <Field
+            label="Drain period"
+            htmlFor="runtime-drain"
+            info="How long the previous release keeps running after a deployment has moved traffic to the new one, so requests already in flight can finish. Empty stops it at once."
+            error={errorFor("runtime-drain")}
+          >
+            <InputGroup>
+              <InputGroupInput
+                id="runtime-drain"
+                type="number"
+                min={0}
+                max={MAX_SHUTDOWN_SECONDS}
+                value={runtime.drainSeconds ?? ""}
+                readOnly={!canEdit}
+                aria-invalid={Boolean(errorFor("runtime-drain"))}
+                className="font-mono"
+                placeholder="0"
+                onChange={(event) => patch({ drainSeconds: shutdownSeconds(event.target.value) })}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>seconds</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+        </FieldRow>
       </SettingSection>
 
       <SettingSection

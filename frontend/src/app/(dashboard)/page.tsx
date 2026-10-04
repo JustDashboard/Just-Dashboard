@@ -17,7 +17,7 @@ import {
 } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { unusableCount } from "@/lib/db-connections"
-import { bytes, clock, duration, percent, plural, rate, relativeTime } from "@/lib/format"
+import { bytes, duration, percent, plural, rate, relativeTime } from "@/lib/format"
 import type {
   BackupJob,
   BackupRun,
@@ -27,7 +27,6 @@ import type {
   DeploymentFleet,
   Exposure,
   GitRepo,
-  MetricEvent,
   MountStats,
   TrafficPulse,
   UpdateReport,
@@ -39,8 +38,6 @@ import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metri
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
 import { Page, PageContext, PageState, Section } from "@/components/page"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Row, RowList } from "@/components/row-list"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
@@ -51,11 +48,11 @@ import { TopProcesses } from "@/components/metrics/top-processes"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { engineFor } from "@/components/database/engine"
-import { eventColor } from "@/components/metrics/metric-chart"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { serverAttention, verdictWith } from "@/components/overview/attention"
+import { ActivityPanel } from "@/components/overview/activity"
 import {
   ProductGlyphs,
   ProductLogos,
@@ -487,60 +484,6 @@ function DeploymentsSection({
 
 /** The fleet's own grid, one column short of it at the widest: two rows of three. */
 const PROJECT_GRID = "grid gap-3 lg:grid-cols-2 xl:grid-cols-3"
-
-/**
- * Deploys, backups, restarts and the actions that change things — the list
- * form of the marks on the metric charts.
- */
-function ActivityPanel({ events }: { events: MetricEvent[] }) {
-  const newestFirst = useMemo(() => [...events].reverse(), [events])
-
-  return (
-    <Panel plain>
-      <PanelHeader
-        title="Recent activity"
-        actions={
-          // A control's height, so this hairline meets the one under Top
-          // processes' toggle group across the gap rather than a step above it.
-          <span className="flex h-8 items-center text-hint text-muted-foreground">
-            Last 24 hours
-          </span>
-        }
-      />
-      <PanelBody
-        flush
-        className={
-          newestFirst.length === 0 ? "py-4" : "-mx-3 max-h-[23.5rem] overflow-y-auto px-3 py-1"
-        }
-      >
-        {newestFirst.length === 0 ? (
-          <p className="text-body text-muted-foreground">Nothing in the last 24 hours.</p>
-        ) : (
-          <RowList className="animate-rise">
-            {newestFirst.map((event, i) => (
-              <Row
-                key={`${event.ts}-${i}`}
-                leading={
-                  <span
-                    aria-hidden
-                    className="size-1.5 rounded-full"
-                    style={{ background: eventColor(event) }}
-                  />
-                }
-                title={event.title}
-                subtitle={`${relativeTime(event.ts)}${event.detail ? ` · ${event.detail}` : ""}`}
-                trailing={
-                  <span className="numeric text-hint text-muted-foreground">{clock(event.ts)}</span>
-                }
-                className="py-2.5"
-              />
-            ))}
-          </RowList>
-        )}
-      </PanelBody>
-    </Panel>
-  )
-}
 
 /**
  * A module that is genuinely absent on this host, as opposed to a poll that

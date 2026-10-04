@@ -4,6 +4,7 @@ import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { DeploymentDetectionChange, DeploymentDetectionProposal } from "@/lib/types"
+import { ProductGlyph, frameworkProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { frameworkLabel } from "@/components/deploy/vocabulary"
 import { proposedValue } from "@/components/deploy/settings/detection-changes"
@@ -43,11 +44,14 @@ export function DetectionProposalPanel({
     (variable) => variable.required || proposal.newVariables.includes(variable.name),
   )
   const detected = proposal.candidate
-  const detectedName = detected
-    ? `${detected.framework ? frameworkLabel(detected.framework) : detected.name}${
-        detected.root ? ` in ${detected.root}` : ""
-      }`
-    : ""
+  const framework = frameworkProduct(detected?.framework)
+  const detectedName = detected ? (
+    <>
+      {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+      {detected.framework ? frameworkLabel(detected.framework) : detected.name}
+      {detected.root ? ` in ${detected.root}` : ""}
+    </>
+  ) : null
   if (
     !proposal.elsewhere &&
     changes.length === 0 &&
@@ -58,7 +62,14 @@ export function DetectionProposalPanel({
       <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-hairline p-3 text-body">
         <span className="min-w-0 flex-1">
           Detection reads the source the way the plan builds it
-          {detected?.framework ? ` — ${frameworkLabel(detected.framework)}` : ""}.
+          {detected?.framework && (
+            <>
+              {" — "}
+              {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+              {frameworkLabel(detected.framework)}
+            </>
+          )}
+          .
         </span>
         {onDismiss && (
           <Button type="button" variant="ghost" size="xs" onClick={onDismiss}>
@@ -88,11 +99,14 @@ export function DetectionProposalPanel({
               </>
             ) : (
               <>
-                {detected
-                  ? `Read ${detectedName}${
-                      proposal.sourceRevision ? ` at ${proposal.sourceRevision.slice(0, 7)}` : ""
-                    }.`
-                  : "Detection found nothing to compare with the plan."}{" "}
+                {detected ? (
+                  <>
+                    Read {detectedName}
+                    {proposal.sourceRevision ? ` at ${proposal.sourceRevision.slice(0, 7)}` : ""}.
+                  </>
+                ) : (
+                  "Detection found nothing to compare with the plan."
+                )}{" "}
                 Applying changes the settings below; a deployment takes them once they are saved.
               </>
             )}
