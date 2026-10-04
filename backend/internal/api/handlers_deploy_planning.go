@@ -273,7 +273,7 @@ func (s *Server) handleDeploymentImportAdopt(w http.ResponseWriter, r *http.Requ
 	}
 	if draft.Data.Source.Mode != deploy.SourceModeExistingCheckout {
 		return httpx.Err(http.StatusConflict, "discovery_import_required",
-			"Discover and inspect the existing workload before importing it through /deploy/import/register.")
+			"Open Import existing in Deployments to inspect and recover this workload before adoption.")
 	}
 	preview, err := s.modules.deploySources.PreviewImport(r.Context(), *draft.Data.Source)
 	if err != nil {

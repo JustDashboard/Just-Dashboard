@@ -59,9 +59,10 @@ its original image/source before adoption.
 
 Compose recovery defaults to `all_services`, including every declared service. A separately reviewed
 `existing_services` scope includes every existing container, running or stopped, and explicitly lists
-only declarations with no container under `excludedServices`. The operator acknowledges one
-`compose_services_excluded` warning for each omitted declaration; Deploy changes does not create those
-services, and their original Compose definitions stay untouched. Retained dependencies, links,
+only declarations with no container under `excludedServices`. Recovery records one
+`compose_services_excluded` issue for each omitted declaration. Normal preflight turns each adoption
+warning into an `adoption_warning_N` finding, whose code must be acknowledged at commit. Deploy changes
+does not create the excluded services, and their original Compose definitions stay untouched. Retained dependencies, links,
 service namespaces, volumes-from or shared build contexts referring to an exclusion block recovery;
 the importer never removes those relationships to force a usable recipe. Unused resources belonging
 only to excluded declarations are omitted from the managed recipe without deleting existing resources.
