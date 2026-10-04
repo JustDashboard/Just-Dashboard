@@ -369,6 +369,8 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   sessions), `terminal` is the pane's (the compose runner needs copy/paste/search with no session at all)
   — and that split is what stops one keydown being handled twice. `shortcuts-dialog.tsx` is both cheatsheet
   and editor, because a read-only list is opened once and a hidden settings page never.
+  Ctrl/Cmd+K remains the shell's global command search: the window capture listener opens it before
+  xterm receives the keystroke, so opening search does not also alter the shell's current line.
 
 In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
