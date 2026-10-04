@@ -89,6 +89,9 @@ can later attach supported Compose source for builds. A native plain/dirty direc
 `local_directory`: a bounded content identity and private copy preserve uncommitted files without
 pretending they are a Git commit. Excluded persistent data remains linked rather than copied into
 an image. Source-copy containment, symlink checks and size/count limits fail closed.
+The dashboard-visible source directory must be the same filesystem object as the host directory.
+Custom deployment roots require matching host mounts; a similarly named directory inside the
+dashboard image cannot substitute for the original application's source.
 Review and advisory inspection read a bounded private copy with the same reviewed content digest;
 a changed directory requires fresh detection before inspection or building. PM2's process-specific
 Node IPC descriptor variables are omitted from the Docker environment and identified in the review.

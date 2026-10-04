@@ -55,6 +55,11 @@ applications can be migrated without operator compatibility checks.
    Native restart evidence hashes original private contents without publishing or copying them into
    images. Regression tests verify credential files do not enter staged build copies.
    Location: `source_local_directory.go:75` (`privateSourceEntry`).
+4. **Medium, host/container source identity:** a custom root may name an unrelated directory inside
+   the dashboard image when the host directory has not been mounted. Recovery requires filesystem
+   identity between the resolved dashboard-visible directory and its authoritative host path before
+   analyzing or committing a baseline. A regression rejects another directory with matching source
+   content and an unavailable host path. Location: `workload_adoption_host.go` (`hostSourceDirectoryMatches`).
 
 ## Real adapter validation
 

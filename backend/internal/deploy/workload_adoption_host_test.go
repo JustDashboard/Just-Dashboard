@@ -528,3 +528,23 @@ func TestHostSourceDriftIncludesKnownPrivateRuntimeFiles(t *testing.T) {
 		t.Fatal("known private startup configuration newer than the process was accepted")
 	}
 }
+
+func TestNativeSourceIdentityRejectsADifferentDirectoryWithMatchingContents(t *testing.T) {
+	original, shadow := t.TempDir(), t.TempDir()
+	for _, directory := range []string{original, shadow} {
+		writePlanningFixture(t, filepath.Join(directory, "server.js"), "same apparent source")
+	}
+	info, err := os.Stat(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hostSourceDirectoryMatches(info, original) {
+		t.Fatal("the same mapped source directory was refused")
+	}
+	if hostSourceDirectoryMatches(info, shadow) {
+		t.Fatal("a dashboard-image source directory replaced the original host directory")
+	}
+	if hostSourceDirectoryMatches(info, filepath.Join(shadow, "missing")) {
+		t.Fatal("an unavailable host source was accepted")
+	}
+}

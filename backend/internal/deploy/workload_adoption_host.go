@@ -50,6 +50,10 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		block("host_source_unavailable", "The original working directory is unavailable. Recover its source before managed migration.", "source.localPath")
 		return recovered, nil
 	}
+	if !hostSourceDirectoryMatches(info, hostexec.HostPath(root)) {
+		block("host_source_mount_mismatch", "The working directory visible to the dashboard does not match the original host directory. Mount this deployment root at its matching host path before recovering the application.", "source.localPath")
+		return recovered, nil
+	}
 	recovered.Source = DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: root}
 	for _, directory := range []string{"data", "uploads", "storage"} {
 		if info, err := os.Stat(filepath.Join(root, directory)); err == nil && info.IsDir() {
@@ -259,6 +263,11 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 // Procfs birth timestamps and filesystem wall-clock timestamps have different
 // precision. Only clear edits beyond that uncertainty are treated as known drift.
 const hostSourceClockTolerance = 2 * time.Second
+
+func hostSourceDirectoryMatches(local os.FileInfo, hostPath string) bool {
+	host, err := os.Stat(hostPath)
+	return err == nil && host.IsDir() && os.SameFile(local, host)
+}
 
 func knownHostSourceDrift(ctx context.Context, root string, capture *procs.HostWorkloadCapture, exclusions []string) (bool, error) {
 	var started int64
