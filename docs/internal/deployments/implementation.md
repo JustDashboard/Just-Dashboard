@@ -1431,14 +1431,22 @@ only renderer/executor/validation authority for their feature.
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the
-  source and the build/runtime/dependency/check rows verbatim and changes exactly three things: domains are
+  source and the build/runtime/dependency/check rows with these isolation changes: domains are
   dropped (a hostname belongs to one project), variables are flattened to name/sensitivity/scopes with every
   value cleared and `required` set (a secret's plaintext is never available to copy, and a reference names
   something scoped to the source project), and a managed Docker volume's literal name is re-derived with the
   same `<slug>-<hash>` shape a blueprint's own volumes already get (`blueprintVolumePrefix`, keyed on the new
   name and the old literal volume name so two mounts never collide) — committing the duplicate unchanged
-  would otherwise hand it the source project's own live volume. A linked or observed dependency, and a
-  bind-path mount, are left exactly as saved: nothing about their identity is owned by lifecycle re-derivation.
+  would otherwise hand it the source project's own live volume. Runtime ownership dependencies are
+  omitted and `composeProjectName` is cleared: a duplicate has no authority over the original runtime
+  or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
+  before a draft is created. Compose sources additionally need inspectable files without fixed
+  container names, external/fixed-name networks, inherited runtime namespaces, external links or
+  shared writable volumes. Project-scoped Compose volumes remain supported, including declarations
+  across override files; read-only host mounts and read-only external volumes may remain linked.
+  Compose aliases/merge keys and unsupported inclusions require a flattened independent copy for
+  review. The refusal explains which independent names, networks or storage must be configured;
+  duplication never rewrites or takes over the original resources.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
   are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
 
