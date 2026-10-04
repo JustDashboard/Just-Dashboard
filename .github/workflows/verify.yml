@@ -104,7 +104,11 @@ jobs:
           go version | tee "$RUNNER_TEMP/jd-ci/go-version.txt"
           go build ./... 2>&1 | tee "$RUNNER_TEMP/jd-ci/backend-build.txt"
           go vet ./... 2>&1 | tee "$RUNNER_TEMP/jd-ci/backend-vet.txt"
-          go test -count=1 -json ./... | tee "$RUNNER_TEMP/jd-ci/backend-tests.jsonl"
+          # ./internal/api is left to the race shards, which run every one of its
+          # tests (they skip only the budgets, and those live in ./internal/deploy).
+          # Serial, it was seven of this job's nine minutes.
+          # shellcheck disable=SC2046
+          go test -count=1 -json $(go list ./... | grep -v '/internal/api$') | tee "$RUNNER_TEMP/jd-ci/backend-tests.jsonl"
       - name: Retain backend evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -201,11 +205,13 @@ jobs:
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Ten shards: the build is under a minute of each, the tests are the rest,
+    # and at six the slowest shard ran twice as long as the fastest.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
-    name: browser (${{ matrix.shard }}/6)
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    name: browser (${{ matrix.shard }}/10)
     defaults:
       run:
         working-directory: frontend
@@ -240,7 +246,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
-          bunx playwright test --shard=${{ matrix.shard }}/6 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
+          bunx playwright test --shard=${{ matrix.shard }}/10 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

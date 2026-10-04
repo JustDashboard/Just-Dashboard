@@ -101,7 +101,8 @@ to the contribution terms above, including the additional licence grant to the p
   jobs run on GitHub's hosted runners, in parallel — the repository is public, so they cost nothing —
   and the two long suites are sharded: the race gate is nine jobs (`./internal/api` in five,
   `./internal/deploy` in three, the rest in one, split by `scripts/go-test-shard.sh`) and the browser
-  suite six (`playwright test --shard`). The latency budgets are asserted in the plain test run and
+  suite ten (`playwright test --shard`). The plain backend run leaves `./internal/api` to the race jobs,
+  which run all of its tests. The latency budgets are asserted in the plain test run and
   skipped under the race detector, which multiplies a SQLite read ten- to twenty-five-fold and so
   measures itself and the runner's load rather than the read. Go and Bun come from `go.mod` and
   `package.json`; dependencies use the frozen Bun lockfile, and the module, Bun, Playwright and Next
