@@ -105,6 +105,13 @@ dashboard image cannot substitute for the original application's source.
 Review and advisory inspection read a bounded private copy with the same reviewed content digest;
 a changed directory requires fresh detection before inspection or building. PM2's process-specific
 Node IPC descriptor variables are omitted from the Docker environment and identified in the review.
+PM2 uses the current frozen manager restart definition for application/interpreter argument arrays.
+PM2 rewrites process titles and omits those arrays from its process environment, so procfs cannot
+universally attest its running argv. Recovery blocks observable scalar restart-environment and
+interpreter discrepancies, retains existing script/cwd/account/PID checks, and requires explicit
+review of restart command/environment fidelity. Review a restart under PM2 before recovery when the
+manager definition cannot be verified against the running app; wrapper argv is never substituted as
+the application command.
 Node recipe recovery selects the supported catalogue image for the captured interpreter major;
 its patch version and container operating system can differ from the original host. Applications
 which rely on host packages, native dependencies or PM2 IPC need an appropriate Dockerfile and
@@ -252,6 +259,10 @@ before manager control; restore the captured source or use a separate managed ch
 This avoids claiming a restart of modified original files is an immutable release restoration.
 Before adoption, known runtime-source edits later than the active process birth time block recovery,
 including module or recognizable private startup-file edits while the entrypoint remains unchanged.
+Systemd unit/drop-in timestamps later than the same process birth plus tolerance also block recovery:
+`NeedDaemonReload=no` does not prove a reloaded unit matches the still-running process's original args
+or environment. Restore the running startup configuration or review a restart under systemd before
+fresh recovery.
 The comparison allows two seconds for procfs/filesystem clock precision and excludes reviewed data
 paths. A filesystem snapshot
 cannot attest every in-memory module, backdated file or dynamic setting: verify the actual running

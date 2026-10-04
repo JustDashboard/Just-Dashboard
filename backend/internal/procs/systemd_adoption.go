@@ -86,6 +86,7 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		out.Processes = live.Processes
 		out.Processes[0].State = unit.ActiveState
 		out.Processes[0].LogSources = []string{"journal:" + unit.Name}
+		blockKnownSystemdConfigurationDrift(out, paths)
 		current, currentProperties, err := s.Show(ctx, name)
 		if err != nil || current.MainPID != unit.MainPID || current.LoadState != "loaded" {
 			return nil, ErrHostWorkloadChanged
@@ -284,4 +285,28 @@ func ResolveHostAccount(name string) (uint32, uint32, error) {
 func volatileSystemdAuthorityPath(path string) bool {
 	path = filepath.Clean(path)
 	return path == "/run" || strings.HasPrefix(path, "/run/") || path == "/var/run" || strings.HasPrefix(path, "/var/run/")
+}
+
+func blockKnownSystemdConfigurationDrift(capture *HostWorkloadCapture, paths []string) {
+	started := int64(0)
+	for _, process := range capture.Processes {
+		if process.PID > 1 && process.CreateTime > 0 && (started == 0 || process.CreateTime < started) {
+			started = process.CreateTime
+		}
+	}
+	if started == 0 {
+		return
+	}
+	cutoff := time.UnixMilli(started).Add(2 * time.Second)
+	for _, path := range paths {
+		info, err := os.Stat(hostexec.HostPath(path))
+		if err != nil || !info.Mode().IsRegular() {
+			capture.Blockers = append(capture.Blockers, "The original unit or drop-in timestamps cannot be verified against the running process before migration.")
+			return
+		}
+		if info.ModTime().After(cutoff) {
+			capture.Blockers = append(capture.Blockers, "The systemd unit or drop-in files changed after this application started. Loaded manager policy can differ from its running command or environment even after daemon reload. Restore and review the actual running startup configuration, or verify the reviewed configuration by restarting under systemd before recovery.")
+			return
+		}
+	}
 }

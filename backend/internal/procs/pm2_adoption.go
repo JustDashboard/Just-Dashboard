@@ -64,6 +64,7 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 				return nil, ErrHostWorkloadChanged
 			}
 		}
+		blockPM2ManagerRuntimeDrift(capture, proc.ID, actual.Environment)
 		sourceFiles = append(sourceFiles, actual.SourcePath)
 		if actual.SourceDirectory != capture.SourceDirectory {
 			capture.Blockers = append(capture.Blockers, "The PM2 process has changed its working directory. Review its filesystem dependencies before migration.")
@@ -237,7 +238,7 @@ func parsePM2Capture(data []byte, account *user.User, namespace, name string) (*
 	out.ConfigurationDigest = captureDigest(out.OriginalConfig)
 	out.EnvironmentNames = captureEnvironmentNames(out.Environment)
 	out.Blockers = uniqueCaptureStrings(out.Blockers)
-	out.Warnings = []string{"The original PM2 account and configuration are retained as the baseline. Docker migration must preserve file permissions, data paths and interpreter dependencies.", "Native baseline replay requires the original PM2 daemon record and frozen source to remain available. A daemon reset can lose unsaved application records. Review a recoverable authority plan before cutover; missing manager authority causes restoration to refuse rather than implicitly recreating it."}
+	out.Warnings = []string{"PM2 migration uses its current manager restart definition for application and interpreter arguments. PM2 rewrites process titles and omits argument arrays from its process environment, so procfs cannot universally attest the running argument boundaries. Verify the restart command and environment match the running application, or review a restart under the original manager before recovery; retain that frozen manager definition for baseline replay.", "The original PM2 account and configuration are retained as the baseline. Docker migration must preserve file permissions, data paths and interpreter dependencies.", "Native baseline replay requires the original PM2 daemon record and frozen source to remain available. A daemon reset can lose unsaved application records. Review a recoverable authority plan before cutover; missing manager authority causes restoration to refuse rather than implicitly recreating it."}
 	return out, nil
 }
 
@@ -341,3 +342,41 @@ func uniqueCaptureStrings(values []string) []string {
 	}
 	return out
 }
+
+func blockPM2ManagerRuntimeDrift(capture *HostWorkloadCapture, id int, actual map[string]string) {
+	var configurations []map[string]json.RawMessage
+	if json.Unmarshal(capture.OriginalConfig, &configurations) != nil {
+		return
+	}
+	for _, config := range configurations {
+		if captureInt(config["pm_id"]) != id {
+			continue
+		}
+		var envelope map[string]json.RawMessage
+		_ = json.Unmarshal(config["env"], &envelope)
+		for key, value := range envelope {
+			// Metadata objects are not byte-string environment values. Their
+			// ambiguity is reviewed separately; visible scalar mismatches block.
+			expected, err := captureJSONEnvironment(mustCaptureJSON(map[string]json.RawMessage{key: value}))
+			if err != nil {
+				continue
+			}
+			if current, present := actual[key]; !present || current != expected[key] {
+				capture.Blockers = append(capture.Blockers, "The current PM2 restart environment differs from the running process. Review and restore its actual startup definition, or verify a reviewed restart under the original manager before migration.")
+				return
+			}
+			if flat, present := config[key]; present {
+				flatExpected, flatErr := captureJSONEnvironment(mustCaptureJSON(map[string]json.RawMessage{key: flat}))
+				if flatErr == nil && actual[key] != flatExpected[key] {
+					capture.Blockers = append(capture.Blockers, "The current PM2 restart environment differs from the running process. Review and restore its actual startup definition, or verify a reviewed restart under the original manager before migration.")
+					return
+				}
+			}
+		}
+		if value, present := actual["exec_interpreter"]; present && value != captureString(config["exec_interpreter"]) {
+			capture.Blockers = append(capture.Blockers, "The current PM2 interpreter definition differs from the running process. Review its actual startup interpreter before migration.")
+		}
+	}
+}
+
+func mustCaptureJSON(value any) json.RawMessage { raw, _ := json.Marshal(value); return raw }

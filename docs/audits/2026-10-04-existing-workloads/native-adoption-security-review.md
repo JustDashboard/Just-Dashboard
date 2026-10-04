@@ -40,7 +40,10 @@ applications can be migrated without operator compatibility checks.
    startup-file edits later than the verified process birth time, allowing two seconds for clock
    precision. Native control rechecks original module/private-file contents and directory ownership
    and permissions before manager mutation. Regression tests cover changed modules with an unchanged
-   entrypoint, private content/additions and source-root permission changes.
+   entrypoint, private content/additions and source-root permission changes. Known newer systemd
+   unit/drop-in timestamps also block with the same tolerance; daemon reload alone cannot prove that
+   loaded startup policy matches a still-running process. The portable regression preserves its live
+   PID while refusing newer manager configuration.
    Locations: `workload_adoption_host.go` (`knownHostSourceDrift`),
    `runtime_native.go` (`capture`) and `source_local_directory.go` (`nativeDirectoryDigest`).
 2. **High, native path/configuration loss:** library/interpreter filesystem dependencies may not
@@ -48,6 +51,9 @@ applications can be migrated without operator compatibility checks.
    external module/CA paths, loader or unknown `NODE_OPTIONS`, and ambiguous/escaping argv paths.
    Contained paths translate into `/app` while original values remain independently sealed.
    Standard manager/tool metadata has a specific review warning. Network URLs remain unchanged.
+   PM2 scalar restart-environment/interpreter mismatches against procfs block recovery. A mandatory
+   review warning explains why rewritten process titles and omitted arrays prevent universal live
+   argument attestation; the wrapper command is not mistaken for application argv.
    Locations: `workload_adoption_host.go` (`translateHostRuntimeEnvironment`) and
    `workload_adoption_host.go` (`hostCommandForContainer`).
 3. **Medium, credential files copied into images:** recognizable registry/account/cloud/SSH and

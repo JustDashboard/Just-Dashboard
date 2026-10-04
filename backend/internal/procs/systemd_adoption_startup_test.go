@@ -192,3 +192,40 @@ func TestNativeCaptureWarnsAboutRetainedBaselineAuthorityAndBlocksVolatileUnits(
 		}
 	}
 }
+
+func TestSystemdMigrationRefusesNewerUnitWithAnUnchangedLivePID(t *testing.T) {
+	root := t.TempDir()
+	unit, dropin := filepath.Join(root, "owned.service"), filepath.Join(root, "override.conf")
+	born := time.Now().Add(-time.Minute).Truncate(time.Millisecond)
+	for _, file := range []string{unit, dropin} {
+		if err := os.WriteFile(file, []byte("[Service]\nEnvironment=TOKEN=owned-private-value\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(file, born.Add(-time.Second), born.Add(-time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	process := HostProcessCapture{PID: 314, CreateTime: born.UnixMilli(), State: "active"}
+	capture := &HostWorkloadCapture{Manager: "systemd", Processes: []HostProcessCapture{process}, Blockers: []string{}}
+	blockKnownSystemdConfigurationDrift(capture, []string{unit, dropin})
+	if len(capture.Blockers) != 0 {
+		t.Fatal("configuration predating the running process was rejected")
+	}
+	if err := os.Chtimes(dropin, born.Add(2*time.Second), born.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	blockKnownSystemdConfigurationDrift(capture, []string{unit, dropin})
+	if len(capture.Blockers) != 0 {
+		t.Fatal("documented timestamp precision tolerance was rejected")
+	}
+	if err := os.Chtimes(dropin, born.Add(3*time.Second), born.Add(3*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	blockKnownSystemdConfigurationDrift(capture, []string{unit, dropin})
+	if len(capture.Blockers) == 0 || capture.Processes[0].PID != process.PID || capture.Processes[0].CreateTime != process.CreateTime {
+		t.Fatal("newer manager configuration was not blocked without changing the live PID")
+	}
+	if strings.Contains(strings.Join(capture.Blockers, " "), "owned-private-value") {
+		t.Fatal("unit private contents entered the blocker")
+	}
+}

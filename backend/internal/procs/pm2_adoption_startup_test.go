@@ -3,6 +3,7 @@ package procs
 import (
 	"encoding/json"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,5 +83,31 @@ func TestPM2MigrationRefusesUnknownOrUnreadableStartupAuthority(t *testing.T) {
 				t.Fatal("unknown saved startup authority was treated as absent")
 			}
 		})
+	}
+}
+
+func TestPM2MigrationBlocksKnownManagerEnvironmentDriftAndWarnsForOpaqueArgv(t *testing.T) {
+	configuration := json.RawMessage(`[{"pm_id":7,"exec_interpreter":"node","TOKEN":"original-private-value","env":{"TOKEN":"original-private-value","PORT":"3000","metadata":{"not":"an environment value"}}}]`)
+	for _, fixture := range []struct {
+		environment map[string]string
+		drift       bool
+	}{
+		{map[string]string{"TOKEN": "original-private-value", "PORT": "3000", "exec_interpreter": "node"}, false},
+		{map[string]string{"TOKEN": "changed-private-value", "PORT": "3000", "exec_interpreter": "node"}, true},
+		{map[string]string{"TOKEN": "original-private-value", "exec_interpreter": "node"}, true},
+		{map[string]string{"TOKEN": "original-private-value", "PORT": "3000", "exec_interpreter": "different-node"}, true},
+	} {
+		capture := &HostWorkloadCapture{Manager: "pm2", OriginalConfig: configuration, Blockers: []string{}, Processes: []HostProcessCapture{{ID: 7, PID: 314, CreateTime: 1234, State: "online"}}}
+		blockPM2ManagerRuntimeDrift(capture, 7, fixture.environment)
+		if (len(capture.Blockers) > 0) != fixture.drift || capture.Processes[0].PID != 314 {
+			t.Fatal("known manager/live startup mismatch was not handled without process mutation")
+		}
+		if strings.Contains(strings.Join(capture.Blockers, " "), "private-value") {
+			t.Fatal("private environment values entered the blocker")
+		}
+	}
+	capture, err := parsePM2Capture([]byte(`[{"pm_id":7,"name":"owned","pm2_env":{"namespace":"default","pm_exec_path":"/srv/owned/server.js","pm_cwd":"/srv/owned","exec_interpreter":"node","exec_mode":"fork_mode","env":{}}}]`), &user.User{Username: "ubuntu", Uid: "1000", Gid: "1000"}, "default", "owned")
+	if err != nil || !strings.Contains(strings.Join(capture.Warnings, " "), "cannot universally attest the running argument boundaries") {
+		t.Fatal("PM2 manager definition was presented as attested running argv")
 	}
 }
