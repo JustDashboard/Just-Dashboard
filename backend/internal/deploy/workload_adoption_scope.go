@@ -41,7 +41,11 @@ func (r *dockerRecovery) applyExistingServicesScope(candidate WorkloadCandidate)
 		delete(services, name)
 	}
 	sort.Strings(r.result.Adoption.ExcludedServices)
-	r.result.Adoption.ServiceCount = len(services)
+	// RunningCount counts containers, so retained replicas must use the same unit.
+	r.result.Adoption.ServiceCount = 0
+	for _, captures := range r.containers {
+		r.result.Adoption.ServiceCount += len(captures)
+	}
 }
 
 type scopedServiceReference struct{ service, field string }

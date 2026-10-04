@@ -122,6 +122,26 @@ func TestRecoveryScopeBlocksExcludedServiceRelationships(t *testing.T) {
 	}
 }
 
+func TestRecoveryScopeCountsRetainedReplicasIncludingStoppedContainers(t *testing.T) {
+	r := &dockerRecovery{
+		result: &RecoveredWorkload{Adoption: &WorkloadAdoption{RunningCount: 4}},
+		model: map[string]any{"services": map[string]any{
+			"web": map[string]any{}, "worker": map[string]any{}, "missing": map[string]any{},
+		}},
+		containers: map[string][]*dockerx.AdoptionContainer{
+			"web":    {{}, {}, {}},
+			"worker": {{}, {}, {}},
+		},
+	}
+	r.applyExistingServicesScope(WorkloadCandidate{})
+	if r.result.Adoption.ServiceCount != 6 || r.result.Adoption.RunningCount != 4 {
+		t.Fatal("replica summary mixes service and container counts")
+	}
+	if len(object(r.model["services"])) != 2 || strings.Join(r.result.Adoption.ExcludedServices, ",") != "missing" {
+		t.Fatal("replica summary changed reviewed service scope")
+	}
+}
+
 func TestRecoveryScopeCannotHideFailedContainerCaptureOrApplyToOtherManagers(t *testing.T) {
 	candidate, reader, paths, root := scopedComposeFixture(t)
 	delete(reader.captures, candidate.Services[1].ResourceID)

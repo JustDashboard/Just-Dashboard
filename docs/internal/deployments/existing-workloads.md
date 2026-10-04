@@ -59,6 +59,8 @@ services, and their original Compose definitions stay untouched. Retained depend
 service namespaces, volumes-from or shared build contexts referring to an exclusion block recovery;
 the importer never removes those relationships to force a usable recipe. Unused resources belonging
 only to excluded declarations are omitted from the managed recipe without deleting existing resources.
+The existing-services summary counts captured containers, including each stopped replica, so its total
+and running count use the same unit even when one service has multiple replicas.
 
 The saved scope and exclusion list are server-owned. Adoption recaptures with the saved scope and
 fences the full resolved original configuration, including excluded declarations, so changes there
