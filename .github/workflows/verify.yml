@@ -313,7 +313,6 @@ jobs:
     name: deployment-live (${{ matrix.name }})
     env:
       JD_DEPLOY_LIVE: "1"
-      JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
     defaults:
       run:
         working-directory: backend
@@ -328,6 +327,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Live fixtures
         env:
+          JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
           PKG: ${{ matrix.pkg }}
           TIMEOUT: ${{ matrix.timeout }}
           RUN: ${{ matrix.run }}
