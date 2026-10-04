@@ -1162,6 +1162,9 @@ func (s *Server) handleDeploymentRunRetry(w http.ResponseWriter, r *http.Request
 		}
 		return mapDeployError(err)
 	}
+	if err := s.requireManagedDeploymentAutomation(r.Context(), projectID, prior.EnvironmentID); err != nil {
+		return mapDeployError(err)
+	}
 	p := httpx.MustPrincipal(r)
 	run, _, err := s.modules.deployRuns.Retry(r.Context(), runID, p.Username(),
 		strings.TrimSpace(r.Header.Get("Idempotency-Key")))
@@ -1429,6 +1432,9 @@ func (s *Server) enqueueLegacyDeployment(
 ) (*deploy.EngineRun, error) {
 	environmentID, revision, err := s.modules.deployRuns.ProductionEnvironment(ctx, project.ID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireManagedDeploymentAutomation(ctx, project.ID, environmentID); err != nil {
 		return nil, err
 	}
 	metadata, err := json.Marshal(map[string]any{
