@@ -211,7 +211,9 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_PM2_ADOPTION_LIVE=1 go test ./internal/procs -run '^TestLiveExistingPM2CaptureAndManagerControls$' -count=1 -v`
   on a host with PM2 installed for the current account. The fixture starts and removes only its own
   temporary `PM2_HOME`; it verifies HTTP, secret and empty variables, UID, PID identity, native logs,
-  and exact original-manager stop/start restoration without touching the account's normal daemon.
+  exact original-manager stop/start restoration, and refusal to stop after a matching saved startup
+  entry appears in either `dump.pm2` or `dump.pm2.bak`, while its original PID and HTTP response remain
+  unchanged. It never touches the account's normal daemon.
   The API and Docker fixtures require a working Docker daemon and `caddy:2-alpine` already available
   locally. The API fixture creates and
   removes only its own uniquely named four-container project, checks two running and two stopped
@@ -226,8 +228,8 @@ to the contribution terms above, including the additional licence grant to the p
   The corresponding persistent systemd-unit path runs
   `JD_SYSTEMD_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
   It requires a reachable host systemd manager, Node and root/passwordless sudo. It installs one
-  uniquely named unit in `/run/systemd/system`, operates only on that unit, and removes that exact
-  file; it never reloads the global manager or modifies an existing unit. It proves native journal
+  uniquely named disabled unit in `/run/systemd/system`, operates only on that unit, and removes that
+  exact file; it never reloads the global manager or modifies an existing unit. It proves native journal
   output and the same adoption/build/compensation/Docker-migration/original-unit rollback sequence.
   `JD_SYSTEMD_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
   The opt-in native browser server and recording commands are documented in
