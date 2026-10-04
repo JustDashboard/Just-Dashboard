@@ -160,6 +160,25 @@ export function ReleaseTasks({
     requestAnimationFrame(() => document.getElementById(`${id}-task-${to}-${arrow}`)?.focus())
   }
 
+  // A task just added takes the keyboard at the field it cannot do without
+  // — its name, or its command when a starter already named it — once it has
+  // been drawn.
+  function add(name = "") {
+    onChange([
+      ...tasks,
+      {
+        name,
+        command: "",
+        workingDirectory: "",
+        timeoutSeconds: 300,
+        env: [],
+        runner: defaultReleaseTaskRunner(buildMethod),
+      },
+    ])
+    const added = `${id}-task-${tasks.length}-${name ? "command" : "name"}`
+    requestAnimationFrame(() => document.getElementById(added)?.focus())
+  }
+
   return (
     <div className="space-y-4">
       {/* Where the tasks run: the run page's seven stages, with Release lit. */}
@@ -170,7 +189,26 @@ export function ReleaseTasks({
       />
       <FormNote>A failing task stops the release; the live version keeps serving.</FormNote>
       {tasks.length === 0 ? (
-        <p className="text-body text-muted-foreground">No release tasks configured.</p>
+        <div className="space-y-2">
+          <p className="text-body text-muted-foreground">No release tasks configured.</p>
+          {!disabled && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-hint text-muted-foreground">Start from</span>
+              {STARTERS.map((starter) => (
+                <Button
+                  key={starter}
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  onClick={() => add(starter)}
+                >
+                  <Plus className="size-3" />
+                  {starter}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         <ol className="space-y-3">
           {tasks.map((task, index) => {
@@ -396,28 +434,7 @@ export function ReleaseTasks({
         </ol>
       )}
       {!disabled && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            onChange([
-              ...tasks,
-              {
-                name: "",
-                command: "",
-                workingDirectory: "",
-                timeoutSeconds: 300,
-                env: [],
-                runner: defaultReleaseTaskRunner(buildMethod),
-              },
-            ])
-            // A task just added takes the keyboard at its name, the field it
-            // cannot do without — once it has been drawn.
-            const added = `${id}-task-${tasks.length}-name`
-            requestAnimationFrame(() => document.getElementById(added)?.focus())
-          }}
-        >
+        <Button type="button" size="sm" variant="outline" onClick={() => add()}>
           <Plus className="size-3.5" />
           Add release task
         </Button>
@@ -425,6 +442,9 @@ export function ReleaseTasks({
     </div>
   )
 }
+
+/** Names a first task is usually given; the command is left for the operator. */
+const STARTERS = ["Database migrations", "Clear cache", "Warm up"]
 
 /** A timeout the way it is said: "5 min", "90 s", "1 h". */
 export function spoken(seconds: number) {

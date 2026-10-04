@@ -147,6 +147,7 @@ import {
   XMarkIcon,
   BookOpenIcon,
   MoonIcon,
+  RocketLaunchIcon,
 } from "@heroicons/react/24/solid"
 import { cn } from "@/lib/utils"
 
@@ -261,6 +262,7 @@ export const Pencil: Icon = adapt(PencilSquareIcon, "Pencil")
 export const FloppyDisk: Icon = adapt(DocumentArrowDownIcon, "FloppyDisk")
 export const Download: Icon = adapt(ArrowDownTrayIcon, "Download")
 export const CloudDownload: Icon = adapt(CloudArrowDownIcon, "CloudDownload")
+export const Rocket: Icon = adapt(RocketLaunchIcon, "Rocket")
 export const CloudUpload: Icon = adapt(CloudArrowUpIcon, "CloudUpload")
 export const MagnifyingGlass: Icon = adapt(MagnifyingGlassIcon, "MagnifyingGlass")
 export const MagnifyingGlassMinus: Icon = adapt(MagnifyingGlassMinusIcon, "MagnifyingGlassMinus")
