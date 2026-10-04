@@ -1,6 +1,6 @@
 # Real n8n adoption lifecycle
 
-On 2026-10-04, `TestLiveManagedN8NAdoptionAndRollback` passed in 163.99 seconds using the
+On 2026-10-04, `TestLiveManagedN8NAdoptionAndRollback` passed in 189.80 seconds using the
 catalogue's actual `n8nio/n8n:2.39.10` image, not an HTTP server shaped like n8n. Its immutable local
 image ID is recorded in [the sanitized evidence](managed-n8n-lifecycle.json).
 
