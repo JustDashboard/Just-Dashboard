@@ -37,6 +37,11 @@ What separates a surface now:
 - `shadow-*` **only** for the three things that genuinely float above the page: popover, dropdown,
   dialog.
 
+The page ground is `oklch(0.2 0 0)`, a softer charcoal than the previous L 0.16. The base neutral
+surface and border tokens moved up by the same L 0.04, with controls and hover washes still derived
+from them, so each surface keeps its separation; the sidebar shares the page ground. Text, brand
+and status colours keep their values.
+
 **And not every block is a surface.** The 0.6.7 pass found the other failure: a page on which every
 block *was* framed read as a page of containers, and the frames stopped separating anything because
 there was nothing unframed left to separate from. The ground went darker (`--background` 0.145,
@@ -1133,8 +1138,8 @@ fetched from, which is the argument §3 makes for `--brand` applied to somebody 
 lightness *is* ours, and it is one rule rather than twenty judgements: every `--language-*` in
 `globals.css` is the logo's hue and chroma at L 0.72, the rung `--tag-*` already sits on, because
 Linguist's values were picked for a white page and four of them (Lua's navy, Ruby's oxblood,
-Markdown's ink, C's grey) are invisible on a 0.16 ground. The rule is written out as twenty literal
-`oklch()` values carrying their source hex in a comment rather than stated once as
+Markdown's ink, C's grey) are invisible on the dark page ground. The rule is written out as twenty
+literal `oklch()` values carrying their source hex in a comment rather than stated once as
 `oklch(from <hex> …)`: relative colour syntax is the one modern colour function Lightning CSS cannot
 downlevel, so those twenty would have been the only tokens in the file shipping without a fallback,
 below the floor Next's default browserslist target declares. Deleting the lightness dimension has a
@@ -1956,9 +1961,9 @@ the product. The border and the lit edge do the separating, so the ground only h
 
 | Token | L | Is |
 | --- | --- | --- |
-| `--background` | 0.16 | the page |
-| `--choice-surface` | 0.183 | a card you pick — recessed *into* the surface holding it |
-| `--flow-surface` | 0.2 | the one focused surface on a flow screen |
+| `--background` | 0.2 | the page |
+| `--choice-surface` | 0.223 | a card you pick — recessed *into* the surface holding it |
+| `--flow-surface` | ≈0.239 | the one focused surface on a flow screen |
 
 The order matters and is easy to get backwards: choices sit **below** the panel that holds them, not
 above it. Painting both from one token — which is what shipped first — made every card inside a
