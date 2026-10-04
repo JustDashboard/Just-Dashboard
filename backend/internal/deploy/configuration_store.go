@@ -1314,12 +1314,12 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	defer tx.Rollback()
 	var current int
-	var sourceKind sql.NullString
+	var sourceKind, sourceConfig sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT e.desired_revision, s.kind FROM deploy_environments e
+		SELECT e.desired_revision, s.kind, s.config_json FROM deploy_environments e
 		  LEFT JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
 		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&current, &sourceKind); err != nil {
+		Scan(&current, &sourceKind, &sourceConfig); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
@@ -1329,7 +1329,13 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
 	}
 	if sourceKind.String == string(SourceImport) {
-		return nil, fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan)
+		var source DraftSourceConfig
+		if json.Unmarshal([]byte(sourceConfig.String), &source) != nil {
+			return nil, fmt.Errorf("%w: desired source configuration is malformed", ErrInvalidPlan)
+		}
+		if source.Mode != SourceModeExistingCheckout {
+			return nil, fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan)
+		}
 	}
 	var kind EnvironmentKind
 	if err := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, environmentID).Scan(&kind); err != nil {
@@ -1529,7 +1535,9 @@ func (s *PlanningStore) saveEnvironmentSource(
 	if current != revision {
 		return fail(fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current))
 	}
-	if currentKind == SourceImport {
+	var currentSource DraftSourceConfig
+	invalidCurrentSource := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil
+	if currentKind == SourceImport && (invalidCurrentSource || currentSource.Mode != SourceModeExistingCheckout || source.Mode != SourceModeExistingCheckout) {
 		return fail(fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan))
 	}
 	if currentKind != source.Kind {
@@ -1544,9 +1552,7 @@ func (s *PlanningStore) saveEnvironmentSource(
 		source.CredentialID, string(identityJSON), digestBytes(sourceJSON, identityJSON), now); err != nil {
 		return fail(err)
 	}
-	var currentSource DraftSourceConfig
-	moved := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil ||
-		!sameSourceLocation(canonicalSourceConfig(currentSource), source)
+	moved := invalidCurrentSource || !sameSourceLocation(canonicalSourceConfig(currentSource), source)
 	var proposal *DetectionProposal
 	if detection == nil {
 		if err := cloneBuildPlanTx(ctx, tx, environmentID, current, next, now, moved); err != nil {
