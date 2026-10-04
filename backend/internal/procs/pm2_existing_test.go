@@ -59,4 +59,24 @@ func TestExistingPM2ClientReadsMonitorRPCWithoutLoadingPM2API(t *testing.T) {
 			t.Fatalf("read initialized %s", path)
 		}
 	}
+	if err := os.Mkdir(filepath.Join(root, "modules"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"pm2-axon", "pm2-axon-rpc"} {
+		if err := os.Rename(filepath.Join(root, "node_modules", name), filepath.Join(root, "modules", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	command = exec.Command(node, "-e", existingPM2Client, "pm2")
+	command.Env = append(os.Environ(), "PM2_HOME="+root, "PATH="+filepath.Join(root, "bin")+":"+os.Getenv("PATH"))
+	if output, err := command.Output(); err != nil || !strings.Contains(string(output), `"pm_id":7`) {
+		t.Fatalf("read bundled transport through host PATH: %s %v", output, err)
+	}
+}
+
+func TestExistingPM2MonitorKeepsApplicationNamespaces(t *testing.T) {
+	rows, err := parsePM2List([]byte(`[{"pm_id":1,"name":"api","pm2_env":{"namespace":"production","status":"online"}},{"pm_id":2,"name":"api","pm2_env":{"namespace":"preview","status":"online"}}]`), 0, "alice")
+	if err != nil || len(rows) != 2 || rows[0].Namespace != "production" || rows[1].Namespace != "preview" {
+		t.Fatalf("namespaces lost: %#v %v", rows, err)
+	}
 }

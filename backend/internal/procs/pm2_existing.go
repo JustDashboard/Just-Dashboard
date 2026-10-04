@@ -21,9 +21,14 @@ let binary = process.argv[1]
 if (!path.isAbsolute(binary)) {
   binary = process.env.PATH.split(path.delimiter).map(dir => path.join(dir, binary)).find(file => fs.existsSync(file))
 }
-const local = require("module").createRequire(fs.realpathSync(binary))
-const socket = local("pm2-axon").socket("req")
-const client = new (local("pm2-axon-rpc").Client)(socket)
+binary = fs.realpathSync(binary)
+const local = require("module").createRequire(binary)
+const transport = name => {
+  const bundled = path.join(path.dirname(binary), "..", "modules", name)
+  return fs.existsSync(bundled) ? local(bundled) : local(name)
+}
+const socket = transport("pm2-axon").socket("req")
+const client = new (transport("pm2-axon-rpc").Client)(socket)
 const timer = setTimeout(() => { socket.close(); process.exit(2) }, 5000)
 socket.on("error", () => { clearTimeout(timer); socket.close(); process.exit(2) })
 socket.connect(path.join(process.env.PM2_HOME, "rpc.sock"))
@@ -47,7 +52,10 @@ func (p *PM2) ListExisting(ctx context.Context) ([]PM2Process, error) {
 		}
 		account, err := pm2Account(home.home)
 		if err != nil {
-			return nil, err
+			if firstErr == nil {
+				firstErr = fmt.Errorf("an existing PM2 daemon account could not be verified")
+			}
+			continue
 		}
 		readCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
 		command, err := hostexec.CommandOnHostAsUser(readCtx, account, pm2Env(home), "node", "-e", existingPM2Client, home.bin)

@@ -61,6 +61,7 @@ type pm2Raw struct {
 		CPU    float64 `json:"cpu"`
 	} `json:"monit"`
 	PM2Env struct {
+		Namespace        string `json:"namespace"`
 		Status           string `json:"status"`
 		PMUptime         int64  `json:"pm_uptime"`
 		RestartTime      int    `json:"restart_time"`
@@ -183,6 +184,9 @@ func parsePM2List(data []byte, nowMilli int64, fallbackUser string) ([]PM2Proces
 			User: fallbackUser, DaemonID: fallbackUser,
 			Interpreter: r.PM2Env.ExecInterpreter, Version: r.PM2Env.Version,
 			CreatedAtMS: r.PM2Env.CreatedAt,
+		}
+		if proc.Namespace == "" {
+			proc.Namespace = r.PM2Env.Namespace
 		}
 		if r.PM2Env.Status == "online" && r.PM2Env.PMUptime > 0 {
 			proc.UptimeMS = nowMilli - r.PM2Env.PMUptime

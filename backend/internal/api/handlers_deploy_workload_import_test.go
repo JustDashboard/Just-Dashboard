@@ -107,6 +107,43 @@ func TestWorkloadDigestIgnoresRuntimeStateButFencesContainerReplacementAndPIDReu
 	}
 }
 
+func TestWorkloadDiscoveryExcludesDashboardWhenCheckoutLocationIsUnavailable(t *testing.T) {
+	items := workloadCandidates(workloadInventory{
+		containers: []dockerx.Container{
+			{ID: "backend", Image: "just-dashboard-backend:latest", Labels: map[string]string{"com.docker.compose.service": "backend", "com.docker.compose.project": "dashboard"}},
+			{ID: "ingress", Labels: map[string]string{"com.just-dashboard.ingress": "true"}},
+			{ID: "real-app", Name: "n8n", State: "running"},
+		},
+		stacks: []dockerx.ComposeStack{{Name: "dashboard", Deployed: true, Running: 3, Total: 3}},
+	})
+	if len(items) != 1 || items[0].ResourceID != "real-app" {
+		t.Fatalf("dashboard resources were offered: %#v", items)
+	}
+}
+
+func TestWorkloadDiscoveryCanonicalizesUnpublishedContainerPorts(t *testing.T) {
+	first := workloadCandidates(workloadInventory{containers: []dockerx.Container{{ID: "one", Name: "app", Ports: []dockerx.Port{
+		{PrivatePort: 443, Type: "tcp"}, {PrivatePort: 80, Type: "tcp"}, {PrivatePort: 2019, Type: "tcp"},
+	}}}})
+	second := workloadCandidates(workloadInventory{containers: []dockerx.Container{{ID: "one", Name: "app", Ports: []dockerx.Port{
+		{PrivatePort: 2019, Type: "tcp"}, {PrivatePort: 443, Type: "tcp"}, {PrivatePort: 80, Type: "tcp"},
+	}}}})
+	if len(first) != 1 || len(second) != 1 || deploy.WorkloadDigest(first[0]) != deploy.WorkloadDigest(second[0]) {
+		t.Fatal("Docker's arbitrary EXPOSE ordering invalidated inspection")
+	}
+}
+
+func TestWorkloadDiscoveryNamesMissingComposeServicesAndCountsReplicas(t *testing.T) {
+	items := workloadCandidates(workloadInventory{stacks: []dockerx.ComposeStack{{Name: "app", Deployed: true, Running: 2, Total: 2, Services: []dockerx.ComposeService{
+		{Name: "web", Container: "one", State: "running"},
+		{Name: "web", Container: "two", State: "running"},
+		{Name: "worker", Missing: true},
+	}}}})
+	if len(items) != 1 || items[0].Total != 3 || items[0].Running != 2 || items[0].Services[2].State != "not created" {
+		t.Fatalf("missing services or replica counts misrepresented: %#v", items)
+	}
+}
+
 func TestWorkloadImportRoutesRequireAdministratorSession(t *testing.T) {
 	s := testServer(t)
 	routes := s.Routes()

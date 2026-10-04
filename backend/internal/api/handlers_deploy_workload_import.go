@@ -163,7 +163,13 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 	items := []deploy.WorkloadCandidate{}
 	managedStacks := map[string]bool{}
 	for _, container := range inventory.containers {
-		if container.Labels["io.just-dashboard.managed"] == "true" {
+		self := inventory.selfID != "" && (container.ID == inventory.selfID || container.Name == inventory.selfID)
+		// Location can be unavailable while the operator's checkout is
+		// temporarily inaccessible. Its documented backend image together
+		// with Compose's backend service still identifies this install.
+		self = self || container.Labels["com.docker.compose.service"] == "backend" &&
+			strings.HasPrefix(container.Image, "just-dashboard-backend:")
+		if self || container.Labels["io.just-dashboard.managed"] == "true" || container.Labels["com.just-dashboard.ingress"] == "true" {
 			managedStacks[container.ComposeStack] = true
 			managedStacks[container.Labels["com.docker.compose.project"]] = true
 		}
@@ -174,7 +180,7 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 		}
 		candidate := deploy.WorkloadCandidate{
 			Key: "stack:" + stack.Name, Kind: "stack", Name: stack.Name, ResourceID: stack.Name,
-			State: string(stack.State), Running: stack.Running, Total: stack.Total,
+			State: string(stack.State), Running: stack.Running, Total: len(stack.Services),
 			Services: []deploy.WorkloadService{}, ManagerURL: "/docker/stacks/" + url.PathEscape(stack.Name),
 			Warnings: []string{"All existing containers, including stopped services, stay under their original Compose project. Import does not start them."},
 		}
@@ -185,8 +191,14 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 			candidate.Warnings = append(candidate.Warnings, "This stack uses multiple Compose files; their original order and settings remain with Compose.")
 		}
 		for _, service := range stack.Services {
+			state := service.State
+			if service.Missing {
+				state = "not created"
+			} else if state == "" {
+				state = "unknown"
+			}
 			candidate.Services = append(candidate.Services, deploy.WorkloadService{
-				Name: service.Name, ResourceID: service.Container, State: service.State, Health: service.Health,
+				Name: service.Name, ResourceID: service.Container, State: state, Health: service.Health,
 				Image: service.Image, Ports: importedPorts(service.Ports),
 			})
 		}
@@ -194,7 +206,8 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 	}
 	for _, container := range inventory.containers {
 		if container.Labels["com.docker.compose.project"] != "" || container.ComposeStack != "" ||
-			container.Labels["io.just-dashboard.managed"] == "true" || container.ID == inventory.selfID {
+			container.Labels["io.just-dashboard.managed"] == "true" || container.Labels["com.just-dashboard.ingress"] == "true" ||
+			container.ID == inventory.selfID || container.Name == inventory.selfID {
 			continue
 		}
 		candidate := deploy.WorkloadCandidate{
@@ -307,6 +320,9 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 				left, right := candidate.Services[index].Ports[i], candidate.Services[index].Ports[j]
 				if left.HostPort != right.HostPort {
 					return left.HostPort < right.HostPort
+				}
+				if left.ContainerPort != right.ContainerPort {
+					return left.ContainerPort < right.ContainerPort
 				}
 				return left.HostIP+left.Protocol < right.HostIP+right.Protocol
 			})
