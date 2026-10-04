@@ -179,13 +179,17 @@ on its stop file or after fifteen minutes.
 The browser proof compares full container IDs, PIDs, running state, status, start times, restart
 counts and configuration digests before and after adoption. It checks the normal runtime/settings
 links and deployment controls without invoking any runtime action.
-The isolated server rebinds its read-only Docker consumers and permits same-origin HTTP WebSocket
-upgrades through the loopback router. The browser waits for real CPU/memory stats frames and the
+The isolated server rebinds its read-only Docker consumers and the advisory deployment checker to
+the same real source, native-runtime and preflight adapters. Its startup requires actual Docker and
+Compose availability, and the browser verifies the Overview check's corresponding pass findings
+before recording the project. This is an adapter-availability check, not a claim that the imported
+application is healthy. The router permits same-origin HTTP WebSocket upgrades through loopback.
+The browser waits for real CPU/memory stats frames and the
 editable captured Compose source before recording Runtime and General settings. It never starts the
 deployment engine or background reconciler, and it does not manufacture metrics or history.
 Runtime waits on the selected service's newly opened socket, then checks that its displayed CPU and
-memory match a ready frame. Reduced motion makes the actual values appear immediately for the
-Runtime/settings recording instead of capturing the number ticker midway through its spring.
+memory match a ready frame. Reduced motion makes the actual values and loaded forms appear immediately
+for the Overview/Runtime/settings recording instead of capturing intermediate fades or number springs.
 It also opens the ordinary authenticated Docker log stream with a one-line tail and discards the
 contents, recording only successful stream metadata as a boolean in the sanitized continuity JSON.
 

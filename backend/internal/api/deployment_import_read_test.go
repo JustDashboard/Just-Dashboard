@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +21,91 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/wsx"
 	"github.com/gorilla/websocket"
 )
+
+func wireWorkloadImportEvidenceDeployModules(s *Server) {
+	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
+	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning)
+	s.modules.deployRuntime = deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd)
+	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
+	observer := deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker, s.modules.proxy).
+		WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions))
+	s.modules.deployPreflight = deploy.NewNativePreflightObserver(observer, s.modules.deployNative, s.modules.deployRuns)
+	// The advisory checker captures these adapters at construction too. Replacing
+	// only draft preflight leaves Overview probing the closed original client.
+	s.modules.deployChecker = deploy.NewDeploymentChecker(s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight)
+}
+
+func TestWorkloadImportEvidenceAdvisoryUsesReplacementDocker(t *testing.T) {
+	for _, available := range []bool{true, false} {
+		t.Run(fmt.Sprintf("available_%t", available), func(t *testing.T) {
+			c, s := newClient(t)
+			var probes, mutations atomic.Int32
+			daemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet && r.Method != http.MethodHead {
+					mutations.Add(1)
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/_ping") {
+					probes.Add(1)
+					w.Header().Set("API-Version", "1.47")
+					if !available {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					fmt.Fprint(w, "OK")
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			}))
+			defer daemon.Close()
+			if s.modules.docker != nil {
+				s.modules.docker.Close()
+			}
+			s.Cfg.DockerHost = daemon.URL
+			s.modules.docker = dockerx.New(s.Cfg.DockerHost)
+			defer s.modules.docker.Close()
+			wireWorkloadImportEvidenceDeployModules(s)
+			projectID, environmentID := seedCommittedDeployment(t, s, "evidence-probe",
+				deploy.DraftSourceConfig{Kind: deploy.SourceImage, Mode: deploy.SourceModeImageReference, Image: "fixture:local"},
+				deploy.SourceIdentity{Kind: deploy.SourceImage})
+			for _, query := range []string{
+				`INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at) SELECT environment_id, 2, kind, config_json, credential_id, identity_json, digest, created_at FROM deploy_sources WHERE environment_id=? AND revision=1`,
+				`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at) VALUES(?, 2, 'image', '{"method":"image"}', '{}', '{}', 'sha256:evidence-image', 0)`,
+				`INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at) SELECT environment_id, 2, config_json, preview, digest, created_at FROM deploy_runtime_plans WHERE environment_id=? AND revision=1`,
+				`UPDATE deploy_environments SET desired_revision=2 WHERE id=?`,
+			} {
+				if _, err := s.Store.DB.Exec(query, environmentID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			response := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/environments/%d/check", projectID, environmentID), `{}`, nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("advisory check = %d %s", response.Code, response.Body.String())
+			}
+			var result deploy.DeploymentCheckResult
+			decodeDeployResponse(t, response.Body.Bytes(), &result)
+			code := "docker_unavailable"
+			if available {
+				code = "docker_available"
+			}
+			found := false
+			for _, finding := range result.Findings {
+				if finding.Code == code {
+					found = true
+				}
+			}
+			if !found || probes.Load() == 0 || mutations.Load() != 0 {
+				t.Fatalf("replacement probe was not authoritative: finding=%t probes=%d mutations=%d", found, probes.Load(), mutations.Load())
+			}
+			var runs int
+			if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_runs`).Scan(&runs); err != nil || runs != 0 {
+				t.Fatalf("advisory check created runs: count=%d err=%v", runs, err)
+			}
+		})
+	}
+}
 
 func TestImportedProjectReadsPreserveMissingWorkloadAndRefuseRuns(t *testing.T) {
 	c, s := newClient(t)
@@ -79,7 +166,8 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 	if s.modules.docker != nil {
 		s.modules.docker.Close()
 	}
-	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+	s.Cfg.DockerHost = "unix:///var/run/docker.sock"
+	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
 	// Rebind the read-only consumers built with the test server's original
 	// client. Start remains unused: no engine or reconciler may act on this host.
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler()
@@ -131,11 +219,11 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 			return nil
 		})
 	})
-	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
-	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning)
-	s.modules.deployPreflight = deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker)
-	s.modules.deployRuntime = deploy.NewDockerRuntimeOwner(s.modules.docker)
-	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd)
+	wireWorkloadImportEvidenceDeployModules(s)
+	availability, err := s.modules.deployPreflight.Observe(t.Context(), deploy.ObservationRequest{NeedsDocker: true, NeedsCompose: true})
+	if err != nil || !availability.Facilities["docker"].Available || !availability.Facilities["compose"].Available {
+		t.Fatal("the proof requires real Docker and Compose preflight availability")
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:44119")
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +271,8 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 	ready, _ := json.Marshal(map[string]any{
 		"url": "http://" + listener.Addr().String(), "cookieName": cookie[0],
 		"cookieValue": cookie[1], "stopFile": filepath.Join(directory, "stop"),
-		"dockerLogTailRead": true,
+		"dockerLogTailRead":        true,
+		"dockerPreflightAvailable": true,
 	})
 	if err := os.WriteFile(filepath.Join(directory, "ready.json"), ready, 0600); err != nil {
 		t.Fatal(err)

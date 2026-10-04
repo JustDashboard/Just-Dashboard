@@ -59,6 +59,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
   test.setTimeout(300000)
   const ready = JSON.parse(readFileSync(readyPath!, "utf8"))
   expect(ready.dockerLogTailRead).toBe(true)
+  expect(ready.dockerPreflightAvailable).toBe(true)
   const output = process.env.JD_IMPORT_NATIVE_EVIDENCE ?? testInfo.outputDir
   mkdirSync(output, { recursive: true })
   await context.addCookies([
@@ -129,6 +130,15 @@ test("imports the real existing bet-bot stack without changing its containers", 
   await page.screenshot({ path: join(output, "native-review-1720.png"), fullPage: true })
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.screenshot({ path: join(output, "native-adoption-review-1280.png"), fullPage: true })
+  const overviewCheckResponse = page.waitForResponse(
+    (response) =>
+      /\/api\/v1\/deploy\/\d+\/environments\/\d+\/check$/.test(response.url()) &&
+      response.request().method() === "POST",
+    { timeout: 30000 },
+  )
+  // Record settled genuine values and settings rather than intermediate fades
+  // or number springs. This changes presentation only, not returned evidence.
+  await page.emulateMedia({ reducedMotion: "reduce" })
   await page.getByRole("button", { name: "Adopt deployment", exact: true }).click()
   await expect(page).toHaveURL(/\/deploy\/\d+$/, { timeout: 30000 })
   const projectUrl = page.url()
@@ -140,7 +150,26 @@ test("imports the real existing bet-bot stack without changing its containers", 
   await expect(settingsLink).toBeVisible()
   await expect(page.getByRole("button", { name: "Redeploy", exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Deployment actions", exact: true })).toBeVisible()
-  await page.screenshot({ path: join(output, "native-project-1280.png"), fullPage: true })
+  const checked = await overviewCheckResponse
+  expect(checked.ok()).toBe(true)
+  expect(new URL(checked.url()).pathname).toMatch(
+    new RegExp(`^/api/v1${projectPath}/environments/\\d+/check$`),
+  )
+  const overviewPreflight = await checked.json()
+  const overviewFindingCodes = overviewPreflight.findings.map(
+    (finding: { code: string }) => finding.code,
+  )
+  expect(overviewFindingCodes).toContain("docker_available")
+  expect(overviewFindingCodes).toContain("compose_available")
+  expect(overviewFindingCodes).not.toContain("docker_unavailable")
+  expect(overviewFindingCodes).not.toContain("compose_unavailable")
+  await expect(page.getByText("Docker is unavailable", { exact: true })).not.toBeVisible()
+  await expect(page.locator('#before-you-deploy button[aria-busy="true"]')).toHaveCount(0)
+  await page.screenshot({
+    path: join(output, "native-project-1280.png"),
+    fullPage: true,
+    animations: "disabled",
+  })
   const detail = await page.request.get(
     new URL(`/api/v1${new URL(page.url()).pathname}`, page.url()).toString(),
   )
@@ -170,9 +199,6 @@ test("imports the real existing bet-bot stack without changing its containers", 
       ),
     timeout: 30000,
   })
-  // Reduced motion writes the genuine reading directly instead of capturing
-  // an intermediate spring value on its way from zero to Docker's number.
-  await page.emulateMedia({ reducedMotion: "reduce" })
   await runtimeLink.click()
   const runtimeSocket = await runtimeSocketPromise
   let runtimeReading: { cpuReady: boolean; cpuPercent: number; memUsage: number } | undefined
@@ -267,6 +293,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
         liveCpuAndMemoryReadingsVerified: true,
         selectedRuntimeReadingVerified: selectedService.containerId,
         dockerLogTailReadVerified: ready.dockerLogTailRead,
+        overviewDockerPreflightVerified: true,
         noRuntimeActionsInvoked: true,
         before,
         after,
