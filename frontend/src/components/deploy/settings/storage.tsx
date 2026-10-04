@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { Archive, Plus } from "@/components/icons"
 import { ApiError, get, refusedIndex } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -29,6 +29,7 @@ import {
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { emptyMount, MountRows, type MountValue } from "@/components/deploy/settings/mounts"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { volumeBackup } from "@/components/deploy/settings/volume-backup"
 import { useProject } from "@/components/deploy/project-context"
 
 /**
@@ -215,7 +216,28 @@ function StorageForm({
                   mount.kind === "volume"
                     ? volumeFacts(mount.source, facts).volume?.size
                     : undefined
-                const state = <Status tone={status.tone} label={status.label} />
+                const backup =
+                  mount.kind === "volume"
+                    ? volumeBackup(
+                        volumeFacts(mount.source, facts).resource,
+                        facts.operations?.backups.jobs,
+                      )
+                    : undefined
+                // The mount's own state, and beside it where its data stands
+                // against the backups that protect it.
+                const state = (
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {backup && (
+                      <Status
+                        tone={backup.tone}
+                        label={
+                          backup.at ? `${backup.word} ${relativeTime(backup.at)}` : backup.word
+                        }
+                      />
+                    )}
+                    <Status tone={status.tone} label={status.label} />
+                  </span>
+                )
                 return (
                   <ChoiceRow
                     key={`${mount.source}-${mount.target}`}
@@ -262,7 +284,7 @@ function StorageForm({
                   key={`protect-${source}`}
                   href={`/backups?source=${encodeURIComponent(volume!.mountpoint)}`}
                   verb={`Back up ${source}`}
-                  leading={<ProductLogo size="sm" fallback={Archive} />}
+                  leading={<ProductLogo id={product} size="sm" fallback={Archive} />}
                   title={`Back up ${source}`}
                   description="No backup job copies it"
                 />

@@ -16,6 +16,7 @@ import type {
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Group } from "@/components/panel"
+import { ProductGlyph, programProduct } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -52,10 +53,16 @@ type TaskEvidence = { name: string; durationMs: number; exitCode: number; variab
  * was the label again. It used to sit under Command, a field away from the
  * choice it described.
  */
-const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] = [
+const RUNNERS: {
+  runner: ReleaseTask["runner"]
+  label: string
+  hint: string
+  product?: string
+}[] = [
   {
     runner: "image",
     label: "Release image",
+    product: "docker",
     hint: "Once, before it starts, with its volumes, its runtime variables and the ones below",
   },
   {
@@ -72,6 +79,12 @@ const RUNNERS: { runner: ReleaseTask["runner"]; label: string; hint: string }[] 
  */
 const COMPOSE_IMAGE_HINT =
   "Once, in the primary service's image but outside the Compose stack, so its network and environment: entries do not apply"
+
+/** The program a command runs, drawn as itself when it is one the product knows. */
+function ProgramGlyph({ command }: { command: string }) {
+  const product = programProduct(command)
+  return product ? <ProductGlyph id={product} /> : null
+}
 
 function runnerHint(runner: ReleaseTask["runner"], buildMethod?: DeploymentBuildMethod) {
   if (runner === "image" && buildMethod === "compose") return COMPOSE_IMAGE_HINT
@@ -341,12 +354,19 @@ export function ReleaseTasks({
                             task.runner !== option.runner && "border-border",
                           )}
                         >
+                          {option.product && <ProductGlyph id={option.product} />}
                           {option.label}
                         </FilterChip>
                       ))}
                     </div>
                   </Field>
-                  <Field label="Command" htmlFor={`${id}-task-${index}-command`}>
+                  <Field
+                    label="Command"
+                    htmlFor={`${id}-task-${index}-command`}
+                    // A textarea has no addon to carry the program's mark, so
+                    // it rides the label's edge, where it cannot move the words.
+                    trailing={<ProgramGlyph command={task.command} />}
+                  >
                     <Textarea
                       id={`${id}-task-${index}-command`}
                       aria-label={`Release task ${n} command`}

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
@@ -9,6 +9,7 @@ import {
   Copy,
   Database,
   External,
+  Information,
   Layers,
   LockClosed,
   LockOpen,
@@ -44,6 +45,7 @@ import type {
 } from "@/lib/types"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
+import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { FormNote } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -69,11 +71,25 @@ import {
   stateWord,
   statusDetail,
 } from "@/components/docker/container-cells"
-import { PortList } from "@/components/docker/exposure"
+import {
+  useContainerControl,
+  useContainerVerbs,
+  type ContainerVerb,
+} from "@/components/docker/container-actions"
+import type { ConfirmFn } from "@/components/docker/shared"
 import { JobCard } from "@/components/backups/job-card"
 import { useProject } from "@/components/deploy/project-context"
 import { ProjectMark } from "@/components/deploy/project-mark"
-import { serviceProduct } from "@/components/deploy/service-product"
+import { ServiceDetails } from "@/components/deploy/runtime-details"
+import { ServiceFailure } from "@/components/deploy/runtime-failure"
+import {
+  mountTargetProduct,
+  publishedPorts,
+  runtimeContainer,
+  wantsFailureReading,
+} from "@/components/deploy/runtime-model"
+import { RuntimePorts } from "@/components/deploy/runtime-ports"
+import { serviceProduct, volumeProduct } from "@/components/deploy/service-product"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
 import {
   CertificateReading,
@@ -196,6 +212,20 @@ export function ProjectRuntime() {
     [],
     { enabled: running.length > 0 },
   )
+  // A lifecycle verb changes what the release engine reports, what Docker's
+  // listing says and what the stats socket carries, and each is on a timer;
+  // reading them now is what lets the card say what happened rather than what
+  // was true a few seconds ago.
+  const { confirm, dialog } = useConfirm()
+  const refreshProject = project.refresh
+  const refreshStats = stats.refresh
+  const changed = useCallback(() => {
+    refreshProject()
+    refreshContainers()
+    refreshStats()
+  }, [refreshProject, refreshContainers, refreshStats])
+  const { pending, act } = useContainerControl(changed)
+  const [detailsId, setDetailsId] = useState<string>()
   // Where a service's release, state, CPU and memory stand beside its name and
   // leave the name some 240px: inside the project's own navigation that is
   // the extra-large width. Its ports and its id join them at the 2xl one.
@@ -255,6 +285,10 @@ export function ProjectRuntime() {
   const liveProduct = live ? product(live.image ?? containerFor(live.containerId)?.image) : "docker"
   const activeRun = deployment.activeRun
   const polledStat = (id: string) => stats.data?.find((one) => one.id === id)
+  const selectedProduct = selected
+    ? product(selected.image ?? containerFor(selected.containerId)?.image)
+    : undefined
+  const detailed = services.find((service) => service.containerId === detailsId)
 
   return (
     <div className="space-y-6">
@@ -318,6 +352,11 @@ export function ProjectRuntime() {
                     projectId={project.projectId}
                     wide={wide}
                     widest={widest}
+                    confirm={confirm}
+                    act={act}
+                    pending={pending[service.containerId]}
+                    onChanged={changed}
+                    onDetails={() => setDetailsId(service.containerId)}
                   />
                 )
               })}
@@ -364,6 +403,7 @@ export function ProjectRuntime() {
             <UsageTiles
               key={selected.containerId}
               containerId={selected.containerId}
+              product={selectedProduct === "docker" ? undefined : selectedProduct}
               columns={4}
               initial={polledStat(selected.containerId)}
               onStats={(frame) => setLiveStat({ containerId: selected.containerId, stats: frame })}
@@ -440,14 +480,25 @@ export function ProjectRuntime() {
                   const keeper = services.find((service) =>
                     volume?.usedBy.some((user) => user.id === service.containerId),
                   )
-                  const keeperProduct = keeper
-                    ? product(keeper.image ?? containerFor(keeper.containerId)?.image)
-                    : liveProduct
+                  // Whoever keeps the data names the volume; failing that, the
+                  // directory it is mounted at does when only one program
+                  // keeps its data there, and the live service is the last
+                  // guess. Docker's whale says nothing the volume's glyph
+                  // does not, so it never names one.
+                  const keeperImage =
+                    keeper?.image ??
+                    containerFor(keeper?.containerId ?? volume?.usedBy[0]?.id ?? "")?.image
+                  const keeperProduct =
+                    (keeperImage
+                      ? volumeProduct(keeperImage, deployment.sourceKind, project.product)
+                      : undefined) ??
+                    mountTargetProduct(mount.target) ??
+                    (liveProduct === "docker" ? undefined : liveProduct)
                   return (
                     <MountCard
                       key={`${mount.source}:${mount.target}`}
                       mount={mount}
-                      product={keeperProduct === "docker" ? undefined : keeperProduct}
+                      product={keeperProduct}
                       size={volume?.size}
                       wide={roomy}
                     />
@@ -548,6 +599,15 @@ export function ProjectRuntime() {
           name={selected.name || selected.containerId}
         />
       )}
+
+      {/* Drawn here and not in a card: a press inside a dialog or a sheet
+          reaches the row it was opened from, and a card is a link. */}
+      {dialog}
+      <ServiceDetails
+        service={detailed}
+        product={product(detailed?.image ?? containerFor(detailed?.containerId ?? "")?.image)}
+        onClose={() => setDetailsId(undefined)}
+      />
     </div>
   )
 }
@@ -621,6 +681,17 @@ function Silence({
   )
 }
 
+/** The lifecycle verbs of Docker's menu that belong on a release's card. */
+const LIFECYCLE_VERBS = new Set(["start", "unpause", "restart", "stop", "pause"])
+
+/** The verbs kept here never open a tab of Docker's detail page, so this is never called. */
+const noTab = () => undefined
+
+/** A Docker verb as the menu draws it: always a word, never inline beside a card's readings. */
+function verbOf({ key, label, icon, run, progressive, danger }: ContainerVerb): Verb {
+  return { key, label, icon, run, progressive, danger }
+}
+
 /**
  * One container of the release, as a card that opens it in Docker — drawn as
  * the product its image is, with the same live readings the Containers page
@@ -631,12 +702,17 @@ function Silence({
  * and whether anything checks it, CPU and memory, each in a fixed measure so
  * a column of cards reads down like a table. The measures stay while a new
  * container's readings are on their way, so its release and state do not
- * stand a column to the right of everyone else's. The ports and the id join
- * the line at `2xl`, where there is room for them beside the name; below it
- * they are on the container's own page. Under `xl` the readings were two more
- * bands under the name, which left the menu level with the name over an empty
- * corner — there they are one band, the release and health first, and the
- * state stays beside the name.
+ * stand a column to the right of everyone else's. The id joins the line at
+ * `2xl`. Under `xl` the readings were two more bands under the name, which
+ * left the menu level with the name over an empty corner — there they are one
+ * band, the release and health first, and the state stays beside the name.
+ *
+ * What the line has no room for goes under it, at every width: every port the
+ * container publishes with who can reach it, and — for a container that is
+ * restarting or has exited — Docker's reading of why. A card with neither
+ * stays one line. The menu starts, stops, restarts and pauses the container
+ * under the confirmations Docker's own page asks, and opens the facts Docker
+ * records about it; while one of those is in flight the state says so.
  *
  * The state word is the release engine's, read every five seconds, and so is
  * the dot beside it: Docker's listing is read once a minute, and its sentence
@@ -658,6 +734,11 @@ function ServiceCard({
   projectId,
   wide,
   widest,
+  confirm,
+  act,
+  pending,
+  onChanged,
+  onDetails,
   index,
 }: {
   service: DeploymentRuntimeService
@@ -671,13 +752,46 @@ function ServiceCard({
   projectId: number
   /** Room for the release, the state and the readings beside the name. */
   wide: boolean
-  /** Room for the ports and the id as well. */
+  /** Room for the container's id beside its name as well. */
   widest: boolean
+  confirm: ConfirmFn
+  act: ReturnType<typeof useContainerControl>["act"]
+  /** What the operator pressed on this container that is still in flight: "Stopping". */
+  pending?: string
+  onChanged: () => void
+  onDetails: () => void
   index: number
 }) {
   const router = useRouter()
   const name = service.name || service.containerId
+  const listed = useMemo(() => runtimeContainer(service, container), [service, container])
+  // Docker's verbs, with the confirmations and the capabilities they already
+  // carry: start and resume need `service.control`, stop and restart
+  // `destructive`. The rest of that menu — logs, a shell, an update, remove —
+  // is either on this card already or is Docker's to do.
+  const lifecycle = useContainerVerbs({
+    container: listed,
+    confirm,
+    act,
+    onOpenTab: noTab,
+    onChanged,
+  })
+    .filter((verb) => LIFECYCLE_VERBS.has(verb.key))
+    .map((verb): Verb => ({
+      ...verbOf(verb),
+      // One command at a time: a second press on a stop that has not landed
+      // is the restart nobody asked for.
+      disabled: Boolean(pending),
+      group: "Run",
+    }))
   const verbs: Verb[] = [
+    ...lifecycle,
+    {
+      key: "details",
+      label: "Details",
+      icon: Information,
+      run: onDetails,
+    },
     {
       key: "logs",
       label: "Logs",
@@ -706,6 +820,10 @@ function ServiceCard({
     icon: External,
     run: () => router.push(`/docker/containers/${service.containerId}`),
   })
+  // A menu of one group needs no name for it.
+  if (lifecycle.length > 0) {
+    for (const verb of verbs) verb.group ??= "Open"
+  }
 
   const number = release?.number
   const current = container?.state === service.state ? container : undefined
@@ -713,9 +831,11 @@ function ServiceCard({
   const detail = current ? statusDetail(current) : serviceHealth(service)
   const state = (
     <Status
-      state={service.state}
+      state={pending ? "restarting" : service.state}
       label={
-        run ? (
+        pending ? (
+          `${pending}\u2026`
+        ) : run ? (
           <TextShimmer>{`Candidate for release${number !== undefined ? ` #${number}` : ""}`}</TextShimmer>
         ) : (
           word
@@ -749,7 +869,9 @@ function ServiceCard({
   )
   const cpu = container && <CpuReading stat={stat} container={container} trend={trend} />
   const memory = container && <MemoryReading stat={stat} container={container} />
-  const ports = container && <PortList ports={container.exposure ?? []} max={1} />
+  const ports = publishedPorts(container?.exposure)
+  const failing = wantsFailureReading(service.state)
+  const below = !wide || ports.length > 0 || failing
 
   return (
     <ChoiceRow
@@ -775,7 +897,6 @@ function ServiceCard({
             </span>
             <span className="w-24">{cpu}</span>
             <span className="w-36">{memory}</span>
-            {widest && <span className="w-32 min-w-0">{ports}</span>}
           </>
         ) : (
           state
@@ -783,24 +904,39 @@ function ServiceCard({
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${name}`} />}
     >
-      {!wide && (
-        // The readings keep the wide line's measures and travel as one group,
-        // so a narrow card breaks between its facts and its readings rather
-        // than between CPU and memory.
-        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5 sm:pl-11">
-          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
-            <ReleaseCell service={service} release={release} inline />
-            {detail && <span className="min-w-0 truncate">{detail}</span>}
-            {runLink}
-          </span>
-          {container && (
-            <span className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5">
-              <span className="w-24">{cpu}</span>
-              <span className="w-36">{memory}</span>
-              <span className="w-32 min-w-0">{ports}</span>
-            </span>
+      {below && (
+        <>
+          {!wide && (
+            // The readings keep the wide line's measures and travel as one
+            // group, so a narrow card breaks between its facts and its
+            // readings rather than between CPU and memory.
+            <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5 sm:pl-11">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+                <ReleaseCell service={service} release={release} inline />
+                {detail && <span className="min-w-0 truncate">{detail}</span>}
+                {runLink}
+              </span>
+              {container && (
+                <span className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5">
+                  <span className="w-24">{cpu}</span>
+                  <span className="w-36">{memory}</span>
+                </span>
+              )}
+            </div>
           )}
-        </div>
+          {ports.length > 0 && (
+            <div className="min-w-0 sm:pl-11">
+              <RuntimePorts ports={ports} />
+            </div>
+          )}
+          {failing && (
+            <ServiceFailure
+              containerId={service.containerId}
+              state={service.state}
+              projectId={projectId}
+            />
+          )}
+        </>
       )}
     </ChoiceRow>
   )

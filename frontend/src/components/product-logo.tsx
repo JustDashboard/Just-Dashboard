@@ -79,6 +79,7 @@ const LOGOS: Record<string, string> = {
   android: "android.svg",
   angular: "angular.svg",
   ansible: "ansible.svg",
+  apache: "apache.svg",
   apple: "apple.svg",
   arch: "arch.svg",
   arm: "arm.svg",
@@ -688,7 +689,7 @@ export function hostProduct(hostOrUrl: string | undefined): string | undefined {
 }
 
 /** The forges a trigger or a source names by `provider`. */
-const GIT_PROVIDERS = new Set(["github", "gitlab", "bitbucket", "gitea"])
+const GIT_PROVIDERS = new Set(["github", "gitlab", "bitbucket", "gitea", "forgejo", "codeberg"])
 
 /**
  * The forge a webhook trigger or a Git source says it is. `generic_hook`,

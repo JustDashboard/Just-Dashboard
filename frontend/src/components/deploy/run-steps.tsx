@@ -19,6 +19,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion"
+import { ProductGlyph, frameworkProduct, packageManagerProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import {
   StepMark,
@@ -314,14 +315,29 @@ function preflightOf(evidence: Record<string, unknown> | undefined): Preflight |
   }
 }
 
-/** What the candidate was, as a line: the framework and the package manager. */
+/**
+ * What the candidate was, as a line: the framework and the package manager,
+ * each with its own mark where it has one.
+ */
 function candidateLine(candidate: DeploymentDetectionCandidate) {
-  const parts = [
-    candidate.framework ? frameworkLabel(candidate.framework) : candidate.name,
-    candidate.packageManager,
-    candidate.root ? `in ${candidate.root}` : undefined,
-  ].filter(Boolean)
-  return parts.join(" · ")
+  const framework = frameworkProduct(candidate.framework)
+  const packageManager = packageManagerProduct(candidate.packageManager)
+  return (
+    <>
+      {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+      {candidate.framework ? frameworkLabel(candidate.framework) : candidate.name}
+      {candidate.packageManager && (
+        <>
+          {" · "}
+          {packageManager && (
+            <ProductGlyph id={packageManager} className="mr-1 inline align-[-2px]" />
+          )}
+          {candidate.packageManager}
+        </>
+      )}
+      {candidate.root && ` · in ${candidate.root}`}
+    </>
+  )
 }
 
 /**
@@ -354,11 +370,11 @@ function PreflightChecks({
             : `${count} unavailable`,
     )
   const judged =
-    candidate && candidateSource === "detected"
-      ? `read from this commit: ${candidateLine(candidate)}`
-      : candidate && candidateSource === "recorded"
-        ? `read from the evidence saved with the plan: ${candidateLine(candidate)}`
-        : undefined
+    candidate && candidateSource === "detected" ? (
+      <>read from this commit: {candidateLine(candidate)}</>
+    ) : candidate && candidateSource === "recorded" ? (
+      <>read from the evidence saved with the plan: {candidateLine(candidate)}</>
+    ) : undefined
   return (
     <section aria-label="Checked before building" className="space-y-2">
       <p className="text-hint text-muted-foreground">
@@ -366,7 +382,7 @@ function PreflightChecks({
         {counts.length
           ? counts.join(", ")
           : `every one of ${plural(findings.length, "check")} passed`}
-        {judged && ` · ${judged}`}
+        {judged && <> · {judged}</>}
       </p>
       {attention.map((finding, index) => (
         <FindingRow
