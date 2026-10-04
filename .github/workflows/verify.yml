@@ -260,7 +260,8 @@ jobs:
 
   # The fixtures are independent `go test` invocations, so each is its own job
   # on its own fresh daemon instead of one long sequence: the framework and
-  # artifact fixtures alone ran for over half an hour on a cold daemon.
+  # artifact fixtures alone ran for over half an hour on a cold daemon, so the
+  # sixty-four framework builds are split into groups that run side by side.
   deployment-live:
     needs: changes
     if: needs.changes.outputs.live == 'true'
@@ -275,10 +276,53 @@ jobs:
             timeout: 90m
             run: TestLiveC4ArtifactAdapters
             tests: TestLiveC4ArtifactAdapters
-          - name: framework-build
+          - name: framework-dotnet
             pkg: ./internal/deploy
             timeout: 90m
             run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: dotnet|dotnet-solution|blazor-wasm|fsharp|dotnet-spa|dotnet-multitarget
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-jvm
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: java|gradle|java-reactor|gradle-multiproject|gradle-composite|play|clojure
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-compiled
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: rust|go-workspace|go-embed|rust-workspace|trunk|leptos|go|gleam
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-ruby-php
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: rails|sinatra|phoenix|laravel|php|laravel-vite|symfony|jekyll
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-python
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: fastapi|flask|django|streamlit|gradio|python-pdm|python-pipenv|python-uv|django-nested|flask-assets|mkdocs
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-node-a
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: vite|next|svelte-node|svelte-static|astro|nuxt|react-router|next-pnpm|express-yarn
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-node-b
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: next-export|next-standalone|svelte-auto|express-vite|hono-bun|react-router-spa|deno|lume|eleventy
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-static
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: html|containerfile|hugo|zola|mdbook|static-rules
             tests: TestLiveDetectedFrameworkBuildAndServing
           - name: activation-adapters
             pkg: ./internal/deploy
@@ -339,13 +383,16 @@ jobs:
           PKG: ${{ matrix.pkg }}
           TIMEOUT: ${{ matrix.timeout }}
           RUN: ${{ matrix.run }}
+          SUBTESTS: ${{ matrix.subtests }}
           TESTS: ${{ matrix.tests }}
           NAME: ${{ matrix.name }}
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           docker version | tee "$RUNNER_TEMP/jd-ci/docker-version.txt"
           go version | tee "$RUNNER_TEMP/jd-ci/go-version.txt"
-          go test -count=1 -timeout "$TIMEOUT" -json "$PKG" -run "^($RUN)\$" | tee "$RUNNER_TEMP/jd-ci/live-$NAME.jsonl"
+          pattern="^($RUN)\$"
+          if [ -n "$SUBTESTS" ]; then pattern="$pattern/^($SUBTESTS)\$"; fi
+          go test -count=1 -timeout "$TIMEOUT" -json "$PKG" -run "$pattern" | tee "$RUNNER_TEMP/jd-ci/live-$NAME.jsonl"
           # shellcheck disable=SC2086
           python3 ../scripts/check-live-test-results.py "$RUNNER_TEMP/jd-ci/live-$NAME.jsonl" $TESTS
       - name: Retain live evidence
