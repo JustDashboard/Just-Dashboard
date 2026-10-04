@@ -20,7 +20,6 @@ import type {
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { Disclosure, Field, FieldRow, FormNote, OptionRow } from "@/components/form"
-import { Well } from "@/components/panel"
 import {
   ProductGlyph,
   ProductGlyphs,
@@ -69,6 +68,7 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { ReleaseTasks, type ReleaseTask } from "@/components/deploy/settings/release-tasks"
 import { Segments } from "@/components/deploy/settings/segments"
+import { DockerfileView, dockerfileFacts } from "@/components/deploy/settings/dockerfile-view"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import {
   applyDetectionChanges,
@@ -1363,7 +1363,7 @@ function BuildForm({
                   ? "Dockerfile the last build used"
                   : "Dockerfile the recipe wrote"
               }
-              facts={`${preview.split("\n").length} lines`}
+              facts={dockerfileFacts(preview)}
             >
               <div className="space-y-1.5">
                 <div className="flex justify-end">
@@ -1377,7 +1377,7 @@ function BuildForm({
                     Copy
                   </Button>
                 </div>
-                <Well className="max-h-72 whitespace-pre">{preview}</Well>
+                <DockerfileView source={preview} />
               </div>
             </Disclosure>
           )}
