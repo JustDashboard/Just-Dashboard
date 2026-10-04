@@ -23,7 +23,7 @@ import {
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { unusableReason } from "@/lib/db-connections"
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import type {
@@ -699,22 +699,23 @@ function verbOf({ key, label, icon, run, progressive, danger }: ContainerVerb): 
  * gives it (`container-card.tsx`), and the release it belongs to at its edge.
  *
  * One line from `xl`, so the menu stands on the card's middle: what it runs
- * under the name, and at its other end the release, the state over how long
- * and whether anything checks it, CPU and memory, each in a fixed measure so
- * a column of cards reads down like a table. The measures stay while a new
- * container's readings are on their way, so its release and state do not
- * stand a column to the right of everyone else's. The id joins the line at
- * `2xl`. Under `xl` the readings were two more bands under the name, which
- * left the menu level with the name over an empty corner — there they are one
- * band, the release and health first, and the state stays beside the name.
+ * under the name, and at its other end the release, the state with how long
+ * it has been up, CPU and memory — each reading one line, its name in front of
+ * its figure, in a fixed measure so a column of cards reads down like a table.
+ * The measures stay while a new container's readings are on their way, so its
+ * release and state do not stand a column to the right of everyone else's.
+ * The id joins the line at `2xl`. Under `xl` the facts are one line under the
+ * name and the readings the next, and the state stays beside the name.
  *
  * An image that is only a digest is left out of the line, since it names
- * nothing. One or two published ports, with who can reach each, join the line
- * from `xl`. What it has no room for goes under it: more ports than that, every
- * port below `xl`, and — for a container that is restarting or has exited —
- * Docker's reading of why. A card with none of those stays one line. The menu starts, stops, restarts and pauses the container
- * under the confirmations Docker's own page asks, and opens the facts Docker
- * records about it; while one of those is in flight the state says so.
+ * nothing, and "no health check" is Details' to say. One or two published
+ * ports, with who can reach each, join the line from `xl`. What it has no room
+ * for goes under it: more ports than that, every port below `xl`, and — for a
+ * container that is restarting or has exited — Docker's reading of why. A card
+ * with none of those stays one line. The menu starts, stops, restarts and
+ * pauses the container under the confirmations Docker's own page asks, and
+ * opens the facts Docker records about it; while one of those is in flight the
+ * state says so.
  *
  * The state word is the release engine's, read every five seconds, and so is
  * the dot beside it: Docker's listing is read once a minute, and its sentence
@@ -830,7 +831,15 @@ function ServiceCard({
   const number = release?.number
   const current = container?.state === service.state ? container : undefined
   const word = stateWord(service.state)
-  const detail = current ? statusDetail(current) : serviceHealth(service)
+  // How long it has been up and what its check says; "no health check" is
+  // Details' to say, not a line on every card.
+  const detail = !current
+    ? serviceHealth(service)
+    : current.state === "running"
+      ? [current.uptimeSeconds > 0 && duration(current.uptimeSeconds), current.health]
+          .filter(Boolean)
+          .join(" · ")
+      : statusDetail(current)
   const state = (
     <Status
       state={pending ? "restarting" : service.state}
@@ -874,8 +883,8 @@ function ServiceCard({
       <span className="shrink-0 font-mono">{service.containerId.slice(0, 12)}</span>
     </span>
   )
-  const cpu = container && <CpuReading stat={stat} container={container} trend={trend} />
-  const memory = container && <MemoryReading stat={stat} container={container} />
+  const cpu = container && <CpuReading compact stat={stat} container={container} trend={trend} />
+  const memory = container && <MemoryReading compact stat={stat} container={container} />
   const failing = wantsFailureReading(service.state)
   const below = !wide || (ports.length > 0 && !portsInline) || failing
 
@@ -902,18 +911,16 @@ function ServiceCard({
       trailing={
         wide ? (
           <>
-            <span className="w-32 min-w-0">
+            <span className="w-28 min-w-0">
               <ReleaseCell service={service} release={release} />
             </span>
-            <span className="flex w-40 min-w-0 flex-col items-start">
+            <span className="flex w-44 min-w-0 items-center gap-2">
               {state}
-              <span className="mt-0.5 flex min-w-0 gap-1.5 text-hint text-muted-foreground">
-                <span className="truncate">{detail || " "}</span>
-                {runLink}
-              </span>
+              <span className="min-w-0 truncate text-hint text-muted-foreground">{detail}</span>
+              {runLink}
             </span>
-            <span className="w-24">{cpu}</span>
-            <span className="w-36">{memory}</span>
+            <span className="w-28">{cpu}</span>
+            <span className="w-40">{memory}</span>
           </>
         ) : (
           state
@@ -924,19 +931,18 @@ function ServiceCard({
       {below && (
         <>
           {!wide && (
-            // The readings keep the wide line's measures and travel as one
-            // group, so a narrow card breaks between its facts and its
-            // readings rather than between CPU and memory.
-            <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5 sm:pl-11">
+            // Two lines, the facts and then the readings: they are one group
+            // each, so a narrow card never breaks between CPU and memory.
+            <div className="flex min-w-0 flex-col gap-1.5 sm:pl-11">
               <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
-                <ReleaseCell service={service} release={release} inline />
+                <ReleaseCell service={service} release={release} />
                 {detail && <span className="min-w-0 truncate">{detail}</span>}
                 {runLink}
               </span>
               {container && (
-                <span className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5">
-                  <span className="w-24">{cpu}</span>
-                  <span className="w-36">{memory}</span>
+                <span className="flex min-w-0 items-center gap-x-5">
+                  {cpu}
+                  {memory}
                 </span>
               )}
             </div>
@@ -961,18 +967,16 @@ function ServiceCard({
 
 /**
  * The release a container belongs to: the word for whether it serves
- * traffic, and under it the number the shell's facts row uses — with, for a
+ * traffic, and beside it the number the shell's facts row uses — with, for a
  * container that does not serve, why it is still here. A release the list has
  * not brought yet has no number to say, rather than its id in place of one.
  */
 function ReleaseCell({
   service,
   release,
-  inline,
 }: {
   service: DeploymentRuntimeService
   release?: DeploymentRelease
-  inline?: boolean
 }) {
   const why =
     service.liveRelease || !release
@@ -994,17 +998,10 @@ function ReleaseCell({
   const line = facts && (
     <span className="numeric truncate text-hint text-muted-foreground">{facts}</span>
   )
-  if (inline)
-    return (
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        {tag}
-        {line}
-      </span>
-    )
   return (
-    <span className="flex min-w-0 flex-col items-start">
+    <span className="inline-flex max-w-full min-w-0 items-center gap-1.5">
       {tag}
-      <span className="mt-0.5 block max-w-full truncate">{line || " "}</span>
+      {line}
     </span>
   )
 }
