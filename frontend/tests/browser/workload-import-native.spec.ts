@@ -132,8 +132,9 @@ test("imports the real existing bet-bot stack without changing its containers", 
   await expect(page).toHaveURL(/\/deploy\/\d+$/, { timeout: 30000 })
   const projectUrl = page.url()
   const projectPath = new URL(projectUrl).pathname
-  const runtimeLink = page.locator(`a[href="${projectPath}/runtime"]`)
-  const settingsLink = page.locator(`a[href="${projectPath}/settings/general"]`)
+  const sidebar = page.getByRole("navigation", { name: "Sidebar", exact: true })
+  const runtimeLink = sidebar.locator(`a[href="${projectPath}/runtime"]`)
+  const settingsLink = sidebar.locator(`a[href="${projectPath}/settings/general"]`)
   await expect(runtimeLink).toBeVisible()
   await expect(settingsLink).toBeVisible()
   await expect(page.getByRole("button", { name: "Redeploy", exact: true })).toBeVisible()
