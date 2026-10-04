@@ -82,7 +82,7 @@ func (s *OrchestrationStore) RecordCandidateRuntime(
 	claimToken string,
 	input ReleaseRuntimeInput,
 ) (*ReleaseRuntime, error) {
-	if input.ReleaseID <= 0 || (input.Kind != "container" && input.Kind != "compose") ||
+	if input.ReleaseID <= 0 || (input.Kind != "container" && input.Kind != "compose" && input.Kind != "pm2" && input.Kind != "systemd") ||
 		input.RuntimeID == "" || input.Port < 0 || input.Port > 65535 ||
 		len(input.Metadata) > maxEventBytes || (len(input.Metadata) != 0 && !json.Valid(input.Metadata)) {
 		return nil, fmt.Errorf("%w: candidate runtime identity is invalid", ErrInvalidPlan)
@@ -103,9 +103,10 @@ func (s *OrchestrationStore) RecordCandidateRuntime(
 	}
 	var releaseRunID, environmentID int64
 	var releaseState string
+	var releaseIdentity Release
 	if err := tx.QueryRowContext(ctx, `
-		SELECT run_id, environment_id, state FROM deploy_releases WHERE id = ?`, input.ReleaseID).
-		Scan(&releaseRunID, &environmentID, &releaseState); err != nil {
+		SELECT run_id, environment_id, state, config_digest, image_digest, strategy FROM deploy_releases WHERE id = ?`, input.ReleaseID).
+		Scan(&releaseRunID, &environmentID, &releaseState, &releaseIdentity.ConfigDigest, &releaseIdentity.ImageDigest, &releaseIdentity.Strategy); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrArtifactMissing
 		}
@@ -113,6 +114,28 @@ func (s *OrchestrationStore) RecordCandidateRuntime(
 	}
 	if releaseRunID != run.ID || environmentID != run.EnvironmentID || releaseState != "candidate" {
 		return nil, fmt.Errorf("%w: runtime does not belong to this candidate release", ErrInvalidPlan)
+	}
+	if input.Kind == "pm2" || input.Kind == "systemd" {
+		// Native runtimes only arise from replaying a captured baseline. A
+		// candidate cannot substitute another unit or daemon identity after
+		// its immutable rollback recipe has been recorded.
+		artifacts, err := artifactsForReleaseTx(ctx, tx, input.ReleaseID)
+		if err != nil {
+			return nil, err
+		}
+		snapshot, err := decodeReleaseRuntimeSnapshot(&ReleaseWithArtifacts{Release: releaseIdentity, Artifacts: artifacts})
+		if err != nil {
+			return nil, err
+		}
+		baseline := snapshot.NativeBaseline
+		var metadata NativeBaselineMetadata
+		if baseline == nil || baseline.Kind != input.Kind || baseline.RuntimeID != input.RuntimeID ||
+			baseline.Name != input.Name || baseline.WorkingDirectory != input.WorkingDirectory ||
+			baseline.Host != input.Host || baseline.Port != input.Port || string(baseline.Metadata) != string(input.Metadata) ||
+			json.Unmarshal(input.Metadata, &metadata) != nil || metadata.Version != 1 || metadata.Manager != input.Kind ||
+			!contentDigestRE.MatchString(metadata.ConfigurationDigest) {
+			return nil, fmt.Errorf("%w: native candidate does not match its captured baseline", ErrInvalidPlan)
+		}
 	}
 	existing, err := scanReleaseRuntime(tx.QueryRowContext(ctx,
 		`SELECT `+releaseRuntimeColumns+` FROM deploy_release_runtimes WHERE release_id = ?`, input.ReleaseID))
