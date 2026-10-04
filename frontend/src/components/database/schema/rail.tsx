@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
@@ -465,12 +467,17 @@ function SchemaPicker({ schemas, current }: { schemas: DbCatalogSchema[]; curren
     >
       <Link href={href("schema", schemaParams(schema.name))}>
         <SchemaMark name={schema.name} />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        {schema.tables >= 0 && (
-          <span className="numeric shrink-0 text-hint text-muted-foreground">
-            {grouped(schema.tables)}
-          </span>
-        )}
+        <MenuItemText
+          hint={
+            schema.tables >= 0 && (
+              <span className="numeric text-hint text-muted-foreground">
+                {grouped(schema.tables)}
+              </span>
+            )
+          }
+        >
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+        </MenuItemText>
       </Link>
     </DropdownMenuItem>
   )

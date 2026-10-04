@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   ChevronDown,
@@ -833,12 +835,17 @@ function SchemaPicker({
       onSelect={() => onPick(schema.name)}
     >
       <SchemaMark name={schema.name} />
-      <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-      {schema.tables >= 0 && (
-        <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {schema.tables.toLocaleString("en-US")}
-        </span>
-      )}
+      <MenuItemText
+        hint={
+          schema.tables >= 0 && (
+            <span className="numeric text-hint text-muted-foreground">
+              {schema.tables.toLocaleString("en-US")}
+            </span>
+          )
+        }
+      >
+        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+      </MenuItemText>
     </DropdownMenuItem>
   )
   return (

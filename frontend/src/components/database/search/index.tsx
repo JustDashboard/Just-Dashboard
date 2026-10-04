@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, Cross, MagnifyingGlass, StopCircle } from "@/components/icons"
@@ -381,14 +383,19 @@ export function SqlSearch() {
                     {rest.map((schema) => (
                       <DropdownMenuItem key={schema.name} onSelect={() => pick(schema.name)}>
                         <SchemaMark name={schema.name} />
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                          {schema.name}
-                        </span>
-                        {schema.tables >= 0 && (
-                          <span className="numeric text-hint text-muted-foreground">
-                            {schema.tables}
+                        <MenuItemText
+                          hint={
+                            schema.tables >= 0 && (
+                              <span className="numeric text-hint text-muted-foreground">
+                                {schema.tables}
+                              </span>
+                            )
+                          }
+                        >
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                            {schema.name}
                           </span>
-                        )}
+                        </MenuItemText>
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>

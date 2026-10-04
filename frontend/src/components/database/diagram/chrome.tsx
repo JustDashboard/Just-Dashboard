@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useEffect, useId, useRef, useState } from "react"
 import Link from "next/link"
 import { useReactFlow } from "@xyflow/react"
@@ -77,10 +79,15 @@ export function DiagramSchemaPicker({
     >
       <Link href={href("diagram", { schema: schema.name, limit: null, every: null })}>
         <SchemaMark name={schema.name} />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        {schema.tables >= 0 && (
-          <span className="numeric shrink-0 text-hint text-muted-foreground">{schema.tables}</span>
-        )}
+        <MenuItemText
+          hint={
+            schema.tables >= 0 && (
+              <span className="numeric text-hint text-muted-foreground">{schema.tables}</span>
+            )
+          }
+        >
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+        </MenuItemText>
       </Link>
     </DropdownMenuItem>
   )

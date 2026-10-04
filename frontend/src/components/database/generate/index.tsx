@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useEffect, useId, useMemo, useRef, useState } from "react"
 import { ChevronDown, CloudDownload, Code, Sparkles, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
@@ -446,10 +448,17 @@ function SchemaChips({
                 onCheckedChange={() => toggle(schema.name)}
               >
                 <SchemaMark name={schema.name} />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-                {schema.tables >= 0 && (
-                  <span className="numeric text-hint text-muted-foreground">{schema.tables}</span>
-                )}
+                <MenuItemText
+                  hint={
+                    schema.tables >= 0 && (
+                      <span className="numeric text-hint text-muted-foreground">
+                        {schema.tables}
+                      </span>
+                    )
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
+                </MenuItemText>
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>

@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import {
   useCallback,
   useEffect,
@@ -722,10 +724,15 @@ export function TableWorkbench({
                       </p>
                       {engine.capabilities.exportFormats.map((format) => (
                         <DropdownMenuItem key={format} onSelect={() => exportAs(format)}>
-                          <span className="w-20 shrink-0">{EXPORT_FORMATS[format].label}</span>
-                          <span className="min-w-0 truncate text-hint text-muted-foreground">
-                            {EXPORT_FORMATS[format].detail}
-                          </span>
+                          <MenuItemText
+                            hint={
+                              <span className="text-hint text-muted-foreground">
+                                {EXPORT_FORMATS[format].detail}
+                              </span>
+                            }
+                          >
+                            <span className="w-20 shrink-0">{EXPORT_FORMATS[format].label}</span>
+                          </MenuItemText>
                         </DropdownMenuItem>
                       ))}
                       <DropdownMenuSeparator />

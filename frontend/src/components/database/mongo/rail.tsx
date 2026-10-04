@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
@@ -421,13 +423,18 @@ function DatabasePicker({
             >
               <Link href={href(section, { db: entry.name, collection: null })}>
                 <DatabaseMark name={entry.name} />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
-                <span className="numeric shrink-0 text-hint text-muted-foreground">
-                  {entry.name === conn.database ? "connects here · " : ""}
-                  {entry.statsKnown
-                    ? `${grouped(entry.collections)} · ${bytes(entry.dataSize, 0)}`
-                    : "not measured"}
-                </span>
+                <MenuItemText
+                  hint={
+                    <span className="numeric text-hint text-muted-foreground">
+                      {entry.name === conn.database ? "connects here · " : ""}
+                      {entry.statsKnown
+                        ? `${grouped(entry.collections)} · ${bytes(entry.dataSize, 0)}`
+                        : "not measured"}
+                    </span>
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
+                </MenuItemText>
               </Link>
             </DropdownMenuItem>
           ))}

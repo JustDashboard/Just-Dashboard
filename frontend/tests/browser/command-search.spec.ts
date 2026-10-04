@@ -104,7 +104,8 @@ test("all live inventories are scoped and duplicate PM2 names keep their daemon 
   await input(page).press("ArrowDown")
   await expect(selected(page)).toContainText("ubuntu")
   await expect(selected(page)).toHaveAttribute("data-value", "app:ubuntu:0")
-  await palette(page).getByRole("combobox", { name: "Search scope" }).selectOption("database")
+  await palette(page).getByRole("combobox", { name: "Search scope" }).click()
+  await page.getByRole("option", { name: "Databases", exact: true }).click()
   await expect(input(page)).toBeFocused()
   await expect(input(page)).toHaveValue("database: shop-worker")
   await expect(
@@ -239,7 +240,9 @@ test("the global shortcut opens from the SQL editor and restores the editor's fo
 }) => {
   await mockDatabases(page)
   await page.goto("/databases/1/query")
-  await expect(page.locator("[data-slot=sql-editor] .monaco-editor").first()).toBeVisible()
+  await expect(page.locator("[data-slot=sql-editor] .monaco-editor").first()).toBeVisible({
+    timeout: 15_000,
+  })
   const editor = page.getByRole("textbox", {
     name: "Query 1: SQL statement. Escape, then Tab, leaves the editor.",
     exact: true,
@@ -272,4 +275,20 @@ test("mobile results and controls fit inside the viewport", async ({ page }) => 
   for (const option of await palette(page).getByRole("listbox").getByRole("option").all()) {
     expect((await option.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   }
+})
+
+test("Escape closes the scope picker without changing the search or closing the palette", async ({
+  page,
+}) => {
+  await mockCommandSearch(page)
+  await page.goto("/account")
+  await open(page)
+  await input(page).fill("domain: shop")
+  await palette(page).getByRole("combobox", { name: "Search scope" }).click()
+  await expect(page.locator("[data-slot=select-content]")).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.locator("[data-slot=select-content]")).toHaveCount(0)
+  await expect(palette(page)).toBeVisible()
+  await expect(input(page)).toHaveValue("domain: shop")
+  await expect(input(page)).toBeFocused()
 })

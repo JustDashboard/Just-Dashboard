@@ -1,5 +1,7 @@
 "use client"
 
+import { MenuItemText } from "@/components/ui/menu-item-text"
+
 import { Servers } from "@/components/icons"
 import type { FileBookmark, FilePlace, FilePlaces } from "@/lib/types"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -107,12 +109,15 @@ export function PlacesMenu({
             className="gap-2.5"
           >
             <PlaceMark place={place} className="size-4" />
-            <span className="min-w-0 flex-1 truncate text-body">{placeName(place)}</span>
-            {placeName(place) !== place.path && (
-              <span className="max-w-[45%] shrink truncate font-mono text-hint text-muted-foreground">
-                {place.path}
-              </span>
-            )}
+            <MenuItemText
+              hint={
+                placeName(place) !== place.path && (
+                  <span className="font-mono text-hint text-muted-foreground">{place.path}</span>
+                )
+              }
+            >
+              <span className="min-w-0 flex-1 truncate text-body">{placeName(place)}</span>
+            </MenuItemText>
             {place.path === current && (
               <span className="size-1.5 shrink-0 rounded-full bg-brand" aria-hidden />
             )}
@@ -141,10 +146,15 @@ export function PlacesMenu({
             {rows.recent.map((path) => (
               <DropdownMenuItem key={path} onSelect={() => onPick(path)} className="gap-2.5">
                 <FolderIcon name={baseOf(path)} path={path} className="size-4" />
-                <span className="min-w-0 flex-1 truncate text-body">{baseOf(path)}</span>
-                <span className="max-w-[45%] shrink truncate font-mono text-hint text-muted-foreground">
-                  {parentOf(path)}
-                </span>
+                <MenuItemText
+                  hint={
+                    <span className="font-mono text-hint text-muted-foreground">
+                      {parentOf(path)}
+                    </span>
+                  }
+                >
+                  <span className="min-w-0 flex-1 truncate text-body">{baseOf(path)}</span>
+                </MenuItemText>
               </DropdownMenuItem>
             ))}
           </>
