@@ -722,7 +722,8 @@ export function Configure({
       onFlowChange((current) =>
         current ? { ...current, draft: checkedDraft.draft, configuration: canonical } : current,
       )
-      setPreflight(checkedDraft.preflight, signatureFor(canonical))
+      const checkedSignature = signatureFor(canonical)
+      setPreflight(checkedDraft.preflight, checkedSignature)
       // Review's own arrival runs this far and no further: the screen asks
       // "is this right", and it cannot answer without having asked the server.
       if (operation === "check") return
@@ -731,6 +732,14 @@ export function Configure({
       const warnings = warningFindings(checkedDraft.preflight.findings)
       if (blockers.length) return
       if (checkedDraft.draft.data.adoption?.blockers?.length) return
+      if (checkedSignature !== planSignature) {
+        setFailure(
+          new Error(
+            "The server updated this plan during validation. Review the updated settings and acknowledge its warnings before continuing.",
+          ),
+        )
+        return
+      }
       const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
       if (outstanding.length) return
 
@@ -1010,6 +1019,7 @@ export function Configure({
                 blockers={blockers}
                 warnings={warnings}
                 acknowledged={acknowledged}
+                acknowledgementsDisabled={Boolean(busy)}
                 onAcknowledgedChange={setAcknowledged}
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
@@ -1059,7 +1069,18 @@ export function Configure({
             {last ? (
               <Button
                 className="h-11 sm:h-9"
-                onClick={() => void submit("deploy")}
+                onClick={() => {
+                  if (preflight && blockers.length === 0 && outstanding.length > 0) {
+                    // Current findings already describe this plan. Let the reader
+                    // acknowledge them before the final fresh server check.
+                    document
+                      .getElementById("deployment-warning-acknowledgements")
+                      ?.querySelector<HTMLElement>('[role="checkbox"][aria-checked="false"]')
+                      ?.focus()
+                    return
+                  }
+                  void submit("deploy")
+                }}
                 pending={busy === "deploy"}
                 disabled={Boolean(busy) || Boolean(adoption?.blockers?.length)}
               >

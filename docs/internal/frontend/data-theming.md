@@ -160,8 +160,13 @@
   on the server and resume as masked `environmentKeys`. Only public adoption review fields are kept
   with the remembered flow; baseline metadata and unexpected fields are excluded. Configure uses the
   server's preflight warning codes, refuses blockers, and commits an adoption through
-  `/deploy/import/adopt` without enqueueing a run. Git adoption defaults to manual deployment; Review can explicitly enable automatic future deployments.
-  Adoption itself never enqueues a run, and Redeploy live release restores the baseline.
+  `/deploy/import/adopt` without enqueueing a run. The acknowledgement command focuses the current
+  outstanding warning without starting another save or check. Warning inputs are disabled during
+  pending operations; final adoption saves and preflights afresh, requiring acknowledgement of any
+  new warnings. A server-canonicalized plan change returns to review rather than using acknowledgement
+  from different settings. Git adoption defaults to manual deployment; Review can explicitly enable
+  automatic future deployments. Adoption itself never enqueues a run, and Redeploy live release
+  restores the baseline.
   A baseline with a live release uses the full project
   shell; observation records without a live release retain their original-manager view. Native services
   carry `manager`, `resourceId` and `logSource`; log reads use that source and Docker stats/exec are

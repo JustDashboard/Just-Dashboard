@@ -1,7 +1,131 @@
 import { expect, test } from "@playwright/test"
-import type { DeploymentRuntimeServices } from "../../src/lib/types"
+import type { DeploymentConfiguration, DeploymentRuntimeServices } from "../../src/lib/types"
 import { deployment, json, mockProject, now, project } from "./deploy-fixture"
 import { betBot, mockWorkloadImport, recoveredWorkloadDraft } from "./workload-import-fixture"
+
+for (const changedPlan of [false, true]) {
+  test(
+    changedPlan
+      ? "a canonical plan change requires a new review instead of adopting old acknowledgement"
+      : "acknowledgement focuses current warnings and delayed final preflight requires every new warning",
+    async ({ page }) => {
+      const draft = recoveredWorkloadDraft()
+      const fixture = await mockWorkloadImport(page, undefined, draft)
+      let preflights = 0
+      let release = () => {}
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      await page.route(
+        "**/api/v1/deploy/drafts/recovered-workload-draft/preflight",
+        async (route) => {
+          preflights++
+          if (preflights === 1) return route.fallback()
+          if (preflights === 2) await held
+          const revision = route.request().postDataJSON().revision + 1
+          const configuration = structuredClone(
+            fixture.configurationSaves.at(-1)!.configuration,
+          ) as DeploymentConfiguration
+          if (changedPlan) configuration.runtime.memoryMb = 128
+          return json(route, {
+            draft: { ...draft, revision, data: { ...draft.data, configuration } },
+            preflight: {
+              revision,
+              findings: [
+                {
+                  code: "adoption_warning_1",
+                  severity: "warning",
+                  title: "Review recovered runtime behavior",
+                  measured:
+                    "Deploy changes stops the original runtime before its replacement starts.",
+                },
+                ...(!changedPlan
+                  ? [
+                      {
+                        code: "fresh_storage_warning",
+                        severity: "warning",
+                        title: "Review additional storage requirement",
+                        measured:
+                          "The latest preflight identified storage requiring another review.",
+                      },
+                    ]
+                  : []),
+              ],
+              expectedDowntime: true,
+              preview: "",
+              digest: "fresh-plan-digest",
+              plan: { actions: [] },
+            },
+          })
+        },
+      )
+      if (changedPlan) {
+        await page.route("**/api/v1/deploy/drafts/recovered-workload-draft", async (route) => {
+          if (route.request().method() !== "PUT") return route.fallback()
+          const body = route.request().postDataJSON()
+          if (body.step !== "configuration" || fixture.configurationSaves.length === 0)
+            return route.fallback()
+          fixture.configurationSaves.push(body)
+          const configuration = structuredClone(body.configuration) as DeploymentConfiguration
+          configuration.runtime.memoryMb = 128
+          return json(route, {
+            ...draft,
+            revision: body.revision + 1,
+            data: { ...draft.data, configuration },
+          })
+        })
+      }
+      await page.goto(`/deploy/new?draft=${draft.id}`)
+      await page.getByRole("button", { name: "Continue", exact: true }).click()
+      const warning = page.getByRole("checkbox", { name: /Review recovered runtime behavior/ })
+      await expect(warning).toBeEnabled()
+      const savedBeforeAcknowledgement = fixture.configurationSaves.length
+      await page.getByRole("button", { name: "Acknowledge, then adopt", exact: true }).click()
+      await expect(warning).toBeFocused()
+      expect(preflights).toBe(1)
+      expect(fixture.configurationSaves).toHaveLength(savedBeforeAcknowledgement)
+      await warning.check()
+      await page.getByRole("button", { name: "Adopt deployment", exact: true }).click()
+      await expect.poll(() => preflights).toBe(2)
+      if (changedPlan) await expect(warning).toHaveCount(0)
+      else await expect(warning).toBeDisabled()
+      await expect(
+        page.getByRole("button", { name: "Adopt deployment", exact: true }),
+      ).toBeDisabled()
+      expect(fixture.adoptions).toEqual([])
+      release()
+      if (changedPlan) {
+        await expect(page.getByText(/The server updated this plan during validation/)).toBeVisible()
+        await expect(warning).not.toBeChecked()
+        await expect(warning).toBeEnabled()
+        expect(fixture.adoptions).toEqual([])
+        await warning.check()
+      } else {
+        await expect(warning).toBeChecked()
+        const freshWarning = page.getByRole("checkbox", {
+          name: /Review additional storage requirement/,
+        })
+        await expect(freshWarning).toBeEnabled()
+        expect(fixture.adoptions).toEqual([])
+        await page.getByRole("button", { name: "Acknowledge, then adopt", exact: true }).click()
+        await expect(freshWarning).toBeFocused()
+        expect(preflights).toBe(2)
+        await freshWarning.check()
+      }
+      await page.getByRole("button", { name: "Adopt deployment", exact: true }).click()
+      await expect(page).toHaveURL(/\/deploy\/77$/)
+      expect(preflights).toBe(3)
+      expect(fixture.adoptions).toHaveLength(1)
+      expect(fixture.adoptions[0].acknowledgedWarnings).toEqual(
+        changedPlan ? ["adoption_warning_1"] : ["adoption_warning_1", "fresh_storage_warning"],
+      )
+      if (changedPlan)
+        expect(fixture.configurationSaves.at(-1)).toMatchObject({
+          configuration: { runtime: { memoryMb: 128 } },
+        })
+    },
+  )
+}
 
 test("existing-container scope includes stopped containers and requires review of server exclusions", async ({
   page,

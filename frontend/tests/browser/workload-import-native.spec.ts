@@ -111,9 +111,16 @@ test("imports the real existing bet-bot stack without changing its containers", 
     timeout: 30000,
   })
   await page.getByRole("button", { name: "Acknowledge, then adopt" }).click()
-  for (const checkbox of await page.getByRole("checkbox").all()) {
-    if (await checkbox.isEnabled()) await checkbox.check()
+  const warnings = page.locator("#deployment-warning-acknowledgements")
+  await expect(warnings.getByRole("checkbox").first()).toBeEnabled({ timeout: 30000 })
+  for (const checkbox of await warnings.getByRole("checkbox").all()) {
+    await expect(checkbox).toBeEnabled({ timeout: 30000 })
+    await checkbox.check()
+    await expect(checkbox).toBeChecked()
   }
+  await expect(page.getByRole("button", { name: "Adopt deployment", exact: true })).toBeEnabled({
+    timeout: 30000,
+  })
   await page.setViewportSize({ width: 1720, height: 1000 })
   await page.screenshot({ path: join(output, "native-review-1720.png"), fullPage: true })
   await page.setViewportSize({ width: 1280, height: 900 })

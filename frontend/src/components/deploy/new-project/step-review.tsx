@@ -56,6 +56,7 @@ export function StepReview({
   blockers,
   warnings,
   acknowledged,
+  acknowledgementsDisabled,
   onAcknowledgedChange,
   onOpenRemedy,
   canOpenRemedy,
@@ -76,6 +77,7 @@ export function StepReview({
   blockers: DeploymentPreflightFinding[]
   warnings: DeploymentPreflightFinding[]
   acknowledged: string[]
+  acknowledgementsDisabled: boolean
   onAcknowledgedChange: (codes: string[]) => void
   onOpenRemedy: (finding: DeploymentPreflightFinding) => void
   canOpenRemedy: (finding: DeploymentPreflightFinding) => boolean
@@ -395,7 +397,7 @@ export function StepReview({
             ))}
           </div>
           {warnings.length > 0 && (
-            <Group tone="warning" className="space-y-2">
+            <Group id="deployment-warning-acknowledgements" tone="warning" className="space-y-2">
               {warnings.map((finding, index) => (
                 <Label
                   key={`${finding.code}:${finding.fieldId ?? index}`}
@@ -408,6 +410,7 @@ export function StepReview({
                   <Checkbox
                     className="mt-0.5"
                     checked={acknowledged.includes(finding.code)}
+                    disabled={acknowledgementsDisabled}
                     onCheckedChange={(checked) =>
                       onAcknowledgedChange(
                         checked
