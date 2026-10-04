@@ -19,7 +19,7 @@ prove this managed behavior.
 ## Real bet-bot adoption and browser recording
 
 The existing operator stack was discovered and adopted through authenticated public routes into an
-isolated temporary dashboard database. The run passed in 45.6 seconds (46.8 seconds including browser
+isolated temporary dashboard database. The run passed in 44.4 seconds (45.3 seconds including browser
 setup). Its two existing running containers became the initial managed live release. The two declared
 services without containers or available images, `eurobet-doubles-tracker` and
 `eurobet-high-market-tracker`, were named and acknowledged as `existing_services` exclusions.
