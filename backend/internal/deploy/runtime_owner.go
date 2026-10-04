@@ -54,6 +54,10 @@ type RuntimeOwner interface {
 	Stop(context.Context, ReleaseRuntime, RuntimePlanConfig, map[string]string, bool, func(BuildLog) error) (RuntimeStopEvidence, error)
 }
 
+type RuntimeCandidateScopeValidator interface {
+	ValidateCandidateScope(context.Context, CandidateRuntimeRequest) error
+}
+
 type RuntimeStorageOwner interface {
 	PersistentSources(context.Context, CandidateRuntimeRequest) ([]string, error)
 }
@@ -122,6 +126,7 @@ type dockerReleaseRuntimeMetadata struct {
 	OverrideFile       string             `json:"overrideFile,omitempty"`
 	PrimaryContainerID string             `json:"primaryContainerId,omitempty"`
 	ContainerIDs       []string           `json:"containerIds,omitempty"`
+	ServiceNames       []string           `json:"serviceNames,omitempty"`
 	VariableNames      []string           `json:"variableNames"`
 }
 
@@ -277,6 +282,9 @@ func (o *DockerRuntimeOwner) StartCandidate(
 		request.Release.RunID != request.Run.ID {
 		return StartedRuntime{}, fmt.Errorf("%w: candidate release identity is inconsistent", ErrInvalidPlan)
 	}
+	if err := o.ValidateCandidateScope(ctx, request); err != nil {
+		return StartedRuntime{}, err
+	}
 	if o.networks != nil {
 		var err error
 		request.Networks, err = o.networks.NetworksForRuntime(ctx, request.Release.EnvironmentID, request.Snapshot.Plan, request.RuntimeVariables)
@@ -427,6 +435,9 @@ func (o *DockerRuntimeOwner) startCompose(
 	if request.Snapshot.Plan.ComposeProjectName != "" {
 		project = request.Snapshot.Plan.ComposeProjectName
 	}
+	if err := o.ValidateCandidateScope(ctx, request); err != nil {
+		return StartedRuntime{}, err
+	}
 	override := filepath.Join(request.SourceRoot, ".just-dashboard", "release.yml")
 	content, err := renderComposeReleaseOverride(request)
 	if err != nil {
@@ -502,6 +513,10 @@ func (o *DockerRuntimeOwner) startCompose(
 		ComposeFiles: append([]string(nil), resolved.Files...), OverrideFile: override,
 		PrimaryContainerID: primaryID, ContainerIDs: containerIDs, VariableNames: variableNames,
 	}
+	for _, service := range resolved.Services {
+		metadata.ServiceNames = append(metadata.ServiceNames, service.Plan.Name)
+	}
+	sort.Strings(metadata.ServiceNames)
 	if len(request.Snapshot.ComposeBaseline) > 0 {
 		metadata.Adopted = true
 		metadata.BaselineContainers = updatedComposeBaseline(containers, request.Snapshot.ComposeBaseline)
@@ -696,6 +711,15 @@ func (o *DockerRuntimeOwner) StartExisting(
 		}
 		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
 			return o.restoreComposeBaseline(ctx, runtime, metadata, variables, emit)
+		}
+		if metadata.SharedProject {
+			containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": metadata.ProjectName})
+			if err != nil {
+				return err
+			}
+			if err := sharedExistingPopulationScope(containers, metadata, runtime); err != nil {
+				return err
+			}
 		}
 		return o.client.RunComposeRelease(ctx, composeSpecFromMetadata(metadata, variables),
 			dockerx.ComposeReleaseUp, 0, composeBuildEmitter(emit))

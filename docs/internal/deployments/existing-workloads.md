@@ -54,7 +54,8 @@ If Docker deleted an existing container's original image, a verified platform de
 [bounded read-only filesystem export](docker-image-recovery.md) into a private recovery image. This
 creates a local image artifact while leaving the original runtime unchanged; mounted data is excluded
 and recovered separately. Captured secrets remain sealed variables rather than image configuration.
-An absent service with no image or container still requires its original image/source before adoption.
+In the default complete-recipe scope, an absent service with no image or container still requires
+its original image/source before adoption.
 
 Compose recovery defaults to `all_services`, including every declared service. A separately reviewed
 `existing_services` scope includes every existing container, running or stopped, and explicitly lists
@@ -155,6 +156,17 @@ original Compose project name; they cannot claim another application through the
 and preview plans must shed original runtime authority and isolate their names and writable storage.
 External volumes and shared resources retain their external/linked ownership, including during
 cleanup; adopting the app is not permission to delete a shared volume.
+
+Before stop-first cutover, Compose up or baseline restoration, the runtime checks the full current
+regular-container population of every included service. It accepts exact captured container IDs or
+dashboard-managed containers with the exact environment and expected current, predecessor or candidate
+release authority for that operation. An unowned extra replica, including one belonging to a newly
+added desired service in the original project, blocks the operation before any previous runtime is
+stopped. Project-name reservation alone grants no authority over those replicas. Unrelated services
+and true Compose one-off containers remain outside the operation; adopted Compose up keeps orphans.
+Runtime metadata records the included service names. Older metadata derives that scope only from
+captured baseline identities or a complete current match of its recorded container IDs; unavailable
+evidence blocks control rather than guessing a service scope.
 
 Initial runtime observation joins exact captured Docker IDs without changing their labels. Recreated
 baseline containers are accepted only with the exact environment/release ownership labels and

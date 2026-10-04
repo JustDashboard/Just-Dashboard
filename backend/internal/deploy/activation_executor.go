@@ -343,6 +343,11 @@ func (e *NormalizedStepExecutor) startCandidate(
 	if err := validateRuntimeActivationStrategy(snapshot); err != nil {
 		return normalizedStepFailure(err)
 	}
+	if validator, ok := e.runtime.(RuntimeCandidateScopeValidator); ok {
+		if err := validator.ValidateCandidateScope(ctx, CandidateRuntimeRequest{Run: execution.Run, Release: release.Release, Snapshot: snapshot}); err != nil {
+			return runtimeStepFailure(err, "candidate_scope_changed", "the existing Compose service population changed; no runtime was stopped", nil)
+		}
+	}
 
 	var previousStop *RuntimeStopEvidence
 	if snapshot.Plan.Strategy == StrategyStopFirst && release.Release.PredecessorReleaseID != 0 {

@@ -164,6 +164,9 @@ type composeBaselineTarget struct {
 }
 
 func composeBaselineScope(containers []dockerx.Container, baseline []AdoptedContainer, runtime ReleaseRuntime, allowMissing bool) ([]composeBaselineTarget, error) {
+	if err := baselinePopulationScope(containers, baseline, runtime); err != nil {
+		return nil, err
+	}
 	var scope []composeBaselineTarget
 	seen := map[string]bool{}
 	for _, entry := range baseline {
@@ -204,6 +207,9 @@ func composeBaselineScope(containers []dockerx.Container, baseline []AdoptedCont
 func (o *DockerRuntimeOwner) stopSharedComposeRuntime(ctx context.Context, runtime ReleaseRuntime, metadata dockerReleaseRuntimeMetadata, grace int, remove bool) error {
 	containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": metadata.ProjectName})
 	if err != nil {
+		return err
+	}
+	if err := sharedExistingPopulationScope(containers, metadata, runtime); err != nil {
 		return err
 	}
 	scope := []string{}

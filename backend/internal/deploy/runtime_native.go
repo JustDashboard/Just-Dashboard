@@ -130,6 +130,16 @@ func (o *NativeRuntimeOwner) StartCandidate(ctx context.Context, request Candida
 	return o.docker.StartCandidate(ctx, request, emit)
 }
 
+func (o *NativeRuntimeOwner) ValidateCandidateScope(ctx context.Context, request CandidateRuntimeRequest) error {
+	if o == nil || o.docker == nil || request.Snapshot.NativeBaseline != nil {
+		return nil
+	}
+	if validator, ok := o.docker.(RuntimeCandidateScopeValidator); ok {
+		return validator.ValidateCandidateScope(ctx, request)
+	}
+	return nil
+}
+
 func (o *NativeRuntimeOwner) capture(ctx context.Context, runtime ReleaseRuntime) (*procs.HostWorkloadCapture, NativeBaselineMetadata, error) {
 	var metadata NativeBaselineMetadata
 	if json.Unmarshal(runtime.Metadata, &metadata) != nil || metadata.Version != 1 || metadata.Manager != runtime.Kind || metadata.ConfigurationDigest == "" {
