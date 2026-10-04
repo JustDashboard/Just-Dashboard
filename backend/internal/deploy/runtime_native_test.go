@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
@@ -13,6 +14,77 @@ type fakeNativePM2 struct {
 	capture  *procs.HostWorkloadCapture
 	actions  []string
 	failStop bool
+}
+
+type nativeDockerDelegationFixture struct{ calls []string }
+
+func (f *nativeDockerDelegationFixture) StartCandidate(context.Context, CandidateRuntimeRequest, func(BuildLog) error) (StartedRuntime, error) {
+	f.calls = append(f.calls, "candidate")
+	return StartedRuntime{}, nil
+}
+func (f *nativeDockerDelegationFixture) StartExisting(context.Context, ReleaseRuntime, map[string]string, func(BuildLog) error) error {
+	f.calls = append(f.calls, "start")
+	return nil
+}
+func (f *nativeDockerDelegationFixture) Stop(context.Context, ReleaseRuntime, RuntimePlanConfig, map[string]string, bool, func(BuildLog) error) (RuntimeStopEvidence, error) {
+	f.calls = append(f.calls, "stop")
+	return RuntimeStopEvidence{}, nil
+}
+func (f *nativeDockerDelegationFixture) RunReleaseTask(context.Context, ReleaseTaskRuntimeRequest, func(BuildLog) error) (int, bool, error) {
+	f.calls = append(f.calls, "release-task")
+	return 0, true, nil
+}
+func (f *nativeDockerDelegationFixture) RemovePreviewResources(context.Context, int64) error {
+	f.calls = append(f.calls, "preview-remove")
+	return nil
+}
+func (f *nativeDockerDelegationFixture) QuarantinePreview(context.Context, PreviewQuarantineTarget) error {
+	f.calls = append(f.calls, "preview-quarantine")
+	return nil
+}
+func (f *nativeDockerDelegationFixture) PersistentSources(context.Context, CandidateRuntimeRequest) ([]string, error) {
+	f.calls = append(f.calls, "storage")
+	return []string{"volume"}, nil
+}
+func (f *nativeDockerDelegationFixture) DiagnoseRuntime(context.Context, ReleaseRuntime) (RuntimeDiagnostics, error) {
+	f.calls = append(f.calls, "diagnostics")
+	return RuntimeDiagnostics{}, nil
+}
+func (f *nativeDockerDelegationFixture) ListContainersWithLabels(context.Context, map[string]string) ([]dockerx.Container, error) {
+	f.calls = append(f.calls, "observe")
+	return []dockerx.Container{}, nil
+}
+
+func TestNativeBaselineWrapperPreservesEveryDockerFeatureOwner(t *testing.T) {
+	delegate := &nativeDockerDelegationFixture{}
+	owner := &NativeRuntimeOwner{docker: delegate}
+	ctx := context.Background()
+	_, _ = owner.StartCandidate(ctx, CandidateRuntimeRequest{}, nil)
+	_ = owner.StartExisting(ctx, ReleaseRuntime{Kind: "container"}, nil, nil)
+	_, _ = owner.Stop(ctx, ReleaseRuntime{Kind: "compose"}, RuntimePlanConfig{}, nil, false, nil)
+	_, _, _ = owner.RunReleaseTask(ctx, ReleaseTaskRuntimeRequest{}, nil)
+	_ = owner.RemovePreviewResources(ctx, 1)
+	_ = owner.QuarantinePreview(ctx, PreviewQuarantineTarget{})
+	_, _ = owner.PersistentSources(ctx, CandidateRuntimeRequest{})
+	_, _ = owner.DiagnoseRuntime(ctx, ReleaseRuntime{Kind: "container"})
+	_, _ = owner.ListContainersWithLabels(ctx, nil)
+	if len(delegate.calls) != 9 {
+		t.Fatalf("Docker feature owner was lost: %v", delegate.calls)
+	}
+}
+
+func TestNativeBaselineObservesOriginalLogsWithoutPretendingContainerIdentity(t *testing.T) {
+	owner, manager, runtime := nativeFixture(t)
+	manager.capture.Processes[0].State = "online"
+	manager.capture.Processes[0].PID = 123
+	result := owner.ObserveNativeBaseline(context.Background(), runtime)
+	if result.Status != "available" || len(result.Services) != 1 {
+		t.Fatalf("native observation unavailable: %+v", result)
+	}
+	service := result.Services[0]
+	if service.State != "running" || service.Manager != "pm2" || service.PID != 123 || service.ContainerID != "" || service.LogSource != "pm2:alice/7/api" {
+		t.Fatalf("native service identity lost: %+v", service)
+	}
 }
 
 func (f *fakeNativePM2) CaptureExisting(context.Context, string, string, string) (*procs.HostWorkloadCapture, error) {

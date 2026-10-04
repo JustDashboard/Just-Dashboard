@@ -26,6 +26,7 @@ type RuntimeService struct {
 	Manager     string     `json:"manager,omitempty"`
 	ResourceID  string     `json:"resourceId,omitempty"`
 	LogSource   string     `json:"logSource,omitempty"`
+	PID         int32      `json:"pid,omitempty"`
 	ContainerID string     `json:"containerId"`
 	Name        string     `json:"name"`
 	ReleaseID   int64      `json:"releaseId"`

@@ -236,3 +236,55 @@ func (o *NativeRuntimeOwner) ListContainersWithLabels(ctx context.Context, label
 	}
 	return owner.ListContainersWithLabels(ctx, labels)
 }
+
+func (o *NativeRuntimeOwner) RunReleaseTask(ctx context.Context, request ReleaseTaskRuntimeRequest, emit func(BuildLog) error) (int, bool, error) {
+	owner, ok := o.docker.(ReleaseTaskRuntime)
+	if !ok {
+		return 0, false, ErrRuntimeUnavailable
+	}
+	return owner.RunReleaseTask(ctx, request, emit)
+}
+
+func (o *NativeRuntimeOwner) RemovePreviewResources(ctx context.Context, environmentID int64) error {
+	owner, ok := o.docker.(PreviewResourceOwner)
+	if !ok {
+		return ErrRuntimeUnavailable
+	}
+	return owner.RemovePreviewResources(ctx, environmentID)
+}
+
+func (o *NativeRuntimeOwner) QuarantinePreview(ctx context.Context, target PreviewQuarantineTarget) error {
+	owner, ok := o.docker.(PreviewQuarantineOwner)
+	if !ok {
+		return ErrRuntimeUnavailable
+	}
+	return owner.QuarantinePreview(ctx, target)
+}
+
+func (o *NativeRuntimeOwner) CaptureRuntime(ctx context.Context, runtime ReleaseRuntime) (*procs.HostWorkloadCapture, error) {
+	capture, _, err := o.capture(ctx, runtime)
+	return capture, err
+}
+
+func (o *NativeRuntimeOwner) ObserveNativeBaseline(ctx context.Context, runtime ReleaseRuntime) RuntimeServices {
+	result := RuntimeServices{Status: "unavailable", Services: []RuntimeService{}}
+	capture, err := o.CaptureRuntime(ctx, runtime)
+	if err != nil {
+		result.Reason = "The original manager or captured configuration is unavailable or changed. Refresh import review before changing this workload."
+		return result
+	}
+	result.Status = "available"
+	result.ObservedAt = time.Now().UTC()
+	for _, process := range capture.Processes {
+		state := process.State
+		if state == "online" || state == "active" {
+			state = "running"
+		}
+		item := RuntimeService{Name: capture.Name, ReleaseID: runtime.ReleaseID, LiveRelease: true, State: state, Health: "unavailable", Manager: capture.Manager, ResourceID: capture.ResourceID, PID: process.PID}
+		if len(process.LogSources) > 0 {
+			item.LogSource = process.LogSources[0]
+		}
+		result.Services = append(result.Services, item)
+	}
+	return result
+}
