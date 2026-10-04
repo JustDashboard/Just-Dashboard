@@ -83,6 +83,7 @@ import { ProjectMark } from "@/components/deploy/project-mark"
 import { ServiceDetails } from "@/components/deploy/runtime-details"
 import { ServiceFailure } from "@/components/deploy/runtime-failure"
 import {
+  isImageDigest,
   mountTargetProduct,
   publishedPorts,
   runtimeContainer,
@@ -707,10 +708,11 @@ function verbOf({ key, label, icon, run, progressive, danger }: ContainerVerb): 
  * left the menu level with the name over an empty corner — there they are one
  * band, the release and health first, and the state stays beside the name.
  *
- * What the line has no room for goes under it, at every width: every port the
- * container publishes with who can reach it, and — for a container that is
- * restarting or has exited — Docker's reading of why. A card with neither
- * stays one line. The menu starts, stops, restarts and pauses the container
+ * An image that is only a digest is left out of the line, since it names
+ * nothing. One or two published ports, with who can reach each, join the line
+ * from `xl`. What it has no room for goes under it: more ports than that, every
+ * port below `xl`, and — for a container that is restarting or has exited —
+ * Docker's reading of why. A card with none of those stays one line. The menu starts, stops, restarts and pauses the container
  * under the confirmations Docker's own page asks, and opens the facts Docker
  * records about it; while one of those is in flight the state says so.
  *
@@ -851,8 +853,13 @@ function ServiceCard({
       deployment #{run.runNumber} →
     </Link>
   )
+  const ports = publishedPorts(container?.exposure)
+  // One or two ports are short enough to join the line under the name, which
+  // keeps the common card to a single band; more go under it.
+  const portsInline = wide && ports.length > 0 && ports.length <= 2
   const identity = container ? (
-    <ContainerIdentity container={container} id={widest} />
+    // A bare digest names nothing, so it is left out rather than truncated.
+    <ContainerIdentity container={container} id={widest} image={!isImageDigest(container.image)} />
   ) : (
     <span className="flex min-w-0 items-center gap-1.5">
       {service.stack && (
@@ -869,9 +876,8 @@ function ServiceCard({
   )
   const cpu = container && <CpuReading stat={stat} container={container} trend={trend} />
   const memory = container && <MemoryReading stat={stat} container={container} />
-  const ports = publishedPorts(container?.exposure)
   const failing = wantsFailureReading(service.state)
-  const below = !wide || ports.length > 0 || failing
+  const below = !wide || (ports.length > 0 && !portsInline) || failing
 
   return (
     <ChoiceRow
@@ -881,7 +887,18 @@ function ServiceCard({
       index={index}
       leading={<ProductLogo id={product} size="sm" />}
       title={name}
-      description={identity}
+      description={
+        portsInline ? (
+          <span className="flex min-w-0 items-center gap-3">
+            {identity}
+            <span className="shrink-0">
+              <RuntimePorts ports={ports} />
+            </span>
+          </span>
+        ) : (
+          identity
+        )
+      }
       trailing={
         wide ? (
           <>
@@ -924,7 +941,7 @@ function ServiceCard({
               )}
             </div>
           )}
-          {ports.length > 0 && (
+          {ports.length > 0 && !portsInline && (
             <div className="min-w-0 sm:pl-11">
               <RuntimePorts ports={ports} />
             </div>

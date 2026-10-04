@@ -1,5 +1,6 @@
 "use client"
 
+import { Fragment } from "react"
 import { Copy, Information, Layers, Warning } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -40,29 +41,36 @@ import { copyText } from "@/lib/clipboard"
 export function ContainerIdentity({
   container,
   id = true,
+  image = true,
 }: {
   container: Container
   /** Off where the line is too short to hold the image and the id both. */
   id?: boolean
+  /** Off where the image is only a digest and says nothing. */
+  image?: boolean
 }) {
+  const stack = container.composeStack && (
+    <span className="flex min-w-0 shrink items-center gap-1 truncate">
+      <Layers className="size-3 shrink-0" />
+      <span className="truncate">
+        {container.composeStack}/{container.composeService}
+      </span>
+    </span>
+  )
+  // A separator belongs between two things, so it is drawn by what follows one.
+  const parts = [
+    image && <span className="min-w-0 truncate font-mono">{container.image}</span>,
+    stack,
+    id && <ContainerId container={container} />,
+  ].filter(Boolean)
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="min-w-0 truncate font-mono">{container.image}</span>
-      {container.composeStack && (
-        <span className="flex min-w-0 shrink items-center gap-1 truncate">
-          <span aria-hidden>·</span>
-          <Layers className="size-3 shrink-0" />
-          <span className="truncate">
-            {container.composeStack}/{container.composeService}
-          </span>
-        </span>
-      )}
-      {id && (
-        <>
-          <span aria-hidden>·</span>
-          <ContainerId container={container} />
-        </>
-      )}
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && <span aria-hidden>·</span>}
+          {part}
+        </Fragment>
+      ))}
     </span>
   )
 }
