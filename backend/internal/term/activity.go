@@ -766,3 +766,5 @@ func freeName(base string, taken map[string]bool) string {
 	}
 	return base
 }
+
+// A line the CI probe adds: nothing reads it.
