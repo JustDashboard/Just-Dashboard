@@ -63,10 +63,13 @@ jobs:
       go_plain: ${{ steps.plan.outputs.go_plain }}
       go_budgets: ${{ steps.plan.outputs.go_budgets }}
       race: ${{ steps.plan.outputs.race }}
+      race_jobs: ${{ steps.plan.outputs.race_jobs }}
       live: ${{ steps.plan.outputs.live }}
+      live_jobs: ${{ steps.plan.outputs.live_jobs }}
       frontend: ${{ steps.plan.outputs.frontend }}
       lint: ${{ steps.plan.outputs.lint }}
       browser: ${{ steps.plan.outputs.browser }}
+      browser_specs: ${{ steps.plan.outputs.browser_specs }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -181,8 +184,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.race) }}
-    name: ${{ matrix.name && format('race ({0})', matrix.name) || 'race' }}
+        name: ${{ fromJSON(needs.plan.outputs.race) }}
     defaults:
       run:
         working-directory: backend
@@ -207,7 +209,8 @@ jobs:
       - name: Race gate
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
-          ../scripts/go-test-race.sh ${{ matrix.procs }} ${{ matrix.packages }} |
+          ../scripts/go-test-race.sh ${{ fromJSON(needs.plan.outputs.race_jobs)[matrix.name].procs }} \
+            ${{ fromJSON(needs.plan.outputs.race_jobs)[matrix.name].packages }} |
             tee "$RUNNER_TEMP/jd-ci/backend-race-${{ matrix.name }}.jsonl"
       - name: Retain race evidence
         if: always()
@@ -293,8 +296,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.browser) }}
-    name: ${{ matrix.shard && format('browser ({0}/{1})', matrix.shard, strategy.job-total) || 'browser' }}
+        shard: ${{ fromJSON(needs.plan.outputs.browser) }}
     defaults:
       run:
         working-directory: frontend
@@ -329,7 +331,7 @@ jobs:
           bunx playwright install --with-deps chromium
       - name: Production build and browser specs
         env:
-          SPECS: ${{ matrix.specs }}
+          SPECS: ${{ fromJSON(needs.plan.outputs.browser_specs)[matrix.shard] }}
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
@@ -365,10 +367,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.plan.outputs.live) }}
-    name: ${{ matrix.name && format('live ({0})', matrix.name) || 'live' }}
+        name: ${{ fromJSON(needs.plan.outputs.live) }}
     env:
       JD_DEPLOY_LIVE: "1"
+      FIXTURES: ${{ toJSON(fromJSON(needs.plan.outputs.live_jobs)[matrix.name]) }}
     defaults:
       run:
         working-directory: backend
@@ -394,7 +396,7 @@ jobs:
         # The hosted image ships Docker 28, which refuses a fixed container
         # address on a network with an automatic subnet; the database fixture
         # holds an address that way, as the release host's daemon allows.
-        if: matrix.docker
+        if: fromJSON(env.FIXTURES).docker
         run: |
           curl -fsSL https://get.docker.com | sudo sh
           docker version --format '{{.Server.Version}}'
@@ -402,10 +404,10 @@ jobs:
         env:
           JD_CUTOVER_EVIDENCE: ${{ runner.temp }}/jd-ci/cutover-traffic.json
           NAME: ${{ matrix.name }}
-          PACKAGES: ${{ matrix.packages }}
-          RUN: ${{ matrix.run }}
-          SKIP: ${{ matrix.skip }}
-          TESTS: ${{ matrix.tests }}
+          PACKAGES: ${{ fromJSON(env.FIXTURES).packages }}
+          RUN: ${{ fromJSON(env.FIXTURES).run }}
+          SKIP: ${{ fromJSON(env.FIXTURES).skip }}
+          TESTS: ${{ fromJSON(env.FIXTURES).tests }}
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           docker version | tee "$RUNNER_TEMP/jd-ci/docker-version.txt"

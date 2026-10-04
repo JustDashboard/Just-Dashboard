@@ -88,12 +88,14 @@ class PlanTest(unittest.TestCase):
 
     def go(self, *changed):
         out = self.plan(*changed)
-        return out["go_packages"].split(), out["go_plain"].split(), [job["name"] for job in json.loads(out["race"])]
+        return out["go_packages"].split(), out["go_plain"].split(), json.loads(out["race"])
 
     def specs(self, *changed):
-        jobs = json.loads(self.plan(*changed)["browser"])
+        out = self.plan(*changed)
+        jobs = json.loads(out["browser_specs"])
+        self.assertEqual(json.loads(out["browser"]), list(range(1, len(jobs))))
         names = sorted(
-            name.removeprefix("tests/browser/").removesuffix(".spec.ts") for job in jobs for name in job["specs"].split()
+            name.removeprefix("tests/browser/").removesuffix(".spec.ts") for job in jobs for name in job.split()
         )
         return "all" if names == ["database", "deploy", "design-system", "files"] else names
 
@@ -133,21 +135,20 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(self.plan("backend/internal/api/routes.go")["go_budgets"], "")
 
     def test_live_fixtures_follow_the_packages_being_checked(self):
-        live = json.loads(self.plan("backend/internal/api/routes.go")["live"])
-        self.assertEqual([job["name"] for job in live], ["fixtures"])
-        self.assertEqual((live[0]["packages"], live[0]["docker"]), ("./internal/api", True))
+        out = self.plan("backend/internal/api/routes.go")
+        self.assertEqual(json.loads(out["live"]), ["fixtures"])
+        fixtures = json.loads(out["live_jobs"])["fixtures"]
+        self.assertEqual((fixtures["packages"], fixtures["docker"]), ("./internal/api", True))
 
-        live = json.loads(self.plan("backend/internal/deploy/engine.go")["live"])
-        self.assertEqual(
-            [job["name"] for job in live],
-            ["fixtures", "frameworks-1", "frameworks-2", "frameworks-3", "frameworks-4"],
-        )
-        self.assertEqual(live[0]["packages"], "./internal/api ./internal/deploy")
+        out = self.plan("backend/internal/deploy/engine.go")
+        names, jobs = json.loads(out["live"]), json.loads(out["live_jobs"])
+        self.assertEqual(names, ["fixtures", "frameworks-1", "frameworks-2", "frameworks-3", "frameworks-4"])
+        self.assertEqual(jobs["fixtures"]["packages"], "./internal/api ./internal/deploy")
         # The last framework job runs whatever the others do not name.
-        self.assertEqual(live[4]["run"], "^TestLiveDetectedFrameworkBuildAndServing$")
-        for job in live[1:4]:
-            for name in job["run"].split("/^(")[1].removesuffix(")$").split("|"):
-                self.assertIn(name, live[4]["skip"])
+        self.assertEqual(jobs["frameworks-4"]["run"], "^TestLiveDetectedFrameworkBuildAndServing$")
+        for job in names[1:4]:
+            for name in jobs[job]["run"].split("/^(")[1].removesuffix(")$").split("|"):
+                self.assertIn(name, jobs["frameworks-4"]["skip"])
 
     def test_a_module_runs_the_specs_naming_the_pages_that_use_it(self):
         self.assertEqual(self.specs("frontend/src/components/deploy/badge.tsx"), ["deploy", "design-system"])
