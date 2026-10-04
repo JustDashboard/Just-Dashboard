@@ -58,6 +58,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
   // This opt-in recording can include two large exports on a busy host.
   test.setTimeout(300000)
   const ready = JSON.parse(readFileSync(readyPath!, "utf8"))
+  expect(ready.dockerLogTailRead).toBe(true)
   const output = process.env.JD_IMPORT_NATIVE_EVIDENCE ?? testInfo.outputDir
   mkdirSync(output, { recursive: true })
   await context.addCookies([
@@ -68,6 +69,25 @@ test("imports the real existing bet-bot stack without changing its containers", 
     },
   ])
   const before = existingStackEvidence()
+  const liveReadings = new Set<string>()
+  page.on("websocket", (socket) => {
+    if (!socket.url().endsWith("/stats/stream")) return
+    socket.on("framereceived", ({ payload }) => {
+      try {
+        const message = JSON.parse(String(payload))
+        if (
+          message.type === "stats" &&
+          message.data?.cpuReady === true &&
+          Number.isFinite(message.data?.cpuPercent) &&
+          Number.isFinite(message.data?.memUsage) &&
+          message.data.memUsage > 0
+        )
+          liveReadings.add(message.data.id)
+      } catch {
+        // A control frame is not a resource reading.
+      }
+    })
+  })
   const excludedServices = ["eurobet-doubles-tracker", "eurobet-high-market-tracker"]
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/deploy")
@@ -161,9 +181,32 @@ test("imports the real existing bet-bot stack without changing its containers", 
       timeout: 30000,
     })
   }
-  await page.screenshot({ path: join(output, "native-runtime-1280.png"), fullPage: true })
+  await expect
+    .poll(() => managedContainerIds.some((id: string) => liveReadings.has(id)), { timeout: 30000 })
+    .toBe(true)
+  const usage = page.locator('[data-slot="panel"]').filter({
+    has: page.getByRole("heading", { name: "Resource usage", exact: true }),
+  })
+  await expect(usage.getByText("Connecting", { exact: true })).not.toBeVisible()
+  await expect(usage.getByText("Waiting for Docker", { exact: true })).not.toBeVisible()
+  await page.screenshot({
+    path: join(output, "native-runtime-1280.png"),
+    fullPage: true,
+    animations: "disabled",
+  })
   await settingsLink.click()
-  await page.screenshot({ path: join(output, "native-settings-1280.png"), fullPage: true })
+  for (const document of recoveredDraft.data.source.composeFiles as { path: string }[]) {
+    await expect(
+      page.getByRole("textbox", { name: `${document.path} content`, exact: true }),
+    ).toBeEditable({
+      timeout: 30000,
+    })
+  }
+  await page.screenshot({
+    path: join(output, "native-settings-1280.png"),
+    fullPage: true,
+    animations: "disabled",
+  })
   await page.goto("/deploy")
   await expect(page.getByRole("link", { name: /bet-bot/ }).first()).toBeVisible()
   await page.screenshot({ path: join(output, "native-after-deployments.png"), fullPage: true })
@@ -186,6 +229,8 @@ test("imports the real existing bet-bot stack without changing its containers", 
         existingContainerCount: before.length,
         configurationsAndStartTimesUnchanged: true,
         processIdentityAndStateUnchanged: true,
+        liveCpuAndMemoryReadingsVerified: true,
+        dockerLogTailReadVerified: ready.dockerLogTailRead,
         noRuntimeActionsInvoked: true,
         before,
         after,

@@ -150,6 +150,12 @@ on its stop file or after fifteen minutes.
 The browser proof compares full container IDs, PIDs, running state, status, start times, restart
 counts and configuration digests before and after adoption. It checks the normal runtime/settings
 links and deployment controls without invoking any runtime action.
+The isolated server rebinds its read-only Docker consumers and permits same-origin HTTP WebSocket
+upgrades through the loopback router. The browser waits for real CPU/memory stats frames and the
+editable captured Compose source before recording Runtime and General settings. It never starts the
+deployment engine or background reconciler, and it does not manufacture metrics or history.
+It also opens the ordinary authenticated Docker log stream with a one-line tail and discards the
+contents, recording only successful stream metadata as a boolean in the sanitized continuity JSON.
 
 ```bash
 cd backend

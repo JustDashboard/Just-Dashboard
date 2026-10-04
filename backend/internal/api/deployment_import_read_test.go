@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,8 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/wsx"
+	"github.com/gorilla/websocket"
 )
 
 func TestImportedProjectReadsPreserveMissingWorkloadAndRefuseRuns(t *testing.T) {
@@ -77,6 +80,14 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 		s.modules.docker.Close()
 	}
 	s.modules.docker = dockerx.New("unix:///var/run/docker.sock")
+	// Rebind the read-only consumers built with the test server's original
+	// client. Start remains unused: no engine or reconciler may act on this host.
+	s.modules.dockerStats = s.modules.docker.NewStatsSampler()
+	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
+	s.modules.metrics.WithContainers(s.modules.docker.NewStatsSampler())
+	// The proof router serves HTTP on loopback. Preserve the normal same-origin
+	// guard with its actual scheme so stats and log sockets can upgrade.
+	s.WS = wsx.NewUpgrader(nil, false)
 	// An isolated database still shares the real daemon. Its runtime label
 	// namespace must never overlap an installed deployment's environment.
 	if _, err := s.Store.DB.Exec(`INSERT INTO sqlite_sequence(name,seq) SELECT 'deploy_environments',? WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name='deploy_environments')`, time.Now().UnixMicro()); err != nil {
@@ -132,10 +143,47 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 	server := &http.Server{Handler: s.Routes(), ReadHeaderTimeout: 5 * time.Second}
 	t.Cleanup(func() { server.Close() })
 	go server.Serve(listener)
+	containers, err := s.modules.docker.ListContainers(t.Context(), false)
+	if err != nil {
+		t.Fatal("the proof's current containers could not be read")
+	}
+	var logContainerID string
+	for _, container := range containers {
+		if container.ComposeStack == "bet-bot" && container.State == "running" {
+			logContainerID = container.ID
+			break
+		}
+	}
+	if logContainerID == "" {
+		t.Fatal("the native proof requires a running bet-bot container")
+	}
+	// Exercise the ordinary authenticated log route with one tail line. Log
+	// contents are discarded; only the successful Docker stream metadata is kept.
+	logURL := "ws://" + listener.Addr().String() + "/api/v1/logs/stream?source=" + url.QueryEscape("docker:"+logContainerID) + "&lines=1"
+	logHeaders := http.Header{"Cookie": []string{c.cookie}, "Origin": []string{"http://" + listener.Addr().String()}}
+	logContext, cancelLogs := context.WithTimeout(t.Context(), 10*time.Second)
+	logSocket, _, err := websocket.DefaultDialer.DialContext(logContext, logURL, logHeaders)
+	cancelLogs()
+	if err != nil {
+		t.Fatal("the proof's authenticated Docker log stream could not open")
+	}
+	defer logSocket.Close()
+	_ = logSocket.SetReadDeadline(time.Now().Add(10 * time.Second))
+	var logMeta struct {
+		Type string `json:"type"`
+		Data struct {
+			Kind string `json:"kind"`
+		} `json:"data"`
+	}
+	if err := logSocket.ReadJSON(&logMeta); err != nil || logMeta.Type != "meta" || logMeta.Data.Kind != "docker" {
+		t.Fatal("the proof's bounded Docker log read did not return stream metadata")
+	}
+	logSocket.Close()
 	cookie := strings.SplitN(c.cookie, "=", 2)
-	ready, _ := json.Marshal(map[string]string{
+	ready, _ := json.Marshal(map[string]any{
 		"url": "http://" + listener.Addr().String(), "cookieName": cookie[0],
 		"cookieValue": cookie[1], "stopFile": filepath.Join(directory, "stop"),
+		"dockerLogTailRead": true,
 	})
 	if err := os.WriteFile(filepath.Join(directory, "ready.json"), ready, 0600); err != nil {
 		t.Fatal(err)
