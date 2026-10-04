@@ -842,8 +842,8 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 		environmentID, target.DesiredRevision).Scan(&sourceKind, &sourceConfig); err != nil {
 		return nil, err
 	}
-	var source deploy.DraftSourceConfig
-	if sourceKind == string(deploy.SourceImport) && (json.Unmarshal([]byte(sourceConfig), &source) != nil || source.Mode != deploy.SourceModeExistingCheckout) {
+	var importedSource deploy.DraftSourceConfig
+	if sourceKind == string(deploy.SourceImport) && (json.Unmarshal([]byte(sourceConfig), &importedSource) != nil || importedSource.Mode != deploy.SourceModeExistingCheckout) {
 		return nil, fmt.Errorf("%w: imported workloads stay with their original manager; open that manager to change or restart them", deploy.ErrInvalidPlan)
 	}
 	if operation == deploy.OperationPreviewRemove && (target.Kind != deploy.EnvironmentPreview || trigger != deploy.TriggerPreview) {
