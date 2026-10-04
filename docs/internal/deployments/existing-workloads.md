@@ -188,6 +188,19 @@ and preview plans must shed original runtime authority and isolate their names a
 External volumes and shared resources retain their external/linked ownership, including during
 cleanup; adopting the app is not permission to delete a shared volume.
 
+Overview checks and execution preflight verify this reservation through its persisted environment
+and adopted baseline provenance. They inspect every recorded Docker container by full ID, including
+stopped containers; managed replacements require the exact environment and live-release labels.
+After a successful cutover or baseline recreation, the permanent original reservation follows the
+registered current runtime rather than requiring obsolete original Docker IDs to exist. PM2 and
+systemd reservations verify the original registered manager configuration and source authority even
+when the retained application is stopped. A missing adapter or unverifiable current runtime blocks
+preflight; caller-supplied dependency configuration cannot substitute for server-owned provenance.
+If the current managed Docker release is verified but original native recovery authority is lost,
+preflight passes current availability with a separate `runtime_baseline_unavailable` warning. Restore
+that manager and source before rolling back to the imported baseline. These inventory checks do not
+grant mutation authority or replace the full population checks below.
+
 Before stop-first cutover, Compose up or baseline restoration, the runtime checks the full current
 regular-container population of every included service. It accepts exact captured container IDs or
 dashboard-managed containers with the exact environment and expected current, predecessor or candidate

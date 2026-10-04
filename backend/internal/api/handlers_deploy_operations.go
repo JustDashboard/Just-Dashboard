@@ -29,8 +29,12 @@ func (o dockerImageUpdates) CheckUpdate(ctx context.Context, reference string, f
 func (s *Server) operationsOwners() deploy.OperationsOwners {
 	owners := deploy.OperationsOwners{}
 	owners.Runtime = s.deploymentRuntimeObserver()
-	if s.modules.docker != nil {
-		owners.Dependencies = newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker)
+	if s.Store != nil {
+		observer := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker)
+		if s.modules.deployNative != nil {
+			observer.withNativeRuntime(s.modules.deployNative)
+		}
+		owners.Dependencies = observer
 	}
 	if s.modules.proxy != nil {
 		owners.Proxy = s.modules.proxy

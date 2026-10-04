@@ -86,7 +86,7 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	dockerOwner := NewDockerRuntimeOwner(client)
 	owner := native.owner(dockerOwner)
 	owner.WithRecordedRuntimeObserver(NewRecordedRuntimeObserver(runs, dockerOwner, client, owner))
-	observer := NewNativePreflightObserver(NewHostPreflightObserver([]string{root}, root, client), owner, runs)
+	observer := NewNativePreflightObserver(NewHostPreflightObserver([]string{root}, root, client).WithDependencies(NewRuntimeReservationObserver(fixture.store, client, owner)), owner, runs)
 	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "owned-" + kind + "-managed", Profile: ProfileService}, recovered)
 	if err != nil {
 		t.Fatal(err)

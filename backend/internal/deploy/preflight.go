@@ -107,6 +107,9 @@ type DependencyObservation struct {
 	Status   string `json:"status,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	DeepLink string `json:"deepLink,omitempty"`
+	// Warning reports lost retained recovery authority separately from a
+	// verified current runtime; it must not masquerade as current availability.
+	Warning string `json:"warning,omitempty"`
 
 	// Extensions are the schema extensions a linked PostgreSQL server
 	// offers among those detection asks about; nil when it was not asked.
@@ -1029,11 +1032,17 @@ func preflightFindings(
 		key := dependency.Kind + "\x00" + dependency.ResourceKind + "\x00" + dependency.ResourceID
 		observed, ok := dependencyEvidence[key]
 		if !ok {
-			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" {
-				findings = append(findings, finding("dependency_unavailable", PreflightUnavailable,
+			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" || dependency.Kind == "runtime" {
+				severity := PreflightUnavailable
+				action := "Open the owning feature and verify the linked resource."
+				if dependency.Kind == "runtime" {
+					severity = PreflightBlocked
+					action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
+				}
+				findings = append(findings, finding("dependency_unavailable", severity,
 					"Dependency evidence is unavailable", dependency.ResourceKind+" "+dependency.ResourceID,
 					"The owning feature did not return inventory evidence.",
-					"Open the owning feature and verify the linked resource.", dependencyOwner(dependency), field))
+					action, dependencyOwner(dependency), field))
 			}
 			continue
 		}
@@ -1059,6 +1068,9 @@ func preflightFindings(
 				"The deployment cannot safely use the named owning-feature resource.",
 				"Repair, relink, or remove this dependency.", dependencyOwner(dependency), field)
 			item.DeepLink = observed.DeepLink
+			if dependency.Kind == "runtime" {
+				item.Action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
+			}
 			findings = append(findings, item)
 			continue
 		}
@@ -1068,6 +1080,14 @@ func preflightFindings(
 			"", dependencyOwner(dependency), field)
 		item.DeepLink = observed.DeepLink
 		findings = append(findings, item)
+		if dependency.Kind == "runtime" && observed.Warning != "" {
+			item := finding("runtime_baseline_unavailable", PreflightWarning,
+				"Original rollback authority is unavailable", observed.Warning,
+				"The current managed runtime is available, but its original native baseline cannot currently be verified.",
+				"Restore the original manager and source before rolling back to the imported baseline.", "deployments", field)
+			item.DeepLink = observed.DeepLink
+			findings = append(findings, item)
+		}
 		if dependency.Kind == "backup" && observed.Status != "" && !observed.Fresh {
 			item := finding("backup_stale", PreflightWarning,
 				"Latest backup is outside the freshness policy", observed.Status,

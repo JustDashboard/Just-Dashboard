@@ -234,20 +234,20 @@ func (s *Server) initModules() {
 		s.modules.docker,
 		s.modules.deployPlanning,
 	)
+	dependencyObserver := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions)
 	s.modules.deployPreflight = deploy.NewHostPreflightObserver(
 		s.Cfg.DeployRoots,
 		s.Cfg.DataDir,
 		s.modules.docker,
 		s.modules.proxy,
-	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
-		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions))
+	).WithFirewall(s.modules.netsec).WithDependencies(dependencyObserver)
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd)
 	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
+	dependencyObserver.withNativeRuntime(s.modules.deployNative)
 	s.modules.deployPreflight = deploy.NewNativePreflightObserver(s.modules.deployPreflight, s.modules.deployNative, s.modules.deployRuns)
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,

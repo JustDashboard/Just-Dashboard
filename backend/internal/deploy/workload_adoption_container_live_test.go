@@ -163,7 +163,7 @@ func liveManagedStandaloneAdoption(t *testing.T, missingImage bool) {
 	}
 	owner := NewDockerRuntimeOwner(client)
 	sources := NewHostSourceAnalyzer([]string{root}, []string{root}, filepath.Join(root, "source-cache"), client, fixture.plans)
-	executor := NewNormalizedStepExecutor(runs, fixture.plans, sources, NewArtifactBuilder(NewDockerArtifactBackend(client)), owner, NewCheckRunner(client), nil, filepath.Join(root, "runtime-cache")).WithPreflightObserver(&preflightObserverFake{observation: HostObservation{Facilities: map[string]FacilityObservation{"docker": {Available: true}, "compose": {Available: true}}}})
+	executor := NewNormalizedStepExecutor(runs, fixture.plans, sources, NewArtifactBuilder(NewDockerArtifactBackend(client)), owner, NewCheckRunner(client), nil, filepath.Join(root, "runtime-cache")).WithPreflightObserver(livePreflightWithReservations(&preflightObserverFake{observation: HostObservation{Facilities: map[string]FacilityObservation{"docker": {Available: true}, "compose": {Available: true}}}}, fixture.store, client, nil))
 	engine := NewEngine(runs, executor, nil, EngineConfig{WorkerID: "standalone-adoption-live", PollEvery: 50 * time.Millisecond, LeaseTTL: 2 * time.Minute}, nil)
 	if err := engine.Start(ctx); err != nil {
 		t.Fatal(err)
