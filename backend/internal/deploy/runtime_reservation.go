@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 )
@@ -113,8 +114,15 @@ func (o *RuntimeReservationObserver) ObserveRuntimeDependency(ctx context.Contex
 			observed.DeepLink = "/docker/containers/" + url.PathEscape(current.RuntimeID)
 		}
 	}
-	if liveReleaseID == baselineID && (kind == "pm2" || kind == "systemd") {
-		if o.native == nil || o.native.ObserveNativeBaseline(ctx, *baseline).Status != "available" {
+	currentNative := current.Kind == "pm2" || current.Kind == "systemd"
+	if currentNative {
+		// Rollback creates a new live release using the retained native manager.
+		// It must carry the exact original captured authority, even though its
+		// release ID differs from the initial adopted release.
+		var baselineAuthority, currentAuthority any
+		if current.Kind != expectedKind || current.RuntimeID != original.ResourceID ||
+			json.Unmarshal(baseline.Metadata, &baselineAuthority) != nil || json.Unmarshal(current.Metadata, &currentAuthority) != nil ||
+			!reflect.DeepEqual(baselineAuthority, currentAuthority) || o.native == nil || o.native.ObserveNativeBaseline(ctx, *current).Status != "available" {
 			observed.Detail = "The original manager configuration, source or retained process authority could not be verified."
 			return observed
 		}
@@ -123,7 +131,7 @@ func (o *RuntimeReservationObserver) ObserveRuntimeDependency(ctx context.Contex
 		return observed
 	}
 	observed.Available, observed.Status, observed.Detail = true, "available", "The owning environment's registered runtime is present; stopped containers and retained native applications are valid."
-	if liveReleaseID != baselineID && (kind == "pm2" || kind == "systemd") &&
+	if !currentNative && (kind == "pm2" || kind == "systemd") &&
 		(o.native == nil || o.native.ObserveNativeBaseline(ctx, *baseline).Status != "available") {
 		observed.Warning = "The current managed Docker runtime is verified, but the original native manager or source is unavailable. Rollback to the imported baseline cannot be verified until its original authority is restored."
 	}
@@ -135,12 +143,59 @@ func (o *RuntimeReservationObserver) reservedDockerRuntimeAvailable(ctx context.
 		return false
 	}
 	var metadata struct {
+		Adopted            bool               `json:"adopted"`
 		ContainerIDs       []string           `json:"containerIds"`
 		PrimaryContainerID string             `json:"primaryContainerId"`
 		BaselineContainers []AdoptedContainer `json:"baselineContainers"`
 	}
 	if json.Unmarshal(runtime.Metadata, &metadata) != nil {
 		return false
+	}
+	if runtime.Kind == "compose" && metadata.Adopted && len(metadata.BaselineContainers) > 0 {
+		inventory, ok := o.containers.(RuntimeObserver)
+		if !ok {
+			return false
+		}
+		containers, err := inventory.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": runtime.RuntimeID})
+		if err != nil {
+			return false
+		}
+		// Compensation can recreate a baseline without changing its immutable
+		// runtime record. Reuse the lifecycle authority rules, and require the
+		// exact captured replica count rather than any owned container in a stack.
+		scope, err := composeBaselineScope(containers, metadata.BaselineContainers, runtime, false)
+		if err != nil || len(scope) != len(metadata.BaselineContainers) {
+			return false
+		}
+		expected, services := map[string]bool{}, map[string]bool{}
+		for _, entry := range metadata.BaselineContainers {
+			services[entry.Service] = true
+			expected[entry.Service+":"+strconv.Itoa(entry.Number)] = true
+		}
+		for _, container := range containers {
+			service := container.Labels["com.docker.compose.service"]
+			if strings.EqualFold(container.Labels["com.docker.compose.oneoff"], "true") || !services[service] {
+				continue
+			}
+			number, err := strconv.Atoi(container.Labels["com.docker.compose.container-number"])
+			if err != nil || !expected[service+":"+strconv.Itoa(number)] {
+				return false
+			}
+		}
+		for _, target := range scope {
+			if !o.reservedDockerContainerAvailable(ctx, runtime, target.container.ID, managed || target.container.ID != target.entry.ID) {
+				return false
+			}
+			detail, err := o.containers.Inspect(ctx, target.container.ID)
+			number := 0
+			if detail != nil {
+				number, _ = strconv.Atoi(detail.Labels["com.docker.compose.container-number"])
+			}
+			if err != nil || detail == nil || detail.Labels["com.docker.compose.service"] != target.entry.Service || number != target.entry.Number {
+				return false
+			}
+		}
+		return true
 	}
 	ids := map[string]bool{}
 	for _, id := range metadata.ContainerIDs {
@@ -156,22 +211,27 @@ func (o *RuntimeReservationObserver) reservedDockerRuntimeAvailable(ctx context.
 		return false
 	}
 	for id := range ids {
-		if len(id) != 64 {
+		if !o.reservedDockerContainerAvailable(ctx, runtime, id, managed) {
 			return false
 		}
-		detail, err := o.containers.Inspect(ctx, id)
-		if err != nil || detail == nil || detail.ID != id || (runtime.Kind == "compose" && detail.ComposeStack != runtime.RuntimeID) {
-			return false
-		}
-		// Original unlabeled containers are admitted only by their recorded full
-		// IDs. Every managed replacement must belong to this exact live release.
-		if managed || detail.Labels["io.just-dashboard.managed"] != "" || detail.Labels["io.just-dashboard.environment-id"] != "" || detail.Labels["io.just-dashboard.release-id"] != "" {
-			if detail.Labels["io.just-dashboard.managed"] != "true" ||
-				detail.Labels["io.just-dashboard.environment-id"] != strconv.FormatInt(runtime.EnvironmentID, 10) ||
-				detail.Labels["io.just-dashboard.release-id"] != strconv.FormatInt(runtime.ReleaseID, 10) {
-				return false
-			}
-		}
+	}
+	return true
+}
+
+func (o *RuntimeReservationObserver) reservedDockerContainerAvailable(ctx context.Context, runtime ReleaseRuntime, id string, managed bool) bool {
+	if len(id) != 64 {
+		return false
+	}
+	detail, err := o.containers.Inspect(ctx, id)
+	if err != nil || detail == nil || detail.ID != id || (runtime.Kind == "compose" && detail.ComposeStack != runtime.RuntimeID) {
+		return false
+	}
+	// Original unlabeled containers are admitted only by their recorded full
+	// IDs. Every managed replacement must belong to this exact live release.
+	if managed || detail.Labels["io.just-dashboard.managed"] != "" || detail.Labels["io.just-dashboard.environment-id"] != "" || detail.Labels["io.just-dashboard.release-id"] != "" {
+		return detail.Labels["io.just-dashboard.managed"] == "true" &&
+			detail.Labels["io.just-dashboard.environment-id"] == strconv.FormatInt(runtime.EnvironmentID, 10) &&
+			detail.Labels["io.just-dashboard.release-id"] == strconv.FormatInt(runtime.ReleaseID, 10)
 	}
 	return true
 }

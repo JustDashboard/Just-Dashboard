@@ -192,9 +192,15 @@ Overview checks and execution preflight verify this reservation through its pers
 and adopted baseline provenance. They inspect every recorded Docker container by full ID, including
 stopped containers; managed replacements require the exact environment and live-release labels.
 After a successful cutover or baseline recreation, the permanent original reservation follows the
-registered current runtime rather than requiring obsolete original Docker IDs to exist. PM2 and
+registered current runtime rather than requiring obsolete original Docker IDs to exist. Compensation
+may restore Compose containers while the immutable baseline still records their original IDs: that
+case requires every captured service/replica, the exact captured count and exact environment/baseline
+release labels on replacements. Missing, ambiguous, foreign or extra regular replicas are refused;
+unrelated services and true one-offs remain outside the reservation inventory. PM2 and
 systemd reservations verify the original registered manager configuration and source authority even
-when the retained application is stopped. A missing adapter or unverifiable current runtime blocks
+when the retained application is stopped. A native rollback release with a new release ID must retain
+the exact original manager identity and captured metadata and pass that manager's live verification.
+A missing adapter or unverifiable current runtime blocks
 preflight; caller-supplied dependency configuration cannot substitute for server-owned provenance.
 If the current managed Docker release is verified but original native recovery authority is lost,
 preflight passes current availability with a separate `runtime_baseline_unavailable` warning. Restore

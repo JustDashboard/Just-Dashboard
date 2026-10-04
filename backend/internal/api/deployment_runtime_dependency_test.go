@@ -192,6 +192,39 @@ func TestRuntimeReservationsFollowOwnedDockerCutoverAndRecreatedBaseline(t *test
 				t.Fatalf("native recovery loss not reported separately: %+v", got)
 			}
 			if runtimeKind == "pm2" || runtimeKind == "systemd" {
+				baselineRuntime, err := s.modules.deployRuns.RuntimeForRelease(t.Context(), baselineID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err := s.Store.DB.Exec(`INSERT INTO deploy_releases(project_id,environment_id,release_number,state,created_at) VALUES(?,?,3,'live',0)`, projectID, environmentID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				cloneID, _ := result.LastInsertId()
+				if _, err := s.Store.DB.Exec(`INSERT INTO deploy_release_runtimes(release_id,environment_id,kind,runtime_id,state,metadata_json,created_at,updated_at) VALUES(?,?,?,?,'live',?,0,0)`, cloneID, environmentID, runtimeKind, resourceID, string(baselineRuntime.Metadata)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Store.DB.Exec(`UPDATE deploy_environments SET live_release_id=? WHERE id=?`, cloneID, environmentID); err != nil {
+					t.Fatal(err)
+				}
+				native.available = true
+				if got := observeReserved(t, observer, dependency); !got.Available || got.Warning != "" {
+					t.Fatalf("native rollback clone unavailable: %+v", got)
+				}
+				native.expectedID = "other-account/namespace/app"
+				if got := observeReserved(t, observer, dependency); got.Available {
+					t.Fatalf("native rollback clone substituted original identity: %+v", got)
+				}
+				native.expectedID = resourceID
+				if _, err := s.Store.DB.Exec(`DELETE FROM deploy_release_runtimes WHERE release_id=?`, cloneID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Store.DB.Exec(`INSERT INTO deploy_release_runtimes(release_id,environment_id,kind,runtime_id,state,metadata_json,created_at,updated_at) VALUES(?,?,?,?,'live','{"configurationDigest":"changed"}',0,0)`, cloneID, environmentID, runtimeKind, resourceID); err != nil {
+					t.Fatal(err)
+				}
+				if got := observeReserved(t, observer, dependency); got.Available {
+					t.Fatalf("native rollback clone substituted captured authority: %+v", got)
+				}
 				return
 			}
 			metadata, _ = json.Marshal(map[string]any{"version": 1, "adopted": true, "containerIds": []string{containerID}})
