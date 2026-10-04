@@ -259,12 +259,16 @@ health checks and runtime limits remain editable before the first deployment.
 
 Already have applications on this server? **Import existing** discovers Docker Compose stacks,
 standalone containers, existing PM2 applications, systemd services and listening host processes.
-Review the services, ports and original manager, then add the workload to Deployments in place.
-Stopped services are included; a four-service stack with two running stays one project. Import
-does not restart anything, rewrite configuration, copy secrets or move persistent data. Imported
-projects show observed runtime state and link to their original manager for configuration, logs
-and lifecycle controls. They do not gain dashboard builds, rollback or automatic deployments;
-converting an existing application to a managed deployment requires a separate migration.
+Review and recover the services, ports, configuration, storage and original manager, then adopt a
+normal deployment with a pinned live release. Existing stopped containers are included; a four-container
+stack with two running stays one project. A Compose project can explicitly adopt its existing
+containers only, with unavailable declarations listed and acknowledged before adoption. Import leaves
+the application running and seals its captured private inputs. Settings, variables, logs, history,
+deployment controls and applicable automation use the regular deployment pages. Settings stay pending
+until Deploy changes; Redeploy and rollback use the frozen baseline. PM2/systemd applications retain
+their original manager until an explicit Docker migration. Recovery blocks incomplete or unsupported
+translations, including unmanaged processes without restart authority. See the
+[coverage and rollback boundaries](docs/internal/deployments/existing-workloads.md).
 
 The Database source uses the same engine catalogue and settings panel as Add a database, with animated
 startup stages until the connection is verified. It then offers the connection string and a link to

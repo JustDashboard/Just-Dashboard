@@ -943,9 +943,12 @@ only renderer/executor/validation authority for their feature.
   artifact existence. See [restore verification](restore-verification.md).
   Coverage resolves named volumes and every writable merged Compose service mount, verifies the immutable
   manifest and artifact checksum, and rejects filtered or uncovered data. See [backup coverage](backup-coverage.md).
-- Existing-workload discovery and in-place registration are described in
-  [existing-workloads.md](existing-workloads.md). Imported projects observe their original managers;
-  run enqueue, source conversion and configuration replacement are refused.
+- Existing-workload discovery and managed adoption are described in
+  [existing-workloads.md](existing-workloads.md). A server-recovered recipe, independently sealed
+  original/desired inputs, immutable artifacts and pinned live baseline commit atomically without
+  enqueueing a run. Initial observation uses exact original Docker IDs or verified native managers;
+  normal settings and lifecycle apply afterward. Explicit Compose scoping reviews excluded absent
+  declarations. Legacy observation-only records retain their execution/conversion guards.
 - Legacy checkout import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
   exact acknowledgement of unsupported observations. It records the external resource as observed and
   does not start, stop, reset or claim it. Archiving disables deployment triggers, the project's schedules

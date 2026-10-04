@@ -52,6 +52,15 @@ settings, persistent data, original container name and network aliases. Baseline
 succeeded with the same data and HTTP response. The run passed in 11.07 seconds.
 [Sanitized lifecycle evidence](managed-container-lifecycle.json).
 
+## Real n8n data lifecycle
+
+The actual `n8nio/n8n:2.39.10` fixture passed in 163.99 seconds with a saved workflow and encrypted
+credential. Its own credential decryption command verified the original value before adoption, after
+normal Deploy and after baseline rollback. The original named SQLite volume, encryption key, image
+user and memory/CPU limits remained intact. Adoption preserved ID/PID/start/settings and independently
+sealed original/desired inputs. Owned fixture cleanup was verified.
+[Detailed record and reproduction](n8n-lifecycle.md), [sanitized evidence](managed-n8n-lifecycle.json).
+
 ## Real native lifecycle
 
 The PM2 fixture used an actual existing daemon with a direct Node service and the normal Node recipe;
