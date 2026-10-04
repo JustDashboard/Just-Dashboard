@@ -13,7 +13,7 @@ func TestNativeCandidateRecordingRequiresTheImmutableCapturedIdentity(t *testing
 			plan := RuntimePlanConfig{Strategy: StrategyStopFirst}
 			fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), plan)
 			run, lease := fixture.claimedRun(t, 1)
-			metadata := NativeBaselineMetadata{Version: 1, Manager: manager, ConfigurationDigest: fakeContentDigest("native-configuration"), LogSources: []string{}}
+			metadata := NativeBaselineMetadata{Version: 1, Manager: manager, ConfigurationDigest: strings.Repeat("a", 64), LogSources: []string{}}
 			baseline := ReleaseRuntimeInput{ReleaseID: 42, Kind: manager, RuntimeID: "original-app", Name: "original-app", WorkingDirectory: "/srv/original", Host: "127.0.0.1", Port: 3000, Metadata: mustJSON(metadata)}
 			snapshot := runtimeReleaseSnapshot{Version: 1, Plan: plan, NativeBaseline: &baseline}
 			release, err := fixture.runs.CreateCandidateRelease(t.Context(), *run, lease.Token, CandidateReleaseInput{RuntimeSnapshot: mustJSON(snapshot)})

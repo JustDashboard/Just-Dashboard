@@ -133,7 +133,7 @@ func (s *OrchestrationStore) RecordCandidateRuntime(
 			baseline.Name != input.Name || baseline.WorkingDirectory != input.WorkingDirectory ||
 			baseline.Host != input.Host || baseline.Port != input.Port || string(baseline.Metadata) != string(input.Metadata) ||
 			json.Unmarshal(input.Metadata, &metadata) != nil || metadata.Version != 1 || metadata.Manager != input.Kind ||
-			!contentDigestRE.MatchString(metadata.ConfigurationDigest) {
+			!(contentDigestRE.MatchString(metadata.ConfigurationDigest) || contentDigestRE.MatchString("sha256:"+metadata.ConfigurationDigest)) {
 			return nil, fmt.Errorf("%w: native candidate does not match its captured baseline", ErrInvalidPlan)
 		}
 	}
