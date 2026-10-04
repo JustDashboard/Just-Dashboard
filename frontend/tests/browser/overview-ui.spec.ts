@@ -169,7 +169,7 @@ for (const width of [1280, 390]) {
     await expect(rows.nth(2)).toContainText("Running")
     await expect(activity.getByText("Succeeded", { exact: true })).toHaveCount(0)
     await expect(rows.first().locator("time")).toHaveAttribute("datetime", iso(now - 60_000))
-    const bounds = await activity.evaluate((panel) => ({
+    const bounds = await activity.locator('[data-slot="panel-body"]').evaluate((panel) => ({
       width: panel.clientWidth,
       scrollWidth: panel.scrollWidth,
     }))
