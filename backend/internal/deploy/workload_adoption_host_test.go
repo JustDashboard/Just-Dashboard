@@ -241,3 +241,68 @@ func TestLocalDirectoryRejectsEscapingSymlinksAndInvalidExclusions(t *testing.T)
 		}
 	}
 }
+
+func TestLocalDirectoryInspectionReadsPrivateReviewedSnapshot(t *testing.T) {
+	root, analyzer, _, _ := hostRecoveryFixture(t)
+	if err := os.Mkdir(filepath.Join(root, "data"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writePlanningFixture(t, filepath.Join(root, "data", "state.json"), `{"live":true}`)
+	writePlanningFixture(t, filepath.Join(root, ".env"), "TOKEN=private")
+	source := DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: root, ExcludePaths: []string{"data"}}
+	detection, err := analyzer.Analyze(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var inspectedRoot string
+	err = analyzer.InspectRevision(t.Context(), source, detection.Source, func(snapshot string, identity SourceIdentity) error {
+		inspectedRoot = snapshot
+		if snapshot == root || identity.Digest != detection.Source.Digest {
+			t.Fatal("inspection did not use the reviewed private source snapshot")
+		}
+		for _, excluded := range []string{".env", "data"} {
+			if _, err := os.Stat(filepath.Join(snapshot, excluded)); !os.IsNotExist(err) {
+				t.Fatal("inspection copied private environment or linked live data")
+			}
+		}
+		return os.WriteFile(filepath.Join(snapshot, "server.js"), []byte("inspection-owned"), 0644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(inspectedRoot); !os.IsNotExist(err) {
+		t.Fatal("private inspection snapshot was not cleaned up")
+	}
+	unchanged, err := analyzer.Analyze(t.Context(), source)
+	if err != nil || unchanged.Source.Digest != detection.Source.Digest {
+		t.Fatal("inspection modified the original source")
+	}
+	if err := os.WriteFile(filepath.Join(root, "server.js"), []byte("changed-after-review"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	err = analyzer.InspectRevision(t.Context(), source, detection.Source, func(string, SourceIdentity) error {
+		t.Fatal("changed source was passed to inspection")
+		return nil
+	})
+	if !errors.Is(err, ErrSourceUnavailable) {
+		t.Fatalf("changed directory source inspection = %v", err)
+	}
+}
+
+func TestLocalDirectoryExecutionRequiresReviewedContentDigest(t *testing.T) {
+	plan := &StoredExecutionPlan{SourceKind: SourceLocal,
+		SourceConfig:   DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: "/srv/owned-source"},
+		SourceIdentity: SourceIdentity{Kind: SourceLocal, LocalPath: "/srv/owned-source", Digest: fakeContentDigest("reviewed directory")}}
+	if err := validateImmutableExecutionSource(plan); err != nil {
+		t.Fatalf("reviewed directory source rejected: %v", err)
+	}
+	plan.SourceIdentity.Digest = ""
+	if err := validateImmutableExecutionSource(plan); !errors.Is(err, ErrInvalidPlan) {
+		t.Fatalf("directory source without immutable digest accepted: %v", err)
+	}
+	plan.SourceIdentity.Digest = fakeContentDigest("reviewed directory")
+	plan.SourceConfig.Mode = SourceModeLocalCheckout
+	if err := validateImmutableExecutionSource(plan); !errors.Is(err, ErrInvalidPlan) {
+		t.Fatalf("Git checkout without immutable revision accepted: %v", err)
+	}
+}

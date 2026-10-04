@@ -32,6 +32,46 @@ func (a *HostSourceAnalyzer) analyzeLocalDirectory(ctx context.Context, source D
 	return a.detector.DetectPath(ctx, selected, identity)
 }
 
+func (a *HostSourceAnalyzer) inspectLocalDirectory(ctx context.Context, source DraftSourceConfig, identity SourceIdentity, inspect func(string, SourceIdentity) error) error {
+	if identity.Kind != SourceLocal || !contentDigestRE.MatchString(identity.Digest) {
+		return fmt.Errorf("%w: directory source has no immutable content digest", ErrInvalidSource)
+	}
+	root, err := a.resolveLocalRoot(source.LocalPath, "")
+	if err != nil {
+		return err
+	}
+	a.inspectMu.Lock()
+	defer a.inspectMu.Unlock()
+	copyCtx, cancel := context.WithTimeout(ctx, localInspectionTimeout)
+	defer cancel()
+	digest, err := localDirectoryDigest(copyCtx, root, source.ExcludePaths)
+	if err != nil || digest != identity.Digest {
+		return fmt.Errorf("%w: directory source changed after review", ErrSourceUnavailable)
+	}
+	cacheRoot, cleanup, err := a.planningCacheRoot()
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+	target, err := os.MkdirTemp(cacheRoot, "directory-inspect-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(target)
+	if err := copyContainedTree(root, target, copyTreeLimits{MaxFiles: localInspectionMaxFiles, MaxBytes: localInspectionMaxBytes, ExcludePrivateFiles: true, ExcludePaths: source.ExcludePaths}); err != nil {
+		return err
+	}
+	digest, err = localDirectoryDigest(copyCtx, target, source.ExcludePaths)
+	if err != nil || digest != identity.Digest {
+		return fmt.Errorf("%w: directory source changed during inspection", ErrSourceUnavailable)
+	}
+	selected, err := detectionSubdirectory(target, source.Subdirectory)
+	if err != nil {
+		return err
+	}
+	return inspect(selected, identity)
+}
+
 func privateSourceEntry(name string) bool {
 	if name == ".env" || strings.HasPrefix(name, ".env.") {
 		return true

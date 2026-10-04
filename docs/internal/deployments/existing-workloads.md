@@ -62,6 +62,13 @@ can later attach supported Compose source for builds. A native plain/dirty direc
 `local_directory`: a bounded content identity and private copy preserve uncommitted files without
 pretending they are a Git commit. Excluded persistent data remains linked rather than copied into
 an image. Source-copy containment, symlink checks and size/count limits fail closed.
+Review and advisory inspection read a bounded private copy with the same reviewed content digest;
+a changed directory requires fresh detection before inspection or building. PM2's process-specific
+Node IPC descriptor variables are omitted from the Docker environment and identified in the review.
+Node recipe recovery selects the supported catalogue image for the captured interpreter major;
+its patch version and container operating system can differ from the original host. Applications
+which rely on host packages, native dependencies or PM2 IPC need an appropriate Dockerfile and
+compatibility review before migration.
 
 Docker writable-layer checks block application data, altered source and unknown file changes.
 Verified Docker-generated files and narrowly identified regenerable Python bytecode caches are

@@ -208,6 +208,12 @@ to the contribution terms above, including the additional licence grant to the p
   removes only its own uniquely named four-container project, checks two running and two stopped
   containers, persistent data, configuration continuity and HTTP requests during import, and leaves
   installed workloads untouched. `JD_WORKLOAD_IMPORT_EVIDENCE_DIR` writes sanitized acceptance JSON.
+  Native managed-adoption changes additionally run
+  `JD_PM2_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
+  This requires Docker Buildx and a supported Node recipe base. Its private PM2 daemon, temporary
+  database and reserved runtime namespace prove adoption without a restart, real image builds,
+  failed-candidate restoration, normal Docker migration, retained data/settings/logs and rollback
+  to the original PM2 manager. `JD_PM2_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
   The opt-in native browser server and recording commands are documented in
   [the workload-import acceptance record](docs/audits/2026-10-04-existing-workloads/README.md).
 - Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are

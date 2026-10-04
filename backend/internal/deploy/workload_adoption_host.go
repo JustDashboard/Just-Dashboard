@@ -74,6 +74,10 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	recovered.Configuration.Variables = []PlannedVariable{}
 	selected := selectedHostRecoveryCandidate(detection)
 	for name, value := range capture.Environment {
+		if name == "NODE_CHANNEL_FD" || name == "NODE_CHANNEL_SERIALIZATION_MODE" {
+			origin.Warnings = append(origin.Warnings, "The original Node IPC channel belongs to its manager and is not transferred into the container. Applications that use process.send or manager messages require an explicit process-manager migration plan.")
+			continue
+		}
 		if ValidateEnvKey(name) != nil {
 			block("host_variable_unsupported", "The original environment contains a variable name the managed deployment cannot represent.", "variables")
 			continue
@@ -101,6 +105,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			verifyHostDockerfileLayout(root, recovered.Configuration.Build, block)
 			origin.Warnings = append(origin.Warnings, "The Dockerfile must provide the original application's operating-system and interpreter dependencies. Review its entrypoint and user permissions before cutover.")
 		case BuildRecipe:
+			origin.Warnings = append(origin.Warnings, "The managed Node recipe uses the captured interpreter major with the catalogue image's patch version and container operating system. Confirm the application works without host-installed packages, native host dependencies or PM2 IPC before deploying changes; provide a Dockerfile when it needs them.")
 			if selected.Recipe != "node" {
 				block("host_runtime_compatibility_unknown", "Automatic host recovery currently requires a Node recipe or an existing Dockerfile. Other interpreters need a reviewed Dockerfile before migration.", "build.method")
 			}
@@ -142,7 +147,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	recovered.Configuration.Runtime.HostPort = port
 	recovered.Configuration.Runtime.BindAddress = host
 	if port > 0 {
-		recovered.Configuration.Checks = []PlannedCheck{{Name: "Original listening port", Kind: "tcp", Phase: "readiness", Required: true, Config: json.RawMessage(`{}`)}}
+		recovered.Configuration.Checks = []PlannedCheck{{Name: "Original listening port", Kind: "tcp", Phase: "readiness", Required: true, Config: json.RawMessage(`{"attempts":30,"timeoutSeconds":2,"intervalSeconds":1}`)}}
 	}
 	origin.Warnings = append(origin.Warnings, "The first replacement uses the existing host network and listening port. It activates only after the build succeeds and uses stop-first cutover; the original manager remains available for compensation and rollback.")
 	if err := inspectHostRecoveryFiles(ctx, root, capture, recovered, block); err != nil {
@@ -190,6 +195,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		return recovered.Configuration.Build.Secrets[i].Variable < recovered.Configuration.Build.Secrets[j].Variable
 	})
 	origin.Blockers = uniqueHostRecoveryStrings(origin.Blockers)
+	origin.Warnings = uniqueHostRecoveryStrings(origin.Warnings)
 	baseline := sha256.Sum256(mustJSON(struct {
 		ConfigurationDigest string
 		SourceDigest        string

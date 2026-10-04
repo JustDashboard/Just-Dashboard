@@ -785,6 +785,12 @@ func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {
 	}
 	switch plan.SourceKind {
 	case SourceGit, SourceLocal:
+		if plan.SourceKind == SourceLocal && plan.SourceConfig.Mode == SourceModeLocalDirectory {
+			if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) || !filepath.IsAbs(plan.SourceIdentity.LocalPath) {
+				return fmt.Errorf("%w: directory source has no immutable content digest", ErrInvalidPlan)
+			}
+			break
+		}
 		if !validGitObjectID(plan.SourceIdentity.Revision) {
 			return fmt.Errorf("%w: Git source has no immutable object id", ErrInvalidPlan)
 		}
