@@ -24,7 +24,10 @@ workflow or the scripts it runs, the answer is everything.
     one difference: that script stops at a module reaching more than one
     section and runs the two specs that open every page, and this follows it
     to all of them.
-  - Live Docker fixtures: those of the packages whose code is being checked.
+  - Live Docker fixtures: when one of the six deployment packages changed
+    itself (they are the packages of the race gate), those of the packages
+    being checked. A package that only imports the terminal is checked, and
+    builds no containers to find out.
 
 `python3 scripts/test_ci_plan.py` checks the picking.
 """
@@ -154,11 +157,11 @@ def go_packages(root):
 
 
 def go_affected(packages, changed):
-    """The packages whose code a change reaches, and those it reaches only through a file their tests read."""
+    """The packages a change is in, those whose code it reaches, and those it reaches only through a file their tests read."""
     touched, read = set(), set()
     for name in changed:
         if name in ("backend/go.mod", "backend/go.sum"):
-            return set(packages), set()
+            return set(packages), set(packages), set()
         # A file beside no Go file (testdata, an embedded template) belongs to
         # the nearest package above it.
         directory = os.path.dirname(name)
@@ -186,7 +189,7 @@ def go_affected(packages, changed):
             seen |= reach(imported)
         if seen & touched:
             affected.add(package)
-    return affected, read - affected
+    return touched, affected, read - affected
 
 
 def has_budgets(root, package):
@@ -282,7 +285,7 @@ def plan(root, changed):
     out = {"scripts": str(everything or any(name.startswith("scripts/") for name in changed)).lower()}
 
     packages = go_packages(root)
-    affected, read = (set(packages), set()) if everything else go_affected(packages, changed)
+    touched, affected, read = (set(packages), set(packages), set()) if everything else go_affected(packages, changed)
     raced = {package for _, _, group in RACE for package in group}
     out["backend"] = str(bool(affected or read)).lower()
     out["go_packages"] = "./..." if affected == set(packages) else go_paths(affected)
@@ -297,14 +300,14 @@ def plan(root, changed):
     out["race"], out["race_jobs"] = json.dumps(list(race)), json.dumps(race)
 
     live = {}
-    fixtures = [package for package in LIVE if package in affected]
+    fixtures = [package for package in LIVE if package in affected and touched & raced]
     if fixtures:
         tests = [test for package in fixtures for test in LIVE[package]]
         live["fixtures"] = {
             "packages": go_paths(fixtures), "run": "^(%s)$" % "|".join(tests), "skip": "",
             "tests": " ".join(tests), "docker": "backend/internal/api" in fixtures,
         }
-    if "backend/internal/deploy" in affected:
+    if "backend/internal/deploy" in fixtures:
         named = [name for job in FRAMEWORK_JOBS if job for name in job]
         for number, job in enumerate(FRAMEWORK_JOBS, 1):
             live["frameworks-%d" % number] = {
