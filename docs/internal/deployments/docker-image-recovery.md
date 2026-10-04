@@ -7,6 +7,12 @@ platform descriptor retained by Docker's container inspection; it never guesses 
 host or a binary. Missing descriptors, unsupported platforms, and meaningful writable-layer changes
 block recovery with a reason to restore the original image or supply its source.
 
+All existing workload members pass the raw and known effective-configuration checks before the first
+export/import. Unsupported disabled networking, explicit shell semantics, terminal dimensions or
+kernel path masks therefore block recovery without creating an image artifact, including when the
+unsafe member is encountered after an otherwise recoverable service. Compose cannot faithfully restore
+these settings by omission; custom shells also change shell-form health checks on a reconstructed image.
+
 The adapter uses Docker's read-only container export API. It does not pause, stop, restart or signal the
 application, execute a command inside it, or use `docker commit`. Docker export excludes mounted volume
 contents. The existing mounts are recovered separately as external volumes, contained bind paths and

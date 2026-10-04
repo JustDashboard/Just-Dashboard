@@ -42,9 +42,6 @@ func (r *dockerRecovery) recoverService(name string, service map[string]any, cap
 			service["stop_grace_period"] = strconv.Itoa(*config.StopTimeout) + "s"
 		}
 	}
-	if config.StdinOnce || config.ArgsEscaped {
-		r.issue("container_config_unsupported", "Single-use stdin or Windows escaped commands cannot be faithfully represented by Linux Compose deployments.", name, "config", true)
-	}
 	environment := map[string]any{}
 	seen := map[string]bool{}
 	for _, assignment := range config.Env {
@@ -121,7 +118,8 @@ func (r *dockerRecovery) recoverService(name string, service map[string]any, cap
 	}
 	for engine, compose := range translations {
 		mapped[engine] = true
-		if value, exists := fields[engine]; exists && !emptyEngineValue(value) {
+		preserveZero := (engine == "MemorySwappiness" && host.MemorySwappiness != nil) || (engine == "PidsLimit" && host.PidsLimit != nil)
+		if value, exists := fields[engine]; exists && (!emptyEngineValue(value) || preserveZero) {
 			if number, ok := value.(float64); ok {
 				service[compose] = int64(number)
 			} else {
@@ -226,9 +224,6 @@ func (r *dockerRecovery) recoverService(name string, service map[string]any, cap
 		if !mapped[field] && !emptyEngineValue(value) {
 			r.issue("engine_option_unsupported", "The Engine setting "+field+" has no proven deployment mapping; adoption would change it.", name, field, true)
 		}
-	}
-	if !defaultMaskedPaths(host.MaskedPaths) || !defaultReadonlyPaths(host.ReadonlyPaths) {
-		r.issue("custom_kernel_path_masks", "Custom masked or read-only kernel paths have no equivalent Compose mapping.", name, "maskedPaths", true)
 	}
 }
 
@@ -410,7 +405,7 @@ func (r *dockerRecovery) recoverNetworks(name string, service map[string]any, ca
 }
 
 func defaultMaskedPaths(paths []string) bool {
-	if len(paths) == 0 {
+	if paths == nil {
 		return true
 	}
 	expected := []string{"/proc/asound", "/proc/acpi", "/proc/interrupts", "/proc/kcore", "/proc/keys", "/proc/latency_stats", "/proc/timer_list", "/proc/timer_stats", "/proc/sched_debug", "/proc/scsi", "/sys/firmware", "/sys/devices/virtual/powercap"}
@@ -418,7 +413,7 @@ func defaultMaskedPaths(paths []string) bool {
 }
 
 func defaultReadonlyPaths(paths []string) bool {
-	if len(paths) == 0 {
+	if paths == nil {
 		return true
 	}
 	return samePaths(paths, []string{"/proc/bus", "/proc/fs", "/proc/irq", "/proc/sys", "/proc/sysrq-trigger"})

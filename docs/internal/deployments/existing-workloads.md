@@ -84,6 +84,17 @@ field blocks, including zero, false, empty strings and empty collections. Those 
 disable a newer Engine default, so the importer does not infer that they are inert.
 This prevents a newer Engine option from silently disappearing through typed JSON decoding.
 
+Known SDK fields also need a proven runtime mapping. Explicit disabled networking, an explicit custom
+container shell, and nonzero terminal dimensions when TTY is enabled block recovery. A legacy
+`Config.MacAddress` is accepted only when it matches an actual endpoint whose address the recipe
+preserves. Explicit empty kernel mask/read-only lists on an unprivileged container differ from omitted
+defaults and block recovery, as do custom lists and any nonempty lists on a privileged container.
+Implicit defaults and the exact standard unprivileged lists remain supported; privileged containers
+with nil or empty lists retain their unmasked behavior. Explicit zero memory swappiness and PID limits
+remain explicit zero values in the recovered recipe rather than being replaced by daemon defaults.
+Every existing member is captured and checked for these and unknown raw fields before any missing
+image is exported or imported; an unsafe later service also blocks image recovery for an earlier one.
+
 | Runtime | Recovered plan and baseline | Cases that require resolution before adoption |
 | --- | --- | --- |
 | Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
