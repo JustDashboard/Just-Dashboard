@@ -1,15 +1,15 @@
 {
-  "beforeAndAfterDockerSnapshotSHA256": "739133b18d11dfbc5bceef4047fabab1c9436e1c00af6a28805d38e81b408ac1",
+  "beforeAndAfterDockerSnapshotSHA256": "8f45c5e731340fd69979c0d28943fd8e7529fbc6b0673843c2883e3a142ed914",
   "completedMigrationRuns": 1,
   "containerIdentityConfigurationMountNetworkPortStartTimesUnchanged": true,
   "containers": 4,
   "deploymentRunsEnqueued": 0,
   "environmentValuesCopiedAndSealed": true,
   "httpFailures": 0,
-  "httpRequestsDuringImport": 105,
+  "httpRequestsDuringImport": 431,
   "importedProjectId": 1,
   "persistentVolumeBytesUnchanged": true,
-  "project": "jd-import-proof-1791138645770886362",
+  "project": "jd-import-proof-1791151885896293897",
   "running": 2,
   "sourceComposeUnchanged": true
 }

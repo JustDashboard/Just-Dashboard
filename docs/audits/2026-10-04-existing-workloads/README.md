@@ -50,9 +50,9 @@ running and two stopped, an HTTP listener, private environment, bind mount, rest
 volumes. It recovered and adopted through the public routes into a temporary database. The test used
 the real Docker socket and removed only its own resources.
 
-The run passed in 17.03 seconds. Container IDs, PIDs, start times, restart counts, ports, Config,
+The final-source run passed in 29.26 seconds. Container IDs, PIDs, start times, restart counts, ports, Config,
 HostConfig, mounts and networks were unchanged. The original Compose file and persistent data matched.
-105 HTTP requests during adoption had zero failures. One completed migration history entry and a
+431 HTTP requests during adoption had zero failures. One completed migration history entry and a
 pinned live release were created, environment values were copied and sealed, and zero execution runs
 were enqueued. [Sanitized evidence](managed-api-continuity.json).
 
