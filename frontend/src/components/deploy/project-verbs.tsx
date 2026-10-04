@@ -191,7 +191,7 @@ function DockerGlyph({ className }: { className?: string }) {
   return <ProductGlyph id="docker" className={className} />
 }
 
-const COMMANDS = new Set(["view", "start", "deploy", "redeploy"])
+const COMMANDS = new Set(["view", "start", "deploy", "redeploy", "manager"])
 
 /**
  * The project's one command: the verb a header draws as its button, and every
@@ -557,7 +557,11 @@ export function useProjectVerbs(
   // each time it changes, so Restart and Stop declared after the command
   // would split Building in two. The sort is stable, so each group keeps its
   // order — and the command stays the first of its keys.
-  return verbs.sort((a, b) => verbRank(a) - verbRank(b))
+  return verbs
+    .filter(
+      (verb) => !imported || !["deployments", "logs", "runtime", "settings"].includes(verb.key),
+    )
+    .sort((a, b) => verbRank(a) - verbRank(b))
 }
 
 /** A project as a confirmation draws it: its mark, its name, and what tells it apart. */

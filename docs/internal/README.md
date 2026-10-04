@@ -49,6 +49,8 @@ strategy, and feature ownership behind those rules.
 
 - [`deployments/caddy-ingress.md`](deployments/caddy-ingress.md) — automatic public Docker Caddy sharing,
   fresh-host provisioning, certificates, route recovery and ownership boundaries.
+- [`deployments/existing-workloads.md`](deployments/existing-workloads.md) — discover and safely register
+  existing Compose stacks, containers, PM2 apps, systemd services and listening host processes in place.
 - [`deployments/implementation.md`](deployments/implementation.md) — implemented deployment model through
   C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,

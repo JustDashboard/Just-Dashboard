@@ -244,12 +244,21 @@ or connect a GitLab/Gitea token for requests on those providers.
 
 ![A project's website preview, live release, running containers and traffic metrics](docs/deployments.png)
 
-Point it at a repository, an image, a template, a Compose stack or something already running. It
+Point it at a repository, an image, a template or a Compose file. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
 an overview with a live preview, deployments with rollback, logs, runtime, a console and settings.
 Setup can generate template credentials and suggest a public address, create and connect a private
 database on this server, or use an external database connection. Build commands, variables, storage,
 health checks and runtime limits remain editable before the first deployment.
+
+Already have applications on this server? **Import existing** discovers Docker Compose stacks,
+standalone containers, existing PM2 applications, systemd services and listening host processes.
+Review the services, ports and original manager, then add the workload to Deployments in place.
+Stopped services are included; a four-service stack with two running stays one project. Import
+does not restart anything, rewrite configuration, copy secrets or move persistent data. Imported
+projects show observed runtime state and link to their original manager for configuration, logs
+and lifecycle controls. They do not gain dashboard builds, rollback or automatic deployments;
+converting an existing application to a managed deployment requires a separate migration.
 
 The Database source uses the same engine catalogue and settings panel as Add a database, with animated
 startup stages until the connection is verified. It then offers the connection string and a link to
