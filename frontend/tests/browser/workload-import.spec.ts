@@ -43,7 +43,7 @@ test("import inspects the four-service stack, preserves stopped services and sub
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   expect(fixture.adoptions).toEqual([])
   expect(fixture.recoveries).toEqual([
-    { key: betBot.key, name: "bet-bot-production", digest: betBot.digest },
+    { key: betBot.key, name: "bet-bot-production", digest: betBot.digest, scope: "all_services" },
   ])
   expect(fixture.calls.filter((call) => call.method === "POST").map((call) => call.path)).toContain(
     "/deploy/import/recover",
@@ -69,6 +69,7 @@ test("discovery searches images and ports, filters managers, and reviews a host 
   await expect(page.getByText("Could not be recovered", { exact: true })).toBeVisible()
   await expect(page.getByText("[::]:3001/tcp", { exact: true })).toBeVisible()
   await expect(page.getByRole("button", { name: "Review migration" })).toBeEnabled()
+  await expect(page.getByRole("group", { name: "Compose recovery scope" })).toHaveCount(0)
 })
 
 test("a changed workload requires another review and sends the fresh digest only after an explicit retry", async ({

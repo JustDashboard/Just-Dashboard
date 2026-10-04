@@ -1,5 +1,34 @@
 import { expect, test } from "bun:test"
-import { workloadManagerUrl, workloadMatches, workloadPort } from "./workload-import"
+import {
+  adoptionReviewMetadata,
+  workloadManagerUrl,
+  workloadMatches,
+  workloadPort,
+} from "./workload-import"
+
+test("remembered adoption preserves server scope and exclusions but drops baseline and private extras", () => {
+  const metadata = adoptionReviewMetadata({
+    key: "stack:bot",
+    digest: "inspected",
+    kind: "stack",
+    resourceId: "bot",
+    manager: "docker",
+    name: "bot",
+    serviceCount: 4,
+    runningCount: 2,
+    warnings: [],
+    blockers: [],
+    scope: "existing_services",
+    excludedServices: ["optional-worker"],
+    baseline: { environment: { TOKEN: "must-not-persist" } },
+    unexpectedEnvironment: { TOKEN: "must-not-persist" },
+  })
+  expect(metadata.scope).toBe("existing_services")
+  expect(metadata.excludedServices).toEqual(["optional-worker"])
+  expect(JSON.stringify(metadata)).not.toContain("must-not-persist")
+  expect(metadata).not.toHaveProperty("baseline")
+  expect(metadata).not.toHaveProperty("unexpectedEnvironment")
+})
 
 const stack = {
   name: "bet-bot",

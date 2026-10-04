@@ -17,7 +17,7 @@ import type {
 } from "@/lib/types"
 import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
 import { BorderBeam } from "@/components/ui/border-beam"
-import { ErrorState } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
@@ -932,6 +932,19 @@ export function Configure({
               <Button variant="outline" asChild>
                 <Link href="/deploy/import">Reinspect workload</Link>
               </Button>
+            )}
+
+            {current !== "review" && (adoption?.excludedServices?.length ?? 0) > 0 && (
+              <Notice title="Services excluded from this deployment" tone="warning">
+                Only existing running and stopped containers are included. These declared services
+                have no container and will not be created on Deploy changes. Review these exclusions
+                before adoption; the original Compose definition is unchanged.
+                <ul aria-label="Excluded Compose services" className="mt-2 space-y-1 font-mono">
+                  {adoption!.excludedServices!.map((service) => (
+                    <li key={service}>{service}</li>
+                  ))}
+                </ul>
+              </Notice>
             )}
 
             {current === "project" && (

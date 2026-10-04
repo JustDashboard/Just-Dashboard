@@ -65,6 +65,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
     },
   ])
   const before = existingStackEvidence()
+  const excludedServices = ["eurobet-doubles-tracker", "eurobet-high-market-tracker"]
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/deploy")
   await expect(page.getByRole("link", { name: "Import existing" })).toBeVisible()
@@ -77,16 +78,35 @@ test("imports the real existing bet-bot stack without changing its containers", 
   await expect(page.getByRole("button", { name: "Review migration" })).toBeVisible({
     timeout: 30000,
   })
+  const existingScope = page.getByRole("button", { name: "Existing containers only", exact: true })
+  await existingScope.click()
+  await expect(existingScope).toHaveAttribute("aria-pressed", "true")
   await page.screenshot({ path: join(output, "native-review-1280.png"), fullPage: true })
+  const recoveryResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith("/deploy/import/recover") && response.request().method() === "POST",
+    { timeout: 180000 },
+  )
   await page.getByRole("button", { name: "Review migration" }).click()
+  const recovered = await recoveryResponse
+  expect(recovered.ok()).toBe(true)
+  const recoveredDraft = await recovered.json()
+  expect(recoveredDraft.data.adoption.scope).toBe("existing_services")
+  expect(recoveredDraft.data.adoption.excludedServices).toEqual(excludedServices)
   await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible({
     timeout: 180000,
   })
+  for (const name of excludedServices) {
+    await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(name)
+  }
   await page.screenshot({ path: join(output, "native-configuration-1280.png"), fullPage: true })
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible({
     timeout: 30000,
   })
+  for (const name of excludedServices) {
+    await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(name)
+  }
   await expect(page.getByRole("button", { name: "Acknowledge, then adopt" })).toBeEnabled({
     timeout: 30000,
   })
@@ -116,6 +136,12 @@ test("imports the real existing bet-bot stack without changing its containers", 
   expect(runtimeResponse.ok()).toBe(true)
   const runtime = await runtimeResponse.json()
   expect(runtime.services).toHaveLength(before.length)
+  const managedContainerIds = runtime.services
+    .map((service: { containerId: string }) => service.containerId)
+    .sort()
+  expect(managedContainerIds).toEqual(
+    before.map((container: { id: string }) => container.id).sort(),
+  )
   await page.getByRole("link", { name: "Runtime", exact: true }).click()
   await expect(page.getByText("high-market-tracker", { exact: true }).first()).toBeVisible({
     timeout: 30000,
@@ -137,6 +163,10 @@ test("imports the real existing bet-bot stack without changing its containers", 
         managedDeployment: true,
         liveReleaseId: payload.deployment.liveReleaseId,
         runtimeServices: runtime.services.length,
+        recoveryScope: recoveredDraft.data.adoption.scope,
+        excludedServices,
+        originalContainersRemainLiveAuthority: true,
+        managedContainerIds,
         existingStack: "bet-bot",
         isolatedProjectUrl: projectUrl,
         existingContainerCount: before.length,

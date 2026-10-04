@@ -25,11 +25,13 @@ import {
   type WorkloadCandidate,
   type WorkloadDiscovery,
   type WorkloadKind,
+  type WorkloadScope,
 } from "@/lib/workload-import"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraft } from "@/lib/types"
 import { Field, FormSection } from "@/components/form"
+import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import {
   ChoiceList,
   ChoiceRow,
@@ -87,6 +89,7 @@ export function ImportWorkload() {
   const [kind, setKind] = useState<WorkloadKind | "all">("all")
   const [selected, setSelected] = useState<WorkloadCandidate>()
   const [name, setName] = useState("")
+  const [scope, setScope] = useState<WorkloadScope>("all_services")
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
   const [stale, setStale] = useState(false)
@@ -119,7 +122,10 @@ export function ImportWorkload() {
     try {
       const fresh = await post<WorkloadCandidate>("/deploy/import/inspect", { key: item.key })
       setSelected(fresh)
-      if (!preserveName) setName(deploymentName(fresh.name))
+      if (!preserveName) {
+        setName(deploymentName(fresh.name))
+        setScope("all_services")
+      }
       setStale(false)
     } catch (error) {
       setFailure(asError(error))
@@ -141,6 +147,7 @@ export function ImportWorkload() {
         key: selected.key,
         name: name.trim(),
         digest: selected.digest,
+        ...(selected.kind === "stack" ? { scope } : {}),
       })
       if (!result.data?.adoption || !result.data.source || !result.data.configuration)
         throw new Error(
@@ -335,6 +342,38 @@ export function ImportWorkload() {
                     }}
                   />
                 </Field>
+                {selected.kind === "stack" && (
+                  <FormSection
+                    title="Recovery scope"
+                    hint="Choose which services a later Deploy changes will manage. Adoption itself leaves running and stopped containers unchanged."
+                  >
+                    <ChoiceGrid columns={2} role="group" aria-label="Compose recovery scope">
+                      <ChoiceCard
+                        selected={scope === "all_services"}
+                        disabled={Boolean(busy)}
+                        aria-label="Every declared service"
+                        onClick={() => setScope("all_services")}
+                      >
+                        <span className="text-body font-medium">Every declared service</span>
+                        <span className="text-hint leading-relaxed text-muted-foreground">
+                          Recover the full Compose recipe, including services without a container.
+                        </span>
+                      </ChoiceCard>
+                      <ChoiceCard
+                        selected={scope === "existing_services"}
+                        disabled={Boolean(busy)}
+                        aria-label="Existing containers only"
+                        onClick={() => setScope("existing_services")}
+                      >
+                        <span className="text-body font-medium">Existing containers only</span>
+                        <span className="text-hint leading-relaxed text-muted-foreground">
+                          Keep running and stopped containers. Review the excluded services before
+                          adoption.
+                        </span>
+                      </ChoiceCard>
+                    </ChoiceGrid>
+                  </FormSection>
+                )}
                 {failure && !nameError && (
                   <div role="alert">
                     <ErrorState error={failure} />

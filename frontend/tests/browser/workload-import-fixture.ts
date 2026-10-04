@@ -117,6 +117,7 @@ export function recoveredWorkloadDraft(item = betBot, name = item.name): Deploym
         blockers: [],
         serviceCount: item.total,
         runningCount: item.running,
+        ...(item.kind === "stack" ? { scope: "all_services" as const, excludedServices: [] } : {}),
       },
     },
     findings: [],
@@ -172,6 +173,10 @@ export async function mockWorkloadImport(
         items.find((item) => item.key === body.key),
         body.name,
       )
+      if (body.scope === "existing_services") {
+        draft.data.adoption!.scope = "existing_services"
+        draft.data.adoption!.excludedServices = ["optional-worker", "unstarted-cache"]
+      }
       return json(route, draft)
     }
     if (path === `/deploy/drafts/${draft.id}`) {
@@ -208,6 +213,19 @@ export async function mockWorkloadImport(
               means:
                 "Adoption records the current runtime. A later Deploy applies the reviewed recipe.",
             },
+            ...(draft.data.adoption?.excludedServices?.length
+              ? [
+                  {
+                    code: "adoption_warning_2",
+                    severity: "warning",
+                    title: "Review excluded Compose services",
+                    measured:
+                      "optional-worker and unstarted-cache have no container and are excluded.",
+                    means:
+                      "Deploy changes will not create these services. All running and stopped containers remain included.",
+                  },
+                ]
+              : []),
           ],
           expectedDowntime: true,
           preview: "",

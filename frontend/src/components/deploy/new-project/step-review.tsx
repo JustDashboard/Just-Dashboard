@@ -131,12 +131,30 @@ export function StepReview({
             <FormFact label="Private inputs">
               {flow.draft.environmentKeys?.length ?? 0} saved on the server
             </FormFact>
+            {adoption.kind === "stack" && adoption.scope && (
+              <FormFact label="Recovery scope">
+                {adoption.scope === "existing_services"
+                  ? "Existing containers only · running and stopped"
+                  : "Every declared service"}
+              </FormFact>
+            )}
           </FormFacts>
           <Notice title="Adoption keeps this application running">
             The current services become the live baseline. No deployment run starts, and stopped
             services stay stopped. Deploy changes uses the settings below; Redeploy live release
             restores the original baseline.
           </Notice>
+          {(adoption.excludedServices?.length ?? 0) > 0 && (
+            <Notice title="Services excluded from this deployment" tone="warning">
+              These declared services have no existing container. The recovered recipe will not
+              create them on Deploy changes; this does not remove any existing container.
+              <ul aria-label="Excluded Compose services" className="mt-2 space-y-1 font-mono">
+                {adoption.excludedServices!.map((service) => (
+                  <li key={service}>{service}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
           {(adoption.blockers?.length ?? 0) > 0 && (
             <Notice title="Resolve migration blockers before adoption" tone="danger">
               <ul className="space-y-1">

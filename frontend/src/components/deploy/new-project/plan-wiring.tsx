@@ -150,6 +150,7 @@ export function PlanWiring({
     runtime.memoryMb ? `${runtime.memoryMb} MB` : undefined,
     runtime.cpus ? `${runtime.cpus} CPU` : undefined,
   ].filter(Boolean)
+  const compose = source.kind === "compose" || build.method === "compose"
   const port = runtime.internalPort ?? 0
 
   return (
@@ -267,7 +268,13 @@ export function PlanWiring({
                     : "No port set"
               }
               hint={
-                limits.length > 0 ? (
+                compose ? (
+                  limits.length > 0 ? (
+                    `${limits.join(" · ")} override · service limits in Compose source`
+                  ) : (
+                    "Service limits are in Compose source"
+                  )
+                ) : limits.length > 0 ? (
                   limits.join(" · ")
                 ) : (
                   // Said here rather than left to be discovered inside

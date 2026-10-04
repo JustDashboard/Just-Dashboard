@@ -1,4 +1,5 @@
 export type WorkloadKind = "stack" | "container" | "pm2" | "systemd" | "process"
+export type WorkloadScope = "all_services" | "existing_services"
 
 export type WorkloadService = {
   name: string
@@ -55,6 +56,8 @@ export type WorkloadAdoption = {
   blockers: string[]
   serviceCount: number
   runningCount: number
+  scope?: WorkloadScope
+  excludedServices?: string[]
   baseline?: unknown
 }
 
@@ -72,6 +75,8 @@ export function adoptionReviewMetadata(
     name,
     serviceCount,
     runningCount,
+    scope: adoption.scope,
+    excludedServices: adoption.excludedServices,
     warnings: adoption.warnings ?? [],
     blockers: adoption.blockers ?? [],
   }

@@ -98,7 +98,7 @@ export function StepRuntime({
       (runtime.devices?.length ?? 0) > 0 && `${runtime.devices!.length} devices`,
     ]
       .filter(Boolean)
-      .join(" · ") || "Unprivileged, own network"
+      .join(" · ") || (compose ? "Kept in Compose source" : "Unprivileged, own network")
 
   return (
     <>

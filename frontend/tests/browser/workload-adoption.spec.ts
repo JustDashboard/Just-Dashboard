@@ -3,6 +3,66 @@ import type { DeploymentRuntimeServices } from "../../src/lib/types"
 import { deployment, json, mockProject, now, project } from "./deploy-fixture"
 import { betBot, mockWorkloadImport, recoveredWorkloadDraft } from "./workload-import-fixture"
 
+test("existing-container scope includes stopped containers and requires review of server exclusions", async ({
+  page,
+}) => {
+  const fixture = await mockWorkloadImport(page)
+  await page.goto("/deploy/import")
+  await page.getByRole("button", { name: "Review bet-bot" }).click()
+  const all = page.getByRole("button", { name: "Every declared service", exact: true })
+  const existing = page.getByRole("button", { name: "Existing containers only", exact: true })
+  await expect(all).toHaveAttribute("aria-pressed", "true")
+  await existing.focus()
+  await page.keyboard.press("Enter")
+  await expect(existing).toHaveAttribute("aria-pressed", "true")
+  await expect(
+    page.getByRole("list", { name: "Services to import" }).getByText("exited", { exact: true }),
+  ).toHaveCount(2)
+  await page.getByRole("button", { name: "Review migration" }).click()
+  await expect(page).toHaveURL(/\/deploy\/new\?draft=recovered-workload-draft/)
+  expect(fixture.recoveries).toEqual([
+    { key: betBot.key, name: betBot.name, digest: betBot.digest, scope: "existing_services" },
+  ])
+  await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(
+    "optional-worker",
+  )
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(
+    page.getByText("Existing containers only · running and stopped", { exact: true }),
+  ).toBeVisible()
+  const excluded = page.getByRole("list", { name: "Excluded Compose services" })
+  await expect(excluded.getByRole("listitem")).toHaveCount(2)
+  await expect(excluded).toContainText("optional-worker")
+  await expect(excluded).toContainText("unstarted-cache")
+  await page.getByRole("checkbox", { name: /Review recovered runtime behavior/ }).check()
+  await expect(page.getByRole("button", { name: "Adopt deployment", exact: true })).toHaveCount(0)
+  expect(fixture.adoptions).toEqual([])
+  await page.getByRole("checkbox", { name: /Review excluded Compose services/ }).check()
+  await page.screenshot({
+    path: test.info().outputPath("compose-existing-scope-review.png"),
+    fullPage: true,
+  })
+  await page.getByRole("button", { name: "Adopt deployment", exact: true }).click()
+  await expect(page).toHaveURL(/\/deploy\/77$/)
+  expect(fixture.adoptions[0]).toMatchObject({
+    acknowledgedWarnings: ["adoption_warning_1", "adoption_warning_2"],
+  })
+  expect(fixture.adoptions[0]).not.toHaveProperty("scope")
+  expect(fixture.adoptions[0]).not.toHaveProperty("excludedServices")
+})
+
+test("choosing another stack resets scope to every declared service", async ({ page }) => {
+  await mockWorkloadImport(page)
+  await page.goto("/deploy/import")
+  await page.getByRole("button", { name: "Review bet-bot" }).click()
+  await page.getByRole("button", { name: "Existing containers only", exact: true }).click()
+  await page.getByRole("button", { name: "Back", exact: true }).click()
+  await page.getByRole("button", { name: "Review bet-bot" }).click()
+  await expect(
+    page.getByRole("button", { name: "Every declared service", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true")
+})
+
 test("recovered settings require server warning acknowledgement and adopt without a deploy run", async ({
   page,
 }) => {

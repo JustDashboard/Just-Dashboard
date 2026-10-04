@@ -21,6 +21,11 @@ engine, with the original manager retained as the baseline recovery authority.
 - `POST /deploy/import/recover` accepts `{key,name,digest,scope?}` and returns a server-created configured
   draft. Recovery reads private configuration separately from the public inventory. It returns
   `422 recovery_blocked` with actionable reasons if a complete supported recipe cannot be recovered.
+  Compose stacks additionally accept `scope: "all_services" | "existing_services"`, defaulting to
+  the full declared recipe. **Existing containers only** retains every running and stopped container
+  and excludes only declared services with no container. The server reports the exact excluded names
+  in the recovered draft and requires acknowledgement in final Review; missing dependencies remain
+  blockers. Scope and exclusions are sealed server-owned provenance, not adoption request authority.
 - Draft configuration and preflight use the normal draft routes. Recovery provenance and the original
   baseline are server-owned; saving a source or runtime dependency cannot replace that authority.
 - `POST /deploy/import/adopt` accepts `{draftId,revision,acknowledgedWarnings,gitPolicy?}`. It
@@ -141,6 +146,8 @@ is unchanged by source editing. Runtime and Storage link to the Compose source a
 aggregate fields as absent overrides, preserving each service's existing settings rather than
 claiming zero limits or no persistent data. Private inputs remain variable references, and in-progress
 YAML edits are never placed in browser session storage.
+The Configure/Review plan summary likewise points to per-service Compose limits when aggregate
+overrides are unset, rather than calling the application unlimited.
 
 General settings also exposes the build directory and optional subdirectory for native
 `local_directory` sources. Select a separate allowed directory for new code: a source save inspects

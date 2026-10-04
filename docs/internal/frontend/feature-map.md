@@ -104,7 +104,11 @@ page-specific navigation, confirmations and API capabilities stay with the featu
 Existing-workload discovery at `/deploy/import` uses `components/deploy/import-workload.tsx` and
 `lib/workload-import.ts`. **Review migration** recovers a normal server draft and opens the existing
 four-step Configure flow, with the current manager, stopped services, sealed input names and the
-first migration's downtime explained at Review. Its final **Adopt deployment** acknowledges the
+first migration's downtime explained at Review. Compose stacks default to every declared service;
+**Existing containers only** retains running and stopped containers and shows the server's exact
+excluded service names in Configure and Review, with required warning acknowledgement. Compose
+summaries point to per-service source settings when aggregate limits or access overrides are unset.
+Its final **Adopt deployment** acknowledges the
 server's warning codes and creates a live baseline without enqueueing a run. The regular project
 shell and settings then apply: Deploy changes applies the recovered desired plan, while Redeploy
 live release restores the frozen baseline. `runtime-service.ts` distinguishes native PM2/systemd services from

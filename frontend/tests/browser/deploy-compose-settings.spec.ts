@@ -228,6 +228,11 @@ test("recovered Compose review shows service mounts and captured limits without 
   await page.goto(`/deploy/new?draft=${draft.id}`)
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByText(/Nothing survives a rebuild/)).toHaveCount(0)
+  const plan = page.getByRole("list", { name: "What this setup will create" })
+  await expect(
+    plan.getByText("Service limits are in Compose source", { exact: true }),
+  ).toBeVisible()
+  await expect(plan.getByText("No memory or CPU limit", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("list", { name: "Compose service mounts" })).toContainText(
     "n8n-data:/home/node/.n8n",
   )
