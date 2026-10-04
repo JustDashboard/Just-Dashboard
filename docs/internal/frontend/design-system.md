@@ -37,8 +37,8 @@ What separates a surface now:
 - `shadow-*` **only** for the three things that genuinely float above the page: popover, dropdown,
   dialog.
 
-The page ground is `oklch(0.2 0 0)`, a softer charcoal than the previous L 0.16. The base neutral
-surface and border tokens moved up by the same L 0.04, with controls and hover washes still derived
+The page ground is `oklch(0.18 0 0)`, a softer charcoal than the previous L 0.16. The base neutral
+surface and border tokens moved up by the same L 0.02, with controls and hover washes still derived
 from them, so each surface keeps its separation; the sidebar shares the page ground. Text, brand
 and status colours keep their values.
 
@@ -1961,9 +1961,9 @@ the product. The border and the lit edge do the separating, so the ground only h
 
 | Token | L | Is |
 | --- | --- | --- |
-| `--background` | 0.2 | the page |
-| `--choice-surface` | 0.223 | a card you pick — recessed *into* the surface holding it |
-| `--flow-surface` | ≈0.239 | the one focused surface on a flow screen |
+| `--background` | 0.18 | the page |
+| `--choice-surface` | 0.203 | a card you pick — recessed *into* the surface holding it |
+| `--flow-surface` | ≈0.219 | the one focused surface on a flow screen |
 
 The order matters and is easy to get backwards: choices sit **below** the panel that holds them, not
 above it. Painting both from one token — which is what shipped first — made every card inside a
