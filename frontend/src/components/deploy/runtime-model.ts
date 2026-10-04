@@ -62,6 +62,14 @@ export function publishedPorts(exposure: PortExposure[] | undefined): PublishedP
   )
 }
 
+/**
+ * An image that is only its digest — what Docker reports for a container whose
+ * tag has since moved to another image. It names nothing a reader can use.
+ */
+export function isImageDigest(image: string | undefined) {
+  return /^sha256:[0-9a-f]{12,}$/.test(image ?? "")
+}
+
 /** An image id as Docker's own CLI prints it: twelve hex digits, no algorithm. */
 export function shortDigest(id: string | undefined) {
   if (!id) return undefined

@@ -1,5 +1,6 @@
 "use client"
 
+import { Fragment } from "react"
 import { Copy, Information, Layers, Warning } from "@/components/icons"
 import { bytes, duration, percent } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -40,29 +41,36 @@ import { copyText } from "@/lib/clipboard"
 export function ContainerIdentity({
   container,
   id = true,
+  image = true,
 }: {
   container: Container
   /** Off where the line is too short to hold the image and the id both. */
   id?: boolean
+  /** Off where the image is only a digest and says nothing. */
+  image?: boolean
 }) {
+  const stack = container.composeStack && (
+    <span className="flex min-w-0 shrink items-center gap-1 truncate">
+      <Layers className="size-3 shrink-0" />
+      <span className="truncate">
+        {container.composeStack}/{container.composeService}
+      </span>
+    </span>
+  )
+  // A separator belongs between two things, so it is drawn by what follows one.
+  const parts = [
+    image && <span className="min-w-0 truncate font-mono">{container.image}</span>,
+    stack,
+    id && <ContainerId container={container} />,
+  ].filter(Boolean)
   return (
     <span className="flex min-w-0 items-center gap-1.5">
-      <span className="min-w-0 truncate font-mono">{container.image}</span>
-      {container.composeStack && (
-        <span className="flex min-w-0 shrink items-center gap-1 truncate">
-          <span aria-hidden>·</span>
-          <Layers className="size-3 shrink-0" />
-          <span className="truncate">
-            {container.composeStack}/{container.composeService}
-          </span>
-        </span>
-      )}
-      {id && (
-        <>
-          <span aria-hidden>·</span>
-          <ContainerId container={container} />
-        </>
-      )}
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {index > 0 && <span aria-hidden>·</span>}
+          {part}
+        </Fragment>
+      ))}
     </span>
   )
 }
@@ -213,6 +221,7 @@ function Reading({
   note,
   tone,
   trend,
+  compact,
 }: {
   label: string
   value: React.ReactNode
@@ -220,7 +229,35 @@ function Reading({
   note?: string
   tone?: "warning"
   trend?: number[]
+  /** One line, the name in front of the value: no bar, no sentence under it. */
+  compact?: boolean
 }) {
+  if (compact)
+    return (
+      <span className="flex min-w-0 cursor-help items-baseline gap-1.5 text-left whitespace-nowrap">
+        <span className="shrink-0 text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase">
+          {label}
+        </span>
+        <span
+          className={cn(
+            "numeric min-w-0 truncate font-mono text-hint",
+            tone === "warning" && "text-warning",
+          )}
+        >
+          {value}
+        </span>
+        {trend && trend.length > 0 && (
+          <Sparkline
+            values={trend}
+            width={36}
+            height={12}
+            label={`${label} over the last hour`}
+            color="var(--chart-1)"
+            className="shrink-0 animate-rise self-center"
+          />
+        )}
+      </span>
+    )
   return (
     <span className="block w-full min-w-0 cursor-help text-left">
       <span
@@ -275,12 +312,22 @@ export function CpuReading({
   stat,
   container,
   trend,
+  compact,
 }: {
   stat?: ContainerStats
   container: Container
   trend?: number[]
+  compact?: boolean
 }) {
-  if (!stat) return <Reading label="CPU" value="—" note={unread(container)} />
+  if (!stat)
+    return (
+      <Reading
+        label="CPU"
+        value="—"
+        note={compact ? undefined : unread(container)}
+        compact={compact}
+      />
+    )
   const limit = container.cpuLimit ?? stat.cpuLimit ?? 0
   const cores = stat.hostCpus ?? 0
   const ofLimit = limit > 0 ? (stat.cpuPercent / (limit * 100)) * 100 : stat.cpuPercent
@@ -288,8 +335,19 @@ export function CpuReading({
   return (
     <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
-        <button type="button" className="block w-full min-w-0 rounded-sm focus-ring">
-          <Reading label="CPU" value={percent(stat.cpuPercent)} meter={ofLimit} trend={trend} />
+        <button
+          type="button"
+          className={cn("block min-w-0 rounded-sm focus-ring", !compact && "w-full")}
+        >
+          <Reading
+            label="CPU"
+            value={percent(stat.cpuPercent)}
+            meter={compact ? undefined : ofLimit}
+            // Against a quota, the bar's warning has to survive its removal.
+            tone={compact && limit > 0 && ofLimit >= 85 ? "warning" : undefined}
+            trend={trend}
+            compact={compact}
+          />
         </button>
       </HoverCardTrigger>
       <HoverCardContent className="w-72 space-y-1 text-xs leading-relaxed">
@@ -318,11 +376,22 @@ export function CpuReading({
 export function MemoryReading({
   stat,
   container,
+  compact,
 }: {
   stat?: ContainerStats
   container: Container
+  compact?: boolean
 }) {
-  if (!stat) return <Reading label="Memory" value="—" note={unread(container)} />
+  const label = compact ? "Mem" : "Memory"
+  if (!stat)
+    return (
+      <Reading
+        label={label}
+        value="—"
+        note={compact ? undefined : unread(container)}
+        compact={compact}
+      />
+    )
 
   // `memLimited` is the server's answer, computed by comparing the reported
   // limit against the machine's own memory. `memoryLimit` from the listing
@@ -334,9 +403,13 @@ export function MemoryReading({
   return (
     <HoverCard openDelay={200}>
       <HoverCardTrigger asChild>
-        <button type="button" className="block w-full min-w-0 rounded-sm focus-ring">
+        <button
+          type="button"
+          className={cn("block min-w-0 rounded-sm focus-ring", !compact && "w-full")}
+        >
           <Reading
-            label="Memory"
+            label={label}
+            compact={compact}
             tone={nearLimit ? "warning" : undefined}
             value={
               <>
