@@ -51,7 +51,9 @@ test("imports the real existing bet-bot stack without changing its containers", 
   page,
   context,
 }, testInfo) => {
-  test.setTimeout(90000)
+  // Deleted-image recovery reads the live filesystem without pausing it.
+  // This opt-in recording can include two large exports on a busy host.
+  test.setTimeout(300000)
   const ready = JSON.parse(readFileSync(readyPath!, "utf8"))
   const output = process.env.JD_IMPORT_NATIVE_EVIDENCE ?? testInfo.outputDir
   mkdirSync(output, { recursive: true })
@@ -78,7 +80,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
   await page.screenshot({ path: join(output, "native-review-1280.png"), fullPage: true })
   await page.getByRole("button", { name: "Review migration" }).click()
   await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible({
-    timeout: 60000,
+    timeout: 180000,
   })
   await page.screenshot({ path: join(output, "native-configuration-1280.png"), fullPage: true })
   await page.getByRole("button", { name: "Continue", exact: true }).click()

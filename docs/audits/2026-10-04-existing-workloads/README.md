@@ -32,7 +32,7 @@ were enqueued. [Sanitized evidence](managed-api-continuity.json).
 ## Real managed Compose lifecycle
 
 The fixture declared five services, with four existing containers and two initially running. Adoption
-preserved their identities/settings and had zero failures across 90 continuous HTTP checks. An
+preserved their identities/settings and had zero failures across 128 continuous HTTP checks. An
 intentional first readiness failure restored the original four-container/two-running baseline and
 persistent volume data. The failed run correctly finished `failed` before activation; restoration
 was checked independently rather than inferred from its status.
@@ -41,7 +41,7 @@ A subsequent ordinary Deploy changes succeeded, starting the five-service review
 rollback succeeded and restored exactly the original four containers' service/replica set, two
 running services and the missing fifth service remaining absent. Named-volume data and HTTP survived.
 An external one-off container under the same Compose project was untouched throughout. The run passed
-in 30.45 seconds. [Sanitized lifecycle evidence](managed-compose-lifecycle.json).
+in 46.07 seconds. [Sanitized lifecycle evidence](managed-compose-lifecycle.json).
 
 ## Real standalone Docker lifecycle
 
@@ -51,6 +51,28 @@ container ID and HTTP service. A successful ordinary deployment preserved the im
 settings, persistent data, original container name and network aliases. Baseline rollback then
 succeeded with the same data and HTTP response. The run passed in 11.07 seconds.
 [Sanitized lifecycle evidence](managed-container-lifecycle.json).
+
+## Real deleted-image lifecycle
+
+A separate standalone fixture deleted its original local image while leaving the container running.
+Recovery exported its filesystem without pause/stop/exec, verified its platform/configuration and
+created a private, reusable recovery image. Adoption retained the original ID/PID/start/settings;
+repeat capture used the same cached image. An intentionally failed first deployment restored the
+original container ID, and a successful managed deployment and baseline rollback preserved its
+persistent volume, name and network alias. The run passed in 30.23 seconds.
+[Sanitized evidence](managed-deleted-image-lifecycle.json).
+
+## Interface evidence
+
+These screenshots and the recording use explicit mocked API fixtures. They demonstrate the current
+managed import flow and normal source/runtime/settings controls; the real lifecycle assertions above
+establish continuity, cutover and rollback behavior separately.
+
+- [Discovery](managed-discovery.png), [recovery](managed-recovery.png),
+  [migration review](managed-migration.png), [private variables](managed-private-variables.png).
+- [Editable Compose source](managed-compose-source.png), [service mount review](managed-compose-review.png).
+- [PM2 runtime controls](managed-pm2-runtime.png), [systemd runtime controls](managed-systemd-runtime.png).
+- [Recorded managed import journey](managed-ui.webm).
 
 ## Production boundaries
 
@@ -95,14 +117,22 @@ JD_IMPORT_BROWSER_EVIDENCE_DIR=/tmp/jd-managed-native-server \
   go test ./internal/api -run '^TestWorkloadImportBrowserEvidenceServer$' -count=1 -v -timeout=20m
 ```
 
-Build/serve the current frontend against `http://127.0.0.1:44119`, then record the native journey:
+Build/serve the current frontend, then put a loopback-only Caddy router in front of the UI and API,
+as the installed Compose stack does. Next's development rewrite has a 30-second upstream timeout;
+read-only image exports can exceed it and must reach the Go API directly through Caddy.
+The reproduction config is [proof.Caddyfile](proof.Caddyfile).
 
 ```bash
 cd frontend
 JD_API_URL=http://127.0.0.1:44119 bun run build
 bun run start --hostname 127.0.0.1 --port 43151
-# In another terminal:
-JD_BROWSER_BASE_URL=http://127.0.0.1:43151 \
+# In another terminal, from the repository root:
+docker run --rm --name jd-managed-adoption-proof-router --network host \
+  --tmpfs /data --tmpfs /config \
+  --mount type=bind,src="$PWD/docs/audits/2026-10-04-existing-workloads/proof.Caddyfile",dst=/etc/caddy/Caddyfile,readonly \
+  caddy:2-alpine caddy run --config /etc/caddy/Caddyfile
+# Record against Caddy:
+JD_BROWSER_BASE_URL=http://127.0.0.1:43152 \
   JD_IMPORT_NATIVE_READY=/tmp/jd-managed-native-server/ready.json \
   JD_IMPORT_NATIVE_EVIDENCE=/tmp/jd-managed-native-recording \
   bunx playwright test tests/browser/workload-import-native.spec.ts --workers=1
