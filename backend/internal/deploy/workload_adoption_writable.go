@@ -9,10 +9,14 @@ import (
 )
 
 func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
+	verifiedRegenerable := map[string]bool{}
+	for _, name := range capture.RegenerablePaths {
+		verifiedRegenerable[name] = true
+	}
 	additions := []string{}
 	bytecode := false
 	for _, change := range capture.Changes {
-		if engineGeneratedFile(change.Path) || verifiedMountDirectory(capture, change) {
+		if engineGeneratedFile(change.Path) || verifiedMountDirectory(capture, change) || verifiedRegenerable[change.Path] {
 			continue
 		}
 		mode, known := capture.ChangeModes[change.Path]
@@ -26,7 +30,7 @@ func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
 		}
 	}
 	for _, change := range capture.Changes {
-		if engineGeneratedFile(change.Path) || verifiedMountDirectory(capture, change) {
+		if engineGeneratedFile(change.Path) || verifiedMountDirectory(capture, change) || verifiedRegenerable[change.Path] {
 			continue
 		}
 		covered := false

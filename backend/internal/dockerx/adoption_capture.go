@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -15,11 +16,13 @@ import (
 // AdoptionContainer is a private, read-only capture. Config and HostConfig
 // contain credentials and must never be sent directly to a browser or audit log.
 type AdoptionContainer struct {
-	Inspection   container.InspectResponse    `json:"-"`
-	Image        *ImageDetail                 `json:"-"`
-	Changes      []container.FilesystemChange `json:"-"`
-	ChangeModes  map[string]os.FileMode       `json:"-"`
-	MissingImage bool                         `json:"-"`
+	Inspection              container.InspectResponse    `json:"-"`
+	Image                   *ImageDetail                 `json:"-"`
+	Changes                 []container.FilesystemChange `json:"-"`
+	ChangeModes             map[string]os.FileMode       `json:"-"`
+	MissingImage            bool                         `json:"-"`
+	RegenerablePaths        []string                     `json:"-"`
+	RegenerableProofFailure string                       `json:"-"`
 }
 
 func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*AdoptionContainer, error) {
@@ -45,12 +48,19 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 		if change.Kind == container.ChangeDelete {
 			continue
 		}
+		// One bounded archive proves n8n's generated assets and their modes.
+		// Unknown generators remain blocked without thousands of stat calls.
+		if n8nDefaultStart(inspection.Config) && (change.Path == n8nEditorCache || strings.HasPrefix(change.Path, n8nEditorCache+"/")) {
+			continue
+		}
 		stat, err := cli.ContainerStatPath(ctx, inspection.ID, change.Path)
 		if err == nil {
 			modes[change.Path] = stat.Mode
 		}
 	}
-	return &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage}, nil
+	captured := &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage}
+	c.captureRegenerableN8nCache(ctx, captured)
+	return captured, nil
 }
 
 // ReadComposeAdoptionConfiguration resolves the original files without writing

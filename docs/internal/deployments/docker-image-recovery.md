@@ -56,3 +56,28 @@ JD_DOCKER_ADOPTION_LIVE=1 JD_ADOPTION_EVIDENCE_DIR=/tmp/jd-managed-adoption-evid
 Docker documents [export's volume exclusion](https://docs.docker.com/reference/cli/docker/container/export/),
 [import's supported configuration changes](https://docs.docker.com/reference/cli/docker/image/import/),
 and [commit's default pause behavior](https://docs.docker.com/reference/cli/docker/container/commit/).
+
+## Verified n8n generated files
+
+Standard n8n startup copies transformed editor JavaScript, CSS and `index.html` into
+`/home/node/.cache/n8n/public`, and rebuilds three node/credential **type definition** JSON files.
+The capture adapter recognizes only exact reviewed startup generator hashes, currently verified
+against n8n 2.39.10 with its default entrypoint and start command. It checks the immutable editor
+distribution and current cache through bounded archives (128 MiB and 4,096 regular file/directory
+entries each), requiring each added output to be a shipped generated filename or one of those three
+type files. Only positively verified directory ancestors are exempted. Unknown versions/generators,
+unknown files/directories, changed or deleted outputs, symlinks, hardlinks and source modifications
+retain the writable-layer blocker. Files outside these exact paths receive the ordinary data check.
+
+`/tmp/n8nDataTableUploads` is permitted only when newly created and independently verified empty.
+Any upload file is application data and blocks adoption until persisted/backed up. Workflow state,
+the encryption key and real encrypted credentials remain in n8n's existing mounted storage; the
+cache exception never substitutes for preserving that storage or verifying a backup.
+
+The source rationale is n8n's pinned
+[static-asset generator](https://github.com/n8n-io/n8n/blob/n8n%402.39.10/packages/cli/src/commands/start.ts),
+[type generator](https://github.com/n8n-io/n8n/blob/n8n%402.39.10/packages/cli/src/services/frontend.service.ts),
+and [upload middleware](https://github.com/n8n-io/n8n/blob/n8n%402.39.10/packages/cli/src/modules/data-table/multer-upload-middleware.ts).
+The owned live source-proof fixture verified all 1,595 observed changes while container ID, PID,
+start time and configuration stayed identical. `TestLiveHeldN8nCacheProof` is read-only and opt-in
+through `JD_N8N_CACHE_PROOF_CONTAINER`, and accepts only a held `jd-n8n-cache-proof-*` fixture.
