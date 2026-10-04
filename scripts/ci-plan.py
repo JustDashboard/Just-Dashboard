@@ -95,7 +95,8 @@ FRAMEWORK_JOBS = [
     ["leptos"],
     ["trunk", "rust", "rust-workspace", "dotnet", "dotnet-solution", "blazor-wasm", "fsharp", "dotnet-spa", "dotnet-multitarget"],
     ["rails", "sinatra", "phoenix", "laravel", "php", "laravel-vite", "symfony", "jekyll",
-     "java", "gradle", "java-reactor", "gradle-multiproject", "gradle-composite", "play", "clojure"],
+     "java", "gradle", "java-reactor", "gradle-multiproject", "gradle-composite", "play", "clojure",
+     "go", "go-workspace", "go-embed", "gleam"],
     None,
 ]
 
