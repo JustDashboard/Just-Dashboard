@@ -32,9 +32,9 @@ for (const width of [1280, 1720, 390]) {
     expect(menuBounds.y).toBeGreaterThanOrEqual(triggerBounds.y + triggerBounds.height + 3)
     expect(menuBounds.width).toBeLessThan(180)
     if (width === 390) {
-      expect((await menu.getByRole("option").first().boundingBox())!.height).toBeGreaterThanOrEqual(
-        44,
-      )
+      await expect
+        .poll(async () => (await menu.getByRole("option").first().boundingBox())?.height ?? 0)
+        .toBeGreaterThanOrEqual(44)
     }
     await page.screenshot({ path: test.info().outputPath(`domains-${width}.png`), fullPage: true })
     if (width === 1280) {
@@ -65,21 +65,29 @@ test("ownership keeps keyboard selection, typeahead, Escape and outside dismissa
   await mockProject(page)
   await page.goto("/deploy/7/settings/domains")
   const trigger = page.getByRole("combobox", { name: "Ownership of api.example.test" })
+  const managed = page.getByRole("option", { name: "Managed", exact: true })
+  const linked = page.getByRole("option", { name: "Linked", exact: true })
   await trigger.focus()
   await trigger.press("ArrowDown")
+  await expect(managed).toBeFocused()
   await page.keyboard.press("End")
+  await expect(linked).toBeFocused()
   await page.keyboard.press("Enter")
   await expect(trigger).toHaveText("Linked")
   await expect(trigger).toBeFocused()
   await trigger.press("Enter")
+  await expect(linked).toBeFocused()
   await page.keyboard.press("m")
+  await expect(managed).toBeFocused()
   await page.keyboard.press("Enter")
   await expect(trigger).toHaveText("Managed")
   await trigger.press("Enter")
+  await expect(managed).toBeFocused()
   await page.keyboard.press("Escape")
   await expect(page.getByRole("listbox")).toHaveCount(0)
   await expect(trigger).toBeFocused()
   await trigger.click()
+  await expect(managed).toBeFocused()
   await page.mouse.click(1200, 800)
   await expect(page.getByRole("listbox")).toHaveCount(0)
 })
