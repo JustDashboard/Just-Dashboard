@@ -833,13 +833,14 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	if target.BuildMethod == deploy.BuildLegacyCompose {
 		return nil, fmt.Errorf("%w: normalized action requires a normalized deployment", deploy.ErrInvalidPlan)
 	}
-	var sourceKind string
+	var sourceKind, sourceConfig string
 	if err := s.Store.DB.QueryRowContext(ctx,
-		`SELECT kind FROM deploy_sources WHERE environment_id = ? AND revision = ?`,
-		environmentID, target.DesiredRevision).Scan(&sourceKind); err != nil {
+		`SELECT kind, config_json FROM deploy_sources WHERE environment_id = ? AND revision = ?`,
+		environmentID, target.DesiredRevision).Scan(&sourceKind, &sourceConfig); err != nil {
 		return nil, err
 	}
-	if sourceKind == string(deploy.SourceImport) {
+	var source deploy.DraftSourceConfig
+	if sourceKind == string(deploy.SourceImport) && (json.Unmarshal([]byte(sourceConfig), &source) != nil || source.Mode != deploy.SourceModeExistingCheckout) {
 		return nil, fmt.Errorf("%w: imported workloads stay with their original manager; open that manager to change or restart them", deploy.ErrInvalidPlan)
 	}
 	if operation == deploy.OperationPreviewRemove && (target.Kind != deploy.EnvironmentPreview || trigger != deploy.TriggerPreview) {

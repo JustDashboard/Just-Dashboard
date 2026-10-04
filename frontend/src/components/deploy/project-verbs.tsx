@@ -48,7 +48,7 @@ import {
   rememberDeploymentCheck,
 } from "@/components/deploy/deploy-check-state"
 import { runPlanIsStale } from "@/components/deploy/failure-cause"
-import { importedWorkloadOf } from "@/components/deploy/imported-workload"
+import { importedWorkloadOf, isObservedImport } from "@/components/deploy/imported-workload"
 import {
   deploymentURL,
   hostOf,
@@ -261,7 +261,7 @@ export function useProjectVerbs(
   // The compatibility pipeline takes only "deploy"; the engine's other
   // operations belong to the projects it runs.
   const normalized = summary.buildMethod !== "legacy_compose"
-  const imported = summary.sourceKind === "import"
+  const imported = isObservedImport(summary)
   const control = can("service.control") && !archived && !imported
   const canRun = control && normalized
   const active = summary.activeRun

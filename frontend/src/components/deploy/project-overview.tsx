@@ -55,6 +55,7 @@ import { UsageTiles } from "@/components/deploy/usage-tiles"
 import { BeforeYouDeploy } from "@/components/deploy/deploy-check"
 import { attentionFindings } from "@/components/deploy/deploy-check-state"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
+import { isObservedImport } from "@/components/deploy/imported-workload"
 import { ImportedProject } from "@/components/deploy/imported-project"
 
 /**
@@ -82,7 +83,7 @@ import { ImportedProject } from "@/components/deploy/imported-project"
  */
 export function ProjectOverview() {
   const project = useProject()
-  if (project.detail.deployment.sourceKind === "import") return <ImportedProject />
+  if (isObservedImport(project.detail.deployment)) return <ImportedProject />
   return <ManagedProjectOverview />
 }
 

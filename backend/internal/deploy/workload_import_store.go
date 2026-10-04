@@ -47,16 +47,54 @@ func (s *PlanningStore) RegisterObservedWorkload(
 		return nil, err
 	}
 	defer tx.Rollback()
-	var existing int64
+	var existingEnvironment, existingProject, archived int64
+	var existingName, ownership string
 	err = tx.QueryRowContext(ctx, `
-		SELECT environment_id FROM deploy_dependencies
-		 WHERE kind = 'runtime' AND resource_kind = ? AND resource_id = ?
-		 LIMIT 1`, registration.ResourceKind, registration.ResourceID).Scan(&existing)
+		SELECT e.id, e.project_id, p.name, p.archived_at, d.ownership
+		  FROM deploy_dependencies d JOIN deploy_environments e ON e.id = d.environment_id
+		  JOIN deploy_projects p ON p.id = e.project_id
+		 WHERE d.kind = 'runtime' AND d.resource_kind = ? AND d.resource_id = ?
+		 LIMIT 1`, registration.ResourceKind, registration.ResourceID).
+		Scan(&existingEnvironment, &existingProject, &existingName, &archived, &ownership)
 	if err == nil {
+		if existingName == registration.Name && archived == 0 && ownership == string(OwnershipObserved) {
+			return &DraftCommitResult{ProjectID: existingProject, EnvironmentID: existingEnvironment,
+				PlanRevision: 1, Created: false}, nil
+		}
 		return nil, ErrWorkloadAlreadyImported
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
+	}
+	// Project labels can be changed outside the dashboard. A stack and one
+	// of its recorded containers must still not receive two project owners.
+	if registration.ResourceKind == "compose_stack" || registration.ResourceKind == "docker_container" {
+		containers := observedContainerIDs(registration.ResourceKind, registration.ResourceID, registration.Observed)
+		rows, err := tx.QueryContext(ctx, `SELECT resource_kind, resource_id, config_json
+		  FROM deploy_dependencies WHERE kind = 'runtime'
+		  AND resource_kind IN ('compose_stack', 'docker_container')`)
+		if err != nil {
+			return nil, err
+		}
+		overlap := false
+		for rows.Next() {
+			var kind, id, metadata string
+			if err := rows.Scan(&kind, &id, &metadata); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			for id := range observedContainerIDs(kind, id, json.RawMessage(metadata)) {
+				overlap = overlap || containers[id]
+			}
+		}
+		readErr := rows.Err()
+		rows.Close()
+		if readErr != nil {
+			return nil, readErr
+		}
+		if overlap {
+			return nil, ErrWorkloadAlreadyImported
+		}
 	}
 
 	sealedHook, err := s.sealer.Seal(auth.RandomToken(24))
@@ -151,6 +189,27 @@ func (s *PlanningStore) RegisterObservedWorkload(
 	return &DraftCommitResult{
 		ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: 1, Created: true,
 	}, nil
+}
+
+func observedContainerIDs(kind, resourceID string, metadata json.RawMessage) map[string]bool {
+	result := map[string]bool{}
+	if kind == "docker_container" {
+		result[resourceID] = true
+		return result
+	}
+	var candidate struct {
+		Services []struct {
+			ResourceID string `json:"resourceId"`
+		} `json:"services"`
+	}
+	if json.Unmarshal(metadata, &candidate) == nil {
+		for _, service := range candidate.Services {
+			if service.ResourceID != "" {
+				result[service.ResourceID] = true
+			}
+		}
+	}
+	return result
 }
 
 func validateObservedWorkloadRegistration(registration ObservedWorkloadRegistration) error {

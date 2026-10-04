@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -112,6 +113,41 @@ func TestRegisterObservedWorkloadRecordsOnlyObservation(t *testing.T) {
 		"deploy_triggers", "deploy_schedules", "deploy_git_watches", "deploy_credentials",
 	} {
 		assertObservedWorkloadRows(t, fixture, table, 0)
+	}
+}
+
+func TestRegisterObservedWorkloadRepeatsTheSameReviewWithoutCreatingRows(t *testing.T) {
+	fixture := newPlanningStoreFixture(t)
+	registration := observedWorkloadFixture()
+	first, err := fixture.plans.RegisterObservedWorkload(t.Context(), registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := fixture.plans.RegisterObservedWorkload(t.Context(), registration)
+	if err != nil || repeated.Created || repeated.ProjectID != first.ProjectID || repeated.EnvironmentID != first.EnvironmentID {
+		t.Fatalf("repeat = %+v, err=%v; first=%+v", repeated, err, first)
+	}
+}
+
+func TestRegisterObservedWorkloadRejectsStackContainerOverlapInBothOrders(t *testing.T) {
+	for _, stackFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("stack-first-%t", stackFirst), func(t *testing.T) {
+			fixture := newPlanningStoreFixture(t)
+			stack := observedWorkloadFixture()
+			stack.Observed = json.RawMessage(`{"key":"stack:bet-bot","kind":"stack","resourceId":"bet-bot","services":[{"resourceId":"container-a"},{"resourceId":"container-b"}]}`)
+			container := ObservedWorkloadRegistration{Name: "standalone", ResourceKind: "docker_container", ResourceID: "container-a", SourceMode: SourceModeExistingContainer,
+				Observed: json.RawMessage(`{"key":"container:container-a","kind":"container","resourceId":"container-a"}`)}
+			first, second := stack, container
+			if !stackFirst {
+				first, second = container, stack
+			}
+			if _, err := fixture.plans.RegisterObservedWorkload(t.Context(), first); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := fixture.plans.RegisterObservedWorkload(t.Context(), second); !errors.Is(err, ErrWorkloadAlreadyImported) {
+				t.Fatalf("overlapping resource registered: %v", err)
+			}
+		})
 	}
 }
 

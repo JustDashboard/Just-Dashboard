@@ -35,7 +35,7 @@ import {
   webhookProduct,
 } from "@/components/product-logo"
 import { wordsProduct } from "@/lib/clients"
-import { importedWorkloadState } from "@/components/deploy/imported-workload"
+import { importedWorkloadState, isObservedImport } from "@/components/deploy/imported-workload"
 import type {
   BlueprintSummary,
   DeploymentBuildMethod,
@@ -441,7 +441,7 @@ export function projectState(
 ): ProjectState {
   if (archived) return "archived"
   if (summary.activeRun) return "deploying"
-  if (summary.sourceKind === "import") return importedWorkloadState(summary)
+  if (isObservedImport(summary)) return importedWorkloadState(summary)
   if (!summary.liveReleaseId) return runFailed(summary.lastRun?.state) ? "failed" : "not_deployed"
   if (summary.stopped || runtimeStopped(runtime, summary.liveReleaseId)) return "stopped"
   // A failed run newer than the live release is news; a failure the live

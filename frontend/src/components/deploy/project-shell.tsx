@@ -31,7 +31,7 @@ import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
-import { importedWorkloadOf } from "@/components/deploy/imported-workload"
+import { importedWorkloadOf, isObservedImport } from "@/components/deploy/imported-workload"
 import {
   BUILD_METHOD_SHORT,
   CERTIFICATE_LABEL,
@@ -247,7 +247,7 @@ export function useProjectNavScope(
       groups: [
         {
           items: PROJECT_NAV.filter((entry) =>
-            deployment.sourceKind === "import"
+            isObservedImport(deployment)
               ? entry.path === ""
               : !entry.game || deployment.profile === "game",
           ).map((entry) => ({
@@ -260,7 +260,7 @@ export function useProjectNavScope(
           label: "Settings",
           pending,
           items: PROJECT_SETTINGS_NAV.filter(
-            (entry) => deployment.sourceKind !== "import" || entry.path === "/settings/danger",
+            (entry) => !isObservedImport(deployment) || entry.path === "/settings/danger",
           ).map((entry) => ({
             title: entry.title,
             href: `${base}${entry.path}`,
@@ -290,7 +290,7 @@ function Address({
   domain?: DeploymentDomainRoute
 }) {
   if (!url) {
-    if (deployment.sourceKind === "import")
+    if (isObservedImport(deployment))
       return (
         <span className="truncate">
           {importedWorkloadOf(deployment)?.name ?? "Imported workload"}

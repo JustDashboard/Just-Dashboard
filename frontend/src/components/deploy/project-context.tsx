@@ -27,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useProjectStart } from "@/components/deploy/project-verbs"
 import { projectProduct } from "@/components/deploy/vocabulary"
 import { OverviewSkeleton } from "@/components/deploy/overview-skeleton"
+import { isObservedImport } from "@/components/deploy/imported-workload"
 import { useDeploymentCheck } from "@/components/deploy/deploy-check"
 
 /**
@@ -253,7 +254,7 @@ export function ProjectProvider({
       can("service.control") &&
       detail.data !== undefined &&
       detail.data.deployment.buildMethod !== "legacy_compose" &&
-      detail.data.deployment.sourceKind !== "import",
+      !isObservedImport(detail.data.deployment),
   })
   const recheck = check.recheck
   // The same request the projects grid's cards make, so a refused start is

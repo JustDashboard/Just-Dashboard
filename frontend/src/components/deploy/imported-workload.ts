@@ -1,6 +1,13 @@
 import type { DeploymentSummary } from "@/lib/types"
 import type { WorkloadCandidate } from "@/lib/workload-import"
 
+export function isObservedImport(summary: Partial<DeploymentSummary>) {
+  return (
+    summary.sourceKind === "import" &&
+    (summary as DeploymentSummary & { importMode?: string }).importMode !== "existing_checkout"
+  )
+}
+
 export function importedWorkloadOf(summary: DeploymentSummary) {
   return (summary as DeploymentSummary & { importedWorkload?: WorkloadCandidate }).importedWorkload
 }

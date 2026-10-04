@@ -68,6 +68,7 @@ type DeploymentSummary struct {
 	// ImportedWorkload is an observed runtime, never an activation or a claim
 	// that the dashboard can reconstruct its original configuration.
 	ImportedWorkload *WorkloadCandidate `json:"importedWorkload,omitempty"`
+	ImportMode       SourceMode         `json:"importMode,omitempty"`
 }
 
 // RecentRun is one run in a deployment's history strip: its outcome and
@@ -187,6 +188,7 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		          WHERE d.environment_id = e.id AND d.kind = 'domain'
 		          ORDER BY d.id LIMIT 1
 		       ), ''),
+		       COALESCE(src.config_json, '{}'),
 		       COALESCE((SELECT d.config_json FROM deploy_dependencies d
 		         WHERE d.environment_id = e.id AND d.kind = 'runtime'
 		           AND d.ownership = 'observed' ORDER BY d.id LIMIT 1), '{}')
@@ -211,14 +213,14 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		var summary DeploymentSummary
 		var updated int64
 		var expectedDowntime, livePort int
-		var identityJSON, buildJSON, runtimeJSON, liveRuntimeState, importedJSON string
+		var identityJSON, buildJSON, runtimeJSON, liveRuntimeState, importedJSON, sourceConfigJSON string
 		if err := rows.Scan(
 			&summary.ID, &summary.Name, &summary.Profile, &updated,
 			&summary.EnvironmentID, &summary.EnvironmentName, &summary.EnvironmentKind,
 			&summary.DesiredRevision, &summary.LiveReleaseID, &summary.Strategy,
 			&expectedDowntime, &summary.LivePlanRevision, &summary.SourceKind,
 			&identityJSON, &summary.BuildMethod, &buildJSON, &runtimeJSON, &livePort, &liveRuntimeState,
-			&summary.Endpoint, &importedJSON,
+			&summary.Endpoint, &sourceConfigJSON, &importedJSON,
 		); err != nil {
 			return nil, err
 		}
@@ -252,11 +254,17 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		}
 		summary.PendingChanges = summary.LiveReleaseID == 0
 		if summary.SourceKind == SourceImport {
+			var source DraftSourceConfig
+			if json.Unmarshal([]byte(sourceConfigJSON), &source) == nil {
+				summary.ImportMode = source.Mode
+			}
 			var candidate WorkloadCandidate
 			if json.Unmarshal([]byte(importedJSON), &candidate) == nil && candidate.Key != "" {
 				summary.ImportedWorkload = &candidate
 			}
-			summary.PendingChanges = false
+			if summary.ImportMode != SourceModeExistingCheckout {
+				summary.PendingChanges = false
+			}
 		}
 		result.Deployments = append(result.Deployments, summary)
 	}
