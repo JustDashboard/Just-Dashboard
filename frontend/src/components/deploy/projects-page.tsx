@@ -426,12 +426,17 @@ function Fleet() {
                     />
                   )}
                   {admin && (
-                    <Button size="sm" asChild>
-                      <Link href="/deploy/new">
-                        <Plus className="size-3.5" />
-                        New project
-                      </Link>
-                    </Button>
+                    <>
+                      <Button variant="outline" size="sm" asChild>
+                        <Link href="/deploy/import">Import existing</Link>
+                      </Button>
+                      <Button size="sm" asChild>
+                        <Link href="/deploy/new">
+                          <Plus className="size-3.5" />
+                          New project
+                        </Link>
+                      </Button>
+                    </>
                   )}
                 </div>
               </Toolbar>
@@ -718,7 +723,9 @@ function FleetEmpty({ admin }: { admin: boolean }) {
               </Button>
             )}
             <Button size="sm" variant="outline" asChild>
-              <Link href="/docker/stacks">See what is already running</Link>
+              <Link href={admin ? "/deploy/import" : "/docker/stacks"}>
+                {admin ? "Import existing" : "See what is already running"}
+              </Link>
             </Button>
           </div>
         }
