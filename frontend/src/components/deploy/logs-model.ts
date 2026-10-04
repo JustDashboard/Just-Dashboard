@@ -11,6 +11,7 @@ import {
   type RequestRange,
   type StatusClass,
 } from "@/lib/requests"
+import { isDockerService } from "@/components/deploy/runtime-service"
 
 /**
  * The deployment Logs page's decisions, kept apart from its drawing so they
@@ -283,7 +284,9 @@ export function orderedServices(services: DeploymentRuntimeService[], lead: Lead
  * all of them.
  */
 export function liveStack(services: DeploymentRuntimeService[]) {
-  const live = services.filter((service) => service.liveRelease && service.stack)
+  const live = services.filter(
+    (service) => isDockerService(service) && service.liveRelease && service.stack,
+  )
   const stack = live[0]?.stack
   return stack && live.filter((service) => service.stack === stack).length > 1 ? stack : undefined
 }

@@ -49,6 +49,7 @@ import {
 } from "@/components/deploy/deploy-check-state"
 import { runPlanIsStale } from "@/components/deploy/failure-cause"
 import { importedWorkloadOf, isObservedImport } from "@/components/deploy/imported-workload"
+import { isDockerService } from "@/components/deploy/runtime-service"
 import {
   deploymentURL,
   hostOf,
@@ -519,10 +520,11 @@ export function useProjectVerbs(
       run: onDuplicate,
     })
   }
-  if (runtime?.status === "available" && runtime.services.length > 0) {
-    const container = (
-      runtime.services.find((service) => service.liveRelease) ?? runtime.services[0]
-    ).containerId
+  const dockerServices =
+    runtime?.status === "available" ? runtime.services.filter(isDockerService) : []
+  if (dockerServices.length > 0) {
+    const container = (dockerServices.find((service) => service.liveRelease) ?? dockerServices[0])
+      .containerId
     verbs.push({
       key: "docker",
       label: "Open in Docker",

@@ -505,7 +505,11 @@ export function NewProject({
               rather than adding a second one inside it. */}
             <FlowHeader
               eyebrow={Eyebrow}
-              question={QUESTIONS[step]}
+              question={
+                flow.draft.data.adoption && step === "review"
+                  ? "Ready to adopt this deployment?"
+                  : QUESTIONS[step]
+              }
               steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
             />
             <div className="min-w-0 xl:min-h-0 xl:flex-1">

@@ -58,6 +58,7 @@ import {
   redetectedConfiguration,
   saveConfiguration,
   saveIntent,
+  sourceWatchesGit,
   selectCandidate,
   stepAfter,
   stepBefore,
@@ -138,6 +139,7 @@ export function Configure({
     null,
   )
   const draftId = flow.draft.id
+  const adoption = flow.draft.data.adoption
   const own = environment?.draftId === draftId ? environment : null
   const discovered = useMemo(
     () =>
@@ -293,8 +295,10 @@ export function Configure({
   // The server's own defaults, shown rather than assumed: this is the decision
   // that used to be reachable only after the first push had already deployed.
   const [gitPolicy, setGitPolicy] = useSessionState<DraftGitPolicy>(
-    "deploy.new.configure.gitPolicy",
-    { automatic: true, watchInclude: [], watchExclude: [], commitStatuses: true },
+    adoption
+      ? `deploy.new.configure.adoption.${draftId}.gitPolicy`
+      : "deploy.new.configure.gitPolicy",
+    { automatic: !adoption, watchInclude: [], watchExclude: [], commitStatuses: true },
   )
   const [created, setCreated] = useState<{
     projectId: number
@@ -341,8 +345,9 @@ export function Configure({
   )
 
   const configuration = flow.configuration
-  const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
+  const isGitSource = sourceWatchesGit(flow.source)
   const isImport = flow.source.kind === "import"
+  const adoptsExisting = isImport || Boolean(adoption)
   const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
@@ -725,11 +730,17 @@ export function Configure({
       const blockers = blockingFindings(checkedDraft.preflight.findings)
       const warnings = warningFindings(checkedDraft.preflight.findings)
       if (blockers.length) return
+      if (checkedDraft.draft.data.adoption?.blockers?.length) return
       const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
       if (outstanding.length) return
 
-      const commit = isImport
-        ? await adoptImport(checkedDraft.draft, acknowledged, flow.importPreview?.unsupported ?? [])
+      const commit = adoptsExisting
+        ? await adoptImport(
+            checkedDraft.draft,
+            acknowledged,
+            flow.importPreview?.unsupported ?? [],
+            adoption && isGitSource ? gitPolicy : undefined,
+          )
         : await commitDraft(
             checkedDraft.draft,
             acknowledged,
@@ -743,7 +754,7 @@ export function Configure({
         environmentId: commit.environmentId,
       })
 
-      if (operation === "deploy" && !isImport) {
+      if (operation === "deploy" && !adoptsExisting) {
         const run = await enqueueDeploy(
           commit.projectId,
           commit.environmentId,
@@ -917,6 +928,11 @@ export function Configure({
             className="animate-rise space-y-6 xl:min-h-0 xl:overflow-y-auto"
           >
             {failure && <ErrorState error={failure} />}
+            {adoption && failure instanceof ApiError && failure.code === "workload_changed" && (
+              <Button variant="outline" asChild>
+                <Link href="/deploy/import">Reinspect workload</Link>
+              </Button>
+            )}
 
             {current === "project" && (
               <StepProject
@@ -997,9 +1013,11 @@ export function Configure({
             note={
               !last
                 ? undefined
-                : isImport
-                  ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
-                  : "Deploy saves the plan, applies the environment, and starts the release."
+                : adoption
+                  ? "Adoption records the current live deployment without restarting it. Deploy changes applies this plan later; Redeploy live release restores the baseline."
+                  : isImport
+                    ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
+                    : "Deploy saves the plan, applies the environment, and starts the release."
             }
             secondary={
               <>
@@ -1011,7 +1029,7 @@ export function Configure({
                 >
                   {current === "project" ? "Change source" : "Back"}
                 </Button>
-                {last && !isImport && (
+                {last && !adoptsExisting && (
                   <Button
                     variant="ghost"
                     className="h-11 sm:h-9"
@@ -1030,16 +1048,22 @@ export function Configure({
                 className="h-11 sm:h-9"
                 onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || Boolean(adoption?.blockers?.length)}
               >
                 <ArrowRight className="size-4" />
-                {isImport
-                  ? "Adopt workload"
-                  : blockers.length
-                    ? "Re-check and deploy"
+                {adoption
+                  ? blockers.length
+                    ? "Re-check adoption"
                     : outstanding.length
-                      ? "Acknowledge, then deploy"
-                      : "Deploy"}
+                      ? "Acknowledge, then adopt"
+                      : "Adopt deployment"
+                  : isImport
+                    ? "Adopt workload"
+                    : blockers.length
+                      ? "Re-check and deploy"
+                      : outstanding.length
+                        ? "Acknowledge, then deploy"
+                        : "Deploy"}
               </Button>
             ) : (
               <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>

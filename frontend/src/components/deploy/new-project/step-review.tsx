@@ -12,7 +12,9 @@ import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findin
 import { variableFixLabel } from "@/components/deploy/failure-cause"
 import { WORKLOAD_LABELS } from "@/components/deploy/vocabulary"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
+import { Notice } from "@/components/state"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
+import { sourceWatchesGit } from "@/components/deploy/new-project/draft"
 
 /**
  * Step four: **is this right.**
@@ -89,8 +91,9 @@ export function StepReview({
    */
   onInspectAgain?: () => void
 }) {
-  const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
+  const isGitSource = sourceWatchesGit(flow.source)
   const configuration = flow.configuration
+  const adoption = flow.draft.data.adoption
   const declared = configuration.variables
   const generated = declared.filter(
     (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
@@ -110,6 +113,51 @@ export function StepReview({
 
   return (
     <>
+      {adoption && (
+        <FormSection title="Existing live deployment">
+          <FormFacts>
+            <FormFact label="Original name" mono>
+              {adoption.name}
+            </FormFact>
+            <FormFact label="Manager">{adoption.manager}</FormFact>
+            <FormFact label="Services">
+              {adoption.runningCount} of {adoption.serviceCount} running
+            </FormFact>
+            <FormFact label="Private inputs">
+              {flow.draft.environmentKeys?.length ?? 0} saved on the server
+            </FormFact>
+          </FormFacts>
+          <Notice title="Adoption keeps this application running">
+            The current services become the live baseline. No deployment run starts, and stopped
+            services stay stopped. Deploy changes uses the settings below; Redeploy live release
+            restores the original baseline.
+          </Notice>
+          {(adoption.blockers?.length ?? 0) > 0 && (
+            <Notice title="Resolve migration blockers before adoption" tone="danger">
+              <ul className="space-y-1">
+                {adoption.blockers.map((blocker, index) => (
+                  <li key={index}>{blocker}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
+          {(adoption.warnings ?? [])
+            .filter(
+              (warning) =>
+                !findings.some(
+                  (finding) =>
+                    finding.title === warning ||
+                    finding.means === warning ||
+                    finding.measured === warning,
+                ),
+            )
+            .map((warning, index) => (
+              <FormNote key={index} tone="warning">
+                {warning}
+              </FormNote>
+            ))}
+        </FormSection>
+      )}
       <FormSection title="Project">
         <FormFacts>
           <FormFact label="Name" mono>
@@ -143,12 +191,15 @@ export function StepReview({
               return (
                 <li key={`${mount.source}:${mount.target}`} className="min-w-0">
                   <span className="block font-mono break-all text-foreground">{mount.target}</span>
+                  {adoption && <span className="block font-mono break-all">{mount.source}</span>}
                   <span className="block text-muted-foreground">
                     {[
                       config.purpose,
                       mount.ownership === "managed"
                         ? "kept in a managed volume"
-                        : "an existing path on this host",
+                        : dependency?.resourceKind === "volume"
+                          ? "an existing named volume"
+                          : "an existing path on this host",
                       mount.readOnly && "read-only",
                       config.backup && "included in backups",
                     ]
@@ -229,20 +280,35 @@ export function StepReview({
         )}
       </FormSection>
 
-      <FormSection title="At the cutover">
+      <FormSection title={adoption ? "When you deploy changes" : "At the cutover"}>
+        {adoption && (
+          <FormNote>
+            Adoption does not perform this cutover. Deploy changes or an enabled automatic
+            deployment does.
+          </FormNote>
+        )}
         <FormNote>
           {/* "Nothing is lost" only when something is kept: with no mounts the
               section above has just said the opposite. */}
-          {configuration.runtime.strategy === "blue_green"
-            ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
-            : mounts.length === 0
-              ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
-              : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."}
+          {adoption && configuration.runtime.strategy === "stop_first"
+            ? "The first deployment of changes stops the original runtime before the replacement starts, causing an outage. Review the recovered storage and backup coverage first; state outside the declared mounts is not preserved by a rebuild."
+            : configuration.runtime.strategy === "blue_green"
+              ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
+              : mounts.length === 0
+                ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
+                : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."}
         </FormNote>
       </FormSection>
 
       {isGitSource && (
-        <AutomaticDeployment branch={branch} policy={gitPolicy} onChange={onGitPolicyChange} />
+        <AutomaticDeployment
+          branch={branch}
+          policy={gitPolicy}
+          onChange={onGitPolicyChange}
+          storageKey={
+            adoption ? `deploy.new.configure.adoption.${flow.draft.id}.gitPolicy` : undefined
+          }
+        />
       )}
 
       {(blockers.length > 0 || warnings.length > 0) && (

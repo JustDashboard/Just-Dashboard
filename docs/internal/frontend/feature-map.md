@@ -87,5 +87,13 @@ Page-owned keyboard commands, history, restoration and polling interactions are 
 page-specific navigation, confirmations and API capabilities stay with the feature components above.
 
 Existing-workload discovery at `/deploy/import` uses `components/deploy/import-workload.tsx` and
-`lib/workload-import.ts`; imported projects use `imported-project.tsx` and `imported-workload.ts`
-for original-manager links and observed status. See [existing-workloads](../deployments/existing-workloads.md).
+`lib/workload-import.ts`. **Review migration** recovers a normal server draft and opens the existing
+four-step Configure flow, with the current manager, stopped services, sealed input names and the
+first migration's downtime explained at Review. Its final **Adopt deployment** acknowledges the
+server's warning codes and creates a live baseline without enqueueing a run. The regular project
+shell and settings then apply: Deploy changes applies the recovered desired plan, while Redeploy
+live release restores the frozen baseline. `runtime-service.ts` distinguishes native PM2/systemd services from
+Docker containers: Logs use the server-issued source, Runtime links to the native manager, and a
+Docker console becomes available after the first Docker release. Legacy observation records without
+a live release retain `imported-project.tsx` and `imported-workload.ts` for original-manager links and
+observed status. See [existing-workloads](../deployments/existing-workloads.md).

@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test"
 import type { WorkloadCandidate } from "../../src/lib/workload-import"
-import { json, user } from "./deploy-fixture"
+import type { DeploymentDraft, DeploymentConfiguration } from "../../src/lib/types"
+import { json, user, mockNewProject, now } from "./deploy-fixture"
 
 export const betBot: WorkloadCandidate = {
   key: "stack:bet-bot",
@@ -58,9 +59,84 @@ export const hostApp: WorkloadCandidate = {
   digest: "host-digest",
 }
 
-export async function mockWorkloadImport(page: Page, items = [betBot, hostApp]) {
+export function recoveredWorkloadDraft(item = betBot, name = item.name): DeploymentDraft {
+  return {
+    id: "recovered-workload-draft",
+    ownerUsername: "operator",
+    currentStep: "configuration",
+    revision: 5,
+    environmentKeys: ["DATABASE_PASSWORD"],
+    data: {
+      intent: { name, profile: "compose" },
+      source: {
+        kind: "compose",
+        mode: "compose_local",
+        localPath: "/srv/bet-bot",
+        composeFiles: [
+          {
+            path: "compose.yml",
+            order: 0,
+            content: "services:\n  api:\n    image: betbot/api:latest\n",
+          },
+        ],
+      },
+      configuration: {
+        build: { method: "compose", primaryService: "api" },
+        runtime: {
+          internalPort: 3000,
+          hostPort: 3000,
+          bindAddress: "127.0.0.1",
+          strategy: "stop_first",
+          mounts: [
+            { source: "bet-bot_db", target: "/var/lib/postgresql/data", ownership: "linked" },
+          ],
+        },
+        variables: [
+          { name: "DATABASE_PASSWORD", sensitivity: "secret", scopes: ["runtime"], required: true },
+        ],
+        dependencies: [
+          {
+            kind: "storage",
+            resourceKind: "volume",
+            resourceId: "bet-bot_db",
+            ownership: "linked",
+            config: { backup: false },
+          },
+        ],
+        checks: [],
+        domains: [],
+      },
+      adoption: {
+        key: item.key,
+        digest: item.digest,
+        kind: item.kind,
+        resourceId: item.resourceId,
+        manager: "docker",
+        name: item.name,
+        warnings: ["Deploy changes stops the original runtime before its replacement starts."],
+        blockers: [],
+        serviceCount: item.total,
+        runningCount: item.running,
+      },
+    },
+    findings: [],
+    planPreview: "",
+    updatedAt: now,
+    expiresAt: "2027-01-01T00:00:00Z",
+  }
+}
+
+export async function mockWorkloadImport(
+  page: Page,
+  items = [betBot, hostApp],
+  initialDraft?: DeploymentDraft,
+) {
+  await mockNewProject(page)
   let inspectCount = 0
-  const registrations: Record<string, unknown>[] = []
+  const recoveries: Record<string, unknown>[] = []
+  const adoptions: Record<string, unknown>[] = []
+  const configurationSaves: Record<string, unknown>[] = []
+  let draft = initialDraft ?? recoveredWorkloadDraft(items[0])
   const calls: { path: string; method: string }[] = []
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request()
@@ -89,11 +165,62 @@ export async function mockWorkloadImport(page: Page, items = [betBot, hostApp]) 
       const item = items.find((item) => item.key === key)
       return json(route, item)
     }
-    if (path === "/deploy/import/register") {
-      registrations.push(request.postDataJSON())
+    if (path === "/deploy/import/recover") {
+      const body = request.postDataJSON()
+      recoveries.push(body)
+      draft = recoveredWorkloadDraft(
+        items.find((item) => item.key === body.key),
+        body.name,
+      )
+      return json(route, draft)
+    }
+    if (path === `/deploy/drafts/${draft.id}`) {
+      if (request.method() === "PUT") {
+        const body = request.postDataJSON() as {
+          configuration?: DeploymentConfiguration
+          intent?: DeploymentDraft["data"]["intent"]
+        }
+        configurationSaves.push(body)
+        draft = {
+          ...draft,
+          revision: draft.revision + 1,
+          data: {
+            ...draft.data,
+            ...(body.configuration ? { configuration: body.configuration } : {}),
+            ...(body.intent ? { intent: body.intent } : {}),
+          },
+        }
+      }
+      return json(route, draft)
+    }
+    if (path === `/deploy/drafts/${draft.id}/preflight`) {
+      draft = { ...draft, revision: draft.revision + 1 }
+      return json(route, {
+        draft,
+        preflight: {
+          revision: draft.revision,
+          findings: [
+            {
+              code: "adoption_warning_1",
+              severity: "warning",
+              title: "Review recovered runtime behavior",
+              measured: "Deploy changes stops the original runtime before its replacement starts.",
+              means:
+                "Adoption records the current runtime. A later Deploy applies the reviewed recipe.",
+            },
+          ],
+          expectedDowntime: true,
+          preview: "",
+          digest: "plan-digest",
+          plan: { actions: [] },
+        },
+      })
+    }
+    if (path === "/deploy/import/adopt") {
+      adoptions.push(request.postDataJSON())
       return json(route, { projectId: 77, environmentId: 78, created: true })
     }
-    return json(route, [])
+    return route.fallback()
   })
-  return { inspections: () => inspectCount, registrations, calls }
+  return { inspections: () => inspectCount, recoveries, adoptions, configurationSaves, calls }
 }

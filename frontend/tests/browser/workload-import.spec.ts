@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test"
 import { json } from "./deploy-fixture"
-import { betBot, hostApp, mockWorkloadImport } from "./workload-import-fixture"
+import {
+  betBot,
+  hostApp,
+  mockWorkloadImport,
+  recoveredWorkloadDraft,
+} from "./workload-import-fixture"
 
 test("import inspects the four-service stack, preserves stopped services and submits only reviewed identity", async ({
   page,
@@ -14,7 +19,9 @@ test("import inspects the four-service stack, preserves stopped services and sub
   await expect(page.getByText("2/4 running")).toBeVisible()
   await page.getByRole("button", { name: "Review bet-bot" }).focus()
   await page.keyboard.press("Enter")
-  await expect(page.getByRole("heading", { name: "Ready to import this workload?" })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Recover this workload's settings?" }),
+  ).toBeVisible()
   expect(fixture.inspections()).toBe(1)
   const services = page.getByRole("list", { name: "Services to import" })
   await expect(services.getByRole("listitem")).toHaveCount(4)
@@ -26,22 +33,22 @@ test("import inspects the four-service stack, preserves stopped services and sub
     "/docker/stacks/bet-bot",
   )
   await expect(
-    page.getByText("Adds a project record. The existing workload keeps running."),
+    page.getByText("Recovers a draft for review. The existing workload keeps running."),
   ).toBeVisible()
   await page.getByLabel("Project name").fill("bet-bot-production")
-  await page.getByRole("button", { name: "Import workload" }).click()
-  await expect(page.getByRole("heading", { name: "Workload imported" })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Open project" })).toHaveAttribute(
-    "href",
-    "/deploy/77",
-  )
-  expect(fixture.registrations).toEqual([
+  await page.getByRole("button", { name: "Review migration" }).click()
+  await expect(page).toHaveURL(/\/deploy\/new\?draft=recovered-workload-draft/)
+  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
+  expect(fixture.adoptions).toEqual([])
+  expect(fixture.recoveries).toEqual([
     { key: betBot.key, name: "bet-bot-production", digest: betBot.digest },
   ])
-  expect(fixture.calls.filter((call) => call.method === "POST").map((call) => call.path)).toEqual([
-    "/deploy/import/inspect",
-    "/deploy/import/register",
-  ])
+  expect(fixture.calls.filter((call) => call.method === "POST").map((call) => call.path)).toContain(
+    "/deploy/import/recover",
+  )
+  expect(fixture.calls.some((call) => /\/runs$|\/commit$/.test(call.path))).toBe(false)
 })
 
 test("discovery searches images and ports, filters managers, and reviews a host process without configuration", async ({
@@ -58,10 +65,10 @@ test("discovery searches images and ports, filters managers, and reviews a host 
   await page.getByRole("button", { name: /Processes 1/ }).click()
   await expect(page.getByRole("button", { name: "Review bet-bot" })).toHaveCount(0)
   await page.getByRole("button", { name: "Review next-server" }).click()
-  await expect(page.getByText("Observation only", { exact: true })).toBeVisible()
+  await expect(page.getByText("Recovery needs review", { exact: true })).toBeVisible()
   await expect(page.getByText("Could not be recovered", { exact: true })).toBeVisible()
   await expect(page.getByText("[::]:3001/tcp", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Import workload" })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Review migration" })).toBeEnabled()
 })
 
 test("a changed workload requires another review and sends the fresh digest only after an explicit retry", async ({
@@ -85,7 +92,7 @@ test("a changed workload requires another review and sends the fresh digest only
           },
     )
   })
-  await page.route("**/api/v1/deploy/import/register", (route) => {
+  await page.route("**/api/v1/deploy/import/recover", (route) => {
     attempts += 1
     submitted.push(route.request().postDataJSON())
     return attempts === 1
@@ -99,20 +106,20 @@ test("a changed workload requires another review and sends the fresh digest only
             },
           }),
         })
-      : json(route, { projectId: 77, environmentId: 78, created: true })
+      : json(route, recoveredWorkloadDraft({ ...betBot, digest: "fresh-digest" }, "my-bot"))
   })
   await page.goto("/deploy/import")
   await page.getByRole("button", { name: "Review bet-bot" }).click()
   await page.getByLabel("Project name").fill("my-bot")
-  await page.getByRole("button", { name: "Import workload" }).click()
-  await expect(page.getByRole("button", { name: "Import workload" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Review migration" }).click()
+  await expect(page.getByRole("button", { name: "Review migration" })).toHaveCount(0)
   await expect(page.getByText("Inspect the workload again", { exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Inspect again" }).click()
   await expect(page.getByText("The worker started after the first review.")).toBeVisible()
   await expect(page.getByLabel("Project name")).toHaveValue("my-bot")
   expect(attempts).toBe(1)
-  await page.getByRole("button", { name: "Import workload" }).click()
-  await expect(page.getByRole("heading", { name: "Workload imported" })).toBeVisible()
+  await page.getByRole("button", { name: "Review migration" }).click()
+  await expect(page).toHaveURL(/\/deploy\/new\?draft=recovered-workload-draft/)
   expect(submitted.map((body) => body.digest)).toEqual(["reviewed-digest", "fresh-digest"])
 })
 
@@ -141,15 +148,15 @@ test("an unavailable workload reports the refusal and keeps discovery available"
   ).toBeVisible()
   await expect(page.getByRole("button", { name: "Refresh" })).toBeEnabled()
   await expect(page.getByRole("button", { name: "Review next-server" })).toBeEnabled()
-  expect(fixture.registrations).toHaveLength(0)
+  expect(fixture.recoveries).toHaveLength(0)
 })
 
-test("an idempotent import opens the existing project and a taken name remains an inline correction", async ({
+test("a taken name remains an inline correction before the recovered draft opens", async ({
   page,
 }) => {
   await mockWorkloadImport(page, [betBot])
   let attempts = 0
-  await page.route("**/api/v1/deploy/import/register", (route) => {
+  await page.route("**/api/v1/deploy/import/recover", (route) => {
     attempts += 1
     return attempts === 1
       ? route.fulfill({
@@ -163,22 +170,18 @@ test("an idempotent import opens the existing project and a taken name remains a
             },
           }),
         })
-      : json(route, { projectId: 91, environmentId: 92, created: false })
+      : json(route, recoveredWorkloadDraft(betBot, "available-name"))
   })
   await page.goto("/deploy/import")
   await page.getByRole("button", { name: "Review bet-bot" }).click()
-  await page.getByRole("button", { name: "Import workload" }).click()
+  await page.getByRole("button", { name: "Review migration" }).click()
   const inlineError = page.locator("[data-slot=flow-panel]").getByRole("alert")
   await expect(inlineError).toHaveText("This project name is already in use.")
   await expect(page.getByLabel("Project name")).toHaveAttribute("aria-invalid", "true")
   await page.getByLabel("Project name").fill("available-name")
   await expect(inlineError).toHaveCount(0)
-  await page.getByRole("button", { name: "Import workload" }).click()
-  await expect(page.getByText("Already imported", { exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Open project" })).toHaveAttribute(
-    "href",
-    "/deploy/91",
-  )
+  await page.getByRole("button", { name: "Review migration" }).click()
+  await expect(page).toHaveURL(/\/deploy\/new\?draft=recovered-workload-draft/)
 })
 
 test("the review never renders unexpected environment values or command arguments", async ({
@@ -195,7 +198,9 @@ test("the review never renders unexpected environment values or command argument
   )
   await page.goto("/deploy/import")
   await page.getByRole("button", { name: "Review next-server" }).click()
-  await expect(page.getByRole("heading", { name: "Ready to import this workload?" })).toBeVisible()
+  await expect(
+    page.getByRole("heading", { name: "Recover this workload's settings?" }),
+  ).toBeVisible()
   await expect(page.getByText("must-stay-secret", { exact: false })).toHaveCount(0)
   await expect(page.getByText("DATABASE_PASSWORD", { exact: false })).toHaveCount(0)
 })
@@ -223,7 +228,7 @@ for (const width of [390, 1280, 1720]) {
     if (width >= 1280) await expect.poll(shellOverflow).toEqual({ across: 0, down: 0 })
     else await expect.poll(async () => (await shellOverflow()).across).toBe(0)
     await page.getByRole("button", { name: "Review bet-bot-0", exact: true }).click()
-    await expect(page.getByRole("button", { name: "Import workload" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Review migration" })).toBeVisible()
     if (width >= 1280) await expect.poll(shellOverflow).toEqual({ across: 0, down: 0 })
     else await expect.poll(async () => (await shellOverflow()).across).toBe(0)
     await expect(page.locator("[data-slot=flow-panel]")).toHaveCount(1)

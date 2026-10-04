@@ -7,6 +7,7 @@ import { FactDot } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
 import { LinesBlock, OutputLines } from "@/components/deploy/output-lines"
 import type { Answering } from "@/components/deploy/logs-model"
+import { runtimeLogSource } from "@/components/deploy/runtime-service"
 
 /** What Caddy names a failure it answered for: a refused dial, a timeout, any other 5xx. */
 const CADDY_FAILURES = ["upstream_refused", "upstream_timeout", "error"]
@@ -84,7 +85,7 @@ export function RequestLines({
               what they wrote went with them.
             </p>
           </LinesBlock>
-        ) : (
+        ) : runtimeLogSource(answering.container) ? (
           <OutputLines
             title="Lines from this request"
             facts={
@@ -102,7 +103,7 @@ export function RequestLines({
               </span>
             }
             query={{
-              source: dockerSource(answering.container.containerId),
+              source: runtimeLogSource(answering.container),
               since: iso(at - (entry.durationMs ?? 0) - 1000),
               until: iso(at + 1000),
               order: "asc",
@@ -114,7 +115,7 @@ export function RequestLines({
                 : "The container wrote nothing in the second either side of the answer."
             }
           />
-        ))}
+        ) : null)}
     </>
   )
 }

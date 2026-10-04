@@ -26,6 +26,7 @@ import {
 import { useProject } from "@/components/deploy/project-context"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { GameConsole } from "@/components/deploy/game/console"
+import { isDockerService } from "@/components/deploy/runtime-service"
 
 /**
  * The shell's height: the window below the project's header, which is about
@@ -43,7 +44,10 @@ export const CONSOLE_HEIGHT = "h-[clamp(26rem,calc(100dvh-17.5rem),48rem)]"
  */
 export function ProjectConsole() {
   const project = useProject()
-  if (project.detail.deployment.profile === "game") {
+  if (
+    project.detail.deployment.profile === "game" &&
+    project.detail.runtime?.services.some(isDockerService)
+  ) {
     return <GameConsole projectId={project.projectId} />
   }
   return <DockerConsole />
@@ -66,7 +70,9 @@ function DockerConsole() {
   const search = useSearchParams()
   const { runtime, deployment } = project.detail
   const services = runtime?.status === "available" ? runtime.services : []
-  const running = services.filter((service) => service.state === "running")
+  const running = services.filter(
+    (service) => isDockerService(service) && service.state === "running",
+  )
   const preferred = running.find((service) => service.liveRelease) ?? running[0]
   const selected = search.get("service")
   const service = running.find((item) => item.containerId === selected) ?? preferred
@@ -109,11 +115,16 @@ function DockerConsole() {
     )
   }
   if (!service) {
+    const native = services.some((entry) => !isDockerService(entry))
     return (
       <EmptyState
         icon={Terminal}
-        title="No running container"
-        description="A shell opens inside the live release once a deployment is running. Deploy first, or open the Runtime tab to see what Docker reports."
+        title={native ? "The current runtime uses a host manager" : "No running container"}
+        description={
+          native
+            ? "The adopted application keeps its current manager. A deployment shell becomes available after its first Docker release. Logs and runtime controls are available now."
+            : "A shell opens inside the live release once a deployment is running. Deploy first, or open the Runtime tab to see what Docker reports."
+        }
         action={
           <Button size="sm" variant="outline" asChild>
             <Link href={`/deploy/${project.projectId}/runtime`}>

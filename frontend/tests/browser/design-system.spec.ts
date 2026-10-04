@@ -677,7 +677,7 @@ test("import review has one foreground, named controls and no status pills", asy
   await mockWorkloadImport(page)
   await page.goto("/deploy/import")
   await page.getByRole("button", { name: "Review bet-bot" }).click()
-  await expect(page.getByRole("button", { name: "Import workload" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review migration" })).toBeVisible()
   expectOneRegister("/deploy/import", await registers(page))
   expect(await unnamedControls(page)).toEqual([])
   expect(await filledPills(page)).toEqual([])

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { importedWorkloadState } from "./imported-workload"
+import { importedWorkloadState, isObservedImport } from "./imported-workload"
 import { projectState } from "./vocabulary"
 import { fleetRank } from "./fleet"
 
@@ -28,7 +28,7 @@ describe("existing workloads without dashboard releases", () => {
     expect(projectState(summary({ state: "unavailable", running: 0, total: 4 }))).toBe(
       "unavailable",
     )
-    expect(projectState(summary(undefined))).toBe("unavailable")
+    expect(projectState(summary({ state: "missing", running: 0, total: 4 }))).toBe("unavailable")
     expect(projectState(summary({ state: "running", running: 1, total: 1 }), undefined, true)).toBe(
       "archived",
     )
@@ -38,5 +38,13 @@ describe("existing workloads without dashboard releases", () => {
     expect(projectState({ ...summary(undefined), importMode: "existing_checkout" })).toBe(
       "not_deployed",
     )
+  })
+
+  test("an adopted baseline keeps normal project state even with retained origin metadata", () => {
+    const baseline = { ...summary({ state: "partial", running: 2, total: 4 }), liveReleaseId: 9 }
+    expect(isObservedImport(baseline)).toBe(false)
+    expect(projectState(baseline)).toBe("ready")
+    expect(isObservedImport({ sourceKind: "image", liveReleaseId: 9 })).toBe(false)
+    expect(isObservedImport({ sourceKind: "import", liveReleaseId: 0 })).toBe(false)
   })
 })

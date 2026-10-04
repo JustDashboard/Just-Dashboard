@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ArrowRight,
@@ -24,10 +25,10 @@ import {
   type WorkloadCandidate,
   type WorkloadDiscovery,
   type WorkloadKind,
-  type WorkloadRegistration,
 } from "@/lib/workload-import"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
+import type { DeploymentDraft } from "@/lib/types"
 import { Field, FormSection } from "@/components/form"
 import {
   ChoiceList,
@@ -48,14 +49,13 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
-import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
 import { Input } from "@/components/ui/input"
 import { deploymentName } from "@/components/deploy/vocabulary"
 
 const STEPS = [
   { key: "discover", label: "Discover" },
-  { key: "review", label: "Review" },
-  { key: "imported", label: "Imported" },
+  { key: "recover", label: "Recover settings" },
+  { key: "review", label: "Review migration" },
 ]
 
 const MARKS = { stack: Layers, container: Box, pm2: Terminal, systemd: Terminal, process: Cpu }
@@ -75,8 +75,9 @@ function WorkloadMark({ item }: { item: WorkloadCandidate }) {
   )
 }
 
-/** Registration observes the existing manager; review never translates its configuration. */
+/** Recover a server draft first; adopting its reviewed baseline never starts a deployment run. */
 export function ImportWorkload() {
+  const router = useRouter()
   const { can } = useAuth()
   const discovery = usePoll(
     (signal) => get<WorkloadDiscovery>("/deploy/import/discovery", undefined, signal),
@@ -89,12 +90,9 @@ export function ImportWorkload() {
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
   const [stale, setStale] = useState(false)
-  const [registered, setRegistered] = useState<WorkloadRegistration>()
-  const [registeredName, setRegisteredName] = useState("")
   const heading = useRef<HTMLDivElement>(null)
   const pending = useRef(false)
-  const confetti = useRef<ConfettiRef>(null)
-  const step = registered ? 2 : selected ? 1 : 0
+  const step = selected ? 1 : 0
   const items = useMemo(() => discovery.data?.items ?? [], [discovery.data])
   const filtered = items.filter(
     (item) => (kind === "all" || item.kind === kind) && workloadMatches(item, query),
@@ -132,21 +130,25 @@ export function ImportWorkload() {
     }
   }
 
-  const register = async (event: React.FormEvent) => {
+  const recover = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!selected || !name.trim() || stale || pending.current) return
     pending.current = true
-    setBusy("register")
+    setBusy("recover")
     setFailure(undefined)
     try {
-      const result = await post<WorkloadRegistration>("/deploy/import/register", {
+      const result = await post<DeploymentDraft>("/deploy/import/recover", {
         key: selected.key,
         name: name.trim(),
         digest: selected.digest,
       })
-      setRegistered(result)
-      setRegisteredName(name.trim())
-      if (result.created) confetti.current?.fire()
+      if (!result.data?.adoption || !result.data.source || !result.data.configuration)
+        throw new Error(
+          "The settings could not be recovered. Check the original manager and try again.",
+        )
+      if (result.data.adoption.blockers?.length)
+        throw new Error(result.data.adoption.blockers.join(" "))
+      router.push(`/deploy/new?draft=${encodeURIComponent(result.id)}`)
     } catch (error) {
       const refusal = asError(error)
       setFailure(refusal)
@@ -162,7 +164,6 @@ export function ImportWorkload() {
 
   const chooseAnother = () => {
     setSelected(undefined)
-    setRegistered(undefined)
     setFailure(undefined)
     setStale(false)
     discovery.refresh()
@@ -180,20 +181,14 @@ export function ImportWorkload() {
               <ArrowLeft aria-hidden className="size-3" /> Deployments · Import existing
             </Link>
           }
-          question={
-            registered
-              ? "Workload imported"
-              : selected
-                ? "Ready to import this workload?"
-                : "What is already running?"
-          }
+          question={selected ? "Recover this workload's settings?" : "What is already running?"}
           steps={<FlowSteps steps={STEPS} current={step} />}
         />
       </div>
 
       <div className="grid min-w-0 gap-6 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
         <FlowPanel className="xl:max-h-full xl:min-h-0 xl:self-start">
-          {!selected && !registered && (
+          {!selected && (
             <>
               <FlowPanelHeader
                 title="Workloads on this server"
@@ -303,8 +298,8 @@ export function ImportWorkload() {
             </>
           )}
 
-          {selected && !registered && (
-            <form onSubmit={(event) => void register(event)} className="flex min-h-0 flex-col">
+          {selected && (
+            <form onSubmit={(event) => void recover(event)} className="flex min-h-0 flex-col">
               <FlowPanelHeader
                 title={selected.name}
                 actions={
@@ -348,7 +343,7 @@ export function ImportWorkload() {
                 {stale && (
                   <Notice title="Inspect the workload again" tone="warning">
                     Its configuration or identity changed after inspection. Review the latest
-                    services before importing.
+                    services before recovering its settings.
                   </Notice>
                 )}
                 <FormSection
@@ -427,9 +422,9 @@ export function ImportWorkload() {
                     )}
                   </dl>
                   {!selected.configurationAvailable && (
-                    <Notice title="Observation only" tone="warning">
-                      The running workload can be tracked. Recreating it requires its original
-                      configuration and secrets.
+                    <Notice title="Recovery needs review" tone="warning">
+                      Recovery checks the running workload for a reproducible configuration. Missing
+                      settings or an unsafe migration must be resolved before adoption.
                     </Notice>
                   )}
                 </FormSection>
@@ -447,7 +442,7 @@ export function ImportWorkload() {
                 )}
               </FlowPanelBody>
               <FlowActions
-                note="Adds a project record. The existing workload keeps running."
+                note="Recovers a draft for review. The existing workload keeps running."
                 secondary={
                   <Button variant="ghost" disabled={Boolean(busy)} onClick={chooseAnother}>
                     Back
@@ -465,70 +460,29 @@ export function ImportWorkload() {
                 ) : (
                   <Button
                     type="submit"
-                    pending={busy === "register"}
+                    pending={busy === "recover"}
                     disabled={!name.trim() || Boolean(busy) || !can("system.admin")}
                   >
-                    Import workload <ArrowRight aria-hidden className="size-3.5" />
+                    Review migration <ArrowRight aria-hidden className="size-3.5" />
                   </Button>
                 )}
               </FlowActions>
             </form>
           )}
-
-          {registered && (
-            <>
-              <FlowPanelHeader
-                title={registeredName}
-                actions={
-                  <Status
-                    tone="running"
-                    label={registered.created ? "Imported" : "Already imported"}
-                    icon={Check}
-                  />
-                }
-              />
-              <FlowPanelBody className="space-y-5 overflow-y-auto">
-                <p className="text-body leading-relaxed text-muted-foreground">
-                  {registered.created
-                    ? "This workload now has a project in Deployments. Its existing services, files and manager stay in place."
-                    : "This workload already has a project in Deployments. Open that project to view it."}
-                </p>
-                {selected && (
-                  <StatGrid columns={2}>
-                    <StatTile label="Services" value={selected.total} />
-                    <StatTile label="Running" value={selected.running} />
-                  </StatGrid>
-                )}
-              </FlowPanelBody>
-              <FlowActions
-                secondary={
-                  <Button variant="ghost" onClick={chooseAnother}>
-                    Import another
-                  </Button>
-                }
-              >
-                <Button asChild>
-                  <Link href={`/deploy/${registered.projectId}`}>
-                    Open project <ArrowRight aria-hidden className="size-3.5" />
-                  </Link>
-                </Button>
-              </FlowActions>
-            </>
-          )}
         </FlowPanel>
 
         <div className="space-y-6 xl:min-h-0 xl:overflow-y-auto">
           <Panel plain>
-            <PanelHeader title="What import preserves" />
+            <PanelHeader title="What adoption preserves" />
             <PanelBody className="space-y-3 text-xs leading-relaxed text-muted-foreground">
               <p>
-                Services keep running under their current manager. Import records their identity and
-                current state in a project.
+                Recovery captures the settings for a regular deployment. Review the configuration,
+                data and migration warnings before adopting the current application.
               </p>
               <ul className="space-y-2">
                 {[
                   "Containers, volumes and networks stay in place.",
-                  "Ports, mounts and environment values stay with the original workload.",
+                  "Ports and mounts are recovered; private environment values stay sealed on the server.",
                   "Compose files and process-manager settings stay where they are.",
                 ].map((text) => (
                   <li key={text} className="flex gap-2">
@@ -538,8 +492,9 @@ export function ImportWorkload() {
                 ))}
               </ul>
               <p>
-                A managed rebuild or redeploy needs a separate migration with a complete source and
-                configuration.
+                Adoption records the current live baseline without a restart. Deploy changes uses
+                the reviewed settings and may require downtime to transfer the runtime. Redeploy
+                live release restores the baseline instead.
               </p>
               {managerUrl && (
                 <Button variant="outline" size="sm" asChild>
@@ -581,7 +536,6 @@ export function ImportWorkload() {
           )}
         </div>
       </div>
-      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
     </Page>
   )
 }

@@ -149,13 +149,22 @@
 - Existing-workload import (`/deploy/import`) keeps its search, source filter, reviewed inventory and
   project name in component state, rather than the new-project draft stores. Its JSON shapes live in
   `lib/workload-import.ts`. Discovery is a snapshot refreshed explicitly; choosing a workload always
-  inspects it afresh, and registration sends only its key, project name and reviewed digest. A
+  inspects it afresh, and recovery sends only its key, project name and reviewed digest. A
   `workload_changed` conflict replaces the import command with **Inspect again**, preserves the chosen
-  project name and requires another explicit import after the new review. A name conflict stays beside
-  its field; an idempotent result links to the existing project. The review shows all service states,
+  project name and requires another explicit recovery after the new review. A name conflict stays beside
+  its field. The discovery review shows all service states,
   Docker health separately from running state, ports, the original configuration location, warnings
   and discovery silences. It never renders raw configuration, environment values or process arguments.
-  The original manager remains responsible for the workload; see
+  Recovery opens a normal source/configuration draft in `/deploy/new`; private values remain sealed
+  on the server and resume as masked `environmentKeys`. Only public adoption review fields are kept
+  with the remembered flow; baseline metadata and unexpected fields are excluded. Configure uses the
+  server's preflight warning codes, refuses blockers, and commits an adoption through
+  `/deploy/import/adopt` without enqueueing a run. Git adoption starts with manual deployment so
+  migration requires an explicit future Deploy changes; Redeploy live release restores the baseline.
+  A baseline with a live release uses the full project
+  shell; observation records without a live release retain their original-manager view. Native services
+  carry `manager`, `resourceId` and `logSource`; log reads use that source and Docker stats/exec are
+  requested only for genuine Docker services. The current runtime keeps running during adoption; see
   [`existing-workloads.md`](../deployments/existing-workloads.md).
 - Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
   action's existing capability. Stack pages hide those controls from limited accounts, explain the

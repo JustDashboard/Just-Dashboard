@@ -52,6 +52,7 @@ import { ProjectWiring } from "@/components/deploy/project-wiring"
 import { Insights } from "@/components/deploy/insights"
 import { RunRow } from "@/components/deploy/run-row"
 import { UsageTiles } from "@/components/deploy/usage-tiles"
+import { isDockerService } from "@/components/deploy/runtime-service"
 import { BeforeYouDeploy } from "@/components/deploy/deploy-check"
 import { attentionFindings } from "@/components/deploy/deploy-check-state"
 import { usePullRequestVerbs } from "@/components/deploy/pull-request-verbs"
@@ -225,12 +226,18 @@ function ManagedProjectOverview() {
                 last socket frame would claim a reading of something that is
                 not running (§11). */}
             <UsageTiles
-              containerId={liveService?.state === "running" ? liveService.containerId : undefined}
+              containerId={
+                liveService?.state === "running" && isDockerService(liveService)
+                  ? liveService.containerId
+                  : undefined
+              }
               name={liveService?.name}
               reason={
-                liveService && liveService.state !== "running"
-                  ? "The containers are not running"
-                  : runtime?.reason || "Usage appears when your application starts."
+                liveService && !isDockerService(liveService)
+                  ? "Host runtime readings remain in Processes until the first Docker release."
+                  : liveService && liveService.state !== "running"
+                    ? "The containers are not running"
+                    : runtime?.reason || "Usage appears when your application starts."
               }
               href={`/deploy/${project.projectId}/runtime`}
             />

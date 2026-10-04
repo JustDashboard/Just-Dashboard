@@ -43,6 +43,40 @@ export type WorkloadRegistration = {
   created: boolean
 }
 
+/** Server-authored origin; private runtime configuration and values stay on the server. */
+export type WorkloadAdoption = {
+  key: string
+  digest: string
+  kind: WorkloadKind
+  resourceId: string
+  manager: string
+  name: string
+  warnings: string[]
+  blockers: string[]
+  serviceCount: number
+  runningCount: number
+  baseline?: unknown
+}
+
+/** Browser persistence has no use for baseline artifacts or extra server-only fields. */
+export function adoptionReviewMetadata(
+  adoption: WorkloadAdoption,
+): Omit<WorkloadAdoption, "baseline"> {
+  const { key, digest, kind, resourceId, manager, name, serviceCount, runningCount } = adoption
+  return {
+    key,
+    digest,
+    kind,
+    resourceId,
+    manager,
+    name,
+    serviceCount,
+    runningCount,
+    warnings: adoption.warnings ?? [],
+    blockers: adoption.blockers ?? [],
+  }
+}
+
 export const WORKLOAD_KINDS: { key: WorkloadKind; label: string }[] = [
   { key: "stack", label: "Compose stacks" },
   { key: "container", label: "Containers" },
