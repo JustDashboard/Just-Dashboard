@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -162,5 +163,32 @@ func TestSystemdStartupTemplateReferencesReserveInstanceFamilies(t *testing.T) {
 	aliases := map[string]bool{"owned@production.service": true, "owned-alias@production.service": true}
 	if !systemdStartupReferenceMatches("owned@.service", aliases) || !systemdStartupReferenceMatches("owned-alias@.service", aliases) || systemdStartupReferenceMatches("other@.service", aliases) {
 		t.Fatal("socket or template authority lost its concrete service instance")
+	}
+}
+
+func TestNativeCaptureWarnsAboutRetainedBaselineAuthorityAndBlocksVolatileUnits(t *testing.T) {
+	pm2, err := parsePM2Capture([]byte(`[{"pm_id":7,"pid":123,"name":"owned","pm2_env":{"namespace":"default","status":"online","pm_exec_path":"/srv/owned/server.js","pm_cwd":"/srv/owned","exec_mode":"fork_mode","exec_interpreter":"node","env":{}}}]`), &user.User{Username: "ubuntu", Uid: "1000", Gid: "1000"}, "default", "owned")
+	if err != nil || !strings.Contains(strings.Join(pm2.Warnings, " "), "daemon reset can lose unsaved application records") {
+		t.Fatal("PM2 native record loss was not a required capture review warning")
+	}
+	for _, fixture := range []struct {
+		fragment, dropins string
+		volatile          bool
+	}{
+		{"/etc/systemd/system/owned.service", "", false},
+		{"/run/systemd/system/owned.service", "", true},
+		{"/var/run/systemd/system/owned.service", "", true},
+		{"/etc/systemd/system/owned.service", "/run/systemd/system/owned.service.d/override.conf", true},
+		{"/etc/systemd/system/owned.service", "/etc/systemd/system/owned.service.d/override.conf", false},
+	} {
+		properties := simpleDisabledUnitProperties()
+		properties["DropInPaths"] = fixture.dropins
+		capture := systemdCaptureProperties(&Unit{Name: "owned.service", Fragment: fixture.fragment}, properties)
+		if (len(capture.Blockers) > 0) != fixture.volatile {
+			t.Fatal("volatile manager authority was not refused independently of the Transient property")
+		}
+		if !strings.Contains(strings.Join(capture.Warnings, " "), "missing original manager authority causes restoration to refuse") {
+			t.Fatal("systemd native authority retention was omitted from required capture review")
+		}
 	}
 }

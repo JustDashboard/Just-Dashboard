@@ -41,20 +41,20 @@ applications can be migrated without operator compatibility checks.
    precision. Native control rechecks original module/private-file contents and directory ownership
    and permissions before manager mutation. Regression tests cover changed modules with an unchanged
    entrypoint, private content/additions and source-root permission changes.
-   Locations: `workload_adoption_host.go:263` (`knownHostSourceDrift`),
-   `runtime_native.go:133` (`capture`) and `source_local_directory.go:96` (`nativeDirectoryDigest`).
+   Locations: `workload_adoption_host.go` (`knownHostSourceDrift`),
+   `runtime_native.go` (`capture`) and `source_local_directory.go` (`nativeDirectoryDigest`).
 2. **High, native path/configuration loss:** library/interpreter filesystem dependencies may not
    appear in source variable detection. Recovery now blocks unknown external filesystem values,
    external module/CA paths, loader or unknown `NODE_OPTIONS`, and ambiguous/escaping argv paths.
    Contained paths translate into `/app` while original values remain independently sealed.
    Standard manager/tool metadata has a specific review warning. Network URLs remain unchanged.
-   Locations: `workload_adoption_host.go:381` (`translateHostRuntimeEnvironment`) and
-   `workload_adoption_host.go:522` (`hostCommandForContainer`).
+   Locations: `workload_adoption_host.go` (`translateHostRuntimeEnvironment`) and
+   `workload_adoption_host.go` (`hostCommandForContainer`).
 3. **Medium, credential files copied into images:** recognizable registry/account/cloud/SSH and
    key/keystore files are excluded from source copies and block automatic application-source recovery.
    Native restart evidence hashes original private contents without publishing or copying them into
    images. Regression tests verify credential files do not enter staged build copies.
-   Location: `source_local_directory.go:75` (`privateSourceEntry`).
+   Location: `source_local_directory.go` (`privateSourceEntry`).
 4. **Medium, host/container source identity:** a custom root may name an unrelated directory inside
    the dashboard image when the host directory has not been mounted. Recovery requires filesystem
    identity between the resolved dashboard-visible directory and its authoritative host path before
@@ -85,7 +85,7 @@ snapshot isolation, UID preservation, `/app` working-directory and absolute data
 successful HTTP serving, failed built candidate compensation, Docker logs, successful Docker
 migration and native baseline rollback. They clean up only their exact created resources.
 
-Sanitized result files are `pm2-managed-adoption.json` and `systemd-managed-adoption.json` in this
+Sanitized result files are `managed-pm2-lifecycle.json` and `managed-systemd-lifecycle.json` in this
 directory. Focused native/source regression tests, race tests and the changed-files gate accompany
 the implementation; the root task records the complete integrated verification.
 
@@ -105,6 +105,10 @@ the implementation; the root task records the complete integrated verification.
 - Startup inventory cannot prove absence of cron, arbitrary scripts, future administrator commands
   or every external launcher. Review the reversible startup handoff before cutover; importing never
   disables shared startup authority. Unresolved enabled template service/target references block recovery.
+- Native baseline replay requires the retained original authority to remain available. A PM2 daemon
+  reset can lose unsaved application records. Volatile `/run` and `/var/run` unit/drop-in authority
+  blocks recovery even without the Transient flag. Capture warns explicitly about retaining original
+  authority; missing authority causes a safe refusal rather than implicit recreation.
 - Explicit unit directive checks do not clone every inherited process limit, umask, scheduling,
   capability or security default. These application-relevant policies require compatibility review.
 - Automatic migration fails closed for unknown build/command layouts, unsupported interpreter or

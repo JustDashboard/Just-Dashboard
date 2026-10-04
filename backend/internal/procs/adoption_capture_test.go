@@ -168,7 +168,7 @@ func TestPM2ControlClientVerifiesConfigurationBeforeExactIDMutation(t *testing.T
 
 func TestSystemdCapturePreservesRepresentableLifecycleAndBlocksTransientAuthority(t *testing.T) {
 	properties := map[string]string{"Type": "exec", "User": "ubuntu", "Restart": "on-failure", "KillMode": "control-group", "KillSignal": "15", "TimeoutStopUSec": "1min 30s"}
-	unit := &Unit{Name: "owned-api.service", Fragment: "/run/systemd/system/owned-api.service", UnitFile: "disabled"}
+	unit := &Unit{Name: "owned-api.service", Fragment: "/etc/systemd/system/owned-api.service", UnitFile: "disabled"}
 	capture := systemdCaptureProperties(unit, properties)
 	if len(capture.Blockers) != 0 || capture.RestartPolicy != "on-failure" || capture.StopSignal != "SIGTERM" || capture.GracePeriodSeconds != 90 {
 		t.Fatalf("simple systemd lifecycle not preserved: %+v", capture)

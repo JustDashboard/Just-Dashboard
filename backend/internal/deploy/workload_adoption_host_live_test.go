@@ -364,7 +364,7 @@ func setupLiveNativeManager(t *testing.T, kind, root, source string, port int, a
 		t.Fatal("the opt-in systemd fixture requires root or passwordless sudo")
 	}
 	unit := fmt.Sprintf("jd-owned-native-adoption-%d.service", time.Now().UnixNano())
-	destination := filepath.Join("/run/systemd/system", unit)
+	destination := filepath.Join("/etc/systemd/system", unit)
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		t.Fatal("the fixture unit path is already occupied")
 	}

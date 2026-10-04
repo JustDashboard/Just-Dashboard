@@ -256,6 +256,14 @@ baseline restoration leaves the original manager record/unit available. Persiste
 writes are not reversed by image/configuration rollback: configure and verify application-appropriate
 backups before deploying changes which can alter data or schema.
 
+Native baseline replay depends on the retained original manager record, unit files and frozen source
+remaining available. A PM2 daemon reset can lose an app removed from saved startup lists. Systemd unit files or drop-ins
+under `/run` or `/var/run` block recovery even when the unit is not marked transient, because reboot
+can remove that authority. Move to a persistent reviewed unit/configuration before fresh recovery.
+Native captures include a mandatory authority-availability warning. Review how to retain a recoverable
+original authority before cutover: the current adapter refuses missing manager records/units and does
+not silently reconstruct them. An immutable Docker release remains independent of native authority.
+
 ## Compatibility
 
 `POST /deploy/import/register` remains available for legacy observation-only records. Those retain an

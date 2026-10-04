@@ -145,6 +145,11 @@ func systemdCaptureProperties(unit *Unit, props map[string]string) *HostWorkload
 	out := &HostWorkloadCapture{Manager: "systemd", ResourceID: unit.Name, Name: unit.Name, Account: account,
 		SourceDirectory: props["WorkingDirectory"], SourcePath: unit.Fragment, Processes: []HostProcessCapture{},
 		Environment: map[string]string{}, EnvironmentNames: []string{}, Blockers: []string{}, Warnings: []string{}}
+	for _, path := range append([]string{unit.Fragment}, strings.Fields(props["DropInPaths"])...) {
+		if volatileSystemdAuthorityPath(path) {
+			out.Blockers = append(out.Blockers, "The original systemd unit or drop-in is stored under volatile /run and can disappear after reboot. A persistent reviewed unit and configuration are required as retained native baseline authority before migration.")
+		}
+	}
 	state := props["UnitFileState"]
 	if state == "" {
 		state = unit.UnitFile
@@ -205,6 +210,7 @@ func systemdCaptureProperties(unit *Unit, props map[string]string) *HostWorkload
 			out.Blockers = append(out.Blockers, "The systemd security setting "+field+" needs an equivalent managed runtime policy before migration.")
 		}
 	}
+	out.Warnings = append(out.Warnings, "Native baseline replay requires the persistent original unit, retained drop-ins and frozen source to remain available. Do not remove or replace them while the baseline is retained; missing original manager authority causes restoration to refuse rather than implicitly recreating it.")
 	out.Warnings = append(out.Warnings, "The original unit, drop-ins, account and journal are retained as the baseline. Migration requires reviewing source, operating-system dependencies, persistence and external unit dependencies.")
 	out.Warnings = append(out.Warnings, "Container restart backoff and child-process signal delivery can differ from systemd. Review application shutdown and restart behavior before deploying changes.")
 	out.Warnings = append(out.Warnings, "Container process defaults and inherited resource or file-descriptor limits can differ from the host manager. Verify the reviewed runtime limits; explicit untranslatable unit settings block migration.")
@@ -273,4 +279,9 @@ func ResolveHostAccount(name string) (uint32, uint32, error) {
 		}
 	}
 	return 0, 0, fmt.Errorf("the runtime account could not be verified")
+}
+
+func volatileSystemdAuthorityPath(path string) bool {
+	path = filepath.Clean(path)
+	return path == "/run" || strings.HasPrefix(path, "/run/") || path == "/var/run" || strings.HasPrefix(path, "/var/run/")
 }

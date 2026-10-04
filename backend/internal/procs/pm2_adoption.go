@@ -237,7 +237,7 @@ func parsePM2Capture(data []byte, account *user.User, namespace, name string) (*
 	out.ConfigurationDigest = captureDigest(out.OriginalConfig)
 	out.EnvironmentNames = captureEnvironmentNames(out.Environment)
 	out.Blockers = uniqueCaptureStrings(out.Blockers)
-	out.Warnings = []string{"The original PM2 account and configuration are retained as the baseline. Docker migration must preserve file permissions, data paths and interpreter dependencies."}
+	out.Warnings = []string{"The original PM2 account and configuration are retained as the baseline. Docker migration must preserve file permissions, data paths and interpreter dependencies.", "Native baseline replay requires the original PM2 daemon record and frozen source to remain available. A daemon reset can lose unsaved application records. Review a recoverable authority plan before cutover; missing manager authority causes restoration to refuse rather than implicitly recreating it."}
 	return out, nil
 }
 

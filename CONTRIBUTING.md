@@ -228,7 +228,7 @@ to the contribution terms above, including the additional licence grant to the p
   The corresponding persistent systemd-unit path runs
   `JD_SYSTEMD_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
   It requires a reachable host systemd manager, Node and root/passwordless sudo. It installs one
-  uniquely named disabled unit in `/run/systemd/system`, operates only on that unit, and removes that
+  uniquely named disabled unit in `/etc/systemd/system`, operates only on that unit, and removes that
   exact file; it never reloads the global manager or modifies an existing unit. It proves native journal
   output and the same adoption/build/compensation/Docker-migration/original-unit rollback sequence.
   `JD_SYSTEMD_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
