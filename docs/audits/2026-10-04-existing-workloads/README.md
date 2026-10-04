@@ -91,6 +91,24 @@ migration needs an authoritative source/configuration and an explicit ownership-
 
 ## Reproduction
 
+Final integrated verification passed:
+
+- `scripts/test-changed.sh patch/0.7.1` with `JD_BROWSER_BASE_URL=http://127.0.0.1:43127`:
+  Prettier, ESLint, TypeScript, 2,936 Bun tests, backend build/vet and selected API/procs/deploy tests.
+  The browser selection passed 601 tests in 10.3 minutes; its one opt-in native spec was skipped
+  there and passed separately against the real existing stack as described above.
+- Production `JD_API_URL=http://127.0.0.1:44119 bun run build`: passed, including its TypeScript gate.
+- Focused race run on API/deploy/procs for imported reads, workload discovery/registration,
+  observed-import guards, existing PM2 and automation: passed (33.301s / 67.329s / 6.743s).
+- The subsequent legacy full-update/hook/rollback/retry guard cases passed their focused race run
+  (9.496s) and are included in the final selective normal run.
+- The 1280×900 native WebM recording loaded and played in Chromium (10.24 seconds).
+
+Documentation review covered `docs/internal/`, `AGENTS.md`, `README.md` and `CONTRIBUTING.md`.
+The behavior, ownership limits, frontend routes/state, PM2 reader, repository map and reproduction
+commands are updated. `AGENTS.md` needs no change because the contributor workflow is unchanged.
+No CI, dependency, licensing, schema migration or release-note changes are part of this feature.
+
 Run normal selective verification from the task worktree against the active release branch:
 
 ```bash
