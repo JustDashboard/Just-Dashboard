@@ -50,7 +50,7 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeServices(ctx context.Context, e
 	defer cancel()
 	query := `SELECT ` + qualifiedRuntimeColumns() + ` FROM deploy_release_runtimes runtime
 	 JOIN deploy_releases release ON release.id=runtime.release_id
-	 WHERE runtime.environment_id=? AND json_extract(release.provenance_json,'$.adopted')=1`
+	 WHERE runtime.environment_id=? AND (json_extract(release.provenance_json,'$.adopted')=1 OR runtime.kind IN ('pm2','systemd') OR json_extract(runtime.metadata_json,'$.adopted')=1)`
 	args := []any{environmentID}
 	if onlyReleaseID > 0 {
 		query += ` AND runtime.release_id=?`
@@ -151,7 +151,7 @@ func (s *OrchestrationStore) RuntimeByIdentity(ctx context.Context, kind, id str
 	}
 	runtime, err := scanReleaseRuntime(s.db.QueryRowContext(ctx, `SELECT `+qualifiedRuntimeColumns()+` FROM deploy_release_runtimes runtime
 	 JOIN deploy_releases release ON release.id=runtime.release_id
-	 WHERE runtime.kind=? AND runtime.runtime_id=? AND json_extract(release.provenance_json,'$.adopted')=1
+	 WHERE runtime.kind=? AND runtime.runtime_id=?
 	 ORDER BY runtime.release_id DESC LIMIT 1`, kind, id))
 	if err == sql.ErrNoRows {
 		return nil, ErrArtifactMissing
