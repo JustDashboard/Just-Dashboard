@@ -15,6 +15,22 @@ using PID plus creation time as identity. Keyboard inspection and place restorat
 [workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
 still read while paused. Signal and priority route guards remain the contracts below.
 
+Managed adoption has separate private host captures. PM2 captures one account/namespace/application
+through its existing monitor socket without executing ecosystem JavaScript, and lifecycle operations
+compare the captured configuration before calling the exact existing process IDs over that socket.
+Systemd captures its unit, drop-ins and effective execution properties; a running process supplies its
+actual argv and initial environment. These values are private input for encrypted deployment variables,
+never discovery JSON or audit metadata. Bare processes are fenced by PID creation time on both sides
+of the procfs read and have no automatic migration without a verified restart authority.
+
+Native baseline releases keep PM2 or systemd as their restart authority. They retain the original
+configuration and entrypoint hashes, stop only after a replacement is prepared, and can be restored
+through the original manager when activation fails. They never delete the original manager entry or
+rewrite its environment. Cluster/watch/IPC behavior, unsupported systemd lifecycle or isolation,
+credentials, environment-file expansion and unverified persistence are migration decisions or blockers,
+not settings the recovery reader silently drops. Entrypoint hashes cover only named executable files;
+they do not certify every dynamically loaded module or mutable application data.
+
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
 membership identifies systemd services, containers and login sessions; an empty command line identifies a
 kernel worker; PM2's own PID list is overlaid by the handler because a PM2 child otherwise inherits its

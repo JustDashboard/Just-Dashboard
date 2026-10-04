@@ -139,6 +139,7 @@ type renderedStepEvidence struct {
 
 type runtimeReleaseSnapshot struct {
 	Version        int                       `json:"version"`
+	NativeBaseline *ReleaseRuntimeInput      `json:"nativeBaseline,omitempty"`
 	Plan           RuntimePlanConfig         `json:"plan"`
 	Image          ResolvedImage             `json:"image,omitempty"`
 	Compose        *ResolvedComposeSnapshot  `json:"compose,omitempty"`

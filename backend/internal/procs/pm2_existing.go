@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"time"
@@ -57,18 +58,12 @@ func (p *PM2) ListExisting(ctx context.Context) ([]PM2Process, error) {
 			}
 			continue
 		}
-		readCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
-		command, err := hostexec.CommandOnHostAsUser(readCtx, account, pm2Env(home), "node", "-e", existingPM2Client, home.bin)
+		data, err := readExistingPM2(ctx, home, account)
 		if err == nil {
-			var result *CommandResult
-			result, err = runPrepared(readCtx, command, 7*time.Second, "node", "existing PM2 inventory")
-			if err == nil {
-				var rows []PM2Process
-				rows, err = parsePM2List([]byte(result.Stdout), time.Now().UnixMilli(), account.Username)
-				out = append(out, rows...)
-			}
+			var rows []PM2Process
+			rows, err = parsePM2List(data, time.Now().UnixMilli(), account.Username)
+			out = append(out, rows...)
 		}
-		cancel()
 		if err != nil && firstErr == nil {
 			// PM2 output may reflect account secrets, so only a fixed summary
 			// leaves this adapter on failure.
@@ -82,4 +77,22 @@ func (p *PM2) ListExisting(ctx context.Context) ([]PM2Process, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, firstErr
+}
+
+func readExistingPM2(ctx context.Context, home pm2Home, account *user.User) ([]byte, error) {
+	info, err := os.Stat(filepath.Join(home.home, ".pm2", "rpc.sock"))
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return nil, fmt.Errorf("the original PM2 daemon is unavailable")
+	}
+	readCtx, cancel := context.WithTimeout(ctx, 7*time.Second)
+	defer cancel()
+	command, err := hostexec.CommandOnHostAsUser(readCtx, account, pm2Env(home), "node", "-e", existingPM2Client, home.bin)
+	if err != nil {
+		return nil, fmt.Errorf("the original PM2 account could not be verified")
+	}
+	result, err := runPrepared(readCtx, command, 7*time.Second, "node", "existing PM2 inventory")
+	if err != nil {
+		return nil, fmt.Errorf("the original PM2 daemon could not be read")
+	}
+	return []byte(result.Stdout), nil
 }
