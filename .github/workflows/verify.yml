@@ -288,11 +288,23 @@ jobs:
             run: TestLiveDetectedFrameworkBuildAndServing
             subtests: java|gradle|java-reactor|gradle-multiproject|gradle-composite|play|clojure
             tests: TestLiveDetectedFrameworkBuildAndServing
-          - name: framework-compiled
+          - name: framework-rust
             pkg: ./internal/deploy
             timeout: 90m
             run: TestLiveDetectedFrameworkBuildAndServing
-            subtests: rust|go-workspace|go-embed|rust-workspace|trunk|leptos|go|gleam
+            subtests: rust|rust-workspace
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-wasm
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: trunk|leptos
+            tests: TestLiveDetectedFrameworkBuildAndServing
+          - name: framework-go
+            pkg: ./internal/deploy
+            timeout: 90m
+            run: TestLiveDetectedFrameworkBuildAndServing
+            subtests: go-workspace|go-embed|go|gleam
             tests: TestLiveDetectedFrameworkBuildAndServing
           - name: framework-ruby-php
             pkg: ./internal/deploy

@@ -111,7 +111,7 @@ to the contribution terms above, including the additional licence grant to the p
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run.
 - The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
-  they run there like the other jobs, as fifteen parallel jobs (the framework builds in eight groups, the other fixtures one each), each on a fresh daemon. They used to run on a self-hosted
+  they run there like the other jobs, as seventeen parallel jobs (the framework builds in ten groups, the other fixtures one each), each on a fresh daemon. They used to run on a self-hosted
   runner on the release host, which put the fixtures' builds on the daemon that serves the dashboard,
   needed its BuildKit cache pruned after every run, and left every run waiting whenever that service
   was down. The framework, artifact, activation and preview groups have a 90-minute test timeout and
