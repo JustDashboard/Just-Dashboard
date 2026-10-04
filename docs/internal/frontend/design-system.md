@@ -1000,7 +1000,8 @@ every deployment card that had one: webhooks, schedules, approvals and previews;
 the gate evidence, the live mounts and a variable's linked database; a backup job (`JobCard`, which
 measures its own width because it is drawn on /backups as well); a runtime service (one line from
 1280, its ports from 1536), a domain (from 1024), a mount and a dependency; the fleet's list rows
-(from `lg`, traffic joining at `xl`), the runs in flight (from `sm`) and the archive (from `sm`).
+(from `lg`, in columns two lines tall so the row keeps the height of its name and source line with
+both lines spent, traffic joining at `xl`), the runs in flight (from `sm`) and the archive (from `sm`).
 Narrow, each keeps one short second line, as the channel card does on a phone; a fact that fitted
 neither line and is not needed to recognise or judge the card went to the page or sheet it opens.
 A revealed variable value and an isolation note on a preview keep their line, because one is a
