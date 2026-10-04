@@ -32,11 +32,19 @@ type dockerAdoptionImageRecoverer interface {
 // Docker image is the source for an image-only workload: source code that was
 // never retained cannot be manufactured from its running process.
 func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, reader DockerWorkloadRecoveryReader, paths *files.Service, recoveryRoot string) (*RecoveredWorkload, error) {
+	return RecoverDockerWorkloadWithScope(ctx, candidate, reader, paths, recoveryRoot, RecoveryAllServices)
+}
+func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandidate, reader DockerWorkloadRecoveryReader, paths *files.Service, recoveryRoot string, scope WorkloadRecoveryScope) (*RecoveredWorkload, error) {
+	scope = scope.Normalized()
+	if !scope.ValidForKind(candidate.Kind) {
+		return nil, fmt.Errorf("%w: recovery scope is not valid for this workload", ErrInvalidPlan)
+	}
 	result := &RecoveredWorkload{Environment: map[string]string{}, Adoption: &WorkloadAdoption{
 		Key: candidate.Key, Digest: candidate.Digest, Kind: candidate.Kind,
 		ResourceID: candidate.ResourceID, Manager: "docker", Name: candidate.Name,
 		Warnings: []string{}, Blockers: []string{}, Issues: []AdoptionIssue{},
 		ServiceCount: candidate.Total, RunningCount: candidate.Running,
+		Scope: scope, ExcludedServices: []string{},
 	}}
 	r := &dockerRecovery{result: result, paths: paths, containers: map[string][]*dockerx.AdoptionContainer{}, model: map[string]any{}}
 	if reader == nil || paths == nil || (candidate.Kind != "stack" && candidate.Kind != "container") || recoveryRoot == "" {
@@ -109,6 +117,10 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 	}
 	if candidate.Kind == "stack" && len(r.containers) > 0 {
 		r.readOriginalCompose(ctx, candidate, reader)
+		r.result.Adoption.OriginalConfigurationDigest = digestBytes(mustJSON(r.model))
+		if scope == RecoveryExistingServices {
+			r.applyExistingServicesScope(candidate)
+		}
 	}
 	if candidate.Kind == "container" {
 		r.model = map[string]any{"services": map[string]any{"app": map[string]any{}}}
@@ -162,15 +174,20 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 				delete(service, "container_name")
 			}
 		} else {
+			r.captureEnvironment(name, service)
 			ref, _ := service["image"].(string)
 			var err error
 			image, err = reader.InspectImage(ctx, ref)
 			if ref == "" || err != nil || image == nil {
 				r.issue("inactive_service_image_missing", "A service without a container has no locally available image. Supply its source or image before adoption.", name, "image", true)
+				// A blocked declaration is never committed. Its unrecovered build
+				// context must not become a misleading second parser failure or a
+				// credential-bearing executable recipe in the diagnostic payload.
+				delete(service, "build")
+				delete(service, "env_file")
 				continue
 			}
 			r.issue("inactive_services", "This service has no current container. Adoption leaves it inactive; an explicit Deploy will create services from the reviewed recipe.", name, "", false)
-			r.captureEnvironment(name, service)
 		}
 		if image == nil || !contentDigestRE.MatchString(image.ID) {
 			r.issue("image_identity_missing", "The original service has no immutable local image identity.", name, "image", true)
@@ -188,6 +205,9 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 		})
 	}
 	r.externalizeResources()
+	if scope == RecoveryExistingServices {
+		pruneScopedComposeResources(r.model)
+	}
 	delete(r.model, "name")
 	delete(r.model, "include")
 	r.sanitizeStrings(r.model, "", "")
@@ -269,10 +289,13 @@ func recoveredDockerBaselineDigest(result *RecoveredWorkload) string {
 	var metadata dockerReleaseRuntimeMetadata
 	_ = json.Unmarshal(result.Adoption.Runtime.Metadata, &metadata)
 	return digestBytes([]byte(RecoveredWorkloadDigest(result.Source, result.Configuration, result.Environment)), mustJSON(struct {
-		Kind       string             `json:"kind"`
-		RuntimeID  string             `json:"runtimeId"`
-		Containers []AdoptedContainer `json:"containers"`
-	}{result.Adoption.Runtime.Kind, result.Adoption.Runtime.RuntimeID, metadata.BaselineContainers}))
+		Kind                        string                `json:"kind"`
+		RuntimeID                   string                `json:"runtimeId"`
+		Containers                  []AdoptedContainer    `json:"containers"`
+		Scope                       WorkloadRecoveryScope `json:"scope"`
+		ExcludedServices            []string              `json:"excludedServices"`
+		OriginalConfigurationDigest string                `json:"originalConfigurationDigest"`
+	}{result.Adoption.Runtime.Kind, result.Adoption.Runtime.RuntimeID, metadata.BaselineContainers, result.Adoption.Scope.Normalized(), result.Adoption.ExcludedServices, result.Adoption.OriginalConfigurationDigest}))
 }
 
 func (r *dockerRecovery) issue(code, message, service, field string, blocking bool) {

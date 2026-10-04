@@ -18,7 +18,7 @@ engine, with the original manager retained as the baseline recovery authority.
 
 - `GET /deploy/import/discovery` returns `checkedAt`, `items` and per-manager `silences`.
 - `POST /deploy/import/inspect` accepts `{key}` and refreshes the selected inventory.
-- `POST /deploy/import/recover` accepts `{key,name,digest}` and returns a server-created configured
+- `POST /deploy/import/recover` accepts `{key,name,digest,scope?}` and returns a server-created configured
   draft. Recovery reads private configuration separately from the public inventory. It returns
   `422 recovery_blocked` with actionable reasons if a complete supported recipe cannot be recovered.
 - Draft configuration and preflight use the normal draft routes. Recovery provenance and the original
@@ -50,6 +50,20 @@ If Docker deleted an existing container's original image, a verified platform de
 creates a local image artifact while leaving the original runtime unchanged; mounted data is excluded
 and recovered separately. Captured secrets remain sealed variables rather than image configuration.
 An absent service with no image or container still requires its original image/source before adoption.
+
+Compose recovery defaults to `all_services`, including every declared service. A separately reviewed
+`existing_services` scope includes every existing container, running or stopped, and explicitly lists
+only declarations with no container under `excludedServices`. The operator acknowledges one
+`compose_services_excluded` warning for each omitted declaration; Deploy changes does not create those
+services, and their original Compose definitions stay untouched. Retained dependencies, links,
+service namespaces, volumes-from or shared build contexts referring to an exclusion block recovery;
+the importer never removes those relationships to force a usable recipe. Unused resources belonging
+only to excluded declarations are omitted from the managed recipe without deleting existing resources.
+
+The saved scope and exclusion list are server-owned. Adoption recaptures with the saved scope and
+fences the full resolved original configuration, including excluded declarations, so changes there
+require fresh recovery. An omitted scope on older drafts means `all_services`. Existing-services scope
+is available only to Compose stacks; containers and native managers keep their complete recovered plan.
 
 ## Supported recovery and explicit boundaries
 

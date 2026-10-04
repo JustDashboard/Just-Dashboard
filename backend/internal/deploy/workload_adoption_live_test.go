@@ -22,6 +22,12 @@ import (
 // This opt-in fixture owns every resource it creates and never adopts the
 // operator's projects. It proves the real engine's compensation, not a fake.
 func TestLiveManagedComposeAdoptionAndRollback(t *testing.T) {
+	liveManagedComposeAdoption(t, RecoveryAllServices)
+}
+func TestLiveManagedScopedComposeAdoptionAndRollback(t *testing.T) {
+	liveManagedComposeAdoption(t, RecoveryExistingServices)
+}
+func liveManagedComposeAdoption(t *testing.T, scope WorkloadRecoveryScope) {
 	if os.Getenv("JD_DOCKER_ADOPTION_LIVE") != "1" {
 		t.Skip("set JD_DOCKER_ADOPTION_LIVE=1 to run the isolated Docker adoption lifecycle")
 	}
@@ -88,6 +94,9 @@ volumes:
   caddy_config: {}
   caddy_data: {}
 `, port, filepath.Join(root, "public"), filepath.Join(root, "Caddyfile"))
+	if scope == RecoveryExistingServices {
+		compose = strings.Replace(compose, "  never_created:\n    image: caddy:2-alpine", "  never_created:\n    image: example.invalid/absent-adoption-fixture:"+project, 1)
+	}
 	if err := os.WriteFile(composeFile, []byte(compose), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +154,7 @@ volumes:
 			<-probeDone
 		}
 	}()
-	recovered, err := RecoverDockerWorkload(ctx, candidate, client, files.New([]string{root}), filepath.Join(root, "baseline-cache"))
+	recovered, err := RecoverDockerWorkloadWithScope(ctx, candidate, client, files.New([]string{root}), filepath.Join(root, "baseline-cache"), scope)
 	if err != nil {
 		for _, service := range candidate.Services {
 			if service.ResourceID != "" {
@@ -154,6 +163,9 @@ volumes:
 			}
 		}
 		t.Fatalf("recovery: %v; issues=%+v", err, recovered.Adoption.Issues)
+	}
+	if scope == RecoveryExistingServices && (strings.Join(recovered.Adoption.ExcludedServices, ",") != "never_created" || recovered.Adoption.ServiceCount != 4) {
+		t.Fatal("scoped fixture did not explicitly exclude only unavailable absent declaration")
 	}
 	fixture := newPlanningStoreFixture(t)
 	draft, err := fixture.plans.CreateRecoveredDraft(ctx, 41, "operator", DraftIntentConfig{Name: project, Profile: ProfileCompose}, recovered)
@@ -273,8 +285,12 @@ volumes:
 		t.Fatalf("managed Deploy failed: %+v", successful)
 	}
 	deployed, _ := adoptionLiveInventory(t, client, project)
-	if len(deployed) != 5 {
-		t.Fatalf("explicit deploy did not create all five reviewed services: %+v", deployed)
+	expectedServices := 5
+	if scope == RecoveryExistingServices {
+		expectedServices = 4
+	}
+	if len(deployed) != expectedServices {
+		t.Fatalf("explicit deploy did not create all %d reviewed services: %+v", expectedServices, deployed)
 	}
 	for _, container := range deployed {
 		if !container.Running {
@@ -292,6 +308,7 @@ volumes:
 		t.Fatalf("baseline rollback mutated external oneoff: %v", err)
 	}
 	evidence := map[string]any{"test": t.Name(), "fixtureProject": project, "checkedAt": time.Now().UTC(), "baselineReleaseId": baseline.Release.ID, "adoptionPreservedIDsPIDsStartedAtAndSettings": true, "originalContainers": 4, "originalRunning": 2, "declaredServices": 5, "failedDeployRun": failed.ID, "failedDeployState": failed.State, "managedDeployRun": successful.ID, "managedDeployState": successful.State, "baselineRollbackRun": rolled.ID, "baselineRollbackState": rolled.State, "persistentDataPreserved": true, "externalOneoffPreserved": true, "HTTPContinuityAtAdoption": true, "HTTPAdoptionSamples": httpSamples.Load(), "HTTPAdoptionFailures": httpFailures.Load(), "fixtureRemovedAtCleanup": true}
+	evidence["scope"], evidence["excludedServices"], evidence["managedRecipeServices"] = scope, recovered.Adoption.ExcludedServices, expectedServices
 	if location := os.Getenv("JD_ADOPTION_EVIDENCE_DIR"); location != "" {
 		if err := os.MkdirAll(location, 0o700); err != nil {
 			t.Fatal(err)

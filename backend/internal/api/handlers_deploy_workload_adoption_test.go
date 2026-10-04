@@ -74,6 +74,12 @@ func TestWorkloadAdoptionAPIRecoversReviewsAndRegistersWithoutDockerMutations(t 
 	}
 	var candidate deploy.WorkloadCandidate
 	decodePlanningResponse(t, inspected.Body.Bytes(), &candidate)
+	for _, scope := range []string{"unknown", "existing_services"} {
+		invalid := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/import/recover", map[string]any{"key": candidate.Key, "digest": candidate.Digest, "name": "managed-worker", "scope": scope})
+		if invalid.Code != 400 || !strings.Contains(invalid.Body.String(), "invalid_scope") {
+			t.Fatalf("invalid container recovery scope accepted: %d", invalid.Code)
+		}
+	}
 	response := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/import/recover", map[string]any{"key": candidate.Key, "digest": candidate.Digest, "name": "managed-worker"})
 	if response.Code != 201 {
 		t.Fatalf("recover %d %s", response.Code, response.Body.String())

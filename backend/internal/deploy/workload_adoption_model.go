@@ -9,6 +9,24 @@ import (
 
 var ErrRecoveryBlocked = errors.New("this workload cannot yet be safely adopted")
 
+type WorkloadRecoveryScope string
+
+const (
+	RecoveryAllServices      WorkloadRecoveryScope = "all_services"
+	RecoveryExistingServices WorkloadRecoveryScope = "existing_services"
+)
+
+func (scope WorkloadRecoveryScope) Normalized() WorkloadRecoveryScope {
+	if scope == "" {
+		return RecoveryAllServices
+	}
+	return scope
+}
+func (scope WorkloadRecoveryScope) ValidForKind(kind string) bool {
+	scope = scope.Normalized()
+	return scope == RecoveryAllServices || (scope == RecoveryExistingServices && kind == "stack")
+}
+
 type AdoptedContainer struct {
 	ID          string `json:"id"`
 	Service     string `json:"service"`
@@ -29,25 +47,28 @@ type AdoptionIssue struct {
 // Baseline values are stored separately under encryption; a source document
 // references their variable names rather than containing their values.
 type WorkloadAdoption struct {
-	Key                   string              `json:"key"`
-	Digest                string              `json:"digest"`
-	Kind                  string              `json:"kind"`
-	ResourceID            string              `json:"resourceId"`
-	Manager               string              `json:"manager"`
-	Name                  string              `json:"name"`
-	Warnings              []string            `json:"warnings"`
-	Blockers              []string            `json:"blockers"`
-	Issues                []AdoptionIssue     `json:"issues"`
-	ServiceCount          int                 `json:"serviceCount"`
-	RunningCount          int                 `json:"runningCount"`
-	OriginalSourcePath    string              `json:"originalSourcePath,omitempty"`
-	ConfigFiles           []string            `json:"configFiles,omitempty"`
-	BaselineSource        DraftSourceConfig   `json:"baselineSource"`
-	BaselineConfiguration PlanConfiguration   `json:"baselineConfiguration"`
-	BaselineDigest        string              `json:"baselineDigest"`
-	Runtime               ReleaseRuntimeInput `json:"runtime"`
-	Snapshot              json.RawMessage     `json:"snapshot"`
-	RecoveryDirectory     string              `json:"recoveryDirectory,omitempty"`
+	Key                         string                `json:"key"`
+	Digest                      string                `json:"digest"`
+	Kind                        string                `json:"kind"`
+	ResourceID                  string                `json:"resourceId"`
+	Manager                     string                `json:"manager"`
+	Name                        string                `json:"name"`
+	Scope                       WorkloadRecoveryScope `json:"scope,omitempty"`
+	ExcludedServices            []string              `json:"excludedServices"`
+	OriginalConfigurationDigest string                `json:"originalConfigurationDigest,omitempty"`
+	Warnings                    []string              `json:"warnings"`
+	Blockers                    []string              `json:"blockers"`
+	Issues                      []AdoptionIssue       `json:"issues"`
+	ServiceCount                int                   `json:"serviceCount"`
+	RunningCount                int                   `json:"runningCount"`
+	OriginalSourcePath          string                `json:"originalSourcePath,omitempty"`
+	ConfigFiles                 []string              `json:"configFiles,omitempty"`
+	BaselineSource              DraftSourceConfig     `json:"baselineSource"`
+	BaselineConfiguration       PlanConfiguration     `json:"baselineConfiguration"`
+	BaselineDigest              string                `json:"baselineDigest"`
+	Runtime                     ReleaseRuntimeInput   `json:"runtime"`
+	Snapshot                    json.RawMessage       `json:"snapshot"`
+	RecoveryDirectory           string                `json:"recoveryDirectory,omitempty"`
 }
 
 // WorkloadAdoptionOrigin is kept as a named alias for feature owners which

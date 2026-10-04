@@ -30,9 +30,13 @@ ordinary health polling does not change the identity. Retrying recovery reuses t
 after checking its ID, controlled label and absence of environment/command configuration. The adoption
 API additionally checks a fresh captured baseline before committing ownership.
 
-A declared Compose service without an existing container cannot use this fallback. If its image is
-also missing, recovery blocks with `inactive_service_image_missing`; the dashboard cannot invent that
-service's source or filesystem. Adoption preserves stopped containers and absent services exactly.
+A declared Compose service without an existing container cannot use this fallback. In the default
+`all_services` scope, a missing image blocks recovery with `inactive_service_image_missing`; the
+dashboard cannot invent that service's source or filesystem. An explicit `existing_services` scope
+may omit only declarations with no container after reviewing each named exclusion and acknowledging
+its warning. Every existing stopped and running container remains included. Relationships from a
+retained service to an exclusion block recovery rather than being removed. Original Compose files
+and excluded resources remain unchanged. Adoption preserves stopped containers and absent services exactly.
 Deploy changes explicitly applies the reviewed recipe. Replica-specific storage or network identities
 that cannot be faithfully expressed as one Compose service also block recovery.
 

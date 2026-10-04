@@ -238,7 +238,7 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 			candidate = &deploy.WorkloadCandidate{
 				Key: "pm2:" + resource, Kind: "pm2", Name: process.Name, ResourceID: resource,
 				SourcePath: process.ScriptPath, Services: []deploy.WorkloadService{}, ManagerURL: "/processes/pm2",
-				Warnings: []string{"PM2 keeps this application's account, runtime, environment, cluster mode and startup settings. No Docker conversion is performed."},
+				Warnings: []string{"Adoption keeps this original PM2 runtime running. A later Deploy changes migrates a compatible reviewed recipe to Docker."},
 			}
 			pm2Groups[resource] = candidate
 		}
@@ -300,7 +300,7 @@ func workloadCandidates(inventory workloadInventory) []deploy.WorkloadCandidate 
 			candidate = &deploy.WorkloadCandidate{
 				Key: "process:" + resource, Kind: "process", Name: name + "-" + strconv.FormatInt(int64(listener.PID), 10),
 				ResourceID: resource, State: "running", Running: 1, Total: 1, ManagerURL: "/processes?pid=" + strconv.FormatInt(int64(listener.PID), 10),
-				Warnings: []string{"Only this listening process is monitored. Its launch command, secrets and boot behavior cannot be safely reconstructed; a replacement PID is not silently adopted."},
+				Warnings: []string{"Managed adoption requires a verified source and restart authority for this process. A replacement PID is not silently claimed."},
 				Services: []deploy.WorkloadService{{Name: name, ResourceID: resource, State: "running", PID: listener.PID,
 					CreatedAt: listener.StartedAt.UnixMilli(), Ports: []dockerx.PortMapping{}}},
 			}
@@ -485,6 +485,13 @@ func workloadImportResource(kind string) (string, deploy.SourceMode) {
 // recoverWorkload never changes the original runtime. Capture errors are kept
 // behind a safe message because manager responses can contain credentials.
 func (s *Server) recoverWorkload(ctx context.Context, candidate *deploy.WorkloadCandidate) (*deploy.RecoveredWorkload, error) {
+	return s.recoverWorkloadWithScope(ctx, candidate, deploy.RecoveryAllServices)
+}
+
+func (s *Server) recoverWorkloadWithScope(ctx context.Context, candidate *deploy.WorkloadCandidate, scope deploy.WorkloadRecoveryScope) (*deploy.RecoveredWorkload, error) {
+	if !scope.ValidForKind(candidate.Kind) {
+		return nil, deploy.ErrInvalidPlan
+	}
 	root := filepath.Join(s.Cfg.DataDir, "deployment-recovery")
 	paths := files.New(s.Cfg.DeployRoots)
 	switch candidate.Kind {
@@ -492,7 +499,7 @@ func (s *Server) recoverWorkload(ctx context.Context, candidate *deploy.Workload
 		if s.modules.docker == nil {
 			return nil, deploy.ErrSourceUnavailable
 		}
-		return deploy.RecoverDockerWorkload(ctx, *candidate, s.modules.docker, paths, root)
+		return deploy.RecoverDockerWorkloadWithScope(ctx, *candidate, s.modules.docker, paths, root, scope)
 	default:
 		capture, err := s.captureHostWorkload(ctx, candidate)
 		if err != nil {
@@ -552,9 +559,10 @@ func recoveryError(recovered *deploy.RecoveredWorkload, err error) error {
 
 func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.Request) error {
 	var request struct {
-		Key    string `json:"key"`
-		Name   string `json:"name"`
-		Digest string `json:"digest"`
+		Key    string                       `json:"key"`
+		Name   string                       `json:"name"`
+		Digest string                       `json:"digest"`
+		Scope  deploy.WorkloadRecoveryScope `json:"scope"`
 	}
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
@@ -572,7 +580,10 @@ func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.
 	if candidate.ImportedProjectID != 0 {
 		return httpx.Err(http.StatusConflict, "workload_already_imported", "This workload is already imported. Open its existing deployment.")
 	}
-	recovered, err := s.recoverWorkload(r.Context(), candidate)
+	if !request.Scope.ValidForKind(candidate.Kind) {
+		return httpx.Err(http.StatusBadRequest, "invalid_scope", "Existing services scope is available only for Compose stacks; choose all_services or existing_services.")
+	}
+	recovered, err := s.recoverWorkloadWithScope(r.Context(), candidate, request.Scope)
 	if err != nil {
 		return recoveryError(recovered, err)
 	}
@@ -593,7 +604,7 @@ func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
-	httpx.SetAudit(r, "deploy.import.recover", candidate.ResourceID, map[string]any{"kind": candidate.Kind, "draftId": draft.ID, "services": candidate.Total})
+	httpx.SetAudit(r, "deploy.import.recover", candidate.ResourceID, map[string]any{"kind": candidate.Kind, "draftId": draft.ID, "services": recovered.Adoption.ServiceCount, "scope": recovered.Adoption.Scope.Normalized(), "excludedServices": recovered.Adoption.ExcludedServices})
 	httpx.JSON(w, http.StatusCreated, draft)
 	return nil
 }

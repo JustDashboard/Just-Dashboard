@@ -464,7 +464,7 @@ func (s *Server) adoptRecoveredWorkload(w http.ResponseWriter, r *http.Request, 
 		if candidate.Digest != draft.Data.Adoption.Digest {
 			return httpx.Err(http.StatusConflict, "workload_changed", "The original workload identity or topology changed during review. Inspect it again before importing.")
 		}
-		recovered, err := s.recoverWorkload(r.Context(), candidate)
+		recovered, err := s.recoverWorkloadWithScope(r.Context(), candidate, draft.Data.Adoption.Scope)
 		if err != nil {
 			return recoveryError(recovered, err)
 		}
@@ -482,7 +482,7 @@ func (s *Server) adoptRecoveredWorkload(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		return mapDeploymentPlanningError(err)
 	}
-	httpx.SetAudit(r, "deploy.import.adopt", draft.Data.Adoption.ResourceID, map[string]any{"draftId": request.DraftID, "deploymentId": result.ProjectID, "environmentId": result.EnvironmentID, "kind": draft.Data.Adoption.Kind})
+	httpx.SetAudit(r, "deploy.import.adopt", draft.Data.Adoption.ResourceID, map[string]any{"draftId": request.DraftID, "deploymentId": result.ProjectID, "environmentId": result.EnvironmentID, "kind": draft.Data.Adoption.Kind, "scope": draft.Data.Adoption.Scope.Normalized(), "excludedServices": draft.Data.Adoption.ExcludedServices})
 	status := http.StatusCreated
 	if !result.Created {
 		status = http.StatusOK
