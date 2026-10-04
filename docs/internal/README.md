@@ -70,6 +70,8 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-04-command-search/README.md`](../audits/2026-10-04-command-search/README.md) — global
+  command search research, keyboard navigation plan, metadata inventory and recorded workflow.
 - [`operations/terminal-tools.md`](operations/terminal-tools.md) — installer stages and completion guide,
   local root account recovery, password handling, audit, and terminal stack commands.
 - [`../audits/2026-09-22-deploy-new/README.md`](../audits/2026-09-22-deploy-new/README.md) — deployment

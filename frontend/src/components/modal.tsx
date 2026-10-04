@@ -154,6 +154,8 @@ export function PaletteModal({
   description,
   className,
   children,
+  onEscapeKeyDown,
+  onCloseAutoFocus,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -162,12 +164,16 @@ export function PaletteModal({
   description: string
   className?: string
   children: React.ReactNode
+  onEscapeKeyDown?: (event: KeyboardEvent) => void
+  onCloseAutoFocus?: (event: Event) => void
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className={cn("gap-0 overflow-hidden rounded-xl p-0 sm:max-w-2xl", className)}
         showCloseButton={false}
+        onEscapeKeyDown={onEscapeKeyDown}
+        onCloseAutoFocus={onCloseAutoFocus}
       >
         <DialogHeader className="sr-only">
           <DialogTitle>{label}</DialogTitle>

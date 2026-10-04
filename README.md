@@ -150,7 +150,14 @@ a link. *No sponsors yet — the space is open.*
 
 ![The command palette with search and shortcuts to server tools](docs/command-palette.png)
 
-**⌘K** from anywhere. The sidebar drills into a section — Docker, Databases, Security, one
+**Ctrl/⌘K** from anywhere. Press **Enter** with no search to return to the previous destination;
+recent places come first. Search the live dashboard by a name, domain, container ID or repository
+path, across projects, proxy sites, saved databases, containers, stacks, Git repositories, services,
+PM2 apps, backups and boards. Narrow with **domain:**, **db:**, **container:** or the scope selector.
+Exact names rank first and small typos are tolerated. Arrows choose a result; Escape clears the
+search, then closes it. Inventories refresh each time you open search, and unavailable sources are
+named with a retry control. Search and recent destinations stay in memory and clear on sign-out.
+The sidebar drills into a section — Docker, Databases, Security, one
 deployment — and every page comes back the way you left it. Processes, Git, Logs, Docker containers,
 Packages, Backups, deployment setup and Audit/Security lists add page shortcuts, focus restoration
 and browser history where you change the question. Press **?** for the page's commands; **Ctrl/⌘F**
