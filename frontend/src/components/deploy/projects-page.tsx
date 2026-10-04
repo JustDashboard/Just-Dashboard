@@ -144,6 +144,7 @@ function Fleet() {
   const roomy = useMediaQuery("(min-width: 640px)")
   const lined = useMediaQuery("(min-width: 1024px)")
   const wide = useMediaQuery("(min-width: 1280px)")
+  const toolbarWide = useMediaQuery("(min-width: 1536px)")
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
     5000,
@@ -334,13 +335,13 @@ function Fleet() {
 
           {deployments.length > 0 && (
             <div className="flex min-w-0 flex-col gap-4">
-              {/* Below xl the search and the layout share the first line and
+              {/* Below 2xl the search and the layout share the first line and
                   the chips take the whole of the second, scrolling on a phone
                   to the screen's edge, where a chip cut in half says there
                   is more; beside a fixed search they were squeezed into a
                   column at 768 and cut off under the toggles at 390. */}
               <Toolbar className="justify-between gap-x-4">
-                <div className="flex w-full min-w-0 items-center gap-2 xl:w-auto">
+                <div className="flex w-full min-w-0 items-center gap-2 2xl:w-auto">
                   <SearchInput
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
@@ -360,14 +361,14 @@ function Fleet() {
                       )
                     }
                   />
-                  {!wide && layoutControls}
+                  {!toolbarWide && layoutControls}
                 </div>
                 {/* A state nothing is in gets no chip — a filter that can only
                     return nothing is furniture — unless it is the one chosen,
                     which must stay visible to be unchosen. The counts are the
                     fleet's, so a chip says what is waiting before it is
                     pressed. */}
-                <ChipStrip className="grow basis-full xl:basis-0">
+                <ChipStrip className="grow basis-full 2xl:basis-0">
                   {FLEET_FILTERS.map(({ key, label }) =>
                     key === "all" || counts[key] > 0 || filter === key ? (
                       <FilterChip
@@ -389,8 +390,8 @@ function Fleet() {
                     ) : null,
                   )}
                 </ChipStrip>
-                {wide && layoutControls}
-                <div className="flex w-full flex-wrap items-center gap-2 xl:w-auto">
+                {toolbarWide && layoutControls}
+                <div className="flex w-full flex-wrap items-center gap-2 2xl:w-auto">
                   {roomy ? (
                     <>
                       <Button variant="ghost" size="sm" asChild>
