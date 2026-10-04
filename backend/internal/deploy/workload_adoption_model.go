@@ -55,11 +55,12 @@ type WorkloadAdoption struct {
 type WorkloadAdoptionOrigin = WorkloadAdoption
 
 type RecoveredWorkload struct {
-	Source        DraftSourceConfig `json:"source"`
-	Configuration PlanConfiguration `json:"configuration"`
-	Detection     DetectionResult   `json:"detection"`
-	Adoption      *WorkloadAdoption `json:"adoption"`
-	Environment   map[string]string `json:"-"`
+	Source              DraftSourceConfig `json:"source"`
+	Configuration       PlanConfiguration `json:"configuration"`
+	Detection           DetectionResult   `json:"detection"`
+	Adoption            *WorkloadAdoption `json:"adoption"`
+	Environment         map[string]string `json:"-"`
+	BaselineEnvironment map[string]string `json:"-"`
 }
 
 type DockerWorkloadRecoveryReader interface {

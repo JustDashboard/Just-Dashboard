@@ -161,6 +161,42 @@ func TestWorkloadAdoptionFailureLeavesNoProjectOrLiveRelease(t *testing.T) {
 	}
 }
 
+func TestWorkloadAdoptionInitialTranslationKeepsOriginalPrivateEnvironment(t *testing.T) {
+	fixture := newPlanningStoreFixture(t)
+	recovered := recoveredStoreFixture(t)
+	recovered.BaselineEnvironment = map[string]string{"API_TOKEN": "original-private-value"}
+	recovered.Environment = map[string]string{"API_TOKEN": "translated-private-value"}
+	encoded := string(mustJSON(recovered))
+	if strings.Contains(encoded, "original-private-value") || strings.Contains(encoded, "translated-private-value") {
+		t.Fatal("private initial environments entered the public recovery DTO")
+	}
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "translated-import", Profile: ProfileCompose}, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, err = fixture.plans.Get(t.Context(), draft.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft = checkRecoveredDraft(t, fixture, draft)
+	result, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := NewOrchestrationStore(fixture.store).LiveRelease(t.Context(), result.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := fixture.plans.OpenRunScopedVariables(t.Context(), live.Release.RunID, result.EnvironmentID, "runtime")
+	if err != nil || len(original) != 1 || original[0].Value != "original-private-value" {
+		t.Fatalf("baseline did not retain the original environment: %v", err)
+	}
+	desired, err := fixture.plans.OpenScopedVariables(t.Context(), result.EnvironmentID, "runtime")
+	if err != nil || len(desired) != 1 || desired[0].Value != "translated-private-value" {
+		t.Fatalf("desired environment did not retain its translation: %v", err)
+	}
+}
+
 func TestWorkloadAdoptionUnchangedRecipeHasNoPendingChanges(t *testing.T) {
 	fixture := newPlanningStoreFixture(t)
 	recovered := recoveredStoreFixture(t)

@@ -42,11 +42,15 @@ func (s *PlanningStore) CreateRecoveredDraft(ctx context.Context, ownerID int64,
 		return nil, err
 	}
 	now := s.now().UTC()
+	originalEnvironment := recovered.BaselineEnvironment
+	if originalEnvironment == nil {
+		originalEnvironment = recovered.Environment
+	}
 	draft := &Draft{
 		ID: auth.RandomToken(18), OwnerUserID: ownerID, OwnerUsername: owner,
 		CurrentStep: DraftConfiguration, Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(draftTTL),
 		Data:     DraftData{Intent: &intent, Source: &recovered.Source, Detection: &recovered.Detection, Configuration: &configuration, Adoption: recovered.Adoption},
-		Findings: []PreflightFinding{}, environment: recovered.Environment, adoptionEnvironment: recovered.Environment,
+		Findings: []PreflightFinding{}, environment: recovered.Environment, adoptionEnvironment: originalEnvironment,
 	}
 	plaintext, err := json.Marshal(recovered.Environment)
 	if err != nil {
@@ -56,7 +60,14 @@ func (s *PlanningStore) CreateRecoveredDraft(ctx context.Context, ownerID int64,
 	if err != nil {
 		return nil, err
 	}
-	draft.adoptionEnc = draft.environmentEnc
+	originalPlaintext, err := json.Marshal(originalEnvironment)
+	if err != nil {
+		return nil, err
+	}
+	draft.adoptionEnc, err = s.sealer.Seal(string(originalPlaintext))
+	if err != nil {
+		return nil, err
+	}
 	configuration = draft.withEnvironmentMetadata(configuration)
 	draft.Data.Configuration = &configuration
 	draft.refreshEnvironmentKeys()

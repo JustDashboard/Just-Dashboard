@@ -45,6 +45,12 @@ writes the application's original directory. Docker effective configuration is r
 file, lifecycle script or application command. PM2 capture speaks to an existing daemon rather than
 using a CLI path which could start one.
 
+If Docker deleted an existing container's original image, a verified platform descriptor permits
+[bounded read-only filesystem export](docker-image-recovery.md) into a private recovery image. This
+creates a local image artifact while leaving the original runtime unchanged; mounted data is excluded
+and recovered separately. Captured secrets remain sealed variables rather than image configuration.
+An absent service with no image or container still requires its original image/source before adoption.
+
 ## Supported recovery and explicit boundaries
 
 | Runtime | Recovered plan and baseline | Cases that require resolution before adoption |
