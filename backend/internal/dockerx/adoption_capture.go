@@ -9,15 +9,17 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/errdefs"
 )
 
 // AdoptionContainer is a private, read-only capture. Config and HostConfig
 // contain credentials and must never be sent directly to a browser or audit log.
 type AdoptionContainer struct {
-	Inspection  container.InspectResponse    `json:"-"`
-	Image       *ImageDetail                 `json:"-"`
-	Changes     []container.FilesystemChange `json:"-"`
-	ChangeModes map[string]os.FileMode       `json:"-"`
+	Inspection   container.InspectResponse    `json:"-"`
+	Image        *ImageDetail                 `json:"-"`
+	Changes      []container.FilesystemChange `json:"-"`
+	ChangeModes  map[string]os.FileMode       `json:"-"`
+	MissingImage bool                         `json:"-"`
 }
 
 func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*AdoptionContainer, error) {
@@ -30,9 +32,10 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 		return nil, errors.New("the container configuration could not be captured")
 	}
 	image, err := c.InspectImage(ctx, inspection.Image)
-	if err != nil {
+	if err != nil && !errdefs.IsNotFound(err) {
 		return nil, errors.New("the original container image is unavailable locally")
 	}
+	missingImage := err != nil
 	changes, err := cli.ContainerDiff(ctx, inspection.ID)
 	if err != nil {
 		return nil, errors.New("the container writable layer could not be checked")
@@ -47,7 +50,7 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 			modes[change.Path] = stat.Mode
 		}
 	}
-	return &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes}, nil
+	return &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage}, nil
 }
 
 // ReadComposeAdoptionConfiguration resolves the original files without writing

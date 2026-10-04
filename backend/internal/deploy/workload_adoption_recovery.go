@@ -12,6 +12,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/docker/docker/api/types/container"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,6 +21,10 @@ type dockerRecovery struct {
 	paths      *files.Service
 	containers map[string][]*dockerx.AdoptionContainer
 	model      map[string]any
+}
+
+type dockerAdoptionImageRecoverer interface {
+	RecoverAdoptionImage(context.Context, *dockerx.AdoptionContainer, string, []string) (*dockerx.ImageDetail, error)
 }
 
 // RecoverDockerWorkload captures configuration and makes a deployable recipe;
@@ -70,6 +75,28 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 		} else if regenerable {
 			r.issue("regenerable_python_cache", "Added Python bytecode caches are regenerated from the unchanged image. They are excluded from the preserved persistent data; all other writable-layer changes still block adoption.", name, "writableLayer", false)
 		}
+		if captured.Image == nil && captured.MissingImage {
+			if safe, _ := recoverableWritableLayer(captured); safe && captured.Inspection.State != nil && !captured.Inspection.State.Paused {
+				if recoverer, ok := reader.(dockerAdoptionImageRecoverer); ok {
+					if err := makePrivateDirectory(recoveryRoot); err != nil {
+						return nil, err
+					}
+					exclude := []string{}
+					for _, change := range captured.Changes {
+						if change.Kind == container.ChangeAdd && strings.HasSuffix(change.Path, ".pyc") && filepath.Base(filepath.Dir(change.Path)) == "__pycache__" {
+							exclude = append(exclude, change.Path)
+						}
+					}
+					image, imageErr := recoverer.RecoverAdoptionImage(ctx, captured, recoveryRoot, exclude)
+					if imageErr == nil {
+						captured.Image = image
+						r.issue("missing_image_snapshotted", "The original image is missing. Its running filesystem was captured without pausing or changing the container as a new private local image; captured environment values and mounted storage stay outside that image. Keep this recovery image available for deployment and rollback.", name, "image", false)
+					} else {
+						r.issue("missing_image_recovery_unavailable", imageErr.Error(), name, "image", true)
+					}
+				}
+			}
+		}
 		if captured.Inspection.Config.Labels["com.docker.swarm.service.id"] != "" {
 			r.issue("swarm_owner", "This container is owned by a Swarm service. Adopt its service specification through Swarm rather than replacing this task.", name, "", true)
 		}
@@ -112,6 +139,16 @@ func RecoverDockerWorkload(ctx context.Context, candidate WorkloadCandidate, rea
 				if containerSettingsDigest(other) != containerSettingsDigest(captures[0]) {
 					r.issue("replica_configuration_differs", "Replicas of this service have different images or runtime settings. Reconcile them before adoption.", name, "", true)
 				}
+				if replicaStorageDigest(other) != replicaStorageDigest(captures[0]) {
+					r.issue("replica_storage_differs", "Replicas use different resolved storage. A single Compose service cannot preserve their separate volumes or bind destinations; review and reconcile the replica storage before adoption.", name, "volumes", true)
+				}
+				if replicaNetworkDigest(other) != replicaNetworkDigest(captures[0]) {
+					r.issue("replica_network_identity_differs", "Replicas have different endpoint addresses, MAC identities or aliases. Those per-replica network settings cannot be applied as one Compose service; review the original network configuration before adoption.", name, "networks", true)
+				}
+			}
+			if image == nil {
+				r.issue("original_image_unavailable", "The original image is missing and its filesystem/platform could not be safely recovered. Restore that image or attach the original build source before adoption.", name, "image", true)
+				continue
 			}
 			r.recoverService(name, service, captures[0], candidate.Kind == "stack")
 			if len(captures) > 1 {
@@ -471,7 +508,9 @@ func (r *dockerRecovery) sanitizeStrings(value any, service, key string) {
 
 func containerSettingsDigest(capture *dockerx.AdoptionContainer) string {
 	config := *capture.Inspection.Config
-	config.Hostname = ""
+	if strings.HasPrefix(capture.Inspection.ID, config.Hostname) && len(config.Hostname) == 12 {
+		config.Hostname = ""
+	}
 	config.Labels = map[string]string{}
 	for key, value := range capture.Inspection.Config.Labels {
 		if !strings.HasPrefix(key, "com.docker.compose.") {
@@ -483,6 +522,38 @@ func containerSettingsDigest(capture *dockerx.AdoptionContainer) string {
 	// discovery fence; the settings fingerprint follows the service recipe.
 	host.PortBindings = nil
 	return digestBytes(mustJSON(config), mustJSON(host), []byte(capture.Inspection.Image))
+}
+
+func replicaStorageDigest(capture *dockerx.AdoptionContainer) string {
+	mounts := append([]container.MountPoint(nil), capture.Inspection.Mounts...)
+	sort.Slice(mounts, func(i, j int) bool { return mounts[i].Destination < mounts[j].Destination })
+	return digestBytes(mustJSON(mounts))
+}
+
+func replicaNetworkDigest(capture *dockerx.AdoptionContainer) string {
+	endpoints := map[string]any{}
+	if capture.Inspection.NetworkSettings != nil {
+		for name, endpoint := range capture.Inspection.NetworkSettings.Networks {
+			if endpoint == nil {
+				continue
+			}
+			aliases := []string{}
+			for _, alias := range endpoint.Aliases {
+				if alias != strings.TrimPrefix(capture.Inspection.Name, "/") && alias != capture.Inspection.ID && !(len(alias) == 12 && strings.HasPrefix(capture.Inspection.ID, alias)) {
+					aliases = append(aliases, alias)
+				}
+			}
+			sort.Strings(aliases)
+			endpoints[name] = struct {
+				IPAM       any
+				MAC        string
+				Aliases    []string
+				DriverOpts map[string]string
+				GwPriority int
+			}{endpoint.IPAMConfig, endpoint.MacAddress, aliases, endpoint.DriverOpts, endpoint.GwPriority}
+		}
+	}
+	return digestBytes(mustJSON(endpoints))
 }
 
 func containsSourceInterpolation(value any) bool {

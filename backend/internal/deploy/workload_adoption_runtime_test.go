@@ -10,7 +10,27 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 )
+
+func TestReplicaCaptureRejectsDifferentStorageAndNetworkIdentity(t *testing.T) {
+	first, second := adoptionCaptureFixture(t, "web", true), adoptionCaptureFixture(t, "web", true)
+	if replicaStorageDigest(first) != replicaStorageDigest(second) || replicaNetworkDigest(first) != replicaNetworkDigest(second) {
+		t.Fatal("identical settings are not stable")
+	}
+	second.Inspection.Mounts[0].Name = "different-private-data"
+	if replicaStorageDigest(first) == replicaStorageDigest(second) {
+		t.Fatal("replica storage isolation difference was lost")
+	}
+	second.Inspection.NetworkSettings.Networks["original_default"] = &network.EndpointSettings{MacAddress: "02:42:aa:bb:cc:dd"}
+	if replicaNetworkDigest(first) == replicaNetworkDigest(second) {
+		t.Fatal("replica endpoint difference was lost")
+	}
+	second.Inspection.Config.Hostname = "explicit-per-replica-name"
+	if containerSettingsDigest(first) == containerSettingsDigest(second) {
+		t.Fatal("custom per-replica hostname difference was lost")
+	}
+}
 
 func TestComposeReleaseIdentityRequiresCapturedServiceDigest(t *testing.T) {
 	compose := &ResolvedComposeSnapshot{Services: []ResolvedComposeService{{Digest: fakeContentDigest("first")}, {Digest: fakeContentDigest("second")}}}

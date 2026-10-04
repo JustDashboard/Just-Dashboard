@@ -16,6 +16,14 @@ import (
 )
 
 func TestLiveManagedStandaloneContainerAdoptionAndRollback(t *testing.T) {
+	liveManagedStandaloneAdoption(t, false)
+}
+
+func TestLiveManagedDeletedImageContainerAdoptionAndRollback(t *testing.T) {
+	liveManagedStandaloneAdoption(t, true)
+}
+
+func liveManagedStandaloneAdoption(t *testing.T, missingImage bool) {
 	if os.Getenv("JD_DOCKER_ADOPTION_LIVE") != "1" {
 		t.Skip("set JD_DOCKER_ADOPTION_LIVE=1 for the isolated standalone-container lifecycle")
 	}
@@ -45,6 +53,15 @@ func TestLiveManagedStandaloneContainerAdoptionAndRollback(t *testing.T) {
 		}
 		return output
 	}
+	sourceTag := "caddy:2-alpine"
+	recoveredImageID := ""
+	if missingImage {
+		sourceTag = name + ":original"
+		if err := os.WriteFile(filepath.Join(root, "Dockerfile"), []byte("FROM caddy:2-alpine\nLABEL fixture.deleted-image=\""+name+"\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		docker("build", "--pull=false", "--tag", sourceTag, root)
+	}
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -59,13 +76,29 @@ func TestLiveManagedStandaloneContainerAdoptionAndRollback(t *testing.T) {
 			_, _ = liveDockerOutput(cleanupCtx, "volume", "rm", existing)
 		}
 		_, _ = liveDockerOutput(cleanupCtx, "network", "rm", network)
+		if missingImage {
+			_, _ = liveDockerOutput(cleanupCtx, "image", "rm", "--force", sourceTag)
+			if recoveredImageID != "" {
+				_, _ = liveDockerOutput(cleanupCtx, "image", "rm", "--force", recoveredImageID)
+			}
+		}
 	})
 	docker("network", "create", network)
 	for _, existing := range []string{volume, volume + "-config", volume + "-caddy"} {
 		docker("volume", "create", existing)
 	}
-	id := strings.TrimSpace(string(docker("run", "--detach", "--name", name, "--network", network, "--network-alias", name+"-alias", "--publish", "127.0.0.1:"+strconv.Itoa(port)+":8080", "--volume", filepath.Join(root, "public")+":/srv:ro", "--volume", filepath.Join(root, "Caddyfile")+":/etc/caddy/Caddyfile:ro", "--volume", volume+":/persistent", "--volume", volume+"-config:/config", "--volume", volume+"-caddy:/data", "--memory", "100663296", "--cpus", "0.5", "--stop-timeout", "2", "--label", "fixture.just-dashboard.adoption="+name, "--env", "API_TOKEN=standalone-private-value", "--env", "EMPTY=", "caddy:2-alpine")))
+	id := strings.TrimSpace(string(docker("run", "--detach", "--name", name, "--network", network, "--network-alias", name+"-alias", "--publish", "127.0.0.1:"+strconv.Itoa(port)+":8080", "--volume", filepath.Join(root, "public")+":/srv:ro", "--volume", filepath.Join(root, "Caddyfile")+":/etc/caddy/Caddyfile:ro", "--volume", volume+":/persistent", "--volume", volume+"-config:/config", "--volume", volume+"-caddy:/data", "--memory", "100663296", "--cpus", "0.5", "--stop-timeout", "2", "--label", "fixture.just-dashboard.adoption="+name, "--env", "API_TOKEN=standalone-private-value", "--env", "EMPTY=", sourceTag)))
 	adoptionLiveHTTP(t, port)
+	if missingImage {
+		image, err := client.InspectImage(ctx, sourceTag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		docker("stop", "--time", "2", id)
+		docker("image", "rm", "--force", image.ID)
+		docker("start", id)
+		adoptionLiveHTTP(t, port)
+	}
 	docker("exec", id, "/bin/sh", "-c", "printf persistent-proof > /persistent/sentinel")
 	original, err := client.CaptureAdoptionContainer(ctx, id)
 	if err != nil {
@@ -76,6 +109,22 @@ func TestLiveManagedStandaloneContainerAdoptionAndRollback(t *testing.T) {
 	recovered, err := RecoverDockerWorkload(ctx, candidate, client, files.New([]string{root}), filepath.Join(root, "baseline-cache"))
 	if err != nil {
 		t.Fatalf("recovery blocked: %v %+v", err, recovered.Adoption.Issues)
+	}
+	var baselineSnapshot runtimeReleaseSnapshot
+	if err := json.Unmarshal(recovered.Adoption.Snapshot, &baselineSnapshot); err != nil {
+		t.Fatal(err)
+	}
+	expectedManagedImage := baselineSnapshot.Compose.Services[0].ConfigDigest
+	if missingImage {
+		recoveredImageID = expectedManagedImage
+		fresh, err := RecoverDockerWorkload(ctx, candidate, client, files.New([]string{root}), filepath.Join(root, "baseline-cache"))
+		if err != nil || fresh.Adoption.BaselineDigest != recovered.Adoption.BaselineDigest || string(fresh.Adoption.Runtime.Metadata) != string(recovered.Adoption.Runtime.Metadata) {
+			t.Fatal("missing-image recovery is not stable across fresh review/adopt capture", err)
+		}
+		image, err := client.InspectImage(ctx, recoveredImageID)
+		if err != nil || len(image.Env) != 0 || len(image.Entrypoint) != 0 || len(image.Command) != 0 {
+			t.Fatal("snapshot image contains captured runtime configuration", err)
+		}
 	}
 	fixture := newPlanningStoreFixture(t)
 	if _, err := fixture.store.DB.Exec(`INSERT INTO sqlite_sequence(name,seq) VALUES('deploy_environments',?)`, time.Now().UnixMicro()); err != nil {
@@ -174,7 +223,7 @@ func TestLiveManagedStandaloneContainerAdoptionAndRollback(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if capture.Inspection.Image != original.Inspection.Image || capture.Inspection.HostConfig.Memory != original.Inspection.HostConfig.Memory || capture.Inspection.HostConfig.NanoCPUs != original.Inspection.HostConfig.NanoCPUs {
+		if capture.Inspection.Image != expectedManagedImage || capture.Inspection.HostConfig.Memory != original.Inspection.HostConfig.Memory || capture.Inspection.HostConfig.NanoCPUs != original.Inspection.HostConfig.NanoCPUs {
 			t.Fatal("managed standalone lost image or resource settings")
 		}
 		adoptionLiveHTTP(t, port)
@@ -193,7 +242,7 @@ func TestLiveManagedStandaloneContainerAdoptionAndRollback(t *testing.T) {
 		t.Fatalf("standalone baseline Rollback failed: %+v", rolled)
 	}
 	assertCurrent()
-	evidence := map[string]any{"test": t.Name(), "fixtureName": name, "checkedAt": time.Now().UTC(), "adoptionPreservedIDsPIDsStartedAtAndSettings": true, "failedDeployRestoredOriginalContainerID": true, "failedDeployRun": failed.ID, "managedDeployRun": successful.ID, "managedDeployState": successful.State, "baselineRollbackRun": rolled.ID, "baselineRollbackState": rolled.State, "persistentDataPreserved": true, "originalNameAndCustomNetworkAliasPreserved": true, "fixtureRemovedAtCleanup": true}
+	evidence := map[string]any{"test": t.Name(), "fixtureName": name, "checkedAt": time.Now().UTC(), "adoptionPreservedIDsPIDsStartedAtAndSettings": true, "failedDeployRestoredOriginalContainerID": true, "failedDeployRun": failed.ID, "managedDeployRun": successful.ID, "managedDeployState": successful.State, "baselineRollbackRun": rolled.ID, "baselineRollbackState": rolled.State, "persistentDataPreserved": true, "originalNameAndCustomNetworkAliasPreserved": true, "fixtureRemovedAtCleanup": true, "originalImageMissing": missingImage, "cachedImageStableAcrossRecoveryAndAdopt": missingImage}
 	if location := os.Getenv("JD_ADOPTION_EVIDENCE_DIR"); location != "" {
 		if err := os.MkdirAll(location, 0o700); err != nil {
 			t.Fatal(err)
