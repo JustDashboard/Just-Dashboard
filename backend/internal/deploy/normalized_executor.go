@@ -138,17 +138,18 @@ type renderedStepEvidence struct {
 }
 
 type runtimeReleaseSnapshot struct {
-	Version        int                       `json:"version"`
-	NativeBaseline *ReleaseRuntimeInput      `json:"nativeBaseline,omitempty"`
-	Plan           RuntimePlanConfig         `json:"plan"`
-	Image          ResolvedImage             `json:"image,omitempty"`
-	Compose        *ResolvedComposeSnapshot  `json:"compose,omitempty"`
-	Variables      []ReleaseVariableSnapshot `json:"variables"`
-	Dependencies   []PlannedDependency       `json:"dependencies"`
-	Checks         []PlannedCheck            `json:"checks"`
-	Domains        []PlannedDomain           `json:"domains"`
-	PlanInputsHash string                    `json:"planInputsDigest"`
-	SourceIdentity SourceIdentity            `json:"sourceIdentity"`
+	Version         int                       `json:"version"`
+	NativeBaseline  *ReleaseRuntimeInput      `json:"nativeBaseline,omitempty"`
+	Plan            RuntimePlanConfig         `json:"plan"`
+	Image           ResolvedImage             `json:"image,omitempty"`
+	Compose         *ResolvedComposeSnapshot  `json:"compose,omitempty"`
+	ComposeBaseline []AdoptedContainer        `json:"composeBaseline,omitempty"`
+	Variables       []ReleaseVariableSnapshot `json:"variables"`
+	Dependencies    []PlannedDependency       `json:"dependencies"`
+	Checks          []PlannedCheck            `json:"checks"`
+	Domains         []PlannedDomain           `json:"domains"`
+	PlanInputsHash  string                    `json:"planInputsDigest"`
+	SourceIdentity  SourceIdentity            `json:"sourceIdentity"`
 	// ProxyTrust names the forwarded-header trust settings the recipe image
 	// sets, which the runtime withdraws when the proxy does not front the
 	// release alone.

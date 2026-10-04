@@ -615,6 +615,21 @@ func (b *ArtifactBuilder) Build(
 			if service.Image == "" || strings.Contains(service.Image, "${") {
 				return result, fmt.Errorf("%w: Compose service %s has no immutable image or supported build", ErrUnsupportedBuilder, service.Name)
 			}
+			if contentDigestRE.MatchString(service.Image) {
+				image, err := b.backend.InspectImage(ctx, service.Image)
+				if err != nil {
+					return result, fmt.Errorf("inspect Compose service %s local image: %w", service.Name, err)
+				}
+				if image.ConfigDigest != service.Image {
+					return result, fmt.Errorf("%w: Compose service %s local image identity changed", ErrArtifactMissing, service.Name)
+				}
+				if err := validateResolvedImage(image); err != nil {
+					return result, err
+				}
+				resolved.Services = append(resolved.Services, composeResolvedService(service, image, "adopted_local_image"))
+				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, image, prepared, "adopted_local_image"))
+				continue
+			}
 			image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
 			if err != nil {
 				return result, fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)

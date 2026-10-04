@@ -1177,6 +1177,9 @@ func normalizeImageReference(raw string) (string, error) {
 	if raw == "" || len(raw) > 512 || strings.ContainsAny(raw, "\x00\r\n\t ") {
 		return "", fmt.Errorf("%w: malformed image reference", ErrInvalidImage)
 	}
+	if contentDigestRE.MatchString(raw) {
+		return raw, nil
+	}
 	named, err := reference.ParseNormalizedNamed(raw)
 	if err != nil {
 		return "", fmt.Errorf("%w: malformed image reference", ErrInvalidImage)

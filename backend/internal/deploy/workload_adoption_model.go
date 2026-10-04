@@ -9,6 +9,14 @@ import (
 
 var ErrRecoveryBlocked = errors.New("this workload cannot yet be safely adopted")
 
+type AdoptedContainer struct {
+	ID          string `json:"id"`
+	Service     string `json:"service"`
+	Number      int    `json:"number"`
+	Running     bool   `json:"running"`
+	StopTimeout *int   `json:"stopTimeout,omitempty"`
+}
+
 type AdoptionIssue struct {
 	Code     string `json:"code"`
 	Message  string `json:"message"`

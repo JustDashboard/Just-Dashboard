@@ -107,19 +107,21 @@ type RuntimeNetworkOwner interface {
 }
 
 type dockerReleaseRuntimeMetadata struct {
-	Version            int      `json:"version"`
-	Strategy           string   `json:"strategy"`
-	Image              string   `json:"image,omitempty"`
-	ImageDigest        string   `json:"imageDigest,omitempty"`
-	ConfigDigest       string   `json:"configDigest,omitempty"`
-	PortLeaseToken     string   `json:"portLeaseToken,omitempty"`
-	ProjectName        string   `json:"projectName,omitempty"`
-	ProjectDirectory   string   `json:"projectDirectory,omitempty"`
-	ComposeFiles       []string `json:"composeFiles,omitempty"`
-	OverrideFile       string   `json:"overrideFile,omitempty"`
-	PrimaryContainerID string   `json:"primaryContainerId,omitempty"`
-	ContainerIDs       []string `json:"containerIds,omitempty"`
-	VariableNames      []string `json:"variableNames"`
+	Adopted            bool               `json:"adopted,omitempty"`
+	BaselineContainers []AdoptedContainer `json:"baselineContainers,omitempty"`
+	Version            int                `json:"version"`
+	Strategy           string             `json:"strategy"`
+	Image              string             `json:"image,omitempty"`
+	ImageDigest        string             `json:"imageDigest,omitempty"`
+	ConfigDigest       string             `json:"configDigest,omitempty"`
+	PortLeaseToken     string             `json:"portLeaseToken,omitempty"`
+	ProjectName        string             `json:"projectName,omitempty"`
+	ProjectDirectory   string             `json:"projectDirectory,omitempty"`
+	ComposeFiles       []string           `json:"composeFiles,omitempty"`
+	OverrideFile       string             `json:"overrideFile,omitempty"`
+	PrimaryContainerID string             `json:"primaryContainerId,omitempty"`
+	ContainerIDs       []string           `json:"containerIds,omitempty"`
+	VariableNames      []string           `json:"variableNames"`
 }
 
 // DockerRuntimeOwner is the only deployment adapter allowed to own runtime
@@ -441,6 +443,12 @@ func (o *DockerRuntimeOwner) startCompose(
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		Files: append([]string(nil), resolved.Files...), OverrideFile: override,
 		Environment: request.RuntimeVariables,
+		KeepOrphans: request.Snapshot.Plan.ComposeProjectName != "",
+	}
+	if len(request.Snapshot.ComposeBaseline) > 0 {
+		if err := configureComposeBaseline(&spec, request.Snapshot.ComposeBaseline); err != nil {
+			return StartedRuntime{}, err
+		}
 	}
 	if err := o.client.RunComposeRelease(ctx, spec, dockerx.ComposeReleaseUp, runtimeGrace(request.Snapshot.Plan), composeBuildEmitter(emit)); err != nil {
 		return StartedRuntime{}, err
@@ -456,6 +464,11 @@ func (o *DockerRuntimeOwner) startCompose(
 	})
 	if err != nil {
 		return StartedRuntime{}, err
+	}
+	if len(request.Snapshot.ComposeBaseline) > 0 {
+		if err := o.startComposeBaselineContainers(ctx, containers, request.Snapshot.ComposeBaseline); err != nil {
+			return StartedRuntime{}, err
+		}
 	}
 	containerIDs, primaryID := composeRuntimeIdentities(containers, request.Release.EnvironmentID, request.Release.ID, project, primaryService)
 	if primaryID == "" {
@@ -482,6 +495,10 @@ func (o *DockerRuntimeOwner) startCompose(
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		ComposeFiles: append([]string(nil), resolved.Files...), OverrideFile: override,
 		PrimaryContainerID: primaryID, ContainerIDs: containerIDs, VariableNames: variableNames,
+	}
+	if len(request.Snapshot.ComposeBaseline) > 0 {
+		metadata.Adopted = true
+		metadata.BaselineContainers = updatedComposeBaseline(containers, request.Snapshot.ComposeBaseline)
 	}
 	return StartedRuntime{
 		Input: ReleaseRuntimeInput{
@@ -671,6 +688,9 @@ func (o *DockerRuntimeOwner) StartExisting(
 		if err != nil {
 			return err
 		}
+		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
+			return o.restoreComposeBaseline(ctx, metadata, variables, emit)
+		}
 		return o.client.RunComposeRelease(ctx, composeSpecFromMetadata(metadata, variables),
 			dockerx.ComposeReleaseUp, 0, composeBuildEmitter(emit))
 	default:
@@ -721,6 +741,11 @@ func (o *DockerRuntimeOwner) Stop(
 		metadata, decodeErr := decodeDockerRuntimeMetadata(runtime.Metadata)
 		if decodeErr != nil {
 			err = decodeErr
+			break
+		}
+		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
+			err = o.stopComposeBaseline(ctx, metadata, grace, remove)
+			evidence.Removed = remove && err == nil
 			break
 		}
 		spec := composeSpecFromMetadata(metadata, variables)
