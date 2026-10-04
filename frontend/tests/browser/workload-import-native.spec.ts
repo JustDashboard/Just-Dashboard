@@ -163,6 +163,12 @@ test("imports the real existing bet-bot stack without changing its containers", 
   expect(overviewFindingCodes).toContain("compose_available")
   expect(overviewFindingCodes).not.toContain("docker_unavailable")
   expect(overviewFindingCodes).not.toContain("compose_unavailable")
+  expect(overviewFindingCodes).not.toContain("runtime_unavailable")
+  const runtimeReservation = overviewPreflight.findings.find(
+    (finding: { fieldId?: string }) =>
+      finding.fieldId === `dependencies.runtime.${recoveredDraft.data.adoption.resourceId}`,
+  )
+  expect(runtimeReservation).toMatchObject({ code: "dependency_available", severity: "pass" })
   await expect(page.getByText("Docker is unavailable", { exact: true })).not.toBeVisible()
   await expect(page.locator('#before-you-deploy button[aria-busy="true"]')).toHaveCount(0)
   await page.screenshot({
@@ -294,6 +300,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
         selectedRuntimeReadingVerified: selectedService.containerId,
         dockerLogTailReadVerified: ready.dockerLogTailRead,
         overviewDockerPreflightVerified: true,
+        runtimeReservationAvailabilityVerified: true,
         noRuntimeActionsInvoked: true,
         before,
         after,

@@ -182,7 +182,8 @@ links and deployment controls without invoking any runtime action.
 The isolated server rebinds its read-only Docker consumers and the advisory deployment checker to
 the same real source, native-runtime and preflight adapters. Its startup requires actual Docker and
 Compose availability, and the browser verifies the Overview check's corresponding pass findings
-before recording the project. This is an adapter-availability check, not a claim that the imported
+before recording the project. It also requires a pass for the adopted stack's exact runtime
+reservation and refuses any `runtime_unavailable` finding. This is an adapter-availability check, not a claim that the imported
 application is healthy. The router permits same-origin HTTP WebSocket upgrades through loopback.
 The browser waits for real CPU/memory stats frames and the
 editable captured Compose source before recording Runtime and General settings. It never starts the
