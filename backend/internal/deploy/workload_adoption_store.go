@@ -250,7 +250,13 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 	} else if snapshot.Image.Digest != "" {
 		artifacts = append(artifacts, ReleaseArtifactInput{Kind: ArtifactImage, Reference: snapshot.Image.Reference, Digest: snapshot.Image.Digest, Metadata: mustJSON(snapshot.Image)})
 	}
+	seenArtifacts := map[string]bool{}
 	for _, artifact := range artifacts {
+		key := string(artifact.Kind) + "\x00" + artifact.Reference + "\x00" + artifact.Digest
+		if seenArtifacts[key] {
+			continue
+		}
+		seenArtifacts[key] = true
 		if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_release_artifacts(release_id,kind,reference,digest,metadata_json,size_bytes,state,created_at)
 		 VALUES(?,?,?,?,?,?,'available',?)`, releaseID, artifact.Kind, artifact.Reference, artifact.Digest, string(artifact.Metadata), artifact.SizeBytes, now.Unix()); err != nil {
 			return err

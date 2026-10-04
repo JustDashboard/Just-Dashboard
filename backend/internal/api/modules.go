@@ -247,6 +247,7 @@ func (s *Server) initModules() {
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
 	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd)
+	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
 	s.modules.deployPreflight = deploy.NewNativePreflightObserver(s.modules.deployPreflight, s.modules.deployNative, s.modules.deployRuns)
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
