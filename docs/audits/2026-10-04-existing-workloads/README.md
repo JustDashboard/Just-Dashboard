@@ -32,7 +32,7 @@ were enqueued. [Sanitized evidence](managed-api-continuity.json).
 ## Real managed Compose lifecycle
 
 The fixture declared five services, with four existing containers and two initially running. Adoption
-preserved their identities/settings and had zero failures across 128 continuous HTTP checks. An
+preserved their identities/settings and had zero failures across 80 continuous HTTP checks. An
 intentional first readiness failure restored the original four-container/two-running baseline and
 persistent volume data. The failed run correctly finished `failed` before activation; restoration
 was checked independently rather than inferred from its status.
@@ -41,17 +41,19 @@ A subsequent ordinary Deploy changes succeeded, starting the five-service review
 rollback succeeded and restored exactly the original four containers' service/replica set, two
 running services and the missing fifth service remaining absent. Named-volume data and HTTP survived.
 An external one-off container under the same Compose project was untouched throughout. The run passed
-in 46.07 seconds. [Sanitized lifecycle evidence](managed-compose-lifecycle.json).
+in 30.27 seconds after the final population and cleanup guards.
+[Sanitized lifecycle evidence](managed-compose-lifecycle.json).
 
 ## Real existing-services Compose lifecycle
 
 A separate real fixture declared five services, with four existing containers and two running, while
 the fifth service's image was deliberately unavailable. Explicit `existing_services` recovery listed
 and acknowledged that exclusion. Adoption preserved all existing stopped/running containers and had
-104 HTTP samples with zero failures. A failed first deployment restored the original runtime;
+80 HTTP samples with zero failures. A failed first deployment restored the original runtime;
 a successful Deploy started only the four reviewed services, and baseline rollback restored the
 original four-container/two-running set. Persistent volume data and an external one-off were retained.
-The unavailable service was never created. The run passed in 35.26 seconds.
+The unavailable service was never created. The final run passed in 29.51 seconds with the complete
+included-service population guard.
 [Sanitized evidence](managed-scoped-compose-lifecycle.json).
 
 ## Real standalone Docker lifecycle
