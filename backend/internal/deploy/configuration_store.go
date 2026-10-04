@@ -1314,9 +1314,12 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	defer tx.Rollback()
 	var current int
+	var sourceKind sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT desired_revision FROM deploy_environments
-		 WHERE id = ? AND project_id = ? AND archived_at = 0`, environmentID, projectID).Scan(&current); err != nil {
+		SELECT e.desired_revision, s.kind FROM deploy_environments e
+		  LEFT JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
+		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
+		Scan(&current, &sourceKind); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
@@ -1324,6 +1327,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	if current != request.Revision {
 		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
+	}
+	if sourceKind.String == string(SourceImport) {
+		return nil, fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan)
 	}
 	var kind EnvironmentKind
 	if err := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, environmentID).Scan(&kind); err != nil {
@@ -1522,6 +1528,9 @@ func (s *PlanningStore) saveEnvironmentSource(
 	}
 	if current != revision {
 		return fail(fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current))
+	}
+	if currentKind == SourceImport {
+		return fail(fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan))
 	}
 	if currentKind != source.Kind {
 		return fail(fmt.Errorf("%w: source kind cannot change from %s to %s", ErrInvalidSource, currentKind, source.Kind))

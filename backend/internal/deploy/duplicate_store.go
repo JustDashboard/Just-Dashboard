@@ -67,6 +67,9 @@ func (s *PlanningStore) Duplicate(
 	if json.Unmarshal([]byte(sourceJSON), &source) != nil {
 		return nil, fmt.Errorf("%w: source configuration is malformed", ErrInvalidSource)
 	}
+	if source.Kind == SourceImport {
+		return nil, fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan)
+	}
 	source = canonicalSourceConfig(source)
 
 	configuration, err := s.EnvironmentConfiguration(ctx, sourceProjectID, environmentID)
