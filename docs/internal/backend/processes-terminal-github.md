@@ -113,6 +113,14 @@ socket-activated service's port.
 - PM2 log filenames cannot grant access outside `JD_LOG_ROOTS`. An administrator must explicitly
   configure custom log directories; the source list and stream errors explain this requirement. Unified
   log source ids carry account, numeric id and name, while unique legacy name-only ids remain accepted.
+- Deployment adoption captures PM2 configuration through an existing daemon socket without starting a
+  daemon or evaluating an ecosystem file. Native baseline actions verify the account, namespace,
+  process IDs, stable manager configuration, and entrypoint hashes before controlling exact IDs.
+  Rollback restarts only instances that were running in the captured baseline; stopped instances stay
+  stopped. Simple systemd baselines retain the original unit and account, while incompatible sandbox,
+  credential, lifecycle, or source settings block automatic container migration. The original manager
+  entry is retained after migration so failed cutover can restore it. Runtime observation and logs name
+  the native manager directly, without presenting a native PID as a Docker container.
 - **The per-feature log routes are gone.** `GET /systemd/{name}/journal`, `/systemd/{name}/journal/stream`
   and `/pm2/{name}/logs/stream` had no caller once the sheets embedded the service logs, and they read
   a unit's journal and a process's files around what the `/logs` routes decide — the auth-data gate

@@ -84,6 +84,11 @@ func parsePM2Capture(data []byte, account *user.User, namespace, name string) (*
 			out.Blockers = append(out.Blockers, "Instances of this PM2 application run different source paths or working directories.")
 		}
 		out.SourceDirectory, out.SourcePath = cwd, script
+		version := captureString(row.Env["node_version"])
+		if out.InterpreterVersion != "" && version != out.InterpreterVersion {
+			out.Blockers = append(out.Blockers, "PM2 instances run different interpreter versions.")
+		}
+		out.InterpreterVersion = version
 		args, argsErr := captureJSONArgs(row.Env["args"])
 		nodeArgs, nodeErr := captureJSONArgs(row.Env["node_args"])
 		if argsErr != nil || nodeErr != nil {
@@ -117,7 +122,10 @@ func parsePM2Capture(data []byte, account *user.User, namespace, name string) (*
 		if mode != "fork_mode" && mode != "fork" {
 			out.Blockers = append(out.Blockers, "PM2 cluster mode needs an explicit container process-manager plan; a single process would lose cluster behavior.")
 		}
-		for _, key := range []string{"watch", "cron_restart", "wait_ready", "shutdown_with_message", "post_update", "increment_var", "instance_var"} {
+		if instanceVar := captureString(row.Env["instance_var"]); instanceVar != "" && instanceVar != "NODE_APP_INSTANCE" {
+			out.Blockers = append(out.Blockers, "A custom PM2 instance variable needs an equivalent managed runtime configuration before migration.")
+		}
+		for _, key := range []string{"watch", "cron_restart", "wait_ready", "shutdown_with_message", "post_update", "increment_var", "max_memory_restart", "exp_backoff_restart_delay", "stop_exit_codes"} {
 			if rawCaptureEnabled(row.Env[key]) {
 				out.Blockers = append(out.Blockers, "The PM2 setting "+key+" needs an equivalent managed runtime configuration before migration.")
 			}

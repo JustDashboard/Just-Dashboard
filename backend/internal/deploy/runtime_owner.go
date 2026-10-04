@@ -381,6 +381,7 @@ func (o *DockerRuntimeOwner) startContainer(
 	}
 	result, err := o.client.Create(ctx, dockerx.ContainerSpec{
 		Name: name, Image: image, Command: append([]string(nil), plan.Command...), Env: environment,
+		User: plan.User, WorkingDir: plan.WorkingDirectory,
 		Ports: ports, Mounts: mounts, Devices: devices, Labels: labels, Networks: networks,
 		NetworkMode:   map[bool]string{true: "host"}[plan.HostNetwork],
 		RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,

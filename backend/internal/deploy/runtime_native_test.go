@@ -11,9 +11,15 @@ import (
 )
 
 type fakeNativePM2 struct {
-	capture  *procs.HostWorkloadCapture
-	actions  []string
-	failStop bool
+	capture    *procs.HostWorkloadCapture
+	actions    []string
+	failStop   bool
+	startedIDs []int
+}
+
+func (f *fakeNativePM2) ControlCapturedProcesses(ctx context.Context, capture *procs.HostWorkloadCapture, namespace, action string, ids []int) error {
+	f.startedIDs = append([]int{}, ids...)
+	return f.ControlCaptured(ctx, capture, namespace, action)
 }
 
 type nativeDockerDelegationFixture struct{ calls []string }
@@ -100,7 +106,7 @@ func (f *fakeNativePM2) ControlCaptured(_ context.Context, _ *procs.HostWorkload
 
 func nativeFixture(t *testing.T) (*NativeRuntimeOwner, *fakeNativePM2, ReleaseRuntime) {
 	t.Helper()
-	capture := &procs.HostWorkloadCapture{Manager: "pm2", ResourceID: "alice/production/api", Name: "api", Account: "alice", ConfigurationDigest: "original-config", Processes: []procs.HostProcessCapture{{ID: 7, LogSources: []string{"pm2:alice/7/api"}}}}
+	capture := &procs.HostWorkloadCapture{Manager: "pm2", ResourceID: "alice/production/api", Name: "api", Account: "alice", ConfigurationDigest: "original-config", Processes: []procs.HostProcessCapture{{ID: 7, State: "online", LogSources: []string{"pm2:alice/7/api"}}}}
 	input, err := NativeBaselineRuntimeInput(capture, 10)
 	if err != nil {
 		t.Fatal(err)
@@ -165,5 +171,35 @@ func TestNativeBaselineCandidateRestartsExactBaselineForRollback(t *testing.T) {
 	encoded, _ := json.Marshal(result.Input)
 	if string(encoded) == "" {
 		t.Fatal("native input unavailable")
+	}
+}
+
+func TestNativeBaselineRollbackPreservesStoppedPM2Instances(t *testing.T) {
+	owner, manager, runtime := nativeFixture(t)
+	manager.capture.Processes = append(manager.capture.Processes, procs.HostProcessCapture{ID: 8, State: "stopped"}, procs.HostProcessCapture{ID: 9, State: "online"})
+	input, err := NativeBaselineRuntimeInput(manager.capture, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.Metadata = input.Metadata
+	if err := owner.StartExisting(context.Background(), runtime, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.startedIDs) != 2 || manager.startedIDs[0] != 7 || manager.startedIDs[1] != 9 {
+		t.Fatalf("originally stopped instance was started: %v", manager.startedIDs)
+	}
+	for index := range manager.capture.Processes {
+		manager.capture.Processes[index].State = "stopped"
+	}
+	input, err = NativeBaselineRuntimeInput(manager.capture, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.Metadata = input.Metadata
+	if err := owner.StartExisting(context.Background(), runtime, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(manager.startedIDs) != 0 {
+		t.Fatal("stopped baseline started application instances")
 	}
 }

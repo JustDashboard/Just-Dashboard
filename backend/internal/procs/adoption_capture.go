@@ -31,6 +31,7 @@ type HostWorkloadCapture struct {
 	ResourceID          string               `json:"resourceId"`
 	Name                string               `json:"name"`
 	Account             string               `json:"account,omitempty"`
+	InterpreterVersion  string               `json:"interpreterVersion,omitempty"`
 	UID                 uint32               `json:"uid"`
 	GID                 uint32               `json:"gid"`
 	SourceDirectory     string               `json:"sourceDirectory,omitempty"`

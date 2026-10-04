@@ -1,5 +1,23 @@
 # Automatic recipes and serving defaults
 
+Host-workload recovery can select `local_directory` instead of requiring a clean Git checkout. This
+source mode snapshots the ordinary files present at review, including dirty and untracked files;
+its digest fences every later materialization. Copies are private, bounded to 100,000 entries and
+1 GiB, preserve file modes, refuse special files and escaping symlinks, and never execute source
+configuration. `.git`, dashboard build output, private configuration names such as `.env`, and
+explicit `excludePaths` are omitted. Linked application data directories are excluded from the
+source digest and retained as runtime mounts rather than copied from a running database.
+
+Recovered PM2 and simple systemd applications use the original interpreter version when a supported
+Node recipe can represent it, or a reviewed existing Dockerfile. The managed command keeps argument
+boundaries through encrypted runtime variables, translates source paths into `/app`, and preserves
+the captured numeric UID:GID. Host networking and stop-first activation retain existing listening
+addresses and localhost dependencies. Private configuration files, unknown interpreter or operating
+system dependencies, unsupported manager settings, unreadable source, and unverified persistence
+produce explicit migration blockers. A bare process has no restart authority and cannot be stopped
+automatically. Review must resolve these limits before cutover; a build and readiness check remain
+required even when capture succeeds.
+
 `just-dashboard-recipes-v4` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
 commands execute inside the build container; source inspection never executes repository configuration
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot

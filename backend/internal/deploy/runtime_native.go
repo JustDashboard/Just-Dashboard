@@ -23,6 +23,8 @@ type NativeBaselineMetadata struct {
 	Namespace           string            `json:"namespace,omitempty"`
 	Name                string            `json:"name,omitempty"`
 	ProcessIDs          []int             `json:"processIds,omitempty"`
+	RunningProcessIDs   []int             `json:"runningProcessIds,omitempty"`
+	WasActive           bool              `json:"wasActive"`
 	Unit                string            `json:"unit,omitempty"`
 	ConfigurationDigest string            `json:"configurationDigest"`
 	LogSources          []string          `json:"logSources"`
@@ -50,12 +52,21 @@ func NativeBaselineRuntimeInput(capture *procs.HostWorkloadCapture, releaseID in
 		}
 		for _, process := range capture.Processes {
 			metadata.ProcessIDs = append(metadata.ProcessIDs, process.ID)
+			if process.State == "online" || process.State == "launching" {
+				metadata.RunningProcessIDs = append(metadata.RunningProcessIDs, process.ID)
+			}
 			metadata.LogSources = append(metadata.LogSources, process.LogSources...)
 		}
 		sort.Ints(metadata.ProcessIDs)
+		sort.Ints(metadata.RunningProcessIDs)
 	} else {
 		metadata.Unit = capture.ResourceID
 		metadata.LogSources = []string{"journal:" + capture.ResourceID}
+		for _, process := range capture.Processes {
+			if process.State == "active" {
+				metadata.WasActive = true
+			}
+		}
 	}
 	encoded, _ := json.Marshal(metadata)
 	return ReleaseRuntimeInput{ReleaseID: releaseID, Kind: capture.Manager, RuntimeID: capture.ResourceID, Name: capture.Name, WorkingDirectory: capture.SourceDirectory, Metadata: encoded}, nil
@@ -64,6 +75,7 @@ func NativeBaselineRuntimeInput(capture *procs.HostWorkloadCapture, releaseID in
 type nativePM2 interface {
 	CaptureExisting(context.Context, string, string, string) (*procs.HostWorkloadCapture, error)
 	ControlCaptured(context.Context, *procs.HostWorkloadCapture, string, string) error
+	ControlCapturedProcesses(context.Context, *procs.HostWorkloadCapture, string, string, []int) error
 }
 type nativeSystemd interface {
 	CaptureExisting(context.Context, string) (*procs.HostWorkloadCapture, error)
@@ -71,9 +83,15 @@ type nativeSystemd interface {
 }
 
 type NativeRuntimeOwner struct {
-	docker  RuntimeOwner
-	pm2     nativePM2
-	systemd nativeSystemd
+	docker   RuntimeOwner
+	pm2      nativePM2
+	systemd  nativeSystemd
+	recorded RuntimeObserver
+}
+
+func (o *NativeRuntimeOwner) WithRecordedRuntimeObserver(observer RuntimeObserver) *NativeRuntimeOwner {
+	o.recorded = observer
+	return o
 }
 
 func NewNativeRuntimeOwner(docker RuntimeOwner, pm2 *procs.PM2, systemd *procs.Systemd) *NativeRuntimeOwner {
@@ -169,7 +187,10 @@ func (o *NativeRuntimeOwner) StartExisting(ctx context.Context, runtime ReleaseR
 		return err
 	}
 	if runtime.Kind == "pm2" {
-		return o.pm2.ControlCaptured(ctx, capture, metadata.Namespace, "start")
+		return o.pm2.ControlCapturedProcesses(ctx, capture, metadata.Namespace, "start", metadata.RunningProcessIDs)
+	}
+	if !metadata.WasActive {
+		return nil
 	}
 	_, err = o.systemd.Control(ctx, metadata.Unit, procs.UnitStart)
 	if err != nil {
@@ -230,11 +251,18 @@ func (o *NativeRuntimeOwner) DiagnoseRuntime(ctx context.Context, runtime Releas
 	return owner.DiagnoseRuntime(ctx, runtime)
 }
 func (o *NativeRuntimeOwner) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]dockerx.Container, error) {
+	if o.recorded != nil {
+		return o.recorded.ListContainersWithLabels(ctx, labels)
+	}
 	owner, ok := o.docker.(RuntimeObserver)
 	if !ok {
 		return nil, ErrRuntimeUnavailable
 	}
 	return owner.ListContainersWithLabels(ctx, labels)
+}
+
+func (o *NativeRuntimeOwner) RecordedRuntimeServices(ctx context.Context, environmentID, liveReleaseID int64) RuntimeServices {
+	return observeRuntimeServices(ctx, o, environmentID, liveReleaseID, 0)
 }
 
 func (o *NativeRuntimeOwner) RunReleaseTask(ctx context.Context, request ReleaseTaskRuntimeRequest, emit func(BuildLog) error) (int, bool, error) {

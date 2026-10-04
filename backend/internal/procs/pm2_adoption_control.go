@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/user"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -52,9 +53,11 @@ client.call("getMonitorData", {}, (error, rows) => {
     if (!row || JSON.stringify(canonical(stable({...row.pm2_env, pm_id:row.pm_id}))) !== JSON.stringify(canonical(expected))) return close(3)
   }
   let index = 0
+  const targets = request.targetIds || request.configuration.map(item => item.pm_id)
+  if (!Array.isArray(targets) || targets.some(id => !Number.isInteger(id) || !request.configuration.some(item => item.pm_id === id))) return close(3)
   const next = () => {
-    if (index >= request.configuration.length) { clearTimeout(timer); socket.close(); process.stdout.write("{}"); return }
-    const expected = request.configuration[index++]
+    if (index >= targets.length) { clearTimeout(timer); socket.close(); process.stdout.write("{}"); return }
+    const expected = request.configuration.find(item => item.pm_id === targets[index++])
     const row = selected.find(row => row.pm_id === expected.pm_id)
     if (request.action === "start" && ["online","launching"].includes(row.pm2_env.status)) return next()
     if (request.action === "stop" && row.pm2_env.status === "stopped") return next()
@@ -65,6 +68,17 @@ client.call("getMonitorData", {}, (error, rows) => {
 `
 
 func (p *PM2) ControlCaptured(ctx context.Context, capture *HostWorkloadCapture, namespace, action string) error {
+	if capture == nil {
+		return fmt.Errorf("unsupported original PM2 action")
+	}
+	ids := make([]int, 0, len(capture.Processes))
+	for _, process := range capture.Processes {
+		ids = append(ids, process.ID)
+	}
+	return p.ControlCapturedProcesses(ctx, capture, namespace, action, ids)
+}
+
+func (p *PM2) ControlCapturedProcesses(ctx context.Context, capture *HostWorkloadCapture, namespace, action string, ids []int) error {
 	if capture == nil || capture.Manager != "pm2" || (action != "stop" && action != "start") {
 		return fmt.Errorf("unsupported original PM2 action")
 	}
@@ -76,6 +90,15 @@ func (p *PM2) ControlCaptured(ctx context.Context, capture *HostWorkloadCapture,
 	if err != nil {
 		return fmt.Errorf("the original PM2 account could not be verified")
 	}
+	err = controlExistingPM2Capture(ctx, home, account, capture, namespace, action, ids)
+	if err == nil {
+		p.invalidate()
+	}
+	return err
+}
+
+func controlExistingPM2Capture(ctx context.Context, home pm2Home, account *user.User, capture *HostWorkloadCapture, namespace, action string, ids []int) error {
+	ids = append([]int{}, ids...)
 	var configuration []map[string]json.RawMessage
 	if json.Unmarshal(capture.OriginalConfig, &configuration) != nil || len(configuration) == 0 || len(configuration) > 128 {
 		return fmt.Errorf("the original PM2 configuration is unavailable")
@@ -85,7 +108,8 @@ func (p *PM2) ControlCaptured(ctx context.Context, capture *HostWorkloadCapture,
 		Name          string                       `json:"name"`
 		Namespace     string                       `json:"namespace"`
 		Configuration []map[string]json.RawMessage `json:"configuration"`
-	}{action, capture.Name, namespace, configuration})
+		TargetIDs     []int                        `json:"targetIds"`
+	}{action, capture.Name, namespace, configuration, ids})
 	commandCtx, cancel := context.WithTimeout(ctx, 70*time.Second)
 	defer cancel()
 	command, err := hostexec.CommandOnHostAsUser(commandCtx, account, pm2Env(home), "node", "-e", existingPM2ControlClient, home.bin)
@@ -100,6 +124,5 @@ func (p *PM2) ControlCaptured(ctx context.Context, capture *HostWorkloadCapture,
 		}
 		return fmt.Errorf("the original PM2 lifecycle action could not be completed")
 	}
-	p.invalidate()
 	return nil
 }
