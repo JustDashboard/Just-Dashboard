@@ -112,7 +112,9 @@ readiness gate and restored the native service, then migrated successfully throu
 engine. Docker UID, working directory, private/empty environment and linked persistent data were
 verified. The absolute `APP_DATA_DIR` value was translated to `/app/data` for Docker while the original
 private environment remained separately snapshotted. Baseline rollback returned control to the
-original manager and preserved data. The final PM2 run passed in 49.56 seconds; persistent systemd in 97.78 seconds.
+original manager and preserved data. Fresh normal checks verified the server-owned runtime reservation after Docker cutover and again
+after rollback created a new live native release. The final PM2 run passed in 75.11 seconds;
+persistent systemd in 153.77 seconds.
 [PM2 evidence](managed-pm2-lifecycle.json), [systemd evidence](managed-systemd-lifecycle.json).
 
 ## Real deleted-image lifecycle
