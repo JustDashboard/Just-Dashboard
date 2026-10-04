@@ -99,11 +99,14 @@ staging-space reservation checks.
 
 These screenshots and the recording use explicit mocked API fixtures. They demonstrate the current
 managed import flow and normal source/runtime/settings controls; the real lifecycle assertions above
-establish continuity, cutover and rollback behavior separately.
+establish continuity, cutover and rollback behavior separately. The final screenshot run passed all
+16 selected browser cases against the rebuilt production frontend, including delayed preflight and
+canonicalized-plan acknowledgement checks.
 
 - [Discovery](managed-discovery.png), [recovery](managed-recovery.png),
   [migration review](managed-migration.png), [private variables](managed-private-variables.png).
 - [Editable Compose source](managed-compose-source.png), [service mount review](managed-compose-review.png).
+- [Reviewed service exclusions](managed-compose-exclusions.png).
 - [PM2 runtime controls](managed-pm2-runtime.png), [systemd runtime controls](managed-systemd-runtime.png).
 - [Recorded managed import journey](managed-ui.webm).
 
