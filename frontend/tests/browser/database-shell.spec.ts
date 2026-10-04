@@ -478,14 +478,16 @@ test("the palette opens any database, and the pages of the one being looked at",
   await expect(strip(page)).toContainText("cache")
   await page.keyboard.press("ControlOrMeta+k")
 
-  const palette = page.getByRole("dialog")
-  await palette.getByRole("combobox").fill("cache")
-  await expect(palette.getByRole("option", { name: "cache Keys" })).toBeVisible()
-  await expect(palette.getByRole("option", { name: "cache Console" })).toBeVisible()
-  await expect(palette.getByRole("option", { name: /Schema/ })).toHaveCount(0)
+  const palette = page.getByRole("dialog", { name: "Command palette" })
+  const search = palette.getByRole("combobox", { name: "Search dashboard" })
+  const results = palette.getByRole("listbox")
+  await search.fill("page: cache")
+  await expect(results.getByRole("option", { name: /Keys.*cache/ })).toBeVisible()
+  await expect(results.getByRole("option", { name: /Console.*cache/ })).toBeVisible()
+  await expect(results.getByRole("option", { name: /Schema/ })).toHaveCount(0)
 
-  await palette.getByRole("combobox").fill("open shop")
-  await palette.getByRole("option", { name: "Open shop" }).click()
+  await search.fill("open shop")
+  await results.getByRole("option", { name: /^shop\b/ }).click()
   await expect(page).toHaveURL(/\/databases\/1$/)
 })
 

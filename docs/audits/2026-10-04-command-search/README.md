@@ -71,6 +71,13 @@ cd frontend
 bun run start --hostname 127.0.0.1 --port 43167
 ```
 
+The compatibility follow-up preserves `open <database name>` searches and updates the existing
+database-shell test to target the labelled input and result list. Its production build, changed-file
+formatting/lint, `tsc --noEmit`, all 2,847 unit tests and the focused database-palette scenario passed.
+The broader rerun selected 557 browser cases across 22 specs and was stopped before completion at
+the operator's request to remove the worktree. The completed initial 536-case run above remains
+the full local browser result. The recording was refreshed against the compatibility build.
+
 ### Recorded workflow
 
 [Watch the keyboard workflow](evidence/keyboard-workflow.webm) (24 seconds, 1280 × 800, WebM).

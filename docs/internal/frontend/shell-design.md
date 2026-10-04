@@ -168,7 +168,8 @@ Each resource result uses its existing detail address. Sites open `/proxy/sites/
 inspection rather than the legacy `?site=` editing link. Containers and stacks open their dedicated
 pages; Git, systemd and PM2 retain query-selection links, including PM2's daemon and numeric ID.
 Names with the same spelling retain separate identities. The current database keeps the existing
-engine-dependent pages and broken-connection restriction. Page commands, proxy commands and
+engine-dependent pages and broken-connection restriction; saved databases also retain the
+`open <name>` search phrase. Page commands, proxy commands and
 account navigation retain capability filtering. Reload nginx and Sign out require an explicit
 search or the Commands scope, so neither becomes the blank menu's default action.
 

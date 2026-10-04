@@ -87,7 +87,7 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           conn.name,
           `/databases/${conn.id}`,
           `${conn.driver} · ${conn.database || conn.host}${conn.broken ? " · cannot be opened" : ""}`,
-          [String(conn.id), conn.host, conn.database, conn.driver, conn.environment],
+          ["open", String(conn.id), conn.host, conn.database, conn.driver, conn.environment],
         ),
         connection: { driver: conn.driver, broken: conn.broken },
       })),
