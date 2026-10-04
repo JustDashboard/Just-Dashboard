@@ -74,6 +74,14 @@ is available only to Compose stacks; containers and native managers keep their c
 
 ## Supported recovery and explicit boundaries
 
+Docker capture also checks the original raw `Config` and `HostConfig` against the negotiated SDK
+representation, including nested mounts, health checks and structured options. Unknown effective
+fields block adoption before any missing-image export/import; field names are reported without their
+values or dynamic map keys. An unknown null value has no populated setting; every unknown non-null
+field blocks, including zero, false, empty strings and empty collections. Those values can explicitly
+disable a newer Engine default, so the importer does not infer that they are inert.
+This prevents a newer Engine option from silently disappearing through typed JSON decoding.
+
 | Runtime | Recovered plan and baseline | Cases that require resolution before adoption |
 | --- | --- | --- |
 | Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |

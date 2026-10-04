@@ -23,6 +23,7 @@ type AdoptionContainer struct {
 	MissingImage            bool                         `json:"-"`
 	RegenerablePaths        []string                     `json:"-"`
 	RegenerableProofFailure string                       `json:"-"`
+	UnrepresentedOptions    []string                     `json:"-"`
 }
 
 func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*AdoptionContainer, error) {
@@ -30,9 +31,13 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 	if err != nil {
 		return nil, err
 	}
-	inspection, err := cli.ContainerInspect(ctx, id)
+	inspection, raw, err := cli.ContainerInspectWithRaw(ctx, id, false)
 	if err != nil || inspection.ID == "" || inspection.Config == nil || inspection.HostConfig == nil {
 		return nil, errors.New("the container configuration could not be captured")
+	}
+	unknownOptions, err := adoptionUnrepresentedConfiguration(raw)
+	if err != nil {
+		return nil, err
 	}
 	image, err := c.InspectImage(ctx, inspection.Image)
 	if err != nil && !errdefs.IsNotFound(err) {
@@ -58,7 +63,7 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 			modes[change.Path] = stat.Mode
 		}
 	}
-	captured := &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage}
+	captured := &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage, UnrepresentedOptions: unknownOptions}
 	c.captureRegenerableN8nCache(ctx, captured)
 	return captured, nil
 }
