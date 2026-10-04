@@ -8,7 +8,7 @@ configuration. `.git`, dashboard build output, private configuration names such 
 explicit `excludePaths` are omitted. Linked application data directories are excluded from the
 source digest and retained as runtime mounts rather than copied from a running database.
 
-Recovered PM2 and simple systemd applications use the original interpreter version when a supported
+Recovered PM2 and simple systemd applications use the original interpreter major (the supported catalogue supplies its patch and container OS) when a supported
 Node recipe can represent it, or a reviewed existing Dockerfile. The managed command keeps argument
 boundaries through encrypted runtime variables, translates source paths into `/app`, and preserves
 the captured numeric UID:GID. Host networking and stop-first activation retain existing listening

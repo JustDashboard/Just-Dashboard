@@ -30,8 +30,10 @@ configuration and entrypoint hashes, stop only after a replacement is prepared, 
 through the original manager when activation fails. They never delete the original manager entry or
 rewrite its environment. Cluster/watch/IPC behavior, unsupported systemd lifecycle or isolation,
 credentials, environment-file expansion and unverified persistence are migration decisions or blockers,
-not settings the recovery reader silently drops. Entrypoint hashes cover only named executable files;
-they do not certify every dynamically loaded module or mutable application data.
+not settings the recovery reader silently drops. Executable/entrypoint hashes are accompanied by a
+full bounded source-tree digest checked before native control, covering modules beyond the entrypoint.
+Known source writes newer than an active process block initial recovery. These filesystem checks do
+not reconstruct arbitrary in-memory code or undo mutable application data.
 
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
 membership identifies systemd services, containers and login sessions; an empty command line identifies a

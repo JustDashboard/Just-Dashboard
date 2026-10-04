@@ -162,6 +162,8 @@ docker run --rm --name jd-managed-adoption-proof-router --network host \
   --tmpfs /data --tmpfs /config \
   --mount type=bind,src="$PWD/docs/audits/2026-10-04-existing-workloads/proof.Caddyfile",dst=/etc/caddy/Caddyfile,readonly \
   caddy:2-alpine caddy run --config /etc/caddy/Caddyfile
+# In a third terminal, from the repository root:
+cd frontend
 # Record against Caddy:
 JD_BROWSER_BASE_URL=http://127.0.0.1:43152 \
   JD_IMPORT_NATIVE_READY=/tmp/jd-managed-native-server/ready.json \

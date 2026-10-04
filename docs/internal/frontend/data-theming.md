@@ -149,7 +149,8 @@
 - Existing-workload import (`/deploy/import`) keeps its search, source filter, reviewed inventory and
   project name in component state, rather than the new-project draft stores. Its JSON shapes live in
   `lib/workload-import.ts`. Discovery is a snapshot refreshed explicitly; choosing a workload always
-  inspects it afresh, and recovery sends only its key, project name and reviewed digest. A
+  inspects it afresh, and recovery sends its key, project name, reviewed digest and explicit Compose
+  service scope. A
   `workload_changed` conflict replaces the import command with **Inspect again**, preserves the chosen
   project name and requires another explicit recovery after the new review. A name conflict stays beside
   its field. The discovery review shows all service states,
@@ -159,8 +160,8 @@
   on the server and resume as masked `environmentKeys`. Only public adoption review fields are kept
   with the remembered flow; baseline metadata and unexpected fields are excluded. Configure uses the
   server's preflight warning codes, refuses blockers, and commits an adoption through
-  `/deploy/import/adopt` without enqueueing a run. Git adoption starts with manual deployment so
-  migration requires an explicit future Deploy changes; Redeploy live release restores the baseline.
+  `/deploy/import/adopt` without enqueueing a run. Git adoption defaults to manual deployment; Review can explicitly enable automatic future deployments.
+  Adoption itself never enqueues a run, and Redeploy live release restores the baseline.
   A baseline with a live release uses the full project
   shell; observation records without a live release retain their original-manager view. Native services
   carry `manager`, `resourceId` and `logSource`; log reads use that source and Docker stats/exec are

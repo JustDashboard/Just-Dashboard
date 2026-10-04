@@ -238,7 +238,8 @@ to the contribution terms above, including the additional licence grant to the p
   providers were exercised.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`.
-  On a busy host use all local shards of `scripts/go-test-shard.sh` (from `backend/`), as the existing
+  On a busy host use all local shards of `../scripts/go-test-shard.sh` from `backend/`
+  (for example, `../scripts/go-test-shard.sh 1 3 ./internal/deploy`, then shards 2 and 3), as the existing
   race gate does. It skips only the reference-scale latency assertions, which must pass separately
   without instrumentation. Engine state/side-effect waits stay bounded at 30 seconds so race overhead
   does not turn completed work into a false three-second timeout.
