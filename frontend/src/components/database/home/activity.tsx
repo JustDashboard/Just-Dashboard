@@ -90,7 +90,7 @@ export const Activity = memo(function Activity({
         title="Activity"
         actions={
           <>
-            <div className="pb-2.5">
+            <div className="flex items-center pb-2.5">
               <Select value={String(hours)} onValueChange={(value) => onHours(Number(value))}>
                 <SelectTrigger aria-label="Activity history range" size="sm">
                   <SelectValue />

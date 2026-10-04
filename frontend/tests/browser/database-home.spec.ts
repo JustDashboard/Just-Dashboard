@@ -653,7 +653,9 @@ test("the chart opens on saved activity and keeps its range and view after reloa
   await expect(activity.locator(".recharts-area-curve").first()).toHaveAttribute("d", /^M/)
   await activity.getByRole("combobox", { name: "Activity history range" }).click()
   await page.getByRole("option", { name: "24 hours", exact: true }).click()
-  await expect(activity.getByRole("combobox", { name: "Activity history range" })).toHaveValue("24")
+  await expect(activity.getByRole("combobox", { name: "Activity history range" })).toHaveText(
+    "24 hours",
+  )
 
   // The view is the reader's arrangement of this database's home: it is there on return.
   await tick(page, 1_000)
@@ -664,7 +666,7 @@ test("the chart opens on saved activity and keeps its range and view after reloa
   )
   await expect(
     block(page, "Activity").getByRole("combobox", { name: "Activity history range" }),
-  ).toHaveValue("24")
+  ).toHaveText("24 hours")
 })
 
 test("a chart of a few sessions counts them in ones", async ({ page }) => {
