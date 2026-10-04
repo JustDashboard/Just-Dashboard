@@ -142,6 +142,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			origin.Warnings = append(origin.Warnings, "The Dockerfile must provide the original application's operating-system and interpreter dependencies. Review its entrypoint and user permissions before cutover.")
 		case BuildRecipe:
 			origin.Warnings = append(origin.Warnings, "The managed Node recipe uses the captured interpreter major with the catalogue image's patch version and container operating system. Confirm the application works without host-installed packages, native host dependencies or PM2 IPC before deploying changes; provide a Dockerfile when it needs them.")
+			origin.Warnings = append(origin.Warnings, "The Node recipe installs dependencies from the reviewed manifests and lockfiles. It does not reproduce patched node_modules or undeclared global dependencies from the host. Verify these inputs match the running application, or provide a reviewed Dockerfile and source plan preserving those dependencies before cutover.")
 			if selected.Profile == ProfileStatic || strings.TrimSpace(recovered.Configuration.Build.OutputDirectory) != "" {
 				block("host_runtime_layout_unsupported", "The detected recipe creates a static serving image whose files and command differ from this running Node process. Provide a reviewed Dockerfile preserving the original source, interpreter and command before migration.", "build.method")
 			}

@@ -84,6 +84,9 @@ the implementation; the root task records the complete integrated verification.
 - Original native source must remain frozen while that baseline is retained. New managed code uses
   a separate checkout. Native rollback refuses changed original files; it cannot restore application
   data/schema writes, which require application-appropriate backups.
+- Automatic Node builds install from manifests/locks rather than copying the host `node_modules`.
+  Patched dependencies or undeclared global modules need a reviewed Dockerfile/source plan; recovery
+  includes an explicit dependency-tree warning before cutover.
 - Automatic migration fails closed for unknown build/command layouts, unsupported interpreter or
   manager semantics, missing restart authority, special files or unsafe symlinks, and source limits.
   A listening process alone does not prove sufficient configuration to restart it safely.

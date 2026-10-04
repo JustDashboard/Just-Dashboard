@@ -22,6 +22,10 @@ system dependencies, unsupported manager settings, unreadable source, and unveri
 produce explicit migration blockers. A bare process has no restart authority and cannot be stopped
 automatically. Review must resolve these limits before cutover; a build and readiness check remain
 required even when capture succeeds.
+The Node recipe installs from reviewed manifests and lockfiles, with the host `node_modules`
+excluded from the build context. Recovery warns that patched dependency files and undeclared global
+modules need a reviewed Dockerfile/source plan; those changes are not reconstructed by a clean
+package-manager install.
 
 Automatic host recovery of a custom Dockerfile requires a verified `/app` source copy and workdir,
 plus an explicit `ENTRYPOINT []`. An inherited or nonempty image entrypoint would alter the captured

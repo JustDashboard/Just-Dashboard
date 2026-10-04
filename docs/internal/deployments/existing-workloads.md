@@ -107,6 +107,10 @@ Node recipe recovery selects the supported catalogue image for the captured inte
 its patch version and container operating system can differ from the original host. Applications
 which rely on host packages, native dependencies or PM2 IPC need an appropriate Dockerfile and
 compatibility review before migration.
+Automatic Node recipes install dependencies from reviewed manifests and lockfiles and exclude the
+host's `node_modules` from the build context. They do not reproduce patched dependency files or
+undeclared global modules. Verify the manifests/locks represent the running dependency tree, or use
+a reviewed Dockerfile and source plan which preserves those dependencies before cutover.
 Whole filesystem environment values within the captured source and local `file`/`sqlite` URIs map
 to the same `/app` layout, while the original values remain privately sealed for the native baseline.
 Unknown application filesystem values and interpreter path variables (including `NODE_PATH`, CA
