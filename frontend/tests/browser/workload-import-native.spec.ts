@@ -69,25 +69,6 @@ test("imports the real existing bet-bot stack without changing its containers", 
     },
   ])
   const before = existingStackEvidence()
-  const liveReadings = new Set<string>()
-  page.on("websocket", (socket) => {
-    if (!socket.url().endsWith("/stats/stream")) return
-    socket.on("framereceived", ({ payload }) => {
-      try {
-        const message = JSON.parse(String(payload))
-        if (
-          message.type === "stats" &&
-          message.data?.cpuReady === true &&
-          Number.isFinite(message.data?.cpuPercent) &&
-          Number.isFinite(message.data?.memUsage) &&
-          message.data.memUsage > 0
-        )
-          liveReadings.add(message.data.id)
-      } catch {
-        // A control frame is not a resource reading.
-      }
-    })
-  })
   const excludedServices = ["eurobet-doubles-tracker", "eurobet-high-market-tracker"]
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/deploy")
@@ -175,18 +156,72 @@ test("imports the real existing bet-bot stack without changing its containers", 
   expect(managedContainerIds).toEqual(
     before.map((container: { id: string }) => container.id).sort(),
   )
+  const selectedService =
+    runtime.services.find(
+      (service: { state: string; liveRelease: boolean }) =>
+        service.state === "running" && service.liveRelease,
+    ) ?? runtime.services.find((service: { state: string }) => service.state === "running")
+  expect(selectedService).toBeTruthy()
+  const runtimeSocketPromise = page.waitForEvent("websocket", {
+    predicate: (socket) =>
+      new URL(page.url()).pathname === `${projectPath}/runtime` &&
+      new URL(socket.url()).pathname.endsWith(
+        `/docker/containers/${selectedService.containerId}/stats/stream`,
+      ),
+    timeout: 30000,
+  })
+  // Reduced motion writes the genuine reading directly instead of capturing
+  // an intermediate spring value on its way from zero to Docker's number.
+  await page.emulateMedia({ reducedMotion: "reduce" })
   await runtimeLink.click()
+  const runtimeSocket = await runtimeSocketPromise
+  let runtimeReading: { cpuReady: boolean; cpuPercent: number; memUsage: number } | undefined
+  runtimeSocket.on("framereceived", ({ payload }) => {
+    try {
+      const message = JSON.parse(String(payload))
+      if (
+        message.type === "stats" &&
+        message.data?.id === selectedService.containerId &&
+        Number.isFinite(message.data.cpuPercent) &&
+        Number.isFinite(message.data.memUsage) &&
+        message.data.memUsage > 0
+      )
+        runtimeReading = message.data
+    } catch {
+      // A control frame is not a resource reading.
+    }
+  })
   for (const service of runtime.services as { name: string }[]) {
     await expect(page.getByText(service.name, { exact: true }).first()).toBeVisible({
       timeout: 30000,
     })
   }
-  await expect
-    .poll(() => managedContainerIds.some((id: string) => liveReadings.has(id)), { timeout: 30000 })
-    .toBe(true)
   const usage = page.locator('[data-slot="panel"]').filter({
     has: page.getByRole("heading", { name: "Resource usage", exact: true }),
   })
+  const cpu = usage.locator('[data-slot="stat-tile"]').filter({
+    has: page.getByText("CPU", { exact: true }),
+  })
+  const memory = usage.locator('[data-slot="stat-tile"]').filter({
+    has: page.getByText("Memory", { exact: true }),
+  })
+  await expect
+    .poll(
+      async () => {
+        const reading = runtimeReading
+        if (!reading?.cpuReady) return false
+        const mib = reading.memUsage / 1024 / 1024
+        const memoryValue = mib >= 1024 ? (mib / 1024).toFixed(2) : mib.toFixed(0)
+        return (
+          (await cpu.locator("span.numeric.truncate").innerText()) ===
+            reading.cpuPercent.toFixed(1) &&
+          (await memory.locator("span.numeric.truncate").innerText()) === memoryValue
+        )
+      },
+      { timeout: 30000 },
+    )
+    .toBe(true)
+  await expect(cpu.getByText("%", { exact: true })).toBeVisible()
   await expect(usage.getByText("Connecting", { exact: true })).not.toBeVisible()
   await expect(usage.getByText("Waiting for Docker", { exact: true })).not.toBeVisible()
   await page.screenshot({
@@ -230,6 +265,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
         configurationsAndStartTimesUnchanged: true,
         processIdentityAndStateUnchanged: true,
         liveCpuAndMemoryReadingsVerified: true,
+        selectedRuntimeReadingVerified: selectedService.containerId,
         dockerLogTailReadVerified: ready.dockerLogTailRead,
         noRuntimeActionsInvoked: true,
         before,

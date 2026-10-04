@@ -154,6 +154,9 @@ The isolated server rebinds its read-only Docker consumers and permits same-orig
 upgrades through the loopback router. The browser waits for real CPU/memory stats frames and the
 editable captured Compose source before recording Runtime and General settings. It never starts the
 deployment engine or background reconciler, and it does not manufacture metrics or history.
+Runtime waits on the selected service's newly opened socket, then checks that its displayed CPU and
+memory match a ready frame. Reduced motion makes the actual values appear immediately for the
+Runtime/settings recording instead of capturing the number ticker midway through its spring.
 It also opens the ordinary authenticated Docker log stream with a one-line tail and discards the
 contents, recording only successful stream metadata as a boolean in the sanitized continuity JSON.
 
