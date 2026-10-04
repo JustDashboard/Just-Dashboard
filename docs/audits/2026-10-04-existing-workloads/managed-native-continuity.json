@@ -21,6 +21,8 @@
   "liveCpuAndMemoryReadingsVerified": true,
   "selectedRuntimeReadingVerified": "327b77980ef8b6d3c7683f0b68366ddaf590b3c9160bc5bd07cb3cc8bf057252",
   "dockerLogTailReadVerified": true,
+  "overviewDockerPreflightVerified": true,
+  "runtimeReservationAvailabilityVerified": true,
   "noRuntimeActionsInvoked": true,
   "before": [
     {

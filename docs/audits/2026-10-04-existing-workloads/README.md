@@ -19,7 +19,7 @@ prove this managed behavior.
 ## Real bet-bot adoption and browser recording
 
 The existing operator stack was discovered and adopted through authenticated public routes into an
-isolated temporary dashboard database. The run passed in 44.4 seconds (45.3 seconds including browser
+isolated temporary dashboard database. The final-source browser case passed in 59.8 seconds (about one minute including browser
 setup). Its two existing running containers became the initial managed live release. The two declared
 services without containers or available images, `eurobet-doubles-tracker` and
 `eurobet-high-market-tracker`, were named and acknowledged as `existing_services` exclusions.
@@ -30,7 +30,9 @@ unchanged. The original containers already reported unhealthy health checks; ado
 healthy application status. Missing-image recovery used read-only exports and removed only the proof
 server's newly created cache images at cleanup.
 
-The recording opens the ordinary deployment shell, Runtime and General settings. Displayed numeric
+The recording opens the ordinary deployment shell, Runtime and General settings. The normal
+Overview check verifies actual Docker/Compose availability and passes the adopted stack's exact
+server-owned runtime reservation; it has no unavailable-runtime blocker. Displayed numeric
 CPU and memory matched a fresh real Docker stats frame for the selected Runtime service. The normal
 authenticated one-line Docker log tail was read successfully, with all output discarded rather than
 published. Captured Compose settings were loaded and editable with private values represented only
