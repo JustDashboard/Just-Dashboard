@@ -22,16 +22,17 @@ concurrency:
 # (scripts/ci-plan.py says how each job's share is picked), against the whole
 # pull request as it would merge, not against the push before. Every push used
 # to run every suite of whichever half it touched, and a second push that only
-# fixed a comment hid the failure of the first.
+# fixed a comment compared with the first and so hid its failure.
 #
 # How many jobs it starts. GitHub runs twenty jobs of a public repository's at
-# once, across every branch, and queues the rest. Forty jobs a push finished
-# later than ten would have, and held up every other pull request while they
-# did. The suites are split only as far as one runner's four cores are full.
+# once, across every branch, and queues the rest, so a suite split further
+# than one runner's four cores can use only moves its wait into the queue, and
+# into every other pull request's. Forty-one jobs a push took twenty-two
+# minutes; the eighteen a change to this file starts take fourteen.
 #
 # Where its caches are. A run reads the caches of its own branch and of the
 # branch it merges into, never a sibling's, so a cache saved on a task branch
-# was read by nobody and cost the repository's ten gigabytes. Only a push to a
+# was read by nobody and cost the repository's ten gigabytes. Only a run on a
 # release branch saves; pull requests into it restore.
 #
 # Everything runs on GitHub's hosted runners, the live Docker fixtures too.
