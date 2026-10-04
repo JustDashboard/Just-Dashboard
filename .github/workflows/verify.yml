@@ -18,14 +18,12 @@ concurrency:
 # failure. The pull-request event therefore only runs for forks, whose pushes
 # never reach this repository.
 #
-# Everything that does not need this server's Docker daemon runs on GitHub's
-# hosted runners, in parallel and sharded: the repository is public, so they
-# cost nothing, and every push used to queue the backend, frontend and live
-# jobs one after another on the one self-hosted runner — about fifty-five
-# minutes — on the same machine that serves the dashboard and its deployments.
-# The self-hosted runner now takes only the live Docker fixtures, and only when
-# the code they exercise changed. A push that changes nothing a job reads skips
-# that job.
+# Everything runs on GitHub's hosted runners, in parallel and sharded: the
+# repository is public, so they cost nothing. The live Docker fixtures used to
+# take a self-hosted runner on the machine that serves the dashboard, which put
+# their builds on the production daemon and left every run waiting whenever that
+# service was down. They run only when the code they exercise changed, and a
+# push that changes nothing a job reads skips that job.
 
 env:
   JD_TEST_POSTGRES_DSN: postgres://jd_test:jd_test@127.0.0.1:1/jd_test?sslmode=disable
@@ -207,13 +205,13 @@ jobs:
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Ten shards: the build is under a minute of each, the tests are the rest,
+    # Twelve shards: the build is under a minute of each, the tests are the rest,
     # and at six the slowest shard ran twice as long as the fastest.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-    name: browser (${{ matrix.shard }}/10)
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    name: browser (${{ matrix.shard }}/12)
     defaults:
       run:
         working-directory: frontend
@@ -248,7 +246,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
           bun run build 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-build.txt"
-          bunx playwright test --shard=${{ matrix.shard }}/10 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
+          bunx playwright test --shard=${{ matrix.shard }}/12 2>&1 | tee "$RUNNER_TEMP/jd-ci/frontend-browser.txt"
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -263,7 +261,7 @@ jobs:
   deployment-live:
     needs: changes
     if: needs.changes.outputs.live == 'true'
-    runs-on: [self-hosted, linux, x64, just-dashboard]
+    runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
       JD_DEPLOY_LIVE: "1"
@@ -278,10 +276,6 @@ jobs:
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
-          # The runner's home persists between jobs, so the module and build
-          # caches are already on disk; restoring a cache archive over them
-          # fails on files that exist, and saving one afterwards fails the job.
-          cache: false
       - name: Verify runner tooling
         run: |
           mkdir -p "$RUNNER_TEMP/jd-ci"
@@ -314,13 +308,3 @@ jobs:
           name: deployment-live-evidence
           path: ${{ runner.temp }}/jd-ci/
           retention-days: 30
-      - name: Return the build cache the fixtures filled
-        # The runner shares the release host's Docker daemon. One pass of the
-        # live fixtures leaves around ten gigabytes of BuildKit cache behind,
-        # which filled the disk after three runs; the host's own deployments
-        # rebuild their layers, they do not depend on them being kept.
-        if: always()
-        run: |
-          docker builder prune --all --force --keep-storage 2GB
-          docker image prune --force
-          df -h / | tail -1

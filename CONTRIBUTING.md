@@ -102,7 +102,7 @@ to the contribution terms above, including the additional licence grant to the p
   and the two long suites are sharded: the race gate is seven jobs (`./internal/api` in four,
   `./internal/deploy` in two, the rest in one, split by `scripts/go-test-shard.sh`, which runs each
   shard's tests as four processes on the runner's four cores) and the browser
-  suite ten (`playwright test --shard`). The plain backend run leaves `./internal/api` to the race jobs,
+  suite twelve (`playwright test --shard`). The plain backend run leaves `./internal/api` to the race jobs,
   which run all of its tests. The latency budgets are asserted in the plain test run and
   skipped under the race detector, which multiplies a SQLite read ten- to twenty-five-fold and so
   measures itself and the runner's load rather than the read. Go and Bun come from `go.mod` and
@@ -110,17 +110,13 @@ to the contribution terms above, including the additional licence grant to the p
   caches are restored between runs.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run.
-- The live Docker fixtures need a real Docker daemon, so they run on a **self-hosted runner** on the
-  release host (labels `self-hosted, linux, x64, just-dashboard`), a systemd service under
-  `~/actions-runner` running as `ubuntu`, one job at a time. It used to take every job, one after
-  another — about fifty-five minutes a push, on the machine that serves the dashboard — and now takes
-  only this one. The framework and artifact command has a 90-minute test timeout, and the live job
-  allows 150 minutes for its remaining fixture commands and evidence cleanup. Required live fixtures
-  fail CI if skipped or absent. Logs and browser failure traces are retained for 30 days, including
-  failed runs. The live job ends by pruning the BuildKit cache its fixtures fill back to two gigabytes,
-  because the runner shares the host's Docker daemon and a few unpruned runs fill the disk. Workflows
-  from outside contributors wait for approval before they
-  touch the runner. CI does not replace public TLS, clean-host installation, remote-host,
+- The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
+  they run there like the other jobs, each time on a fresh daemon. They used to run on a self-hosted
+  runner on the release host, which put the fixtures' builds on the daemon that serves the dashboard,
+  needed its BuildKit cache pruned after every run, and left every run waiting whenever that service
+  was down. The framework and artifact command has a 90-minute test timeout and the live job allows
+  150 minutes in all. Required live fixtures fail CI if skipped or absent. Logs and browser failure
+  traces are retained for 30 days, including failed runs. CI does not replace public TLS, clean-host installation, remote-host,
   architecture or soak acceptance.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
