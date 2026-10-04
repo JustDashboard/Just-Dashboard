@@ -1522,9 +1522,9 @@ every part at one fixed height, so a row of cards is one height with nothing str
 source line is the commit, or for anything not built from a repository the images it runs (an
 image project's first line then names its registry); the traffic band says "No web traffic" over a
 flat rule for a project with no address on the web; and the footer never wraps, its words
-truncating instead. The list view carries the same readings from 1024 in three columns of two lines
-each — the state over the address or pending changes, the traffic, the run strip over the last run
-— so a row stays one row's height. The fleet is read every five seconds and the traffic
+truncating instead. The list view carries the same readings from 1024 in columns two lines tall — the
+state over the address or pending changes and the run strip over the last run, with the traffic
+joining from 1280 — so a row stays one row's height. The fleet is read every five seconds and the traffic
 every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.
 `/deploy?view=archived` lists archived projects drawn as what they deployed (`ArchivedDeployment`),

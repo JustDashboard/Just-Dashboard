@@ -1,7 +1,6 @@
 "use client"
 
 import { useRef, useState } from "react"
-import type { FormEvent } from "react"
 import { Clock, External } from "@/components/icons"
 import { ApiError, get, put } from "@/lib/api"
 import { plural, relativeTime, timestamp } from "@/lib/format"
@@ -180,20 +179,19 @@ function NameForm({
   const [refused, setRefused] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
+  const save = async () => {
     setRefused(false)
     if (!DEPLOYMENT_NAME.test(value)) {
       setError(NAME_ERROR)
       setRefused(true)
-      return
+      return false
     }
     setError(undefined)
     setSaving(true)
     try {
       await put(`/deploy/${projectId}`, { name: value })
-      notify.success("Project renamed")
       onSaved()
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 409 && caught.code === "name_taken") {
         setError("That name is already used by another project")
@@ -201,6 +199,7 @@ function NameForm({
       } else {
         notify.error("Could not rename project", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -209,7 +208,7 @@ function NameForm({
   return (
     <SettingForm
       name="Project name"
-      onSubmit={save}
+      onSave={save}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -475,8 +474,7 @@ function SourceForm({
   // screen is a guess and the reader is told rather than left to assume it.
   const needsReentry = isGit ? !prefillUrl : !source || !source.image
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
+  const save = async () => {
     setSaving(true)
     setFieldErrors({})
     setFormError(undefined)
@@ -531,8 +529,8 @@ function SourceForm({
         image: value.image.trim(),
         platform: value.platform.trim(),
       })
-      notify.success("Source updated", { description: "The next deployment builds from it." })
       onSaved()
+      return true
     } catch (caught) {
       if (caught instanceof ApiError && caught.field) {
         setFieldErrors({ [caught.field]: caught.message })
@@ -544,6 +542,7 @@ function SourceForm({
       } else {
         notify.error("Could not update source", caught)
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -564,7 +563,7 @@ function SourceForm({
   return (
     <SettingForm
       name="Source"
-      onSubmit={save}
+      onSave={save}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -1089,8 +1088,7 @@ function AutomaticDeploymentForm({
   const included = linesOf(include).length
   const excluded = linesOf(exclude).length
 
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
+  const save = async () => {
     setSaving(true)
     try {
       await put(`/deploy/${projectId}/environments/${environmentId}/git-policy`, {
@@ -1103,10 +1101,11 @@ function AutomaticDeploymentForm({
       // The globs went out one per line, trimmed; the draft takes that shape
       // too, or a blank line left in would read as an edit the save did not make.
       patch({ include: linesOf(include).join("\n"), exclude: linesOf(exclude).join("\n") })
-      notify.success("Deployment policy saved")
       onSaved()
+      return true
     } catch (error) {
       notify.error("Could not save deployment policy", error)
+      return false
     } finally {
       setSaving(false)
     }
@@ -1115,7 +1114,7 @@ function AutomaticDeploymentForm({
   return (
     <SettingForm
       name="Automatic deployment"
-      onSubmit={save}
+      onSave={save}
       dirty={draft.dirty}
       changes={draft.changes}
       saving={saving}
@@ -1157,11 +1156,10 @@ function AutomaticDeploymentForm({
             disabled={!canEdit}
           >
             {/* Only automatic deployments read these, so they live under the
-                switch that turns them on rather than beside it (§7), and
-                rise as the switch reveals them rather than snapping in. */}
+                switch that turns them on rather than beside it (§7). */}
             {/* "One glob per line" is said by the placeholders, which hold two
                 lines each; the rest is the paragraph wanted once, behind ⓘ. */}
-            <FieldRow columns={2} className="animate-rise">
+            <FieldRow columns={2}>
               <Field
                 label="Include paths"
                 htmlFor="git-policy-include"

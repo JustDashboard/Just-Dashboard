@@ -36,6 +36,7 @@ import { IconAction } from "@/components/icon-action"
 import { SearchInput } from "@/components/page"
 import { Well } from "@/components/panel"
 import {
+  hasProductLogo,
   ProductGlyph,
   ProductGlyphs,
   ProductLogo,
@@ -661,7 +662,9 @@ function VariablesBody({
   const filtered = sorted.filter(
     (variable) => active.test(variable) && variable.name.toLowerCase().includes(needle),
   )
-  const products = [...new Set(sorted.map(productOf).filter((id): id is string => Boolean(id)))]
+  // Only the ones with a mark: a product drawn as nothing was counted in the
+  // glyphs' "+N" as if it were overflow.
+  const products = [...new Set(sorted.map(productOf).filter(hasProductLogo))]
 
   const nameProblem = name && !NAME.test(name.trim())
   const exists =
@@ -680,7 +683,11 @@ function VariablesBody({
       />
       {/* No section head: the sheet's title already says what this is. An
           existing variable is named by the subject above: the name is the
-          address it is saved under, and a new name is a new variable. */}
+          address it is saved under, and a new name is a new variable.
+
+          A hint that arrives while typing — the name exists, the value points
+          at localhost — is news about what was just typed, so it rises in
+          once, keyed on which hint it is, rather than on every keystroke. */}
       <div className="min-w-0 space-y-4">
         <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
           {!editingName && (
@@ -693,11 +700,15 @@ function VariablesBody({
                   : undefined
               }
               hint={
-                exists
-                  ? `${name.trim()} exists — saving replaces its value and scopes.`
-                  : browserInlined(name.trim())
-                    ? "Compiled into the browser bundle: public, and read while the build runs."
-                    : undefined
+                exists ? (
+                  <span key="exists" className="block animate-rise">
+                    {name.trim()} exists — saving replaces its value and scopes.
+                  </span>
+                ) : browserInlined(name.trim()) ? (
+                  <span key="browser" className="block animate-rise">
+                    Compiled into the browser bundle: public, and read while the build runs.
+                  </span>
+                ) : undefined
               }
             >
               <Input
@@ -706,6 +717,7 @@ function VariablesBody({
                 onChange={(event) => changeName(event.target.value.toUpperCase())}
                 autoComplete="off"
                 spellCheck={false}
+                placeholder="STRIPE_SECRET_KEY"
                 className="font-mono"
               />
             </Field>
@@ -715,17 +727,22 @@ function VariablesBody({
           </Field>
         </div>
         <Field
-          label={reference ? "Typed reference" : "Value"}
+          label={
+            <span key={reference ? "reference" : "value"} className="block animate-rise">
+              {reference ? "Typed reference" : "Value"}
+            </span>
+          }
           htmlFor="variable-value"
+          // When it resolves is background, not something to know mid-typing;
+          // the placeholder already shows the shape it takes.
+          info={reference ? "Resolved when the release starts." : undefined}
           hint={
-            reference ? (
-              "Resolved when the release starts."
-            ) : pointsAtLocalhost(name.trim(), value) ? (
-              <span className="text-warning">
+            !reference && pointsAtLocalhost(name.trim(), value) ? (
+              <span key="localhost" className="block animate-rise text-warning">
                 Points at localhost, which inside the container is the app itself. Link a database
                 or use a host the container can reach.
               </span>
-            ) : editingName ? (
+            ) : !reference && editingName ? (
               "Enter the value again — the dashboard does not read it back."
             ) : undefined
           }
@@ -793,10 +810,15 @@ function VariablesBody({
           <ReferencePicker links={links.data ?? []} value={value} onChange={setValue} />
         )}
       </div>
-      <FormSection title="Who can read it" hint={`${scopes.length} of ${SCOPES.length}`}>
+      {/* No count under the title: the three switches under it are the count. */}
+      <FormSection title="Who can read it">
         <ScopeOptions scopes={scopes} onToggle={toggleScope} />
       </FormSection>
-      {error && <FormNote tone="danger">{error}</FormNote>}
+      {error && (
+        <FormNote key={error} tone="danger" className="animate-rise">
+          {error}
+        </FormNote>
+      )}
     </div>
   )
 
@@ -810,12 +832,14 @@ function VariablesBody({
       <GroupRule label="Removed · not live yet" count={removed.length} />
       <ul aria-label="Removed variables" className="divide-y divide-hairline">
         {removed.map((removedName) => (
-          <li key={removedName} className="flex min-w-0 items-center gap-3 py-2.5">
+          // No state at the row's end: "Removed · applies on the next
+          // deployment" on every row was the group's rule said again. A row
+          // rises as the remove that put it here lands.
+          <li key={removedName} className="flex min-w-0 animate-rise items-center gap-3 py-2.5">
             <ProductLogo size="sm" fallback={Trash} />
             <span className="min-w-0 flex-1 truncate font-mono text-body text-muted-foreground line-through">
               {removedName}
             </span>
-            <Status tone="warning" label="Removed · applies on the next deployment" />
           </li>
         ))}
       </ul>
@@ -825,10 +849,11 @@ function VariablesBody({
   const list =
     variables.length === 0 ? (
       <div className="min-w-0 space-y-4">
+        {/* The .env clause is gone: the second button under it says so. */}
         <EmptyState
           icon={Key}
-          title="No scoped variables"
-          description="Add a value and choose whether your build, application, or release tasks can read it — or bring a whole .env at once."
+          title="No variables yet"
+          description="Add a value and choose whether the build, the running app or release tasks can read it."
           action={
             canEdit &&
             !compact && (
@@ -878,7 +903,7 @@ function VariablesBody({
           </ChipStrip>
         </div>
         {filtered.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-6">
+          <div className="flex animate-rise flex-col items-center gap-2 py-6">
             <EmptyNote className="py-0">No variables match.</EmptyNote>
             <Button
               size="sm"
@@ -892,7 +917,11 @@ function VariablesBody({
             </Button>
           </div>
         ) : (
-          <ChoiceList aria-label="Environment variables">
+          // Keyed on the chip, so a filter narrowing the list lands its rows
+          // again in their stagger rather than leaving the survivors standing
+          // in the gaps; typing in the search does not, or every keystroke
+          // would replay it.
+          <ChoiceList key={filter} aria-label="Environment variables">
             {filtered.map((variable, index) => (
               <VariableRow
                 key={variable.name}
@@ -918,14 +947,17 @@ function VariablesBody({
       </div>
     )
 
+  // Keyed on the value, so a second rotation over a notice still showing the
+  // first rises as the new value it is rather than repainting in place.
   const notice = generated && (
     <Notice
+      key={generated.value}
       tone="warning"
       icon={Warning}
       title={`${generated.name} was generated`}
       className="animate-rise"
     >
-      <p>This value is shown once. Store it now; the list keeps only a fixed mask.</p>
+      <p>Shown once. Store it now; the list keeps only a mask.</p>
       <Well className="mt-3 font-mono break-all select-all">{generated.value}</Well>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button
@@ -973,18 +1005,11 @@ function VariablesBody({
 
   return (
     <>
+      {/* The head carries the services the environment talks to and not how
+          many variables there are: the "All" chip under it is that count. */}
       <SettingSection
         title="Environment variables"
-        state={
-          variables.length > 0 && (
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="numeric">
-                {variables.length} variable{variables.length === 1 ? "" : "s"}
-              </span>
-              <ProductGlyphs ids={products} />
-            </span>
-          )
-        }
+        state={products.length > 0 && <ProductGlyphs ids={products} />}
         actions={
           canEdit && (
             <>
@@ -1051,11 +1076,15 @@ function VariablesBody({
 
 /**
  * A variable in the list. Its name in the family's hue, what it holds on the
- * line under it — a mask, the database it points at, or the value while it is
- * revealed — and who set it, as their face. Where the list's column is wide
- * the row's edge carries its pending state and the three places it can reach;
- * narrower, they go under the name at the card's full width. The state of the
- * database a reference reads is always under the name it describes.
+ * line under it — a mask, or the database it points at — and who set it, as
+ * their face. Where the list's column is wide the card is one line: its edge
+ * carries its pending state, the state of the database a reference reads, and
+ * the three places it can reach, which are the same width on every row, so
+ * down the list the states end on one edge. The database's state was a band
+ * of its own under the name, the one reading that made a row two lines tall
+ * with its verbs level with the name. Narrower, all of it goes under the name
+ * at the card's full width. A revealed value always takes a line of its own:
+ * it is there to be selected and copied, not read past.
  */
 function VariableRow({
   variable,
@@ -1088,27 +1117,32 @@ function VariableRow({
   onEdit: () => void
   verbs: Verb[]
 }) {
+  // Each state its own key, so a rotation finishing into "Pending" or an
+  // edit that adds Build arrives (§11) rather than being repainted in place.
   const state = rotating ? (
-    <Status tone="running" label="Rotating…" />
+    <Status key="rotating" tone="running" label="Rotating…" className="animate-rise" />
   ) : variable.pending ? (
-    <Status tone="warning" label={change ? `Pending · ${change}` : "Pending"} />
+    <Status
+      key={`pending-${change}`}
+      tone="warning"
+      label={change ? `Pending · ${change}` : "Pending"}
+      className="animate-rise"
+    />
   ) : browserInlined(variable.name) && !variable.scopes.includes("build") ? (
     // The bundle is compiled while the build runs; a runtime-only value is
     // undefined in every visitor's browser however it is set here.
-    <Status tone="warning" label="Not in the build" />
+    <Status key="not-built" tone="warning" label="Not in the build" className="animate-rise" />
   ) : undefined
   // The state of the database a reference reads, where it is anything but
-  // connected — a dot and its word (§4) under the name it describes, not a
-  // bare dot in the value's line where it read as a separator. Connected is
-  // the quiet case, and Databases already draws it.
+  // connected — a dot and its word (§4) among the row's states, not a bare
+  // dot in the value's line where it read as a separator. Connected is the
+  // quiet case, and Databases already draws it.
   const linkState = link && link.status !== "connected" && (
     <Status tone={LINK_STATUS[link.status].tone} label={LINK_STATUS[link.status].label} />
   )
-  // Wide, the edge holds the variable's own state and reach; narrow, all of
-  // it goes under the name, the three slots first so they line up down the list.
-  const under = wide ? (
-    linkState
-  ) : (
+  // Wide, the edge holds the states and the reach; narrow, all of it goes
+  // under the name, the three slots first so they line up down the list.
+  const under = !wide && (
     <>
       <Reach scopes={variable.scopes} />
       {state}
@@ -1136,6 +1170,7 @@ function VariableRow({
       trailing={
         wide ? (
           <>
+            {linkState}
             {state}
             <Reach scopes={variable.scopes} />
           </>
@@ -1148,10 +1183,11 @@ function VariableRow({
           {under && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{under}</div>}
           {revealed !== undefined && (
             // The value invites a click to select it, and the row around it
-            // opens the editor on a press — so a press here stays here.
+            // opens the editor on a press — so a press here stays here. It
+            // rises in, because Reveal put it there.
             <div
               onClick={(event) => event.stopPropagation()}
-              className="flex min-w-0 items-start gap-1"
+              className="flex min-w-0 animate-rise items-start gap-1"
             >
               <Well className="min-w-0 flex-1 py-1.5 font-mono text-hint break-all select-all">
                 {revealed}
@@ -1286,20 +1322,23 @@ function ValueLine({
  * The three places a variable can reach, always in the same three slots: the
  * ones it reaches in the foreground, the ones it does not faint, so a column
  * of rows reads down as a matrix. A reader hears the reached ones by name.
+ * A slot is keyed on whether it is lit, so the one an edit just turned on or
+ * off lands in its new state instead of blinking into it. The rise is on a
+ * wrapper: the keyframe ends on full opacity and holds it, which on the tag
+ * itself would light every faint slot.
  */
 function Reach({ scopes }: { scopes: Scope[] }) {
   return (
     <span className="flex shrink-0 items-center gap-2.5">
       <span className="sr-only">Reaches {scopeWords(scopes)}</span>
-      {SCOPES.map((item) => (
-        <Tag
-          key={item.scope}
-          aria-hidden
-          className={cn(scopes.includes(item.scope) ? "text-foreground/85" : "opacity-25")}
-        >
-          {item.word}
-        </Tag>
-      ))}
+      {SCOPES.map((item) => {
+        const lit = scopes.includes(item.scope)
+        return (
+          <span key={`${item.scope}-${lit}`} aria-hidden className="inline-flex animate-rise">
+            <Tag className={lit ? "text-foreground/85" : "opacity-25"}>{item.word}</Tag>
+          </span>
+        )
+      })}
     </span>
   )
 }
@@ -1330,7 +1369,11 @@ function VariableSubject({
 }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <VariableMark variable={{ sensitivity }} product={product} />
+      {/* Keyed on what it draws, so the mark swapping as the name is typed
+          lands as the new mark rather than flickering between two. */}
+      <span key={product ?? sensitivity} className="flex shrink-0 animate-rise">
+        <VariableMark variable={{ sensitivity }} product={product} />
+      </span>
       <div className="min-w-0 space-y-0.5">
         <p
           className={cn(
@@ -1421,7 +1464,8 @@ function ReferencePicker({
 }) {
   const chosen = /^\$\{\{database\.(\d+)\}\}$/.exec(value.trim())?.[1] ?? ""
   return (
-    <Field label="Linked database" htmlFor="variable-reference">
+    // The Reference toggle reveals it, so it rises in under the field.
+    <Field label="Linked database" htmlFor="variable-reference" className="animate-rise">
       <Select value={chosen} onValueChange={(id) => onChange(`\${{database.${id}}}`)}>
         <SelectTrigger id="variable-reference" className="w-full">
           <SelectValue placeholder="Choose a linked database" />
@@ -1677,10 +1721,13 @@ function ImportSheet({
         </div>
 
         <FormSection title="Paste">
+          {/* The placeholder shows the shape; what else the reading accepts
+              is behind ⓘ, and a name given twice is refused in the list
+              below as soon as it is pasted. */}
           <Field
             label="Dotenv values"
             htmlFor="dotenv-values"
-            hint="Comments, empty values and quoted multi-line values are read. A name given twice is refused."
+            info="Comments, empty values and quoted multi-line values are read. A name given twice is refused."
             trailing={
               <Button
                 type="button"
@@ -1714,14 +1761,18 @@ function ImportSheet({
         </FormSection>
 
         <FormSection title="What this imports">
-          {reading.error && <FormNote tone="danger">{reading.error}</FormNote>}
-          {refusedWhole && <FormNote tone="danger">{refusedWhole}</FormNote>}
+          {reading.error && (
+            <FormNote key={reading.error} tone="danger" className="animate-rise">
+              {reading.error}
+            </FormNote>
+          )}
+          {refusedWhole && (
+            <FormNote key={refusedWhole} tone="danger" className="animate-rise">
+              {refusedWhole}
+            </FormNote>
+          )}
           {verdicts.length === 0 ? (
-            !reading.error && (
-              <EmptyNote>
-                Each name in the paste appears here with what importing it does.
-              </EmptyNote>
-            )
+            !reading.error && <EmptyNote>Names in the paste appear here.</EmptyNote>
           ) : (
             <ul aria-label="What this imports" className="divide-y divide-hairline">
               {verdicts.map((verdict) => (
@@ -1746,7 +1797,15 @@ function ImportSheet({
                           : verdict.value || "empty"}
                     </span>
                   </span>
-                  <Status tone={verdict.tone} label={verdict.label} />
+                  {/* The client's reading first, then the server's dry run:
+                      a verdict that changes when that answer lands rises as
+                      the new one. */}
+                  <Status
+                    key={verdict.label}
+                    tone={verdict.tone}
+                    label={verdict.label}
+                    className="animate-rise"
+                  />
                 </li>
               ))}
             </ul>
@@ -1755,7 +1814,8 @@ function ImportSheet({
             <OptionList>
               <OptionRow
                 title={`Leave out ${platform.join(" and ")}`}
-                hint={`Left out because ${platformReason(platform)}.`}
+                // The reason alone: "Left out because" before it was the title again.
+                hint={`${platformReason(platform).replace(/^./, (first) => first.toUpperCase())}.`}
                 checked={!keepPlatform}
                 onCheckedChange={(checked) => setKeepPlatform(!checked)}
               />
@@ -1764,10 +1824,11 @@ function ImportSheet({
         </FormSection>
         <FormSection title="Import as">
           <ValueType value={sensitivity} onChange={setSensitivity} />
+          {/* Rises as Build is switched off under it, which is what brings it. */}
           {!scopes.includes("build") && browserNames.length > 0 && (
-            <FormNote tone="warning">
+            <FormNote tone="warning" className="animate-rise">
               {browserNames.join(", ")} {browserNames.length === 1 ? "is" : "are"} compiled into the
-              browser bundle while the build runs; without Build{" "}
+              browser bundle — without Build{" "}
               {browserNames.length === 1 ? "it builds" : "they build"} as undefined.
             </FormNote>
           )}
@@ -1783,7 +1844,11 @@ function ImportSheet({
           />
         </FormSection>
 
-        {error && <FormNote tone="danger">{error}</FormNote>}
+        {error && (
+          <FormNote key={error} tone="danger" className="animate-rise">
+            {error}
+          </FormNote>
+        )}
       </div>
     </SidePanel>
   )

@@ -446,10 +446,13 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   join that fails leaves its block saying so in its header. The Docker console is one strip over a
   pane sized to the window; a game server's three pages carry one line under the header with the
   join address, the edition and how many are online, its console is a transcript with players in
-  their own colours, and its server settings are a railed form with a save bar that follows.
+  their own colours, and its server settings are a railed form saved from the settings pages'
+  floating bar.
 - **Settings.** All nine are rail forms (`settings/setting-card.tsx`), with a pending strip that no
   longer carries a second "Deploy changes", and drafts keyed per form so a save of one no longer
-  discards the edits in another. General's sections are Name, Source and Automatic deployment,
+  discards the edits in another. Since 0.7.1 no form carries its own Save: one bar floats at the
+  foot of the content area while anything on the page holds an edit, and saves each dirty form in
+  order (`settings/save-bar.tsx`). General's sections are Name, Source and Automatic deployment,
   the last with its picture and the commit-status switch. Build and Runtime opened on readings drawn
   from the draft and the live release until 2026-10-03, when every settings page's row of figures
   was removed; Runtime still draws each limit against the last hour's peak and says a blue/green

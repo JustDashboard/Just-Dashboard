@@ -8,9 +8,11 @@ import { cn } from "@/lib/utils"
  * things and the lines between them, in the wiring vocabulary the Credentials,
  * Notifications and overview pictures already speak (`deploy/wire.tsx`).
  *
- * Framed, because a picture needs an edge to read as one thing (§2's one
- * exception in the deployment section), and on the card's ground so it sits
- * as a figure among the fields rather than as another field.
+ * On the page's own ground over the dot grid, as General's picture and the
+ * GitHub App's on Credentials are: the grid fades out towards its edges, so
+ * the picture has a middle and needs no border to read as one thing. It was
+ * framed on the card's ground, which left the one box on each of these pages
+ * of hairlines.
  *
  * Wide, the marks stand in one row — the start edge's nodes with their words
  * before the mark, the middle one's under it, the end one's after it — so
@@ -46,12 +48,8 @@ export function SettingPicture({
   className?: string
 }) {
   return (
-    <div
-      className={cn(
-        "animate-rise overflow-hidden rounded-xl border bg-card px-4 py-5 sm:px-6",
-        className,
-      )}
-    >
+    <div className={cn("relative animate-rise py-6", className)}>
+      <div aria-hidden className="wire-grid pointer-events-none absolute inset-0" />
       <div ref={containerRef} className="relative">
         {lines}
         <ol
@@ -72,7 +70,7 @@ export function SettingPicture({
               {start.map((node, index) => (
                 // Set to the end, a node is only as wide as its words, and
                 // without a ceiling a word wider than the column pushed it
-                // out past the frame's left edge, which cut it off.
+                // out past the picture's left edge, which cut it off.
                 <li key={index} className="max-w-full min-w-0">
                   {node}
                 </li>

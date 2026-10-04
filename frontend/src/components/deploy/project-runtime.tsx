@@ -63,7 +63,6 @@ import {
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ContainerUsage } from "@/components/docker/container-usage"
 import {
-  ContainerId,
   ContainerIdentity,
   CpuReading,
   MemoryReading,
@@ -87,7 +86,7 @@ import {
   humanize,
 } from "@/components/deploy/vocabulary"
 
-/** Who owns a route or a mount, as the word a row's edge carries. */
+/** Who owns a route or a mount, as the tag in the line under its name. */
 const OWNERSHIP_WORD: Record<DeploymentOwnership, string> = {
   managed: "Managed",
   linked: "Linked",
@@ -197,13 +196,16 @@ export function ProjectRuntime() {
     [],
     { enabled: running.length > 0 },
   )
-  // Where a card holds five readings beside its name and still has room for
-  // the name: inside the project's own navigation that is the 2xl width.
-  const wide = useMediaQuery("(min-width: 1536px)")
-  // A domain's tags, route and certificate beside its hostname: below this,
-  // with the sidebar open, they took the whole card and the hostname with it.
-  const domainsWide = useMediaQuery("(min-width: 1280px)")
-  // Where a card's second line is the name's alone: a phone.
+  // Where a service's release, state, CPU and memory stand beside its name and
+  // leave the name some 240px: inside the project's own navigation that is
+  // the extra-large width. Its ports and its id join them at the 2xl one.
+  const wide = useMediaQuery("(min-width: 1280px)")
+  const widest = useMediaQuery("(min-width: 1536px)")
+  // A domain's route and certificate beside its hostname, once its tags have
+  // moved under it: from the large width the hostname keeps some 190px, and
+  // below it the line is the hostname's alone.
+  const domainsWide = useMediaQuery("(min-width: 1024px)")
+  // Where a card's state fits on the line beside its name: all but a phone.
   const roomy = useMediaQuery("(min-width: 640px)")
 
   const operations = project.operations
@@ -315,7 +317,7 @@ export function ProjectRuntime() {
                     }
                     projectId={project.projectId}
                     wide={wide}
-                    phone={!roomy}
+                    widest={widest}
                   />
                 )
               })}
@@ -624,12 +626,17 @@ function Silence({
  * the product its image is, with the same live readings the Containers page
  * gives it (`container-card.tsx`), and the release it belongs to at its edge.
  *
- * From `2xl` the readings sit beside the name in fixed measures so a column of
- * cards reads down like a table — the measures stay while a new container's
- * readings are still on their way, so its release and state do not stand a
- * column to the right of everyone else's. Below it they go beneath the name
- * and none is dropped; on a phone the image and stack take a line of their
- * own under the name rather than sharing it with the state and the menu.
+ * One line from `xl`, so the menu stands on the card's middle: what it runs
+ * under the name, and at its other end the release, the state over how long
+ * and whether anything checks it, CPU and memory, each in a fixed measure so
+ * a column of cards reads down like a table. The measures stay while a new
+ * container's readings are on their way, so its release and state do not
+ * stand a column to the right of everyone else's. The ports and the id join
+ * the line at `2xl`, where there is room for them beside the name; below it
+ * they are on the container's own page. Under `xl` the readings were two more
+ * bands under the name, which left the menu level with the name over an empty
+ * corner — there they are one band, the release and health first, and the
+ * state stays beside the name.
  *
  * The state word is the release engine's, read every five seconds, and so is
  * the dot beside it: Docker's listing is read once a minute, and its sentence
@@ -650,7 +657,7 @@ function ServiceCard({
   run,
   projectId,
   wide,
-  phone,
+  widest,
   index,
 }: {
   service: DeploymentRuntimeService
@@ -662,8 +669,10 @@ function ServiceCard({
   /** The deployment whose candidate this container is, while it runs. */
   run?: DeploymentEngineRun
   projectId: number
+  /** Room for the release, the state and the readings beside the name. */
   wide: boolean
-  phone: boolean
+  /** Room for the ports and the id as well. */
+  widest: boolean
   index: number
 }) {
   const router = useRouter()
@@ -723,7 +732,7 @@ function ServiceCard({
     </Link>
   )
   const identity = container ? (
-    <ContainerIdentity container={container} id={wide} />
+    <ContainerIdentity container={container} id={widest} />
   ) : (
     <span className="flex min-w-0 items-center gap-1.5">
       {service.stack && (
@@ -738,6 +747,9 @@ function ServiceCard({
       <span className="shrink-0 font-mono">{service.containerId.slice(0, 12)}</span>
     </span>
   )
+  const cpu = container && <CpuReading stat={stat} container={container} trend={trend} />
+  const memory = container && <MemoryReading stat={stat} container={container} />
+  const ports = container && <PortList ports={container.exposure ?? []} max={1} />
 
   return (
     <ChoiceRow
@@ -747,7 +759,7 @@ function ServiceCard({
       index={index}
       leading={<ProductLogo id={product} size="sm" />}
       title={name}
-      description={phone ? undefined : identity}
+      description={identity}
       trailing={
         wide ? (
           <>
@@ -761,15 +773,9 @@ function ServiceCard({
                 {runLink}
               </span>
             </span>
-            <span className="w-24">
-              {container && <CpuReading stat={stat} container={container} trend={trend} />}
-            </span>
-            <span className="w-36">
-              {container && <MemoryReading stat={stat} container={container} />}
-            </span>
-            <span className="w-32 min-w-0">
-              {container && <PortList ports={container.exposure ?? []} max={1} />}
-            </span>
+            <span className="w-24">{cpu}</span>
+            <span className="w-36">{memory}</span>
+            {widest && <span className="w-32 min-w-0">{ports}</span>}
           </>
         ) : (
           state
@@ -778,26 +784,21 @@ function ServiceCard({
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${name}`} />}
     >
       {!wide && (
-        <div className="min-w-0 space-y-2.5 sm:pl-11">
-          {phone && (
-            <div className="min-w-0 text-hint text-muted-foreground">
-              {container ? <ContainerIdentity container={container} id={false} /> : identity}
-            </div>
-          )}
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
+        // The readings keep the wide line's measures and travel as one group,
+        // so a narrow card breaks between its facts and its readings rather
+        // than between CPU and memory.
+        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5 sm:pl-11">
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
             <ReleaseCell service={service} release={release} inline />
             {detail && <span className="min-w-0 truncate">{detail}</span>}
-            {container && <ContainerId container={container} />}
             {runLink}
-          </div>
+          </span>
           {container && (
-            // The ports take the third column once the card is wide enough,
-            // rather than a line of their own under two half-width meters.
-            <div className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3 lg:items-center">
-              <CpuReading stat={stat} container={container} trend={trend} />
-              <MemoryReading stat={stat} container={container} />
-              <PortList ports={container.exposure ?? []} max={2} />
-            </div>
+            <span className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2.5">
+              <span className="w-24">{cpu}</span>
+              <span className="w-36">{memory}</span>
+              <span className="w-32 min-w-0">{ports}</span>
+            </span>
           )}
         </div>
       )}
@@ -869,12 +870,17 @@ function serviceHealth(service: DeploymentRuntimeService) {
  * is none, and set as the literal it is, as Settings → Domains draws the same
  * name. Visiting it is the verb pressed daily, so it is the
  * one inline; the certificate, the address and the settings wait in the menu.
- * Its readings — the route, the certificate — sit in fixed measures at the
- * edge once the content column has room for them beside the hostname, and
- * beneath it until then.
+ *
+ * One line from `lg`: who owns the route, and whether a password stands in
+ * front of it, under the hostname; the route and the certificate in fixed
+ * measures at the edge, so down a list they are two columns. The tags stood
+ * at the edge as well, which needed the extra-large width before the
+ * hostname had room, and every card under it was two lines. Below `lg` the
+ * line is the hostname's alone — a hostname cut to "www.example…" is the one
+ * thing on the card that must not be — and the readings go under it.
  *
  * Which site config serves it is said once, in the block's header; a card
- * repeats it only when another config answers for the name.
+ * repeats it, first under its name, only when another config answers for it.
  */
 function DomainCard({
   domain,
@@ -924,12 +930,6 @@ function DomainCard({
   const foreign = domain.route === "foreign" || domain.route === "conflict"
   const elsewhere = domain.servedBy && (foreign || domain.servedBy !== siteName)
   const route = <Status tone={ROUTE_TONE[domain.route]} label={ROUTE_LABEL[domain.route]} />
-  const tags = (
-    <>
-      {domain.protected && <Tag>Password</Tag>}
-      <Tag>{OWNERSHIP_WORD[domain.ownership]}</Tag>
-    </>
-  )
 
   return (
     <ChoiceRow
@@ -947,17 +947,26 @@ function DomainCard({
       }
       title={<span className="font-mono">{domain.hostname}</span>}
       description={
-        elsewhere && (
-          <>
-            {foreign ? "answered by " : "served by "}
-            <span className="font-mono">{domain.servedBy}</span>
-          </>
-        )
+        <>
+          {elsewhere && (
+            <>
+              {foreign ? "answered by " : "served by "}
+              <span className="font-mono">{domain.servedBy}</span>
+              {" · "}
+            </>
+          )}
+          {domain.protected && (
+            <>
+              <Tag>Password</Tag>
+              {" · "}
+            </>
+          )}
+          <Tag>{OWNERSHIP_WORD[domain.ownership]}</Tag>
+        </>
       }
       trailing={
         wide && (
           <>
-            {tags}
             <span className="flex w-24">{route}</span>
             <span className="flex w-56 min-w-0">
               <CertificateReading domain={domain} issuer={false} />
@@ -967,13 +976,10 @@ function DomainCard({
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${domain.hostname}`} />}
     >
-      {/* Until then the whole line is the name's: a hostname cut to
-          "www.example…" is the one thing on the card that must not be. */}
       {!wide && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 sm:pl-11">
           {route}
           <CertificateReading domain={domain} issuer={false} />
-          {tags}
         </div>
       )}
     </ChoiceRow>
@@ -985,6 +991,13 @@ function DomainCard({
  * volume drawn as the product of the container that keeps its data there, a
  * folder on this server as the file manager draws it (§14). A mount that is
  * missing is not a place to go, so it keeps its card and loses its edge.
+ *
+ * One line: where it is mounted, who owns it, and — when it is not where it
+ * should be — why, under the name; its state and then its size at the edge,
+ * the size in a fixed measure so down a list the sizes are one column and the
+ * states end on one edge. The reason was a second line of its own, which made
+ * the one card with something to say twice the height of the rest. A phone
+ * has no room for the size beside the name, so it joins the line under it.
  */
 function MountCard({
   mount,
@@ -998,14 +1011,7 @@ function MountCard({
   wide: boolean
 }) {
   const status = MOUNT_STATUS[mount.status]
-  const readings = (
-    <>
-      {size !== undefined && size > 0 && (
-        <span className="numeric text-hint text-muted-foreground">{bytes(size)}</span>
-      )}
-      <Tag>{OWNERSHIP_WORD[mount.ownership]}</Tag>
-    </>
-  )
+  const stored = size ? bytes(size) : undefined
   return (
     <ChoiceRow
       verb={mount.source}
@@ -1019,26 +1025,33 @@ function MountCard({
         <>
           mounted at <span className="font-mono">{mount.target}</span>
           {mount.readOnly && " · read-only"}
+          {" · "}
+          <Tag>{OWNERSHIP_WORD[mount.ownership]}</Tag>
+          {!wide && stored && <span className="numeric">{` · ${stored}`}</span>}
+          {/* Last, because it is the longest: the mount point and the owner
+              are what tell two cards apart, and the state at the edge has
+              already said that something is wrong. */}
+          {mount.detail && (
+            <>
+              {" · "}
+              <span className={cn(mount.status === "missing" && "text-destructive")}>
+                {mount.detail}
+              </span>
+            </>
+          )}
         </>
       }
       trailing={
         <>
-          {wide && readings}
           <Status tone={status.tone} label={status.label} />
-        </>
-      }
-    >
-      {(mount.detail || !wide) && (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground sm:pl-11">
-          {!wide && readings}
-          {mount.detail && (
-            <span className={cn(mount.status === "missing" && "text-destructive")}>
-              {mount.detail}
+          {wide && (
+            <span className="numeric flex w-16 justify-end text-hint text-muted-foreground">
+              {stored}
             </span>
           )}
-        </div>
-      )}
-    </ChoiceRow>
+        </>
+      }
+    />
   )
 }
 
@@ -1056,8 +1069,14 @@ function lastRunLabel(status: string) {
  * writes and its recent runs as a strip — and, when a deployment waits on it,
  * whether the newest archive is young enough to let one through.
  *
- * The job's own record is read for all of that; without it the card says what
- * the release engine observed and nothing it cannot know.
+ * The job's own record is read for all of that, and `JobCard` decides where
+ * the gate's reading stands on its line. Without the record the card says
+ * what the release engine observed and nothing it cannot know: one line, why
+ * the job could not be read under the name and how its last run went at the
+ * edge. The gate's tag and its age keep a line under the name there, because
+ * beside the outcome they need more than a half-width panel has — and that
+ * card lasts only until the job's record arrives. A phone keeps the outcome
+ * under the name as well.
  */
 function BackupCard({
   gate,
@@ -1143,8 +1162,13 @@ function BackupCard({
  * A database's state is the link Settings › Databases & backups reads —
  * whether the release answered on its alias lately — so the two pages say
  * one thing about it. Without that reading it says only whether the
- * connection exists. On a phone the state goes under the address, which is
- * the line it would otherwise cut.
+ * connection exists.
+ *
+ * One line: the engine and the address under the name, followed by why it
+ * cannot be reached when something says so, and the state at the edge. The
+ * reason was a second line of its own under a block that is the page's full
+ * width, and had the room beside the address. On a phone the state and the
+ * reason go under the address, which is the line they would otherwise cut.
  */
 function DependencyCard({
   item,
@@ -1181,6 +1205,16 @@ function DependencyCard({
   const note = unusable
     ? `The saved connection cannot be opened: ${unusable}`
     : (link || (database && connection)) && (link?.detail ?? item.detail)
+  const facts = link ? (
+    <>
+      {engine} · <span className="font-mono">{link.hostname}</span>
+      {link.database && ` · database ${link.database}`}
+    </>
+  ) : database && connection ? (
+    engine
+  ) : (
+    item.detail
+  )
   return (
     <ChoiceRow
       verb={title}
@@ -1195,22 +1229,19 @@ function DependencyCard({
       }
       title={title}
       description={
-        link ? (
+        wide && note ? (
           <>
-            {engine} · <span className="font-mono">{link.hostname}</span>
-            {link.database && ` · database ${link.database}`}
+            {facts} · {note}
           </>
-        ) : database && connection ? (
-          engine
         ) : (
-          item.detail
+          facts
         )
       }
       trailing={wide && state}
     >
-      {(!wide || note) && (
+      {!wide && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground sm:pl-11">
-          {!wide && state}
+          {state}
           {note && <span>{note}</span>}
         </div>
       )}

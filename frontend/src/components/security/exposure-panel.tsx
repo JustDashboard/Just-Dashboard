@@ -154,9 +154,12 @@ export function ExposurePath({ exposure }: { exposure: Exposure | undefined }) {
   const ClientMark = NETWORK_GLYPH[network.kind]
   const risky = exposure.grade === "open" || exposure.grade === "public"
   return (
+    // Framed still: the deployment settings' pictures stand on the page's
+    // ground, but this one is a block among Security's framed readings.
     <SettingPicture
       label="How this browser reaches the dashboard"
       containerRef={container}
+      className="overflow-hidden rounded-xl border bg-card px-4 py-5 sm:px-6"
       lines={
         <>
           <AnimatedBeam

@@ -2163,6 +2163,23 @@ export async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
 
+/**
+ * The settings pages' one Save: the bar that floats at the foot of the
+ * content area while any form on the page holds an edit.
+ */
+export function saveBar(page: Page) {
+  return page.getByRole("region", { name: "Save changes" })
+}
+
+export async function saveSettings(page: Page) {
+  await saveBar(page).getByRole("button", { name: "Save", exact: true }).click()
+}
+
+/** The bar says *Saved* once every form it saved went through. */
+export async function expectSaved(page: Page) {
+  await expect(saveBar(page).getByText("Saved", { exact: true })).toBeVisible()
+}
+
 export async function mockProject(
   page: Page,
   options: {

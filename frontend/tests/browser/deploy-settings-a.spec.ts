@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { json, mockProject } from "./deploy-fixture"
+import { expectSaved, json, mockProject, saveBar, saveSettings } from "./deploy-fixture"
 
 /**
  * Project settings, part A: General, Build, Runtime, Environment variables,
@@ -56,8 +56,8 @@ test.describe("General settings", () => {
     // edit to save before Save is pressed.
     await expect(nameCard.getByText("16/64", { exact: true })).toBeVisible()
     await expect(nameCard.getByText("Unsaved changes", { exact: true })).toBeVisible()
-    await nameCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Project renamed")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     expect(renames.at(-1)).toEqual({ name: "api-production-2" })
 
     await page.setViewportSize({ width: 390, height: 844 })
@@ -79,7 +79,7 @@ test.describe("General settings", () => {
     await page.goto("/deploy/7/settings/general")
     const nameCard = page.getByRole("form", { name: "Project name" })
     await nameCard.getByLabel("Project name").fill("payments-api")
-    await nameCard.getByRole("button", { name: "Save" }).click()
+    await saveSettings(page)
     await expect(page.getByText("That name is already used by another project")).toBeVisible()
   })
 
@@ -110,9 +110,9 @@ test.describe("General settings", () => {
     // The path filters only govern automatic deployments, so they fold away
     // under the switch that turns those off — and are still saved.
     await expect(gitCard.getByLabel("Include paths")).toHaveCount(0)
-    await gitCard.getByRole("button", { name: "Save" }).click()
+    await saveSettings(page)
 
-    await expect(page.getByText("Deployment policy saved")).toBeVisible()
+    await expectSaved(page)
     await expect(picture.getByText("only when you press Deploy", { exact: true })).toBeVisible()
     await expect(gitCard.getByText("Manual", { exact: true })).toBeVisible()
     // What was saved is what the form holds: nothing left over to save.
@@ -220,8 +220,8 @@ test.describe("Build settings", () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.screenshot({ path: test.info().outputPath("build-1280.png"), fullPage: true })
 
-    await buildCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Build settings saved")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     const saved = writes.at(-1) as { build: Record<string, unknown>; dependencies: unknown }
     expect(saved.build.buildCommand).toBe("npm run build")
@@ -267,8 +267,8 @@ test.describe("Build settings", () => {
     await expect(tasksCard.getByRole("group", { name: /^Task 1/ })).toContainText("seconds")
     await tasksCard.getByLabel("Release task 1 name").fill("Migrate database")
     await tasksCard.getByLabel("Release task 1 command").fill("./bin/migrate")
-    await tasksCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Release tasks saved")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     const saved = writes.at(-1) as { build: { releaseTasks: unknown } }
     // A build that makes an image runs a new task in it, where the
@@ -337,8 +337,8 @@ test.describe("Runtime settings", () => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.screenshot({ path: test.info().outputPath("runtime-1280.png"), fullPage: true })
 
-    await runtimeCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Runtime settings saved")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     const saved = writes.at(-1) as { runtime: Record<string, unknown> }
     expect(saved.runtime.memoryMb).toBe(512)
@@ -375,8 +375,8 @@ test.describe("Runtime settings", () => {
     )
     await expect(checksCard.getByText("GET / → 2xx · 20 × 3 s").first()).toBeVisible()
     await expect(unverified).toHaveCount(0)
-    await checksCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Health checks saved")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
 
     const saved = writes.at(-1) as { checks: Array<Record<string, unknown>> }
     expect(saved.checks).toHaveLength(1)
@@ -440,20 +440,23 @@ test.describe("Runtime settings, drafts and refusals", () => {
     await expect(runtimeCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
 
     // Clearing the port to type another keeps the switch on and the field
-    // where it is, and a save with no port says so beside it.
+    // where it is. With no port the plan is what is saved, so there is
+    // nothing to save and the page's bar stays away.
     await runtimeCard.getByRole("switch", { name: /fixed host port/ }).click()
     const hostPort = runtimeCard.getByRole("spinbutton", { name: "Host port" })
     await expect(hostPort).toHaveValue("3000")
+    await expect(saveBar(page)).toBeVisible()
     await hostPort.fill("")
     await expect(hostPort).toBeVisible()
-    await runtimeCard.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(runtimeCard.getByText("Use a port from 1 to 65535.")).toBeVisible()
+    await expect(saveBar(page)).toHaveCount(0)
     expect(writes).toHaveLength(0)
     await hostPort.fill("8080")
     await expect(hostPort).toHaveValue("8080")
+    await expect(saveBar(page)).toBeVisible()
     await runtimeCard.getByRole("switch", { name: /fixed host port/ }).click()
     await expect(hostPort).toHaveCount(0)
     await expect(runtimeCard.getByText("Unsaved changes", { exact: true })).toHaveCount(0)
+    await expect(saveBar(page)).toHaveCount(0)
   })
 
   test("a plan refusal that names no field is the form's own sentence, not a toast", async ({
@@ -476,7 +479,7 @@ test.describe("Runtime settings, drafts and refusals", () => {
     await page.goto("/deploy/7/settings/runtime")
     const runtimeCard = page.getByRole("form", { name: "Runtime" })
     await runtimeCard.getByLabel("Memory limit").fill("512")
-    await runtimeCard.getByRole("button", { name: "Save", exact: true }).click()
+    await saveSettings(page)
 
     await expect(runtimeCard.getByRole("alert")).toHaveText(
       "runtime command passes credential material through argv",
@@ -509,8 +512,8 @@ test.describe("Runtime settings, drafts and refusals", () => {
     await expect(argv).toHaveValue("pg_isready\n-U \n\npostgres")
     await expect(checksCard.getByText("$ pg_isready -U postgres")).toBeVisible()
 
-    await checksCard.getByRole("button", { name: "Save", exact: true }).click()
-    await expect(page.getByText("Health checks saved")).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     const saved = writes.at(-1) as { checks: Array<{ config: Record<string, unknown> }> }
     expect(saved.checks[0].config.command).toEqual(["pg_isready", "-U", "postgres"])
     await expect(argv).toHaveValue("pg_isready\n-U\npostgres")
@@ -902,8 +905,8 @@ test.describe("Build settings for static output and Python", () => {
     const fallback = buildCard.getByRole("switch", { name: "Single-page application" })
     await expect(fallback).toBeVisible()
     await fallback.click()
-    await buildCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Build settings saved").last()).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     let saved = writes.at(-1) as { build: Record<string, unknown> }
     expect(saved.build.spaFallback).toBe(true)
     expect(saved.build.outputDirectory).toBe("dist")
@@ -911,8 +914,8 @@ test.describe("Build settings for static output and Python", () => {
     await builder.getByRole("button", { name: /^Python/ }).click()
     await expect(buildCard.getByLabel("Package manager")).toHaveCount(0)
     await buildCard.getByRole("radio", { name: "3.12" }).click()
-    await buildCard.getByRole("button", { name: "Save" }).click()
-    await expect(page.getByText("Build settings saved").last()).toBeVisible()
+    await saveSettings(page)
+    await expectSaved(page)
     saved = writes.at(-1) as { build: Record<string, unknown> }
     expect(saved.build.recipe).toBe("python")
     expect(saved.build.pythonVersion).toBe("3.12")
@@ -922,7 +925,7 @@ test.describe("Build settings for static output and Python", () => {
     // server refuses a recipe on any other builder.
     await builder.getByRole("button", { name: /^Dockerfile/ }).click()
     await buildCard.getByLabel("Dockerfile path").fill("deploy/Dockerfile")
-    await buildCard.getByRole("button", { name: "Save" }).click()
+    await saveSettings(page)
     await expect.poll(() => writes.length).toBe(3)
     saved = writes.at(-1) as { build: Record<string, unknown> }
     expect(saved.build.method).toBe("dockerfile")

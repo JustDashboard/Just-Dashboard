@@ -9,7 +9,6 @@ import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentPreview,
@@ -19,7 +18,7 @@ import type {
 } from "@/lib/types"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
-import { ForgeFace, ShortSha } from "@/components/git/marks"
+import { ForgeFace } from "@/components/git/marks"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
@@ -32,6 +31,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { VariablesPanel } from "@/components/deploy/settings/variables"
 import { RunStrip } from "@/components/deploy/run-marks"
 import {
@@ -158,15 +158,18 @@ function AddressLine({ url, published }: { url: string; published: boolean }) {
         {host}
       </span>
     )
+  // Inline rather than an inline flex box: inside the card's one truncating
+  // line a flex box is one piece, and the ellipsis took the whole address
+  // with it — "PR #42 · …" — where it should only shorten its end.
   return (
     <a
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex min-w-0 items-center gap-1 font-mono text-foreground/85 underline-offset-2 hover:underline"
+      className="font-mono text-foreground/85 underline-offset-2 hover:underline"
     >
-      <span className="truncate">{host}</span>
-      <External aria-hidden className="size-3 shrink-0" />
+      {host}
+      <External aria-hidden className="ml-1 inline-block size-3 align-[-1px]" />
     </a>
   )
 }
@@ -215,6 +218,10 @@ export function Previews({
   const [openId, setOpenId] = useState<number>()
   const [variablesFor, setVariablesFor] = useState<DeploymentPreview>()
   const [deploying, setDeploying] = useState<number>()
+  // A card's facts and readings share one line where the lists' own column
+  // has room for both, and the readings take a second line where it has not.
+  const [column, columnWidth] = useColumnWidth()
+  const wide = columnWidth >= 560
   const triggerOf = (id: number) => triggers.data?.find((trigger) => trigger.id === id)
   const approvalOf = (preview: DeploymentPreview) =>
     approvals.data?.find(
@@ -313,21 +320,19 @@ export function Previews({
   ]
   const offer = canAdmin && triggers.data !== undefined && previewTriggers.length === 0
 
+  // One line: the address previews are given while a webhook creates them,
+  // why there are none while none does. That each revision is approved first
+  // is the "Awaiting review" group itself, and the option that turns them on.
   return (
     <SettingSection
       id="previews"
       title="Preview environments"
       state={
-        previewTriggers.length > 0 ? (
-          <>
-            {patterns.length > 0 && (
-              <span className="block font-mono text-foreground/85">{patterns.join(", ")}</span>
-            )}
-            each revision is approved before it builds
-          </>
-        ) : (
-          "Off — no webhook creates them"
-        )
+        previewTriggers.length === 0
+          ? "Off — no webhook creates them"
+          : patterns.length > 0 && (
+              <span className="font-mono text-foreground/85">{patterns.join(", ")}</span>
+            )
       }
       actions={
         offer &&
@@ -338,67 +343,75 @@ export function Previews({
         )
       }
     >
-      {approvals.error && !approvals.data && (
-        <ErrorState error={approvals.error} onRetry={approvals.refresh} />
-      )}
-      {pending.length > 0 && (
-        <section className="space-y-2">
-          <GroupRule
-            label="Awaiting review"
-            count={pending.filter((a) => a.state === "pending").length}
-          />
-          <ChoiceList aria-label="Revisions awaiting review">
-            {pending.map((approval) => (
-              <ApprovalCard
-                key={approval.id}
-                approval={approval}
-                trigger={triggerOf(approval.triggerId)}
-                canReview={canAdmin}
-                onReview={() => setReviewing(approval)}
-                onReject={() => reject(approval)}
-              />
-            ))}
-          </ChoiceList>
-        </section>
-      )}
+      <div ref={column} className="min-w-0 space-y-5">
+        {approvals.error && !approvals.data && (
+          <ErrorState error={approvals.error} onRetry={approvals.refresh} />
+        )}
+        {pending.length > 0 && (
+          <section className="space-y-2">
+            <GroupRule
+              label="Awaiting review"
+              count={pending.filter((a) => a.state === "pending").length}
+            />
+            <ChoiceList aria-label="Revisions awaiting review">
+              {pending.map((approval, index) => (
+                <ApprovalCard
+                  key={approval.id}
+                  index={index}
+                  approval={approval}
+                  trigger={triggerOf(approval.triggerId)}
+                  wide={wide}
+                  canReview={canAdmin}
+                  onReview={() => setReviewing(approval)}
+                  onReject={() => reject(approval)}
+                />
+              ))}
+            </ChoiceList>
+          </section>
+        )}
 
-      {previews.loading && !previews.data ? (
-        <LoadingRows rows={2} />
-      ) : previews.error && !previews.data ? (
-        <ErrorState error={previews.error} onRetry={previews.refresh} />
-      ) : list.length === 0 ? (
-        <EmptyState
-          icon={SourcePull}
-          title="No preview environments"
-          description="A webhook with pull-request previews creates one per pull request, after you approve its revision."
-          action={
-            offer && (
-              <Button size="sm" variant="outline" onClick={onTurnOn}>
-                Turn on previews
-              </Button>
-            )
-          }
-          className="py-8"
-        />
-      ) : (
-        <section className="space-y-2">
-          {pending.length > 0 && <GroupRule label="Environments" count={list.length} />}
-          <ChoiceList aria-label="Preview environments" className="animate-rise">
-            {list.map((preview) => (
-              <PreviewCard
-                key={preview.id}
-                projectId={projectId}
-                preview={preview}
-                approval={approvalOf(preview)}
-                trigger={triggerOf(preview.triggerId)}
-                deploying={deploying === preview.id}
-                verbs={verbsFor(preview)}
-                onOpen={() => setOpenId(preview.id)}
-              />
-            ))}
-          </ChoiceList>
-        </section>
-      )}
+        {previews.loading && !previews.data ? (
+          <LoadingRows rows={2} />
+        ) : previews.error && !previews.data ? (
+          <ErrorState error={previews.error} onRetry={previews.refresh} />
+        ) : list.length === 0 ? (
+          // The head says whether a webhook creates them; this says when one
+          // appears, which is the question an empty list leaves.
+          <EmptyState
+            icon={SourcePull}
+            title="No preview environments"
+            description="One per pull request, after you approve its revision."
+            action={
+              offer && (
+                <Button size="sm" variant="outline" onClick={onTurnOn}>
+                  Turn on previews
+                </Button>
+              )
+            }
+            className="py-8"
+          />
+        ) : (
+          <section className="space-y-2">
+            {pending.length > 0 && <GroupRule label="Environments" count={list.length} />}
+            <ChoiceList aria-label="Preview environments">
+              {list.map((preview, index) => (
+                <PreviewCard
+                  key={preview.id}
+                  index={index}
+                  projectId={projectId}
+                  preview={preview}
+                  approval={approvalOf(preview)}
+                  trigger={triggerOf(preview.triggerId)}
+                  wide={wide}
+                  deploying={deploying === preview.id}
+                  verbs={verbsFor(preview)}
+                  onOpen={() => setOpenId(preview.id)}
+                />
+              ))}
+            </ChoiceList>
+          </section>
+        )}
+      </div>
 
       <ReviewModal
         projectId={projectId}
@@ -442,38 +455,54 @@ export function Previews({
 }
 
 /**
- * One revision waiting for a decision, drawn as the person who opened it.
+ * One revision waiting for a decision, on one line: drawn as the person who
+ * opened it, named by its pull request, with who opened it, the repository
+ * and branch it comes from, its commit and when it asked under the name, and
+ * where it stands at the other end. A fork is said there too, before the
+ * state, where the end of the line cannot cut it off: code from outside the
+ * repository is the one fact to weigh before approving.
+ *
+ * One line, so Reject stands on the card's middle: the branch, the fork, the
+ * commit and the time were a second band under the name, which left it level
+ * with the name over an empty corner. A column too narrow for that line keeps
+ * a second one for the state and the fork, and lets the facts wrap.
+ *
  * Reviewing opens the approval, so the card is lit; Reject is the one other
  * thing to do, in the card's own slot. A rejected revision stays drawn with
  * nothing to press.
  */
 function ApprovalCard({
   approval,
+  index,
   trigger,
+  wide,
   canReview,
   onReview,
   onReject,
 }: {
   approval: DeploymentPreviewApproval
+  index: number
   trigger?: DeploymentTrigger
+  /** Whether the list's column has room for the card's one line. */
+  wide: boolean
   canReview: boolean
   onReview: () => void
   onReject: () => void
 }) {
   const rejected = approval.state === "rejected"
+  // Keyed on the decision, so a rejection rises into place over the request.
   const status = rejected ? (
-    <Status tone="stopped" label="Rejected" />
+    <Status key="rejected" tone="stopped" label="Rejected" className="animate-rise" />
   ) : approval.state === "pending" ? (
-    <Status tone="warning" label="Awaiting approval" />
+    <Status key="pending" tone="warning" label="Awaiting approval" className="animate-rise" />
   ) : (
-    <Status tone="warning" label="Setup incomplete" />
+    <Status key="setup" tone="warning" label="Setup incomplete" className="animate-rise" />
   )
-  // Wide, the state sits beside the name; on a phone it leads the line of
-  // facts under it, which the fork and the commit need the width of.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const fork = forkOf(approval) && <Tag tone="warning">fork</Tag>
   return (
     <ChoiceRow
       verb={`Review revision · PR ${approval.providerRef}`}
+      index={index}
       onSelect={onReview}
       disabled={rejected || !canReview}
       className={cn(rejected && "opacity-80")}
@@ -486,12 +515,28 @@ function ApprovalCard({
       }
       title={`PR ${approval.providerRef}`}
       description={
-        <>
+        <span className={cn(!wide && "whitespace-normal")}>
           {approval.author || "unknown author"} ·{" "}
           <span className="font-mono">{approval.headRepository || approval.repository}</span>
-        </>
+          {approval.headRef && (
+            <>
+              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <span className="font-mono">{approval.headRef}</span>
+            </>
+          )}
+          {" · "}
+          <span className="font-mono">{approval.revision.slice(0, 7)}</span>
+          {` · ${relativeTime(approval.updatedAt)}`}
+        </span>
       }
-      trailing={wide ? status : undefined}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {fork}
+            {status}
+          </span>
+        )
+      }
       actions={
         approval.state === "pending" &&
         canReview && (
@@ -506,18 +551,12 @@ function ApprovalCard({
         )
       }
     >
-      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
-        {!wide && status}
-        {approval.headRef && (
-          <span className="inline-flex min-w-0 items-center gap-1">
-            <SourceBranch aria-hidden className="size-3 shrink-0" />
-            <span className="truncate font-mono text-foreground/85">{approval.headRef}</span>
-          </span>
-        )}
-        {forkOf(approval) && <Tag tone="warning">fork</Tag>}
-        <ShortSha sha={approval.revision} />
-        <span className="whitespace-nowrap">{relativeTime(approval.updatedAt)}</span>
-      </div>
+      {!wide && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
+          {status}
+          {fork}
+        </div>
+      )}
     </ChoiceRow>
   )
 }
@@ -655,29 +694,47 @@ function usePreviewRuns(projectId: number, environmentId: number | undefined, in
 }
 
 /**
- * One preview as a card that opens its sheet: its author's face, its slug,
- * the pull request and commit it runs, and the address it answers at while it
- * is open. How its last run went and whether it is isolated sit beside the
- * name when the card is wide, and lead the line under it on a phone.
+ * One preview as a card that opens its sheet, on one line: its author's face,
+ * its slug, and under them the pull request, the address it answers at while
+ * it is open — a link once it does — its title, author and commit. At its
+ * other end are how its last run went, whether it is isolated, and its last
+ * runs as a strip.
+ *
+ * One line, so the verbs stand on the card's middle: the address, the strip,
+ * its tags and when it last changed were a second band under the name, which
+ * left the verbs level with the name over an empty corner. The address comes
+ * before the title because a title runs to any length and is the part the
+ * line should lose; the tags and the time are the sheet's alone now. The
+ * strip keeps fourteen squares' width however few it holds, so down a list
+ * the strips are one column and the states end on one edge.
+ *
+ * A preview stopped for isolation keeps a second band for the server's
+ * sentence saying why — that is the thing to act on, and no line has room
+ * for it. A column too narrow for the one line keeps a second one for the
+ * readings and the strip, and lets the facts wrap.
  */
 function PreviewCard({
+  index,
   projectId,
   preview,
   approval,
   trigger,
+  wide,
   deploying,
   verbs,
   onOpen,
 }: {
+  index: number
   projectId: number
   preview: DeploymentPreview
   approval?: DeploymentPreviewApproval
   trigger?: DeploymentTrigger
+  /** Whether the list's column has room for the card's one line. */
+  wide: boolean
   deploying: boolean
   verbs: Verb[]
   onOpen: () => void
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
   const runs = usePreviewRuns(projectId, preview.environmentId, 15_000)
   const recent = runs.data?.runs ?? []
   const active = recent.find((run) => isActiveRun(run.state))
@@ -688,59 +745,95 @@ function PreviewCard({
   // request wrote one; a webhook preview knows only what its approval said.
   const author = preview.author ?? approval?.author
   const revision = preview.revision ?? approval?.revision
+  // Each rises into its new state: a run starting, the run it ended as, the
+  // preview opening, closing or being stopped for isolation.
   const readings = (
     <>
       {active ? (
-        // Said as the webhook and schedule cards say theirs, with the stage.
-        <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
-          {`deploying · ${(active.currentStep?.label ?? "building").toLowerCase()}`}
-        </TextShimmer>
+        // Said as the webhook card says its own: the run, not its stage. The
+        // stage made the far end long enough to take the line the name and
+        // facts need, and the run page draws it as the release path.
+        <span key={`active-${active.id}`} className="flex animate-rise">
+          <TextShimmer className="pr-0.5 text-xs font-medium whitespace-nowrap">
+            {`deploying #${active.runNumber}`}
+          </TextShimmer>
+        </span>
       ) : (
-        recent[0] && <RunStatus state={recent[0].state} />
+        recent[0] && (
+          <span key={`${recent[0].id}-${recent[0].state}`} className="flex animate-rise">
+            <RunStatus state={recent[0].state} />
+          </span>
+        )
       )}
-      <Status tone={isolation.tone} label={isolation.label} />
+      <Status
+        key={isolation.label}
+        tone={isolation.tone}
+        label={isolation.label}
+        className="animate-rise"
+      />
     </>
   )
+  const strip = recent.length > 0 && <RunStrip runs={recent} />
   return (
     <ChoiceRow
       verb={`Open ${preview.environmentSlug}`}
+      index={index}
       onSelect={onOpen}
       busy={deploying || Boolean(active)}
       className={cn(!open && "opacity-80")}
       leading={<AuthorFace login={author} trigger={trigger} />}
       title={<span className="font-mono">{preview.environmentSlug}</span>}
       description={
-        <>
+        <span className={cn(!wide && "whitespace-normal")}>
           PR #{preview.providerRef}
+          {address && (
+            <>
+              {" · "}
+              <AddressLine url={address} published={preview.address?.published ?? true} />
+            </>
+          )}
           {preview.title && ` · ${preview.title}`}
           {author && ` · ${author}`}
-          {revision && ` · ${revision.slice(0, 7)}`}
-        </>
+          {revision && (
+            <>
+              {" · "}
+              <span className="font-mono">{revision.slice(0, 7)}</span>
+            </>
+          )}
+        </span>
       }
-      trailing={wide ? <span className="flex items-center gap-4">{readings}</span> : undefined}
+      trailing={
+        wide && (
+          <span className="flex items-center gap-4">
+            {readings}
+            <span className="flex w-27.5 justify-end">{strip}</span>
+          </span>
+        )
+      }
       actions={
         verbs.length > 0 && (
           <VerbActions dim verbs={verbs} menuLabel={`Actions for ${preview.environmentSlug}`} />
         )
       }
     >
-      <div className="space-y-2 sm:pl-11">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground">
-          {!wide && <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>}
-          {address && <AddressLine url={address} published={preview.address?.published ?? true} />}
-          <PreviewTags preview={preview} />
-          {recent.length > 0 && <RunStrip runs={recent} />}
-          <span className="whitespace-nowrap">updated {relativeTime(preview.updatedAt)}</span>
+      {(!wide || isolation.note) && (
+        <div className="space-y-2 sm:pl-11">
+          {!wide && (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-6 gap-y-2 text-hint text-muted-foreground">
+              <span className="flex flex-wrap items-center gap-x-4 gap-y-1">{readings}</span>
+              {strip}
+            </div>
+          )}
+          {isolation.note && (
+            <FormNote
+              tone={isolation.tone === "danger" ? "danger" : "warning"}
+              className="max-w-prose"
+            >
+              {isolation.note}
+            </FormNote>
+          )}
         </div>
-        {isolation.note && (
-          <FormNote
-            tone={isolation.tone === "danger" ? "danger" : "warning"}
-            className="max-w-prose"
-          >
-            {isolation.note}
-          </FormNote>
-        )}
-      </div>
+      )}
     </ChoiceRow>
   )
 }

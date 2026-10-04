@@ -1,10 +1,11 @@
 "use client"
 
-import { Fragment, useRef, type RefObject } from "react"
+import { Fragment, useRef, useState, type RefObject } from "react"
 import { Clock, GitBranch, Globe } from "@/components/icons"
 import { SourcePull } from "@/components/git/glyphs"
 import { describeCron } from "@/lib/cron"
 import { cn } from "@/lib/utils"
+import { useArrivals } from "@/hooks/use-arrivals"
 import type {
   DeploymentGitWatch,
   DeploymentPreview,
@@ -34,17 +35,24 @@ type Ref = RefObject<HTMLDivElement | null>
  * of it — the production release and, where a webhook asks for them, the
  * pull-request previews — on the other.
  *
- * Framed, because it is a picture (§2's exception for the deployment section's
- * pictures), in the wiring vocabulary the Credentials, Notifications and
- * General pictures already speak: a pulse travels along a line while that
- * sender is on, the line stands still while it is paused or deploys only by
- * hand, and a dashed ring stands where a kind of sender could be — pressing
- * it opens that sheet. Colour comes only from the senders' own logos, the
- * project's favicon and the brand pulse.
+ * On the page's own ground over the dot grid (`SettingPicture`), in the
+ * wiring vocabulary the Credentials, Notifications and General pictures
+ * already speak: a pulse travels along a line while that sender is on, the
+ * line stands still while it is paused or deploys only by hand, and a dashed
+ * ring stands where a kind of sender could be — pressing it opens that sheet.
+ * Colour comes only from the senders' own logos, the project's favicon and
+ * the brand pulse.
  *
  * Senders are named by what they watch — a repository and branch, a cron
  * sentence — never by the name the list below gives them: the list is where
  * a webhook or a schedule is found by name, and this is a picture of them.
+ *
+ * A ring is its mark and its word, with no line under it about what such a
+ * sender is: the sections below open on the same kinds as cards that say it,
+ * and a picture of a project with nothing wired was mostly those captions.
+ * What changes in place — a sender switched on or off, the release that went
+ * live, how many previews are open — rises into its new state rather than
+ * being repainted, and a sender added from its sheet rises in.
  */
 export function AutomationWiring({
   deployment,
@@ -88,6 +96,14 @@ export function AutomationWiring({
   ]
   const open = previews.filter((preview) => preview.state === "open").length
   const live = Boolean(deployment.liveReleaseId)
+  // A sender rises only when it was not drawn a moment ago — one added from
+  // its sheet, or a list that landed after the picture — and not each one as
+  // the picture itself rises in with the page, which moved them twice.
+  const arrived = useArrivals([
+    ...(watching ? ["push"] : []),
+    ...triggers.map((trigger) => `trigger-${trigger.id}`),
+    ...schedules.map((schedule) => `schedule-${schedule.id}`),
+  ])
 
   const sources: React.ReactNode[] = []
   if (watching) {
@@ -96,6 +112,7 @@ export function AutomationWiring({
         key="push"
         containerRef={container}
         toRef={project}
+        arrived={arrived.has("push")}
         carries={watching.automatic && watching.status === "watching"}
         mark={
           <WireMark tone="logo" size="md">
@@ -126,6 +143,7 @@ export function AutomationWiring({
         key={`trigger-${trigger.id}`}
         containerRef={container}
         toRef={project}
+        arrived={arrived.has(`trigger-${trigger.id}`)}
         carries={trigger.enabled}
         delay={(trigger.id % 4) * 0.35}
         mark={
@@ -143,14 +161,9 @@ export function AutomationWiring({
             "any signed request"
           )
         }
-        // A hook with no repository is already "any signed request".
-        hint={
-          viaApp(trigger)
-            ? "through the GitHub App"
-            : trigger.config.repository
-              ? "signed"
-              : undefined
-        }
+        // Only the exception is said: every other webhook is signed, so
+        // "signed" under each one told the reader nothing about any of them.
+        hint={viaApp(trigger) ? "through the GitHub App" : undefined}
       />,
     )
   }
@@ -160,6 +173,7 @@ export function AutomationWiring({
         key={`schedule-${schedule.id}`}
         containerRef={container}
         toRef={project}
+        arrived={arrived.has(`schedule-${schedule.id}`)}
         carries={schedule.enabled}
         delay={(schedule.id % 4) * 0.35 + 0.2}
         mark={
@@ -188,7 +202,6 @@ export function AutomationWiring({
           </WireLink>
         }
         title={<span className="text-muted-foreground">Webhook</span>}
-        hint="a forge, a CI job, anything that signs"
       />,
     )
   }
@@ -205,7 +218,6 @@ export function AutomationWiring({
           </WireLink>
         }
         title={<span className="text-muted-foreground">Schedule</span>}
-        hint="deploy or restart on a clock"
       />,
     )
   }
@@ -214,9 +226,9 @@ export function AutomationWiring({
     <SettingPicture
       label="What deploys this project"
       containerRef={container}
-      // The frame keeps room under the row for the project's caption, which
+      // The picture keeps room under the row for the project's caption, which
       // hangs below its mark. Three senders stand taller than mark and caption
-      // together, so the room would only sit the picture high in its frame.
+      // together, so the room would only leave a band of grid under them.
       className={sources.length >= 3 ? "lg:[&_ol]:pb-0" : undefined}
       lines={
         <>
@@ -252,8 +264,8 @@ export function AutomationWiring({
                     <GitBranch />
                   </WirePlaceholder>
                 }
+                // The head over the picture says what deploys it instead.
                 title={<span className="text-muted-foreground">Nothing yet</span>}
-                hint="it deploys when you press Deploy"
               />,
             ]
       }
@@ -288,7 +300,11 @@ export function AutomationWiring({
                 {hostOf(deployment.endpoint) ?? (deployment.endpoint || "private")}
               </span>
             }
-            hint={release ? `Release #${release.number} live` : live ? "live" : "no release yet"}
+            hint={
+              <Swap>
+                {release ? `Release #${release.number} live` : live ? "live" : "no release yet"}
+              </Swap>
+            }
           />
           <WireNode
             nodeRef={pulls}
@@ -308,13 +324,13 @@ export function AutomationWiring({
             eyebrow="Pull requests"
             title={
               previewing.length > 0 ? (
-                `${open} preview${open === 1 ? "" : "s"} open`
+                <Swap>{`${open} preview${open === 1 ? "" : "s"} open`}</Swap>
               ) : (
                 <span className="text-muted-foreground">No previews</span>
               )
             }
             hint={
-              previewing.length > 0 ? (
+              previewing.length > 0 && (
                 <span className="font-mono break-words">
                   {patterns.length > 0
                     ? patterns.map((pattern, index) => (
@@ -325,8 +341,6 @@ export function AutomationWiring({
                       ))
                     : "no address"}
                 </span>
-              ) : (
-                "one environment per pull request"
               )
             }
           />
@@ -340,10 +354,16 @@ export function AutomationWiring({
  * One sender on the picture's start edge and its line to the project: a
  * pulse while it is on and carrying, still while paused or manual, dotted for
  * a ring that holds nothing yet.
+ *
+ * Its mark and words rise when it arrives, and the mark again when it is
+ * switched on or off. The motion is on what the node holds and never on the
+ * node itself: the lines are measured from the node's box, and a box caught
+ * four pixels into its rise drew a line that ended beside the mark.
  */
 function Source({
   containerRef,
   toRef,
+  arrived = false,
   carries,
   placeholder,
   delay = 0,
@@ -354,6 +374,8 @@ function Source({
 }: {
   containerRef: Ref
   toRef: Ref
+  /** Not drawn a moment ago. */
+  arrived?: boolean
   carries?: boolean
   placeholder?: boolean
   delay?: number
@@ -363,6 +385,11 @@ function Source({
   hint?: React.ReactNode
 }) {
   const node = useRef<HTMLDivElement>(null)
+  // Whether it has been switched since it was drawn, adjusted during render
+  // as `useArrivals` is: the mark's first state is not news, its next ones are.
+  const [drawn, setDrawn] = useState({ carries, switched: false })
+  if (drawn.carries !== carries) setDrawn({ carries, switched: true })
+  const words = cn("block", arrived && "animate-rise")
   return (
     <>
       <AnimatedBeam
@@ -377,12 +404,34 @@ function Source({
       <WireNode
         nodeRef={node}
         align="end"
-        mark={mark}
-        eyebrow={eyebrow}
-        title={title}
-        hint={hint}
+        mark={
+          <span
+            key={carries ? "on" : "off"}
+            className={cn("flex", (arrived || drawn.switched) && "animate-rise")}
+          >
+            {mark}
+          </span>
+        }
+        eyebrow={eyebrow && <span className={words}>{eyebrow}</span>}
+        title={<span className={words}>{title}</span>}
+        hint={hint && <span className={words}>{hint}</span>}
       />
     </>
+  )
+}
+
+/**
+ * Words that change in place — the release that went live, how many previews
+ * are open — rising into the new ones rather than being repainted (§11). The
+ * first words are not news; they arrive with the picture.
+ */
+function Swap({ children }: { children: string }) {
+  const [shown, setShown] = useState({ words: children, changed: false })
+  if (shown.words !== children) setShown({ words: children, changed: true })
+  return (
+    <span key={children} className={cn("block", shown.changed && "animate-rise")}>
+      {children}
+    </span>
   )
 }
 

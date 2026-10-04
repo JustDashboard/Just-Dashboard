@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import {
   deployment,
+  expectSaved,
   forkPullRequest,
   healthyOperations,
   json,
@@ -11,6 +12,7 @@ import {
   projectPullRequests,
   pullRequest,
   run,
+  saveSettings,
   user,
 } from "./deploy-fixture"
 import type { DeploymentRuntimeServices } from "../../src/lib/types"
@@ -1050,8 +1052,8 @@ test("a setting saved on its own page marks that page in the rail without a relo
 
   const runtimeCard = page.getByRole("form", { name: "Runtime" })
   await runtimeCard.getByLabel("Memory limit").fill("512")
-  await runtimeCard.getByRole("button", { name: "Save" }).click()
-  await expect(page.getByText("Runtime settings saved")).toBeVisible()
+  await saveSettings(page)
+  await expectSaved(page)
   await expect(rail.getByRole("img", { name: "Changes pending" })).toBeVisible({ timeout: 15_000 })
 })
 
