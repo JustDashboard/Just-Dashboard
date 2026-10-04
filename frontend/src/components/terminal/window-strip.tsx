@@ -5,6 +5,7 @@ import { Cross, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalWindow as Window } from "@/lib/types"
 import { windowActivity, windowLabel, windowProgram } from "@/lib/terminal-activity"
+import { TERMINAL_WINDOW_DRAG } from "@/lib/terminal-layout"
 import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
@@ -20,6 +21,8 @@ export function WindowStrip({
   newDisabled,
   onClose,
   onReorder,
+  onDragStart,
+  onDragEnd,
 }: {
   windows: Window[]
   activeId: string | null
@@ -32,12 +35,17 @@ export function WindowStrip({
   newDisabled?: boolean
   onClose: (id: string) => void
   onReorder: (id: string, position: number) => void
+  onDragStart: (id: string) => void
+  onDragEnd: () => void
 }) {
   const [dropAt, setDropAt] = useState<number | null>(null)
   return (
     <div
       className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
       aria-label="Terminal windows"
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropAt(null)
+      }}
     >
       {windows.map((window, position) => (
         <WindowTab
@@ -50,16 +58,23 @@ export function WindowStrip({
           onSelect={() => onSelect(window.id)}
           onClose={() => onClose(window.id)}
           onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
             event.preventDefault()
+            event.dataTransfer.dropEffect = "move"
             setDropAt(position)
           }}
           onDrop={(event) => {
             event.preventDefault()
             setDropAt(null)
-            const id = event.dataTransfer.getData("application/x-jd-terminal-window")
-            if (id && id !== window.id) onReorder(id, position)
+            const id = event.dataTransfer.getData(TERMINAL_WINDOW_DRAG)
+            if (id && id !== window.id) onReorder(id, window.index)
+            onDragEnd()
           }}
-          onDragEnd={() => setDropAt(null)}
+          onDragStart={() => onDragStart(window.id)}
+          onDragEnd={() => {
+            setDropAt(null)
+            onDragEnd()
+          }}
         />
       ))}
       <IconAction
@@ -84,6 +99,7 @@ function WindowTab({
   onClose,
   onDragOver,
   onDrop,
+  onDragStart,
   onDragEnd,
 }: {
   window: Window
@@ -95,6 +111,7 @@ function WindowTab({
   onClose: () => void
   onDragOver: (event: React.DragEvent) => void
   onDrop: (event: React.DragEvent) => void
+  onDragStart: () => void
   onDragEnd: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -127,7 +144,8 @@ function WindowTab({
       data-disconnected={disconnected || undefined}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move"
-        event.dataTransfer.setData("application/x-jd-terminal-window", window.id)
+        event.dataTransfer.setData(TERMINAL_WINDOW_DRAG, window.id)
+        onDragStart()
       }}
       onDragOver={onDragOver}
       onDrop={onDrop}

@@ -190,7 +190,10 @@ cannot be set up, new sessions are refused with a reason instead of opening a te
 on restart. Existing held sessions remain running. Rebooting the Linux server ends running terminals.
 
 Split a terminal above, below, left or right, then drag the divider to resize it. Click a pane to
-move typing focus; the Keyboard shortcuts menu lists editable split and focus bindings. Windows
+move typing focus; the Keyboard shortcuts menu lists editable split and focus bindings. Split panes
+share one window tab. Each pane's **Open as separate window** button returns it to its own tab without
+restarting its shell. Drag a window tab onto a terminal to split at the hovered edge; a live overlay
+previews the placement. The Split terminal menu can also move an existing window into a split. Windows
 retain their screens when switching tabs or sessions, and each browser remembers its split layout.
 The Codex and Claude buttons open a fresh terminal in the focused pane's current directory and run
 `codex --yolo` or `claude --dangerously-skip-permissions`. The tools must already be installed for

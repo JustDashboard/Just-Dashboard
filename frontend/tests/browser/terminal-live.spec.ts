@@ -63,11 +63,11 @@ async function drag(page: Page, divider: Locator, dx: number, dy: number, name: 
   await page.mouse.up()
 }
 
-async function evidence(page: Page, name: string) {
+async function evidence(page: Page, name: string, preservePointer = false) {
   const directory = process.env.JD_TERMINAL_EVIDENCE
   if (!directory) return
   await mkdir(directory, { recursive: true })
-  await page.mouse.move(0, 0)
+  if (!preservePointer) await page.mouse.move(0, 0)
   await page.screenshot({ path: join(directory, name), animations: "disabled" })
   // Leave each verified frame visible long enough to review in the recording.
   await page.waitForTimeout(650)
@@ -108,9 +108,18 @@ async function assertNativeGrids(page: Page, streams: Map<string, Stream>) {
   )
 }
 
-test("native PTYs inherit the live directory and resize every focused split", async ({ page }) => {
-  if (!ready) return
-  test.setTimeout(process.env.JD_TERMINAL_EVIDENCE ? 300_000 : 120_000)
+async function waitForShellPrompt(streams: Map<string, Stream>, id: string) {
+  // Socket attachment and cwd availability precede the login shell's rc
+  // files. Wait until it can accept a command, especially on a busy host.
+  await expect
+    .poll(() => (streams.get(id)?.output ?? "").replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, ""), {
+      timeout: 10_000,
+    })
+    .toMatch(/\r?\n> /)
+}
+
+async function liveTerminal(page: Page) {
+  if (!ready) throw new Error("The isolated live terminal harness is unavailable")
   const streams = new Map<string, Stream>()
   const creates: Creation[] = []
   const errors: string[] = []
@@ -194,6 +203,13 @@ test("native PTYs inherit the live directory and resize every focused split", as
   })
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/terminal")
+  return { streams, creates, errors }
+}
+
+test("native PTYs inherit the live directory and resize every focused split", async ({ page }) => {
+  if (!ready) return
+  test.setTimeout(process.env.JD_TERMINAL_EVIDENCE ? 300_000 : 120_000)
+  const { streams, creates, errors } = await liveTerminal(page)
   const source = ready.windowId
   const currentDir = join(ready.cwd, "working folder")
   await expect(pane(page, source).locator(".xterm-helper-textarea")).toBeFocused({
@@ -251,6 +267,7 @@ test("native PTYs inherit the live directory and resize every focused split", as
     const top = creates[2].id
     await expect(pane(page, top).locator(".xterm-helper-textarea")).toBeFocused()
     await expect.poll(() => cwd(top), { timeout: 10_000 }).toBe(currentDir)
+    await waitForShellPrompt(streams, top)
     await page.keyboard.type(ready.tuiCommand)
     await page.keyboard.press("Enter")
     await expect.poll(() => streams.get(top)?.output).toContain("Command: jd-resize-tui")
@@ -259,6 +276,7 @@ test("native PTYs inherit the live directory and resize every focused split", as
     const bottom = creates[3].id
     await expect(pane(page, bottom).locator(".xterm-helper-textarea")).toBeFocused()
     await expect.poll(() => cwd(bottom), { timeout: 10_000 }).toBe(currentDir)
+    await waitForShellPrompt(streams, bottom)
     await page.keyboard.type(ready.tuiCommand)
     await page.keyboard.press("Enter")
     await expect.poll(() => streams.get(bottom)?.output).toContain("Command: jd-resize-tui")
@@ -321,6 +339,109 @@ test("native PTYs inherit the live directory and resize every focused split", as
     await page.setViewportSize({ width: 390, height: 844 })
     await assertNativeGrids(page, streams)
     await evidence(page, "native-mobile.png")
+    expect(errors).toEqual([])
+  } finally {
+    for (const created of creates) {
+      await page.request.delete(
+        `${ready.url}/api/v1/terminal/${ready.workspaceId}/windows/${created.id}`,
+      )
+    }
+    if (!page.isClosed() && (await pane(page, source).isVisible())) {
+      await focusPane(page, source)
+      await page.keyboard.press("Control+C")
+    }
+  }
+})
+
+test("native panes detach and dock through live directional overlays", async ({ page }) => {
+  if (!ready) return
+  test.setTimeout(180_000)
+  const { streams, creates, errors } = await liveTerminal(page)
+  const source = ready.windowId
+  const strip = page.getByLabel("Terminal windows")
+  const startTUI = async (id: string) => {
+    await expect(pane(page, id).locator(".xterm-helper-textarea")).toBeFocused()
+    await waitForShellPrompt(streams, id)
+    await page.keyboard.type(ready.tuiCommand)
+    await page.keyboard.press("Enter")
+    await expect.poll(() => streams.get(id)?.output).toContain("Command: jd-resize-tui")
+  }
+  const hoverDrop = async (
+    dragged: string,
+    target: string,
+    direction: "left" | "right" | "up" | "down",
+    start = true,
+  ) => {
+    if (start) {
+      const tab = (await strip.locator(`[data-window="${dragged}"]`).boundingBox())!
+      await page.mouse.move(tab.x + tab.width / 3, tab.y + tab.height / 2)
+      await page.mouse.down()
+      await page.mouse.move(tab.x + tab.width / 3 + 12, tab.y + tab.height / 2 + 12, {
+        steps: 4,
+      })
+    }
+    const box = (await pane(page, target).boundingBox())!
+    const x = direction === "left" ? 0.1 : direction === "right" ? 0.9 : 0.5
+    const y = direction === "up" ? 0.1 : direction === "down" ? 0.9 : 0.5
+    await page.mouse.move(box.x + box.width * x, box.y + box.height * y, { steps: 16 })
+    await page.mouse.move(box.x + box.width * x + 1, box.y + box.height * y + 1)
+    await expect(pane(page, target).locator(`[data-terminal-drop="${direction}"]`)).toBeVisible()
+    await evidence(page, `native-drop-overlay-${direction}.png`, true)
+  }
+  try {
+    await startTUI(source)
+    await page.keyboard.press("Control+Alt+Shift+ArrowRight")
+    await expect.poll(() => creates.length).toBe(1)
+    const split = creates[0].id
+    await startTUI(split)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(strip.locator("[data-window]")).toHaveCount(1)
+    await expect(strip.locator(`[data-window="${split}"]`)).toHaveCount(0)
+    await assertNativeGrids(page, streams)
+    await evidence(page, "native-split-hidden-from-windows.png")
+
+    await pane(page, split)
+      .getByRole("button", { name: /as separate window$/ })
+      .click()
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(1)
+    await expect(strip.locator("[data-window]")).toHaveCount(2)
+    await expect(strip.locator(`[data-window="${split}"]`)).toHaveAttribute("data-active", "true")
+    await assertNativeGrids(page, streams)
+    await evidence(page, "native-detached-window.png")
+    await strip.locator(`[data-window="${source}"]`).getByRole("button").first().click()
+
+    await hoverDrop(split, source, "left")
+    for (const direction of ["up", "right", "down"] as const) {
+      await hoverDrop(split, source, direction, false)
+    }
+    await page.mouse.up()
+    await expect(page.locator("[data-terminal-drop]")).toHaveCount(0)
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(strip.locator("[data-window]")).toHaveCount(1)
+    await assertNativeGrids(page, streams)
+    await page.keyboard.type("live-dropped-below")
+    await expect.poll(() => streams.get(split)?.output).toContain("Last input: live-dropped-below")
+    expect(streams.get(source)?.input).not.toContain("live-dropped-below")
+    await evidence(page, "native-dropped-below.png")
+
+    // Detach the original group owner as well, then dock it beside the
+    // surviving window. Both shells must keep their live TUI and socket.
+    await pane(page, source)
+      .getByRole("button", { name: /as separate window$/ })
+      .click()
+    await expect(strip.locator("[data-window]")).toHaveCount(2)
+    await strip.locator(`[data-window="${split}"]`).getByRole("button").first().click()
+    await hoverDrop(source, split, "right")
+    await page.mouse.up()
+    await expect(page.locator("[data-terminal-window]:visible")).toHaveCount(2)
+    await expect(strip.locator("[data-window]")).toHaveCount(1)
+    await assertNativeGrids(page, streams)
+    await page.keyboard.type("live-dropped-right")
+    await expect.poll(() => streams.get(source)?.output).toContain("Last input: live-dropped-right")
+    expect(streams.get(split)?.input).not.toContain("live-dropped-right")
+    await evidence(page, "native-dropped-right.png")
+    for (const id of [source, split]) expect(streams.get(id)?.attaches).toBe(1)
+    expect(creates).toHaveLength(1)
     expect(errors).toEqual([])
   } finally {
     for (const created of creates) {

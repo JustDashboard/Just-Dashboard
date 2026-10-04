@@ -11,6 +11,7 @@ import {
   Copy,
   Cross,
   Download,
+  External,
   Command,
   FolderOpen,
   Fullscreen,
@@ -43,16 +44,22 @@ import { Page } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { XtermPane, type XtermActions } from "@/components/xterm-pane"
 import { SplitDivider } from "@/components/terminal/split-divider"
+import { SplitDropOverlay } from "@/components/terminal/split-drop-overlay"
 import { ProgramMark, ActivityMark } from "@/components/terminal/activity-mark"
 import { windowLabel, windowProgram, windowActivity } from "@/lib/terminal-activity"
 import {
   canSplit,
+  detachWindow,
+  dockLayout,
+  dropDirection,
   layoutGeometry,
+  layoutTab,
   leaves,
   neighbour,
   reconcileLayouts,
   resizeLayout,
   splitLayout,
+  TERMINAL_WINDOW_DRAG,
   type TerminalLayout,
   type SplitDirection,
 } from "@/lib/terminal-layout"
@@ -62,6 +69,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SessionRail } from "@/components/terminal/session-rail"
@@ -120,6 +130,12 @@ export default function TerminalPage() {
   const draftLayoutsRef = useRef<Record<string, TerminalLayout[]>>({})
   const [draftLayouts, setDraftLayouts] = useState<Record<string, TerminalLayout[]>>({})
   const [creating, setCreating] = useState(false)
+  const [draggedWindow, setDraggedWindow] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    window: string
+    direction: SplitDirection
+    blocked: boolean
+  } | null>(null)
   const creatingRef = useRef(false)
   const gridRef = useRef<HTMLDivElement>(null)
   const actionsRef = useRef<XtermActions | null>(null)
@@ -269,6 +285,10 @@ export default function TerminalPage() {
   )
   const activeLayout = groups.find((tree) => leaves(tree).includes(activeWindow?.id ?? ""))
   const visibleWindows = activeLayout ? leaves(activeLayout) : []
+  const tabIds = new Set(groups.map(layoutTab))
+  const tabWindows = windowList.filter((window) => tabIds.has(window.id))
+  const activeTab = activeLayout ? layoutTab(activeLayout) : null
+  const draggedLayout = groups.find((tree) => layoutTab(tree) === draggedWindow)
   for (const id of visibleWindows) {
     if (active && !openWindows.some((item) => item.id === id))
       openWindows.push({ id, sessionId: active })
@@ -334,6 +354,57 @@ export default function TerminalPage() {
   }
   const showWindow = (id: string) => {
     if (active) setRememberedWindows((windows) => ({ ...windows, [active]: id }))
+  }
+  const clearWindowDrag = () => {
+    setDraggedWindow(null)
+    setDropTarget(null)
+  }
+  useEffect(() => {
+    const clear = () => {
+      setDraggedWindow(null)
+      setDropTarget(null)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clear()
+    }
+    window.addEventListener("dragend", clear)
+    window.addEventListener("drop", clear)
+    window.addEventListener("keydown", onKey)
+    window.addEventListener("blur", clear)
+    return () => {
+      window.removeEventListener("dragend", clear)
+      window.removeEventListener("drop", clear)
+      window.removeEventListener("keydown", onKey)
+      window.removeEventListener("blur", clear)
+    }
+  }, [active])
+  const updateLayouts = (change: (current: TerminalLayout[]) => TerminalLayout[]) => {
+    if (!active) return
+    const next = change(draftLayoutsRef.current[active] ?? groups)
+    setLayouts((previous) => ({ ...previous, [active]: next }))
+    // A divider may still hold a pointer while a menu moves a pane. Its final
+    // release must commit the updated membership as well as the ratio.
+    if (draftLayoutsRef.current[active]) {
+      draftLayoutsRef.current = { ...draftLayoutsRef.current, [active]: next }
+      setDraftLayouts(draftLayoutsRef.current)
+    }
+  }
+  const detachPane = (id: string) => {
+    updateLayouts((current) => detachWindow(current, id))
+    showWindow(id)
+    focusPaneRef.current?.()
+  }
+  const dockWindow = (source: string, target: string, direction: SplitDirection) => {
+    const added = groups.find((tree) => layoutTab(tree) === source)
+    if (
+      !added ||
+      leaves(added).includes(target) ||
+      !canSplit(geometry.panes[target], direction, added)
+    )
+      return
+    updateLayouts((current) => dockLayout(current, source, target, direction, crypto.randomUUID()))
+    showWindow(source)
+    focusPaneRef.current?.()
   }
 
   // Closing a shell asks nothing first, for the same reason the API route
@@ -490,16 +561,16 @@ export default function TerminalPage() {
     "window.new": () => void openWindow(),
     "window.next": () => {
       const next = step(
-        windowList,
-        windowList.findIndex((item) => item.id === activeWindow?.id),
+        tabWindows,
+        tabWindows.findIndex((item) => item.id === activeTab),
         1,
       )
       if (next) showWindow(next.id)
     },
     "window.prev": () => {
       const previous = step(
-        windowList,
-        windowList.findIndex((item) => item.id === activeWindow?.id),
+        tabWindows,
+        tabWindows.findIndex((item) => item.id === activeTab),
         -1,
       )
       if (previous) showWindow(previous.id)
@@ -521,7 +592,7 @@ export default function TerminalPage() {
   }
   for (const n of [1, 2, 3, 4, 5, 6, 7, 8, 9] as const) {
     navigation[`session.${n}`] = () => sessions[n - 1] && select(sessions[n - 1])
-    navigation[`window.${n}`] = () => windowList[n - 1] && showWindow(windowList[n - 1].id)
+    navigation[`window.${n}`] = () => tabWindows[n - 1] && showWindow(tabWindows[n - 1].id)
   }
   useEffect(() => {
     navigationRef.current = navigation
@@ -588,18 +659,20 @@ export default function TerminalPage() {
       />
       {active ? (
         <WindowStrip
-          windows={windowList}
-          activeId={activeWindow?.id ?? null}
+          windows={tabWindows}
+          activeId={activeTab}
           activity={activity}
           disconnected={disconnectedWindows}
           onSelect={(id) => {
-            showWindow(id)
+            if (id !== activeTab) showWindow(id)
             focusPaneRef.current?.()
           }}
           onReorder={(id, position) => updateWindow(id, { position }, "Could not move that window")}
           onNew={() => void openWindow()}
           newDisabled={creating || !data.persistent}
           onClose={closeWindow}
+          onDragStart={setDraggedWindow}
+          onDragEnd={clearWindowDrag}
         />
       ) : (
         <span className="min-w-0 flex-1 truncate px-2 text-xs font-medium text-muted-foreground">
@@ -661,6 +734,40 @@ export default function TerminalPage() {
                 <Icon className="size-4" /> Split {direction}
               </DropdownMenuItem>
             ))}
+            {tabWindows.some((window) => window.id !== activeTab) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Move window into split</DropdownMenuLabel>
+                {tabWindows
+                  .filter((window) => window.id !== activeTab)
+                  .map((window) => (
+                    <DropdownMenuSub key={window.id}>
+                      <DropdownMenuSubTrigger>
+                        {windowLabel(window, activity[window.id])}
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {(["left", "right", "up", "down"] as const).map((direction) => (
+                          <DropdownMenuItem
+                            key={direction}
+                            disabled={
+                              !canSplit(
+                                geometry.panes[activeWindow?.id ?? ""],
+                                direction,
+                                groups.find((tree) => layoutTab(tree) === window.id),
+                              )
+                            }
+                            onSelect={() =>
+                              activeWindow && dockWindow(window.id, activeWindow.id, direction)
+                            }
+                          >
+                            Split {direction}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ))}
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
         <DropdownMenu>
@@ -814,6 +921,53 @@ export default function TerminalPage() {
                   onFocusCapture={() => {
                     if (!focused && rect) showWindow(window.id)
                   }}
+                  onDragOverCapture={(event) => {
+                    if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    if (!rect || !draggedLayout || leaves(draggedLayout).includes(window.id)) {
+                      event.dataTransfer.dropEffect = "none"
+                      setDropTarget(null)
+                      return
+                    }
+                    const box = event.currentTarget.getBoundingClientRect()
+                    const direction = dropDirection(
+                      { x: box.x, y: box.y, width: box.width, height: box.height },
+                      event.clientX,
+                      event.clientY,
+                    )
+                    if (!direction) return
+                    const blocked = !canSplit(rect, direction, draggedLayout)
+                    event.dataTransfer.dropEffect = blocked ? "none" : "move"
+                    setDropTarget((previous) =>
+                      previous?.window === window.id &&
+                      previous.direction === direction &&
+                      previous.blocked === blocked
+                        ? previous
+                        : { window: window.id, direction, blocked },
+                    )
+                  }}
+                  onDragLeaveCapture={(event) => {
+                    if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+                      setDropTarget((previous) =>
+                        previous?.window === window.id ? null : previous,
+                      )
+                  }}
+                  onDropCapture={(event) => {
+                    if (!event.dataTransfer.types.includes(TERMINAL_WINDOW_DRAG)) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    const source = event.dataTransfer.getData(TERMINAL_WINDOW_DRAG)
+                    const box = event.currentTarget.getBoundingClientRect()
+                    const direction = dropDirection(
+                      { x: box.x, y: box.y, width: box.width, height: box.height },
+                      event.clientX,
+                      event.clientY,
+                    )
+                    if (source === draggedWindow && direction)
+                      dockWindow(source, window.id, direction)
+                    clearWindowDrag()
+                  }}
                 >
                   <XtermPane
                     flush
@@ -845,6 +999,15 @@ export default function TerminalPage() {
                               disconnected={disconnectedWindows.has(window.id)}
                             />
                           </button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`Open pane ${label} as separate window`}
+                            title="Open as separate window"
+                            onClick={() => detachPane(window.id)}
+                          >
+                            <External className="size-3.5" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon-sm"
@@ -884,6 +1047,12 @@ export default function TerminalPage() {
                     <span
                       aria-hidden="true"
                       className="pointer-events-none absolute inset-0 z-20 ring-1 ring-ring ring-inset"
+                    />
+                  )}
+                  {rect && dropTarget?.window === window.id && (
+                    <SplitDropOverlay
+                      direction={dropTarget.direction}
+                      blocked={dropTarget.blocked}
                     />
                   )}
                 </div>
