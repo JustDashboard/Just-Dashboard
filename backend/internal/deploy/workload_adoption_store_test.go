@@ -179,7 +179,13 @@ func TestWorkloadAdoptionInitialTranslationKeepsOriginalPrivateEnvironment(t *te
 		t.Fatal(err)
 	}
 	draft = checkRecoveredDraft(t, fixture, draft)
-	result, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision})
+	ack := []string{}
+	for _, finding := range draft.Findings {
+		if finding.Severity == PreflightWarning {
+			ack = append(ack, finding.Code)
+		}
+	}
+	result, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision, AcknowledgedWarnings: ack})
 	if err != nil {
 		t.Fatal(err)
 	}
