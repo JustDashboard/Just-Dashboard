@@ -161,6 +161,90 @@ func TestRecoveredSnapshotExclusionsAreLimitedToNativeSources(t *testing.T) {
 	}
 }
 
+func TestNativeRecoveredSnapshotRunsThroughPersistedExecutionPlan(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	recovery := t.TempDir()
+	analyzer.WithRecoveryRoot(recovery)
+	writeBuildFixture(t, root, "data/state.json", `{"token":"linked-live-data"}`)
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), recovery)
+	if err != nil || len(recovered.Adoption.Blockers) != 0 {
+		t.Fatalf("recovery=%v blockers=%v", err, recovered.Adoption.Blockers)
+	}
+	fixture := newPlanningStoreFixture(t)
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-snapshot-execution", Profile: ProfileService}, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := PreflightDraft(t.Context(), draft, &preflightObserverFake{observation: HostObservation{Facilities: map[string]FacilityObservation{
+		"docker": {Available: true}, "compose": {Available: true}, "buildx": {Available: true},
+	}}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, finding := range preflight.Findings {
+		if finding.Severity == PreflightBlocked || finding.Severity == PreflightDecision {
+			t.Fatalf("native snapshot preflight blocked: %+v", finding)
+		}
+	}
+	draft, err = fixture.plans.SavePreflight(t.Context(), draft.ID, 41, false, draft.Revision, preflight)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warnings := []string{}
+	for _, finding := range draft.Findings {
+		if finding.Severity == PreflightWarning {
+			warnings = append(warnings, finding.Code)
+		}
+	}
+	adopted, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision, AcknowledgedWarnings: warnings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := NewOrchestrationStore(fixture.store)
+	run, _, err := runs.Enqueue(t.Context(), RunRequest{ProjectID: adopted.ProjectID, EnvironmentID: adopted.EnvironmentID,
+		Operation: OperationDeploy, Trigger: TriggerManual, Actor: "operator", RequestDigest: "native-snapshot-execution", PlanRevision: adopted.PlanRevision, SlotClass: SlotHeavy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runs.ExecutionPlan(t.Context(), *run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.SourceConfig.ResourceID != recovered.Source.ResourceID || plan.SourceConfig.Mode != SourceModeRecoveredSnapshot ||
+		plan.SourceIdentity.Digest != recovered.Source.ResourceID || plan.SourceIdentity.LocalPath != "" || plan.SourceIdentity.Revision != "" {
+		t.Fatalf("persisted native source lost its snapshot identity: %+v %+v", plan.SourceConfig, plan.SourceIdentity)
+	}
+	if err := validateStoredExecutionPlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	writeBuildFixture(t, root, "server.js", "throw new Error('external source changed')")
+	executor := NewNormalizedStepExecutor(runs, fixture.plans, analyzer, NewArtifactBuilder(&artifactBackendFake{}), nil, nil, nil, t.TempDir())
+	output := &recordingStepOutput{}
+	for _, key := range []StepKey{StepResolveSource, StepAcquireSource, StepPrepareContext} {
+		result := executor.Execute(t.Context(), StepExecution{Run: *run, Step: RunStep{Key: key}, Output: output})
+		if result.State != StepPassed {
+			t.Fatalf("native snapshot step %s failed: %+v", key, result)
+		}
+		if key == StepPrepareContext {
+			var evidence preparedStepEvidence
+			if err := json.Unmarshal(result.Evidence, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			content, err := os.ReadFile(filepath.Join(evidence.Source.Root, "server.js"))
+			if err != nil || strings.Contains(string(content), "external source changed") {
+				t.Fatal("execution built external edits instead of the frozen imported source")
+			}
+			if _, err := os.Stat(filepath.Join(evidence.Source.Root, "data")); !os.IsNotExist(err) {
+				t.Fatal("native execution copied linked storage into its build context")
+			}
+		}
+	}
+	plan.SourceIdentity.Digest = "sha256:" + strings.Repeat("a", 64)
+	if err := validateImmutableExecutionSource(plan); err == nil {
+		t.Fatal("mismatching recovered snapshot handle accepted for execution")
+	}
+}
+
 func TestNativePythonRecoveryPreservesInterpreterVersionAndCommand(t *testing.T) {
 	root, analyzer, candidate, capture := hostRecoveryFixture(t)
 	if err := os.Remove(filepath.Join(root, "package.json")); err != nil {

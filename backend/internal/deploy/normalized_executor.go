@@ -785,6 +785,13 @@ func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {
 	}
 	switch plan.SourceKind {
 	case SourceGit, SourceLocal:
+		if plan.SourceKind == SourceLocal && plan.SourceConfig.Mode == SourceModeRecoveredSnapshot {
+			if !recoveredSnapshotDigest(plan.SourceConfig.ResourceID) || plan.SourceIdentity.Digest != plan.SourceConfig.ResourceID ||
+				plan.SourceIdentity.Revision != "" || plan.SourceIdentity.LocalPath != "" {
+				return fmt.Errorf("%w: recovered source has no matching immutable snapshot handle", ErrInvalidPlan)
+			}
+			break
+		}
 		if plan.SourceKind == SourceLocal && plan.SourceConfig.Mode == SourceModeLocalDirectory {
 			if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) || !filepath.IsAbs(plan.SourceIdentity.LocalPath) {
 				return fmt.Errorf("%w: directory source has no immutable content digest", ErrInvalidPlan)
