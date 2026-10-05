@@ -122,9 +122,9 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 	capture.Blockers = uniqueCaptureStrings(append(capture.Blockers, append(startupBlockers, latestBlockers...)...))
 	capture.RuntimeConfigurationDigest = capture.ConfigurationDigest
 	capture.ConfigurationDigest = captureDigest(append(append([]byte(capture.ConfigurationDigest), 0), startup...))
-	if version, probeErr := ProbeCapturedInterpreter(ctx, capture); probeErr == nil {
-		capture.InterpreterVersion = version
-	}
+	// PM2's reported node_version is manager metadata, not evidence for the
+	// exact running executable. A failed fixed probe cannot authorize a recipe.
+	capture.InterpreterVersion, _ = ProbeCapturedInterpreter(ctx, capture)
 	if plan, prepareErr := PreparePM2StartupHandoff(capture, home.daemonDirectory(), namespace); prepareErr == nil {
 		capture.StartupPlan = plan
 	}
