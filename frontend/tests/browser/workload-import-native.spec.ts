@@ -273,6 +273,12 @@ test("imports the real selected stack without changing its containers", async ({
     await expect(storageList).toContainText("worker")
     await expect(storageList).toContainText("/www")
     await expect(storageList).toContainText("read-only")
+    await storageList.scrollIntoViewIfNeeded()
+    await page.screenshot({
+      path: join(output, "native-storage-1280.png"),
+      fullPage: true,
+      animations: "disabled",
+    })
   }
   await expect(usage).toBeVisible()
   await usage.scrollIntoViewIfNeeded()
