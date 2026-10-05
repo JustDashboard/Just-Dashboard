@@ -922,7 +922,7 @@ only renderer/executor/validation authority for their feature.
   server, and the answer carries neither a value nor a digest. It is audited under an action of its
   own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
   import it did not perform. What the import refuses as a whole — a
-  line the parser cannot read past, a bad sensitivity or scope, a reference that would not resolve —
+  line the parser cannot read past or a bad sensitivity or scope —
   is refused with the import's own error; a refusal that belongs to one name is that name's verdict,
   so every other line can still be read. `dryRun` must parse as a boolean, because a preview that
   failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and
@@ -1173,14 +1173,24 @@ only renderer/executor/validation authority for their feature.
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
   batched call. Every section carries its own availability, so a host without nginx or Backups renders
-  named unavailable evidence rather than an empty success. A domain row names who issued its
+  named unavailable evidence rather than an empty success. Compose storage comes from exact live
+  release containers rather than aggregate plan overrides: actual volume names and bind paths retain
+  read-only flags, service names and container IDs, including shared replica mounts. This is a
+  read-only enrichment of the dependency inventory, bounded to 128 containers and ten seconds;
+  missing or mismatched Docker evidence reads unavailable rather than verified empty storage.
+  Native runtime observations prefer the current live release over historical rollback rows for the
+  same manager identity while retaining all instances from its capture. A domain row names who issued its
   certificate (`certificateIssuer`, the issuer's common name — `R10`, `E6` for Let's Encrypt — read
   from the same certificate as its name and days left), so the issuer is observed rather than
   inferred from how the domain is owned. Imported external proxy bindings are read from the live
   snapshot's server-owned `existing_proxy_route` dependencies and verified through the original
   proxy reader. Each row retains its binding ID, path and exact service; private network routes are
   not mapped to every published service. A verified link reads `served` with linked ownership;
-  unavailable or changed evidence reads `unavailable` with an explicit detail. External HTTPS stays
+  unavailable or changed evidence reads `unavailable` with an explicit detail. An unverified known
+  manager with no authoritative hostname makes domain evidence unavailable rather than claiming
+  there is no public domain. Runtime maps and lists retain distinct hostname/path/service bindings
+  and exact storage owners; an absent explicit owner never falls back to a different service.
+  External HTTPS stays
   unassessed by this summary: it does not claim a dashboard certificate, issue one or invoke route
   handoff. These links bypass the generic dependency inventory. A domain covered by the copy a Docker Caddy release kept reads
   `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the

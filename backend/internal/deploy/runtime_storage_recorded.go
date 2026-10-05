@@ -62,7 +62,7 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeMounts(ctx context.Context, run
 			if mount.Destination == "" || !filepath.IsAbs(mount.Destination) {
 				return nil, ErrRuntimeUnavailable
 			}
-			key := fmt.Sprintf("%s\x00%s\x00%s\x00%t", service.Service, source, mount.Destination, mount.RW)
+			key := fmt.Sprintf("%s\x00%s\x00%s\x00%s\x00%t", service.ContainerID, service.Service, source, mount.Destination, mount.RW)
 			if seen[key] {
 				continue
 			}
@@ -84,7 +84,10 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeMounts(ctx context.Context, run
 		if a.Target != b.Target {
 			return a.Target < b.Target
 		}
-		return a.Source < b.Source
+		if a.Source != b.Source {
+			return a.Source < b.Source
+		}
+		return a.ContainerID < b.ContainerID
 	})
 	return result, nil
 }

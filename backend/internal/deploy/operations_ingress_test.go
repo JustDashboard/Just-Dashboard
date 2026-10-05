@@ -112,3 +112,20 @@ func TestOperationsDoNotInventDomainForUnassociatedManagerHint(t *testing.T) {
 		t.Fatal("manager presence became a hostname route", result)
 	}
 }
+
+func TestOperationsUnverifiedManagerCannotClaimNoExistingDomain(t *testing.T) {
+	binding := proxysvc.ExistingIngressBinding{ID: "unverified-manager", Owner: "Existing proxy", Status: "unverified", Continuity: "unverified"}
+	result := observeReleaseDomainRoutes(t.Context(), OperationsOwners{}, operationsIngressSnapshot(t, []proxysvc.ExistingIngressBinding{binding}), 1)
+	if result.Status != statusUnavailable || result.Reason == "" || len(result.Domains) != 0 {
+		t.Fatal("unknown active proxy evidence became verified empty domains", result)
+	}
+}
+
+func TestOperationsNamedRouteDoesNotHideUnverifiedManager(t *testing.T) {
+	unknown := proxysvc.ExistingIngressBinding{ID: "unverified-manager", Owner: "Existing proxy", Status: "unverified", Continuity: "unverified"}
+	observer := &operationsIngressObserver{countingProxyObserver: &countingProxyObserver{}}
+	result := observeReleaseDomainRoutes(t.Context(), OperationsOwners{Proxy: observer}, operationsIngressSnapshot(t, []proxysvc.ExistingIngressBinding{linkedIngressFixture(), unknown}), 1)
+	if result.Status != statusUnavailable || result.Reason == "" || len(result.Domains) != 1 || result.Domains[0].Route != "served" {
+		t.Fatal("a verified route concealed another unknown proxy manager", result)
+	}
+}

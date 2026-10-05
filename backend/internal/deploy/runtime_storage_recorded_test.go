@@ -84,3 +84,17 @@ func TestRecordedComposeStorageRefusesMissingOrMismatchedEvidence(t *testing.T) 
 		t.Fatal("an absent storage adapter became verified empty Compose storage")
 	}
 }
+
+func TestRecordedComposeStorageRetainsSharedReplicaOwners(t *testing.T) {
+	reader := &storageContainerReader{details: map[string]*dockerx.ContainerDetail{}}
+	runtime := RuntimeServices{Status: statusAvailable}
+	for _, id := range []string{"web-2", "web-1"} {
+		reader.details[id] = &dockerx.ContainerDetail{Container: dockerx.Container{ID: id}, Mounts: []dockerx.MountPoint{{Type: "volume", Name: "shared", Destination: "/data", RW: true}}}
+		runtime.Services = append(runtime.Services, RuntimeService{ContainerID: id, Service: "web", Manager: "docker", ReleaseID: 9, LiveRelease: true})
+	}
+	owner := NewRecordedRuntimeObserver(nil, nil, reader, nil)
+	mounts, err := owner.RecordedRuntimeMounts(t.Context(), runtime, 9)
+	if err != nil || len(mounts) != 2 || mounts[0].ContainerID != "web-1" || mounts[1].ContainerID != "web-2" {
+		t.Fatalf("shared replica storage lost an exact owner: mounts=%+v error=%v", mounts, err)
+	}
+}

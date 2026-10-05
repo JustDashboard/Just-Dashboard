@@ -20,8 +20,24 @@ func (f *countingNativeInstances) ObserveNativeBaseline(_ context.Context, runti
 }
 
 func TestRecordedNativeObservationPrefersLiveRollbackAndKeepsEveryInstance(t *testing.T) {
-	fixture, original := liveOperationsFixture(t)
-	if _, err := fixture.base.DB.Exec(`UPDATE deploy_release_runtimes SET kind='pm2',runtime_id='owned-app',state='stopped' WHERE release_id=?`, original.Release.ID); err != nil {
+	fixture := newReleaseStoreFixture(t)
+	plan := RuntimePlanConfig{Strategy: StrategyStopFirst}
+	fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), plan)
+	run, lease := fixture.claimedRun(t, 1)
+	baseline := ReleaseRuntimeInput{Kind: "pm2", RuntimeID: "owned-app", Metadata: mustJSON(NativeBaselineMetadata{
+		Version: 1, Manager: "pm2", ConfigurationDigest: strings.Repeat("a", 64),
+	})}
+	original, err := fixture.runs.CreateCandidateRelease(t.Context(), *run, lease.Token, CandidateReleaseInput{
+		RuntimeSnapshot: mustJSON(runtimeReleaseSnapshot{Version: 1, Plan: plan, NativeBaseline: &baseline}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline.ReleaseID = original.Release.ID
+	if _, err := fixture.runs.RecordCandidateRuntime(t.Context(), *run, lease.Token, baseline); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.base.DB.Exec(`UPDATE deploy_release_runtimes SET state='stopped' WHERE release_id=?`, original.Release.ID); err != nil {
 		t.Fatal(err)
 	}
 	result, err := fixture.base.DB.Exec(`INSERT INTO deploy_releases(project_id,environment_id,release_number,state,created_at) VALUES(?,?,2,'live',?)`, fixture.projectID, fixture.envID, fixture.now.Unix())

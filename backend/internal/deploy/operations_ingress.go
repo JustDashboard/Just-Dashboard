@@ -19,13 +19,18 @@ func observeReleaseDomainRoutes(ctx context.Context, owners OperationsOwners, sn
 	}
 	linked := []proxysvc.ExistingIngressBinding{}
 	named := false
+	unknownManager := false
 	for _, binding := range bindings {
 		named = named || binding.Hostname != ""
+		unknownManager = unknownManager || (binding.Hostname == "" && (binding.Status == "unverified" || binding.Status == "blocked"))
 		if binding.Status == "linked" && binding.Hostname != "" {
 			linked = append(linked, binding)
 		}
 	}
 	if !named {
+		if unknownManager {
+			result.Status, result.Reason = statusUnavailable, "The existing proxy manager could not verify its routes. Inspect the original manager before deploying changes."
+		}
 		return result
 	}
 	controller, available := owners.Proxy.(interface {
@@ -39,6 +44,9 @@ func observeReleaseDomainRoutes(ctx context.Context, owners OperationsOwners, sn
 	}
 	if len(snapshot.Domains) == 0 {
 		result.Status, result.Reason = statusAvailable, ""
+	}
+	if unknownManager {
+		result.Status, result.Reason = statusUnavailable, "An existing proxy manager could not verify all its routes. Inspect the original manager before deploying changes."
 	}
 	for _, binding := range bindings {
 		if binding.Hostname == "" {
