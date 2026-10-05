@@ -3,7 +3,6 @@ package deploy
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -22,7 +21,6 @@ type dockerRecovery struct {
 	paths      *files.Service
 	containers map[string][]*dockerx.AdoptionContainer
 	model      map[string]any
-	builds     map[string]any
 }
 
 type dockerAdoptionImageRecoverer interface {
@@ -48,7 +46,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		ServiceCount: candidate.Total, RunningCount: candidate.Running,
 		Scope: scope, ExcludedServices: []string{},
 	}}
-	r := &dockerRecovery{result: result, paths: paths, containers: map[string][]*dockerx.AdoptionContainer{}, model: map[string]any{}, builds: map[string]any{}}
+	r := &dockerRecovery{result: result, paths: paths, containers: map[string][]*dockerx.AdoptionContainer{}, model: map[string]any{}}
 	if reader == nil || paths == nil || (candidate.Kind != "stack" && candidate.Kind != "container") || recoveryRoot == "" {
 		return nil, fmt.Errorf("%w: Docker recovery is unavailable", ErrSourceUnavailable)
 	}
@@ -62,17 +60,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		seen[service.ResourceID] = true
 		captured, err := reader.CaptureAdoptionContainer(ctx, service.ResourceID)
 		if err != nil {
-			code, message, field := "runtime_capture_unavailable", "The original container image, configuration and writable layer could not all be captured.", ""
-			var failure *dockerx.AdoptionCaptureError
-			if errors.As(err, &failure) {
-				field = failure.Stage
-				message = "The original container " + strings.ReplaceAll(failure.Stage, "_", " ") + " could not be verified. Retry recovery after resolving the Docker daemon read failure."
-				if errors.Is(err, context.DeadlineExceeded) {
-					code = "runtime_capture_timeout"
-					message = "The original container " + strings.ReplaceAll(failure.Stage, "_", " ") + " exceeded the bounded recovery time limit. Retry when the host has enough resources to finish its read-only checks."
-				}
-			}
-			r.issue(code, message, service.Name, field, true)
+			r.issue("runtime_capture_unavailable", "The original container image, configuration and writable layer could not all be captured.", service.Name, "", true)
 			continue
 		}
 		name := "app"
@@ -108,12 +96,10 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	}
 	if len(r.containers) == 0 {
 		r.issue("runtime_missing", "No existing container could be captured for this workload.", "", "", true)
-		return result, ErrRecoveryBlocked
 	}
 	if candidate.Kind == "stack" && len(r.containers) > 0 {
 		r.readOriginalCompose(ctx, candidate, reader)
 		r.result.Adoption.OriginalConfigurationDigest = digestBytes(mustJSON(r.model))
-		decodeComposeRenderedLiterals(r.model)
 		if scope == RecoveryExistingServices {
 			r.applyExistingServicesScope(candidate)
 		}
@@ -187,10 +173,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 			continue
 		}
 		if _, exists := service["build"]; exists {
-			// Keep the resolved definition outside the immutable image baseline.
-			var build any
-			_ = json.Unmarshal(mustJSON(service["build"]), &build)
-			r.builds[name] = build
+			r.issue("build_source_retained", "The running image is preserved as the initial redeploy source. Its original Compose build definition is retained in the original project; attach its source checkout for future builds.", name, "build", false)
 		}
 		delete(service, "build")
 		delete(service, "env_file")
@@ -207,7 +190,6 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	delete(r.model, "name")
 	delete(r.model, "include")
 	r.sanitizeStrings(r.model, "", "")
-	escapeRecoveredLiterals(r.model, result.Environment)
 	if len(r.result.Adoption.Issues) > 0 {
 		sort.Slice(r.result.Adoption.Issues, func(i, j int) bool {
 			return string(mustJSON(r.result.Adoption.Issues[i])) < string(mustJSON(r.result.Adoption.Issues[j]))
@@ -225,13 +207,12 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		result.Configuration.Runtime.ComposeProjectName = candidate.ResourceID
 	}
 	for _, name := range sortedStringMapKeys(result.Environment) {
-		result.Configuration.Variables = append(result.Configuration.Variables, PlannedVariable{Name: name, ValueMode: "literal", Sensitivity: "secret", Scopes: []string{"runtime"}})
+		result.Configuration.Variables = append(result.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, Required: result.Environment[name] != ""})
 	}
 	analysis, analyzeErr := analyzeComposeDocuments(result.Source.ComposeFiles)
 	if analyzeErr != nil {
 		r.issue("recovered_source_unsupported", "The recovered configuration contains options or credential arguments that the deployment parser cannot safely manage. Resolve those settings in the original manager before adoption.", "", "", true)
 	} else {
-		analysis.PrimaryService = r.recoveredPrimaryService(analysis)
 		for _, reason := range analysis.Unsupported {
 			r.issue("compose_option_unsupported", reason, "", "", true)
 		}
@@ -251,11 +232,6 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	r.captureBaseline(candidate, resolved)
 	result.Configuration = canonicalConfiguration(result.Configuration)
 	r.result.Adoption.BaselineSource = result.Source
-	r.result.Adoption.BaselineDetection = result.Detection
-	result.BaselineEnvironment = make(map[string]string, len(result.Environment))
-	for name, value := range result.Environment {
-		result.BaselineEnvironment[name] = value
-	}
 	r.result.Adoption.BaselineConfiguration = result.Configuration
 	r.result.Adoption.BaselineConfiguration.Build.PrimaryService = resolved.PrimaryService
 	r.result.Adoption.BaselineDigest = recoveredDockerBaselineDigest(result)
@@ -276,21 +252,6 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	}
 	if err := r.stageBaseline(recoveryRoot, content); err != nil {
 		return nil, err
-	}
-	if err := r.attachBuildSources(ctx, recoveryRoot); err != nil {
-		return nil, err
-	}
-	if len(result.Adoption.Blockers) > 0 {
-		return result, ErrRecoveryBlocked
-	}
-	if err := result.Source.ValidateForDeployment(); err != nil {
-		return result, fmt.Errorf("%w: prepared source is not deployable", ErrRecoveryBlocked)
-	}
-	if err := result.Configuration.Validate(); err != nil {
-		return result, fmt.Errorf("%w: prepared runtime plan is not deployable", ErrRecoveryBlocked)
-	}
-	if err := validateDetectionResult(&result.Source, result.Detection); err != nil {
-		return result, fmt.Errorf("%w: prepared source evidence is invalid", ErrRecoveryBlocked)
 	}
 	return result, nil
 }
@@ -381,7 +342,7 @@ func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *
 				score += 8
 			}
 			if name == resolved.PrimaryService {
-				score += 100
+				score++
 			}
 			if len(capture.Inspection.HostConfig.PortBindings) > 0 {
 				score += 4
@@ -476,17 +437,6 @@ func recoveryVariableName(service, key string) string {
 func (r *dockerRecovery) privateValue(service, key, value string) string {
 	name := recoveryVariableName(service, key)
 	r.result.Environment[name] = value
-	kind, original, category := "runtime_setting", key, "runtime_setting"
-	if strings.HasPrefix(key, "env_") {
-		kind, original, category = "environment", strings.TrimPrefix(key, "env_"), "application"
-	}
-	if strings.HasPrefix(key, "label_") {
-		kind, original = "label", strings.TrimPrefix(key, "label_")
-	}
-	if strings.HasPrefix(key, "log_") {
-		kind, original = "log_option", strings.TrimPrefix(key, "log_")
-	}
-	AddRecoveredInput(r.result, name, original, service, kind, "container", category)
 	return "${" + name + "}"
 }
 
@@ -504,7 +454,6 @@ func (r *dockerRecovery) captureEnvironment(name string, service map[string]any)
 			}
 		}
 		environment[key] = r.privateValue(name, "env_"+key, value)
-		AddRecoveredInput(r.result, recoveryVariableName(name, "env_"+key), key, name, "environment", "compose", "application")
 	}
 }
 
@@ -614,5 +563,5 @@ func replicaNetworkDigest(capture *dockerx.AdoptionContainer) string {
 
 func containsSourceInterpolation(value any) bool {
 	encoded, _ := json.Marshal(value)
-	return composeInterpolationRE.MatchString(strings.ReplaceAll(string(encoded), "$$", ""))
+	return strings.Contains(string(encoded), "${")
 }

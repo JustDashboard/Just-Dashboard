@@ -2618,7 +2618,6 @@ export type DeploymentSourceMode =
   | "connected_repository"
   | "local_checkout"
   | "local_directory"
-  | "recovered_snapshot"
   | "image_reference"
   | "compose_paste"
   | "compose_upload"
@@ -3141,12 +3140,6 @@ export type DeploymentDiagnosis = {
 }
 
 export type DeploymentDomainRoute = {
-  id?: string
-  path?: string
-  service?: string
-  proxyKind?: string
-  continuity?: string
-  detail?: string
   hostname: string
   https: boolean
   ownership: DeploymentOwnership
@@ -3168,8 +3161,6 @@ export type DeploymentDomainRoute = {
 }
 
 export type DeploymentStorageMount = {
-  service?: string
-  containerId?: string
   source: string
   target: string
   kind: "volume" | "bind"
@@ -4479,8 +4470,6 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
-    /** Imported native commands keep their captured paths under the full source tree. */
-    preserveSourceRoot?: boolean
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
@@ -4529,7 +4518,6 @@ export type DeploymentConfiguration = {
   }
   variables: {
     name: string
-    valueMode?: "literal" | "reference" | ""
     sensitivity: "plain" | "secret"
     scopes: string[]
     required?: boolean
@@ -4576,7 +4564,6 @@ export type DeploymentPlannedDomain = {
 
 export type DeploymentVariable = {
   name: string
-  recoveredInput?: import("./workload-import").RecoveredInput
   revision: number
   sensitivity: "plain" | "secret"
   scopes: ("build" | "runtime" | "release_task")[]
@@ -4622,8 +4609,6 @@ export type DeploymentPendingState = {
 }
 
 export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "variables"> & {
-  inputs?: import("./workload-import").RecoveredInput[]
-  ingressBindings?: import("./workload-import").ExistingIngressBinding[]
   revision: number
   variables: DeploymentVariable[]
   pending: DeploymentPendingState
@@ -4696,8 +4681,6 @@ export type DeploymentBackupGateEvidence = {
 }
 
 export type DeploymentPreflightFinding = {
-  issueCode?: string
-  service?: string
   code: string
   severity: "pass" | "decision" | "warning" | "blocked" | "unavailable"
   title: string

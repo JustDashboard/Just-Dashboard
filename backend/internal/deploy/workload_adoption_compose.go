@@ -25,9 +25,6 @@ func (r *dockerRecovery) readOriginalCompose(ctx context.Context, candidate Work
 	directory := labels["com.docker.compose.project.working_dir"]
 	if directory == "" {
 		directory = candidate.SourcePath
-		if info, err := os.Stat(directory); err == nil && info.Mode().IsRegular() {
-			directory = filepath.Dir(directory)
-		}
 	}
 	resolvedDirectory, err := r.paths.Resolve(directory)
 	if err != nil || !filepath.IsAbs(directory) {

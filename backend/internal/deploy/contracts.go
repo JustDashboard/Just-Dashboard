@@ -320,17 +320,15 @@ const (
 )
 
 type PreflightFinding struct {
-	Code      string            `json:"code"`
-	IssueCode string            `json:"issueCode,omitempty"`
-	Service   string            `json:"service,omitempty"`
-	Severity  PreflightSeverity `json:"severity"`
-	Title     string            `json:"title"`
-	Measured  string            `json:"measured,omitempty"`
-	Means     string            `json:"means,omitempty"`
-	Action    string            `json:"action,omitempty"`
-	Owner     string            `json:"owner,omitempty"`
-	FieldID   string            `json:"fieldId,omitempty"`
-	DeepLink  string            `json:"deepLink,omitempty"`
+	Code     string            `json:"code"`
+	Severity PreflightSeverity `json:"severity"`
+	Title    string            `json:"title"`
+	Measured string            `json:"measured,omitempty"`
+	Means    string            `json:"means,omitempty"`
+	Action   string            `json:"action,omitempty"`
+	Owner    string            `json:"owner,omitempty"`
+	FieldID  string            `json:"fieldId,omitempty"`
+	DeepLink string            `json:"deepLink,omitempty"`
 	// Fix is the one plan change the finding offers, applied from the screen
 	// that shows it, when the check can compute it.
 	Fix *CauseFix `json:"fix,omitempty"`

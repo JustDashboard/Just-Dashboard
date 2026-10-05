@@ -17,7 +17,6 @@ import (
 // below or become a blocker. Silently accepting an omitted option is unsafe.
 func (r *dockerRecovery) recoverService(name string, service map[string]any, capture *dockerx.AdoptionContainer, stack bool) {
 	insp, config, host := capture.Inspection, capture.Inspection.Config, capture.Inspection.HostConfig
-	declaredEnvironment := object(service["environment"])
 	for field := range service {
 		if field != "depends_on" && field != "profiles" && field != "build" && !strings.HasPrefix(field, "x-") {
 			delete(service, field)
@@ -53,15 +52,6 @@ func (r *dockerRecovery) recoverService(name string, service map[string]any, cap
 		}
 		seen[key] = true
 		environment[key] = r.privateValue(name, "env_"+key, value)
-		if _, declared := declaredEnvironment[key]; !declared {
-			for _, assignment := range capture.Image.Env {
-				imageKey, imageValue, _ := strings.Cut(assignment, "=")
-				if imageKey == key && imageValue == value {
-					AddRecoveredInput(r.result, recoveryVariableName(name, "env_"+key), key, name, "environment", "container", "image_default")
-					break
-				}
-			}
-		}
 	}
 	service["environment"] = environment
 	labels := map[string]any{}

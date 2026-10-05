@@ -89,7 +89,7 @@ export function ImportWorkload() {
   const [kind, setKind] = useState<WorkloadKind | "all">("all")
   const [selected, setSelected] = useState<WorkloadCandidate>()
   const [name, setName] = useState("")
-  const [scope, setScope] = useState<WorkloadScope>("existing_services")
+  const [scope, setScope] = useState<WorkloadScope>("all_services")
   const [busy, setBusy] = useState("")
   const [failure, setFailure] = useState<Error>()
   const [stale, setStale] = useState(false)
@@ -124,7 +124,7 @@ export function ImportWorkload() {
       setSelected(fresh)
       if (!preserveName) {
         setName(deploymentName(fresh.name))
-        setScope("existing_services")
+        setScope("all_services")
       }
       setStale(false)
     } catch (error) {

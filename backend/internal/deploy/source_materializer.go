@@ -198,24 +198,6 @@ func (a *HostSourceAnalyzer) Materialize(
 			_ = os.RemoveAll(workspace)
 			return nil, fmt.Errorf("%w: the local source changed during snapshot capture", ErrSourceUnavailable)
 		}
-	case SourceModeRecoveredSnapshot:
-		local, err := a.recoveredSnapshotRoot(ctx, source.ResourceID)
-		if err != nil {
-			_ = os.RemoveAll(workspace)
-			return nil, err
-		}
-		if err := copyContainedTree(local, sourceRoot, copyTreeLimits{ExcludePrivateFiles: true}); err != nil {
-			_ = os.RemoveAll(workspace)
-			return nil, err
-		}
-		if source.Kind == SourceLocal && identity.Digest != source.ResourceID {
-			_ = os.RemoveAll(workspace)
-			return nil, ErrInvalidSource
-		}
-		if err := writeRecoveredComposeDocuments(sourceRoot, source.ComposeFiles); err != nil {
-			_ = os.RemoveAll(workspace)
-			return nil, err
-		}
 	case SourceModeComposePaste, SourceModeComposeUpload:
 		for _, document := range source.ComposeFiles {
 			if !safeRelativePath(document.Path) {

@@ -261,12 +261,9 @@ Already have applications on this server? **Import existing** discovers Docker C
 standalone containers, existing PM2 applications, systemd services and listening host processes.
 Review and recover the services, ports, configuration, storage and original manager, then adopt a
 normal deployment with a pinned live release. Existing stopped containers are included; a four-container
-stack with two running stays one project. New Compose imports default to existing containers only,
-with absent declarations listed before adoption. Original environment names remain grouped by service;
-their exact values stay sealed. Verified build sources and app-specific configuration are prepared
-automatically, with immutable images retained as the live baseline. Existing domains keep their current
-proxy, TLS and path rules; verified upstream changes and native startup handoffs are prepared for later
-cutover and restored on failure or baseline rollback. Import leaves the application running. Settings, variables, logs, history,
+stack with two running stays one project. A Compose project can explicitly adopt its existing
+containers only, with unavailable declarations listed and acknowledged before adoption. Import leaves
+the application running and seals its captured private inputs. Settings, variables, logs, history,
 deployment controls and applicable automation use the regular deployment pages. Settings stay pending
 until Deploy changes; Redeploy and rollback use the frozen baseline. PM2/systemd applications retain
 their original manager until an explicit Docker migration. Recovery blocks incomplete or unsupported

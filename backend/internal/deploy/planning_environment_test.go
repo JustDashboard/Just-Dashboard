@@ -195,17 +195,13 @@ func TestDraftEnvironmentRejectsInvalidOrStaleChangesAndPreservesMaskedInputs(t 
 		want       error
 	}{
 		{"duplicate", "API_TOKEN=x\nAPI_TOKEN=y", draft.Revision, 41, ErrInvalidVariable},
-		{"cyclic", "", draft.Revision, 41, ErrVariableCycle},
+		{"cyclic", "API_TOKEN=${{variable.EXTRA}}\nEXTRA=${{variable.API_TOKEN}}", draft.Revision, 41, ErrVariableCycle},
 		{"stale", "API_TOKEN=wrong", draft.Revision - 1, 41, ErrDraftRevision},
 		{"other owner", "API_TOKEN=wrong", draft.Revision, 42, ErrDraftForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			configuration := *draft.Data.Configuration
-			if tc.name == "cyclic" {
-				configuration.Variables = append(append([]PlannedVariable(nil), configuration.Variables...), PlannedVariable{Name: "CYCLE_A", Sensitivity: "secret", Scopes: []string{"runtime"}, Reference: "${{variable.CYCLE_B}}"}, PlannedVariable{Name: "CYCLE_B", Sensitivity: "secret", Scopes: []string{"runtime"}, Reference: "${{variable.CYCLE_A}}"})
-			}
 			_, err := fixture.plans.Save(t.Context(), draft.ID, tc.owner, false, DraftSaveRequest{
-				Revision: tc.revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &tc.text,
+				Revision: tc.revision, Step: DraftConfiguration, Configuration: draft.Data.Configuration, Dotenv: &tc.text,
 			})
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)

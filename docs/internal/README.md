@@ -72,7 +72,6 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
-- [`../audits/2026-10-05-existing-workload-import/README.md`](../audits/2026-10-05-existing-workload-import/README.md) — import overhaul root causes, automatic preparation, preserved domains, isolated live acceptance and real browser recording.
 - [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
   select/menu inventory, single-column option layout, opening behavior and verification coverage.
 

@@ -7,8 +7,6 @@
   PM2 and systemd workloads, explicit recovery blockers, live baselines and acceptance evidence.
 - [`docker-image-recovery.md`](docker-image-recovery.md) — bounded read-only export when a running
   container's original image was deleted, private recovery artifacts, platform and ownership fences.
-- [`recovery-artifacts.md`](recovery-artifacts.md) — verified build snapshots, independent live
-  baselines, native startup journals and retention of private recovery inputs.
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, copied production variables, tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.

@@ -168,34 +168,6 @@ test("a clean Compose stack lands on Review", () => {
   expect(landingStep(flow)).toBe("review")
 })
 
-test("captured sealed inputs satisfy Compose declarations and land directly on Review", () => {
-  const flow = flowFor({
-    candidate: candidate({ profile: "compose", buildMethod: "compose" }),
-    source: { kind: "compose", mode: "compose_paste" },
-    detection: { compose: { variables: ["JD_IMPORT_ENV_TOKEN_WORKER"] } },
-  })
-  flow.draft.environmentKeys = ["JD_IMPORT_ENV_TOKEN_WORKER"]
-  flow.draft.data = {
-    adoption: {
-      inputs: [
-        {
-          storageKey: "JD_IMPORT_ENV_TOKEN_WORKER",
-          name: "TOKEN",
-          kind: "environment",
-          service: "worker",
-          empty: false,
-        },
-      ],
-    },
-  }
-  expect(landingStep(flow)).toBe("review")
-  flow.draft.data.adoption.inputs[0].empty = true
-  expect(landingStep(flow)).toBe("variables")
-  flow.draft.data.adoption.inputs[0].empty = false
-  flow.draft.environmentKeys = []
-  expect(landingStep(flow)).toBe("variables")
-})
-
 test("a variable the source was read as needing, with nothing in it, opens the variables screen", () => {
   const flow = flowFor({
     candidate: candidate({

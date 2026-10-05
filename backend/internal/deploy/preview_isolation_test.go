@@ -186,17 +186,6 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 	if _, err := f.store.DB.Exec(`INSERT INTO deploy_runtime_plans(environment_id,revision,config_json,preview,digest,created_at) VALUES(?,2,?,'','runtime',1)`, f.environmentID, string(mustJSON(runtime))); err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []string{"linked", "unverified", "hint"} {
-		binding := linkedIngressFixture()
-		binding.ID, binding.Status = "production-"+status, status
-		ownership := OwnershipLinked
-		if status == "hint" {
-			ownership = OwnershipObserved
-		}
-		if _, err := f.store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id,release_id,kind,ownership,resource_kind,resource_id,config_json,created_at) VALUES(?,0,'ingress',?,?,?,?,1)`, f.environmentID, ownership, existingIngressDependency, binding.ID, string(mustJSON(binding))); err != nil {
-			t.Fatal(err)
-		}
-	}
 	created, err := f.automation.CreateTrigger(t.Context(), f.projectID, f.environmentID, TriggerWrite{Name: "Review", Kind: TriggerGitHub, Provider: "github", Enabled: true, Config: TriggerConfig{Repository: "acme/app", Ref: "main", Preview: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -206,13 +195,6 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 	preview, _, err := f.automation.EnsurePreview(t.Context(), &created.Trigger, event)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var previewLinks, productionLinks int
-	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id=? AND resource_kind=?`, preview.EnvironmentID, existingIngressDependency).Scan(&previewLinks); err != nil || previewLinks != 0 {
-		t.Fatal("preview inherited production proxy authority", previewLinks, err)
-	}
-	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id=? AND resource_kind=?`, f.environmentID, existingIngressDependency).Scan(&productionLinks); err != nil || productionLinks != 3 {
-		t.Fatal("preview changed production proxy authority", productionLinks, err)
 	}
 	var buildRaw, runtimeRaw string
 	if err := f.store.DB.QueryRow(`SELECT b.config_json,r.config_json FROM deploy_build_plans b JOIN deploy_runtime_plans r ON r.environment_id=b.environment_id AND r.revision=b.revision WHERE b.environment_id=?`, preview.EnvironmentID).Scan(&buildRaw, &runtimeRaw); err != nil {

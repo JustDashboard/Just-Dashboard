@@ -26,7 +26,7 @@ volumes:
     external: true
 `
 
-async function mockComposeProject(page: Page, recovered = false) {
+async function mockComposeProject(page: Page) {
   await mockProject(page, {
     operations: {
       ...healthyOperations,
@@ -37,10 +37,6 @@ async function mockComposeProject(page: Page, recovered = false) {
     kind: "compose",
     mode: "compose_paste",
     composeFiles: [{ path: "compose.yml", order: 0, content: yaml }],
-  }
-  if (recovered) {
-    source.mode = "recovered_snapshot"
-    source.resourceId = `sha256:${"a".repeat(64)}`
   }
   let revision = 4
   const writes: { method: string; path: string }[] = []
@@ -101,23 +97,6 @@ async function mockComposeProject(page: Page, recovered = false) {
   })
   return { writes, sources, source: () => source, revision: () => revision }
 }
-
-test("editing recovered Compose documents retains their verified build context handle", async ({
-  page,
-}) => {
-  const fixture = await mockComposeProject(page, true)
-  await page.goto("/deploy/7/settings/general")
-  await page
-    .getByRole("textbox", { name: "compose.yml content", exact: true })
-    .fill(yaml.replace("512m", "768m"))
-  await saveSettings(page)
-  await expect.poll(() => fixture.sources.length).toBe(1)
-  expect(fixture.sources[0].mode).toBe("recovered_snapshot")
-  expect(fixture.sources[0].resourceId).toBe(`sha256:${"a".repeat(64)}`)
-  expect(fixture.writes.filter((write) => !write.path.endsWith("/check"))).toEqual([
-    { method: "PUT", path: "/deploy/7/environments/12/source" },
-  ])
-})
 
 test("Compose overrides never imply absent service limits or storage and link to editable source", async ({
   page,
@@ -247,7 +226,7 @@ test("recovered Compose review shows service mounts and captured limits without 
   }
   await mockWorkloadImport(page, undefined, draft)
   await page.goto(`/deploy/new?draft=${draft.id}`)
-  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByText(/Nothing survives a rebuild/)).toHaveCount(0)
   const plan = page.getByRole("list", { name: "What this setup will create" })
   await expect(

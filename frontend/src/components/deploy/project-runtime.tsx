@@ -23,7 +23,6 @@ import {
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { unusableReason } from "@/lib/db-connections"
-import { deploymentRouteId } from "@/lib/deployment-runtime-route"
 import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
@@ -331,9 +330,7 @@ export function ProjectRuntime() {
     // The container that keeps its data in the volume, when Docker says which;
     // the live service otherwise.
     const keeper = services.find((service) =>
-      mount.containerId
-        ? service.containerId === mount.containerId
-        : volume?.usedBy.some((user) => user.id === service.containerId),
+      volume?.usedBy.some((user) => user.id === service.containerId),
     )
     // Whoever keeps the data names the volume; failing that, the directory it
     // is mounted at does when only one program keeps its data there, and the
@@ -386,13 +383,13 @@ export function ProjectRuntime() {
       : [
           ...(storageRead ? mounts : []).map(
             ({ mount, size, keeper, product: keeperProduct }): MapStore => ({
-              key: `${mount.source}:${mount.target}:${mount.service || ""}:${mount.containerId || ""}`,
+              key: `${mount.source}:${mount.target}`,
               kind: mount.kind === "bind" ? "bind" : "volume",
               eyebrow: mount.kind === "bind" ? "Folder on this server" : "Volume",
               title: mount.source,
-              detail: `at ${mount.target}${mount.service ? ` · ${mount.service}` : ""}${size ? ` · ${bytes(size)}` : ""}`,
+              detail: `at ${mount.target}${size ? ` · ${bytes(size)}` : ""}`,
               product: mount.kind === "bind" ? undefined : keeperProduct,
-              ownerId: mount.containerId || keeper?.containerId,
+              ownerId: keeper?.containerId,
               status: MOUNT_STATUS[mount.status],
             }),
           ),
@@ -558,7 +555,7 @@ export function ProjectRuntime() {
             <ChoiceList aria-label="Deployment domains">
               {domains?.domains.map((domain) => (
                 <DomainCard
-                  key={deploymentRouteId(domain)}
+                  key={domain.hostname}
                   domain={domain}
                   siteName={domains.siteName}
                   projectId={project.projectId}
@@ -596,7 +593,7 @@ export function ProjectRuntime() {
               <ChoiceList aria-label="Persistent storage">
                 {mounts.map(({ mount, size, product: keeperProduct }) => (
                   <MountCard
-                    key={`${mount.source}:${mount.target}:${mount.service || ""}:${mount.containerId || ""}`}
+                    key={`${mount.source}:${mount.target}`}
                     mount={mount}
                     product={keeperProduct}
                     size={size}
@@ -1281,8 +1278,7 @@ function DomainCard({
   wide: boolean
 }) {
   const router = useRouter()
-  const address = `${domain.hostname}${domain.path && domain.path !== "/" ? domain.path : ""}`
-  const url = `${domain.https ? "https" : "http"}://${domain.hostname}${domain.path || "/"}`
+  const url = `${domain.https ? "https" : "http"}://${domain.hostname}/`
   const verbs: Verb[] = [
     {
       key: "visit",
@@ -1321,9 +1317,11 @@ function DomainCard({
 
   return (
     <ChoiceRow
-      verb={address}
+      verb={domain.hostname}
       href={domain.deepLink}
       disabled={!domain.deepLink}
+      // The certificate's issuer, as Settings → Domains leads the same name:
+      // a hostname is one row wherever it is listed.
       leading={
         <ProductLogo
           size="sm"
@@ -1331,7 +1329,7 @@ function DomainCard({
           fallback={domain.https ? LockClosed : LockOpen}
         />
       }
-      title={<span className="font-mono">{address}</span>}
+      title={<span className="font-mono">{domain.hostname}</span>}
       description={
         <>
           {elsewhere && (
@@ -1348,8 +1346,6 @@ function DomainCard({
             </>
           )}
           <Tag>{OWNERSHIP_WORD[domain.ownership]}</Tag>
-          {domain.service && ` · ${domain.service}`}
-          {domain.detail && ` · ${domain.detail}`}
         </>
       }
       trailing={
@@ -1362,7 +1358,7 @@ function DomainCard({
           </>
         )
       }
-      actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${address}`} />}
+      actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${domain.hostname}`} />}
     >
       {!wide && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 sm:pl-11">
@@ -1412,7 +1408,6 @@ function MountCard({
       description={
         <>
           mounted at <span className="font-mono">{mount.target}</span>
-          {mount.service && ` · ${mount.service}`}
           {mount.readOnly && " · read-only"}
           {" · "}
           <Tag>{OWNERSHIP_WORD[mount.ownership]}</Tag>

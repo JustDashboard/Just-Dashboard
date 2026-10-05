@@ -161,54 +161,6 @@ func TestWorkloadAdoptionFailureLeavesNoProjectOrLiveRelease(t *testing.T) {
 	}
 }
 
-func TestWorkloadAdoptionKeepsSeparateBaselineSourceEvidence(t *testing.T) {
-	fixture := newPlanningStoreFixture(t)
-	recovered := recoveredStoreFixture(t)
-	if err := json.Unmarshal(mustJSON(recovered.Detection), &recovered.Adoption.BaselineDetection); err != nil {
-		t.Fatal(err)
-	}
-	recovered.Source.ComposeFiles = append([]ComposeDocument(nil), recovered.Source.ComposeFiles...)
-	baselineDigest := recovered.Detection.Source.Digest
-	prepared := *recovered.Detection.Compose
-	prepared.Digest = "sha256:" + strings.Repeat("b", 64)
-	prepared.PrimaryService = "web"
-	recovered.Source.ComposeFiles[0].Content += "    build: .\n"
-	recovered.Detection.Source.Digest = prepared.Digest
-	recovered.Detection.Compose = &prepared
-	recovered.Detection.Candidates[0].Name = "Prepared application build"
-	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "separate-source", Profile: ProfileCompose}, recovered)
-	if err != nil {
-		t.Fatal(err)
-	}
-	draft = checkRecoveredDraft(t, fixture, draft)
-	ack := []string{}
-	for _, finding := range draft.Findings {
-		if finding.Severity == PreflightWarning {
-			ack = append(ack, finding.Code)
-		}
-	}
-	result, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision, AcknowledgedWarnings: ack})
-	if err != nil {
-		t.Fatal(err)
-	}
-	live, err := NewOrchestrationStore(fixture.store).LiveRelease(t.Context(), result.EnvironmentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := decodeReleaseRuntimeSnapshot(live)
-	if err != nil || snapshot.SourceIdentity.Digest != baselineDigest {
-		t.Fatalf("baseline source identity changed: %+v %v", snapshot.SourceIdentity, err)
-	}
-	var raw string
-	if err := fixture.store.DB.QueryRow(`SELECT evidence_json FROM deploy_build_plans WHERE id=?`, live.Release.BuildPlanID).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	var evidence StoredBuildEvidence
-	if json.Unmarshal([]byte(raw), &evidence) != nil || evidence.Compose.Digest != baselineDigest || evidence.Candidates[0].Name != "Compose stack" {
-		t.Fatal("baseline build evidence borrowed the prepared source")
-	}
-}
-
 func TestWorkloadAdoptionInitialTranslationKeepsOriginalPrivateEnvironment(t *testing.T) {
 	fixture := newPlanningStoreFixture(t)
 	recovered := recoveredStoreFixture(t)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,218 +79,6 @@ func hostRecoveryFixture(t *testing.T) (string, *HostSourceAnalyzer, WorkloadCan
 	return root, analyzer, candidate, capture
 }
 
-func TestHostRecoveryRequiresCopiedDirectoryTraversalForPreservedUser(t *testing.T) {
-	for _, fixture := range []struct {
-		name    string
-		mode    os.FileMode
-		uid     uint32
-		blocked bool
-	}{
-		{"private directory", 0700, 1000, true},
-		{"readable without traversal", 0744, 1000, true},
-		{"host group traversal", 0770, 1000, true},
-		{"traversable without listing", 0751, 1000, false},
-		{"root runtime", 0700, 0, false},
-	} {
-		t.Run(fixture.name, func(t *testing.T) {
-			root, analyzer, candidate, capture := hostRecoveryFixture(t)
-			capture.UID = fixture.uid
-			directory := filepath.Join(root, "lib")
-			if err := os.Mkdir(directory, fixture.mode); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chmod(directory, fixture.mode); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(filepath.Join(directory, "handler.js"), []byte("module.exports = () => 'native application'"), 0644); err != nil {
-				t.Fatal(err)
-			}
-			recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
-			blocked := false
-			for _, issue := range recovered.Adoption.Issues {
-				if issue.Code == "host_source_directory_permissions" {
-					blocked = issue.Blocking && issue.Field == "runtime.user" && strings.Contains(issue.Message, "COPY ownership")
-				}
-			}
-			if blocked != fixture.blocked || (len(recovered.Adoption.Blockers) != 0) != fixture.blocked {
-				t.Fatalf("directory traversal blocker=%v issues=%v", blocked, recovered.Adoption.Issues)
-			}
-			store := newPlanningStoreFixture(t)
-			_, err = store.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-directory-proof", Profile: ProfileService}, recovered)
-			if fixture.blocked && !errors.Is(err, ErrPreflightBlocked) || !fixture.blocked && err != nil {
-				t.Fatalf("public draft traversal boundary: %v", err)
-			}
-			if recovered.Configuration.Runtime.User != strconv.FormatUint(uint64(fixture.uid), 10)+":1001" {
-				t.Fatal("recovery changed the original runtime account")
-			}
-			if info, err := os.Stat(directory); err != nil || info.Mode().Perm() != fixture.mode {
-				t.Fatal("recovery changed original source permissions", err)
-			}
-		})
-	}
-}
-
-func TestHostRecoveryDoesNotApplyCopiedDirectoryPermissionsToExcludedData(t *testing.T) {
-	root, analyzer, candidate, capture := hostRecoveryFixture(t)
-	for _, name := range []string{"data", ".venv"} {
-		directory := filepath.Join(root, name)
-		if err := os.Mkdir(directory, 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(directory, "original-private-state"), []byte("retained outside the build"), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-	if err != nil || len(recovered.Adoption.Blockers) != 0 {
-		t.Fatalf("excluded host directory blocked copying: %v %v", err, recovered.Adoption.Blockers)
-	}
-	if len(recovered.Configuration.Runtime.Mounts) != 1 || recovered.Configuration.Runtime.Mounts[0].Source != filepath.Join(root, "data") || recovered.Configuration.Runtime.Mounts[0].Ownership != OwnershipLinked {
-		t.Fatal("private linked data lost its retained mount")
-	}
-	for _, name := range []string{"data", ".venv"} {
-		if _, err := os.Stat(filepath.Join(recovered.Adoption.RecoveryDirectory, name)); !os.IsNotExist(err) {
-			t.Fatal("excluded private directory entered the build snapshot", name, err)
-		}
-		if info, err := os.Stat(filepath.Join(root, name)); err != nil || info.Mode().Perm() != 0700 {
-			t.Fatal("recovery changed excluded directory permissions", name, err)
-		}
-	}
-}
-
-func TestHostRecoveryFencesInstalledDependenciesOutsideDesiredBuild(t *testing.T) {
-	for _, module := range []string{"node_modules/fixture-dependency/index.js", ".venv/lib/python3.12/site-packages/fixture_dependency.py"} {
-		t.Run(module, func(t *testing.T) {
-			root, analyzer, candidate, capture := hostRecoveryFixture(t)
-			writeBuildFixture(t, root, module, "original installed module")
-			writeBuildFixture(t, root, "data/state.json", "mutable application state")
-			if strings.HasPrefix(module, ".venv/") {
-				for _, name := range []string{"package.json", "server.js"} {
-					if err := os.Remove(filepath.Join(root, name)); err != nil {
-						t.Fatal(err)
-					}
-				}
-				writeBuildFixture(t, root, "requirements.txt", "fastapi==0.115.0\nuvicorn==0.34.0\n")
-				writeBuildFixture(t, root, "app.py", "from fastapi import FastAPI\napp = FastAPI()\n")
-				capture.SourcePath, capture.InterpreterVersion = filepath.Join(root, "app.py"), "3.12.9"
-				capture.Command = []string{"/usr/bin/python3", capture.SourcePath}
-			}
-			recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-			if err != nil || len(recovered.Adoption.Blockers) != 0 {
-				t.Fatalf("dependency recovery blocked: %v %v", err, recovered.Adoption.Blockers)
-			}
-			var metadata NativeBaselineMetadata
-			if err := json.Unmarshal(recovered.Adoption.Runtime.Metadata, &metadata); err != nil {
-				t.Fatal(err)
-			}
-			if len(metadata.SourceExclusions) != 1 || metadata.SourceExclusions[0] != "data" || !metadata.SourcePrivateFence {
-				t.Fatalf("original dependency code excluded from native authority: %+v", metadata)
-			}
-			if _, err := os.Stat(filepath.Join(recovered.Adoption.RecoveryDirectory, filepath.FromSlash(module))); !os.IsNotExist(err) {
-				t.Fatal("installed dependencies entered the desired build copy", err)
-			}
-			manager := &fakeNativePM2{capture: capture}
-			owner := &NativeRuntimeOwner{pm2: manager}
-			runtime := ReleaseRuntime{Kind: recovered.Adoption.Runtime.Kind, RuntimeID: recovered.Adoption.Runtime.RuntimeID, Metadata: recovered.Adoption.Runtime.Metadata}
-			writeBuildFixture(t, root, "data/state.json", "changed application state")
-			if _, _, err := owner.capture(t.Context(), runtime); err != nil {
-				t.Fatal("linked mutable data invalidated the baseline", err)
-			}
-			writeBuildFixture(t, root, module, "modified installed module")
-			if _, err := owner.Stop(t.Context(), runtime, RuntimePlanConfig{}, nil, false, nil); !errors.Is(err, procs.ErrHostWorkloadChanged) {
-				t.Fatal("modified installed dependency accepted before native stop", err)
-			}
-			if err := owner.StartExisting(t.Context(), runtime, nil, nil); !errors.Is(err, procs.ErrHostWorkloadChanged) {
-				t.Fatal("modified installed dependency accepted for original rollback", err)
-			}
-			if len(manager.actions) != 0 {
-				t.Fatal("dependency drift changed the original manager", manager.actions)
-			}
-			changed := time.UnixMilli(capture.Processes[0].CreateTime).Add(hostSourceClockTolerance + time.Second)
-			if err := os.Chtimes(filepath.Join(root, filepath.FromSlash(module)), changed, changed); err != nil {
-				t.Fatal(err)
-			}
-			recovered, err = RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-			if err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for _, issue := range recovered.Adoption.Issues {
-				found = found || issue.Code == "host_running_source_changed" && issue.Blocking
-			}
-			if !found {
-				t.Fatal("installed module edited after process birth accepted for recovery")
-			}
-		})
-	}
-}
-
-func TestHostRecoveryBlocksExternalNativeDependencyAuthority(t *testing.T) {
-	root, analyzer, candidate, capture := hostRecoveryFixture(t)
-	directory := filepath.Join(root, ".venv", "bin")
-	if err := os.MkdirAll(directory, 0755); err != nil {
-		t.Fatal(err)
-	}
-	external := filepath.Join(t.TempDir(), "python3")
-	if err := os.WriteFile(external, []byte("external owned dependency fixture"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(external, filepath.Join(directory, "python")); err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, issue := range recovered.Adoption.Issues {
-		found = found || issue.Code == "host_native_source_fence_unavailable" && issue.Blocking
-	}
-	if !found {
-		t.Fatal("unbounded external native dependency authority accepted")
-	}
-	fixture := newPlanningStoreFixture(t)
-	if _, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "external-native-dependency", Profile: ProfileService}, recovered); !errors.Is(err, ErrPreflightBlocked) {
-		t.Fatal("external native dependency reached public adoption", err)
-	}
-}
-
-func TestHostRecoveryDoesNotExcludeUnverifiedLinkedDataSymlink(t *testing.T) {
-	root, analyzer, candidate, capture := hostRecoveryFixture(t)
-	if err := os.Mkdir(filepath.Join(root, "actual-state"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("actual-state", filepath.Join(root, "data")); err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, issue := range recovered.Adoption.Issues {
-		found = found || issue.Code == "host_data_path_unverified" && issue.Field == "runtime.mounts" && issue.Blocking
-	}
-	if !found {
-		t.Fatal("a storage symlink was treated as verified mutable data")
-	}
-	for _, excluded := range recovered.Source.ExcludePaths {
-		if excluded == "data" {
-			t.Fatal("unverified data disappeared from source authority")
-		}
-	}
-	if len(recovered.Configuration.Runtime.Mounts) != 0 {
-		t.Fatal("recovery fabricated a linked data mount")
-	}
-	fixture := newPlanningStoreFixture(t)
-	if _, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "unverified-native-data", Profile: ProfileService}, recovered); !errors.Is(err, ErrPreflightBlocked) {
-		t.Fatal("unverified native data reached public adoption", err)
-	}
-}
-
 func TestHostRecoveryCreatesNormalManagedNodePlanAndNativeRollbackBaseline(t *testing.T) {
 	root, analyzer, candidate, capture := hostRecoveryFixture(t)
 	cache := t.TempDir()
@@ -302,14 +89,14 @@ func TestHostRecoveryCreatesNormalManagedNodePlanAndNativeRollbackBaseline(t *te
 	if len(recovered.Adoption.Blockers) != 0 {
 		t.Fatalf("supported node recovery blocked: %v", recovered.Adoption.Blockers)
 	}
-	if recovered.Source.Kind != SourceLocal || recovered.Source.Mode != SourceModeRecoveredSnapshot || recovered.Configuration.Build.Method != BuildRecipe || recovered.Configuration.Build.Recipe != "node" || recovered.Configuration.Build.NodeVersion != "24" {
+	if recovered.Source.Kind != SourceLocal || recovered.Source.Mode != SourceModeLocalDirectory || recovered.Configuration.Build.Method != BuildRecipe || recovered.Configuration.Build.Recipe != "node" || recovered.Configuration.Build.NodeVersion != "24" {
 		t.Fatalf("source/build not restored: %+v %+v", recovered.Source, recovered.Configuration.Build)
 	}
 	runtime := recovered.Configuration.Runtime
 	if runtime.User != "1000:1001" || runtime.WorkingDirectory != "/app" || !runtime.HostNetwork || runtime.HostPort != 3000 || runtime.Strategy != StrategyStopFirst {
 		t.Fatalf("runtime parity missing: %+v", runtime)
 	}
-	if recovered.Environment["TOKEN"] != "private-production-value" || recovered.Environment["JD_IMPORTED_ARG_0"] != "/usr/local/bin/node" || recovered.Environment["JD_IMPORTED_ARG_1"] != "/app/server.js" {
+	if recovered.Environment["TOKEN"] != "private-production-value" || recovered.Environment["JD_IMPORTED_ARG_0"] != "node" || recovered.Environment["JD_IMPORTED_ARG_1"] != "/app/server.js" {
 		t.Fatal("environment or exact argv lost")
 	}
 	if recovered.Adoption.Runtime.Kind != "pm2" || recovered.Adoption.Runtime.RuntimeID != candidate.ResourceID || recovered.Adoption.Runtime.Port != 3000 {
@@ -337,93 +124,6 @@ func TestHostRecoveryCreatesNormalManagedNodePlanAndNativeRollbackBaseline(t *te
 	}
 }
 
-func TestHostRecoveryDraftSavesArgumentsOutsideOriginalNativeEnvironment(t *testing.T) {
-	root, analyzer, candidate, capture := hostRecoveryFixture(t)
-	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
-	if err != nil {
-		t.Fatal("native recovery failed", err)
-	}
-	if len(recovered.Adoption.Blockers) != 0 {
-		t.Fatal("native recovery blocked", recovered.Adoption.Blockers)
-	}
-	argument := ""
-	for _, input := range recovered.Adoption.Inputs {
-		if input.Kind == "argument" {
-			argument = input.StorageKey
-			break
-		}
-	}
-	if argument == "" {
-		t.Fatal("native recovery omitted server-owned argument metadata")
-	}
-	if _, exists := recovered.BaselineEnvironment[argument]; exists {
-		t.Fatal("translated argument contaminated original native environment")
-	}
-	for _, variable := range recovered.Adoption.BaselineConfiguration.Variables {
-		if variable.Name == argument {
-			t.Fatal("translated argument contaminated original native declarations")
-		}
-	}
-	fixture := newPlanningStoreFixture(t)
-	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-save-proof", Profile: ProfileService}, recovered)
-	if err != nil {
-		t.Fatal(err)
-	}
-	configuration := *draft.Data.Configuration
-	emptyDotenv := ""
-	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &emptyDotenv, RetainEnvironmentKeys: append([]string{}, draft.EnvironmentKeys...)})
-	if err != nil {
-		t.Fatal("unchanged recovered native draft rejected its translated arguments", err)
-	}
-	for _, mode := range []string{"", "reference"} {
-		configuration := *draft.Data.Configuration
-		configuration.Variables = append([]PlannedVariable{}, configuration.Variables...)
-		for i := range configuration.Variables {
-			if configuration.Variables[i].Name == argument {
-				configuration.Variables[i].ValueMode = mode
-			}
-		}
-		if _, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration}); !errors.Is(err, ErrInvalidVariable) {
-			t.Fatal("translated argument mode change accepted", mode, err)
-		}
-	}
-	for _, change := range []func(*PlannedVariable){
-		func(variable *PlannedVariable) { variable.Scopes = []string{"runtime", "build"} },
-		func(variable *PlannedVariable) { variable.Sensitivity = "plain" },
-	} {
-		configuration := *draft.Data.Configuration
-		configuration.Variables = append([]PlannedVariable{}, configuration.Variables...)
-		for i := range configuration.Variables {
-			if configuration.Variables[i].Name == argument {
-				change(&configuration.Variables[i])
-			}
-		}
-		if _, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration}); !errors.Is(err, ErrInvalidVariable) {
-			t.Fatal("translated argument storage declaration change accepted", err)
-		}
-	}
-	configuration = *draft.Data.Configuration
-	literalDotenv := argument + "='${{credential.unrelated}}'"
-	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &literalDotenv, RetainEnvironmentKeys: append([]string{}, draft.EnvironmentKeys...)})
-	if err != nil || draft.environment[argument] != "${{credential.unrelated}}" {
-		t.Fatal("translated argument literal replacement was interpreted", err)
-	}
-	configuration = *draft.Data.Configuration
-	literalDotenv = argument + "="
-	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &literalDotenv, RetainEnvironmentKeys: append([]string{}, draft.EnvironmentKeys...)})
-	if err != nil {
-		t.Fatal("explicit empty translated argument replacement rejected", err)
-	}
-	if value, exists := draft.environment[argument]; !exists || value != "" {
-		t.Fatal("empty argument replacement was lost")
-	}
-	for _, variable := range draft.Data.Adoption.BaselineConfiguration.Variables {
-		if variable.Name == argument {
-			t.Fatal("desired argument edits changed original baseline declarations")
-		}
-	}
-}
-
 func TestHostRecoveryRetainsDataWithoutCopyingLiveFilesAndBlocksPrivateConfig(t *testing.T) {
 	root, analyzer, candidate, capture := hostRecoveryFixture(t)
 	if err := os.Mkdir(filepath.Join(root, "data"), 0755); err != nil {
@@ -447,18 +147,14 @@ func TestHostRecoveryRetainsDataWithoutCopyingLiveFilesAndBlocksPrivateConfig(t 
 			t.Fatalf("private/live %s copied into source archive", name)
 		}
 	}
-	var baseline NativeBaselineMetadata
-	if err := json.Unmarshal(recovered.Adoption.Runtime.Metadata, &baseline); err != nil {
-		t.Fatal(err)
-	}
-	before, err := localDirectoryDigest(context.Background(), root, baseline.SourceExclusions)
+	before, err := localDirectoryDigest(context.Background(), root, recovered.Source.ExcludePaths)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "data", "production.sqlite"), []byte("database changes while app remains live"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	after, err := localDirectoryDigest(context.Background(), root, baseline.SourceExclusions)
+	after, err := localDirectoryDigest(context.Background(), root, recovered.Source.ExcludePaths)
 	if err != nil || before != after {
 		t.Fatal("mutable linked data invalidates source capture")
 	}

@@ -81,7 +81,6 @@ type StoredBuildEvidence struct {
 }
 
 type ReleaseVariableSnapshot struct {
-	ValueMode   string `json:"valueMode,omitempty"`
 	Name        string `json:"name"`
 	Sensitivity string `json:"sensitivity"`
 	Scopes      string `json:"scopes"`
@@ -237,7 +236,7 @@ func (s *OrchestrationStore) ExecutionPlan(ctx context.Context, run EngineRun) (
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT v.key, v.sensitivity, v.scopes, v.value_digest, v.value_mode
+		SELECT v.key, v.sensitivity, v.scopes, v.value_digest
 		  FROM deploy_run_variable_revisions rv
 		  JOIN deploy_variable_revisions v ON v.id = rv.variable_revision_id
 		 WHERE rv.run_id = ? AND v.environment_id = ?
@@ -247,7 +246,7 @@ func (s *OrchestrationStore) ExecutionPlan(ctx context.Context, run EngineRun) (
 	}
 	for rows.Next() {
 		var variable ReleaseVariableSnapshot
-		if err := rows.Scan(&variable.Name, &variable.Sensitivity, &variable.Scopes, &variable.ValueDigest, &variable.ValueMode); err != nil {
+		if err := rows.Scan(&variable.Name, &variable.Sensitivity, &variable.Scopes, &variable.ValueDigest); err != nil {
 			rows.Close()
 			return nil, err
 		}

@@ -355,37 +355,3 @@ func TestDuplicateComposeIsolationAllowsScopedResourcesAndRefusesSharedIdentity(
 		t.Fatalf("project-scoped override volume refused: %v", err)
 	}
 }
-
-func TestDuplicateNeverCopiesExternalProxyAuthority(t *testing.T) {
-	t.Parallel()
-	fixture := newPlanningStoreFixture(t)
-	projectID := buildSourceProjectForDuplication(t, fixture.plans, 7, "linked-original")
-	var environmentID int64
-	if err := fixture.store.DB.QueryRow(`SELECT id FROM deploy_environments WHERE project_id=? AND slug='production'`, projectID).Scan(&environmentID); err != nil {
-		t.Fatal(err)
-	}
-	for _, status := range []string{"linked", "unverified", "hint"} {
-		binding := linkedIngressFixture()
-		binding.ID, binding.Status = "original-"+status, status
-		ownership := OwnershipLinked
-		if status == "hint" {
-			ownership = OwnershipObserved
-		}
-		if _, err := fixture.store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id,release_id,kind,ownership,resource_kind,resource_id,config_json,created_at) VALUES(?,0,'ingress',?,?,?,?,1)`, environmentID, ownership, existingIngressDependency, binding.ID, string(mustJSON(binding))); err != nil {
-			t.Fatal(err)
-		}
-	}
-	draft, err := fixture.plans.Duplicate(t.Context(), projectID, 7, "tester", "independent-copy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, dependency := range draft.Data.Configuration.Dependencies {
-		if dependency.ResourceKind == existingIngressDependency || dependency.Kind == "ingress" {
-			t.Fatal("duplicate retained original external route authority", dependency)
-		}
-	}
-	configuration, err := fixture.plans.EnvironmentConfiguration(t.Context(), projectID, environmentID)
-	if err != nil || len(configuration.IngressBindings) != 3 {
-		t.Fatal("duplicate changed original bindings", err, configuration)
-	}
-}

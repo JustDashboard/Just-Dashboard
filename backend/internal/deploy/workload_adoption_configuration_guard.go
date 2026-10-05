@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"path/filepath"
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/docker/docker/api/types/container"
 )
 
 func (r *dockerRecovery) checkCapturedRuntimeConfiguration(name string, capture *dockerx.AdoptionContainer) {
@@ -100,7 +102,11 @@ func (r *dockerRecovery) recoverMissingImages(ctx context.Context, reader Docker
 				return err
 			}
 			exclude := append([]string(nil), captured.RegenerablePaths...)
-			exclude = append(exclude, captured.VerifiedPythonCaches...)
+			for _, change := range captured.Changes {
+				if change.Kind == container.ChangeAdd && strings.HasSuffix(change.Path, ".pyc") && filepath.Base(filepath.Dir(change.Path)) == "__pycache__" {
+					exclude = append(exclude, change.Path)
+				}
+			}
 			image, err := recoverer.RecoverAdoptionImage(ctx, captured, recoveryRoot, exclude)
 			if err != nil {
 				r.issue("missing_image_recovery_unavailable", err.Error(), name, "image", true)

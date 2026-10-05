@@ -111,10 +111,7 @@ test("each channel says how its last message went, and its sheet reads every att
   page,
 }) => {
   await mockProject(page)
-  // Keep ordering and exact relative-time readings independent of worker scheduling.
-  const fixtureTime = Date.now()
-  await page.clock.setFixedTime(fixtureTime)
-  const at = (hours: number) => new Date(fixtureTime - hours * 3_600_000).toISOString()
+  const at = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString()
   const failing = {
     id: 92,
     name: "Status hook",
@@ -186,7 +183,7 @@ test("each channel says how its last message went, and its sheet reads every att
               runId: 39,
               status: "failed",
               responseClass: "network",
-              nextAttemptAt: new Date(fixtureTime + 10 * 60_000).toISOString(),
+              nextAttemptAt: new Date(Date.now() + 10 * 60_000).toISOString(),
             }),
             delivery({ id: 2, event: "test", status: "delivered", createdAt: at(5) }),
           ]

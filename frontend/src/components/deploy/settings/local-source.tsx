@@ -37,18 +37,11 @@ export function LocalSourceSettings({
     Number(subdirectory !== (source.subdirectory ?? ""))
 
   const save = async () => {
-    if (!directory.trim()) {
-      setError("Enter a build directory to attach new source.")
-      return false
-    }
     setSaving(true)
     setError(undefined)
     try {
       await put(`/deploy/${projectId}/environments/${environmentId}/source`, {
         ...source,
-        kind: "local",
-        mode: "local_directory",
-        resourceId: undefined,
         revision: configuration.revision,
         localPath: directory.trim(),
         subdirectory: subdirectory.trim() || undefined,
@@ -73,7 +66,6 @@ export function LocalSourceSettings({
       dirty={changes > 0}
       changes={changes}
       saving={saving}
-      invalid={!directory.trim()}
       canEdit={canEdit}
       onDiscard={() => {
         setDirectory(source.localPath ?? "")
@@ -92,21 +84,14 @@ export function LocalSourceSettings({
         })}
       >
         <FormNote>
-          {source.mode === "recovered_snapshot"
-            ? "Deploy changes builds the verified source snapshot captured during import. Choose a directory below to attach future source changes. "
-            : "Choose a separate directory for new code. "}
-          The original source is retained for baseline rollback. Saving inspects the directory and
-          creates a pending source revision; the running app changes only when you deploy it.
+          The original source is retained for baseline rollback. Choose a separate directory for new
+          code. Saving inspects the directory and creates a pending source revision; the running app
+          changes only when you deploy it.
         </FormNote>
         <Field
           label="Build directory"
           htmlFor="local-source-directory"
           hint="An absolute directory allowed by this server's deployment roots."
-          error={
-            changes > 0 && !directory.trim()
-              ? "Enter a build directory to attach new source."
-              : undefined
-          }
         >
           <Input
             id="local-source-directory"

@@ -38,15 +38,12 @@ test("import inspects the four-service stack, preserves stopped services and sub
   await page.getByLabel("Project name").fill("bet-bot-production")
   await page.getByRole("button", { name: "Review migration" }).click()
   await expect(page).toHaveURL(/\/deploy\/new\?draft=recovered-workload-draft/)
+  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   expect(fixture.adoptions).toEqual([])
   expect(fixture.recoveries).toEqual([
-    {
-      key: betBot.key,
-      name: "bet-bot-production",
-      digest: betBot.digest,
-      scope: "existing_services",
-    },
+    { key: betBot.key, name: "bet-bot-production", digest: betBot.digest, scope: "all_services" },
   ])
   expect(fixture.calls.filter((call) => call.method === "POST").map((call) => call.path)).toContain(
     "/deploy/import/recover",

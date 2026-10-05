@@ -402,7 +402,7 @@ func snapshotRunVariablesTx(
 	}
 
 	query := `
-		SELECT v.id, v.key, v.sensitivity, v.scopes, v.value_digest, v.value_mode
+		SELECT v.id, v.key, v.sensitivity, v.scopes, v.value_digest
 		  FROM deploy_variable_revisions v`
 	args := []any{environmentID}
 	if copyFromRunID == 0 {
@@ -422,7 +422,7 @@ func snapshotRunVariablesTx(
 		var ref runVariableRevisionRef
 		if err := rows.Scan(
 			&ref.id, &ref.snapshot.Name, &ref.snapshot.Sensitivity,
-			&ref.snapshot.Scopes, &ref.snapshot.ValueDigest, &ref.snapshot.ValueMode,
+			&ref.snapshot.Scopes, &ref.snapshot.ValueDigest,
 		); err != nil {
 			rows.Close()
 			return err

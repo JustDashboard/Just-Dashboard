@@ -47,9 +47,7 @@ export function ComposeSourceSettings({
       await put(`/deploy/${projectId}/environments/${environmentId}/source`, {
         ...source,
         revision: configuration.revision,
-        mode: (source.mode === "recovered_snapshot"
-          ? "recovered_snapshot"
-          : "compose_paste") satisfies DeploymentDraftSource["mode"],
+        mode: "compose_paste" satisfies DeploymentDraftSource["mode"],
         composeFiles: documents.map((document, order) => ({ ...document, order })),
       })
       onSaved()

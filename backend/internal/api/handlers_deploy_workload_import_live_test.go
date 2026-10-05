@@ -57,18 +57,12 @@ func TestLiveWorkloadAdoptionKeepsFourContainerStackAndHTTPServiceUnchanged(t *t
     volumes: ["./web:/www:ro", "caddy_data:/data", "caddy_config:/config"]
     environment:
       FIXTURE_PASSWORD: import-fixture-secret-retained-in-place
-      TELEGRAM_CHAT_ID: "-1000000000001"
-      TELEGRAM_ENABLED: "true"
-      LOG_LEVEL: "INFO"
     restart: unless-stopped
   worker:
     image: caddy:2-alpine
     command: [sleep, "300"]
     volumes: ["persistent:/fixture-data"]
     restart: unless-stopped
-    environment:
-      TELEGRAM_CHAT_ID: "-1000000000002"
-      TELEGRAM_BOT_TOKEN: synthetic-fixture-token
   paused_one:
     image: caddy:2-alpine
     command: [sleep, "300"]
@@ -97,14 +91,6 @@ volumes:
 	}
 	if output, err := command(append(composeArgs, "stop", "--timeout", "1", "paused_one", "paused_two")...); err != nil {
 		t.Fatalf("stop fixture services: %v %s", err, output)
-	}
-	if os.Getenv("JD_WORKLOAD_IMPORT_BROWSER") == "1" {
-		if os.Getenv("JD_IMPORT_BROWSER_EVIDENCE_DIR") == "" {
-			t.Fatal("the owned browser fixture requires JD_IMPORT_BROWSER_EVIDENCE_DIR")
-		}
-		t.Setenv("JD_IMPORT_BROWSER_STACK", project)
-		TestWorkloadImportBrowserEvidenceServer(t)
-		return
 	}
 
 	s := testServer(t)
@@ -235,9 +221,6 @@ volumes:
 	}
 	var draft deploy.Draft
 	decodePlanningResponse(t, recovered.Body.Bytes(), &draft)
-	if draft.Data.Adoption == nil || draft.Data.Adoption.Scope != deploy.RecoveryExistingServices {
-		t.Fatal("an omitted API recovery scope did not default to existing containers")
-	}
 	checked := doPlanningJSON(t, c, http.MethodPost, "/api/v1/deploy/drafts/"+draft.ID+"/preflight", map[string]any{"revision": draft.Revision})
 	if checked.Code != http.StatusOK {
 		t.Fatalf("preflight = %d %s", checked.Code, checked.Body.String())

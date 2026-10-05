@@ -13,10 +13,6 @@ func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
 	for _, name := range capture.RegenerablePaths {
 		verifiedRegenerable[name] = true
 	}
-	verifiedPython := map[string]bool{}
-	for _, name := range capture.VerifiedPythonCaches {
-		verifiedPython[name] = true
-	}
 	additions := []string{}
 	bytecode := false
 	for _, change := range capture.Changes {
@@ -27,7 +23,7 @@ func recoverableWritableLayer(capture *dockerx.AdoptionContainer) (bool, bool) {
 		if change.Kind != container.ChangeAdd || !known || !mode.IsRegular() {
 			continue
 		}
-		if verifiedPython[change.Path] && path.Base(path.Dir(change.Path)) == "__pycache__" && strings.HasSuffix(path.Base(change.Path), ".pyc") && path.Clean(change.Path) == change.Path && strings.HasPrefix(change.Path, "/") {
+		if path.Base(path.Dir(change.Path)) == "__pycache__" && strings.HasSuffix(path.Base(change.Path), ".pyc") && path.Clean(change.Path) == change.Path && strings.HasPrefix(change.Path, "/") {
 			additions, bytecode = append(additions, change.Path), true
 		} else if change.Path == "/usr/sbin/docker-init" && capture.Inspection.HostConfig.Init != nil && *capture.Inspection.HostConfig.Init {
 			additions = append(additions, change.Path)

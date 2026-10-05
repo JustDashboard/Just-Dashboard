@@ -28,32 +28,28 @@ var ErrHostWorkloadChanged = errors.New("the original host workload changed")
 // Environment and arguments can contain credentials; only their names and the
 // compatibility findings may be serialized into discovery or audit responses.
 type HostWorkloadCapture struct {
-	Manager                    string               `json:"manager"`
-	ResourceID                 string               `json:"resourceId"`
-	Name                       string               `json:"name"`
-	Account                    string               `json:"account,omitempty"`
-	InterpreterVersion         string               `json:"interpreterVersion,omitempty"`
-	InterpreterPath            string               `json:"-"`
-	UID                        uint32               `json:"uid"`
-	GID                        uint32               `json:"gid"`
-	RestartPolicy              string               `json:"restartPolicy,omitempty"`
-	StopSignal                 string               `json:"stopSignal,omitempty"`
-	GracePeriodSeconds         int                  `json:"gracePeriodSeconds,omitempty"`
-	SourceDirectory            string               `json:"sourceDirectory,omitempty"`
-	SourcePath                 string               `json:"sourcePath,omitempty"`
-	ConfigurationDigest        string               `json:"configurationDigest"`
-	RuntimeConfigurationDigest string               `json:"-"`
-	Processes                  []HostProcessCapture `json:"processes"`
-	EnvironmentNames           []string             `json:"environmentNames"`
-	Blockers                   []string             `json:"blockers"`
-	Warnings                   []string             `json:"warnings"`
-	Environment                map[string]string    `json:"-"`
-	Command                    []string             `json:"-"`
-	OriginalConfig             json.RawMessage      `json:"-"`
-	StartupEvidence            json.RawMessage      `json:"-"`
-	SourceFiles                map[string]string    `json:"-"`
-	StartupPlan                *NativeStartupPlan   `json:"-"`
-	UnitNames                  []string             `json:"-"`
+	Manager             string               `json:"manager"`
+	ResourceID          string               `json:"resourceId"`
+	Name                string               `json:"name"`
+	Account             string               `json:"account,omitempty"`
+	InterpreterVersion  string               `json:"interpreterVersion,omitempty"`
+	UID                 uint32               `json:"uid"`
+	GID                 uint32               `json:"gid"`
+	RestartPolicy       string               `json:"restartPolicy,omitempty"`
+	StopSignal          string               `json:"stopSignal,omitempty"`
+	GracePeriodSeconds  int                  `json:"gracePeriodSeconds,omitempty"`
+	SourceDirectory     string               `json:"sourceDirectory,omitempty"`
+	SourcePath          string               `json:"sourcePath,omitempty"`
+	ConfigurationDigest string               `json:"configurationDigest"`
+	Processes           []HostProcessCapture `json:"processes"`
+	EnvironmentNames    []string             `json:"environmentNames"`
+	Blockers            []string             `json:"blockers"`
+	Warnings            []string             `json:"warnings"`
+	Environment         map[string]string    `json:"-"`
+	Command             []string             `json:"-"`
+	OriginalConfig      json.RawMessage      `json:"-"`
+	StartupEvidence     json.RawMessage      `json:"-"`
+	SourceFiles         map[string]string    `json:"-"`
 }
 
 type HostProcessCapture struct {
@@ -134,8 +130,7 @@ func CaptureExistingProcess(ctx context.Context, pid int32, created int64) (*Hos
 		Manager: "process", ResourceID: strconv.Itoa(int(pid)) + ":" + strconv.FormatInt(created, 10),
 		Name: filepath.Base(executable), Account: account, UID: uint32(uids[1]), GID: uint32(gids[1]),
 		SourceDirectory: cwd, SourcePath: executable, Command: command, Environment: environment,
-		InterpreterPath: executable,
-		OriginalConfig:  private, ConfigurationDigest: captureDigest(private), EnvironmentNames: captureEnvironmentNames(environment),
+		OriginalConfig: private, ConfigurationDigest: captureDigest(private), EnvironmentNames: captureEnvironmentNames(environment),
 		Processes: []HostProcessCapture{{PID: pid, CreateTime: created, State: "running", LogSources: []string{}, Environment: environment, Command: command}},
 		Blockers:  []string{"This process has no verified restart manager. Automatic cutover cannot restore it if a replacement fails. Configure an authoritative service or PM2 manager before migration."},
 		Warnings:  []string{"Open files and live memory do not describe every data dependency. Review persistence and operating-system dependencies before container migration."},

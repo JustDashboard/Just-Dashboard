@@ -9,9 +9,8 @@ original runtime. Recovery refuses incomplete translations instead of claiming t
 ## Workflow and API
 
 An administrator opens **Import existing** on `/deploy`, discovers the workload, reviews the
-inventory, and chooses **Review migration**. `/deploy/import` opens final Review when all inputs
-are retained and the recovered configuration is complete. Configure and Variables remain available
-for reviewing or replacing captured settings. The final **Adopt deployment** action
+inventory, and chooses **Review migration**. `/deploy/import` then opens the normal Configure,
+Variables and Review sequence with the recovered settings. The final **Adopt deployment** action
 records the existing app. **Deploy changes** later applies the desired recipe. **Redeploy** restores
 the frozen live release; it does not apply pending settings. Docker adoption retains existing Docker
 resources; an explicitly deployed PM2/systemd recipe runs under the dashboard's Docker deployment
@@ -23,7 +22,7 @@ engine, with the original manager retained as the baseline recovery authority.
   draft. Recovery reads private configuration separately from the public inventory. It returns
   `422 recovery_blocked` with actionable reasons if a complete supported recipe cannot be recovered.
   Compose stacks additionally accept `scope: "all_services" | "existing_services"`, defaulting to
-  `existing_services` for new imports. **Existing containers only** retains every running and stopped container
+  the full declared recipe. **Existing containers only** retains every running and stopped container
   and excludes only declared services with no container. The server reports the exact excluded names
   in the recovered draft and requires acknowledgement in final Review; missing dependencies remain
   blockers. Scope and exclusions are sealed server-owned provenance, not adoption request authority.
@@ -54,55 +53,6 @@ private capture never enters discovery, audit data or browser remembered setup. 
 sealed in draft and variable storage; recovered source documents use variable references instead
 of embedding captured environment, credential arguments or label values.
 
-Container capture reads authoritative image configuration without the image page's history or unrelated
-container inventory. Verified n8n generator/distribution evidence is cached per daemon client and
-immutable image (at most eight images), reusable only after fresh writable-layer changes and mount
-inspection prove its source paths remain untouched and unshadowed. Generated cache archives and
-upload emptiness are verified afresh each time. Recovery keeps its 60-second overall bound; timeout
-diagnostics name the capture phase without exposing Docker responses, and a failed existing-container
-read does not become a misleading missing-service diagnosis.
-
-Captured inputs carry server-owned original names, service identities, environment/image-default/runtime
-categories and retained/empty status. Reads also compute `bound` from the current desired source and
-runtime, including the shell argument aliases retained for native migrations. The wizard and project
-settings use those identities; opaque
-`JD_IMPORT_*` storage names keep service-local values separate internally. Display sensitivity does
-not make a captured value public: all values remain sealed, including ordinary image defaults and
-intentionally empty strings. Source-bound captured inputs accept literal value replacement; removal,
-reference conversion or scope changes require updating the source or runtime binding first. Ordinary
-native environment names and captured inputs whose bindings have been removed remain editable through
-the normal variable controls, while their original-name metadata remains available. Old native imports
-without metadata recover argument identities only from their known native baseline source mode and the
-aliases referenced by the first managed runtime command.
-Translated native argument declarations remain private runtime-only literals, validated from their
-server-owned input identities. They are excluded from the original native environment and its frozen
-variable declarations; saving a migration draft never adds them to that baseline.
-
-Variable revisions record explicit literal/reference intent. New captured inputs and dotenv/value
-writes are literal, so a running app's `${{credential.name}}` text is never interpreted as dashboard
-authority. The additive `value_mode` migration defaults existing rows to the shipped inference behavior;
-old drafts, snapshots and release digests retain that meaning. Run snapshots bind the mode alongside
-the value digest, and desired edits cannot change a frozen baseline's mode or values.
-Dotenv previews preserve that distinction: reference-shaped text is accepted as literal input, and
-replacing an old inferred or explicit reference with the same literal text is reported as a change.
-
-Effective `compose config` output first loses its reusable-document dollar escaping, while its
-original serialized digest stays frozen for fresh inspection. Engine overlays and decoded retained
-fields then escape literal dollar signs once before Compose rendering. Temporary Compose
-interpolation files use Compose-specific literal encoding rather than Go string quoting, preserving
-dollars, quotes, backslashes, line breaks, Unicode and supported control bytes without expanding a
-captured value against the dashboard's process environment. Escaped source literals are distinguished
-from unresolved interpolation inputs. Private/shareable IPC is not host-equivalent authority, and
-backup coverage counts distinct writable persistent resources rather than read-only source mounts or
-multiple mounts of the same volume.
-
-Recovery also reuses an existing backup policy when one enabled, unfiltered job covers every distinct
-writable bind or local named volume and its latest successful archive verifies against the stored
-manifest. Archive verification is bounded to a 15-second check, a 256 MiB archive and a successful run
-within the last 24 hours. It never creates or runs a backup job during import. Unsupported volume
-drivers, partial coverage, stale or unverifiable archives retain the backup warning. The linked policy
-is checked again through the normal backup gate before a later deployment stops the application.
-
 Recovery writes only private, bounded staging files under the dashboard data directory. It never
 writes the application's original directory. Docker effective configuration is read with Compose
 `config`, not `up`, `build` or `pull`; source inspection does not execute an ecosystem JavaScript
@@ -113,18 +63,14 @@ If Docker deleted an existing container's original image, a verified platform de
 [bounded read-only filesystem export](docker-image-recovery.md) into a private recovery image. This
 creates a local image artifact while leaving the original runtime unchanged; mounted data is excluded
 and recovered separately. Captured secrets remain sealed variables rather than image configuration.
-In explicitly selected `all_services` scope, an absent service with no image or container still requires
+In the default complete-recipe scope, an absent service with no image or container still requires
 its original image/source before adoption.
 
-New Compose imports default to `existing_services`, including every existing container, running or
-stopped, and explicitly list
-only declarations with no container under `excludedServices`. An explicitly selected `all_services`
-scope includes every declared service; historical persisted empty scopes retain `all_services` meaning. Recovery records one
+Compose recovery defaults to `all_services`, including every declared service. A separately reviewed
+`existing_services` scope includes every existing container, running or stopped, and explicitly lists
+only declarations with no container under `excludedServices`. Recovery records one
 `compose_services_excluded` issue for each omitted declaration. Normal preflight turns each adoption
-issue into a stable structured finding, whose code must be acknowledged at commit. Review
-groups repeated adoption issues and Compose operational warnings while retaining every
-service's evidence and every distinct backend acknowledgement.
-Deploy changes
+warning into an `adoption_warning_N` finding, whose code must be acknowledged at commit. Deploy changes
 does not create the excluded services, and their original Compose definitions stay untouched. Retained dependencies, links,
 service namespaces, volumes-from or shared build contexts referring to an exclusion block recovery;
 the importer never removes those relationships to force a usable recipe. Unused resources belonging
@@ -138,36 +84,6 @@ require fresh recovery. An omitted scope on older drafts means `all_services`. E
 is available only to Compose stacks; containers and native managers keep their complete recovered plan.
 
 ## Supported recovery and explicit boundaries
-
-### Existing domains and proxy continuity
-
-Recovered external routes are recorded separately from managed deployment domains. **Keep current
-proxy** preserves each authoritative hostname/path/service binding, TLS, authentication, rewrite and
-WebSocket configuration. Host nginx and host or Docker Caddy are inspected using bounded persistent
-configuration plus authoritative active-manager evidence; unsynced Caddy configuration is rejected.
-Discovery never guesses a domain from `APP_URL` or assigns every hostname to every stack service.
-
-A verified host-port upstream stays unchanged. A Docker alias requires exact network membership and
-one verified running owner, or direct identity/network/alias proof for its captured intentionally
-stopped original. Rollback can retain that exact original stopped state; a replacement must be the
-sole running owner and match the verified managed target. A literal container-IP upstream can receive a targeted, reversible
-address update on **Deploy changes** when the exact persisted nginx directive or closed Caddy
-`reverse_proxy` literal can be isolated. A private durable journal binds before/after bytes and
-configuration identity; validate/reload failures compensate, and rollback reconciles the restored
-runtime's actual endpoint. Surrounding proxy configuration is preserved. Desired service ports and
-network aliases are checked before stopping the live application, then actual endpoints are verified
-after start. Configuration drift or a detected conflicting external edit is refused without
-overwriting it. Single-file bind mounts retain their inode through bounded in-place writes: file
-descriptor/path identity and before/after byte checks detect conflicts, but cannot atomically exclude
-an external writer racing between those checks. See [the handoff contract](caddy-ingress.md).
-
-Shared, dynamic, imported or otherwise ambiguous upstreams need a verified external handoff. Known
-routes whose manager cannot be inspected remain explicit unverified dependencies and block replacement
-before stop. Traefik host labels are unverified routing evidence, not proof of active middleware or
-upstream continuity. Unassociated Apache, Traefik and nginx-proxy-manager presence is a discovery hint;
-the dashboard never takes over those managers implicitly. Linked existing routes remain server-owned
-across settings saves and are excluded from managed certificate rendering, preview routing and managed
-resource deletion. Additional managed domains can still be added through the ordinary Domains page.
 
 Docker capture also checks the original raw `Config` and `HostConfig` against the negotiated SDK
 representation, including nested mounts, health checks and structured options. Unknown effective
@@ -192,32 +108,19 @@ also block before image recovery, with a specific reason instead of a partial re
 
 | Runtime | Recovered plan and baseline | Cases that require resolution before adoption |
 | --- | --- | --- |
-| Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services in `all_services` scope, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
+| Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
 | Standalone Docker | A Compose recipe capturing environment, command/entrypoint, user/cwd, ports, mounts, networks/aliases, restart policy, health check, logging, resource limits and supported security/host options. Live baseline initially points to the unchanged original container. | Unmapped Engine options, unsupported namespace/resource relationships, Swarm tasks, missing image identity, or meaningful writable-layer data. The first **Deploy changes** action preserves the original container name, aliases and reviewed resources. |
-| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node/Python recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Verified matching `dump.pm2`/backup entries receive a targeted reversible startup handoff. Unverifiable, ambiguous or differently owned saved lists still block migration. |
-| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. Disabled authority or exact verified direct target enablement links can be retained under a reversible startup handoff. Shared/indirect loaded or installed activation relationships and unsupported resource/scheduling directives block migration. |
+| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Matching entries in `dump.pm2` or `dump.pm2.bak`, or an unverifiable saved list, require a reviewed startup handoff before migration. |
+| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. Original startup authority must be verifiably disabled; known loaded or installed activation relationships and unsupported resource/scheduling directives block migration. |
 | Bare listening process | PID plus creation time and safe inventory; capture can explain the source and missing requirements. | No verified manager can restart the original process for compensation. Automatic managed adoption is refused until a reproducible source and restart authority exist. A port or framework name alone cannot supply these. |
 
 The source of an image-only workload is its immutable local image. Recovery cannot manufacture the
-original Git history or source checkout. Verified local Compose build contexts and Dockerfiles are
-copied into bounded immutable source snapshots for future builds, while the exact captured images,
-variables and runtime remain an independent frozen baseline. Unsupported external, missing, private
-or unresolved historical build inputs retain the image-only fallback, with a service-specific reason.
-Original build declarations and contexts remain untouched. Multiple service contexts are inspected
-independently; a framework candidate belongs to its service rather than every container in the stack.
-
-Native recovery selects a source candidate containing the actual captured entrypoint, preserves a
-monorepo's source-root layout and prepares a server-owned `recovered_snapshot`. Supported interpreter
-identity is positively verified using the captured executable, bounded version probes and unchanged
-file evidence; it is not inferred from an administrator's current Node or Python executable. Recovery
-inspects manifests, locks and runtime command/image-family evidence without executing application
-scripts. Inlined Next.js browser settings receive build scope; ordinary runtime inputs keep their
-original runtime bindings and independent baseline values. General settings can later attach an
-allowed local build directory without retaining the immutable snapshot handle. Editing captured
-Compose YAML retains its source mode and handle. Native source settings require an explicit local
-directory before switching to a local build. Excluded persistent
-data remains linked rather than copied into an image. Source-copy containment, symlink checks and
-size/count limits fail closed.
+original Git history or source checkout. An existing Compose `build` definition is reported for
+review; the captured image is the initial reproducible baseline/redeploy input. The source settings
+can later attach supported Compose source for builds. A native plain/dirty directory uses
+`local_directory`: a bounded content identity and private copy preserve uncommitted files without
+pretending they are a Git commit. Excluded persistent data remains linked rather than copied into
+an image. Source-copy containment, symlink checks and size/count limits fail closed.
 Source hashes and private copies open regular files through no-follow, nonblocking descriptors and
 verify descriptor identity before reading; a file replaced by a FIFO cannot stall recovery.
 The dashboard-visible source directory must be the same filesystem object as the host directory.
@@ -248,8 +151,7 @@ Explicit systemd directives outside the supported unit subset fail closed, inclu
 rlimits, scheduling, watchdog/backoff, additional lifecycle commands, dependencies and sandbox policy.
 The supported file directives are `Description`/`Documentation`, `Type`, `User`/`Group`,
 `WorkingDirectory`, `ExecStart`, `Environment`, `Restart`, `KillMode`/`KillSignal` and `TimeoutStopSec`;
-install metadata is retained only alongside verifiably disabled startup authority or an exact
-reversible handoff for direct enablement links. Unknown directives
+install metadata is retained only alongside verifiably disabled startup authority. Unknown directives
 or sections require explicit review instead of silently losing their behavior.
 
 Whole filesystem environment values within the captured source and local `file`/`sqlite` URIs map
@@ -269,8 +171,8 @@ filename checks cannot identify every embedded secret. Static-serving recipes ca
 those migrations require a reviewed Dockerfile instead of an automatic runtime override.
 
 Docker writable-layer checks block application data, altered source and unknown file changes.
-Verified Docker-generated files and timestamp-validated Python bytecode caches backed by unchanged regular source are
-reported separately. Sourceless, hash-based and unverifiable bytecode remains blocking; this is not a blanket exemption for `/tmp`, logs or cache directories. Stopped
+Verified Docker-generated files and narrowly identified regenerable Python bytecode caches are
+reported separately; this is not a blanket exemption for `/tmp`, logs or cache directories. Stopped
 and missing services remain inactive during adoption. A later Deploy changes may create/start the
 services in the reviewed recipe; baseline redeploy/rollback restores only the captured existing
 replicas and running set.
@@ -337,11 +239,6 @@ captured service/replica identity. Native services expose their manager, current
 PID and native log source rather than fabricated Docker IDs. Container console requires an actual
 Docker runtime; PM2 files and systemd journal supply native output before migration. Git-only features
 require a real Git source, and Docker-specific metrics/tools require a Docker runtime.
-Recorded native observation and dependency preflight for managed PM2/systemd runtime reservations
-allow up to 30 seconds for installed startup inventory and captured source/executable verification,
-while respecting a shorter caller deadline. Ordinary dependency preflight keeps its ten-second
-bound and ordinary Docker listing keeps its five-second bound. Extending the native read budget
-does not skip any authority checks.
 
 Recovery captures the application runtime. Existing external reverse-proxy routes, certificates,
 schedulers and integrations retain their original ownership. Review their addresses, credentials and
@@ -361,60 +258,39 @@ The Configure/Review plan summary likewise points to per-service Compose limits 
 overrides are unset, rather than calling the application unlimited.
 
 General settings also exposes the build directory and optional subdirectory for native
-`recovered_snapshot` and `local_directory` sources. Select a separate allowed directory for new code: a source save inspects
+`local_directory` sources. Select a separate allowed directory for new code: a source save inspects
 it and creates a pending revision, while the frozen original source remains the baseline rollback
 input. Captured data exclusions are shown read-only and retained on save along with the source's
-other metadata, including when an immutable recovery snapshot is later replaced with the original
-local directory. Rejected paths or revision conflicts keep the unsaved fields visible; readers can
+other metadata. Rejected paths or revision conflicts keep the unsaved fields visible; readers can
 inspect them without editing, and source paths are not remembered in browser storage.
 
 Original startup authority also needs a reversible handoff before container migration. PM2 capture
 checks both `dump.pm2` and `dump.pm2.bak` by application namespace/name, independent of numeric IDs.
-Verified matching saved entries receive a private handoff plan; malformed, unreadable, nonregular,
-oversized or differently owned lists cannot prove safe authority and still block. The plan retains only
-selected namespace/name rows, their original positions and file fingerprints, never another application's
-private configuration. Import does not change the lists. Deploy changes atomically removes the selected
-rows from both lists while preserving other applications and namespaces; baseline rollback restores
-those exact selected rows and original ownership/mode. The importer never runs `pm2 save`.
+Matching saved entries block; malformed, unreadable, nonregular or oversized lists cannot prove absence
+and block too. Other applications' valid saved entries remain untouched. The controller rechecks this
+private evidence using bounded no-follow descriptor reads immediately before its exact lifecycle RPC.
+The importer never runs `pm2 save` or rewrites a shared startup list.
 
-Systemd recovery permits disabled original units and verifies a targeted handoff for direct
-`.target.wants`/`.target.requires` enablement symlinks. Each link must resolve to the captured persistent
-unit and explain its `WantedBy`/`RequiredBy` relationships. Aliases, static/indirect enablement, explicit
-target-file dependencies, timers, sockets, paths and reverse control relationships (`TriggeredBy`,
-`BoundBy`, `UpheldBy`, `ConsistsOf`, `OnFailureOf`, `OnSuccessOf`) remain blockers. A bounded installed inventory reads service/timer/path/socket/target metadata,
+Systemd recovery permits only verifiably disabled original units and rejects current reverse activation
+or control relationships (`WantedBy`, `RequiredBy`, `TriggeredBy`, `BoundBy`, `UpheldBy`, `ConsistsOf`,
+`OnFailureOf`, `OnSuccessOf`). A bounded installed inventory reads service/timer/path/socket/target metadata,
 service aliases and their authoritative files using read-only `systemctl` arguments; this can load
 metadata but never starts, enables or reloads a unit. Explicit activation/dependency references and
 same-basename default triggers are checked against canonical and alias service names even when those
-startup units were previously unloaded. Matching references outside the positively verified direct-link
-handoff block, and their private evidence joins the baseline configuration digest. Unreadable or ambiguous inventory also blocks. The limits are
+startup units were previously unloaded. Matching references block, and their private evidence joins
+the baseline configuration digest. Unreadable or ambiguous inventory also blocks. The limits are
 10,000 listed entries, 512 inspected units, 4 MiB per command/file and 8 MiB of inspected file contents.
 Concrete template instances are included, and uninstantiated templates are inspected through bounded
 `systemctl cat` and authoritative-file reads. Explicit template activation references block; enabled
 templates with ambiguous service/target specifiers fail closed. Unrelated templates such as getty do
 not substitute for the application's startup authority. The real adapter recaptures startup/configuration and PID identity before manager
-control. Import changes no startup settings; Deploy changes retires only the exact prepared links.
-Rollback recreates their original targets and ownership without overwriting an existing link or file.
-The adapter never disables a shared service, calls a global manager save or reloads the host manager.
+control. No global enablement or startup settings are changed by import or cutover.
 
 These checks cannot prove absence of cron, custom scripts, future administrator actions or every
 external launcher. The mandatory review warning requires checking all external startup authority,
 including additional targets and template launchers, so the original app cannot restart beside Docker
-after reboot. Known safe authority is prepared automatically; unresolved shared or ambiguous authority
-requires an operator-reviewed reversible handoff and fresh recovery. It does not authorize disabling
-shared production startup services globally.
-
-Startup plans are sealed outside public draft data. A durable journal records the exact before and
-planned/observed retired or restored fingerprints before and after each side effect. Directory-descriptor
-locks serialize dashboard plans sharing an authority directory; bounded no-follow reads and atomic
-exchange verify displaced file bytes against the prepared fingerprint, preserving foreign races rather
-than overwriting them. Interrupted publishes reconcile through their recorded temporary path before
-continuing or compensating. Completed operations remove temporary backups. A foreign saved-list/link
-change blocks retirement or rollback; runtime digest normalization alone cannot grant restart authority.
-Later cutovers can retire the same verified restored authority again. Each cycle records its exact
-restored source fingerprint before publication, while the original sealed plan and before fingerprint
-remain immutable. Old journals without a cycle source retain their first-cycle comparison semantics.
-The full original discovery digest remains intact, and the separate runtime digest is accepted only
-with verified startup evidence and the journal's exact controlled transition.
+after reboot. Clearing a startup blocker requires an operator-reviewed reversible handoff, followed
+by fresh recovery; it is not permission to disable shared production startup services globally.
 
 Native lifecycle operations recheck manager configuration and captured source evidence before
 controlling the original app. The reviewed original source directory remains frozen while its native

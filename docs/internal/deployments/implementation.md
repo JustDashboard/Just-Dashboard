@@ -915,11 +915,7 @@ only renderer/executor/validation authority for their feature.
   is not the live one.
 - Deployment variables are encrypted, immutable revisions with an exact closed scope set (`build`,
   `runtime`, `release_task`). Lists use a fixed mask; reveal is a separate session-only admin read with an
-  explicit audit entry. Bulk dotenv parsing is bounded and inert. New captured and value/dotenv writes
-  record literal intent; reference writes record explicit reference intent. The additive `value_mode`
-  migration preserves the shipped inference behavior for historical rows with an empty mode, while
-  new literal `${{credential.name}}` text stays an application value. Frozen snapshots and run digests
-  bind this intent alongside each value digest. Full typed references are parsed into a
+  explicit audit entry. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
   closed kind/target model; missing variable references and cycles fail before commit, secret leaves stay
   masked, and enqueue freezes exact variable revision ids so retries cannot observe a later variable
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
@@ -935,7 +931,7 @@ only renderer/executor/validation authority for their feature.
   server, and the answer carries neither a value nor a digest. It is audited under an action of its
   own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
   import it did not perform. What the import refuses as a whole — a
-  line the parser cannot read past or a bad sensitivity or scope —
+  line the parser cannot read past, a bad sensitivity or scope, a reference that would not resolve —
   is refused with the import's own error; a refusal that belongs to one name is that name's verdict,
   so every other line can still be read. `dryRun` must parse as a boolean, because a preview that
   failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and
@@ -1187,26 +1183,10 @@ only renderer/executor/validation authority for their feature.
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
   batched call. Every section carries its own availability, so a host without nginx or Backups renders
-  named unavailable evidence rather than an empty success. Compose storage comes from exact live
-  release containers rather than aggregate plan overrides: actual volume names and bind paths retain
-  read-only flags, service names and container IDs, including shared replica mounts. This is a
-  read-only enrichment of the dependency inventory, bounded to 128 containers and ten seconds;
-  missing or mismatched Docker evidence reads unavailable rather than verified empty storage.
-  Native runtime observations prefer the current live release over historical rollback rows for the
-  same manager identity while retaining all instances from its capture. A domain row names who issued its
+  named unavailable evidence rather than an empty success. A domain row names who issued its
   certificate (`certificateIssuer`, the issuer's common name — `R10`, `E6` for Let's Encrypt — read
   from the same certificate as its name and days left), so the issuer is observed rather than
-  inferred from how the domain is owned. Imported external proxy bindings are read from the live
-  snapshot's server-owned `existing_proxy_route` dependencies and verified through the original
-  proxy reader. Each row retains its binding ID, path and exact service; private network routes are
-  not mapped to every published service. A verified link reads `served` with linked ownership;
-  unavailable or changed evidence reads `unavailable` with an explicit detail. An unverified known
-  manager with no authoritative hostname makes domain evidence unavailable rather than claiming
-  there is no public domain. Runtime maps and lists retain distinct hostname/path/service bindings
-  and exact storage owners; an absent explicit owner never falls back to a different service.
-  External HTTPS stays
-  unassessed by this summary: it does not claim a dashboard certificate, issue one or invoke route
-  handoff. These links bypass the generic dependency inventory. A domain covered by the copy a Docker Caddy release kept reads
+  inferred from how the domain is owned. A domain covered by the copy a Docker Caddy release kept reads
   `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the
   certificate it serves and never the copy, so the copy's expiry is not the domain's and raises no
   finding. A dependency's `deepLink` is the page that owns it: a backup
@@ -1479,8 +1459,8 @@ only renderer/executor/validation authority for their feature.
   same `<slug>-<hash>` shape a blueprint's own volumes already get (`blueprintVolumePrefix`, keyed on the new
   name and the old literal volume name so two mounts never collide) — committing the duplicate unchanged
   would otherwise hand it the source project's own live volume. Runtime ownership dependencies are
-  omitted, along with all externally owned imported proxy links, and `composeProjectName` is cleared:
-  a duplicate has no authority over the original runtime, proxy or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
+  omitted and `composeProjectName` is cleared: a duplicate has no authority over the original runtime
+  or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
   before a draft is created. Compose sources additionally need inspectable files without fixed
   container names, external/fixed-name networks, inherited runtime namespaces, external links or
   shared writable volumes. Project-scoped Compose volumes remain supported, including declarations

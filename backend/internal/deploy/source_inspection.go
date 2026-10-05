@@ -40,7 +40,7 @@ type SourceInspector interface {
 func sourceHasTree(source DraftSourceConfig) bool {
 	switch source.Mode {
 	case SourceModeGitURL, SourceModeConnectedRepository, SourceModeComposeGit,
-		SourceModeLocalCheckout, SourceModeExistingCheckout, SourceModeLocalDirectory, SourceModeRecoveredSnapshot:
+		SourceModeLocalCheckout, SourceModeExistingCheckout, SourceModeLocalDirectory:
 		return true
 	}
 	return false
@@ -58,33 +58,6 @@ func (a *HostSourceAnalyzer) InspectRevision(
 	}
 	if err := source.Validate(); err != nil {
 		return err
-	}
-	if source.Mode == SourceModeRecoveredSnapshot {
-		root, err := a.recoveredSnapshotRoot(ctx, source.ResourceID)
-		if err != nil {
-			return err
-		}
-		cache, cleanup, err := a.planningCacheRoot()
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-		target, err := os.MkdirTemp(cache, "recovered-inspect-")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(target)
-		if err := copyContainedTree(root, target, copyTreeLimits{ExcludePrivateFiles: true}); err != nil {
-			return err
-		}
-		if err := writeRecoveredComposeDocuments(target, source.ComposeFiles); err != nil {
-			return err
-		}
-		selected, err := detectionSubdirectory(target, source.Subdirectory)
-		if err != nil {
-			return err
-		}
-		return inspect(selected, identity)
 	}
 	if source.Mode == SourceModeLocalDirectory {
 		return a.inspectLocalDirectory(ctx, source, identity, inspect)

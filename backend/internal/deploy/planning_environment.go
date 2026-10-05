@@ -15,13 +15,6 @@ func (d *Draft) refreshEnvironmentKeys() {
 }
 
 func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanConfiguration {
-	if d.Data.Adoption != nil {
-		bindings := recoveredInputBindingKeys(d.Data.Source, configuration.Runtime)
-		for i := range d.Data.Adoption.Inputs {
-			input := &d.Data.Adoption.Inputs[i]
-			input.Bound = bindings[input.StorageKey]
-		}
-	}
 	seen := map[string]bool{}
 	for _, variable := range configuration.Variables {
 		seen[variable.Name] = true
@@ -46,7 +39,7 @@ func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanCon
 			scopes = []string{"build"}
 		}
 		configuration.Variables = append(configuration.Variables, PlannedVariable{
-			Name: name, ValueMode: "literal", Sensitivity: suppliedVariableSensitivity(PlannedVariable{Name: name, ValueMode: "literal", Sensitivity: "plain"}),
+			Name: name, Sensitivity: suppliedVariableSensitivity(PlannedVariable{Name: name, Sensitivity: "plain"}),
 			Scopes: scopes,
 		})
 	}
@@ -127,26 +120,4 @@ func (d *Draft) variableValues(configuration PlanConfiguration) map[string]strin
 		values[name] = value
 	}
 	return values
-}
-
-// Empty mode retains the shipped value-shape inference for old drafts.
-func (d *Draft) variableModes(configuration PlanConfiguration) map[string]string {
-	modes := map[string]string{}
-	for _, variable := range configuration.Variables {
-		mode := variable.ValueMode
-		if _, supplied := d.environment[variable.Name]; !supplied && variable.Reference != "" {
-			mode = "reference"
-		}
-		if mode == "" && (variable.Value != "" || variable.Generate > 0) {
-			mode = "literal"
-		}
-		modes[variable.Name] = mode
-	}
-	return modes
-}
-func variableWriteMode(request VariableWriteRequest) string {
-	if request.Reference != "" {
-		return "reference"
-	}
-	return "literal"
 }
