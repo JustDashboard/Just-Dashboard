@@ -10,6 +10,8 @@ import {
   StorageMounts,
 } from "@/components/deploy/new-project/configure-advanced"
 import { PublicAddress } from "@/components/deploy/new-project/public-address"
+import { checkTarget } from "@/components/deploy/new-project/plan-reading"
+import { ShellWords } from "@/components/deploy/run-evidence"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 import { synchronizePrimaryDomain } from "@/components/deploy/new-project/domain-bindings"
@@ -64,13 +66,16 @@ export function StepRuntime({
 
   const readiness = configuration.checks.find((check) => check.phase === "readiness")
   const smoke = configuration.checks.find((check) => check.phase === "smoke")
-  const checkFacts =
-    [
-      readiness ? `Readiness · ${readiness.kind}` : "No readiness check",
-      smoke && "smoke test after activation",
-    ]
-      .filter(Boolean)
-      .join(" · ") || "No checks"
+  // What the check asks, as the request it is: `GET /alive` reads at a glance
+  // where "Readiness · http" had to be opened to find the path.
+  const checkFacts = readiness ? (
+    <>
+      <ShellWords command={checkTarget(readiness)} />
+      {smoke && " · smoke test after activation"}
+    </>
+  ) : (
+    "No readiness check"
+  )
 
   const limitFacts =
     [

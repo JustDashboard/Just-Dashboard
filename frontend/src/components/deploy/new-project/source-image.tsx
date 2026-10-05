@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { deploymentName } from "@/components/deploy/vocabulary"
 import { ProductGlyph, ProductLogo, hostProduct, imageProduct } from "@/components/product-logo"
+import { CODE } from "@/components/deploy/run-evidence"
 import { useSourceInspection } from "./use-source-inspection"
 import {
   imageName,
@@ -94,7 +95,12 @@ export function SourceImage({
   const needle = filter.trim().toLowerCase()
   const tags = (images.data ?? [])
     .flatMap((image) =>
-      image.repoTags.map((tag) => ({ tag, size: image.size, created: image.created })),
+      image.repoTags.map((tag) => ({
+        tag,
+        size: image.size,
+        created: image.created,
+        containers: image.containers,
+      })),
     )
     .filter(
       ({ tag }) =>
@@ -155,7 +161,7 @@ export function SourceImage({
             key={images.loading ? "loading" : "listed"}
           >
             <ChoiceList aria-label="Images on this server" className="animate-rise">
-              {tags.map(({ tag, size, created }) => (
+              {tags.map(({ tag, size, created, containers }) => (
                 <ChoiceRow
                   key={tag}
                   verb={`Use ${tag}`}
@@ -163,8 +169,16 @@ export function SourceImage({
                   busy={busy === tag}
                   leading={<ProductLogo id={imageProduct(tag)} size="sm" />}
                   // Mono because a tag is read character by character: which of
-                  // `app:1.0.9` and `app:1.09` this is decides what runs.
-                  title={<span className="font-mono">{tag}</span>}
+                  // `app:1.0.9` and `app:1.09` this is decides what runs. The
+                  // registry steps back and the tag takes a string's hue, so
+                  // the repository is what the eye lands on and the version is
+                  // what it reads next.
+                  title={<ImageReference reference={tag} />}
+                  description={
+                    containers > 0
+                      ? `Used by ${plural(containers, "container")} on this server`
+                      : undefined
+                  }
                   trailing={
                     <>
                       {created && (
@@ -241,5 +255,21 @@ export function SourceImage({
         </PanelBody>
       </Panel>
     </div>
+  )
+}
+
+/** `ghcr.io/owner/app:1.2`, as its registry, its repository and its tag. */
+function ImageReference({ reference }: { reference: string }) {
+  const colon = reference.lastIndexOf(":")
+  const tagged = colon > reference.lastIndexOf("/")
+  const name = tagged ? reference.slice(0, colon) : reference
+  const slash = name.indexOf("/")
+  const registry = slash > 0 && /[.:]|^localhost$/.test(name.slice(0, slash))
+  return (
+    <span className="font-mono">
+      {registry && <span className="text-muted-foreground">{name.slice(0, slash + 1)}</span>}
+      {registry ? name.slice(slash + 1) : name}
+      {tagged && <span className={CODE.string}>{reference.slice(colon)}</span>}
+    </span>
   )
 }
