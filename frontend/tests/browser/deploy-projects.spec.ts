@@ -185,9 +185,10 @@ test("the empty state offers to start a project or clear the filters", async ({ 
   // The empty fleet carries its own command, beside its next steps.
   const empty = page.locator('[data-slot="empty-state"]')
   await expect(empty.getByRole("link", { name: "New project", exact: true })).toBeVisible()
-  await expect(
-    empty.getByRole("link", { name: "See what is already running", exact: true }),
-  ).toHaveAttribute("href", "/docker/stacks")
+  await expect(empty.getByRole("link", { name: "Import existing", exact: true })).toHaveAttribute(
+    "href",
+    "/deploy/import",
+  )
 
   await page.route("**/api/v1/deploy/?view=fleet", (route) =>
     json(route, {
@@ -205,7 +206,7 @@ test("the empty state offers to start a project or clear the filters", async ({ 
   ).toHaveCount(1)
 })
 
-test("New project is hidden for a read-only role", async ({ page }) => {
+test("New project and Import existing are hidden for a read-only role", async ({ page }) => {
   await mockProject(page)
   await page.route("**/api/v1/auth/session", (route) =>
     json(route, { ...user, capabilities: ["read"] }),
@@ -213,6 +214,7 @@ test("New project is hidden for a read-only role", async ({ page }) => {
   await page.goto("/deploy")
   await expect(page.getByRole("heading", { name: "Deployments", exact: true })).toBeVisible()
   await expect(page.getByRole("link", { name: "New project", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Import existing", exact: true })).toHaveCount(0)
 })
 
 test("Credentials link sits beside Notifications and opens the credentials page", async ({

@@ -160,7 +160,7 @@ func createIsolatedPreviewPlansTx(ctx context.Context, tx *sql.Tx, sourceID int6
 		return ErrInvalidPlan
 	}
 	build.Method = BuildMethod(method)
-	if build.Method == BuildCompose || runtime.HostNetwork || runtime.Privileged || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
+	if build.Method == BuildCompose || runtime.ComposeProjectName != "" || runtime.HostNetwork || runtime.Privileged || len(runtime.Capabilities) > 0 || len(runtime.Devices) > 0 {
 		return fmt.Errorf("%w: previews currently require a container build without host access", ErrPreviewIsolation)
 	}
 	var quarantined int
@@ -248,7 +248,7 @@ func copyPreviewChecksTx(ctx context.Context, tx *sql.Tx, sourceID, environmentI
 }
 
 func validatePreviewPlan(environmentID int64, build BuildPlanConfig, runtime RuntimePlanConfig) error {
-	if !runtime.PreviewIsolation || build.Method == BuildCompose || len(build.ReleaseTasks) > 0 ||
+	if !runtime.PreviewIsolation || runtime.ComposeProjectName != "" || build.Method == BuildCompose || len(build.ReleaseTasks) > 0 ||
 		runtime.Privileged || runtime.HostNetwork || len(runtime.Devices) > 0 || len(runtime.Capabilities) > 0 || runtime.HostPort != 0 || len(runtime.Ports) != 0 || runtime.BindAddress != "127.0.0.1" {
 		return ErrPreviewIsolation
 	}

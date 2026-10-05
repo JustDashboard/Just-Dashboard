@@ -54,6 +54,7 @@ import {
   lfsFilesForRoot,
   rootEditCandidate,
   submodulesForRoot,
+  sourceWatchesGit,
 } from "@/components/deploy/new-project/draft"
 import type { ConfigureFlow, FlowUpdate } from "@/components/deploy/new-project/draft"
 import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
@@ -148,6 +149,7 @@ export function StepProject({
   }, [rootPickId, busy])
 
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
+  const isGitCheckout = sourceWatchesGit(flow.source)
   const isImageSource = flow.source.kind === "image"
   const nameInvalid = nameTouched && !DEPLOYMENT_NAME.test(flow.name)
   /**
@@ -245,7 +247,7 @@ export function StepProject({
         {/* The source's own name and mark are the first node of the plan
             drawing, so neither is repeated here: this section is the controls
             that change it. */}
-        {isGitSource && (
+        {isGitCheckout && (
           <Field
             label="Branch"
             htmlFor="source-branch"
@@ -286,7 +288,7 @@ export function StepProject({
             )}
           </Field>
         )}
-        {!isGitSource && (
+        {!isGitCheckout && (
           /* Data rather than a caption (§5): a non-git source has no control
              on this screen — changing it is the way out at the foot — so what
              the section holds is what the source *is*. */
@@ -294,14 +296,18 @@ export function StepProject({
             <FormFact label="From" mono>
               {flow.sourceLabel}
             </FormFact>
-            <FormFact label="Kind">{SOURCE_KIND_LABELS[flow.source.kind]}</FormFact>
+            <FormFact label="Kind">
+              {flow.source.mode === "local_directory"
+                ? "Local directory"
+                : SOURCE_KIND_LABELS[flow.source.kind]}
+            </FormFact>
           </FormFacts>
         )}
         {/* Submodules and LFS objects are part of what gets built, so they
             are switched here, beside the branch, rather than only on the
             source picker the reader has already left. Detection turns them on
             by itself when the build root needs them and nothing else does. */}
-        {isGitSource && (requirements?.submodules || requirements?.lfs) && (
+        {isGitCheckout && (requirements?.submodules || requirements?.lfs) && (
           <OptionList>
             {requirements.submodules && (
               <OptionRow

@@ -178,6 +178,26 @@ func (a *HostSourceAnalyzer) Materialize(
 			_ = os.RemoveAll(workspace)
 			return nil, err
 		}
+	case SourceModeLocalDirectory:
+		local, err := a.resolveLocalRoot(source.LocalPath, "")
+		if err != nil {
+			_ = os.RemoveAll(workspace)
+			return nil, err
+		}
+		before, err := localDirectoryDigest(ctx, local, source.ExcludePaths)
+		if err != nil || identity.Digest == "" || before != identity.Digest {
+			_ = os.RemoveAll(workspace)
+			return nil, fmt.Errorf("%w: the reviewed local source changed", ErrSourceUnavailable)
+		}
+		if err := copyContainedTree(local, sourceRoot, copyTreeLimits{ExcludePrivateFiles: true, ExcludePaths: source.ExcludePaths}); err != nil {
+			_ = os.RemoveAll(workspace)
+			return nil, err
+		}
+		after, err := localDirectoryDigest(ctx, sourceRoot, source.ExcludePaths)
+		if err != nil || after != identity.Digest {
+			_ = os.RemoveAll(workspace)
+			return nil, fmt.Errorf("%w: the local source changed during snapshot capture", ErrSourceUnavailable)
+		}
 	case SourceModeComposePaste, SourceModeComposeUpload:
 		for _, document := range source.ComposeFiles {
 			if !safeRelativePath(document.Path) {
@@ -457,8 +477,10 @@ func sameMaterializedIdentity(marker materializedSourceMarker, source DraftSourc
 }
 
 type copyTreeLimits struct {
-	MaxFiles int
-	MaxBytes int64
+	MaxFiles            int
+	MaxBytes            int64
+	ExcludePrivateFiles bool
+	ExcludePaths        []string
 }
 
 func (limits copyTreeLimits) normalized() copyTreeLimits {
@@ -490,8 +512,20 @@ func copyContainedTree(source, target string, limits copyTreeLimits) error {
 		if relative == "." {
 			return nil
 		}
+		if excludedLocalSourcePath(relative, limits.ExcludePaths) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".just-dashboard") {
 			return filepath.SkipDir
+		}
+		if limits.ExcludePrivateFiles && privateSourceEntry(entry.Name()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		files++
 		if files > limits.MaxFiles {
@@ -505,7 +539,13 @@ func copyContainedTree(source, target string, limits copyTreeLimits) error {
 		mode := info.Mode()
 		switch {
 		case mode.IsDir():
-			return os.MkdirAll(destination, mode.Perm()&0o777)
+			if err := os.MkdirAll(destination, mode.Perm()&0o777); err != nil {
+				return err
+			}
+			if limits.ExcludePrivateFiles {
+				return os.Chmod(destination, mode.Perm())
+			}
+			return nil
 		case mode&os.ModeSymlink != 0:
 			link, err := os.Readlink(path)
 			if err != nil {
@@ -529,6 +569,9 @@ func copyContainedTree(source, target string, limits copyTreeLimits) error {
 			}
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 				return err
+			}
+			if limits.ExcludePrivateFiles {
+				return copyRegularSnapshotFile(path, destination, mode.Perm(), info.Size())
 			}
 			return copyRegularFile(path, destination, mode.Perm()&0o777)
 		default:

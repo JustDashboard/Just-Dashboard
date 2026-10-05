@@ -1,4 +1,5 @@
 import { Suspense } from "react"
+import { redirect } from "next/navigation"
 import { Page, PageContext } from "@/components/page"
 import { LoadingPanel } from "@/components/state"
 import { NewProject } from "@/components/deploy/new-project"
@@ -24,6 +25,11 @@ export default async function NewProjectPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const params = await searchParams
+  if (
+    !first(params.draft) &&
+    (first(params.source) === "import" || first(params.profile) === "imported")
+  )
+    redirect("/deploy/import")
   return (
     <Suspense
       fallback={

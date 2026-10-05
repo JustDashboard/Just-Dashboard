@@ -1,5 +1,10 @@
 # Frontend data flow and theming
 
+- Legacy `/deploy/new?source=import` and `?profile=imported` links without a draft redirect to
+  `/deploy/import`. Resumed or remembered external import drafts show an explicit discovery link
+  before Configure, including drafts that never reached detection. The old draft remains saved;
+  existing-checkout imports retain the Configure and adoption flow.
+
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding
@@ -141,6 +146,32 @@
   ignores obsolete inspection responses. The new-project flow keeps secret-bearing inputs in memory;
   saved environment values resume as masked names from the encrypted server draft. Hostname changes
   update only unchanged template-derived URL defaults, and retain visitor password protection.
+- Existing-workload import (`/deploy/import`) keeps its search, source filter, reviewed inventory and
+  project name in component state, rather than the new-project draft stores. Its JSON shapes live in
+  `lib/workload-import.ts`. Discovery is a snapshot refreshed explicitly; choosing a workload always
+  inspects it afresh, and recovery sends its key, project name, reviewed digest and explicit Compose
+  service scope. A
+  `workload_changed` conflict replaces the import command with **Inspect again**, preserves the chosen
+  project name and requires another explicit recovery after the new review. A name conflict stays beside
+  its field. The discovery review shows all service states,
+  Docker health separately from running state, ports, the original configuration location, warnings
+  and discovery silences. It never renders raw configuration, environment values or process arguments.
+  Recovery opens a normal source/configuration draft in `/deploy/new`; private values remain sealed
+  on the server and resume as masked `environmentKeys`. Only public adoption review fields are kept
+  with the remembered flow; baseline metadata and unexpected fields are excluded. Configure uses the
+  server's preflight warning codes, refuses blockers, and commits an adoption through
+  `/deploy/import/adopt` without enqueueing a run. The acknowledgement command focuses the current
+  outstanding warning without starting another save or check. Warning inputs are disabled during
+  pending operations; final adoption saves and preflights afresh, requiring acknowledgement of any
+  new warnings. A server-canonicalized plan change returns to review rather than using acknowledgement
+  from different settings. Git adoption defaults to manual deployment; Review can explicitly enable
+  automatic future deployments. Adoption itself never enqueues a run, and Redeploy live release
+  restores the baseline.
+  A baseline with a live release uses the full project
+  shell; observation records without a live release retain their original-manager view. Native services
+  carry `manager`, `resourceId` and `logSource`; log reads use that source and Docker stats/exec are
+  requested only for genuine Docker services. The current runtime keeps running during adoption; see
+  [`existing-workloads.md`](../deployments/existing-workloads.md).
 - Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
   action's existing capability. Stack pages hide those controls from limited accounts, explain the
   restriction, and retain stack/config/log read views. Direct container controls retain their separate

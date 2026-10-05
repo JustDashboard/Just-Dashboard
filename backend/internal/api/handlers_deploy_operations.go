@@ -28,15 +28,36 @@ func (o dockerImageUpdates) CheckUpdate(ctx context.Context, reference string, f
 // than reporting an empty success.
 func (s *Server) operationsOwners() deploy.OperationsOwners {
 	owners := deploy.OperationsOwners{}
-	if s.modules.docker != nil {
-		owners.Runtime = s.modules.docker
-		owners.Dependencies = newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker)
+	owners.Runtime = s.deploymentRuntimeObserver()
+	if s.Store != nil {
+		observer := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker)
+		if s.modules.deployNative != nil {
+			observer.withNativeRuntime(s.modules.deployNative)
+		}
+		owners.Dependencies = observer
 	}
 	if s.modules.proxy != nil {
 		owners.Proxy = s.modules.proxy
 		owners.Certificates = s.modules.proxy
 	}
 	return owners
+}
+
+func (s *Server) deploymentRuntimeObserver() deploy.RuntimeObserver {
+	if s.modules.deployRuns == nil {
+		return nil
+	}
+	var docker deploy.RuntimeObserver
+	var containers deploy.RecordedContainerReader
+	if s.modules.docker != nil {
+		docker = s.modules.docker
+		containers = s.modules.docker
+	}
+	var native deploy.NativeBaselineObserver
+	if observer, ok := any(s.modules.deployNative).(deploy.NativeBaselineObserver); ok && s.modules.deployNative != nil {
+		native = observer
+	}
+	return deploy.NewRecordedRuntimeObserver(s.modules.deployRuns, docker, containers, native)
 }
 
 func (s *Server) handleDeploymentOperations(w http.ResponseWriter, r *http.Request) error {

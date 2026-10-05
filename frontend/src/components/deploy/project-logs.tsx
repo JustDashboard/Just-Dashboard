@@ -7,7 +7,7 @@ import { ArrowRight, Bell } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { agentProduct } from "@/lib/clients"
-import { dockerSource, stackSource } from "@/lib/log-sources"
+import { stackSource } from "@/lib/log-sources"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -61,6 +61,7 @@ import { AddAlertSheet } from "@/components/deploy/add-alert-sheet"
 import { failingTone } from "@/components/deploy/fleet"
 import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
 import { WrapDot } from "@/components/deploy/request-marks"
+import { runtimeLogSource, runtimeServiceId } from "@/components/deploy/runtime-service"
 import { MinuteStrip, isCleanExit } from "@/components/deploy/traffic-strip"
 
 /**
@@ -298,13 +299,15 @@ export function ProjectLogs() {
   )[0]
   const containerOf = (id: string | undefined) =>
     id
-      ? services.find((s) => s.containerId.startsWith(id) || id.startsWith(s.containerId))
+      ? services.find(
+          (s) => runtimeServiceId(s).startsWith(id) || id.startsWith(runtimeServiceId(s)),
+        )
       : undefined
 
   // Output on one container's lines around a moment: the request it served,
   // the exit it made, the exception it threw.
   const openOutput = (container: DeploymentRuntimeService, at: string) => {
-    setService(container.containerId)
+    setService(runtimeServiceId(container))
     setOutputMoment(at)
     setAsked("output")
   }
@@ -388,10 +391,10 @@ export function ProjectLogs() {
               <RequestLines entry={entry} window={window} answering={answering(entry)} />
             )}
             afterInsights={
-              live
+              live && runtimeLogSource(live)
                 ? (window) => (
                     <OutputInsights
-                      sourceId={stack ? stackSource(stack) : dockerSource(live.containerId)}
+                      sourceId={stack ? stackSource(stack) : runtimeLogSource(live)!}
                       label={stack ? "the live release's services" : live.name}
                       window={window}
                       onOpen={(at, container) => openOutput(containerOf(container) ?? live, at)}
