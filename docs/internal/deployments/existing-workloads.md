@@ -74,6 +74,9 @@ native environment names and captured inputs whose bindings have been removed re
 the normal variable controls, while their original-name metadata remains available. Old native imports
 without metadata recover argument identities only from their known native baseline source mode and the
 aliases referenced by the first managed runtime command.
+Translated native argument declarations remain private runtime-only literals, validated from their
+server-owned input identities. They are excluded from the original native environment and its frozen
+variable declarations; saving a migration draft never adds them to that baseline.
 
 Variable revisions record explicit literal/reference intent. New captured inputs and dotenv/value
 writes are literal, so a running app's `${{credential.name}}` text is never interpreted as dashboard

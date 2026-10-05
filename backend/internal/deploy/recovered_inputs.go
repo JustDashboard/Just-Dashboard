@@ -277,7 +277,19 @@ func (d *Draft) validateRecoveredInputBindings(configuration PlanConfiguration) 
 		}
 		variable, ok := declared[input.StorageKey]
 		_, retained := d.environment[input.StorageKey]
-		baseline := baselineVariables[input.StorageKey]
+		baseline, hasBaseline := baselineVariables[input.StorageKey]
+		if !hasBaseline && input.Origin == "native" && input.Kind == "argument" {
+			// Translated argv belongs to the managed command, never the original
+			// native environment. Its server-owned identity fixes its declaration.
+			baseline = PlannedVariable{Name: input.StorageKey, Sensitivity: "secret", Scopes: []string{"runtime"}, ValueMode: "literal"}
+			if d.Data.Configuration != nil {
+				for _, previous := range d.Data.Configuration.Variables {
+					if previous.Name == input.StorageKey && previous.ValueMode == "" {
+						baseline.ValueMode = ""
+					}
+				}
+			}
+		}
 		sameScopes := slices.Equal(slices.Sorted(slices.Values(variable.Scopes)), slices.Sorted(slices.Values(baseline.Scopes)))
 		if !ok || !retained || variable.Sensitivity != baseline.Sensitivity || !sameScopes || (variable.ValueMode != "literal" && !(variable.ValueMode == "" && baseline.ValueMode == "")) || variable.Reference != "" || variable.Generate != 0 {
 			return fmt.Errorf("%w: captured input %s must retain its sealed literal runtime binding", ErrInvalidVariable, input.Name)

@@ -124,6 +124,93 @@ func TestHostRecoveryCreatesNormalManagedNodePlanAndNativeRollbackBaseline(t *te
 	}
 }
 
+func TestHostRecoveryDraftSavesArgumentsOutsideOriginalNativeEnvironment(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+	if err != nil {
+		t.Fatal("native recovery failed", err)
+	}
+	if len(recovered.Adoption.Blockers) != 0 {
+		t.Fatal("native recovery blocked", recovered.Adoption.Blockers)
+	}
+	argument := ""
+	for _, input := range recovered.Adoption.Inputs {
+		if input.Kind == "argument" {
+			argument = input.StorageKey
+			break
+		}
+	}
+	if argument == "" {
+		t.Fatal("native recovery omitted server-owned argument metadata")
+	}
+	if _, exists := recovered.BaselineEnvironment[argument]; exists {
+		t.Fatal("translated argument contaminated original native environment")
+	}
+	for _, variable := range recovered.Adoption.BaselineConfiguration.Variables {
+		if variable.Name == argument {
+			t.Fatal("translated argument contaminated original native declarations")
+		}
+	}
+	fixture := newPlanningStoreFixture(t)
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-save-proof", Profile: ProfileService}, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := *draft.Data.Configuration
+	emptyDotenv := ""
+	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &emptyDotenv, RetainEnvironmentKeys: append([]string{}, draft.EnvironmentKeys...)})
+	if err != nil {
+		t.Fatal("unchanged recovered native draft rejected its translated arguments", err)
+	}
+	for _, mode := range []string{"", "reference"} {
+		configuration := *draft.Data.Configuration
+		configuration.Variables = append([]PlannedVariable{}, configuration.Variables...)
+		for i := range configuration.Variables {
+			if configuration.Variables[i].Name == argument {
+				configuration.Variables[i].ValueMode = mode
+			}
+		}
+		if _, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration}); !errors.Is(err, ErrInvalidVariable) {
+			t.Fatal("translated argument mode change accepted", mode, err)
+		}
+	}
+	for _, change := range []func(*PlannedVariable){
+		func(variable *PlannedVariable) { variable.Scopes = []string{"runtime", "build"} },
+		func(variable *PlannedVariable) { variable.Sensitivity = "plain" },
+	} {
+		configuration := *draft.Data.Configuration
+		configuration.Variables = append([]PlannedVariable{}, configuration.Variables...)
+		for i := range configuration.Variables {
+			if configuration.Variables[i].Name == argument {
+				change(&configuration.Variables[i])
+			}
+		}
+		if _, err := fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration}); !errors.Is(err, ErrInvalidVariable) {
+			t.Fatal("translated argument storage declaration change accepted", err)
+		}
+	}
+	configuration = *draft.Data.Configuration
+	literalDotenv := argument + "='${{credential.unrelated}}'"
+	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &literalDotenv, RetainEnvironmentKeys: append([]string{}, draft.EnvironmentKeys...)})
+	if err != nil || draft.environment[argument] != "${{credential.unrelated}}" {
+		t.Fatal("translated argument literal replacement was interpreted", err)
+	}
+	configuration = *draft.Data.Configuration
+	literalDotenv = argument + "="
+	draft, err = fixture.plans.Save(t.Context(), draft.ID, 41, false, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration, Dotenv: &literalDotenv, RetainEnvironmentKeys: append([]string{}, draft.EnvironmentKeys...)})
+	if err != nil {
+		t.Fatal("explicit empty translated argument replacement rejected", err)
+	}
+	if value, exists := draft.environment[argument]; !exists || value != "" {
+		t.Fatal("empty argument replacement was lost")
+	}
+	for _, variable := range draft.Data.Adoption.BaselineConfiguration.Variables {
+		if variable.Name == argument {
+			t.Fatal("desired argument edits changed original baseline declarations")
+		}
+	}
+}
+
 func TestHostRecoveryRetainsDataWithoutCopyingLiveFilesAndBlocksPrivateConfig(t *testing.T) {
 	root, analyzer, candidate, capture := hostRecoveryFixture(t)
 	if err := os.Mkdir(filepath.Join(root, "data"), 0755); err != nil {

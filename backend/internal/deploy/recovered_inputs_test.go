@@ -427,4 +427,10 @@ func TestLegacyNativeArgumentMetadataUsesVerifiedBaselineModeAndInitialCommand(t
 	if len(legacyNativeInputBindings(source, RuntimePlanConfig{})) != 0 {
 		t.Fatal("absent command inferred unrelated native variables")
 	}
+	variable := PlannedVariable{Name: "JD_IMPORTED_ARG_0", Sensitivity: "secret", Scopes: []string{"runtime"}}
+	configuration := PlanConfiguration{Runtime: runtime, Variables: []PlannedVariable{variable}}
+	draft := &Draft{Data: DraftData{Source: &DraftSourceConfig{Kind: SourceLocal}, Configuration: &configuration, Adoption: &WorkloadAdoption{Inputs: []RecoveredInput{inputs[0]}}}, environment: map[string]string{variable.Name: "node"}}
+	if err := draft.validateRecoveredInputBindings(configuration); err != nil {
+		t.Fatal("shipped native draft lost its inference mode", err)
+	}
 }
