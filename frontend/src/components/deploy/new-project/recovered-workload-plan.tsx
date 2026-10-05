@@ -48,6 +48,21 @@ export function RecoveredWorkloadPlan({ adoption }: { adoption: WorkloadAdoption
         </FormSection>
       )}
       <ExistingIngressRoutes bindings={adoption.ingressBindings ?? []} />
+      {adoption.startupHandoff && (
+        <FormSection title="Prepared startup handoff">
+          <FormFacts>
+            <FormFact label="Original manager">{adoption.startupHandoff.manager}</FormFact>
+            <FormFact label="Startup entries">
+              {adoption.startupHandoff.actionCount} verified
+            </FormFact>
+          </FormFacts>
+          <FormNote>{adoption.startupHandoff.description}</FormNote>
+          <FormNote>
+            Deploy changes retires only this application's verified startup entries. Failed cutover
+            and baseline rollback restore them before restarting the original application.
+          </FormNote>
+        </FormSection>
+      )}
     </>
   )
 }

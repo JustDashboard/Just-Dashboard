@@ -167,6 +167,9 @@ test("automation retains service-specific inputs and reviews grouped evidence an
     .getByRole("button", { name: "Replace high-market-tracker · TELEGRAM_CHAT_ID", exact: true })
     .click()
   await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect
+    .poll(() => fixture.configurationSaves.at(-1)?.dotenv)
+    .toContain('JD_IMPORT_ENV_TELEGRAM_CHAT_ID_FIRST="first-$literal\\nsecond-line"')
   const save = fixture.configurationSaves.at(-1) as {
     dotenv: string
     retainEnvironmentKeys: string[]

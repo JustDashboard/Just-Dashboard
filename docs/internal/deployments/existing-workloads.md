@@ -75,6 +75,13 @@ from unresolved interpolation inputs. Private/shareable IPC is not host-equivale
 backup coverage counts distinct writable persistent resources rather than read-only source mounts or
 multiple mounts of the same volume.
 
+Recovery also reuses an existing backup policy when one enabled, unfiltered job covers every distinct
+writable bind or local named volume and its latest successful archive verifies against the stored
+manifest. Automatic matching is bounded to a 15-second check, a 256 MiB archive and a successful run
+within the last 24 hours. It never creates or runs a backup job during import. Unsupported volume
+drivers, partial coverage, stale or unverifiable archives retain the backup warning. The linked policy
+is checked again through the normal backup gate before a later deployment stops the application.
+
 Recovery writes only private, bounded staging files under the dashboard data directory. It never
 writes the application's original directory. Docker effective configuration is read with Compose
 `config`, not `up`, `build` or `pull`; source inspection does not execute an ecosystem JavaScript

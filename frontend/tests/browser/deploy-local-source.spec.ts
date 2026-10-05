@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test"
 import type { DeploymentDraftSource, DeploymentEnvironmentConfiguration } from "../../src/lib/types"
 import { deployment, json, mockProject, project, saveSettings, user } from "./deploy-fixture"
 
-async function mockLocalProject(page: Page) {
+async function mockLocalProject(page: Page, recovered = false) {
   await mockProject(page)
   let source: DeploymentDraftSource = {
     kind: "local",
@@ -12,6 +12,11 @@ async function mockLocalProject(page: Page) {
     excludePaths: ["data", "uploads", "storage"],
     managedInPlace: false,
     platform: "linux/amd64",
+  }
+  if (recovered) {
+    source.mode = "recovered_snapshot"
+    source.resourceId = `sha256:${"a".repeat(64)}`
+    source.localPath = undefined
   }
   let revision = 4
   let refused = false
@@ -98,6 +103,22 @@ async function mockLocalProject(page: Page) {
     },
   }
 }
+
+test("a recovered native source can attach future code without retaining the private snapshot handle", async ({
+  page,
+}) => {
+  const fixture = await mockLocalProject(page, true)
+  await page.goto("/deploy/7/settings/general")
+  await expect(page.getByText(/verified source snapshot captured during import/)).toBeVisible()
+  await page.getByRole("textbox", { name: "Build directory", exact: true }).fill("/srv/future-app")
+  await saveSettings(page)
+  await expect.poll(() => fixture.source().mode).toBe("local_directory")
+  expect(fixture.source().resourceId).toBeUndefined()
+  expect(fixture.source().localPath).toBe("/srv/future-app")
+  expect(fixture.writes.filter((write) => !write.path.endsWith("/check"))).toEqual([
+    { method: "PUT", path: "/deploy/7/environments/12/source" },
+  ])
+})
 
 test("native build source saves a separate inspected directory as pending and preserves exclusions", async ({
   page,

@@ -91,6 +91,15 @@ export type ExistingIngressBinding = {
   https?: boolean
 }
 
+export type NativeStartupHandoff = {
+  version: number
+  manager: string
+  digest: string
+  actionCount: number
+  status: "prepared"
+  description: string
+}
+
 /** Server-authored origin; private runtime configuration and values stay on the server. */
 export type WorkloadAdoption = {
   key: string
@@ -109,6 +118,7 @@ export type WorkloadAdoption = {
   issues?: AdoptionIssue[]
   buildSources?: RecoveredBuildSource[]
   ingressBindings?: ExistingIngressBinding[]
+  startupHandoff?: NativeStartupHandoff
   baseline?: unknown
 }
 
@@ -197,6 +207,14 @@ export function adoptionReviewMetadata(
         https,
       }),
     ),
+    startupHandoff: adoption.startupHandoff && {
+      version: adoption.startupHandoff.version,
+      manager: adoption.startupHandoff.manager,
+      digest: adoption.startupHandoff.digest,
+      actionCount: adoption.startupHandoff.actionCount,
+      status: adoption.startupHandoff.status,
+      description: adoption.startupHandoff.description,
+    },
     warnings: adoption.warnings ?? [],
     blockers: adoption.blockers ?? [],
   }

@@ -4521,6 +4521,7 @@ export type DeploymentConfiguration = {
   }
   variables: {
     name: string
+    valueMode?: "literal" | "reference" | ""
     sensitivity: "plain" | "secret"
     scopes: string[]
     required?: boolean
@@ -4568,7 +4569,6 @@ export type DeploymentPlannedDomain = {
 export type DeploymentVariable = {
   name: string
   recoveredInput?: import("./workload-import").RecoveredInput
-  valueMode?: "literal" | "reference" | "auto"
   revision: number
   sensitivity: "plain" | "secret"
   scopes: ("build" | "runtime" | "release_task")[]

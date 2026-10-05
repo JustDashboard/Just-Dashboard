@@ -591,6 +591,7 @@ func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.
 	if err != nil {
 		return recoveryError(recovered, err)
 	}
+	s.recoverExistingBackupPolicy(r.Context(), recovered)
 	profile := deploy.ProfileService
 	if recovered.Detection.SelectedID != "" {
 		for _, item := range recovered.Detection.Candidates {

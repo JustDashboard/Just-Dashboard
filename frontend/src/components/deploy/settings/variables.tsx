@@ -284,6 +284,7 @@ function VariablesBody({
       : null,
   )
   const [valueError, setValueError] = useState("")
+  const [valueEntered, setValueEntered] = useState(false)
   const [shown, setShown] = useState(false)
   const [reference, setReference] = useSessionState(
     `${draft}.reference`,
@@ -392,6 +393,7 @@ function VariablesBody({
   const resetForm = () => {
     setName("")
     setValue("")
+    setValueEntered(false)
     setValueError("")
     setShown(false)
     setReference(false)
@@ -449,7 +451,7 @@ function VariablesBody({
     // Edit never reads the stored value back, so `value` is empty unless the
     // operator retyped it or used "Reveal current" — saving that as the new
     // value would silently wipe whatever was there.
-    if (editingName && !reference && !value.trim()) {
+    if (editingName && !reference && !valueEntered && !value) {
       setValueError("Enter the value again — the dashboard does not read it back.")
       return
     }
@@ -458,7 +460,6 @@ function VariablesBody({
       await put(`${base}/${encodeURIComponent(name.trim())}`, {
         revision: configuration.revision,
         ...(reference ? { reference: value.trim() } : { value }),
-        valueMode: reference ? "reference" : "literal",
         sensitivity,
         scopes,
       })
@@ -542,6 +543,7 @@ function VariablesBody({
     setName(variable.name)
     setReference(Boolean(variable.reference))
     setValue(variable.reference ? referenceLiteral(variable.reference) : "")
+    setValueEntered(false)
     setShown(false)
     setSensitivity(variable.sensitivity)
     setScopes(variable.scopes)
@@ -559,6 +561,7 @@ function VariablesBody({
         `${base}/${encodeURIComponent(editingName)}/reveal`,
       )
       setValue(result.value)
+      setValueEntered(true)
       setValueError("")
     } catch (caught) {
       notify.error(`Could not reveal ${editingName}`, caught)
@@ -764,6 +767,7 @@ function VariablesBody({
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)
+                setValueEntered(true)
                 if (valueError) setValueError("")
               }}
               autoComplete="off"
@@ -816,6 +820,18 @@ function VariablesBody({
             </InputGroupAddon>
           </InputGroup>
         </Field>
+        {editing?.recoveredInput && !reference && (
+          <OptionRow
+            title="Set an empty value"
+            hint="Keep this input in the application environment with an empty string."
+            checked={valueEntered && value === ""}
+            onCheckedChange={(checked) => {
+              setValue("")
+              setValueEntered(checked)
+              setValueError("")
+            }}
+          />
+        )}
         {reference && (links.data?.length ?? 0) > 0 && (
           <ReferencePicker links={links.data ?? []} value={value} onChange={setValue} />
         )}

@@ -1,22 +1,29 @@
 package deploy
 
 import (
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 func writablePersistentStorageCount(draft *Draft, configuration PlanConfiguration) int {
+	return len(PersistentStorageSources(draft.Data.Source, configuration.Runtime))
+}
+
+// PersistentStorageSources uses the effective service mounts, retaining actual
+// external volume names and counting shared writable storage once.
+func PersistentStorageSources(source *DraftSourceConfig, runtime RuntimePlanConfig) []string {
 	storage := map[string]bool{}
-	for _, mount := range configuration.Runtime.Mounts {
+	for _, mount := range runtime.Mounts {
 		if !mount.ReadOnly {
 			storage[mount.Source] = true
 		}
 	}
-	if draft.Data.Source == nil || draft.Data.Source.Kind != SourceCompose {
-		return len(storage)
+	if source == nil || source.Kind != SourceCompose {
+		return sortedStorageSources(storage)
 	}
-	for _, document := range draft.Data.Source.ComposeFiles {
+	for _, document := range source.ComposeFiles {
 		var model map[string]any
 		if yaml.Unmarshal([]byte(document.Content), &model) != nil {
 			continue
@@ -55,5 +62,14 @@ func writablePersistentStorageCount(draft *Draft, configuration PlanConfiguratio
 			}
 		}
 	}
-	return len(storage)
+	return sortedStorageSources(storage)
+}
+
+func sortedStorageSources(storage map[string]bool) []string {
+	sources := make([]string, 0, len(storage))
+	for source := range storage {
+		sources = append(sources, source)
+	}
+	sort.Strings(sources)
+	return sources
 }

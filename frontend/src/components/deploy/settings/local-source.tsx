@@ -42,6 +42,9 @@ export function LocalSourceSettings({
     try {
       await put(`/deploy/${projectId}/environments/${environmentId}/source`, {
         ...source,
+        kind: "local",
+        mode: "local_directory",
+        resourceId: undefined,
         revision: configuration.revision,
         localPath: directory.trim(),
         subdirectory: subdirectory.trim() || undefined,
@@ -84,9 +87,11 @@ export function LocalSourceSettings({
         })}
       >
         <FormNote>
-          The original source is retained for baseline rollback. Choose a separate directory for new
-          code. Saving inspects the directory and creates a pending source revision; the running app
-          changes only when you deploy it.
+          {source.mode === "recovered_snapshot"
+            ? "Deploy changes builds the verified source snapshot captured during import. Choose a directory below to attach future source changes. "
+            : "Choose a separate directory for new code. "}
+          The original source is retained for baseline rollback. Saving inspects the directory and
+          creates a pending source revision; the running app changes only when you deploy it.
         </FormNote>
         <Field
           label="Build directory"
