@@ -111,8 +111,9 @@ test("each channel says how its last message went, and its sheet reads every att
   page,
 }) => {
   await mockProject(page)
-  // Equal-age deliveries share one clock so a millisecond boundary cannot reorder them.
+  // Keep ordering and exact relative-time readings independent of worker scheduling.
   const fixtureTime = Date.now()
+  await page.clock.setFixedTime(fixtureTime)
   const at = (hours: number) => new Date(fixtureTime - hours * 3_600_000).toISOString()
   const failing = {
     id: 92,
