@@ -104,6 +104,7 @@ type moduleSet struct {
 	deployPreviews   *deploy.PreviewQuarantineController
 	deployRuntime    *deploy.DockerRuntimeOwner
 	deployNative     *deploy.NativeRuntimeOwner
+	deployStartup    *deploy.NativeStartupStore
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
@@ -229,13 +230,14 @@ func (s *Server) initModules() {
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
+	s.modules.deployStartup = deploy.NewNativeStartupStore(filepath.Join(s.Cfg.DataDir, "deployment-recovery"), s.Sealer)
 	s.modules.deploySources = deploy.NewHostSourceAnalyzer(
 		s.Cfg.DeployRoots,
 		s.Cfg.ComposeRoots,
 		filepath.Join(s.Cfg.DataDir, "deployment-detection"),
 		s.modules.docker,
 		s.modules.deployPlanning,
-	)
+	).WithNativeStartupStore(s.modules.deployStartup)
 	dependencyObserver := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions)
 	s.modules.deployPreflight = deploy.NewHostPreflightObserver(
 		s.Cfg.DeployRoots,
@@ -247,7 +249,7 @@ func (s *Server) initModules() {
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
-	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd)
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd).WithStartupStore(s.modules.deployStartup)
 	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
 	dependencyObserver.withNativeRuntime(s.modules.deployNative)
 	s.modules.deployPreflight = deploy.NewNativePreflightObserver(s.modules.deployPreflight, s.modules.deployNative, s.modules.deployRuns)

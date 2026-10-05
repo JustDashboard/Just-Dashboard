@@ -19,22 +19,24 @@ import (
 // command values. The original manager remains the rollback authority until a
 // later release replaces the baseline with a normal managed Docker runtime.
 type NativeBaselineMetadata struct {
-	Version             int               `json:"version"`
-	Manager             string            `json:"manager"`
-	DaemonID            string            `json:"daemonId,omitempty"`
-	Namespace           string            `json:"namespace,omitempty"`
-	Name                string            `json:"name,omitempty"`
-	ProcessIDs          []int             `json:"processIds,omitempty"`
-	RunningProcessIDs   []int             `json:"runningProcessIds,omitempty"`
-	WasActive           bool              `json:"wasActive"`
-	Unit                string            `json:"unit,omitempty"`
-	ConfigurationDigest string            `json:"configurationDigest"`
-	LogSources          []string          `json:"logSources"`
-	SourceFiles         map[string]string `json:"sourceFiles,omitempty"`
-	SourceRoot          string            `json:"sourceRoot,omitempty"`
-	SourceDigest        string            `json:"sourceDigest,omitempty"`
-	SourceExclusions    []string          `json:"sourceExclusions,omitempty"`
-	SourcePrivateFence  bool              `json:"sourcePrivateFence,omitempty"`
+	Version                    int               `json:"version"`
+	Manager                    string            `json:"manager"`
+	DaemonID                   string            `json:"daemonId,omitempty"`
+	Namespace                  string            `json:"namespace,omitempty"`
+	Name                       string            `json:"name,omitempty"`
+	ProcessIDs                 []int             `json:"processIds,omitempty"`
+	RunningProcessIDs          []int             `json:"runningProcessIds,omitempty"`
+	WasActive                  bool              `json:"wasActive"`
+	Unit                       string            `json:"unit,omitempty"`
+	ConfigurationDigest        string            `json:"configurationDigest"`
+	RuntimeConfigurationDigest string            `json:"runtimeConfigurationDigest,omitempty"`
+	StartupPlanDigest          string            `json:"startupPlanDigest,omitempty"`
+	LogSources                 []string          `json:"logSources"`
+	SourceFiles                map[string]string `json:"sourceFiles,omitempty"`
+	SourceRoot                 string            `json:"sourceRoot,omitempty"`
+	SourceDigest               string            `json:"sourceDigest,omitempty"`
+	SourceExclusions           []string          `json:"sourceExclusions,omitempty"`
+	SourcePrivateFence         bool              `json:"sourcePrivateFence,omitempty"`
 }
 
 func NativeBaselineRuntimeInput(capture *procs.HostWorkloadCapture, releaseID int64) (ReleaseRuntimeInput, error) {
@@ -93,10 +95,16 @@ type NativeRuntimeOwner struct {
 	pm2      nativePM2
 	systemd  nativeSystemd
 	recorded RuntimeObserver
+	startup  *NativeStartupStore
 }
 
 func (o *NativeRuntimeOwner) WithRecordedRuntimeObserver(observer RuntimeObserver) *NativeRuntimeOwner {
 	o.recorded = observer
+	return o
+}
+
+func (o *NativeRuntimeOwner) WithStartupStore(store *NativeStartupStore) *NativeRuntimeOwner {
+	o.startup = store
 	return o
 }
 
@@ -141,6 +149,10 @@ func (o *NativeRuntimeOwner) ValidateCandidateScope(ctx context.Context, request
 }
 
 func (o *NativeRuntimeOwner) capture(ctx context.Context, runtime ReleaseRuntime) (*procs.HostWorkloadCapture, NativeBaselineMetadata, error) {
+	return o.captureIdentity(ctx, runtime, true)
+}
+
+func (o *NativeRuntimeOwner) captureIdentity(ctx context.Context, runtime ReleaseRuntime, verifyStartup bool) (*procs.HostWorkloadCapture, NativeBaselineMetadata, error) {
 	var metadata NativeBaselineMetadata
 	if json.Unmarshal(runtime.Metadata, &metadata) != nil || metadata.Version != 1 || metadata.Manager != runtime.Kind || metadata.ConfigurationDigest == "" {
 		return nil, metadata, fmt.Errorf("the original native runtime identity is unavailable")
@@ -167,7 +179,21 @@ func (o *NativeRuntimeOwner) capture(ctx context.Context, runtime ReleaseRuntime
 	if err != nil {
 		return nil, metadata, err
 	}
-	if capture.ResourceID != runtime.RuntimeID || capture.ConfigurationDigest != metadata.ConfigurationDigest {
+	if capture.ResourceID != runtime.RuntimeID {
+		return nil, metadata, procs.ErrHostWorkloadChanged
+	}
+	if metadata.StartupPlanDigest != "" {
+		if o.startup == nil || metadata.RuntimeConfigurationDigest == "" || capture.RuntimeConfigurationDigest != metadata.RuntimeConfigurationDigest {
+			return nil, metadata, procs.ErrHostWorkloadChanged
+		}
+		if verifyStartup {
+			plan, err := o.startup.VerifyCapture(ctx, metadata.StartupPlanDigest, capture)
+			if err != nil {
+				return nil, metadata, err
+			}
+			removeHandledStartupBlockers(capture, plan)
+		}
+	} else if capture.ConfigurationDigest != metadata.ConfigurationDigest {
 		return nil, metadata, procs.ErrHostWorkloadChanged
 	}
 	if err := procs.VerifyHostSourceFiles(metadata.SourceFiles); err != nil {
@@ -214,6 +240,15 @@ func (o *NativeRuntimeOwner) StartExisting(ctx context.Context, runtime ReleaseR
 		}
 		return o.docker.StartExisting(ctx, runtime, variables, emit)
 	}
+	// Fence runtime and source before republishing its restart authority. An
+	// interrupted startup journal is reconciled before its full proof is read;
+	// control still requires the subsequent exact startup verification.
+	if _, _, err := o.captureIdentity(ctx, runtime, false); err != nil {
+		return err
+	}
+	if err := o.restoreStartup(ctx, runtime); err != nil {
+		return err
+	}
 	capture, metadata, err := o.capture(ctx, runtime)
 	if err != nil {
 		return err
@@ -243,6 +278,21 @@ func (o *NativeRuntimeOwner) Stop(ctx context.Context, runtime ReleaseRuntime, p
 	if err != nil {
 		return evidence, err
 	}
+	if metadata.StartupPlanDigest != "" {
+		if err = o.startup.transition(ctx, metadata.StartupPlanDigest, false); err != nil {
+			if restoreErr := o.restoreStartupAfterFailure(runtime); restoreErr != nil {
+				return evidence, fmt.Errorf("startup handoff failed and restoration requires operator attention")
+			}
+			return evidence, err
+		}
+		capture, metadata, err = o.capture(ctx, runtime)
+		if err != nil {
+			if restoreErr := o.restoreStartupAfterFailure(runtime); restoreErr != nil {
+				return evidence, fmt.Errorf("startup handoff verification failed and restoration requires operator attention")
+			}
+			return evidence, err
+		}
+	}
 	if runtime.Kind == "pm2" {
 		err = o.pm2.ControlCaptured(ctx, capture, metadata.Namespace, "stop")
 	} else {
@@ -263,6 +313,23 @@ func (o *NativeRuntimeOwner) Stop(ctx context.Context, runtime ReleaseRuntime, p
 	}
 	evidence.CompletedAt = time.Now().UTC()
 	return evidence, nil
+}
+
+func (o *NativeRuntimeOwner) restoreStartup(ctx context.Context, runtime ReleaseRuntime) error {
+	var metadata NativeBaselineMetadata
+	if json.Unmarshal(runtime.Metadata, &metadata) != nil || metadata.StartupPlanDigest == "" {
+		return nil
+	}
+	if o.startup == nil {
+		return fmt.Errorf("the retained native startup authority is unavailable")
+	}
+	return o.startup.transition(ctx, metadata.StartupPlanDigest, true)
+}
+
+func (o *NativeRuntimeOwner) restoreStartupAfterFailure(runtime ReleaseRuntime) error {
+	restoreCtx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	return o.restoreStartup(restoreCtx, runtime)
 }
 
 func (o *NativeRuntimeOwner) PersistentSources(ctx context.Context, request CandidateRuntimeRequest) ([]string, error) {

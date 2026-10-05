@@ -52,6 +52,7 @@ type HostSourceAnalyzer struct {
 	composeRoots []string
 	cacheRoot    string
 	recoveryRoot string
+	startup      *NativeStartupStore
 	detector     Detector
 	gitMu        sync.Mutex
 	// inspectMu serializes copies of local checkouts made for inspection,

@@ -121,7 +121,11 @@ func prepareSystemdStartupHandoffOwned(capture *HostWorkloadCapture, roots []str
 			return nil, fmt.Errorf("shared or indirect systemd startup authority requires review")
 		}
 	}
-	if names := strings.Fields(props["Names"]); len(names) > 1 || (len(names) == 1 && names[0] != capture.ResourceID) {
+	names := capture.UnitNames
+	if names == nil {
+		names = strings.Fields(props["Names"])
+	}
+	if len(names) > 1 || (len(names) == 1 && names[0] != capture.ResourceID) {
 		return nil, fmt.Errorf("systemd alias startup authority requires review")
 	}
 	plan := &NativeStartupPlan{Version: 1, Manager: capture.Manager, ResourceID: capture.ResourceID, Account: capture.Account, UID: capture.UID, GID: capture.GID, StartupEvidence: append(json.RawMessage(nil), capture.StartupEvidence...)}

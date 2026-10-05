@@ -24,9 +24,10 @@ import (
 
 func wireWorkloadImportEvidenceDeployModules(s *Server) {
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
-	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning)
+	s.modules.deployStartup = deploy.NewNativeStartupStore(filepath.Join(s.Cfg.DataDir, "deployment-recovery"), s.Sealer)
+	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning).WithNativeStartupStore(s.modules.deployStartup)
 	s.modules.deployRuntime = deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
-	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd)
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd).WithStartupStore(s.modules.deployStartup)
 	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
 	observer := deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker, s.modules.proxy).
 		WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions).withNativeRuntime(s.modules.deployNative))

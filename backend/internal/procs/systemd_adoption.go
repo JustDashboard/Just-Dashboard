@@ -33,6 +33,7 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		return nil, ErrHostWorkloadChanged
 	}
 	out := systemdCaptureProperties(unit, props)
+	out.UnitNames = strings.Fields(props["Names"])
 	out.StartupEvidence = startup
 	out.Blockers = append(out.Blockers, startupBlockers...)
 	out.UID, out.GID, err = ResolveHostAccount(out.Account)
@@ -64,6 +65,15 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 	}{stableSystemdProperties(props), files, startup})
 	out.OriginalConfig = private
 	out.ConfigurationDigest = captureDigest(private)
+	runtimeProperties := stableSystemdProperties(props)
+	for _, field := range []string{"UnitFileState", "WantedBy", "RequiredBy"} {
+		delete(runtimeProperties, field)
+	}
+	runtimePrivate, _ := json.Marshal(struct {
+		Properties map[string]string
+		Files      map[string]string
+	}{runtimeProperties, files})
+	out.RuntimeConfigurationDigest = captureDigest(runtimePrivate)
 	if unit.MainPID > 1 {
 		p, err := process.NewProcessWithContext(ctx, int32(unit.MainPID))
 		if err != nil {
@@ -138,6 +148,9 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		if version, probeErr := ProbeCapturedInterpreter(ctx, out); probeErr == nil {
 			out.InterpreterVersion = version
 		}
+	}
+	if plan, prepareErr := PrepareSystemdStartupHandoff(out); prepareErr == nil {
+		out.StartupPlan = plan
 	}
 	return out, nil
 }

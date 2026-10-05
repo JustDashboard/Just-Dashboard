@@ -107,7 +107,7 @@ func writeRecoveredComposeDocuments(root string, documents []ComposeDocument) er
 func (r *dockerRecovery) recoveredPrimaryService(analysis ComposeAnalysis) string {
 	services := append([]ComposeServicePlan(nil), analysis.Services...)
 	for i := range services {
-		if captures := r.containers[services[i].Name]; len(captures) > 0 {
+		if captures := r.containers[services[i].Name]; len(captures) > 0 && captures[0].Inspection.Config != nil {
 			services[i].Image = captures[0].Inspection.Config.Image
 		}
 		if _, exists := r.builds[services[i].Name]; exists {
@@ -161,10 +161,16 @@ func (r *dockerRecovery) attachBuildSources(ctx context.Context, recoveryRoot st
 			r.result.Adoption.BuildSources = append(r.result.Adoption.BuildSources, entry)
 			continue
 		}
+		if !recoverableBuildArguments(build) {
+			entry.Reason = "The original build arguments need unresolved environment or private inputs. The pinned live image remains deployable."
+			r.result.Adoption.BuildSources = append(r.result.Adoption.BuildSources, entry)
+			continue
+		}
 		build["dockerfile"] = filepath.ToSlash(dockerfile)
 		relative := filepath.ToSlash(filepath.Join("contexts", service))
 		build["context"] = relative
 		r.sanitizeStrings(build, service, "build")
+		escapeRecoveredLiterals(build, r.result.Environment)
 		contexts[service] = preparedContext{resolved, build, relative}
 		r.result.Adoption.BuildSources = append(r.result.Adoption.BuildSources, entry)
 	}
@@ -259,10 +265,30 @@ func (r *dockerRecovery) attachBuildSources(ctx context.Context, recoveryRoot st
 	}
 	for _, name := range sortedStringMapKeys(r.result.Environment) {
 		if !seen[name] {
-			r.result.Configuration.Variables = append(r.result.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"build"}})
+			r.result.Configuration.Variables = append(r.result.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"build"}, ValueMode: "literal"})
+			AddRecoveredInput(r.result, name, name, "", "runtime_setting", "compose", "runtime_setting")
 		}
 	}
 	return nil
+}
+
+func recoverableBuildArguments(build map[string]any) bool {
+	if raw, exists := build["args"]; exists {
+		arguments, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		for name, raw := range arguments {
+			if raw == nil || secretShapedKey(name) {
+				return false
+			}
+			value := fmt.Sprint(raw)
+			if containsURLCredentials(value) || browserSecretValue.MatchString(value) || containsSourceInterpolation(value) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func capturedBuildSourceEvidence(entry *RecoveredBuildSource, capture *dockerx.AdoptionContainer) {

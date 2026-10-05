@@ -184,6 +184,9 @@ func VerifyCapturedStartup(capture *HostWorkloadCapture, plan *NativeStartupPlan
 	if plan == nil || capture == nil || capture.Manager != plan.Manager || capture.ResourceID != plan.ResourceID {
 		return ErrHostWorkloadChanged
 	}
+	if capture.Manager == "systemd" && (len(capture.UnitNames) > 1 || len(capture.UnitNames) == 1 && capture.UnitNames[0] != capture.ResourceID) {
+		return ErrHostWorkloadChanged
+	}
 	if err := VerifyStartupHandoff(context.Background(), plan, journal); err != nil {
 		return err
 	}

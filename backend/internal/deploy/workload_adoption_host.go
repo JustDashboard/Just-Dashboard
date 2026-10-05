@@ -22,6 +22,16 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	if capture == nil || analyzer == nil || paths == nil || (capture.Manager != "pm2" && capture.Manager != "systemd" && capture.Manager != "process") {
 		return nil, ErrRecoveryBlocked
 	}
+	localCapture := *capture
+	localCapture.Blockers = append([]string(nil), capture.Blockers...)
+	capture = &localCapture
+	if capture.StartupPlan != nil && analyzer.startup != nil {
+		if err := analyzer.startup.Stage(ctx, capture.StartupPlan); err == nil {
+			if plan, err := analyzer.startup.VerifyCapture(ctx, capture.StartupPlan.Digest, capture); err == nil {
+				removeHandledStartupBlockers(capture, plan)
+			}
+		}
+	}
 	origin := &WorkloadAdoption{Key: candidate.Key, Digest: candidate.Digest, Kind: candidate.Kind, ResourceID: candidate.ResourceID, Manager: capture.Manager, Name: candidate.Name,
 		ServiceCount: candidate.Total, RunningCount: candidate.Running, Warnings: append([]string{}, capture.Warnings...), Blockers: append([]string{}, capture.Blockers...), Issues: []AdoptionIssue{},
 		OriginalSourcePath: capture.SourceDirectory, BaselineDigest: capture.ConfigurationDigest}
@@ -137,6 +147,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			value = "/usr/local/bin:" + value
 		}
 		recovered.Environment[name] = value
+		AddRecoveredInput(recovered, name, name, candidate.Name, "environment", "native", "application")
 		scopes := []string{"runtime"}
 		buildStep := ""
 		if selected != nil {
@@ -163,7 +174,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			scopes = append(scopes, "build")
 			recovered.Configuration.Build.Secrets = append(recovered.Configuration.Build.Secrets, BuildSecretConfig{Variable: name, Step: buildStep})
 		}
-		recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: scopes})
+		recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: scopes, ValueMode: "literal"})
 	}
 	if selected == nil {
 		block("host_build_unknown", "No supported build was found in this application's source. Add a reviewed Dockerfile or select the correct source directory.", "build.method")
@@ -229,8 +240,8 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			}
 			name := prefix + strconv.Itoa(index)
 			recovered.Environment[name] = arg
-			recovered.BaselineEnvironment[name] = capture.Command[index]
-			recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}})
+			AddRecoveredInput(recovered, name, "Argument "+strconv.Itoa(index), candidate.Name, "argument", "native", "runtime_setting")
+			recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, ValueMode: "literal"})
 			args = append(args, `"$`+name+`"`)
 		}
 		recovered.Configuration.Runtime.Command = []string{"/bin/sh", "-c", strings.Join(args, " ")}
@@ -252,7 +263,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	origin.BaselineDetection = DetectionResult{Source: SourceIdentity{Kind: SourceImport, Repository: candidate.Name}, Candidates: []DetectedCandidate{baselineCandidate}, SelectedID: baselineCandidate.ID}
 	baselineVariables := make([]PlannedVariable, 0, len(capture.Environment))
 	for _, name := range sortedStringMapKeys(capture.Environment) {
-		baselineVariables = append(baselineVariables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}})
+		baselineVariables = append(baselineVariables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, ValueMode: "literal"})
 	}
 	origin.BaselineConfiguration = PlanConfiguration{Build: BuildPlanConfig{Method: BuildNone, Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}}, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, HostPort: port, InternalPort: port, BindAddress: host}, Variables: baselineVariables, Checks: recovered.Configuration.Checks, Dependencies: []PlannedDependency{}, Domains: []PlannedDomain{}}
 	if capture.Manager != "process" {
@@ -271,6 +282,16 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 				block("host_native_source_fence_unavailable", "The original source could not be fenced safely for native restart authority. Review its private files, permissions and source limits before migration.", "source.localPath")
 			}
 			metadata.SourcePrivateFence = true
+			if capture.StartupPlan != nil && analyzer.startup != nil {
+				if _, verifyErr := analyzer.startup.VerifyCapture(ctx, capture.StartupPlan.Digest, capture); verifyErr == nil {
+					metadata.StartupPlanDigest = capture.StartupPlan.Digest
+					metadata.RuntimeConfigurationDigest = capture.RuntimeConfigurationDigest
+					summary := capture.StartupPlan.Summary()
+					origin.StartupHandoff = &summary
+				} else {
+					block("host_startup_handoff_changed", "The prepared startup authority changed during recovery. Refresh detection before adoption.", "source")
+				}
+			}
 			origin.Runtime.Metadata = mustJSON(metadata)
 			origin.Runtime.Host, origin.Runtime.Port = host, port
 			origin.Warnings = append(origin.Warnings, "The original source directory is frozen as native rollback evidence. Keep it unchanged while this manager is a live or retained baseline; use a separate managed checkout for new code. Changed modules block native stop, compensation and rollback until the captured source is restored. Linked data remains writable.")

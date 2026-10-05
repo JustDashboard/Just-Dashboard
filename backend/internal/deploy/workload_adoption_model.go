@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -83,6 +84,7 @@ type WorkloadAdoption struct {
 	BaselineSource              DraftSourceConfig                 `json:"baselineSource"`
 	BaselineDetection           DetectionResult                   `json:"baselineDetection"`
 	BuildSources                []RecoveredBuildSource            `json:"buildSources,omitempty"`
+	StartupHandoff              *procs.NativeStartupSummary       `json:"startupHandoff,omitempty"`
 	BaselineConfiguration       PlanConfiguration                 `json:"baselineConfiguration"`
 	BaselineDigest              string                            `json:"baselineDigest"`
 	Runtime                     ReleaseRuntimeInput               `json:"runtime"`

@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -33,11 +34,34 @@ func bindHostRecoveryCandidate(detection *DetectionResult, capture *procs.HostWo
 			break
 		}
 	}
+	if entry == "" && len(capture.Command) > 1 && strings.HasPrefix(filepath.Base(capture.Command[0]), "python") {
+		for _, operand := range capture.Command[1:] {
+			module, _, _ := strings.Cut(operand, ":")
+			if strings.HasPrefix(module, "-") || module == "" || strings.ContainsAny(module, "/\\ ") {
+				continue
+			}
+			module = strings.ReplaceAll(module, ".", "/")
+			for _, relative := range []string{module + ".py", module + "/__init__.py"} {
+				if safeRelativePath(relative) {
+					if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err == nil && info.Mode().IsRegular() {
+						entry = relative
+						break
+					}
+				}
+			}
+			if entry != "" {
+				break
+			}
+		}
+	}
 	best, score, ambiguous := -1, -1, false
 	for index, candidate := range detection.Candidates {
 		candidateRoot := strings.Trim(strings.TrimPrefix(filepath.ToSlash(candidate.Root), "./"), "/")
 		if candidateRoot == "." {
 			candidateRoot = ""
+		}
+		if entry == "" && candidateRoot != "" {
+			continue
 		}
 		if entry != "" && candidateRoot != "" && !strings.HasPrefix(entry, candidateRoot+"/") {
 			continue

@@ -120,9 +120,13 @@ func (p *PM2) CaptureExisting(ctx context.Context, daemon, namespace, name strin
 	}
 	capture.StartupEvidence = startup
 	capture.Blockers = uniqueCaptureStrings(append(capture.Blockers, append(startupBlockers, latestBlockers...)...))
+	capture.RuntimeConfigurationDigest = capture.ConfigurationDigest
 	capture.ConfigurationDigest = captureDigest(append(append([]byte(capture.ConfigurationDigest), 0), startup...))
 	if version, probeErr := ProbeCapturedInterpreter(ctx, capture); probeErr == nil {
 		capture.InterpreterVersion = version
+	}
+	if plan, prepareErr := PreparePM2StartupHandoff(capture, home.daemonDirectory(), namespace); prepareErr == nil {
+		capture.StartupPlan = plan
 	}
 	return capture, nil
 }
