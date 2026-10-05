@@ -2139,9 +2139,9 @@ function showcaseRead(path: string, url: URL): unknown {
       const points = containerHistory(one.name, api ? 12 : 3, api ? 210_000_000 : 96_000_000).points
       return {
         name: one.name,
-        cpu: points.map((point) => point.cpu),
+        cpu: points.map((point) => point.cpu ?? 0),
         mem: points.map((point) => point.mem),
-        cpuPeak: Math.max(...points.map((point) => point.cpuPeak)),
+        cpuPeak: Math.max(...points.map((point) => point.cpuPeak ?? 0)),
         memPeak: Math.max(...points.map((point) => point.memPeak)),
       }
     }) satisfies ContainerSparkline[]

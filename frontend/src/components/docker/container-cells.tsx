@@ -319,7 +319,9 @@ export function CpuReading({
   trend?: number[]
   compact?: boolean
 }) {
-  if (!stat)
+  // A sample with no interval to measure over is not an idle container: the
+  // first poll of a sampler, or one after a long pause, carries no CPU.
+  if (!stat || stat.cpuReady === false)
     return (
       <Reading
         label="CPU"

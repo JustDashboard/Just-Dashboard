@@ -77,7 +77,7 @@ const formatPercent = (v: number) => percent(v)
  * a spike — a core pinned for one sample is a busy moment, and a panel that
  * calls that an anomaly is a panel people learn to close.
  */
-function ContainerAnomalies({ containerId }: { containerId: string }) {
+export function ContainerAnomalies({ containerId }: { containerId: string }) {
   const { data } = usePoll<AnomalyReport>(
     (signal) =>
       get<AnomalyReport>(
@@ -102,8 +102,8 @@ function ContainerAnomalies({ containerId }: { containerId: string }) {
           <p>{anomaly.detail}</p>
           {anomaly.advice && <p className="mt-1">{anomaly.advice}</p>}
           <p className="mt-1 text-hint text-muted-foreground">
-            Read from {data.samples} samples over the last {anomaly.window}, and inferred from their
-            shape rather than reported by Docker.
+            Read from {data.samples} recorded points over the last {anomaly.window}, and inferred
+            from their shape rather than reported by Docker.
           </p>
         </Notice>
       ))}
@@ -189,32 +189,12 @@ export function ContainerUsage({
 }
 
 /**
- * Processor, memory, network and block I/O over the window `usage` holds,
- * with the anomalies the record shows and what the figures do and do not
- * measure. The section around them — its title and range — is the caller's.
+ * Every axis a container's charts draw, ending on a round figure and ticking
+ * at its quarters, peaks included, so the top tick is a number someone would
+ * say aloud. Memoised, like everything handed to `ChartPanel`.
  */
-export function ContainerCharts({
-  usage,
-  containerId,
-  name,
-  plain = true,
-}: {
-  usage: ContainerUsageState
-  containerId: string
-  name: string
-  plain?: boolean
-}) {
-  const { rows, limit, events, history, streaming, controls } = usage
-  // Zero is a measurement. Only null is absent; an idle interface keeps its chart.
-  const hasNetwork = rows.length === 0 || rows.some((r) => r.netRx !== null || r.netTx !== null)
-  const hasBlock =
-    rows.length === 0 || rows.some((r) => r.blockRead !== null || r.blockWrite !== null)
-  const disabled =
-    usage.error instanceof ApiError && usage.error.code === "metrics_history_disabled"
-  // Every axis ends on a round figure and ticks at its quarters, peaks
-  // included, so the top tick is a number someone would say aloud. Memoised,
-  // like everything handed to `ChartPanel`.
-  const scales = useMemo(() => {
+export function useContainerScales(rows: ContainerRow[], limit: number, streaming: boolean) {
+  return useMemo(() => {
     const memoryCeiling = Math.max(limit, peakOf(rows, ["mem", "memPeak"]))
     return {
       cpu: cpuScale(peakOf(rows, ["cpu", "cpuPeak"])),
@@ -249,6 +229,32 @@ export function ContainerCharts({
           : { ...byteScale(memoryCeiling), thresholds: undefined },
     }
   }, [rows, limit, streaming])
+}
+
+/**
+ * Processor, memory, network and block I/O over the window `usage` holds,
+ * with the anomalies the record shows and what the figures do and do not
+ * measure. The section around them — its title and range — is the caller's.
+ */
+export function ContainerCharts({
+  usage,
+  containerId,
+  name,
+  plain = true,
+}: {
+  usage: ContainerUsageState
+  containerId: string
+  name: string
+  plain?: boolean
+}) {
+  const { rows, limit, events, history, streaming, controls } = usage
+  // Zero is a measurement. Only null is absent; an idle interface keeps its chart.
+  const hasNetwork = rows.length === 0 || rows.some((r) => r.netRx !== null || r.netTx !== null)
+  const hasBlock =
+    rows.length === 0 || rows.some((r) => r.blockRead !== null || r.blockWrite !== null)
+  const disabled =
+    usage.error instanceof ApiError && usage.error.code === "metrics_history_disabled"
+  const scales = useContainerScales(rows, limit, streaming)
 
   if (disabled) {
     return (

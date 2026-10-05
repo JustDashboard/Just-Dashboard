@@ -260,7 +260,7 @@ function useLiveUsage(): Usage {
     state: "ready",
     memory: Math.max(...points.map((point) => point.memBytesPeak)),
     // Docker's CPU percentage counts one core as 100.
-    cpus: Math.max(...points.map((point) => point.cpuPeak)) / 100,
+    cpus: Math.max(0, ...points.map((point) => point.cpuPeak ?? 0)) / 100,
     processes: Math.max(...points.map((point) => point.pids)),
   }
 }

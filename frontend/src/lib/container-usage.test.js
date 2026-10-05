@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   appendLive,
+  bucketLive,
   byteScale,
   containerRates,
   containerRateLabel,
@@ -159,6 +160,51 @@ describe("the live window", () => {
     expect(rows).toHaveLength(seconds + 1)
     expect(rows.at(-1).ts - rows[0].ts).toBe(LIVE_WINDOW_MS)
     expect(rows.every((row) => row.netRx === 10)).toBe(true)
+  })
+})
+
+describe("the live window in buckets", () => {
+  const row = (second, cpu, netRx = 100) => ({
+    t: "",
+    at: "",
+    ts: 1_800_000_000_000 + second * 1000,
+    cpu,
+    cpuPeak: null,
+    mem: 200,
+    memPeak: null,
+    netRx,
+    netTx: null,
+    blockRead: null,
+    blockWrite: null,
+    pids: 12,
+  })
+
+  test("a bucket is the mean of its frames, with the highest of them as its peak", () => {
+    const rows = bucketLive([row(0, 10), row(1, 30), row(2, 20), row(5, 4)], 5000)
+    expect(rows).toHaveLength(2)
+    expect(rows[0].cpu).toBe(20)
+    expect(rows[0].cpuPeak).toBe(30)
+    expect(rows[0].mem).toBe(200)
+    expect(rows[0].pidsPeak).toBe(12)
+    expect(rows[1].cpu).toBe(4)
+  })
+
+  test("a bucket is stamped with its newest frame, so the chart ends on the last reading", () => {
+    const rows = bucketLive([row(0, 1), row(3, 1), row(6, 1)], 5000)
+    expect(rows.map((one) => one.ts)).toEqual([row(3, 1).ts, row(6, 1).ts])
+  })
+
+  test("breaks are skipped inside a bucket, and a bucket of nothing but breaks stays one", () => {
+    const rows = bucketLive([row(0, null, null), row(1, 8, null), row(5, null, null)], 5000)
+    expect(rows[0].cpu).toBe(8)
+    expect(rows[0].netRx).toBeNull()
+    expect(rows[0].netRxPeak).toBeNull()
+    expect(rows[1].cpu).toBeNull()
+    expect(rows[1].cpuPeak).toBeNull()
+  })
+
+  test("an empty window is empty", () => {
+    expect(bucketLive([])).toEqual([])
   })
 })
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 import { appendLive, CONTAINER_STALE_MS } from "@/lib/container-usage"
 import type { ContainerRow } from "@/lib/metrics-range"
 import type { ContainerStats } from "@/lib/types"
@@ -22,6 +22,29 @@ type Feed = {
  * watching instead of starting from nothing on every visit.
  */
 const feeds = new Map<string, Feed>()
+const listeners = new Set<() => void>()
+
+function subscribe(listener: () => void) {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/**
+ * The newest frame and row a container's socket has delivered, read without
+ * opening a socket of its own. For a figure that only shows what an open
+ * `useContainerLive` is already receiving: it re-renders alone on each frame,
+ * so a memoised chart beside it is not redrawn to change one number.
+ */
+export function useContainerFrame(containerId: string) {
+  const feed = useSyncExternalStore(
+    subscribe,
+    () => feeds.get(containerId),
+    () => undefined,
+  )
+  return { stats: feed?.last, now: feed?.rows.at(-1) }
+}
 
 export type ContainerLive = {
   /** The newest frame Docker sent. */
@@ -64,6 +87,7 @@ export function useContainerLive(
         const next = { containerId, last: stats, rows, receivedAt: Date.now() }
         feeds.set(containerId, next)
         setFeed(next)
+        for (const listener of listeners) listener()
         onStats?.(stats)
       },
     },

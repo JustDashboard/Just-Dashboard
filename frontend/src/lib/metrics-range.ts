@@ -476,6 +476,7 @@ export type ContainerRow = {
   blockReadPeak?: number | null
   blockWritePeak?: number | null
   pids: number | null
+  pidsPeak?: number | null
 }
 
 export function containerRows(history: ContainerHistory): ContainerRow[] {
@@ -514,6 +515,7 @@ function toContainerRow(point: ContainerHistoryPoint, ts: number, step: number):
     blockReadPeak: point.blockReadPeak ?? point.blockRead,
     blockWritePeak: point.blockWritePeak ?? point.blockWrite,
     pids: point.pids,
+    pidsPeak: point.pidsPeak ?? point.pids,
   }
 }
 
