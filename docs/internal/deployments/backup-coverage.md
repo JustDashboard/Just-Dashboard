@@ -16,7 +16,7 @@ with no manifest remain listable/restorable but cannot satisfy the coverage gate
 the current job and the completed run: editing a job cannot make an old artifact cover new data.
 
 Existing-workload recovery can automatically link an enabled, unfiltered saved job whose latest
-successful archive verifies complete writable bind/local-volume coverage. Matching is bounded to
+successful archive verifies complete writable bind/local-volume coverage. Archive verification is bounded to
 15 seconds, 256 MiB and a successful run within 24 hours; import neither creates nor runs a job.
 Unsupported or incomplete evidence leaves the warning in place. The normal gate verifies the linked
 policy again before a later deployment stops the application.

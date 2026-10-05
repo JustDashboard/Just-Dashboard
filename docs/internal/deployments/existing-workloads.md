@@ -98,7 +98,7 @@ multiple mounts of the same volume.
 
 Recovery also reuses an existing backup policy when one enabled, unfiltered job covers every distinct
 writable bind or local named volume and its latest successful archive verifies against the stored
-manifest. Automatic matching is bounded to a 15-second check, a 256 MiB archive and a successful run
+manifest. Archive verification is bounded to a 15-second check, a 256 MiB archive and a successful run
 within the last 24 hours. It never creates or runs a backup job during import. Unsupported volume
 drivers, partial coverage, stale or unverifiable archives retain the backup warning. The linked policy
 is checked again through the normal backup gate before a later deployment stops the application.
@@ -113,7 +113,7 @@ If Docker deleted an existing container's original image, a verified platform de
 [bounded read-only filesystem export](docker-image-recovery.md) into a private recovery image. This
 creates a local image artifact while leaving the original runtime unchanged; mounted data is excluded
 and recovered separately. Captured secrets remain sealed variables rather than image configuration.
-In the default complete-recipe scope, an absent service with no image or container still requires
+In explicitly selected `all_services` scope, an absent service with no image or container still requires
 its original image/source before adoption.
 
 New Compose imports default to `existing_services`, including every existing container, running or
@@ -192,9 +192,9 @@ also block before image recovery, with a specific reason instead of a partial re
 
 | Runtime | Recovered plan and baseline | Cases that require resolution before adoption |
 | --- | --- | --- |
-| Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
+| Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services in `all_services` scope, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
 | Standalone Docker | A Compose recipe capturing environment, command/entrypoint, user/cwd, ports, mounts, networks/aliases, restart policy, health check, logging, resource limits and supported security/host options. Live baseline initially points to the unchanged original container. | Unmapped Engine options, unsupported namespace/resource relationships, Swarm tasks, missing image identity, or meaningful writable-layer data. The first **Deploy changes** action preserves the original container name, aliases and reviewed resources. |
-| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Verified matching `dump.pm2`/backup entries receive a targeted reversible startup handoff. Unverifiable, ambiguous or differently owned saved lists still block migration. |
+| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node/Python recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Verified matching `dump.pm2`/backup entries receive a targeted reversible startup handoff. Unverifiable, ambiguous or differently owned saved lists still block migration. |
 | systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. Disabled authority or exact verified direct target enablement links can be retained under a reversible startup handoff. Shared/indirect loaded or installed activation relationships and unsupported resource/scheduling directives block migration. |
 | Bare listening process | PID plus creation time and safe inventory; capture can explain the source and missing requirements. | No verified manager can restart the original process for compensation. Automatic managed adoption is refused until a reproducible source and restart authority exist. A port or framework name alone cannot supply these. |
 
