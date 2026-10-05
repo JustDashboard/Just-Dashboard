@@ -140,8 +140,8 @@ also block before image recovery, with a specific reason instead of a partial re
 | --- | --- | --- |
 | Docker Compose | Canonical effective Compose configuration, exact running local image IDs, captured settings for existing replicas, current file order and project identity. Existing named volumes and networks become explicit external resources. Baseline records existing service/replica IDs and which were running. | Missing authoritative configuration, unresolved paths/resources, absent local images for missing services, one-off/Swarm ownership, divergent replica settings, replica-number gaps, unrepresentable non-default Engine fields, or meaningful writable-layer data. |
 | Standalone Docker | A Compose recipe capturing environment, command/entrypoint, user/cwd, ports, mounts, networks/aliases, restart policy, health check, logging, resource limits and supported security/host options. Live baseline initially points to the unchanged original container. | Unmapped Engine options, unsupported namespace/resource relationships, Swarm tasks, missing image identity, or meaningful writable-layer data. The first **Deploy changes** action preserves the original container name, aliases and reviewed resources. |
-| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Matching entries in `dump.pm2` or `dump.pm2.bak`, or an unverifiable saved list, require a reviewed startup handoff before migration. |
-| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. Original startup authority must be verifiably disabled; known loaded or installed activation relationships and unsupported resource/scheduling directives block migration. |
+| PM2 | Exact account/daemon, namespace, application and instance identities; private environment and argv; source evidence; a supported Dockerfile or bounded Node recipe; original PM2 restart and log authority for the live baseline. | Unknown toolchain, missing/unsafe source, incompatible interpreter or process topology, unsupported manager-only behavior, secret-bearing opaque files, or settings which cannot be translated faithfully. Cluster discovery does not imply every cluster topology is convertible. Verified matching `dump.pm2`/backup entries receive a targeted reversible startup handoff. Unverifiable, ambiguous or differently owned saved lists still block migration. |
+| systemd | Exact persistent unit and drop-in/configuration identity, private environment/argv, supported restart policy, stop signal/grace and source/build recipe. Native baseline uses the original unit and journal until Deploy changes creates the Docker release. | Transient units which can disappear on stop, socket activation, credentials, complex execution chains, unsupported sandbox/dependency/shutdown semantics, unavailable restart authority or an unreproducible source/build. A loaded unit alone is not proof it is an application. Disabled authority or exact verified direct target enablement links can be retained under a reversible startup handoff. Shared/indirect loaded or installed activation relationships and unsupported resource/scheduling directives block migration. |
 | Bare listening process | PID plus creation time and safe inventory; capture can explain the source and missing requirements. | No verified manager can restart the original process for compensation. Automatic managed adoption is refused until a reproducible source and restart authority exist. A port or framework name alone cannot supply these. |
 
 The source of an image-only workload is its immutable local image. Recovery cannot manufacture the
@@ -296,31 +296,48 @@ inspect them without editing, and source paths are not remembered in browser sto
 
 Original startup authority also needs a reversible handoff before container migration. PM2 capture
 checks both `dump.pm2` and `dump.pm2.bak` by application namespace/name, independent of numeric IDs.
-Matching saved entries block; malformed, unreadable, nonregular or oversized lists cannot prove absence
-and block too. Other applications' valid saved entries remain untouched. The controller rechecks this
-private evidence using bounded no-follow descriptor reads immediately before its exact lifecycle RPC.
-The importer never runs `pm2 save` or rewrites a shared startup list.
+Verified matching saved entries receive a private handoff plan; malformed, unreadable, nonregular,
+oversized or differently owned lists cannot prove safe authority and still block. The plan retains only
+selected namespace/name rows, their original positions and file fingerprints, never another application's
+private configuration. Import does not change the lists. Deploy changes atomically removes the selected
+rows from both lists while preserving other applications and namespaces; baseline rollback restores
+those exact selected rows and original ownership/mode. The importer never runs `pm2 save`.
 
-Systemd recovery permits only verifiably disabled original units and rejects current reverse activation
-or control relationships (`WantedBy`, `RequiredBy`, `TriggeredBy`, `BoundBy`, `UpheldBy`, `ConsistsOf`,
-`OnFailureOf`, `OnSuccessOf`). A bounded installed inventory reads service/timer/path/socket/target metadata,
+Systemd recovery permits disabled original units and verifies a targeted handoff for direct
+`.target.wants`/`.target.requires` enablement symlinks. Each link must resolve to the captured persistent
+unit and explain its `WantedBy`/`RequiredBy` relationships. Aliases, static/indirect enablement, explicit
+target-file dependencies, timers, sockets, paths and reverse control relationships (`TriggeredBy`,
+`BoundBy`, `UpheldBy`, `ConsistsOf`, `OnFailureOf`, `OnSuccessOf`) remain blockers. A bounded installed inventory reads service/timer/path/socket/target metadata,
 service aliases and their authoritative files using read-only `systemctl` arguments; this can load
 metadata but never starts, enables or reloads a unit. Explicit activation/dependency references and
 same-basename default triggers are checked against canonical and alias service names even when those
-startup units were previously unloaded. Matching references block, and their private evidence joins
-the baseline configuration digest. Unreadable or ambiguous inventory also blocks. The limits are
+startup units were previously unloaded. Matching references outside the positively verified direct-link
+handoff block, and their private evidence joins the baseline configuration digest. Unreadable or ambiguous inventory also blocks. The limits are
 10,000 listed entries, 512 inspected units, 4 MiB per command/file and 8 MiB of inspected file contents.
 Concrete template instances are included, and uninstantiated templates are inspected through bounded
 `systemctl cat` and authoritative-file reads. Explicit template activation references block; enabled
 templates with ambiguous service/target specifiers fail closed. Unrelated templates such as getty do
 not substitute for the application's startup authority. The real adapter recaptures startup/configuration and PID identity before manager
-control. No global enablement or startup settings are changed by import or cutover.
+control. Import changes no startup settings; Deploy changes retires only the exact prepared links.
+Rollback recreates their original targets and ownership without overwriting an existing link or file.
+The adapter never disables a shared service, calls a global manager save or reloads the host manager.
 
 These checks cannot prove absence of cron, custom scripts, future administrator actions or every
 external launcher. The mandatory review warning requires checking all external startup authority,
 including additional targets and template launchers, so the original app cannot restart beside Docker
-after reboot. Clearing a startup blocker requires an operator-reviewed reversible handoff, followed
-by fresh recovery; it is not permission to disable shared production startup services globally.
+after reboot. Known safe authority is prepared automatically; unresolved shared or ambiguous authority
+requires an operator-reviewed reversible handoff and fresh recovery. It does not authorize disabling
+shared production startup services globally.
+
+Startup plans are sealed outside public draft data. A durable journal records the exact before and
+planned/observed retired or restored fingerprints before and after each side effect. Directory-descriptor
+locks serialize dashboard plans sharing an authority directory; bounded no-follow reads and atomic
+exchange verify displaced file bytes against the prepared fingerprint, preserving foreign races rather
+than overwriting them. Interrupted publishes reconcile through their recorded temporary path before
+continuing or compensating. Completed operations remove temporary backups. A foreign saved-list/link
+change blocks retirement or rollback; runtime digest normalization alone cannot grant restart authority.
+The full original discovery digest remains intact, and the separate runtime digest is accepted only
+with verified startup evidence and the journal's exact controlled transition.
 
 Native lifecycle operations recheck manager configuration and captured source evidence before
 controlling the original app. The reviewed original source directory remains frozen while its native
