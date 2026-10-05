@@ -16,6 +16,8 @@ import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-d
 import { Notice } from "@/components/state"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
 import { sourceWatchesGit } from "@/components/deploy/new-project/draft"
+import { groupImportWarnings } from "@/lib/workload-import"
+import { RecoveredWorkloadPlan } from "./recovered-workload-plan"
 
 /**
  * Step four: **is this right.**
@@ -97,6 +99,7 @@ export function StepReview({
   const isGitSource = sourceWatchesGit(flow.source)
   const configuration = flow.configuration
   const adoption = flow.draft.data.adoption
+  const warningGroups = groupImportWarnings(warnings)
   const declared = configuration.variables
   const generated = declared.filter(
     (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
@@ -183,6 +186,7 @@ export function StepReview({
             ))}
         </FormSection>
       )}
+      {adoption && <RecoveredWorkloadPlan adoption={adoption} />}
       <FormSection title="Project">
         <FormFacts>
           <FormFact label="Name" mono>
@@ -398,81 +402,99 @@ export function StepReview({
           </div>
           {warnings.length > 0 && (
             <Group id="deployment-warning-acknowledgements" tone="warning" className="space-y-2">
-              {warnings.map((finding, index) => (
-                <Label
-                  key={`${finding.code}:${finding.fieldId ?? index}`}
-                  /* An `OptionRow`'s anatomy, at an `OptionRow`'s sizes: title
+              {warningGroups.map(({ key, finding, codes, details, services }) => (
+                <div key={key} className="min-w-0 space-y-2">
+                  <Label
+                    /* An `OptionRow`'s anatomy, at an `OptionRow`'s sizes: title
                      at body, everything under it at hint. It was one 12px
                      block throughout, which is a step the ladder does not have
                      between the two (§8). */
-                  className="flex min-h-11 items-start gap-3 text-hint leading-relaxed"
-                >
-                  <Checkbox
-                    className="mt-0.5"
-                    checked={acknowledged.includes(finding.code)}
-                    disabled={acknowledgementsDisabled}
-                    onCheckedChange={(checked) =>
-                      onAcknowledgedChange(
-                        checked
-                          ? [...new Set([...acknowledged, finding.code])]
-                          : acknowledged.filter((code) => code !== finding.code),
-                      )
-                    }
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-body font-medium">{finding.title}</span>
-                    <span className="mt-0.5 block text-muted-foreground">
-                      {finding.measured || finding.means}
-                    </span>
-                    {/* A warning is a thing to accept *or* fix, and this said
+                    className="flex min-h-11 items-start gap-3 text-hint leading-relaxed"
+                  >
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={codes.every((code) => acknowledged.includes(code))}
+                      disabled={acknowledgementsDisabled}
+                      onCheckedChange={(checked) =>
+                        onAcknowledgedChange(
+                          checked
+                            ? [...new Set([...acknowledged, ...codes])]
+                            : acknowledged.filter((code) => !codes.includes(code)),
+                        )
+                      }
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-body font-medium">{finding.title}</span>
+                      <span className="mt-0.5 block text-muted-foreground">
+                        {details.length > 1
+                          ? `Applies to ${services.join(", ") || `${details.length} recovered settings`}. ${finding.means ?? ""}`
+                          : finding.measured || finding.means}
+                      </span>
+                      {/* A warning is a thing to accept *or* fix, and this said
                         only what it was: the remedy and the owning feature's
                         page were dropped, so "link a backup job" arrived with
                         nowhere to do it. */}
-                    {findingRemedy(finding) && (
-                      <span className="mt-1 block font-normal">
-                        <b className="font-medium">Next:</b> {findingRemedy(finding)}
-                        {finding.deepLink && (
-                          <>
-                            {" · "}
-                            <Link href={finding.deepLink} className="underline underline-offset-2">
-                              Open owning page
-                            </Link>
-                          </>
-                        )}
-                      </span>
-                    )}
-                    {finding.fix && onApplyFix && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        className="mt-1.5"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          onApplyFix(finding)
-                        }}
-                      >
-                        {variableFixLabel(finding.fix)}
-                      </Button>
-                    )}
-                    {finding.code === "source_moved" && onInspectAgain && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        className="mt-1.5"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          onInspectAgain()
-                        }}
-                      >
-                        Inspect again
-                      </Button>
-                    )}
-                  </span>
-                </Label>
+                      {findingRemedy(finding) && (
+                        <span className="mt-1 block font-normal">
+                          <b className="font-medium">Next:</b> {findingRemedy(finding)}
+                          {finding.deepLink && (
+                            <>
+                              {" · "}
+                              <Link
+                                href={finding.deepLink}
+                                className="underline underline-offset-2"
+                              >
+                                Open owning page
+                              </Link>
+                            </>
+                          )}
+                        </span>
+                      )}
+                      {finding.fix && onApplyFix && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          className="mt-1.5"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            onApplyFix(finding)
+                          }}
+                        >
+                          {variableFixLabel(finding.fix)}
+                        </Button>
+                      )}
+                      {finding.code === "source_moved" && onInspectAgain && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          className="mt-1.5"
+                          onClick={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            onInspectAgain()
+                          }}
+                        >
+                          Inspect again
+                        </Button>
+                      )}
+                    </span>
+                  </Label>
+                  {details.length > 1 && (
+                    <Disclosure
+                      summary="Affected services and evidence"
+                      facts={`${details.length} findings`}
+                    >
+                      <ul className="space-y-2 text-hint text-muted-foreground">
+                        {details.map((entry) => (
+                          <li key={entry.code}>{entry.measured || entry.means}</li>
+                        ))}
+                      </ul>
+                    </Disclosure>
+                  )}
+                </div>
               ))}
             </Group>
           )}

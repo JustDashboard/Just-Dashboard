@@ -76,7 +76,6 @@ for (const changedPlan of [false, true]) {
         })
       }
       await page.goto(`/deploy/new?draft=${draft.id}`)
-      await page.getByRole("button", { name: "Continue", exact: true }).click()
       const warning = page.getByRole("checkbox", { name: /Review recovered runtime behavior/ })
       await expect(warning).toBeEnabled()
       const savedBeforeAcknowledgement = fixture.configurationSaves.length
@@ -135,7 +134,7 @@ test("existing-container scope includes stopped containers and requires review o
   await page.getByRole("button", { name: "Review bet-bot" }).click()
   const all = page.getByRole("button", { name: "Every declared service", exact: true })
   const existing = page.getByRole("button", { name: "Existing containers only", exact: true })
-  await expect(all).toHaveAttribute("aria-pressed", "true")
+  await expect(all).toHaveAttribute("aria-pressed", "false")
   await existing.focus()
   await page.keyboard.press("Enter")
   await expect(existing).toHaveAttribute("aria-pressed", "true")
@@ -150,7 +149,6 @@ test("existing-container scope includes stopped containers and requires review o
   await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(
     "optional-worker",
   )
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(
     page.getByText("Existing containers only · running and stopped", { exact: true }),
   ).toBeVisible()
@@ -175,15 +173,15 @@ test("existing-container scope includes stopped containers and requires review o
   expect(fixture.adoptions[0]).not.toHaveProperty("excludedServices")
 })
 
-test("choosing another stack resets scope to every declared service", async ({ page }) => {
+test("choosing another stack resets scope to existing containers", async ({ page }) => {
   await mockWorkloadImport(page)
   await page.goto("/deploy/import")
   await page.getByRole("button", { name: "Review bet-bot" }).click()
-  await page.getByRole("button", { name: "Existing containers only", exact: true }).click()
+  await page.getByRole("button", { name: "Every declared service", exact: true }).click()
   await page.getByRole("button", { name: "Back", exact: true }).click()
   await page.getByRole("button", { name: "Review bet-bot" }).click()
   await expect(
-    page.getByRole("button", { name: "Every declared service", exact: true }),
+    page.getByRole("button", { name: "Existing containers only", exact: true }),
   ).toHaveAttribute("aria-pressed", "true")
 })
 
@@ -192,8 +190,7 @@ test("recovered settings require server warning acknowledgement and adopt withou
 }) => {
   const fixture = await mockWorkloadImport(page)
   await page.goto("/deploy/new?draft=recovered-workload-draft")
-  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   await expect(
     page.getByText("Adoption keeps this application running", { exact: true }),
@@ -268,7 +265,7 @@ test("blocked recovery remains on discovery and an immutable baseline is exclude
       : route.fallback(),
   )
   await page.goto("/deploy/new?draft=recovered-workload-draft")
-  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   await expect(page.getByText(/baseline-private-token|unexpected-private-token/)).toHaveCount(0)
   const stored = await page.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }))
   expect(stored).not.toContain("baseline-private-token")
@@ -292,8 +289,7 @@ test("changed origin at adoption gives a reinspect path and never starts a run",
     }),
   )
   await page.goto("/deploy/new?draft=recovered-workload-draft")
-  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   await page.getByRole("checkbox", { name: /Review recovered runtime behavior/ }).check()
   await page.getByRole("button", { name: "Adopt deployment", exact: true }).click()
   await expect(page.getByRole("link", { name: /Reinspect workload/ })).toHaveAttribute(
@@ -338,7 +334,8 @@ test("a recovered Git source starts manual even when an earlier setup remembered
   }
   const fixture = await mockWorkloadImport(page, [betBot], draft)
   await page.goto("/deploy/new?draft=recovered-workload-draft")
-  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
+  await page.getByRole("button", { name: "Back", exact: true }).click()
   await page.getByRole("button", { name: "Back", exact: true }).click()
   await page.getByRole("spinbutton", { name: "Port the app listens on" }).fill("3001")
   await page.getByRole("button", { name: "Continue", exact: true }).click()

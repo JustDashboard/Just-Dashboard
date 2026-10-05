@@ -5,6 +5,9 @@ import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 
 const readyPath = process.env.JD_IMPORT_NATIVE_READY
+const selectedStack = readyPath
+  ? JSON.parse(readFileSync(readyPath, "utf8")).stackName || "bet-bot"
+  : "bet-bot"
 test.skip(!readyPath, "requires the isolated authenticated native discovery evidence server")
 test.use({ video: { mode: "on", size: { width: 1280, height: 900 } } })
 
@@ -21,7 +24,14 @@ type InspectedContainer = {
 function existingStackEvidence() {
   const ids = execFileSync(
     "docker",
-    ["ps", "-a", "--filter", "label=com.docker.compose.project=bet-bot", "--format", "{{.ID}}"],
+    [
+      "ps",
+      "-a",
+      "--filter",
+      `label=com.docker.compose.project=${selectedStack}`,
+      "--format",
+      "{{.ID}}",
+    ],
     { encoding: "utf8" },
   )
     .trim()
@@ -50,7 +60,7 @@ function existingStackEvidence() {
   }))
 }
 
-test("imports the real existing bet-bot stack without changing its containers", async ({
+test("imports the real selected stack without changing its containers", async ({
   page,
   context,
 }, testInfo) => {
@@ -70,16 +80,19 @@ test("imports the real existing bet-bot stack without changing its containers", 
     },
   ])
   const before = existingStackEvidence()
-  const excludedServices = ["eurobet-doubles-tracker", "eurobet-high-market-tracker"]
+  const excludedServices =
+    selectedStack === "bet-bot" ? ["eurobet-doubles-tracker", "eurobet-high-market-tracker"] : []
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/deploy")
   await expect(page.getByRole("link", { name: "Import existing" })).toBeVisible()
   await page.screenshot({ path: join(output, "native-before-deployments.png"), fullPage: true })
   await page.goto("/deploy/import")
-  await page.getByRole("textbox", { name: "Search workloads" }).fill("bet-bot")
-  await expect(page.getByRole("button", { name: "Review bet-bot" })).toBeVisible({ timeout: 30000 })
+  await page.getByRole("textbox", { name: "Search workloads" }).fill(selectedStack)
+  await expect(page.getByRole("button", { name: `Review ${selectedStack}` })).toBeVisible({
+    timeout: 30000,
+  })
   await page.screenshot({ path: join(output, "native-discovery-1280.png"), fullPage: true })
-  await page.getByRole("button", { name: "Review bet-bot" }).click()
+  await page.getByRole("button", { name: `Review ${selectedStack}` }).click()
   await expect(page.getByRole("button", { name: "Review migration" })).toBeVisible({
     timeout: 30000,
   })
@@ -98,14 +111,13 @@ test("imports the real existing bet-bot stack without changing its containers", 
   const recoveredDraft = await recovered.json()
   expect(recoveredDraft.data.adoption.scope).toBe("existing_services")
   expect(recoveredDraft.data.adoption.excludedServices).toEqual(excludedServices)
-  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible({
     timeout: 180000,
   })
   for (const name of excludedServices) {
     await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(name)
   }
   await page.screenshot({ path: join(output, "native-configuration-1280.png"), fullPage: true })
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible({
     timeout: 30000,
   })
@@ -275,7 +287,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
     animations: "disabled",
   })
   await page.goto("/deploy")
-  await expect(page.getByRole("link", { name: /bet-bot/ }).first()).toBeVisible()
+  await expect(page.getByRole("link", { name: selectedStack, exact: true }).first()).toBeVisible()
   await page.screenshot({ path: join(output, "native-after-deployments.png"), fullPage: true })
   const after = existingStackEvidence()
   expect(after).toEqual(before)
@@ -291,7 +303,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
         excludedServices,
         originalContainersRemainLiveAuthority: true,
         managedContainerIds,
-        existingStack: "bet-bot",
+        existingStack: selectedStack,
         isolatedProjectUrl: projectUrl,
         existingContainerCount: before.length,
         configurationsAndStartTimesUnchanged: true,

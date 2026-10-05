@@ -54,6 +54,7 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
+import { ExistingIngressRoutes } from "@/components/deploy/existing-ingress-routes"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
 
@@ -210,6 +211,7 @@ function DomainsForm({
 
   return (
     <>
+      <ExistingIngressRoutes bindings={configuration.ingressBindings ?? []} />
       <SettingForm
         name="Domains"
         onSave={onSave}
@@ -258,7 +260,11 @@ function DomainsForm({
           {domains.length === 0 && leaving.length === 0 ? (
             <EmptyState
               icon={Globe}
-              title="No public domains yet"
+              title={
+                configuration.ingressBindings?.length
+                  ? "No additional managed domains"
+                  : "No public domains yet"
+              }
               description="Add a hostname to route its traffic here through Proxy, with a certificate issued on the first deployment."
             />
           ) : (

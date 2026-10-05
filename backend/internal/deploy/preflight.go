@@ -595,17 +595,7 @@ func preflightFindings(
 ) []PreflightFinding {
 	findings := []PreflightFinding{}
 	if adoption := draft.Data.Adoption; adoption != nil {
-		for index, message := range adoption.Warnings {
-			findings = append(findings, finding(fmt.Sprintf("adoption_warning_%d", index+1), PreflightWarning,
-				"Review recovered runtime behavior", message,
-				"Import registers the current runtime. A later Deploy applies the reviewed recipe and may restart services.",
-				"Review this limitation before adopting the workload.", "deploy", "adoption"))
-		}
-		for index, message := range adoption.Blockers {
-			findings = append(findings, finding(fmt.Sprintf("adoption_blocked_%d", index+1), PreflightBlocked,
-				"Recovery has an unresolved limitation", message, "A complete replacement cannot yet be reproduced safely.",
-				"Resolve the original configuration and inspect again.", "deploy", "adoption"))
-		}
+		findings = append(findings, adoptionPreflightFindings(adoption)...)
 	}
 	if facility, ok := observation.Facilities["native-runtime"]; ok && !facility.Available {
 		findings = append(findings, finding("native_runtime_changed", PreflightBlocked,

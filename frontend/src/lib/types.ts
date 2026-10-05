@@ -2618,6 +2618,7 @@ export type DeploymentSourceMode =
   | "connected_repository"
   | "local_checkout"
   | "local_directory"
+  | "recovered_snapshot"
   | "image_reference"
   | "compose_paste"
   | "compose_upload"
@@ -4470,6 +4471,8 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
+    /** Imported native commands keep their captured paths under the full source tree. */
+    preserveSourceRoot?: boolean
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
@@ -4564,6 +4567,8 @@ export type DeploymentPlannedDomain = {
 
 export type DeploymentVariable = {
   name: string
+  recoveredInput?: import("./workload-import").RecoveredInput
+  valueMode?: "literal" | "reference" | "auto"
   revision: number
   sensitivity: "plain" | "secret"
   scopes: ("build" | "runtime" | "release_task")[]
@@ -4609,6 +4614,8 @@ export type DeploymentPendingState = {
 }
 
 export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "variables"> & {
+  inputs?: import("./workload-import").RecoveredInput[]
+  ingressBindings?: import("./workload-import").ExistingIngressBinding[]
   revision: number
   variables: DeploymentVariable[]
   pending: DeploymentPendingState
@@ -4681,6 +4688,8 @@ export type DeploymentBackupGateEvidence = {
 }
 
 export type DeploymentPreflightFinding = {
+  issueCode?: string
+  service?: string
   code: string
   severity: "pass" | "decision" | "warning" | "blocked" | "unavailable"
   title: string

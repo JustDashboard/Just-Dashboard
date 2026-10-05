@@ -5,6 +5,8 @@ import { Disclosure } from "@/components/form"
 import { Notice } from "@/components/state"
 import { VariableReferences } from "@/components/deploy/new-project/configure-advanced"
 import { EnvironmentEditor } from "@/components/deploy/new-project/environment-editor"
+import { RecoveredInputs } from "./recovered-inputs"
+import { recoveredEnvironmentSatisfied } from "@/lib/workload-import"
 import { detectedVariableDeclarations } from "@/components/deploy/deployment-defaults"
 import {
   railsDatabaseRows,
@@ -53,9 +55,19 @@ export function StepVariables({
   referencesOpen: boolean
 }) {
   const configuration = flow.configuration
+  const inputs = flow.draft.data.adoption?.inputs ?? []
+  const boundKeys = new Set(inputs.map((input) => input.storageKey))
+  const boundRow = (row: EnvironmentRow) =>
+    boundKeys.has(row.name) ||
+    (row.detected && recoveredEnvironmentSatisfied(row.name, retainedKeys, inputs))
+  const visibleRows = rows.filter((row) => !boundRow(row))
+  const visibleConfiguration = {
+    ...configuration,
+    variables: configuration.variables.filter((variable) => !boundKeys.has(variable.name)),
+  }
   const setConfiguration = (next: typeof configuration) =>
     onFlowChange({ ...flow, configuration: next })
-  const declared = configuration.variables.length
+  const declared = visibleConfiguration.variables.length
   // Seeded once, the way the build fold's own state is: the fold opens for the
   // same reason the sequence landed on this screen, and the first character
   // typed into the last empty reference answers that reason. Read on every
@@ -120,13 +132,19 @@ export function StepVariables({
 
   return (
     <>
-      <EnvironmentEditor
+      <RecoveredInputs
+        inputs={inputs}
+        retainedKeys={retainedKeys}
         rows={rows}
-        onRowsChange={changeRows}
+        onRowsChange={onRowsChange}
+      />
+      <EnvironmentEditor
+        rows={visibleRows}
+        onRowsChange={(next) => changeRows([...rows.filter(boundRow), ...next])}
         dotenv={dotenv}
         onDotenvChange={onDotenvChange}
         platformSkipped={platformSkipped}
-        retainedKeys={retainedKeys}
+        retainedKeys={retainedKeys.filter((key) => !boundKeys.has(key))}
         onRemoveRetainedKey={onRemoveRetainedKey}
         hostNetwork={configuration.runtime.hostNetwork}
         databases={flow.candidate?.databases}
@@ -184,8 +202,16 @@ export function StepVariables({
           </Notice>
         )}
         <VariableReferences
-          configuration={configuration}
-          onChange={changeReferences}
+          configuration={visibleConfiguration}
+          onChange={(next) =>
+            changeReferences({
+              ...next,
+              variables: [
+                ...configuration.variables.filter((variable) => boundKeys.has(variable.name)),
+                ...next.variables,
+              ],
+            })
+          }
           overriddenNames={suppliedVariables}
         />
       </Disclosure>
