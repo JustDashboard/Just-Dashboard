@@ -1,6 +1,7 @@
 "use client"
 
 import { Field, FormNote, FormSection, OptionRow } from "@/components/form"
+import { SECTION_IDS } from "@/components/deploy/new-project/plan-sections"
 import { Textarea } from "@/components/ui/textarea"
 import { useSessionState } from "@/lib/view-state"
 import type { DraftGitPolicy } from "@/components/deploy/new-project/draft"
@@ -47,7 +48,7 @@ export function AutomaticDeployment({
     policy.watchInclude.join("\n"),
   )
   return (
-    <FormSection title="Automatic deployment">
+    <FormSection id={SECTION_IDS.automatic} title="Automatic deployment">
       <OptionRow
         title="Deploy new commits automatically"
         checked={policy.automatic}

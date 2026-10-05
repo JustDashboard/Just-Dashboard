@@ -116,7 +116,9 @@ taking a frame:
   draws through the same component and keeps its frame, as a block among framed readings. The
   preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
-  and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
+  and the two shells, Docker's and a game server's, are `Pane`s, the run page's Details is one frame
+  around a rail of the run's steps and an inspector of the picked one (Security's Tools shape, the
+  rail deciding what the inspector shows), and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
   everything inside it changes what the deployment is, so one red edge says "careful" once where
   four red cards said it four times. The release path on a deployment page is not a wiring
@@ -880,7 +882,7 @@ above:
   at twelve so a long list does not spend a second arriving, and `ChoiceCard` staggers a grid by its
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
   the fleet's live and build-slot figures, the
-  Overview's requests, the delivery insights, the run page's traffic after activation, Automation's
+  Overview's requests, the delivery insights, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, and the readings on
   Packages, System users and the audit log. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
@@ -901,7 +903,7 @@ above:
   release #14*, *deploying #14*, *running now*;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   and on the Overview when a run watched there from start to finish ends in success — never on
-  arrival.
+  arrival, and never for a Stop, which takes the release down.
 
 `animate-sweep` is spent the same way, on the three waits in the section that cannot say how far
 along they are: a credential's test while the server tries it, the website preview while the site
@@ -1094,7 +1096,7 @@ The deployment section declares its two sets the same way. A project's verbs are
 `projectCommand`, is the first of View, Start, Deploy and Redeploy the list holds — by a fleet
 card's menu and by a fleet row, so a card and the context row cannot disagree about what can be done to
 a project. A run's and its release's are declared once in `deploy/run-verbs.tsx` and drawn by a
-Deployments row's menu and by the run page's identity line, which is what keeps a finished run from
+Deployments row's menu and by the run page's header, which is what keeps a finished run from
 being a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
 *Release #4* — and `VerbMenu` draws an eyebrow and a separator where the group changes, because
 eleven words in a row are a wall and the same eleven under three names are three short lists.
@@ -1178,9 +1180,9 @@ price, and it is paid by the pairs Linguist separated by lightness alone — Lua
 as the same blue. The glyph shapes and the word beside them still tell those two rows apart, and a
 floor high enough to be legible on this ground collapses them either way, so the rule stands as
 written. This
-does not extend to the marks a reader is choosing *between*: the five source kinds on `/deploy/new`
+does not extend to the marks a reader is choosing *between*: the four source kinds on `/deploy/new`
 stay muted with the current one in `--brand`, because there the colour is saying which one you are
-on (§3), and twenty hues in a row of five would be saying nothing.
+on (§3), and twenty hues in a row of four would be saying nothing.
 
 **A product is not a kind, and it is drawn as itself.** The template catalogue is sixty-two products
 the reader already knows by their marks — n8n, Grafana, Redis — and set as sixty-two names in one grey
@@ -1199,7 +1201,7 @@ CDN), picked in the variant drawn for a dark ground, with their licences in `pub
 one file whose own colour failed that ground, MySQL's navy dolphin, was lifted to the L 0.72 rung the
 `--language-*` tokens sit on. The tile is not an icon plate — it carries no tint of this product's and
 sits beside a card's words rather than in front of a header's title — and the source strip still
-stays muted, because five *kinds* are not five products. A repository row on the Git tab carries its
+stays muted, because four *kinds* are not four products. A repository row on the Git tab carries its
 owner's picture on the same reasoning: the face is the account, which a glyph could only guess at.
 
 The same marks carry into Docker and Databases, because they are the same products. A container,
@@ -1267,8 +1269,10 @@ live, so `github-actions` is GitHub's, and `backup-cron`, whose name says nothin
 from `LANES` — `AuthorMark`'s argument: a users list of eight brand-blue squares was a texture, and
 the same person now keeps one colour in the rail, the list and their own profile. The profile opens on
 `HostIdentity` with that picture where the tile would be, which makes it the fourth page that
-describes a thing the same way; a project's header and a deployment's run page are the fifth and
-sixth. A game server's three pages add one line under that header (`GameIdentity`) with what only
+describes a thing the same way; a project's header is the fifth, and a deployment's run page
+opens on that same header saying what the run is (`run-header.tsx`) — it had its own identity line,
+a 48px tile and the duration as a 24px figure, until the operator asked for the project's compact
+one. A game server's three pages add one line under that header (`GameIdentity`) with what only
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
@@ -1446,8 +1450,8 @@ registry host or an image reference is drawn as the forge or registry it names (
 GitHub, `ghcr.io` included, GitLab, Bitbucket, Codeberg, Gitea, Forgejo, Docker Hub, Quay, Harbor,
 Azure, AWS and Google Cloud's registries, and a self-hosted host whose name carries one of those
 words), falling back to git's or Docker's own mark — on a fleet card's source line, the run page's
-identity line, and as the field is typed on `/deploy/new`'s Clone URL, Compose Git URL and Image
-reference and the credential sheet's Host. A saved credential is the host it signs in to, an SSH key
+header, and as the field is typed on `/deploy/new`'s Clone URL and Image reference and the
+credential sheet's Host. A saved credential is the host it signs in to, an SSH key
 with a key in the tile's corner and a GitHub App credential as the installed account's face with
 GitHub's there. What is pasted into a credential's secret is read for what it says about itself
 (`lib/secrets.ts`): providers prefix their tokens so that secret scanners can find them, so
@@ -1578,6 +1582,38 @@ a write takes the method hue while a read stays muted (a `DELETE` is a change, n
 path and query are tokens, and an address takes the address hue beside the client drawn as itself.
 Its Colour switch is the console's own; turned off it keeps a failure, a refusal and an answer
 slower than a second, because those are readings of state (§3) rather than decoration.
+
+**A step's record is read by its shapes, and code is coloured by the same rules.** The run page's
+Details drew a step's evidence as a well of grey JSON under an accordion row: the commit a build
+checked out, the Dockerfile it wrote and the image it made were all found by reading braces.
+`deploy/run-evidence.tsx` reads the record by shape instead — a value by its key, a list by what its
+items carry — and draws each the way the product draws it elsewhere: a toolchain, a Node version, a
+platform or an image beside its product's mark, a digest cut to twelve characters with a copy, a
+commit as the Git page draws one, a list of images as rows of their products with size and platform,
+a list of health checks as rows of their outcomes. What is text — a Dockerfile, a command line, a
+record nested past two levels — is a `CodeBlock`: the `Well`'s ground with a strip naming it, its
+length and a copy, and its tokens in the `--tag-*` hues the log console's tokens sit on (keys blue,
+strings green, numbers pink, literals and a Dockerfile's instructions violet, paths and flags cyan,
+digests slate, punctuation and comments stepped back). None of the status hues: a string is not a
+success. A step is drawn on the tile of the product it works with (`StepTile`, its state in the
+tile's corner the way `ProjectMark` carries a framework) — the forge for the source, the toolchain
+for the build context, Docker for the build and the runtime, Let's Encrypt for a certificate, the
+authority certbot asks — and a step that is the dashboard's own bookkeeping keeps a glyph.
+
+`/deploy/new` reads its plan the same way since 2026-10-05, because a plan is the run before it
+happens. The drawing beside Configure's fields — four nodes on beams — is a rail
+(`new-project/plan-rail.tsx`, over the pure `plan-reading.ts`): each of the four steps under its
+segment of the spine, each part of the plan the step decides on the tile of the product it is (the
+forge, the framework, the runtime, Let's Encrypt for a name served over HTTPS, a glyph for a health
+check, the limits, the storage, the environment and the server's check), what it currently says
+under its name, a build or start command, a check's request, the paths kept between releases or the
+variables still owed as code in the same hues (`ShellWords`, the inline form of the run page's
+`CommandBlock`), and a part that wants a look before Deploy marked in its tile's corner. Every row
+opens the fields that decide it. Review opens on what the server said about the plan the way the
+run page opens on how a run ended, and draws what the release does to this server — a mount, a
+generated secret, a value the plan sets, a readiness request, the cutover — as rows of what each
+is. Detection's evidence is its files drawn as files (`FileIcon`), and an image tag is its
+registry, its repository and its tag.
 
 **A file is drawn as what it is, and a folder in the colour it was given.** The file manager drew
 Material Design Icons' file family, a stencil per category in one flat tone: it told a config from a
@@ -1940,8 +1976,8 @@ the reader through it.
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's only flow page. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
-| `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
-| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the run's identity line with its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the line's end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
+| `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. Each of its four screens is the run page's rail and inspector before the run: the plan read down a rail beside the one focused surface holding the step's fields. |
+| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the project header's shape saying what the run is, its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the far end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
 
@@ -1987,7 +2023,7 @@ Each of these is bought against a specific failure, and each is the smallest thi
   `variant={pickable.length > 0 ? "outline" : "default"}` — which is the rule stated in code rather
   than a colour chosen once and left to be wrong half the time.
 - **A choice is something you pick.** `ChoiceCard` in a `ChoiceGrid` for the *kinds* of thing — the
-  five sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
+  four sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
   kind — twenty-two repositories, a page of image tags. The split is load-bearing: a three-column
   grid of twenty-two 13px names is a wall, and a flat row is the listing this register exists to stop
   a decision from looking like. Both keep §12's shape — the title is a real `<button>` carrying the
@@ -2082,7 +2118,7 @@ palette, and a reading page must not grow a use for them.
    the Git page's filter strip — and laid out as `ChoiceGrid columns="fill"`, whose rows are equal,
    with the card's hint clamped to two lines beside a `logo`: sixty cards at three heights read as a
    grid that failed to load. The strip that picks between kinds of source is a `role="group"` of
-   pressed buttons, never a tablist — a tablist must own tabs, and these are five toggles for one
+   pressed buttons, never a tablist — a tablist must own tabs, and these are four toggles for one
    answer — and on a phone it runs to the screen's edge, where the source cut off is the cue that
    there are more, as a `ChipStrip` does; the scroll shade is drawn in the page's own ground and
    cannot show on it.
@@ -2095,7 +2131,10 @@ palette, and a reading page must not grow a use for them.
    window at `xl`, the question, the spine and any strip stay put, and what scrolls is the one list or
    form longer than the space left — inside its own surface, under its own toolbar and above its own
    command. A surface with no inner scroll is a surface the page now clips, so each one is capped
-   (`max-h-full`) and scrolls itself. `/deploy/new` is the reference: every source is the same two
+   (`max-h-full`) and scrolls itself. A surface that scrolls also clips whatever its contents draw
+   outside themselves — a field's focus ring four pixels out, a quiet fold's wash twelve — so a
+   scrolling column of fields pays that bleed and takes it back (`-mx-3 -my-1 px-3 py-1`), as a
+   scrolling list pays its rows'. `/deploy/new` is the reference: every source is the same two
    columns (the focused surface, capped at the window's height with `max-h-full self-start`, and a 22rem
    column beside it), unfinished setups moved from a block above the strip into a counted button beside
    the question, and a Configure step with more settings than fit scrolls its fields between the heading

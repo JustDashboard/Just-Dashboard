@@ -20,7 +20,7 @@ import { Status } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
 import { LanguageMark } from "@/components/language-icon"
-import { ForgeFace } from "@/components/git/marks"
+import { BranchChip, ForgeFace } from "@/components/git/marks"
 import { BadgedLogo } from "@/components/client-mark"
 import { ProductGlyph, ProductLogo, hostProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
@@ -459,8 +459,12 @@ export function SourceGit({
       {/* Beside the rows at this width, under them at every other. Who the
           rows come from, then the fallback for a repository neither identity
           lists — never the primary way in, and second in the DOM so a phone
-          reaches the rows first. */}
-      <div className="flex min-w-0 flex-col gap-6 xl:min-h-0 xl:overflow-y-auto">
+          reaches the rows first. Scrolling at this width clips whatever it
+          holds to its own box, which cut the focus ring drawn outside each
+          field and the fold's wash that bleeds to a row's edge. The column
+          pads by the wider of the two and pulls the padding back out, so the
+          fields still line up with the rows' panel. */}
+      <div className="flex min-w-0 flex-col gap-6 xl:-mx-3 xl:-my-1 xl:min-h-0 xl:overflow-y-auto xl:px-3 xl:py-1">
         {/* Said once, in one place: "why are these the repositories I can
             see" used to have no answer anywhere on the page. Each identity is
             a face, a name and a count — and one account reached through both
@@ -752,6 +756,10 @@ function RepoRow({
           )}
           {repo.archived && <Tag>archived</Tag>}
           {repo.fork && <Tag>fork</Tag>}
+          {/* The branch an import builds unless it is told otherwise, drawn as
+              the Git page draws one — the repository whose default is not
+              `main` is the one this saves a trip back for. */}
+          <BranchChip branch={repo.defaultBranch} className="hidden max-w-28 md:inline-flex" />
           {/* On a phone the coloured mark is the language (§14) and the name
               needs the width the word took — "acme/design-tok…" beside a full
               TYPESCRIPT. A language with no mark keeps its word. */}

@@ -554,9 +554,10 @@ function useCelebration(deployment: DeploymentSummary) {
       return
     }
     if (isActiveRun(last.state)) return
-    if (last.state === "succeeded") confetti.current?.fire()
+    // A Stop that succeeds takes the release down, which is no celebration.
+    if (last.state === "succeeded" && last.operation !== "stop") confetti.current?.fire()
     watched.current = undefined
-  }, [active, last?.id, last?.state])
+  }, [active, last?.id, last?.state, last?.operation])
   return confetti
 }
 

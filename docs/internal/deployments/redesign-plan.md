@@ -125,12 +125,12 @@ screens below live in `frontend/src/components/deploy/` and are covered by
 | --- | --- |
 | `/deploy` | Projects: in-progress runs, search, state chips, a grid of project cards (or rows) with the workload mark, the address, the branch and commit subject, the Compose service count and one status word (until 2026-09-24; see "Life and colour"). `?view=archived` lists archived projects with Restore and Delete permanently. |
 | `/deploy/notifications` | The fleet-level notification channels (Discord, Slack, Telegram, e-mail, signed webhook) with test delivery, pause, history and removal. |
-| `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database, Compose) and a configure form (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
+| `/deploy/new` | One page: unfinished setups to resume, a source strip (Git repository, Docker image, Template, Database; Compose until 2026-10-05) and a configure form (four steps beside a rail of the plan since 2026-10-05) (name, type, build & output settings, environment variables, database, public address, an Advanced disclosure) that ends in Deploy or Save only. `?draft=` resumes a draft and `?mode=advanced` opens Advanced. |
 | `/deploy/[id]` | The project shell (one compact header: the address, status word, the one command, a verbs menu, a facts row; its pages are the sidebar's third level, not a tab strip) and the Overview: the production block with the site preview and its facts, findings that need attention, recent deployments, live usage (until 2026-09-24; see "Life and colour"). |
 | `/deploy/[id]/deployments` | Success and weekly frequency over releases per day, median release and recovery time over release time per day beside it, why releases failed under both, and counted underlined status filters above the run rows — status, duration, title, commit subject, branch · sha · trigger · time — with Roll back, Compare with live, Pin, Retry and Cancel behind each row, and older pages on request. Filter and environment changes preserve the results' height for the page visit so the controls and shell scroll position stay steady. |
 | `/deploy/[id]/logs`, `/runtime`, `/console` | Four traffic readings (five, with the container's, until 2026-10-03) and an alerts line over one pane of five views (three until 2026-09-27) — Requests (what the ingress served, from a record the server keeps in memory, with deploy and container marks on the chart, and each request's own lines and what the proxy said inline), Insights (the window faceted: failing pages, scanners, bots, sources, slowest, and the output's exceptions), Output (what the containers wrote, per service), Builds (the recent runs' transcripts) and Events (Docker's exits, OOM kills, restarts and health flips, crash loops folded), see [`request-observability.md`](request-observability.md); services, live usage and recorded charts, routes/storage/backup evidence; a shell inside the live container. Game servers add `/players` and `/game-settings`. |
 | `/deploy/[id]/settings/*` | General, Build, Runtime (with the health-check editor), Variables, Domains, Storage, Databases & backups, Automation (webhooks with their delivery log, schedules, previews), Danger zone — each a run of sections, every head over its fields, whose forms end in their own Save (a stack of setting cards with a footer Save until 2026-09-24), reached from the Settings group on the rail rather than a rail of their own. |
-| `/deploy/[id]/runs/[run]` | The deployment page: status, facts, the release path with durations, the build console (search, stage, errors, wrap, follow), runtime logs, details and metrics (its facts a row until 2026-09-24; see "Life and colour"). |
+| `/deploy/[id]/runs/[run]` | The deployment page: the project header's shape saying what the run is, the release path with durations, how it ended, then the build console (search, stage, errors, wrap, follow) and Details — the steps beside the picked one's record (its facts a row until 2026-09-24; runtime logs and metrics until 2026-10-05; see "Life and colour"). |
 
 Backend additions in the same change: `stop` and `start` operations (and `stopped` on every
 summary), a `ref`/`sourceRevision` override on manual deploys, commit subject/author/date recorded
@@ -187,7 +187,10 @@ tokens; see `docs/internal/frontend/design-system.md` §11):
   evidence and timings and lead to the build console only where the step wrote to it
   (`run-steps.tsx`); a stage with no output says so in the console. Metrics draws the before and
   after windows on one scale with sparklines and reads the change (`run-metrics.tsx`); Runtime
-  logs says what the stream is and where the two views look (`run-logs.tsx`).
+  logs says what the stream is and where the two views look (`run-logs.tsx`). Both views, and the
+  strip that switched them, left the page on 2026-10-05: it is the build console and Details now,
+  Details a rail of the steps beside the picked step's record drawn by shape
+  (`run-evidence.tsx`).
 - **Project overview:** the preview is one tile that is the website laid out at desktop width and
   shrunk, and one link that opens it (`site-preview.tsx`); the column beside it is the way a
   request reaches the project — source, live release, runtime, domains — drawn on an opaque ground
@@ -226,7 +229,10 @@ already running. Both were fixed in the same pass.
   find them, and an unbounded container reads as "No memory or CPU limit" rather than as silence,
   because on one server that is the thing that takes the dashboard down with it. The screen splits
   at `xl` (drawing left, a sticky summary right); below it the plan is read first and the form
-  follows.
+  follows. On 2026-10-05 the drawing became a rail (`new-project/plan-rail.tsx`), the run page's
+  Details read before the run: the steps under their segments of the spine, every part of the plan
+  on its product's tile — the health check, limits, storage, environment and the server's check
+  included, which the four nodes could only hint at — with commands and requests coloured as code.
 - **The Git tab's bento is gone.** The "Pictures" pass above put a grid of the five other sources on
   the Git tab; the source strip above it already did that job, so the same six ways in were drawn
   twice, one of them wired to a tab the other did not know about. The space now carries the clone
@@ -426,8 +432,9 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   progress and then by day, each with who started it as a face or a product, a duration bar that
   turns amber past twice the median, and verbs declared once in `run-verbs.tsx` — among them a new
   *What changed in this release*. A failure reason in the delivery figures narrows the list to the
-  failed runs. The run page opens on an identity line that carries the run's verbs — Cancel, Retry,
-  Redeploy, Visit and the release's menu — beside its state, draws a stage the run did not include
+  failed runs. The run page opens on a header that carries the run's verbs — Cancel, Retry,
+  Redeploy, Visit and the release's menu — beside its state (the project header's shape since
+  2026-10-05), draws a stage the run did not include
   as dashed, and names a failure in words with the engine's code beside it and a way to the failing
   step. The build console groups each step's lines under a sticky rule,
   counts its errors, shows elapsed time, downloads `deployment-N.log` and, from `2xl`, lists the
@@ -481,7 +488,7 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
 - **Create.** The source strip is a group of pressed buttons rather than a tablist and scrolls at
   a phone's edge; identities and repository owners are their faces; the Clone URL, Compose Git URL
   and Image reference fields draw their host's logo as they are typed; Compose from Git picks a
-  saved credential by name instead of an id; and Configure's container access and cache options
+  saved credential by name instead of an id (the Compose tab, and both, left on 2026-10-05); and Configure's container access and cache options
   say their consequence in their titles.
 
 Backend additions in the same change, each additive and optional on the wire, with no schema,

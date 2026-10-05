@@ -152,13 +152,13 @@ export function BuildConsole({
   steps,
   active,
   outcome,
+  operation,
   connected,
   startedAt,
   runNumber,
   now,
   selectedStep,
   onSelectStep,
-  hidden,
   focusLine,
   flush,
   className,
@@ -173,6 +173,8 @@ export function BuildConsole({
   active: boolean
   /** How the run ended, for the console's own verdict once it stops. */
   outcome: DeploymentRunState
+  /** The run's operation, which names a step a Stop or Restart takes against the live release. */
+  operation?: string
   connected: boolean
   /** When the run was claimed: the zero of the time column. */
   startedAt: string
@@ -180,9 +182,6 @@ export function BuildConsole({
   now: number
   selectedStep?: number
   onSelectStep: (id: number | undefined) => void
-  /** Keeps the console mounted while another run view is active, so its
-   * search, wrap, follow and scroll position survive switching back. */
-  hidden?: boolean
   /**
    * The persisted line a failure's cause points at. Each new value (the
    * nonce changes on every press) clears the filters that could hide it and
@@ -264,10 +263,10 @@ export function BuildConsole({
   }
   const focusSeq = focusLine ? `${focusLine.seq}:` : undefined
   useEffect(() => {
-    if (!focusLine || hidden) return
+    if (!focusLine) return
     const row = body.current?.querySelector<HTMLElement>(`#${lineAnchor(`${focusLine.seq}:0`)}`)
     row?.scrollIntoView({ block: "center" })
-  }, [focusLine, hidden, visible])
+  }, [focusLine, visible])
 
   const plain = (list: ConsoleRow[]) =>
     list.map((row) => `[${clock(row.ts)}] ${row.line.text}`).join("\n")
@@ -281,9 +280,9 @@ export function BuildConsole({
     >
       <SelectTrigger
         // Forces a fresh element whenever the selected stage changes, so
-        // `autoFocus` fires again: with the console kept permanently mounted,
-        // picking a stage from Details no longer mounts this trigger for the
-        // first time, which is the only moment `autoFocus` normally acts.
+        // `autoFocus` fires again: the console is mounted beside Details, so
+        // picking a stage there never mounts this trigger for the first
+        // time, which is the only moment `autoFocus` normally acts.
         key={selectedStep ?? "all"}
         size="sm"
         aria-label="Build log stage"
@@ -297,7 +296,7 @@ export function BuildConsole({
         {steps.map((step) => (
           <SelectItem key={step.id} value={String(step.id)}>
             <StepMark state={step.state} />
-            {stepName(step.key)}
+            {stepName(step.key, operation)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -305,11 +304,7 @@ export function BuildConsole({
   )
 
   return (
-    <Pane
-      flush={flush}
-      className={cn("relative", className ?? "h-[min(70vh,44rem)] min-h-72")}
-      hidden={hidden}
-    >
+    <Pane flush={flush} className={cn("relative", className ?? "h-[min(70vh,44rem)] min-h-72")}>
       {active && <BorderBeam size={96} duration={7} />}
       <PaneHeader className="flex-wrap gap-2 py-2">
         <SearchInput
@@ -400,6 +395,7 @@ export function BuildConsole({
             perStep={perStep}
             total={rows.length}
             now={now}
+            operation={operation}
             selected={selectedStep}
             onSelect={onSelectStep}
           />
@@ -434,10 +430,15 @@ export function BuildConsole({
                 // step's rule pushes it away.
                 <div key={`${generation}:${group.key}`} className="relative">
                   {group.step && (
-                    <StepRule step={group.step} lines={perStep.get(group.step.id) ?? 0} now={now} />
+                    <StepRule
+                      step={group.step}
+                      operation={operation}
+                      lines={perStep.get(group.step.id) ?? 0}
+                      now={now}
+                    />
                   )}
                   <ol
-                    aria-label={group.step ? stepName(group.step.key) : "Engine"}
+                    aria-label={group.step ? stepName(group.step.key, operation) : "Engine"}
                     // A command opens with a rule of its own; directly under
                     // the step's rule that is two lines for one edge.
                     className="[&>li:first-child]:mt-0 [&>li:first-child]:border-t-0"
@@ -481,7 +482,7 @@ export function BuildConsole({
             <div className="flex h-full min-h-48 items-center justify-center px-6 text-center text-body text-muted-foreground">
               {rows.length
                 ? selectedStep && !needle && !errorsOnly
-                  ? `${stepName(stepById.get(selectedStep)?.key ?? "this_stage")} wrote nothing to the build log.`
+                  ? `${stepName(stepById.get(selectedStep)?.key ?? "this_stage", operation)} wrote nothing to the build log.`
                   : "No lines match. Try another search or stage."
                 : active
                   ? "Waiting for build output. New lines appear here automatically."
@@ -520,7 +521,17 @@ export function BuildConsole({
  * rule is for the eye; the transcript's lines stay the only items in it, and
  * copying takes only them.
  */
-function StepRule({ step, lines, now }: { step: DeploymentStep; lines: number; now: number }) {
+function StepRule({
+  step,
+  operation,
+  lines,
+  now,
+}: {
+  step: DeploymentStep
+  operation?: string
+  lines: number
+  now: number
+}) {
   const seconds = stepSeconds(step, now)
   return (
     <div
@@ -534,7 +545,7 @@ function StepRule({ step, lines, now }: { step: DeploymentStep; lines: number; n
           (step.state === "failed" || step.state === "blocked") && "text-destructive",
         )}
       >
-        {stepName(step.key)}
+        {stepName(step.key, operation)}
       </span>
       {seconds !== undefined && (
         <span className="numeric shrink-0 text-hint text-muted-foreground">
@@ -553,15 +564,16 @@ function StepRule({ step, lines, now }: { step: DeploymentStep; lines: number; n
  * run took, its mark, how long it took and how much it wrote, the picked one
  * filled as every selection is (§3).
  *
- * The rail stays mounted while Details is open, so a stage picked there is not
- * a mount and `autoFocus` would not fire: the picked stage takes the keyboard
- * whenever the pick changes, as the select it replaces does.
+ * The rail is mounted beside Details, so a stage picked there is not a mount
+ * and `autoFocus` would not fire: the picked stage takes the keyboard whenever
+ * the pick changes, as the select it replaces does.
  */
 function StageRail({
   steps,
   perStep,
   total,
   now,
+  operation,
   selected,
   onSelect,
 }: {
@@ -569,6 +581,7 @@ function StageRail({
   perStep: Map<number, number>
   total: number
   now: number
+  operation?: string
   selected?: number
   onSelect: (id: number | undefined) => void
 }) {
@@ -621,7 +634,7 @@ function StageRail({
                 (step.state === "failed" || step.state === "blocked") && "text-destructive",
               )}
             >
-              {stepName(step.key)}
+              {stepName(step.key, operation)}
             </span>
             {seconds !== undefined && (
               <span className="numeric shrink-0 text-hint text-muted-foreground">

@@ -17,6 +17,17 @@ redirect to `/login` is convenience, not a control; every API call behind it is 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
 the remaining height (`<Page fill>`) instead of growing past the viewport.
 
+**A table comes fully on screen before its rows scroll.** A capped table (`max-h-[calc(100svh-22rem)]`
+and the like) is sized to fit under the page's header, so with the page anywhere but its top the
+wheel would scroll a grid half below the fold. Every `ui/table.tsx` container listens through
+`hooks/use-reveal-on-wheel.ts`: when the wheel would scroll its rows while the shell's scroll (or a
+dialog body's) clips part of it, the page first moves the smallest distance that shows the whole
+container — `lib/scroll-reveal.ts`, 12px clear of the edge, its top when it cannot fit — and holds the
+wheel while it glides, so the rows stay still under the reader. A wheel past the table's end already
+scrolls the page and is left alone, as are a table with nothing to scroll, sideways and Ctrl-zoom
+wheels; reduced motion jumps rather than glides. The database `DataGrid` fills its frame and has no
+page around it to move.
+
 ### The rail drills in
 
 **The sidebar shows one list at a time: the list for where you are.** Opening Docker replaces the list
@@ -233,11 +244,12 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
   verbs in `actions`, then the resource name and state among the page's facts — a `MetricStrip` on
   a container's and a stack's page. The run page (`deploy/run-page.tsx`) goes one step further:
-  since the 2026-09-24 pass it opens on the `HostIdentity` line the host Overview opens on (the
-  source as its forge, the commit, who or what started the run, how long it has taken), because a
-  run is one thing described the way the product describes every thing, and since 2026-09-25 that
-  line is the first thing on the page — its verbs sit at the line's end beside the run's state, and
-  the way back is the rail's panel and the menu's Open project rather than an eyebrow. A container,
+  since 2026-10-05 it opens on the header its project's pages open on (`run-header.tsx`, the
+  project's tile, the commit, the run's state and how long it took, one line of provenance),
+  because a run is one of the project's Deployments, and that header is the first thing on the
+  page — its verbs sit at its far end beside the run's state, and the way back is the rail's panel
+  and the menu's Open project rather than an eyebrow. (From 2026-09-24 it opened on the
+  `HostIdentity` line the host Overview opens on instead.) A container,
   a compose stack and a backup job went that way on 2026-09-21, and a proxy site
   (`/proxy/sites/<name>`) on 2026-09-27, since it now holds its logs — the way back is a "Sites" link
   beside its verbs, the form and the raw file staying sheets it opens; every other detail in the
