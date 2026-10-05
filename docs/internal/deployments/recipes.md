@@ -1,8 +1,10 @@
 # Automatic recipes and serving defaults
 
-Host-workload recovery can select `local_directory` instead of requiring a clean Git checkout. This
-source mode snapshots the ordinary files present at review, including dirty and untracked files;
-its digest fences every later materialization. Copies are private, bounded to 100,000 entries and
+Host-workload recovery prepares a server-owned `recovered_snapshot` instead of requiring a clean Git
+checkout. It captures the ordinary files present at review, including dirty and untracked files;
+its digest fences every later materialization. General settings can attach an allowed
+`local_directory` for future changes while retaining the independent original baseline. Copies are
+private, bounded to 100,000 entries and
 1 GiB, preserve file modes, refuse special files and escaping symlinks, and never execute source
 configuration. `.git`, dashboard build output, private configuration names such as `.env`, and
 explicit `excludePaths` are omitted. Linked application data directories are excluded from the
@@ -13,8 +15,9 @@ uses a separate bounded original-tree digest including private contents and owne
 values are never copied into builds or exposed as metadata. A native baseline therefore refuses new
 or altered private startup files even when the desired build copy excludes them.
 
-Recovered PM2 and simple systemd applications use the original interpreter major (the supported catalogue supplies its patch and container OS) when a supported
-Node recipe can represent it, or a reviewed existing Dockerfile. The managed command keeps argument
+Recovered PM2 and simple systemd applications use a verified original Node major or Python
+major/minor (the supported catalogue supplies its patch and container OS) when a supported recipe
+can represent the captured entrypoint, or a reviewed existing Dockerfile. The managed command keeps argument
 boundaries through encrypted runtime variables, translates source paths into `/app`, and preserves
 the captured numeric UID:GID. Host networking and stop-first activation retain existing listening
 addresses and localhost dependencies. Private configuration files, unknown interpreter or operating

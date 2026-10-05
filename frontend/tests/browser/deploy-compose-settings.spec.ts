@@ -247,7 +247,7 @@ test("recovered Compose review shows service mounts and captured limits without 
   }
   await mockWorkloadImport(page, undefined, draft)
   await page.goto(`/deploy/new?draft=${draft.id}`)
-  await page.getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible()
   await expect(page.getByText(/Nothing survives a rebuild/)).toHaveCount(0)
   const plan = page.getByRole("list", { name: "What this setup will create" })
   await expect(

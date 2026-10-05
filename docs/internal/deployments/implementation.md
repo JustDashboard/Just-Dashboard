@@ -902,7 +902,11 @@ only renderer/executor/validation authority for their feature.
   is not the live one.
 - Deployment variables are encrypted, immutable revisions with an exact closed scope set (`build`,
   `runtime`, `release_task`). Lists use a fixed mask; reveal is a separate session-only admin read with an
-  explicit audit entry. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
+  explicit audit entry. Bulk dotenv parsing is bounded and inert. New captured and value/dotenv writes
+  record literal intent; reference writes record explicit reference intent. The additive `value_mode`
+  migration preserves the shipped inference behavior for historical rows with an empty mode, while
+  new literal `${{credential.name}}` text stays an application value. Frozen snapshots and run digests
+  bind this intent alongside each value digest. Full typed references are parsed into a
   closed kind/target model; missing variable references and cycles fail before commit, secret leaves stay
   masked, and enqueue freezes exact variable revision ids so retries cannot observe a later variable
   rotation. Execution resolves external credential/database/domain/Compose-service references only through

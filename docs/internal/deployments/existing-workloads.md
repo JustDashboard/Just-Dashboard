@@ -343,7 +343,7 @@ The Configure/Review plan summary likewise points to per-service Compose limits 
 overrides are unset, rather than calling the application unlimited.
 
 General settings also exposes the build directory and optional subdirectory for native
-`local_directory` sources. Select a separate allowed directory for new code: a source save inspects
+`recovered_snapshot` and `local_directory` sources. Select a separate allowed directory for new code: a source save inspects
 it and creates a pending revision, while the frozen original source remains the baseline rollback
 input. Captured data exclusions are shown read-only and retained on save along with the source's
 other metadata, including when an immutable recovery snapshot is later replaced with the original
