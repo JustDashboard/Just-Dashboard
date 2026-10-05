@@ -72,28 +72,6 @@ func TestPreviewApprovalIsBoundToExactRevisionAndProjectBeforeCreatingWork(t *te
 	}
 }
 
-func TestPreviewCreationRefusesInheritedComposeNamespaceBeforeWritingPlans(t *testing.T) {
-	f := newAutomationFixture(t)
-	tx, err := f.store.DB.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(t.Context(), `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) VALUES(?,2,'recipe','{}','[]','','build',1)`, f.environmentID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(t.Context(), `INSERT INTO deploy_runtime_plans(environment_id,revision,config_json,preview,digest,created_at) VALUES(?,2,'{"composeProjectName":"original-stack"}','','runtime',1)`, f.environmentID); err != nil {
-		t.Fatal(err)
-	}
-	if err := createIsolatedPreviewPlansTx(t.Context(), tx, f.environmentID, 2, f.environmentID, 3, 1); !errors.Is(err, ErrPreviewIsolation) {
-		t.Fatalf("preview inherited production's Compose namespace: %v", err)
-	}
-	var written int
-	if err := tx.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM deploy_runtime_plans WHERE environment_id=? AND revision=3`, f.environmentID).Scan(&written); err != nil || written != 0 {
-		t.Fatalf("unsafe preview wrote a plan: count=%d err=%v", written, err)
-	}
-}
-
 // A rejected revision must not be approvable afterward without a new event,
 // and it must not show up in the pending list an administrator reviews.
 func TestRejectPreviewClosesTheApprovalUntilANewEvent(t *testing.T) {
@@ -231,7 +209,6 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 		},
 		func(p *RuntimePlanConfig) { p.HostNetwork = true },
 		func(p *RuntimePlanConfig) { p.Privileged = true },
-		func(p *RuntimePlanConfig) { p.ComposeProjectName = "production-stack" },
 		func(p *RuntimePlanConfig) { p.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 2222}} },
 	} {
 		copy := runtime

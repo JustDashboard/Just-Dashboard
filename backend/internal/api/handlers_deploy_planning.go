@@ -191,7 +191,7 @@ func (s *Server) handleDeploymentDraftCommit(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		return err
 	}
-	if draft.Data.Adoption != nil || draft.Data.Source != nil && draft.Data.Source.Kind == deploy.SourceImport {
+	if draft.Data.Source != nil && draft.Data.Source.Kind == deploy.SourceImport {
 		return httpx.Err(http.StatusBadRequest, "import_adopt_required", "use the import adoption endpoint for an observed workload")
 	}
 	principal := httpx.MustPrincipal(r)
@@ -242,11 +242,10 @@ func (s *Server) handleDeploymentImportPreview(w http.ResponseWriter, r *http.Re
 }
 
 type importAdoptRequest struct {
-	DraftID                 string                      `json:"draftId"`
-	Revision                int                         `json:"revision"`
-	AcknowledgedWarnings    []string                    `json:"acknowledgedWarnings"`
-	AcknowledgedUnsupported []string                    `json:"acknowledgedUnsupported"`
-	GitPolicy               *deploy.GitDeploymentPolicy `json:"gitPolicy,omitempty"`
+	DraftID                 string   `json:"draftId"`
+	Revision                int      `json:"revision"`
+	AcknowledgedWarnings    []string `json:"acknowledgedWarnings"`
+	AcknowledgedUnsupported []string `json:"acknowledgedUnsupported"`
 }
 
 func (s *Server) handleDeploymentImportAdopt(w http.ResponseWriter, r *http.Request) error {
@@ -265,15 +264,8 @@ func (s *Server) handleDeploymentImportAdopt(w http.ResponseWriter, r *http.Requ
 	if err := deploy.AuthorizeDraft(draft, principal.UserID(), principal.Can(auth.CapSystemAdmin)); err != nil {
 		return mapDeploymentPlanningError(err)
 	}
-	if draft.Data.Adoption != nil {
-		return s.adoptRecoveredWorkload(w, r, draft, request)
-	}
 	if draft.Data.Source == nil || draft.Data.Source.Kind != deploy.SourceImport {
 		return httpx.BadRequest("only an observed import draft can be adopted")
-	}
-	if draft.Data.Source.Mode != deploy.SourceModeExistingCheckout {
-		return httpx.Err(http.StatusConflict, "discovery_import_required",
-			"Open Import existing in Deployments to inspect and recover this workload before adoption.")
 	}
 	preview, err := s.modules.deploySources.PreviewImport(r.Context(), *draft.Data.Source)
 	if err != nil {
@@ -369,8 +361,6 @@ func mapDeploymentPlanningError(err error) error {
 		return httpx.Err(http.StatusNotFound, "deploy_not_found", "deployment import resource was not found")
 	case errors.Is(err, deploy.ErrDraftRevision):
 		return httpx.Err(http.StatusConflict, "draft_revision_conflict", err.Error())
-	case errors.Is(err, deploy.ErrNameTaken):
-		return httpx.Err(http.StatusConflict, "name_taken", err.Error())
 	case errors.Is(err, deploy.ErrRevisionConflict):
 		return httpx.Err(http.StatusConflict, "revision_conflict", err.Error())
 	case errors.Is(err, deploy.ErrEnvironmentNotFound):
@@ -452,41 +442,4 @@ func (s *Server) applyBlueprintSchedules(
 		}
 	}
 	return created
-}
-
-func (s *Server) adoptRecoveredWorkload(w http.ResponseWriter, r *http.Request, draft *deploy.Draft, request importAdoptRequest) error {
-	// A committed retry is idempotent even though discovery now reserves the app.
-	if draft.CommittedProjectID == 0 {
-		candidate, err := s.importedWorkload(r.Context(), draft.Data.Adoption.Key)
-		if err != nil {
-			return httpx.Err(http.StatusConflict, "workload_changed", "The original workload is no longer available. Inspect it again.")
-		}
-		if candidate.Digest != draft.Data.Adoption.Digest {
-			return httpx.Err(http.StatusConflict, "workload_changed", "The original workload identity or topology changed during review. Inspect it again before importing.")
-		}
-		recovered, err := s.recoverWorkloadWithScope(r.Context(), candidate, draft.Data.Adoption.Scope)
-		if err != nil {
-			return recoveryError(recovered, err)
-		}
-		if recovered.Adoption.BaselineDigest != draft.Data.Adoption.BaselineDigest || string(recovered.Adoption.Runtime.Metadata) != string(draft.Data.Adoption.Runtime.Metadata) {
-			return httpx.Err(http.StatusConflict, "workload_changed", "The original configuration, image, environment or source changed during review. Inspect it again before importing.")
-		}
-	}
-	principal := httpx.MustPrincipal(r)
-	policy := request.GitPolicy
-	if policy == nil && draft.Data.Source != nil && (draft.Data.Source.Kind == deploy.SourceGit || draft.Data.Source.Kind == deploy.SourceLocal) {
-		policy = &deploy.GitDeploymentPolicy{Automatic: false}
-	}
-	result, err := s.modules.deployPlanning.Commit(r.Context(), request.DraftID, principal.UserID(), true,
-		deploy.DraftCommitRequest{Revision: request.Revision, AcknowledgedWarnings: request.AcknowledgedWarnings, GitPolicy: policy})
-	if err != nil {
-		return mapDeploymentPlanningError(err)
-	}
-	httpx.SetAudit(r, "deploy.import.adopt", draft.Data.Adoption.ResourceID, map[string]any{"draftId": request.DraftID, "deploymentId": result.ProjectID, "environmentId": result.EnvironmentID, "kind": draft.Data.Adoption.Kind, "scope": draft.Data.Adoption.Scope.Normalized(), "excludedServices": draft.Data.Adoption.ExcludedServices})
-	status := http.StatusCreated
-	if !result.Created {
-		status = http.StatusOK
-	}
-	httpx.JSON(w, status, result)
-	return nil
 }

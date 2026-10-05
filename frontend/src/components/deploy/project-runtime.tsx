@@ -96,13 +96,6 @@ import { RuntimePorts } from "@/components/deploy/runtime-ports"
 import { serviceProduct, volumeProduct } from "@/components/deploy/service-product"
 import { RuntimeUsage } from "@/components/deploy/runtime-usage"
 import {
-  isDockerService,
-  runtimeLogSource,
-  runtimeManagerLabel,
-  runtimeManagerUrl,
-  runtimeServiceId,
-} from "@/components/deploy/runtime-service"
-import {
   CertificateReading,
   DATABASE_ENGINE_LABELS,
   LINK_STATUS,
@@ -173,17 +166,15 @@ export function ProjectRuntime() {
     [available, runtime, releaseById],
   )
   const running = services.filter((service) => service.state === "running")
-  const dockerServices = services.filter(isDockerService)
-  const dockerRunning = dockerServices.filter((service) => service.state === "running")
   const [picked, setPicked] = useSessionState<string | undefined>(
     `deploy.${project.projectId}.runtime.service`,
     undefined,
   )
   // Only a running container has a stats socket with anything to say.
   const selected =
-    dockerRunning.find((service) => service.containerId === picked) ??
-    dockerRunning.find((service) => service.liveRelease) ??
-    dockerRunning[0]
+    running.find((service) => service.containerId === picked) ??
+    running.find((service) => service.liveRelease) ??
+    running[0]
   // The usage tiles' socket frames, so the selected service's card shows the
   // figure the tiles show rather than a poll from a few seconds before it.
   const [liveStat, setLiveStat] = useState<{ containerId: string; stats: ContainerStats }>()
@@ -195,12 +186,12 @@ export function ProjectRuntime() {
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
     60_000,
     [],
-    { enabled: dockerServices.length > 0 },
+    { enabled: services.length > 0 },
   )
   // A container a deployment has just created is not in a listing read up to
   // a minute ago, so a change in which containers the release has asks again
   // rather than leaving the newest card without its readings until then.
-  const ids = dockerServices.map((service) => service.containerId).join()
+  const ids = services.map((service) => service.containerId).join()
   const refreshContainers = containers.refresh
   const seenIds = useRef(ids)
   useEffect(() => {
@@ -226,7 +217,7 @@ export function ProjectRuntime() {
       ),
     120_000,
     [],
-    { enabled: dockerRunning.length > 0 },
+    { enabled: running.length > 0 },
   )
   // A lifecycle verb changes what the release engine reports, what Docker's
   // listing says and what the stats socket carries, and each is on a timer;
@@ -459,22 +450,12 @@ export function ProjectRuntime() {
             <EmptyState
               mark={<ProjectMark deployment={deployment} product={project.product} />}
               title="No managed runtime services"
-              description="The runtime owner returned no services for this environment. Refresh the project or check its manager."
+              description="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
               className="border-0 py-6"
             />
           ) : (
             <ChoiceList aria-label="Runtime services">
               {services.map((service, index) => {
-                if (!isDockerService(service))
-                  return (
-                    <NativeServiceCard
-                      key={`${service.releaseId}:${runtimeServiceId(service)}`}
-                      service={service}
-                      release={releaseById.get(service.releaseId)}
-                      projectId={project.projectId}
-                      index={index}
-                    />
-                  )
                 const container = containerFor(service.containerId)
                 return (
                   <ServiceCard

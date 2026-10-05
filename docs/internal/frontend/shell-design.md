@@ -1,9 +1,9 @@
 # Frontend shell and design system
 
-The App Router currently has 92 `page.tsx` entry points, including nested database, Docker, proxy,
-security, and deployment workflows plus `/login`. Most page modules are client components;
-deployment detail, creation and existing-workload import wrappers remain server components and hand
-interaction to client components under `components/deploy/`.
+The App Router currently has 91 `page.tsx` entry points, including nested database, Docker, proxy,
+security, and deployment workflows plus `/login`. Most page modules are client components; the three
+deployment detail/new wrappers remain server components and hand interaction to client components under
+`components/deploy/`.
 
 ## The shell
 

@@ -56,8 +56,6 @@ import {
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import { DetectionProposalPanel } from "@/components/deploy/settings/detection-proposal"
 import { applyDetectionChanges } from "@/components/deploy/settings/detection-changes"
-import { ComposeSourceSettings } from "@/components/deploy/settings/compose-source"
-import { LocalSourceSettings } from "@/components/deploy/settings/local-source"
 
 /**
  * What the project is called, where it is built from, and — for a Git
@@ -112,35 +110,10 @@ export function GeneralSettings({
             <Checkout record={record} />
           ) : (
             <>
-              {configuration.source?.kind === "compose" && (
-                <ComposeSourceSettings
-                  key={configuration.revision}
-                  projectId={projectId}
-                  environmentId={environmentId}
-                  canEdit={canEdit}
-                  configuration={configuration}
-                  onSaved={() => {
-                    state.refresh()
-                    project.refresh()
-                  }}
-                />
-              )}
-              {configuration.source?.kind === "local" &&
-                configuration.source.mode === "local_directory" && (
-                  <LocalSourceSettings
-                    key={configuration.revision}
-                    projectId={projectId}
-                    environmentId={environmentId}
-                    canEdit={canEdit}
-                    configuration={configuration}
-                    onSaved={() => {
-                      state.refresh()
-                      project.refresh()
-                    }}
-                  />
-                )}
-              {/* Git and image sources have their own fields; Compose and
-                  plain local directories use the editors above. */}
+              {/* The endpoint's own errors (git_unavailable, invalid_image) are
+                  the tell: only these two kinds have a re-enterable source
+                  today, so the form is scoped to them rather than to every
+                  normalized kind. */}
               {(deployment.sourceKind === "git" || deployment.sourceKind === "image") && (
                 <SourceForm
                   projectId={projectId}

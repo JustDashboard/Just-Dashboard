@@ -85,21 +85,13 @@ export function RuntimeLimits({
 }: AdvancedProps & { errors: WizardErrors }) {
   const updateRuntime = (patch: Partial<DeploymentConfiguration["runtime"]>) =>
     onChange({ ...configuration, runtime: { ...configuration.runtime, ...patch } })
-  const zeroLimitHint =
-    configuration.build.method === "compose"
-      ? "0 keeps each service's Compose limit."
-      : "0 for no limit."
   return (
     <div className="space-y-4">
       <FieldRow columns={2}>
         <Field
           label="Host port"
           htmlFor="adv-host-port"
-          hint={
-            configuration.build.method === "compose"
-              ? "0 keeps the published ports in Compose."
-              : "0 leaves the service private behind its managed route."
-          }
+          hint="0 leaves the service private behind its managed route."
           error={errors.hostPort}
         >
           <Input
@@ -166,7 +158,7 @@ export function RuntimeLimits({
         </Field>
       </FieldRow>
       <FieldRow columns={3}>
-        <Field label="Memory limit (MB)" htmlFor="adv-memory" hint={zeroLimitHint}>
+        <Field label="Memory limit (MB)" htmlFor="adv-memory" hint="0 for no limit.">
           <Input
             id="adv-memory"
             type="number"
@@ -176,7 +168,7 @@ export function RuntimeLimits({
             className="font-mono"
           />
         </Field>
-        <Field label="CPU limit (cores)" htmlFor="adv-cpus" hint={zeroLimitHint}>
+        <Field label="CPU limit (cores)" htmlFor="adv-cpus" hint="0 for no limit.">
           <Input
             id="adv-cpus"
             type="number"
@@ -187,7 +179,7 @@ export function RuntimeLimits({
             className="font-mono"
           />
         </Field>
-        <Field label="Process limit" htmlFor="adv-pids" hint={zeroLimitHint}>
+        <Field label="Process limit" htmlFor="adv-pids" hint="0 for no limit.">
           <Input
             id="adv-pids"
             type="number"
@@ -319,9 +311,7 @@ export function StorageMounts({ configuration, onChange }: AdvancedProps) {
           fold's head has already stated. */}
       {mounts.length === 0 ? (
         <EmptyNote className="px-0 py-2 text-left">
-          {configuration.build.method === "compose"
-            ? "No additional mount overrides. Each service keeps its Compose volumes and bind mounts."
-            : "Nothing is mounted, so whatever the container writes is gone on its next release."}
+          Nothing is mounted, so whatever the container writes is gone on its next release.
         </EmptyNote>
       ) : (
         <MountRows

@@ -47,9 +47,6 @@ func (s *Server) handleDeploymentTriggerCreate(w http.ResponseWriter, r *http.Re
 	if err = httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.requireManagedDeploymentAutomation(r.Context(), projectID, environmentID); err != nil {
-		return mapDeployError(err)
-	}
 	result, err := s.modules.deployAutomation.CreateTrigger(r.Context(), projectID, environmentID, req)
 	if err != nil {
 		return mapAutomationError(err)
@@ -77,9 +74,6 @@ func (s *Server) handleDeploymentTriggerUpdate(w http.ResponseWriter, r *http.Re
 	var req deploy.TriggerWrite
 	if err = httpx.DecodeJSON(r, &req); err != nil {
 		return err
-	}
-	if err := s.requireManagedDeploymentAutomation(r.Context(), projectID, environmentID); err != nil {
-		return mapDeployError(err)
 	}
 	item, err := s.modules.deployAutomation.UpdateTrigger(r.Context(), projectID, environmentID, triggerID, req)
 	if err != nil {
@@ -207,9 +201,6 @@ func (s *Server) handleDeploymentScheduleCreate(w http.ResponseWriter, r *http.R
 	if err = httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.requireManagedDeploymentAutomation(r.Context(), projectID, environmentID); err != nil {
-		return mapDeployError(err)
-	}
 	item, err := s.modules.deployAutomation.CreateSchedule(r.Context(), projectID, environmentID, req)
 	if err != nil {
 		return mapAutomationError(err)
@@ -230,9 +221,6 @@ func (s *Server) handleDeploymentScheduleUpdate(w http.ResponseWriter, r *http.R
 	var req deploy.ScheduleWrite
 	if err = httpx.DecodeJSON(r, &req); err != nil {
 		return err
-	}
-	if err := s.requireManagedDeploymentAutomation(r.Context(), projectID, environmentID); err != nil {
-		return mapDeployError(err)
 	}
 	item, err := s.modules.deployAutomation.UpdateSchedule(r.Context(), projectID, environmentID, scheduleID, req)
 	if err != nil {
@@ -524,10 +512,6 @@ func (s *Server) dispatchAutomationEvent(ctx context.Context, trigger *deploy.Tr
 		_ = s.modules.deployAutomation.RecordDelivery(ctx, trigger, event, body, "rejected", automationReason(err), 0)
 		return automationOutcome{}, mapAutomationError(err)
 	}
-	if err := s.requireManagedDeploymentAutomation(ctx, trigger.ProjectID, trigger.EnvironmentID); err != nil {
-		_ = s.modules.deployAutomation.RecordDelivery(ctx, trigger, event, body, "rejected", "automation_unavailable", 0)
-		return automationOutcome{}, mapDeployError(err)
-	}
 	// Reserve the provider delivery before preview or queue side effects. This
 	// unique row is the replay fence even when two identical requests arrive
 	// concurrently.
@@ -737,9 +721,6 @@ func mapAutomationError(err error) error {
 }
 
 func (s *Server) dispatchDeploymentSchedule(ctx context.Context, item deploy.ScheduleDispatch) error {
-	if err := s.requireManagedDeploymentAutomation(ctx, item.Schedule.ProjectID, item.Schedule.EnvironmentID); err != nil {
-		return err
-	}
 	project, err := s.modules.deployStore.Get(ctx, item.Schedule.ProjectID)
 	if err != nil {
 		return err

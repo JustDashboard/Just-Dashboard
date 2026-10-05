@@ -38,22 +38,7 @@ webhook channels with event selection, pause/resume, test delivery and delivery 
 deployment section on General carries the GitHub commit-status switch. Settings → Runtime exposes memory,
 CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
 periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each
-protected volume's backup standing (`settings/volume-backup.ts`). Compose projects keep per-service
-settings in their source: Runtime and Storage explain that zero or empty overrides preserve the
-Compose configuration and link to General's Compose source section (`settings/compose-source.tsx`).
-Captured inline files can be edited with the shared Compose document editor; saving goes through
-the normal source inspection endpoint with a revision guard and remains pending until Deploy changes.
-Invalid YAML stays unsaved, and document edits are held in component memory rather than browser
-storage. Read-only accounts can inspect the files. Recovered Compose review lists detection's service
-mounts and offers the captured configuration, so an empty aggregate mount list never claims all
-storage is absent. `tests/browser/deploy-compose-settings.spec.ts` covers these paths.
-Native `local_directory` sources expose General's build directory and subdirectory
-(`settings/local-source.tsx`). A normal inspected, revision-guarded save retains all source metadata
-and the read-only data exclusions, while the original source remains available for baseline
-rollback. Rejected fields stay on screen, accepted changes remain pending until Deploy changes,
-and paths stay in component memory. Readers can inspect the fields without editing.
-`tests/browser/deploy-local-source.spec.ts` covers saves, refused paths, stale revisions and readers.
-The Runtime page's service cards carry the
+protected volume's backup standing (`settings/volume-backup.ts`). The Runtime page's service cards carry the
 container's own Start, Stop, Restart and Pause/Resume verbs, every published port with its scope
 (`runtime-ports.tsx`), a failure cause for a container that is restarting or has exited
 (`runtime-failure.tsx`) and a Details panel read from `GET /docker/containers/{id}` on open
@@ -100,19 +85,3 @@ backup partial/stale evidence stays visible beside the completed findings and th
 Page-owned keyboard commands, history, restoration and polling interactions are specified in
 [`workspace-interactions.md`](workspace-interactions.md). Their shared owner is `components/workspace/`;
 page-specific navigation, confirmations and API capabilities stay with the feature components above.
-
-Existing-workload discovery at `/deploy/import` uses `components/deploy/import-workload.tsx` and
-`lib/workload-import.ts`. **Review migration** recovers a normal server draft and opens the existing
-four-step Configure flow, with the current manager, stopped services, sealed input names and the
-first migration's downtime explained at Review. Compose stacks default to every declared service;
-**Existing containers only** retains running and stopped containers and shows the server's exact
-excluded service names in Configure and Review, with required warning acknowledgement. Compose
-summaries point to per-service source settings when aggregate limits or access overrides are unset.
-Its final **Adopt deployment** acknowledges the
-server's warning codes and creates a live baseline without enqueueing a run. The regular project
-shell and settings then apply: Deploy changes applies the recovered desired plan, while Redeploy
-live release restores the frozen baseline. `runtime-service.ts` distinguishes native PM2/systemd services from
-Docker containers: Logs use the server-issued source, Runtime links to the native manager, and a
-Docker console becomes available after the first Docker release. Legacy observation records without
-a live release retain `imported-project.tsx` and `imported-workload.ts` for original-manager links and
-observed status. See [existing-workloads](../deployments/existing-workloads.md).

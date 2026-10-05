@@ -58,8 +58,6 @@ existing ingress owner. Docker does not publish ports on containers attached onl
 the dedicated bridge permits outbound traffic and is not a hostile-code sandbox. Administrator code
 review remains required. Host network, privileged mode, devices, added capabilities, any release task,
 fixed host ports, production mounts and Compose preview plans are refused at admission and execution.
-A retained `composeProjectName` is also refused when preview plans are created and admitted, even if
-the build method changed to a container recipe: a preview never inherits an adopted stack's namespace.
 Dockerfile instructions run only after approval; an approved Dockerfile is trusted executable code.
 
 Checks target the preview's own endpoint rather than inherited production URLs. A configured domain

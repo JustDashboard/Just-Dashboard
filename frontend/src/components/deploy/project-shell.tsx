@@ -31,7 +31,6 @@ import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
 import { ProjectMark } from "@/components/deploy/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
-import { importedWorkloadOf, isObservedImport } from "@/components/deploy/imported-workload"
 import {
   BUILD_METHOD_SHORT,
   CERTIFICATE_LABEL,
@@ -246,22 +245,18 @@ export function useProjectNavScope(
       mark: <ProjectMark deployment={deployment} size="xs" />,
       groups: [
         {
-          items: PROJECT_NAV.filter((entry) =>
-            isObservedImport(deployment)
-              ? entry.path === ""
-              : !entry.game || deployment.profile === "game",
-          ).map((entry) => ({
-            title: entry.title,
-            href: `${base}${entry.path}`,
-            icon: entry.icon,
-          })),
+          items: PROJECT_NAV.filter((entry) => !entry.game || deployment.profile === "game").map(
+            (entry) => ({
+              title: entry.title,
+              href: `${base}${entry.path}`,
+              icon: entry.icon,
+            }),
+          ),
         },
         {
           label: "Settings",
           pending,
-          items: PROJECT_SETTINGS_NAV.filter(
-            (entry) => !isObservedImport(deployment) || entry.path === "/settings/danger",
-          ).map((entry) => ({
+          items: PROJECT_SETTINGS_NAV.map((entry) => ({
             title: entry.title,
             href: `${base}${entry.path}`,
             icon: entry.icon,
@@ -290,12 +285,6 @@ function Address({
   domain?: DeploymentDomainRoute
 }) {
   if (!url) {
-    if (isObservedImport(deployment))
-      return (
-        <span className="truncate">
-          {importedWorkloadOf(deployment)?.name ?? "Imported workload"}
-        </span>
-      )
     if (!deployment.liveReleaseId)
       return <span className="truncate text-muted-foreground">Not deployed yet</span>
     return (

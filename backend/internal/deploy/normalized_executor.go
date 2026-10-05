@@ -138,18 +138,16 @@ type renderedStepEvidence struct {
 }
 
 type runtimeReleaseSnapshot struct {
-	Version         int                       `json:"version"`
-	NativeBaseline  *ReleaseRuntimeInput      `json:"nativeBaseline,omitempty"`
-	Plan            RuntimePlanConfig         `json:"plan"`
-	Image           ResolvedImage             `json:"image,omitempty"`
-	Compose         *ResolvedComposeSnapshot  `json:"compose,omitempty"`
-	ComposeBaseline []AdoptedContainer        `json:"composeBaseline,omitempty"`
-	Variables       []ReleaseVariableSnapshot `json:"variables"`
-	Dependencies    []PlannedDependency       `json:"dependencies"`
-	Checks          []PlannedCheck            `json:"checks"`
-	Domains         []PlannedDomain           `json:"domains"`
-	PlanInputsHash  string                    `json:"planInputsDigest"`
-	SourceIdentity  SourceIdentity            `json:"sourceIdentity"`
+	Version        int                       `json:"version"`
+	Plan           RuntimePlanConfig         `json:"plan"`
+	Image          ResolvedImage             `json:"image,omitempty"`
+	Compose        *ResolvedComposeSnapshot  `json:"compose,omitempty"`
+	Variables      []ReleaseVariableSnapshot `json:"variables"`
+	Dependencies   []PlannedDependency       `json:"dependencies"`
+	Checks         []PlannedCheck            `json:"checks"`
+	Domains        []PlannedDomain           `json:"domains"`
+	PlanInputsHash string                    `json:"planInputsDigest"`
+	SourceIdentity SourceIdentity            `json:"sourceIdentity"`
 	// ProxyTrust names the forwarded-header trust settings the recipe image
 	// sets, which the runtime withdraws when the proxy does not front the
 	// release alone.
@@ -372,7 +370,6 @@ func (e *NormalizedStepExecutor) analyzePlan(
 			return normalizedStepFailure(runtimeErr)
 		}
 		deployment.RuntimeID, deployment.RuntimeKind = runtime.RuntimeID, runtime.Kind
-		deployment.RuntimeMetadata = runtime.Metadata
 	} else if !errors.Is(liveErr, ErrArtifactMissing) {
 		return normalizedStepFailure(liveErr)
 	}
@@ -785,12 +782,6 @@ func validateImmutableExecutionSource(plan *StoredExecutionPlan) error {
 	}
 	switch plan.SourceKind {
 	case SourceGit, SourceLocal:
-		if plan.SourceKind == SourceLocal && plan.SourceConfig.Mode == SourceModeLocalDirectory {
-			if !contentDigestRE.MatchString(plan.SourceIdentity.Digest) || !filepath.IsAbs(plan.SourceIdentity.LocalPath) {
-				return fmt.Errorf("%w: directory source has no immutable content digest", ErrInvalidPlan)
-			}
-			break
-		}
 		if !validGitObjectID(plan.SourceIdentity.Revision) {
 			return fmt.Errorf("%w: Git source has no immutable object id", ErrInvalidPlan)
 		}

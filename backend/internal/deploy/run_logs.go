@@ -64,14 +64,7 @@ func ObserveRunLogs(ctx context.Context, owner RuntimeObserver, snapshot RunSnap
 	runtime := observeRuntimeServices(ctx, owner, snapshot.Run.EnvironmentID, 0, releaseID)
 	result.Status, result.Reason = runtime.Status, runtime.Reason
 	for _, service := range runtime.Services {
-		logSource := service.LogSource
-		if logSource == "" && service.ContainerID != "" {
-			logSource = "docker:" + service.ContainerID
-		}
-		if logSource == "" {
-			continue
-		}
-		query := url.Values{"source": {logSource}}
+		query := url.Values{"source": {"docker:" + service.ContainerID}}
 		source := RunLogSource{
 			ContainerID: service.ContainerID, Name: service.Name, Image: service.Image,
 			LiveURL: "/logs?" + query.Encode(),

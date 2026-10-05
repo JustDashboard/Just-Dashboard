@@ -207,72 +207,13 @@ to the contribution terms above, including the additional licence grant to the p
   webhook channel, an nginx image deployment with resource limits, a busybox image that exits before it
   listens, and a restart. It needs Docker and Go and touches only the containers it creates; run it after
   changes to the engine, run observers, notifications, runtime limits or health-gate diagnostics.
-- Existing-workload import changes also run the isolated live fixture from `backend/`:
-  `JD_WORKLOAD_IMPORT_LIVE=1 go test ./internal/api -run '^TestLiveWorkloadAdoptionKeepsFourContainerStackAndHTTPServiceUnchanged$' -count=1 -v`.
-  Managed Docker recovery/runtime changes additionally run
-  `JD_DOCKER_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveManaged(Compose|ScopedCompose|StandaloneContainer|DeletedImageContainer)AdoptionAndRollback$' -count=1 -v`.
-  These use unique owned projects/containers and a temporary database to verify import continuity,
-  a failed first replacement, normal deployment and baseline rollback with persistent data. Compose
-  acceptance includes existing stopped replicas, a declared missing service and an external one-off
-  container which must remain untouched. It also preserves values inherited through YAML aliases
-  from optional environment files across deployment and baseline rollback, while accepting an absent
-  optional file. Deleted-image acceptance verifies bounded read-only export,
-  stable cached identity, normal managed deployment and baseline rollback. Scoped Compose acceptance
-  explicitly excludes an absent declaration whose image is unavailable and verifies the retained
-  four-container/two-running baseline through failure recovery, Deploy and rollback. `JD_ADOPTION_EVIDENCE_DIR` writes sanitized lifecycle
-  evidence when set.
-  Real n8n data continuity additionally uses the catalogue pin `n8nio/n8n:2.39.10` already available
-  locally: `JD_N8N_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveManagedN8NAdoptionAndRollback$' -count=1 -v -timeout=20m`.
-  It creates a real workflow and encrypted credential, verifies n8n's native SQLite readiness and
-  credential decryption before adoption, after normal Deploy and after baseline rollback, and removes
-  only its unique owned resources. `JD_ADOPTION_EVIDENCE_DIR` also writes its sanitized evidence.
-  The managed Docker/Compose and n8n fixtures read the saved runtime reservation after normal Deploy
-  and baseline rollback and require the production inventory verifier to report it available; this
-  guards the next Overview check and deployment preflight as well as lifecycle completion.
-  See [the real n8n lifecycle record](docs/audits/2026-10-04-existing-workloads/n8n-lifecycle.md).
-  Native capture changes also run
-  `JD_PM2_ADOPTION_LIVE=1 go test ./internal/procs -run '^TestLiveExistingPM2CaptureAndManagerControls$' -count=1 -v`
-  on a host with PM2 installed for the current account. The fixture starts and removes only its own
-  temporary `PM2_HOME`; it verifies HTTP, secret and empty variables, UID, PID identity, native logs,
-  exact original-manager stop/start restoration, and refusal to stop after a matching saved startup
-  entry appears in either `dump.pm2` or `dump.pm2.bak`, while its original PID and HTTP response remain
-  unchanged. Its separately owned daemon directory uses a compact name so Go's descriptive test
-  paths do not exceed the Unix socket limit. It never touches the account's normal daemon.
-  The API and Docker fixtures require a working Docker daemon and `caddy:2-alpine` already available
-  locally. The API fixture creates and
-  removes only its own uniquely named four-container project, checks two running and two stopped
-  containers, persistent data, configuration continuity and HTTP requests during import, and leaves
-  installed workloads untouched. `JD_WORKLOAD_IMPORT_EVIDENCE_DIR` writes sanitized acceptance JSON.
-  Native managed-adoption changes additionally run
-  `JD_PM2_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLivePM2AdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
-  This requires Docker Buildx and a supported Node recipe base. Its private PM2 daemon, temporary
-  database and reserved runtime namespace prove adoption without a restart, real image builds,
-  failed-candidate restoration, normal Docker migration, retained data/settings/logs and rollback
-  to the original PM2 manager. Production runtime-reservation evidence must remain available after
-  Docker migration and after rollback creates a new native release; the fixtures assert both states.
-  `JD_PM2_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
-  The corresponding persistent systemd-unit path runs
-  `JD_SYSTEMD_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
-  It requires a reachable host systemd manager, Node and root/passwordless sudo. It installs one
-  uniquely named disabled unit in `/etc/systemd/system`, operates only on that unit, and removes that
-  exact file; it never reloads the global manager or modifies an existing unit. It proves native journal
-  output and the same adoption/build/compensation/Docker-migration/original-unit rollback sequence.
-  `JD_SYSTEMD_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
-  The opt-in native browser server and recording commands are documented in
-  [the workload-import acceptance record](docs/audits/2026-10-04-existing-workloads/README.md).
 - Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are
   covered by component tests with fake providers; a real provider or GitHub post is verified manually
   through **Send test** and a deployment of a GitHub-sourced project, and the pull request must say which
   providers were exercised.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
-  `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`.
-  On a busy host use `../scripts/go-test-race.sh 4 ./internal/api` from `backend/` to distribute
-  the API tests across four processes. Use the same helper with one process for `./internal/deploy`,
-  `./internal/proxysvc`, `./internal/backups` and `./internal/store`, whose tests already run in parallel,
-  as the existing race gate does. It skips only the reference-scale latency assertions, which must pass
-  separately without instrumentation. Engine state/side-effect waits stay bounded at 30 seconds so race overhead
-  does not turn completed work into a false three-second timeout.
-  The browser gate covers the project overview, build transcript and focused settings, including
+  `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`;
+  the browser gate covers the project overview, build transcript and focused settings, including
   variables, domains, storage, dependencies, automation and lifecycle.
 - Preview changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLive(PreviewStorageCredentialsNetworkAndCleanup|LegacyPreviewQuarantinePreservesProduction)$' -count=1 -v`.

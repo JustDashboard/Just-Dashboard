@@ -9,12 +9,6 @@ import { ServiceLogs, type LogWindow, type ServiceLogSource } from "@/components
 import { EmptyState } from "@/components/state"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { liveStack, orderedServices, type Lead } from "@/components/deploy/logs-model"
-import {
-  isDockerService,
-  runtimeLogKind,
-  runtimeLogSource,
-  runtimeServiceId,
-} from "@/components/deploy/runtime-service"
 
 /** What `?service=` says for the live release's stack as a whole. */
 export const ALL_SERVICES = "all"
@@ -70,14 +64,14 @@ export function ProjectOutput({
   const sources = useMemo<(ServiceLogSource & { service: string })[]>(
     () => [
       ...services
-        .filter((s) => s.liveRelease && runtimeLogSource(s))
+        .filter((s) => s.liveRelease)
         .map((s) => ({
-          id: runtimeLogSource(s)!,
-          label: s.name || runtimeServiceId(s),
-          kind: runtimeLogKind(s),
+          id: dockerSource(s.containerId),
+          label: s.name || s.containerId.slice(0, 12),
+          kind: "docker" as const,
           status: s.state,
           product: serviceProduct(s.image, kind, product),
-          service: runtimeServiceId(s),
+          service: s.containerId,
         })),
       ...(stack
         ? [
@@ -93,14 +87,14 @@ export function ProjectOutput({
       // Containers of a release no longer live — kept for a rollback, or not
       // yet removed — after the ones serving, where their last words are.
       ...services
-        .filter((s) => !s.liveRelease && runtimeLogSource(s))
+        .filter((s) => !s.liveRelease)
         .map((s) => ({
-          id: runtimeLogSource(s)!,
-          label: s.name || runtimeServiceId(s),
-          kind: runtimeLogKind(s),
+          id: dockerSource(s.containerId),
+          label: s.name || s.containerId.slice(0, 12),
+          kind: "docker" as const,
           status: s.state,
           product: serviceProduct(s.image, kind, product),
-          service: runtimeServiceId(s),
+          service: s.containerId,
         })),
     ],
     [services, stack, kind, product],
@@ -108,9 +102,7 @@ export function ProjectOutput({
 
   const asked = service
     ? (sources.find((source) => source.service === service)?.id ??
-      (service === ALL_SERVICES || services.some((s) => !isDockerService(s))
-        ? undefined
-        : dockerSource(service)))
+      (service === ALL_SERVICES ? undefined : dockerSource(service)))
     : null
   const window = useMemo<LogWindow | undefined>(() => {
     const at = moment ? Date.parse(moment) : NaN
@@ -127,11 +119,11 @@ export function ProjectOutput({
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <EmptyState
           icon={Box}
-          title="No runtime output to read"
+          title="No container to read"
           description={
             runtime?.status === "unavailable" && runtime.reason
               ? runtime.reason
-              : "This deployment has no available log source. Runtime shows its services; build transcripts are under Builds."
+              : "This deployment runs no container right now. What a release prints appears here once one starts — its build transcript is under Builds."
           }
         />
       </div>

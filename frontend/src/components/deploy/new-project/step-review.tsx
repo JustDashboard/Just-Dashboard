@@ -9,7 +9,6 @@ import { ProductLogo, variableProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import type { DeploymentPreflightFinding } from "@/lib/types"
 import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findings"
@@ -17,7 +16,6 @@ import { variableFixLabel } from "@/components/deploy/failure-cause"
 import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { CODE, ShellWords } from "@/components/deploy/run-evidence"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
-import { Notice } from "@/components/state"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
 import { sourceWatchesGit } from "@/components/deploy/new-project/draft"
 import { checkBudget, checkTarget, secretShape } from "@/components/deploy/new-project/plan-reading"
@@ -66,7 +64,6 @@ export function StepReview({
   blockers,
   warnings,
   acknowledged,
-  acknowledgementsDisabled,
   onAcknowledgedChange,
   onOpenRemedy,
   canOpenRemedy,
@@ -85,7 +82,6 @@ export function StepReview({
   blockers: DeploymentPreflightFinding[]
   warnings: DeploymentPreflightFinding[]
   acknowledged: string[]
-  acknowledgementsDisabled: boolean
   onAcknowledgedChange: (codes: string[]) => void
   onOpenRemedy: (finding: DeploymentPreflightFinding) => void
   canOpenRemedy: (finding: DeploymentPreflightFinding) => boolean
@@ -102,9 +98,8 @@ export function StepReview({
    */
   onInspectAgain?: () => void
 }) {
-  const isGitSource = sourceWatchesGit(flow.source)
+  const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const configuration = flow.configuration
-  const adoption = flow.draft.data.adoption
   const declared = configuration.variables
   const generated = declared.filter(
     (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
@@ -118,10 +113,6 @@ export function StepReview({
       !suppliedVariables.includes(variable.name),
   )
   const mounts = configuration.runtime.mounts ?? []
-  const compose = configuration.build.method === "compose"
-  const composeMounts = (flow.detection?.compose?.services ?? []).flatMap((service) =>
-    (service.mounts ?? []).map((mount) => ({ service: service.name, mount })),
-  )
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
   const smoke = configuration.checks.filter((check) => check.phase === "smoke")
   const gated = flow.profile === "web" || flow.profile === "static"
@@ -228,12 +219,10 @@ export function StepReview({
           </>
         )}
         {mounts.length === 0 ? (
-          !compose && (
-            <FormNote>
-              Nothing survives a rebuild. Every release starts from the image, so anything the
-              application writes is gone when the next one replaces it.
-            </FormNote>
-          )
+          <FormNote>
+            Nothing survives a rebuild. Every release starts from the image, so anything the
+            application writes is gone when the next one replaces it.
+          </FormNote>
         ) : (
           <ul aria-label="Kept between releases" className="min-w-0 space-y-1">
             {mounts.map((mount) => {
@@ -273,27 +262,6 @@ export function StepReview({
           </ul>
         )}
       </FormSection>
-
-      {compose && (flow.source.composeFiles?.length ?? 0) > 0 && (
-        <Disclosure summary="Compose service configuration">
-          <FormNote>
-            These saved files carry per-service images, limits, ports, commands and storage. Private
-            inputs stay on the server behind their variable references. After adoption, edit these
-            files in Settings → General; saving changes leaves the live baseline running until you
-            choose Deploy changes.
-          </FormNote>
-          {flow.source.composeFiles!.map((document, index) => (
-            <Textarea
-              key={`${document.path}-${index}`}
-              aria-label={`Reviewed ${document.path}`}
-              readOnly
-              value={document.content || "This file is read from the source directory."}
-              rows={10}
-              className="font-mono sm:text-xs"
-            />
-          ))}
-        </Disclosure>
-      )}
 
       {generated.length > 0 && (
         <FormSection title="Secrets made on this server">
@@ -396,14 +364,7 @@ export function StepReview({
       </FormSection>
 
       {isGitSource && (
-        <AutomaticDeployment
-          branch={branch}
-          policy={gitPolicy}
-          onChange={onGitPolicyChange}
-          storageKey={
-            adoption ? `deploy.new.configure.adoption.${flow.draft.id}.gitPolicy` : undefined
-          }
-        />
+        <AutomaticDeployment branch={branch} policy={gitPolicy} onChange={onGitPolicyChange} />
       )}
 
       <PassedChecks findings={findings} checking={checking} />

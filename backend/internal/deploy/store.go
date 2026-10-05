@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -158,51 +157,15 @@ func (s *Store) Update(ctx context.Context, id int64, p *Project) (*Project, err
 	if _, err := s.Get(ctx, id); err != nil {
 		return nil, err
 	}
-	tx, err := s.st.DB.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	// Legacy fields can drive a compatibility pipeline independently of the
-	// normalized source. Observation-only projects retain their original owner.
-	rows, err := tx.QueryContext(ctx, `
-		SELECT src.config_json FROM deploy_environments e
-		  JOIN deploy_sources src ON src.environment_id = e.id AND src.revision = e.desired_revision
-		 WHERE e.project_id = ? AND e.archived_at = 0 AND src.kind = ?`, id, SourceImport)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var configuration string
-		if err := rows.Scan(&configuration); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		var source DraftSourceConfig
-		if json.Unmarshal([]byte(configuration), &source) != nil || source.Mode != SourceModeExistingCheckout {
-			rows.Close()
-			return nil, fmt.Errorf("%w: imported workloads must be configured through their original manager", ErrInvalidPlan)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
 	enabled := 0
 	if p.Enabled {
 		enabled = 1
 	}
-	_, err = tx.ExecContext(ctx,
+	_, err := s.st.DB.ExecContext(ctx,
 		`UPDATE deploy_projects SET name = ?, repo_path = ?, branch = ?, compose_file = ?,
 		 pre_command = ?, post_command = ?, enabled = ? WHERE id = ?`,
 		p.Name, p.RepoPath, p.Branch, p.ComposeFile, p.PreCommand, p.PostCommand, enabled, id)
 	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.Get(ctx, id)

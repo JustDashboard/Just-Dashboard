@@ -343,11 +343,6 @@ func (e *NormalizedStepExecutor) startCandidate(
 	if err := validateRuntimeActivationStrategy(snapshot); err != nil {
 		return normalizedStepFailure(err)
 	}
-	if validator, ok := e.runtime.(RuntimeCandidateScopeValidator); ok {
-		if err := validator.ValidateCandidateScope(ctx, CandidateRuntimeRequest{Run: execution.Run, Release: release.Release, Snapshot: snapshot}); err != nil {
-			return runtimeStepFailure(err, "candidate_scope_changed", "the existing Compose service population changed; no runtime was stopped", nil)
-		}
-	}
 
 	var previousStop *RuntimeStopEvidence
 	if snapshot.Plan.Strategy == StrategyStopFirst && release.Release.PredecessorReleaseID != 0 {
@@ -827,8 +822,7 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	// containers were already replaced by `up`; stopping that identity here
 	// would stop the newly activated release.
 	sharedComposeProject := previous.Kind == "compose" && current.Kind == "compose" && previous.RuntimeID == current.RuntimeID
-	sharedNativeRuntime := (previous.Kind == "pm2" || previous.Kind == "systemd") && previous.Kind == current.Kind && previous.RuntimeID == current.RuntimeID
-	if !sharedComposeProject && !sharedNativeRuntime {
+	if !sharedComposeProject {
 		if snapshot.Plan.DrainSeconds > 0 {
 			timer := time.NewTimer(time.Duration(snapshot.Plan.DrainSeconds) * time.Second)
 			select {
@@ -1041,18 +1035,8 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
-		imageMatches := snapshot.Image.Digest == release.Release.ImageDigest
-		if snapshot.Compose != nil {
-			imageMatches = false
-			for _, service := range snapshot.Compose.Services {
-				if service.Digest == release.Release.ImageDigest {
-					imageMatches = true
-					break
-				}
-			}
-		}
 		if snapshot.Plan.Strategy != release.Release.Strategy ||
-			(release.Release.ImageDigest != "" && !imageMatches) {
+			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
 		return snapshot, nil

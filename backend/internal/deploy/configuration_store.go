@@ -1314,12 +1314,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	defer tx.Rollback()
 	var current int
-	var sourceKind, sourceConfig sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT e.desired_revision, s.kind, s.config_json FROM deploy_environments e
-		  LEFT JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
-		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&current, &sourceKind, &sourceConfig); err != nil {
+		SELECT desired_revision FROM deploy_environments
+		 WHERE id = ? AND project_id = ? AND archived_at = 0`, environmentID, projectID).Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
@@ -1327,31 +1324,6 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	if current != request.Revision {
 		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
-	}
-	var originalRuntimeJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT config_json FROM deploy_runtime_plans WHERE environment_id=? AND revision=?`, environmentID, current).Scan(&originalRuntimeJSON); err != nil {
-		return nil, err
-	}
-	var originalRuntime RuntimePlanConfig
-	if json.Unmarshal([]byte(originalRuntimeJSON), &originalRuntime) != nil {
-		return nil, fmt.Errorf("%w: desired runtime configuration is malformed", ErrInvalidPlan)
-	}
-	if configuration.Runtime.ComposeProjectName != "" && configuration.Runtime.ComposeProjectName != originalRuntime.ComposeProjectName {
-		return nil, fmt.Errorf("%w: the original Compose project identity cannot be changed through settings", ErrInvalidPlan)
-	}
-	configuration.Runtime.ComposeProjectName = originalRuntime.ComposeProjectName
-	configuration.Dependencies, err = retainRuntimeOwnershipTx(ctx, tx, environmentID, configuration.Dependencies)
-	if err != nil {
-		return nil, err
-	}
-	if sourceKind.String == string(SourceImport) {
-		var source DraftSourceConfig
-		if json.Unmarshal([]byte(sourceConfig.String), &source) != nil {
-			return nil, fmt.Errorf("%w: desired source configuration is malformed", ErrInvalidPlan)
-		}
-		if source.Mode != SourceModeExistingCheckout {
-			return nil, fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan)
-		}
 	}
 	var kind EnvironmentKind
 	if err := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, environmentID).Scan(&kind); err != nil {
@@ -1551,11 +1523,6 @@ func (s *PlanningStore) saveEnvironmentSource(
 	if current != revision {
 		return fail(fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current))
 	}
-	var currentSource DraftSourceConfig
-	invalidCurrentSource := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil
-	if currentKind == SourceImport && (invalidCurrentSource || currentSource.Mode != SourceModeExistingCheckout || source.Mode != SourceModeExistingCheckout) {
-		return fail(fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan))
-	}
 	if currentKind != source.Kind {
 		return fail(fmt.Errorf("%w: source kind cannot change from %s to %s", ErrInvalidSource, currentKind, source.Kind))
 	}
@@ -1568,7 +1535,9 @@ func (s *PlanningStore) saveEnvironmentSource(
 		source.CredentialID, string(identityJSON), digestBytes(sourceJSON, identityJSON), now); err != nil {
 		return fail(err)
 	}
-	moved := invalidCurrentSource || !sameSourceLocation(canonicalSourceConfig(currentSource), source)
+	var currentSource DraftSourceConfig
+	moved := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil ||
+		!sameSourceLocation(canonicalSourceConfig(currentSource), source)
 	var proposal *DetectionProposal
 	if detection == nil {
 		if err := cloneBuildPlanTx(ctx, tx, environmentID, current, next, now, moved); err != nil {
@@ -1768,47 +1737,4 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 		})
 	}
 	return changes
-}
-
-// Settings control deployable inputs, not the identity reserved by migration.
-// Preserve that server-owned relationship even when a client omits it.
-func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int64, requested []PlannedDependency) ([]PlannedDependency, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND kind='runtime' ORDER BY resource_kind,resource_id`, environmentID)
-	if err != nil {
-		return nil, err
-	}
-	originals := []PlannedDependency{}
-	for rows.Next() {
-		var dependency PlannedDependency
-		var config string
-		if err := rows.Scan(&dependency.Kind, &dependency.Ownership, &dependency.ResourceKind, &dependency.ResourceID, &config); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		dependency.Config = json.RawMessage(config)
-		originals = append(originals, dependency)
-	}
-	readErr := rows.Err()
-	rows.Close()
-	if readErr != nil {
-		return nil, readErr
-	}
-	result := []PlannedDependency{}
-	for _, dependency := range requested {
-		if dependency.Kind != "runtime" {
-			result = append(result, dependency)
-			continue
-		}
-		valid := false
-		for _, original := range originals {
-			if string(mustJSON(dependency)) == string(mustJSON(original)) {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return nil, fmt.Errorf("%w: runtime ownership cannot be changed through settings", ErrInvalidPlan)
-		}
-	}
-	return append(result, originals...), nil
 }

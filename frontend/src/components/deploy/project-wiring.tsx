@@ -39,7 +39,6 @@ import {
 } from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { serviceProduct } from "@/components/deploy/service-product"
-import { isDockerService, runtimeServiceId } from "@/components/deploy/runtime-service"
 
 /** How many of the environment's runs the release node's strip draws. */
 const STRIP = 14
@@ -297,18 +296,11 @@ export function ProjectWiring({
             title={
               services ? (
                 services.length === 0 ? (
-                  <span className="text-muted-foreground">No services</span>
+                  <span className="text-muted-foreground">No containers</span>
                 ) : (
                   <span className="numeric">
                     {running.length} of {services.length}{" "}
-                    {services.every(isDockerService)
-                      ? services.length === 1
-                        ? "container"
-                        : "containers"
-                      : services.length === 1
-                        ? "service"
-                        : "services"}{" "}
-                    running
+                    {services.length === 1 ? "container" : "containers"} running
                   </span>
                 )
               ) : (
@@ -323,7 +315,7 @@ export function ProjectWiring({
                   {running.length > 0 && <HealthStatus health={deployment.health} />}
                   {services.map((service) => (
                     <span
-                      key={runtimeServiceId(service)}
+                      key={service.containerId}
                       className="inline-flex min-w-0 items-center gap-1 font-mono"
                     >
                       <ProductGlyph
@@ -334,7 +326,7 @@ export function ProjectWiring({
                   ))}
                 </span>
               ) : (
-                runtime?.reason || "The runtime has not reported this release yet"
+                runtime?.reason || "Docker has not reported this release yet"
               )
             }
           />

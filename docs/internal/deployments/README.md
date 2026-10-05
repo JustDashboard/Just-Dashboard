@@ -3,10 +3,6 @@
 - [`Deployment creation audit`](../../audits/2026-09-22-deploy-new/README.md) — wizard state, template
   usability, encrypted draft inputs, database connections and local acceptance evidence.
 - [`implementation.md`](implementation.md) — current implementation, invariants, feature joins, automation, and topology.
-- [`existing-workloads.md`](existing-workloads.md) — discovery and managed adoption of external Docker,
-  PM2 and systemd workloads, explicit recovery blockers, live baselines and acceptance evidence.
-- [`docker-image-recovery.md`](docker-image-recovery.md) — bounded read-only export when a running
-  container's original image was deleted, private recovery artifacts, platform and ownership fences.
 - [`preview-isolation.md`](preview-isolation.md) — exact-revision approval, previews tested from the dashboard, copied production variables, tailnet-only addresses, reconciliation with GitHub, storage, network and cleanup.
 - [`backup-coverage.md`](backup-coverage.md) — immutable archive manifests and persistent-data coverage limitations.
 - [`restore-verification.md`](restore-verification.md) — native SQLite snapshots and artifact-bound isolated application recovery checks.
