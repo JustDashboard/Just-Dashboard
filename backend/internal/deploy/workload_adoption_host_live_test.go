@@ -16,6 +16,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 )
 
@@ -92,7 +93,8 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	dockerOwner := NewDockerRuntimeOwner(client)
 	owner := native.owner(dockerOwner).WithStartupStore(startup)
 	owner.WithRecordedRuntimeObserver(NewRecordedRuntimeObserver(runs, dockerOwner, client, owner))
-	observer := NewNativePreflightObserver(NewHostPreflightObserver([]string{root}, root, client).WithDependencies(NewRuntimeReservationObserver(fixture.store, client, owner)), owner, runs)
+	proofOwner := &ownedNativeProofOwner{NativeRuntimeOwner: owner, test: t, capture: native.capture}
+	observer := NewNativePreflightObserver(NewHostPreflightObserver([]string{root}, root, client).WithDependencies(NewRuntimeReservationObserver(fixture.store, client, proofOwner)), owner, runs)
 	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "owned-" + kind + "-managed", Profile: ProfileService}, recovered)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +145,6 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	if strings.Contains(string(mustJSON(settings)), "owned-native-private-value") {
 		t.Fatal("settings exposed a captured private variable")
 	}
-	proofOwner := &ownedNativeProofOwner{NativeRuntimeOwner: owner, test: t, capture: native.capture}
 	executor := NewNormalizedStepExecutor(runs, fixture.plans, analyzer, NewArtifactBuilder(NewDockerArtifactBackend(client)), proofOwner, NewCheckRunner(client), nil, filepath.Join(root, "workspaces")).WithPreflightObserver(observer)
 	engine := NewEngine(runs, executor, nil, EngineConfig{WorkerID: "owned-native-proof", PollEvery: 20 * time.Millisecond, LeaseTTL: time.Minute}, nil)
 	engineCtx, cancelEngine := context.WithCancel(context.Background())
@@ -245,6 +246,10 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	}
 	deployed := operation(OperationDeploy, settings.Revision, nil)
 	if deployed.State != RunSucceeded {
+		runtime, readErr := runs.RuntimeForRelease(t.Context(), baseline.Release.ID)
+		if readErr == nil {
+			logOwnedNativeProof(t, owner, *runtime, native.capture)
+		}
 		steps, _ := runs.Steps(t.Context(), deployed.ID)
 		for _, step := range steps {
 			if step.State == StepFailed || step.Key == StepStartCandidate {
@@ -330,6 +335,21 @@ type ownedNativeProofOwner struct {
 	capture func(context.Context) (*procs.HostWorkloadCapture, error)
 }
 
+func (o *ownedNativeProofOwner) ObserveNativeBaseline(ctx context.Context, runtime ReleaseRuntime) RuntimeServices {
+	started := time.Now()
+	budget := time.Duration(0)
+	if deadline, bounded := ctx.Deadline(); bounded {
+		budget = time.Until(deadline)
+	}
+	result := o.NativeRuntimeOwner.ObserveNativeBaseline(ctx, runtime)
+	o.test.Logf("owned native reservation observation: elapsed=%s budget=%s status=%s context=%v metadata=%s",
+		time.Since(started), budget, result.Status, ctx.Err(), digestBytes(runtime.Metadata))
+	if result.Status != "available" {
+		logOwnedNativeProof(o.test, o.NativeRuntimeOwner, runtime, o.capture)
+	}
+	return result
+}
+
 func (o *ownedNativeProofOwner) Stop(ctx context.Context, runtime ReleaseRuntime, plan RuntimePlanConfig, variables map[string]string, remove bool, emit func(BuildLog) error) (RuntimeStopEvidence, error) {
 	started := time.Now()
 	result, err := o.NativeRuntimeOwner.Stop(ctx, runtime, plan, variables, remove, emit)
@@ -353,6 +373,9 @@ func logOwnedNativeProof(t *testing.T, owner *NativeRuntimeOwner, runtime Releas
 	}
 	var expected NativeBaselineMetadata
 	_ = json.Unmarshal(runtime.Metadata, &expected)
+	source, sourceErr := nativeDirectoryDigest(t.Context(), hostexec.HostPath(expected.SourceRoot), expected.SourceExclusions)
+	t.Logf("owned source digest proof: current=%s expected=%s exclusions=%s error=%v",
+		source, expected.SourceDigest, digestBytes(mustJSON(expected.SourceExclusions)), sourceErr)
 	t.Logf("owned manager digest proof after %s: configuration=%s expected=%s runtime=%s expectedRuntime=%s environment=%s startup=%s",
 		time.Since(started), fresh.ConfigurationDigest, expected.ConfigurationDigest, fresh.RuntimeConfigurationDigest, expected.RuntimeConfigurationDigest,
 		digestBytes(mustJSON(fresh.Environment)), digestBytes(fresh.StartupEvidence))
