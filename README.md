@@ -251,6 +251,11 @@ Setup can generate template credentials and suggest a public address, create and
 database on this server, or use an external database connection. Build commands, variables, storage,
 health checks and runtime limits remain editable before the first deployment.
 
+Existing-workload deployment import is unavailable after reverting PRs #136 and #145. Previously
+imported projects keep their records and running resources, but deployment mutations and automation
+are blocked. Manage those workloads with Docker/Compose/PM2/systemd directly, or restore an
+import-capable version. Stop or drain deployment runs before changing versions.
+
 The Database source uses the same engine catalogue and settings panel as Add a database, with animated
 startup stages until the connection is verified. It then offers the connection string and a link to
 the database's page.

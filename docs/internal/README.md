@@ -50,7 +50,8 @@ strategy, and feature ownership behind those rules.
 - [`deployments/caddy-ingress.md`](deployments/caddy-ingress.md) — automatic public Docker Caddy sharing,
   fresh-host provisioning, certificates, route recovery and ownership boundaries.
 - [`deployments/implementation.md`](deployments/implementation.md) — implemented deployment model through
-  C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
+  C7, execution/activation/recovery, feature joins, automation, previews, production topology, and
+  compatibility after removing existing-workload import.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
 - The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout. Use the

@@ -17,7 +17,6 @@ import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { CODE, ShellWords } from "@/components/deploy/run-evidence"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
-import { sourceWatchesGit } from "@/components/deploy/new-project/draft"
 import { checkBudget, checkTarget, secretShape } from "@/components/deploy/new-project/plan-reading"
 import type { Icon } from "@/components/icons"
 
@@ -45,8 +44,8 @@ import type { Icon } from "@/components/icons"
  * the application before sending anyone to it, and what happens to the
  * previous release at the cutover. Each of those is drawn as what it is — a
  * path, a variable on the product its name says holds it, a request — and
- * each is derived from the plan rather than from the source, so an adopted
- * container and a reviewed template read the same way.
+ * each is derived from the plan rather than from the source, so every
+ * reviewed template reads the same way.
  *
  * Before this, none of that was here. A template with no blocking finding drew
  * one section of four facts against a four-node drawing half a screen taller
@@ -125,7 +124,7 @@ export function StepReview({
         blockers={blockers}
         warnings={warnings}
         acknowledged={acknowledged}
-        acknowledgementsDisabled={acknowledgementsDisabled}
+        acknowledgementsDisabled={false}
         onAcknowledgedChange={onAcknowledgedChange}
         onOpenRemedy={onOpenRemedy}
         canOpenRemedy={canOpenRemedy}
@@ -133,91 +132,7 @@ export function StepReview({
         onInspectAgain={onInspectAgain}
       />
 
-      {adoption && (
-        <FormSection title="Existing live deployment">
-          <FormFacts>
-            <FormFact label="Original name" mono>
-              {adoption.name}
-            </FormFact>
-            <FormFact label="Manager">{adoption.manager}</FormFact>
-            <FormFact label="Services">
-              {adoption.runningCount} of {adoption.serviceCount} running
-            </FormFact>
-            <FormFact label="Private inputs">
-              {flow.draft.environmentKeys?.length ?? 0} saved on the server
-            </FormFact>
-            {adoption.kind === "stack" && adoption.scope && (
-              <FormFact label="Recovery scope">
-                {adoption.scope === "existing_services"
-                  ? "Existing containers only · running and stopped"
-                  : "Every declared service"}
-              </FormFact>
-            )}
-          </FormFacts>
-          <Notice title="Adoption keeps this application running">
-            The current services become the live baseline. No deployment run starts, and stopped
-            services stay stopped. Deploy changes uses the settings below; Redeploy live release
-            restores the original baseline.
-          </Notice>
-          {(adoption.excludedServices?.length ?? 0) > 0 && (
-            <Notice title="Services excluded from this deployment" tone="warning">
-              These declared services have no existing container. The recovered recipe will not
-              create them on Deploy changes; this does not remove any existing container.
-              <ul aria-label="Excluded Compose services" className="mt-2 space-y-1 font-mono">
-                {adoption.excludedServices!.map((service) => (
-                  <li key={service}>{service}</li>
-                ))}
-              </ul>
-            </Notice>
-          )}
-          {(adoption.blockers?.length ?? 0) > 0 && (
-            <Notice title="Resolve migration blockers before adoption" tone="danger">
-              <ul className="space-y-1">
-                {adoption.blockers.map((blocker, index) => (
-                  <li key={index}>{blocker}</li>
-                ))}
-              </ul>
-            </Notice>
-          )}
-          {(adoption.warnings ?? [])
-            .filter(
-              (warning) =>
-                !findings.some(
-                  (finding) =>
-                    finding.title === warning ||
-                    finding.means === warning ||
-                    finding.measured === warning,
-                ),
-            )
-            .map((warning, index) => (
-              <FormNote key={index} tone="warning">
-                {warning}
-              </FormNote>
-            ))}
-        </FormSection>
-      )}
       <FormSection title="Data it keeps">
-        {compose && (
-          <>
-            <FormNote>
-              Each service keeps the volumes and bind mounts declared in the Compose source. The
-              fields below are additional overrides, so an empty list does not mean the stack has no
-              persistent storage. Review the full service configuration below.
-            </FormNote>
-            {composeMounts.length > 0 && (
-              <ul aria-label="Compose service mounts" className="min-w-0 space-y-1">
-                {composeMounts.map(({ service, mount }, index) => (
-                  <ReviewItem
-                    key={`${service}-${index}`}
-                    glyph={Archive}
-                    title={<span className="font-mono">{service}</span>}
-                    detail={<code className={cn("font-mono break-all", CODE.path)}>{mount}</code>}
-                  />
-                ))}
-              </ul>
-            )}
-          </>
-        )}
         {mounts.length === 0 ? (
           <FormNote>
             Nothing survives a rebuild. Every release starts from the image, so anything the
@@ -239,9 +154,6 @@ export function StepReview({
                   }
                   detail={
                     <>
-                      {adoption && (
-                        <span className="block font-mono break-all">{mount.source}</span>
-                      )}
                       {[
                         config.purpose,
                         mount.ownership === "managed"
@@ -335,13 +247,7 @@ export function StepReview({
         )}
       </FormSection>
 
-      <FormSection title={adoption ? "When you deploy changes" : "At the cutover"}>
-        {adoption && (
-          <FormNote>
-            Adoption does not perform this cutover. Deploy changes or an enabled automatic
-            deployment does.
-          </FormNote>
-        )}
+      <FormSection title="At the cutover">
         <ul className="min-w-0">
           <ReviewItem
             glyph={Route}
@@ -351,13 +257,11 @@ export function StepReview({
             detail={
               /* "Nothing is lost" only when something is kept: with no mounts
                the section above has just said the opposite. */
-              adoption && configuration.runtime.strategy === "stop_first"
-                ? "The first deployment of changes stops the original runtime before the replacement starts, causing an outage. Review the recovered storage and backup coverage first; state outside the declared mounts is not preserved by a rebuild."
-                : configuration.runtime.strategy === "blue_green"
-                  ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
-                  : mounts.length === 0
-                    ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
-                    : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."
+              configuration.runtime.strategy === "blue_green"
+                ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
+                : mounts.length === 0
+                  ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
+                  : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."
             }
           />
         </ul>

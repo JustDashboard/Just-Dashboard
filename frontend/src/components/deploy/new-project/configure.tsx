@@ -18,7 +18,7 @@ import type {
 import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ErrorState, Notice } from "@/components/state"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
@@ -46,7 +46,6 @@ import {
   type PlanSection,
 } from "@/components/deploy/new-project/plan-sections"
 import {
-  adoptImport,
   commitDraft,
   configurationForSave,
   withHeldDomainVariables,
@@ -89,7 +88,7 @@ function asError(error: unknown) {
 
 /**
  * The configure half of `/deploy/new`, for every source from a picked
- * repository to an adopted container — and, since this pass, four screens
+ * repository to a reviewed template — and, since this pass, four screens
  * rather than one.
  *
  * One screen carried the source controls, the name, the type, a ten-field
@@ -353,7 +352,6 @@ export function Configure({
 
   const configuration = flow.configuration
   const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
-  const isImport = flow.source.kind === "import"
   const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
@@ -739,22 +737,19 @@ export function Configure({
       const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
       if (outstanding.length) return
 
-      const commit = isImport
-        ? await adoptImport(checkedDraft.draft, acknowledged, flow.importPreview?.unsupported ?? [])
-        : await commitDraft(
-            checkedDraft.draft,
-            acknowledged,
-            // Only a Git source polls a branch, so only a Git source has a
-            // policy to record; anything else keeps the server's defaults.
-            isGitSource ? gitPolicy : undefined,
-          )
+      const commit = await commitDraft(
+        checkedDraft.draft,
+        acknowledged,
+        // Only Git sources poll a branch and need a watch policy.
+        isGitSource ? gitPolicy : undefined,
+      )
       onStepChange("done")
       setCreated({
         projectId: commit.projectId,
         environmentId: commit.environmentId,
       })
 
-      if (operation === "deploy" && !isImport) {
+      if (operation === "deploy") {
         const run = await enqueueDeploy(
           commit.projectId,
           commit.environmentId,
@@ -1037,9 +1032,7 @@ export function Configure({
             note={
               !last
                 ? undefined
-                : isImport
-                  ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
-                  : "Deploy saves the plan, applies the environment, and starts the release."
+                : "Deploy saves the plan, applies the environment, and starts the release."
             }
             secondary={
               <>
@@ -1051,7 +1044,7 @@ export function Configure({
                 >
                   {current === "project" ? "Change source" : "Back"}
                 </Button>
-                {last && !isImport && (
+                {last && (
                   <Button
                     variant="ghost"
                     className="h-11 sm:h-9"
@@ -1073,13 +1066,11 @@ export function Configure({
                 disabled={Boolean(busy)}
               >
                 <ArrowRight className="size-4" />
-                {isImport
-                  ? "Adopt workload"
-                  : blockers.length
-                    ? "Re-check and deploy"
-                    : outstanding.length
-                      ? "Acknowledge, then deploy"
-                      : "Deploy"}
+                {blockers.length
+                  ? "Re-check and deploy"
+                  : outstanding.length
+                    ? "Acknowledge, then deploy"
+                    : "Deploy"}
               </Button>
             ) : (
               <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>

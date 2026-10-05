@@ -59,8 +59,8 @@ only renderer/executor/validation authority for their feature.
   a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
   fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has no
   tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
-  Project step's *Deploy as a Compose stack*), adopted from this server through `/deploy/import`, or
-  resumed as an unfinished setup, and a saved stack's documents are edited on Settings → General.
+  Project step's *Deploy as a Compose stack*) or
+  resumed as an unfinished setup.
   Choosing a
   source creates a draft, saves the intent and source, and runs detection in one action; when
   detection finds more than one candidate they are offered ranked, each saying why it ranks where it
@@ -126,8 +126,7 @@ only renderer/executor/validation authority for their feature.
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
-  is re-detected rather than refused. `?mode=advanced` opens Advanced, and existing workloads adopt
-  through `/deploy/import/adopt` without a run. For a Git source the commit carries a `gitPolicy`
+  is re-detected rather than refused. `?mode=advanced` opens Advanced. For a Git source the commit carries a `gitPolicy`
   (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
   `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so
   every caller that does not ask keeps the defaults in `gitDeploymentPolicy` exactly as they were.
@@ -767,7 +766,7 @@ only renderer/executor/validation authority for their feature.
   SvelteKit's header variables), which is safe only while the proxy fronts the release alone. The
   release's runtime snapshot records which of those settings the recipe image's final stage sets
   (`proxyTrust`, read from the rendered Dockerfile by `imageProxyTrust`); a repository Dockerfile, a
-  pulled image or an adopted container records none. When the release has no route, or its port is
+  pulled image records none. When the release has no route, or its port is
   reachable directly (a `0.0.0.0`/`::` bind, host networking, or the application's port published again
   on every interface), `startContainer` writes the withdrawn value of each recorded setting unless the
   plan sets the variable itself (`network_trust.go`). Nothing is written over a user's own image.
@@ -903,13 +902,15 @@ only renderer/executor/validation authority for their feature.
   frozen variable/dependency/check snapshots, by names and digests only; a run clears only the revision it
   actually applied, so a change saved after enqueue stays pending. It is pending only when that comparison
   names a change: the revision number counts saves, so an edit undone (a variable added then removed) moves
-  it on with nothing to deploy. A variable compares by value digest, sensitivity and scope set, so a
+  it on with nothing to deploy. A variable compares by value digest, sensitivity, scope set and literal/reference mode, so a
   scope-only edit is still named. The fleet summary's `pendingChanges` — the header's "Deploy changes",
   the Settings dot, the fleet chip — runs the same comparison for each deployment whose desired revision
   is not the live one.
 - Deployment variables are encrypted, immutable revisions with an exact closed scope set (`build`,
   `runtime`, `release_task`). Lists use a fixed mask; reveal is a separate session-only admin read with an
-  explicit audit entry. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
+  explicit audit entry. Stored `value_mode` keeps literal values literal, including reference-shaped
+  text. New values and dotenv entries are literal; an explicit reference uses reference mode. Empty
+  mode preserves historical value-shape inference. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
   closed kind/target model; missing variable references and cycles fail before commit, secret leaves stay
   masked, and enqueue freezes exact variable revision ids so retries cannot observe a later variable
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
@@ -950,9 +951,20 @@ only renderer/executor/validation authority for their feature.
   artifact existence. See [restore verification](restore-verification.md).
   Coverage resolves named volumes and every writable merged Compose service mount, verifies the immutable
   manifest and artifact checksum, and rejects filtered or uncovered data. See [backup coverage](backup-coverage.md).
-- Import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
-  exact acknowledgement of unsupported observations. It records the external resource as observed and
-  does not start, stop, reset or claim it. Archiving disables deployment triggers, the project's schedules
+- Existing-workload discovery and adoption were removed by reverting #136 and #145. The
+  `/deploy/import` page and workload discovery/recovery endpoints are absent. The older
+  `/deploy/import/preview` and `/deploy/import/adopt` APIs remain only for Git-checkout imports;
+  container and Compose workload imports are refused.
+  Previously adopted projects and legacy external observations retain their database records and
+  runtime resources, but project mutations, new runs, queued execution, provider hooks and schedules
+  are refused. Their baseline and native startup authority require the removed engine; use the
+  original Docker/Compose/PM2/systemd tools, or restore an import-capable version to manage them.
+  Existing Git-checkout sources remain supported. The additive `adoption_enc` and `value_mode`
+  columns and the immutable-value trigger remain in the migration path. Literal/reference value
+  interpretation and variable snapshot digests are retained for compatibility with saved releases;
+  no stored data is erased.
+  Stop or drain deployment runs before switching versions. An import review draft cannot be committed
+  through the ordinary draft endpoint. Archiving disables deployment triggers, the project's schedules
   and visibility; it never removes runtime or data. Schedules are disabled directly (`ClaimDueSchedules`
   already excludes an archived *environment*, not an archived *project*, so without this a schedule kept
   firing and failing every occurrence at `environment_not_found`, invisibly, because even its summary

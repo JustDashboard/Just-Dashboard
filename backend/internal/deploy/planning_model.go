@@ -679,6 +679,7 @@ type RuntimeMount struct {
 
 type PlannedVariable struct {
 	Name        string   `json:"name"`
+	ValueMode   string   `json:"valueMode,omitempty"`
 	Sensitivity string   `json:"sensitivity"`
 	Scopes      []string `json:"scopes"`
 	Required    bool     `json:"required,omitempty"`
@@ -1410,6 +1411,9 @@ func (c PlanConfiguration) Validate() error {
 			return invalidField(variable.Name, "invalid or duplicate planned variable %q", variable.Name)
 		}
 		seenVariables[variable.Name] = true
+		if variable.ValueMode != "" && variable.ValueMode != "literal" && variable.ValueMode != "reference" {
+			return invalidField(variable.Name, "invalid variable value mode")
+		}
 		if variable.Sensitivity != "plain" && variable.Sensitivity != "secret" {
 			return invalidField(variable.Name, "invalid sensitivity for %s", variable.Name)
 		}

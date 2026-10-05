@@ -222,6 +222,9 @@ func (s *OrchestrationStore) Retry(
 // events together. Returning a run therefore proves it can be recovered after
 // the caller disconnects. The bool is false for an idempotent replay.
 func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*EngineRun, bool, error) {
+	if err := RequireSupportedProject(ctx, s.db, req.ProjectID); err != nil {
+		return nil, false, err
+	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := normalizeRunRequest(&req); err != nil {
@@ -402,7 +405,7 @@ func snapshotRunVariablesTx(
 	}
 
 	query := `
-		SELECT v.id, v.key, v.sensitivity, v.scopes, v.value_digest
+		SELECT v.id, v.key, v.sensitivity, v.scopes, v.value_digest, v.value_mode
 		  FROM deploy_variable_revisions v`
 	args := []any{environmentID}
 	if copyFromRunID == 0 {
@@ -422,7 +425,7 @@ func snapshotRunVariablesTx(
 		var ref runVariableRevisionRef
 		if err := rows.Scan(
 			&ref.id, &ref.snapshot.Name, &ref.snapshot.Sensitivity,
-			&ref.snapshot.Scopes, &ref.snapshot.ValueDigest,
+			&ref.snapshot.Scopes, &ref.snapshot.ValueDigest, &ref.snapshot.ValueMode,
 		); err != nil {
 			rows.Close()
 			return err

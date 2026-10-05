@@ -940,7 +940,7 @@ func preflightFindings(
 				"", "deploy", "runtime.strategy"))
 		}
 	}
-	resolvedVariables, _, variableErr := ResolveVariableGraph(draft.variableValues(configuration), nil)
+	resolvedVariables, _, variableErr := ResolveVariableGraphWithModes(draft.variableValues(configuration), draft.variableModes(configuration), nil)
 	if variableErr != nil {
 		findings = append(findings, finding("variable_graph_invalid", PreflightBlocked,
 			"Variable references cannot resolve", "", "A variable reference is missing or cyclic.",

@@ -22,6 +22,7 @@ import (
 
 func (s *Server) mountDeployRoutes(r chi.Router) {
 	r.Route("/deploy", func(r chi.Router) {
+		r.Use(s.retiredImportReadOnly)
 		s.mountBlueprintRoutes(r)
 		s.mountGameRoutes(r)
 		s.mountGitHubAppRoutes(r)
@@ -100,8 +101,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/drafts", s.handle(s.handleDeploymentDraftCreate))
 				r.Method(http.MethodPost, "/drafts/{draft}/commit", s.handle(s.handleDeploymentDraftCommit))
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
-				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
+				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/{id}/unarchive", s.handle(s.handleDeploymentUnarchive))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/releases/{release}/pin", s.handle(s.handleDeploymentReleasePin))
 				r.Method(http.MethodPost, "/{id}/previews/approvals/{approval}/reject", s.handle(s.handleDeploymentPreviewReject))

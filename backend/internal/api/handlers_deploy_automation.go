@@ -504,6 +504,10 @@ type automationOutcome struct {
 // per-trigger hooks and the GitHub App's shared webhook both end here, so a
 // delivery means the same thing whichever door it came through.
 func (s *Server) dispatchAutomationEvent(ctx context.Context, trigger *deploy.Trigger, event deploy.ProviderEvent, body []byte) (automationOutcome, error) {
+	if err := deploy.RequireSupportedProject(ctx, s.Store.DB, trigger.ProjectID); err != nil {
+		_ = s.modules.deployAutomation.RecordDelivery(ctx, trigger, event, body, "rejected", "import_removed", 0)
+		return automationOutcome{}, mapDeployError(err)
+	}
 	err := validateAutomationEvent(trigger, event)
 	if err == nil && event.PreviewNumber > 0 && !event.PreviewClosed && !deploy.MatchWatchPaths(event.ChangedPaths, trigger.Config.WatchInclude, trigger.Config.WatchExclude) {
 		err = deploy.ErrWatchPathsIgnored
@@ -721,6 +725,9 @@ func mapAutomationError(err error) error {
 }
 
 func (s *Server) dispatchDeploymentSchedule(ctx context.Context, item deploy.ScheduleDispatch) error {
+	if err := deploy.RequireSupportedProject(ctx, s.Store.DB, item.Schedule.ProjectID); err != nil {
+		return err
+	}
 	project, err := s.modules.deployStore.Get(ctx, item.Schedule.ProjectID)
 	if err != nil {
 		return err
