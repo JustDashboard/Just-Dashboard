@@ -483,6 +483,9 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   windows while its request is pending. Hidden panes keep parsing bytes and answering live terminal
   queries, but remain inert and retain their last visible grid size. Selection fits and refreshes every
   visible pane and focuses only the selected one; browser visibility/focus changes refresh it even if the dimensions have not changed.
+  Showing a pane, returning to the browser tab and focusing the browser window also *resend* its size even
+  when unchanged: `sent` is what this tab last said, not the PTY's size, and another browser attached to the
+  same window resizes the PTY too. The server ignores a size the PTY already has.
 - **`clipboardKey`**: Ctrl+C copies **only when something is selected** and clears the selection as it
   goes, so the interrupt is never more than one keypress away. Ctrl+V returns false *without*
   `preventDefault`, so xterm leaves the key alone instead of sending ^V and the browser's own paste runs —
@@ -519,7 +522,13 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   to browser font fallback; that produced disconnected Codex borders and gaps in Claude's block artwork.
   `@xterm/addon-webgl` 0.19 matches xterm 6.0 and paints those structural glyphs to the full cell. Every
   alternate-buffer change schedules a complete refresh to prevent the stale/blank rows seen in the old
-  WebGL integration, and context loss disposes WebGL and refreshes the DOM fallback. Setting
+  WebGL integration. Context loss disposes WebGL and **fits** the DOM fallback: WebGL floors the cell width
+  to whole device pixels and DOM keeps the fraction, so the WebGL-fitted grid ran off the pane under DOM,
+  and the box had not changed for any observer to notice. A terminal whose context was lost stays on DOM
+  until it remounts. Contexts are rationed by `WEBGL_BUDGET` (8): Chrome keeps sixteen per page and
+  destroys the oldest — possibly the pane on screen — and every visited window stays mounted. Each fit of
+  a visible pane claims WebGL and moves it to the recent end; past the budget, the least recently fitted
+  *hidden* pane drops to DOM and claims WebGL again, before fitting, when next shown. Setting
   `jd.terminal.renderer=dom` in local storage is the diagnostic A/B override. The Canvas addon remains
   absent because its stable release targets xterm 5 internals. Font metrics remain fixed at unit line
   height and zero letter spacing; `@xterm/addon-unicode11` keeps cursor arithmetic aligned with the
@@ -544,6 +553,7 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
 
 `tests/browser/terminal-ui.spec.ts` exercises both DOM and WebGL renderers with output exceeding the
 server's replay limit, ANSI/UTF-8 split across messages, background terminal replies, resize while hidden,
+size resent on every return, a lost WebGL context refitting the DOM fallback inside its pane,
 window/session switching, screen preservation, input routing and cleanup when windows/sessions close.
 It also checks all four split directions, mixed nested splits, pointer/keyboard divider resizing,
 focused-only input, pane shortcuts, reconnect focus, saved layouts, fullscreen and narrow viewport

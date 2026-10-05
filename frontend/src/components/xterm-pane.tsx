@@ -208,6 +208,37 @@ const CONTROL_KEYS = [
 ] as const
 
 /**
+ * How many terminals may hold a WebGL context at once.
+ *
+ * Chrome keeps sixteen live contexts per page and destroys the oldest past
+ * that, which can be the pane on screen, and every visited window stays
+ * mounted with its emulator. So the contexts are rationed: the panes fitted
+ * most recently keep theirs, and a hidden pane past the budget drops to the
+ * DOM renderer until it is shown again.
+ */
+const WEBGL_BUDGET = 8
+
+type WebglHolder = { visible: () => boolean; release: () => void }
+
+/** Oldest first; a holder moves to the end each time it is fitted. */
+const webglHolders: WebglHolder[] = []
+
+function dropWebgl(holder: WebglHolder) {
+  const index = webglHolders.indexOf(holder)
+  if (index >= 0) webglHolders.splice(index, 1)
+}
+
+function holdWebgl(holder: WebglHolder) {
+  dropWebgl(holder)
+  webglHolders.push(holder)
+  while (webglHolders.length > WEBGL_BUDGET) {
+    const idle = webglHolders.find((other) => !other.visible())
+    if (!idle) return
+    idle.release()
+  }
+}
+
+/**
  * An xterm.js terminal wired to a PTY over a WebSocket.
  *
  * Binary frames carry raw terminal bytes in both directions; JSON frames carry
@@ -391,7 +422,7 @@ export function XtermPane({
   // tearing down the PTY session behind it.
   const termRef = useRef<Terminal | null>(null)
   const searchRef = useRef<SearchAddon | null>(null)
-  const fitRef = useRef<{ fit: () => void } | null>(null)
+  const fitRef = useRef<{ fit: () => void; resync: () => void } | null>(null)
   const socketRef = useRef<WebSocket | null>(null)
   // The upload path uses this exact input writer after its HTTP request
   // finishes. It is assigned by the live socket effect so a returned path
@@ -559,50 +590,77 @@ export function XtermPane({
       // glyphs. That leaves box-drawing and block-element characters to font
       // fallback, where their edges do not fill the cell and TUI borders/logo
       // art develop visible gaps. The matching WebGL addon renders those
-      // structural characters itself. Keep DOM as a context-loss fallback and
-      // as an explicit diagnostic A/B override.
+      // structural characters itself. Keep DOM as a context-loss fallback, for
+      // hidden panes past WEBGL_BUDGET, and as an explicit diagnostic A/B
+      // override.
+      //
+      // The two renderers measure cells differently — WebGL floors the width
+      // to whole device pixels, DOM keeps the fraction — so the same grid is
+      // wider under DOM. Every switch is therefore followed by a fit before the
+      // pane is seen: a grid that no longer matched the box ran off its right
+      // edge, and the box had not changed, so no observer ever fitted it.
       host.dataset.terminalRenderer = "dom"
-      if (window.localStorage.getItem("jd.terminal.renderer") !== "dom") {
-        try {
-          const webgl = new WebglAddon()
-          disposables.push(
-            webgl.onContextLoss(() => {
-              webgl.dispose()
-              host.dataset.terminalRenderer = "dom"
-              window.requestAnimationFrame(() => {
-                if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
-              })
-            }),
-          )
-          term.loadAddon(webgl)
-          host.dataset.terminalRenderer = "webgl"
-
-          // Alternate-buffer switches replace the complete rendered surface.
-          // Force one coherent frame so an atlas update cannot leave rows from
-          // the former buffer stale or blank.
-          disposables.push(
-            term.buffer.onBufferChange(() => {
-              window.requestAnimationFrame(() => {
-                if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
-              })
-            }),
-          )
-        } catch {
-          // Software-only browsers remain usable through xterm's DOM renderer.
-          host.dataset.terminalRenderer = "dom"
+      const preferDom = window.localStorage.getItem("jd.terminal.renderer") === "dom"
+      let webgl: IDisposable | undefined
+      // A context that died and was not restored stays dead for this
+      // terminal; claiming a new one on every fit would trade a working DOM
+      // renderer for a blank pane every three seconds.
+      let webglLost = preferDom
+      const holder: WebglHolder = {
+        visible: () => visibleRef.current,
+        release: () => releaseWebgl(),
+      }
+      const releaseWebgl = () => {
+        dropWebgl(holder)
+        webgl?.dispose()
+        webgl = undefined
+        host.dataset.terminalRenderer = "dom"
+      }
+      const claimWebgl = () => {
+        if (webglLost) return
+        if (!webgl) {
+          try {
+            const addon = new WebglAddon()
+            addon.onContextLoss(() => {
+              webglLost = true
+              releaseWebgl()
+              window.requestAnimationFrame(() => refreshTerminal())
+            })
+            term.loadAddon(addon)
+            webgl = addon
+            host.dataset.terminalRenderer = "webgl"
+          } catch {
+            // Software-only browsers remain usable through xterm's DOM renderer.
+            webglLost = true
+            return
+          }
         }
+        holdWebgl(holder)
+      }
+      if (!preferDom) {
+        // Alternate-buffer switches replace the complete rendered surface.
+        // Force one coherent frame so an atlas update cannot leave rows from
+        // the former buffer stale or blank.
+        disposables.push(
+          term.buffer.onBufferChange(() => {
+            window.requestAnimationFrame(() => {
+              if (!disposed && term.rows > 0) term.refresh(0, term.rows - 1)
+            })
+          }),
+        )
       }
 
       const fitTerminal = () => {
         if (!visibleRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
+        claimWebgl()
         fit.fit()
         return term.rows > 0 && term.cols > 0
       }
       fitTerminal()
 
-      // The size the server was last told. Both xterm's resize event and the
-      // host observer converge here, so a fit cannot emit the same control
-      // message twice.
+      // The size this tab last told the server. Both xterm's resize event and
+      // the host observer converge here, so a fit cannot emit the same control
+      // message twice. It is not the PTY's size — see `resync` below.
       let sent = { rows: 0, cols: 0 }
       const terminalDebug = window.localStorage.getItem("jd.terminal.debug") === "1"
       const syncPtySize = (socket: WebSocket) => {
@@ -708,7 +766,6 @@ export function XtermPane({
         // its retained screen even when the PTY needs no resize notification.
         if (term.rows > 0) term.refresh(0, term.rows - 1)
       }
-      fitRef.current = { fit: refreshTerminal }
 
       socket.onopen = () => {
         if (disposed) return
@@ -966,13 +1023,23 @@ export function XtermPane({
           refreshTerminal()
         })
       }
+      // Another browser attached to the same window resizes the PTY too, and
+      // coming back to this one — its tab, its browser window or its terminal
+      // window — changed nothing `sent` could see, so the size was never said
+      // again and the program kept drawing for the other screen. Each return
+      // forgets what was sent; the server ignores a size the PTY already has.
+      const resync = () => {
+        sent = { rows: 0, cols: 0 }
+        scheduleResize()
+      }
+      fitRef.current = { fit: refreshTerminal, resync }
       const observer = new ResizeObserver(scheduleResize)
       observer.observe(host)
       const onVisibility = () => {
-        if (document.visibilityState === "visible") scheduleResize()
+        if (document.visibilityState === "visible") resync()
       }
       document.addEventListener("visibilitychange", onVisibility)
-      window.addEventListener("focus", scheduleResize)
+      window.addEventListener("focus", resync)
       void document.fonts?.ready.then(scheduleResize)
 
       cleanup = () => {
@@ -980,12 +1047,13 @@ export function XtermPane({
         observer.disconnect()
         cancelAnimationFrame(resizeFrame)
         document.removeEventListener("visibilitychange", onVisibility)
-        window.removeEventListener("focus", scheduleResize)
+        window.removeEventListener("focus", resync)
         clearTimeout(syncTimer)
         host.removeEventListener("wheel", onWheel, { capture: true })
         host.removeEventListener("mousedown", onMouseDownCapture, { capture: true })
         for (const d of disposables) d.dispose()
         socket.close()
+        dropWebgl(holder)
         term.dispose()
         termRef.current = null
         searchRef.current = null
@@ -1033,7 +1101,7 @@ export function XtermPane({
   }, [active, focusRef, terminalSessionId])
 
   useEffect(() => {
-    if (visible) fitRef.current?.fit()
+    if (visible) fitRef.current?.resync()
   }, [visible])
 
   useEffect(() => {

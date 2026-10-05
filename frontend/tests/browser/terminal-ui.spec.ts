@@ -357,6 +357,57 @@ for (const renderer of ["dom", "webgl"] as const) {
   })
 }
 
+// Another browser attached to the same window resizes the PTY as well, so
+// coming back to this one must say its size again even though nothing here
+// changed — or the program keeps drawing for the other screen.
+test("says its size again on every return, unchanged or not", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { connections, errors, strip } = await terminalFixture(page, "webgl")
+  const first = connections.get("window-a")![0]
+  await expect.poll(() => first.sizes.length).toBeGreaterThan(0)
+  const size = first.sizes.at(-1)
+
+  let said = first.sizes.length
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")))
+  await expect.poll(() => first.sizes.length).toBeGreaterThan(said)
+  expect(first.sizes.at(-1)).toEqual(size)
+
+  said = first.sizes.length
+  await strip.getByRole("button", { name: "window-b", exact: true }).click()
+  await strip.getByRole("button", { name: "window-a", exact: true }).click()
+  await expect.poll(() => first.sizes.length).toBeGreaterThan(said)
+  expect(first.sizes.at(-1)).toEqual(size)
+  expect(errors).toEqual([])
+})
+
+// WebGL floors the cell width to whole device pixels and the DOM renderer does
+// not, so the grid WebGL fitted runs off the pane under DOM. The box itself has
+// not changed, so only the fallback can fit it again.
+test("fits the pane again when the WebGL context is lost", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { errors } = await terminalFixture(page, "webgl")
+  const host = page.locator("[data-terminal-renderer]:visible")
+  await page.evaluate(() => {
+    const visible = [...document.querySelectorAll<HTMLElement>("[data-terminal-renderer]")].find(
+      (element) => element.offsetParent !== null,
+    )
+    for (const canvas of visible?.querySelectorAll("canvas") ?? []) {
+      canvas.getContext("webgl2")?.getExtension("WEBGL_lose_context")?.loseContext()
+    }
+  })
+  // The addon waits three seconds for the browser to restore the context.
+  await expect(host).toHaveAttribute("data-terminal-renderer", "dom", { timeout: 10_000 })
+  await expect
+    .poll(() =>
+      host.evaluate((element) => {
+        const screen = element.querySelector<HTMLElement>(".xterm-screen")!
+        return screen.getBoundingClientRect().right <= element.getBoundingClientRect().right
+      }),
+    )
+    .toBe(true)
+  expect(errors).toEqual([])
+})
+
 // A tab is named after what its shell is doing and marked while something
 // runs; the rail names a session after the window it is on. And the page
 // remembers which session and window were on screen across a navigation.
