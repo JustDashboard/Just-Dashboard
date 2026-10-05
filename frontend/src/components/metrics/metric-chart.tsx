@@ -324,10 +324,12 @@ export function MetricChart({
           <YAxis
             domain={domain}
             ticks={yTicks}
-            // Wide enough for "384 MB": recharts wraps a label it measures
-            // wider than the gutter, and at 56 a three-digit figure with a
-            // unit broke onto two lines beside one that did not.
-            width={unit === "%" ? 34 : 64}
+            // Fitted to the widest label. A fixed gutter had to be wide enough
+            // for "384 MB" — recharts wraps a label wider than it — and left
+            // "48 MB" and "59" a band of nothing between the scale and the
+            // plot, so charts in one row started at different distances from
+            // their own labels.
+            width="auto"
             tickLine={false}
             axisLine={false}
             fontSize={10}
@@ -539,9 +541,16 @@ function usePlotArea(
     const host = ref.current
     if (!host) return
 
+    let observed: Element | null = null
     const measure = () => {
       const grid = host.querySelector(".recharts-cartesian-grid")
       if (!grid) return
+      // The axis gutter fits its labels, so a scale that grows a digit moves
+      // the plot without resizing the box around it.
+      if (grid !== observed) {
+        observed = grid
+        observer.observe(grid)
+      }
       const g = grid.getBoundingClientRect()
       const h = host.getBoundingClientRect()
       if (g.width === 0 || g.height === 0) return
