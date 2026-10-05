@@ -43,19 +43,24 @@ func stageRecoveredSource(ctx context.Context, recoveryRoot string, populate fun
 		return "", "", err
 	}
 	target := filepath.Join(store, strings.TrimPrefix(digest, "sha256:"))
-	if err := os.Rename(staging, target); err != nil {
-		// Concurrent captures with the same content may share the immutable
-		// artifact only after its full tree is verified.
-		actual, verifyErr := localDirectoryDigest(ctx, filepath.Join(target, "tree"))
-		if verifyErr != nil || actual != digest {
-			return "", "", err
+	err = withRecoveredSourcesLock(ctx, store, func(directory *os.Root) error {
+		if err := os.Rename(staging, target); err != nil {
+			actual, verifyErr := localDirectoryDigest(ctx, filepath.Join(target, "tree"))
+			resolved, resolveErr := filepath.EvalSymlinks(target)
+			if verifyErr != nil || actual != digest || resolveErr != nil || resolved != target {
+				return err
+			}
 		}
+		return markRecoveredSnapshotUsed(directory, filepath.Base(target))
+	})
+	if err != nil {
+		return "", "", err
 	}
 	return digest, filepath.Join(target, "tree"), nil
 }
 
 func (a *HostSourceAnalyzer) recoveredSnapshotRoot(ctx context.Context, handle string) (string, error) {
-	if !contentDigestRE.MatchString(handle) || !filepath.IsAbs(a.recoveryRoot) {
+	if !recoveredSnapshotDigest(handle) || !filepath.IsAbs(a.recoveryRoot) {
 		return "", ErrInvalidSource
 	}
 	root := filepath.Join(a.recoveryRoot, "sources", strings.TrimPrefix(handle, "sha256:"), "tree")
@@ -118,6 +123,31 @@ func (r *dockerRecovery) recoveredPrimaryService(analysis ComposeAnalysis) strin
 }
 
 func (r *dockerRecovery) attachBuildSources(ctx context.Context, recoveryRoot string) error {
+	initialInputs := map[string]bool{}
+	for name := range r.result.Environment {
+		initialInputs[name] = true
+	}
+	defer func() {
+		for name := range r.result.Environment {
+			if initialInputs[name] {
+				continue
+			}
+			bound := false
+			for _, document := range r.result.Source.ComposeFiles {
+				bound = bound || strings.Contains(document.Content, "${"+name+"}")
+			}
+			if !bound {
+				delete(r.result.Environment, name)
+			}
+		}
+		inputs := r.result.Adoption.Inputs[:0]
+		for _, input := range r.result.Adoption.Inputs {
+			if _, present := r.result.Environment[input.StorageKey]; present {
+				inputs = append(inputs, input)
+			}
+		}
+		r.result.Adoption.Inputs = inputs
+	}()
 	var model map[string]any
 	if yaml.Unmarshal([]byte(r.result.Source.ComposeFiles[0].Content), &model) != nil {
 		return ErrInvalidCompose
@@ -156,7 +186,7 @@ func (r *dockerRecovery) attachBuildSources(ctx context.Context, recoveryRoot st
 		if resolveErr == nil && filepath.IsAbs(dockerfile) {
 			dockerfile, resolveErr = filepath.Rel(resolved, dockerfile)
 		}
-		if resolveErr != nil || !safeRelativePath(dockerfile) || build["dockerfile_inline"] != nil || build["additional_contexts"] != nil || build["secrets"] != nil || build["ssh"] != nil {
+		if resolveErr != nil || !safeRelativePath(dockerfile) || !recoverableBuildDefinition(build) {
 			entry.Reason = "The original build needs unavailable, external or private inputs. Its immutable live image remains deployable."
 			r.result.Adoption.BuildSources = append(r.result.Adoption.BuildSources, entry)
 			continue
@@ -196,6 +226,27 @@ func (r *dockerRecovery) attachBuildSources(ctx context.Context, recoveryRoot st
 		}
 		target := filepath.Join(staging, filepath.FromSlash(prepared.relative))
 		exclusions := []string{}
+		linkedDataRoot := false
+		for _, captures := range r.containers {
+			for _, capture := range captures {
+				for _, mounted := range capture.Inspection.Mounts {
+					if !mounted.RW || mounted.Source == "" {
+						continue
+					}
+					relative, err := filepath.Rel(prepared.source, mounted.Source)
+					if err == nil && relative == "." {
+						linkedDataRoot = true
+					}
+					if err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, "../") {
+						exclusions = append(exclusions, relative)
+					}
+				}
+			}
+		}
+		if linkedDataRoot {
+			entry.Reason = "The build context is itself linked writable application storage. Its pinned image is retained without copying live data into a build."
+			continue
+		}
 		if relative, err := filepath.Rel(prepared.source, recoveryRoot); err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, "../") {
 			exclusions = append(exclusions, relative)
 		}
@@ -253,7 +304,16 @@ func (r *dockerRecovery) attachBuildSources(ctx context.Context, recoveryRoot st
 		return os.WriteFile(filepath.Join(tree, "compose.yml"), content, 0600)
 	})
 	if err != nil {
-		return err
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		for i := range r.result.Adoption.BuildSources {
+			if r.result.Adoption.BuildSources[i].Status == "snapshot" {
+				r.result.Adoption.BuildSources[i].Status = "image_only"
+				r.result.Adoption.BuildSources[i].Reason = "The combined build inputs could not be retained within the private snapshot limits. Its immutable live image remains deployable."
+			}
+		}
+		return nil
 	}
 	analysis.PrimaryService = r.result.Configuration.Build.PrimaryService
 	r.result.Source = DraftSourceConfig{Kind: SourceCompose, Mode: SourceModeRecoveredSnapshot, ResourceID: digest, ComposeFiles: documents}
@@ -286,6 +346,15 @@ func recoverableBuildArguments(build map[string]any) bool {
 			if containsURLCredentials(value) || browserSecretValue.MatchString(value) || containsSourceInterpolation(value) {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+func recoverableBuildDefinition(build map[string]any) bool {
+	for key := range build {
+		if key != "context" && key != "dockerfile" && key != "target" && key != "args" && !strings.HasPrefix(key, "x-") {
+			return false
 		}
 	}
 	return true

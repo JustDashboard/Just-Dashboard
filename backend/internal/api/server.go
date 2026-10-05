@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -189,6 +190,9 @@ func (s *Server) Start(ctx context.Context) error {
 		return err
 	}
 	s.modules.deployGit.Start(ctx)
+	s.modules.deployPlanning.StartRecoveredSourceCleanup(ctx, filepath.Join(s.Cfg.DataDir, "deployment-recovery"), func(err error) {
+		s.Log.Warn("deployment recovery snapshot cleanup needs attention", "error", err)
+	})
 	s.modules.previewReconciler.Start(ctx)
 	s.modules.deployDatabases.Start(ctx)
 	return nil

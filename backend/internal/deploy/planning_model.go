@@ -964,7 +964,7 @@ func (c DraftSourceConfig) Validate() error {
 		}
 	case SourceModeRecoveredSnapshot:
 		allowed = sourceFieldSet("resourceId", "composeFiles", "subdirectory")
-		if !contentDigestRE.MatchString(c.ResourceID) {
+		if !recoveredSnapshotDigest(c.ResourceID) {
 			return fmt.Errorf("%w: recovered source has no immutable snapshot handle", ErrInvalidSource)
 		}
 		if c.Kind == SourceCompose {

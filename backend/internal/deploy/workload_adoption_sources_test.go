@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
+	"github.com/docker/docker/api/types/container"
 )
 
 func TestRecoveredBuildSourceMaterializesFrozenInputsAndSeparateImageBaseline(t *testing.T) {
@@ -18,6 +19,8 @@ func TestRecoveredBuildSourceMaterializesFrozenInputsAndSeparateImageBaseline(t 
 		writeBuildFixture(t, root, name, content)
 	}
 	capture := adoptionCaptureFixture(t, "web", true)
+	writeBuildFixture(t, root, "data/state.json", `{"secret":"linked-data-private"}`)
+	capture.Inspection.Mounts = append(capture.Inspection.Mounts, container.MountPoint{Type: "bind", Source: filepath.Join(root, "data"), Destination: "/linked-data", RW: true})
 	capture.Inspection.Config.Labels = map[string]string{"com.docker.compose.project": "original", "com.docker.compose.service": "web", "com.docker.compose.container-number": "1", "com.docker.compose.project.config_files": filepath.Join(root, "compose.yml")}
 	reader := &adoptionReaderFake{captures: map[string]*dockerx.AdoptionContainer{capture.Inspection.ID: capture}, compose: []byte(`{"services":{"web":{"image":"example/web:latest","build":{"context":"` + root + `","dockerfile":"Dockerfile"}}}}`)}
 	candidate := WorkloadCandidate{Key: "stack:original", Kind: "stack", Name: "original", ResourceID: "original", SourcePath: filepath.Join(root, "compose.yml"), Total: 1, Running: 1, Services: []WorkloadService{{Name: "web", ResourceID: capture.Inspection.ID}}}
@@ -43,6 +46,9 @@ func TestRecoveredBuildSourceMaterializesFrozenInputsAndSeparateImageBaseline(t 
 	}
 	if _, err := os.Stat(filepath.Join(materialized.Root, "contexts", "web", ".env")); !os.IsNotExist(err) {
 		t.Fatal("private file copied into source")
+	}
+	if _, err := os.Stat(filepath.Join(materialized.Root, "contexts", "web", "data")); !os.IsNotExist(err) {
+		t.Fatal("linked writable data copied into build source")
 	}
 	if capture.Inspection.Config.Image != "example/web:latest" || !capture.Inspection.State.Running {
 		t.Fatal("source preparation changed live capture")

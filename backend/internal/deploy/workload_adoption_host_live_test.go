@@ -133,7 +133,7 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	}
 	native.assertLogs(t.Context())
 	settings, err := fixture.plans.EnvironmentConfiguration(t.Context(), adopted.ProjectID, adopted.EnvironmentID)
-	if err != nil || settings.Source == nil || settings.Source.Mode != SourceModeLocalDirectory || settings.Build.Method != native.buildMethod {
+	if err != nil || settings.Source == nil || settings.Source.Mode != SourceModeRecoveredSnapshot || settings.Source.ResourceID != recovered.Source.ResourceID || settings.Source.LocalPath != "" || settings.Build.Method != native.buildMethod {
 		t.Fatal("adoption did not create a regular source/build/settings plan")
 	}
 	if strings.Contains(string(mustJSON(settings)), "owned-native-private-value") {
