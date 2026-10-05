@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
+import { bytes, percent } from "../../src/lib/format"
 
 const readyPath = process.env.JD_IMPORT_NATIVE_READY
 const selectedStack = readyPath
@@ -248,31 +249,27 @@ test("imports the real selected stack without changing its containers", async ({
     })
   }
   const usage = page.locator('[data-slot="panel"]').filter({
-    has: page.getByRole("heading", { name: "Resource usage", exact: true }),
+    has: page.getByRole("heading", { name: "Usage", exact: true }),
   })
-  const cpu = usage.locator('[data-slot="stat-tile"]').filter({
-    has: page.getByText("CPU", { exact: true }),
-  })
-  const memory = usage.locator('[data-slot="stat-tile"]').filter({
-    has: page.getByText("Memory", { exact: true }),
-  })
+  await expect(usage).toBeVisible()
+  await usage.scrollIntoViewIfNeeded()
   await expect
     .poll(
       async () => {
         const reading = runtimeReading
         if (!reading?.cpuReady) return false
-        const mib = reading.memUsage / 1024 / 1024
-        const memoryValue = mib >= 1024 ? (mib / 1024).toFixed(2) : mib.toFixed(0)
         return (
-          (await cpu.locator("span.numeric.truncate").innerText()) ===
-            reading.cpuPercent.toFixed(1) &&
-          (await memory.locator("span.numeric.truncate").innerText()) === memoryValue
+          (await usage.getByText(/^CPU now:/).textContent())?.startsWith(
+            `CPU now: ${percent(reading.cpuPercent)}`,
+          ) &&
+          (await usage.getByText(/^Memory now:/).textContent())?.startsWith(
+            `Memory now: ${bytes(reading.memUsage)}`,
+          )
         )
       },
       { timeout: 30000 },
     )
     .toBe(true)
-  await expect(cpu.getByText("%", { exact: true })).toBeVisible()
   await expect(usage.getByText("Connecting", { exact: true })).not.toBeVisible()
   await expect(usage.getByText("Waiting for Docker", { exact: true })).not.toBeVisible()
   await page.screenshot({

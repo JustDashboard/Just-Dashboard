@@ -119,7 +119,10 @@ stopped, and explicitly list
 only declarations with no container under `excludedServices`. An explicitly selected `all_services`
 scope includes every declared service; historical persisted empty scopes retain `all_services` meaning. Recovery records one
 `compose_services_excluded` issue for each omitted declaration. Normal preflight turns each adoption
-issue into a stable structured finding, whose code must be acknowledged at commit. Deploy changes
+issue into a stable structured finding, whose code must be acknowledged at commit. Review
+groups repeated adoption issues and Compose operational warnings while retaining every
+service's evidence and every distinct backend acknowledgement.
+Deploy changes
 does not create the excluded services, and their original Compose definitions stay untouched. Retained dependencies, links,
 service namespaces, volumes-from or shared build contexts referring to an exclusion block recovery;
 the importer never removes those relationships to force a usable recipe. Unused resources belonging

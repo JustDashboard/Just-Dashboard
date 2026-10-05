@@ -90,6 +90,30 @@ test("captured environment groups original keys by service and separates proven 
   expect(recoveredEnvironmentSatisfied("PATH", ["alias-path"], inputs)).toBe(true)
 })
 
+test("Compose operational warning groups preserve every distinct acknowledgement and evidence", () => {
+  const warnings = [
+    {
+      code: "compose_warning_1",
+      title: "Compose configuration needs review",
+      measured: "worker has no healthcheck",
+    },
+    {
+      code: "compose_warning_2",
+      title: "Compose configuration needs review",
+      measured: "web has no healthcheck",
+    },
+    { code: "backup_missing", title: "Backup missing", measured: "Storage needs coverage" },
+  ]
+  const groups = groupImportWarnings(warnings)
+  expect(groups).toHaveLength(2)
+  expect(groups[0].codes).toEqual(["compose_warning_1", "compose_warning_2"])
+  expect(groups[0].details.map((finding) => finding.measured)).toEqual([
+    "worker has no healthcheck",
+    "web has no healthcheck",
+  ])
+  expect(groups[1].codes).toEqual(["backup_missing"])
+})
+
 test("one grouped warning still requires every distinct server acknowledgement", () => {
   const warnings = [
     {

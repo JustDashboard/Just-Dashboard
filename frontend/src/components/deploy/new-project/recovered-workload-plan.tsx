@@ -58,8 +58,8 @@ export function RecoveredWorkloadPlan({ adoption }: { adoption: WorkloadAdoption
           </FormFacts>
           <FormNote>{adoption.startupHandoff.description}</FormNote>
           <FormNote>
-            Deploy changes retires only this application's verified startup entries. Failed cutover
-            and baseline rollback restore them before restarting the original application.
+            Deploy changes retires only this application&apos;s verified startup entries. Failed
+            cutover and baseline rollback restore them before restarting the original application.
           </FormNote>
         </FormSection>
       )}

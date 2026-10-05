@@ -279,7 +279,11 @@ export function recoveredEnvironmentGroups(inputs: readonly RecoveredInput[]) {
 export function groupImportWarnings(findings: readonly DeploymentPreflightFinding[]) {
   const groups = new Map<string, DeploymentPreflightFinding[]>()
   for (const finding of findings) {
-    const key = finding.issueCode ? `adoption:${finding.issueCode}` : finding.code
+    const key = finding.issueCode
+      ? `adoption:${finding.issueCode}`
+      : /^compose_warning_\d+$/.test(finding.code)
+        ? "compose:operational"
+        : finding.code
     groups.set(key, [...(groups.get(key) ?? []), finding])
   }
   return [...groups].map(([key, entries]) => ({
