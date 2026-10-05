@@ -337,9 +337,11 @@ captured service/replica identity. Native services expose their manager, current
 PID and native log source rather than fabricated Docker IDs. Container console requires an actual
 Docker runtime; PM2 files and systemd journal supply native output before migration. Git-only features
 require a real Git source, and Docker-specific metrics/tools require a Docker runtime.
-Recorded native observation allows up to 30 seconds for installed startup inventory and captured
-source/executable verification, while respecting a shorter caller deadline. Ordinary Docker listing
-keeps its five-second bound; extending the native read budget does not skip any authority checks.
+Recorded native observation and dependency preflight for managed PM2/systemd runtime reservations
+allow up to 30 seconds for installed startup inventory and captured source/executable verification,
+while respecting a shorter caller deadline. Ordinary dependency preflight keeps its ten-second
+bound and ordinary Docker listing keeps its five-second bound. Extending the native read budget
+does not skip any authority checks.
 
 Recovery captures the application runtime. Existing external reverse-proxy routes, certificates,
 schedulers and integrations retain their original ownership. Review their addresses, credentials and

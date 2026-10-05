@@ -383,30 +383,43 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		}
 	}
 	if len(request.Dependencies) > 0 && o.resources != nil {
-		dependencyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		external := []PlannedDependency{}
+		groups := [2][]PlannedDependency{}
 		for _, dependency := range request.Dependencies {
 			if dependency.ResourceKind != existingIngressDependency {
-				external = append(external, dependency)
+				index := 0
+				if nativeReservationDependency(dependency) {
+					index = 1
+				}
+				groups[index] = append(groups[index], dependency)
 			}
 		}
-		observed, err := o.resources.ObserveDependencies(dependencyCtx, external)
-		if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
-			for index := range observed {
-				if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
-					continue
-				}
-				// Unknown is not a refusal: a server that cannot be asked
-				// leaves the finding to the first migration.
-				if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
-					observed[index].Extensions = available
+		verified := []DependencyObservation{}
+		for _, dependencies := range groups {
+			if len(dependencies) == 0 {
+				continue
+			}
+			dependencyCtx, cancel := context.WithTimeout(ctx, preflightDependencyTimeout(dependencies))
+			observed, err := o.resources.ObserveDependencies(dependencyCtx, dependencies)
+			if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
+				for index := range observed {
+					if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
+						continue
+					}
+					// Unknown is not a refusal: a server that cannot be asked
+					// leaves the finding to the first migration.
+					if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
+						observed[index].Extensions = available
+					}
 				}
 			}
+			cancel()
+			if err != nil {
+				verified = nil
+				break
+			}
+			verified = append(verified, observed...)
 		}
-		cancel()
-		if err == nil {
-			observation.Dependencies = observed
-		}
+		observation.Dependencies = verified
 	}
 	observation.AvailableMemory, observation.AvailableSwap = hostMemory()
 	observation.CPUCount = runtime.NumCPU()
@@ -441,6 +454,22 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		}
 	}
 	return observation, nil
+}
+
+func preflightDependencyTimeout(dependencies []PlannedDependency) time.Duration {
+	for _, dependency := range dependencies {
+		if nativeReservationDependency(dependency) {
+			// These reservations recapture installed startup authority and the
+			// original source, with the same bound as recorded native observation.
+			return 30 * time.Second
+		}
+	}
+	return 10 * time.Second
+}
+
+func nativeReservationDependency(dependency PlannedDependency) bool {
+	return dependency.Kind == "runtime" && dependency.Ownership == OwnershipManaged &&
+		(dependency.ResourceKind == "pm2_process" || dependency.ResourceKind == "systemd_unit")
 }
 
 func (o *HostPreflightObserver) existingDeploymentPorts(
