@@ -152,6 +152,7 @@ export function BuildConsole({
   steps,
   active,
   outcome,
+  operation,
   connected,
   startedAt,
   runNumber,
@@ -173,6 +174,8 @@ export function BuildConsole({
   active: boolean
   /** How the run ended, for the console's own verdict once it stops. */
   outcome: DeploymentRunState
+  /** The run's operation, which names a step a Stop or Restart takes against the live release. */
+  operation?: string
   connected: boolean
   /** When the run was claimed: the zero of the time column. */
   startedAt: string
@@ -297,7 +300,7 @@ export function BuildConsole({
         {steps.map((step) => (
           <SelectItem key={step.id} value={String(step.id)}>
             <StepMark state={step.state} />
-            {stepName(step.key)}
+            {stepName(step.key, operation)}
           </SelectItem>
         ))}
       </SelectContent>
@@ -400,6 +403,7 @@ export function BuildConsole({
             perStep={perStep}
             total={rows.length}
             now={now}
+            operation={operation}
             selected={selectedStep}
             onSelect={onSelectStep}
           />
@@ -434,10 +438,15 @@ export function BuildConsole({
                 // step's rule pushes it away.
                 <div key={`${generation}:${group.key}`} className="relative">
                   {group.step && (
-                    <StepRule step={group.step} lines={perStep.get(group.step.id) ?? 0} now={now} />
+                    <StepRule
+                      step={group.step}
+                      operation={operation}
+                      lines={perStep.get(group.step.id) ?? 0}
+                      now={now}
+                    />
                   )}
                   <ol
-                    aria-label={group.step ? stepName(group.step.key) : "Engine"}
+                    aria-label={group.step ? stepName(group.step.key, operation) : "Engine"}
                     // A command opens with a rule of its own; directly under
                     // the step's rule that is two lines for one edge.
                     className="[&>li:first-child]:mt-0 [&>li:first-child]:border-t-0"
@@ -481,7 +490,7 @@ export function BuildConsole({
             <div className="flex h-full min-h-48 items-center justify-center px-6 text-center text-body text-muted-foreground">
               {rows.length
                 ? selectedStep && !needle && !errorsOnly
-                  ? `${stepName(stepById.get(selectedStep)?.key ?? "this_stage")} wrote nothing to the build log.`
+                  ? `${stepName(stepById.get(selectedStep)?.key ?? "this_stage", operation)} wrote nothing to the build log.`
                   : "No lines match. Try another search or stage."
                 : active
                   ? "Waiting for build output. New lines appear here automatically."
@@ -520,7 +529,17 @@ export function BuildConsole({
  * rule is for the eye; the transcript's lines stay the only items in it, and
  * copying takes only them.
  */
-function StepRule({ step, lines, now }: { step: DeploymentStep; lines: number; now: number }) {
+function StepRule({
+  step,
+  operation,
+  lines,
+  now,
+}: {
+  step: DeploymentStep
+  operation?: string
+  lines: number
+  now: number
+}) {
   const seconds = stepSeconds(step, now)
   return (
     <div
@@ -534,7 +553,7 @@ function StepRule({ step, lines, now }: { step: DeploymentStep; lines: number; n
           (step.state === "failed" || step.state === "blocked") && "text-destructive",
         )}
       >
-        {stepName(step.key)}
+        {stepName(step.key, operation)}
       </span>
       {seconds !== undefined && (
         <span className="numeric shrink-0 text-hint text-muted-foreground">
@@ -562,6 +581,7 @@ function StageRail({
   perStep,
   total,
   now,
+  operation,
   selected,
   onSelect,
 }: {
@@ -569,6 +589,7 @@ function StageRail({
   perStep: Map<number, number>
   total: number
   now: number
+  operation?: string
   selected?: number
   onSelect: (id: number | undefined) => void
 }) {
@@ -621,7 +642,7 @@ function StageRail({
                 (step.state === "failed" || step.state === "blocked") && "text-destructive",
               )}
             >
-              {stepName(step.key)}
+              {stepName(step.key, operation)}
             </span>
             {seconds !== undefined && (
               <span className="numeric shrink-0 text-hint text-muted-foreground">

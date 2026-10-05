@@ -4,10 +4,13 @@ import {
   groupedState,
   projectProduct,
   runActor,
+  runLabel,
   runRevision,
   runTriggerLine,
   sourceLine,
   sourceProduct,
+  stageName,
+  stepName,
   stepStateLabel,
 } from "./vocabulary"
 
@@ -233,5 +236,24 @@ describe("sourceLine", () => {
       sourceRevision: "sha256:0123456789abcdef0123",
     })
     expect(sourceLine(image).primary).toBe("ghcr.io/acme/api:1")
+  })
+})
+
+describe("a Stop run", () => {
+  test("is stopped when it succeeds, not ready", () => {
+    expect(runLabel("succeeded", "stop")).toBe("Stopped")
+    expect(runLabel("running", "stop")).toBe("Building")
+    expect(runLabel("succeeded", "deploy")).toBe("Ready")
+    expect(runLabel("succeeded")).toBe("Ready")
+  })
+
+  test("names the step it takes against the live release, and its stage", () => {
+    expect(stepName("start_candidate", "stop")).toBe("Stop live release")
+    expect(stepName("start_candidate", "start")).toBe("Start live release")
+    expect(stepName("start_candidate", "restart")).toBe("Restart live release")
+    expect(stepName("start_candidate", "deploy")).toBe("Start new release")
+    expect(stepName("record_release", "stop")).toBe("Record release")
+    expect(stageName("Start", "stop")).toBe("Stop")
+    expect(stageName("Start", "restart")).toBe("Start")
   })
 })

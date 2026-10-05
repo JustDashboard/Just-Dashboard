@@ -23,6 +23,7 @@ import {
   runFailed,
   runRef,
   runRevision,
+  runStopped,
   runSubject,
   runTitle,
   runTriggerLine,
@@ -96,7 +97,13 @@ export function RunRow({
   // or, for a cause the output proved, what.
   const failure =
     runFailed(run.state) && run.terminalCode ? failureLabel(run.terminalCode) : undefined
-  const state = live ? <Status tone="running" label="Live" /> : <RunStatus state={run.state} />
+  // A Stop's release is still the live one, but it is not serving.
+  const state =
+    live && !runStopped(run) ? (
+      <Status tone="running" label="Live" />
+    ) : (
+      <RunStatus state={run.state} operation={run.operation} />
+    )
   const stage = active && run.currentStep && (
     <span className="flex items-center gap-2">
       <MiniReleasePath currentStep={run.currentStep.key} currentStatus={run.currentStep.state} />
