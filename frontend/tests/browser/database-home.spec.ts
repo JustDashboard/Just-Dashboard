@@ -734,8 +734,12 @@ test("what needs attention leads to the page that acts on it", async ({ page }) 
   await block(page, "Needs attention")
     .getByRole("button", { name: "Review the fix in Query" })
     .click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  await expect.poll(() => new URL(page.url()).searchParams.get("sql")).toBe(ADVISOR.findings[1].sql)
+  // Query consumes the handoff address once the statement is ready for review.
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
+  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
+    ADVISOR.findings[1].sql!,
+  )
+  await expect(page.getByText("Nothing has been run in this tab", { exact: true })).toBeVisible()
 })
 
 test("an advisor link that leaves this database is not followed", async ({ page }) => {
