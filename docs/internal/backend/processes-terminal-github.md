@@ -360,7 +360,12 @@ applies that size: `TIOCSWINSZ` may produce an application redraw synchronously,
 it would lose the first bytes of the only screen a new browser needs. Every later `ResizeObserver` fit
 sends only a changed cell size. Reconnect uses `SynchronizeSize` to reapply the size even when the cached
 fields agree; ordinary resize frames are de-duplicated. The recorded size changes only after `pty.Setsize`
-succeeds. Terminal capability variables replace inherited entries rather than being appended — duplicate
+succeeds. A reattach also has to make the program repaint, because what the browser was just sent is raw
+history rather than a screen. The kernel signals `SIGWINCH` only for a size that differs, Node (under Claude
+Code) emits `resize` only for a size unlike the last it read, and ratatui (Codex) redraws only changed cells
+for an unchanged area, so when the kernel already has the requested size `SynchronizeSize` sets it one
+column narrower and restores it after `repaintHold` (120 ms) — unless a resize replaced the size meanwhile.
+The program sees two real size changes and repaints after the replay. Terminal capability variables replace inherited entries rather than being appended — duplicate
 names are legal in `execve`, and appending could leave an inherited `TERM=dumb` as the value libc returns.
 
 Legacy tmux compatibility tests use a private `TMUX_TMPDIR` and clear inherited `TMUX`. Socket-directory

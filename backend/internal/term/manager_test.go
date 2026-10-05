@@ -161,6 +161,63 @@ func TestResizeUpdatesKernelAndReportedSize(t *testing.T) {
 	}
 }
 
+// A reattach at the size the PTY already has must still reach the program as
+// a size change, or it never repaints over the replayed history.
+func TestSynchronizeSizeRepaintsAnUnchangedSize(t *testing.T) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ptmx.Close()
+	defer tty.Close()
+	sess := &Session{pty: ptmx}
+	if err := sess.SynchronizeSize(40, 120); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := sess.SynchronizeSize(40, 120); err != nil {
+		t.Fatal(err)
+	}
+	if winsize, _ := pty.GetsizeFull(ptmx); winsize.Rows != 40 || winsize.Cols != 119 {
+		t.Fatalf("kernel PTY size during repaint = %dx%d, want 40x119", winsize.Rows, winsize.Cols)
+	}
+	if rows, cols := sess.Size(); rows != 40 || cols != 120 {
+		t.Fatalf("session size during repaint = %dx%d, want 40x120", rows, cols)
+	}
+	waitForKernelSize(t, ptmx, 40, 120)
+
+	// A browser resizing during the hold owns the size; the repaint must not
+	// put the old one back over it.
+	if err := sess.SynchronizeSize(40, 120); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sess.Resize(30, 90); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * repaintHold)
+	if winsize, _ := pty.GetsizeFull(ptmx); winsize.Rows != 30 || winsize.Cols != 90 {
+		t.Fatalf("kernel PTY size after a resize during repaint = %dx%d, want 30x90", winsize.Rows, winsize.Cols)
+	}
+}
+
+func waitForKernelSize(t *testing.T, ptmx *os.File, rows, cols uint16) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		winsize, err := pty.GetsizeFull(ptmx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if winsize.Rows == rows && winsize.Cols == cols {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("kernel PTY size = %dx%d, want %dx%d", winsize.Rows, winsize.Cols, rows, cols)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestTerminalEnvReplacesInheritedCapabilities(t *testing.T) {
 	got := terminalEnv([]string{
 		"PATH=/usr/bin", "TERM=dumb", "COLORTERM=", "JD_SESSION=old", "LANG=C.UTF-8",

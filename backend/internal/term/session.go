@@ -231,9 +231,22 @@ func (s *Session) Resize(rows, cols uint16) (changed bool, err error) {
 	return true, nil
 }
 
-// SynchronizeSize unconditionally applies the browser's authoritative size.
+// repaintHold is how long a reattach keeps the PTY one column narrower: long
+// enough for a program that is busy drawing to read the size in between.
+const repaintHold = 120 * time.Millisecond
+
+// SynchronizeSize unconditionally applies the browser's authoritative size,
+// and makes the program draw its screen again even when the size is unchanged.
 // Resize can skip a duplicate during a drag, but reconnect is a boundary at
 // which the cached fields must not be trusted more than the kernel PTY.
+//
+// A reattaching browser has just been sent raw history, not a screen, so what
+// it shows is right only once the program repaints. A size change is the one
+// repaint request every program honours, but the kernel signals SIGWINCH only
+// when the size differs, Node (under Claude Code) emits its resize event only
+// for a size unlike the last it read, and ratatui (Codex) writes only the cells
+// that changed unless the area did. So the size the PTY already has is reached
+// by way of one column narrower, held for repaintHold.
 func (s *Session) SynchronizeSize(rows, cols uint16) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -243,11 +256,31 @@ func (s *Session) SynchronizeSize(rows, cols uint16) error {
 	if rows == 0 || cols == 0 {
 		return nil
 	}
-	if err := ptyhold.SetSize(s.pty, rows, cols); err != nil {
+	kernelRows, kernelCols, err := ptyhold.Size(s.pty)
+	if err != nil {
+		return err
+	}
+	if kernelRows == rows && kernelCols == cols && cols > 1 {
+		if err := ptyhold.SetSize(s.pty, rows, cols-1); err != nil {
+			return err
+		}
+		time.AfterFunc(repaintHold, func() { s.restoreSize(rows, cols) })
+	} else if err := ptyhold.SetSize(s.pty, rows, cols); err != nil {
 		return err
 	}
 	s.Rows, s.Cols = rows, cols
 	return nil
+}
+
+// restoreSize ends SynchronizeSize's repaint, unless a resize has already
+// replaced the size it was returning to.
+func (s *Session) restoreSize(rows, cols uint16) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.Rows != rows || s.Cols != cols {
+		return
+	}
+	_ = ptyhold.SetSize(s.pty, rows, cols)
 }
 
 // maxPending bounds how far behind one attached browser may fall before it is
