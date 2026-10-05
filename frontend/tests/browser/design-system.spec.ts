@@ -130,6 +130,7 @@ const SURFACES = [
 const PROJECT_SURFACES = [
   "/deploy",
   "/deploy?view=archived",
+  "/deploy/7/runtime",
   "/deploy/7/settings/general",
   "/deploy/7/settings/build",
   "/deploy/7/settings/runtime",

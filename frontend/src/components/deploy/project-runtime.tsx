@@ -63,6 +63,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { TextShimmer } from "@/components/ui/text-shimmer"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   ContainerIdentity,
   CpuReading,
@@ -84,10 +85,13 @@ import { ServiceFailure } from "@/components/deploy/runtime-failure"
 import {
   isImageDigest,
   mountTargetProduct,
+  publicServices,
   publishedPorts,
+  releaseEvents,
   runtimeContainer,
   wantsFailureReading,
 } from "@/components/deploy/runtime-model"
+import { RuntimeMap, type MapService, type MapStore } from "@/components/deploy/runtime-map"
 import { RuntimePorts } from "@/components/deploy/runtime-ports"
 import { serviceProduct, volumeProduct } from "@/components/deploy/service-product"
 import { RuntimeUsage } from "@/components/deploy/runtime-usage"
@@ -195,10 +199,13 @@ export function ProjectRuntime() {
     seenIds.current = ids
     refreshContainers()
   }, [ids, refreshContainers])
+  // Only this release's running containers: the endpoint inspects and reads
+  // every container it is asked about, and the host may run fifty.
+  const runningIds = running.map((service) => service.containerId).join(",")
   const stats = usePoll(
-    (signal) => get<ContainerStats[]>("/docker/containers/stats", undefined, signal),
+    (signal) => get<ContainerStats[]>("/docker/containers/stats", { ids: runningIds }, signal),
     10_000,
-    [],
+    [runningIds],
     { enabled: running.length > 0 },
   )
   const trends = usePoll(
@@ -285,13 +292,129 @@ export function ProjectRuntime() {
   const liveProduct = live ? product(live.image ?? containerFor(live.containerId)?.image) : "docker"
   const activeRun = deployment.activeRun
   const polledStat = (id: string) => stats.data?.find((one) => one.id === id)
-  const selectedProduct = selected
-    ? product(selected.image ?? containerFor(selected.containerId)?.image)
-    : undefined
+  // The selected service's figure is the socket's, every other one the poll's.
+  // A frame kept from a service that has since stopped, or from the one
+  // selected before, is not this card's figure.
+  const statFor = (id: string) =>
+    (id === selected?.containerId && id === liveStat?.containerId ? liveStat.stats : undefined) ??
+    polledStat(id)
   const detailed = services.find((service) => service.containerId === detailsId)
+  const productOf = (service: DeploymentRuntimeService) =>
+    product(service.image ?? containerFor(service.containerId)?.image)
+
+  const runs = project.runs
+  const environmentId = project.environmentId
+  const events = useMemo(
+    () =>
+      releaseEvents(
+        releases,
+        runs.filter((run) => run.environmentId === environmentId),
+      ),
+    [releases, runs, environmentId],
+  )
+
+  // Each mount once, with the container that keeps it and the product it is
+  // drawn as — read by the storage list and the map alike.
+  const mounts = (storage?.mounts ?? []).map((mount) => {
+    const volume =
+      mount.kind === "volume" ? volumes.data?.find((one) => one.name === mount.source) : undefined
+    // The container that keeps its data in the volume, when Docker says which;
+    // the live service otherwise.
+    const keeper = services.find((service) =>
+      volume?.usedBy.some((user) => user.id === service.containerId),
+    )
+    // Whoever keeps the data names the volume; failing that, the directory it
+    // is mounted at does when only one program keeps its data there, and the
+    // live service is the last guess. Docker's whale says nothing the volume's
+    // glyph does not, so it never names one.
+    const keeperImage =
+      keeper?.image ?? containerFor(keeper?.containerId ?? volume?.usedBy[0]?.id ?? "")?.image
+    const keeperProduct =
+      (keeperImage
+        ? volumeProduct(keeperImage, deployment.sourceKind, project.product)
+        : undefined) ??
+      mountTargetProduct(mount.target) ??
+      (liveProduct === "docker" ? undefined : liveProduct)
+    return { mount, size: volume?.size, keeper, product: keeperProduct }
+  })
+
+  // The map's three lanes. The live release's containers, or every container
+  // while none of them is live; the data the release declares, once the
+  // owners have answered.
+  const mapped = services.some((service) => service.liveRelease)
+    ? services.filter((service) => service.liveRelease)
+    : services
+  const reached = new Set(
+    publicServices(
+      mapped.map((service) => ({ ...service, liveRelease: true })),
+      (service) => publishedPorts(containerFor(service.containerId)?.exposure).length > 0,
+      (service) => Object.hasOwn(DATABASE_ENGINE_LABELS, productOf(service)),
+    ).map((service) => service.containerId),
+  )
+  const mapServices: MapService[] = mapped.map((service) => ({
+    service,
+    product: productOf(service),
+    stat: statFor(service.containerId),
+    release: releaseById.get(service.releaseId)?.number,
+    reached: reached.has(service.containerId),
+  }))
+  const storageRead = storage?.status === "available"
+  const dependenciesRead = dependencies?.status === "available"
+  const mapStores: MapStore[] | undefined =
+    loading || (!storageRead && !dependenciesRead)
+      ? undefined
+      : [
+          ...(storageRead ? mounts : []).map(
+            ({ mount, size, keeper, product: keeperProduct }): MapStore => ({
+              key: `${mount.source}:${mount.target}`,
+              kind: mount.kind === "bind" ? "bind" : "volume",
+              eyebrow: mount.kind === "bind" ? "Folder on this server" : "Volume",
+              title: mount.source,
+              detail: `at ${mount.target}${size ? ` · ${bytes(size)}` : ""}`,
+              product: mount.kind === "bind" ? undefined : keeperProduct,
+              ownerId: keeper?.containerId,
+              status: MOUNT_STATUS[mount.status],
+            }),
+          ),
+          ...(dependenciesRead ? databaseItems : []).map((item): MapStore => {
+            const link = links.data?.find((one) => String(one.connectionId) === item.resourceId)
+            const connection = connections.data?.find((one) => String(one.id) === item.resourceId)
+            const driver = link?.driver ?? connection?.driver
+            return {
+              key: `db:${item.resourceId}`,
+              kind: "database",
+              eyebrow: (driver && DATABASE_ENGINE_LABELS[driver]) ?? "Database",
+              title: link?.name ?? connection?.name ?? item.status ?? `Database ${item.resourceId}`,
+              detail: link?.hostname,
+              product: driver,
+              status: link
+                ? LINK_STATUS[link.status]
+                : item.available
+                  ? { label: "Available", tone: "running" }
+                  : { label: "Unavailable", tone: "warning" },
+            }
+          }),
+        ]
 
   return (
     <div className="space-y-6">
+      {available && services.length > 0 && (
+        <RuntimeMap
+          services={mapServices}
+          domains={loading || domains?.status !== "available" ? undefined : domains.domains}
+          domainsReason={
+            loading
+              ? undefined
+              : domains?.status !== "available"
+                ? (domains?.reason ?? "Proxy evidence could not be read.")
+                : undefined
+          }
+          stores={mapStores}
+          storesReason={
+            loading || mapStores ? undefined : "The storage and database owners could not be read."
+          }
+        />
+      )}
       <Panel plain>
         <PanelHeader
           title="Services"
@@ -326,18 +449,13 @@ export function ProjectRuntime() {
             <ChoiceList aria-label="Runtime services">
               {services.map((service, index) => {
                 const container = containerFor(service.containerId)
-                const streamed =
-                  service.containerId === selected?.containerId &&
-                  liveStat?.containerId === service.containerId
-                    ? liveStat.stats
-                    : undefined
                 return (
                   <ServiceCard
                     key={service.containerId}
                     index={index}
                     service={service}
                     container={container}
-                    stat={streamed ?? polledStat(service.containerId)}
+                    stat={statFor(service.containerId)}
                     trend={
                       container && trends.data?.find((one) => one.name === container.name)?.cpu
                     }
@@ -371,38 +489,18 @@ export function ProjectRuntime() {
           key={selected.containerId}
           containerId={selected.containerId}
           name={selected.name || selected.containerId}
-          product={selectedProduct === "docker" ? undefined : selectedProduct}
           initial={polledStat(selected.containerId)}
+          events={events}
           onStats={(frame) => setLiveStat({ containerId: selected.containerId, stats: frame })}
           picker={
             running.length > 1 && (
-              // Its own line on a phone, where a fixed width beside the title
-              // would push the title off the start of the header.
-              <div className="w-full sm:w-56">
-                <Select value={selected.containerId} onValueChange={setPicked}>
-                  <SelectTrigger size="sm" className="w-full" aria-label="Runtime usage service">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {services.map((service) => {
-                      const number = releaseById.get(service.releaseId)?.number
-                      return (
-                        <SelectItem
-                          key={service.containerId}
-                          value={service.containerId}
-                          disabled={service.state !== "running"}
-                          hint={number !== undefined ? `#${number}` : undefined}
-                        >
-                          <ProductGlyph
-                            id={product(service.image ?? containerFor(service.containerId)?.image)}
-                          />
-                          <span className="truncate">{service.service || service.name}</span>
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
+              <ServicePicker
+                services={services}
+                selected={selected.containerId}
+                onSelect={setPicked}
+                productOf={productOf}
+                releaseOf={(service) => releaseById.get(service.releaseId)?.number}
+              />
             )
           }
         />
@@ -466,40 +564,15 @@ export function ProjectRuntime() {
               empty={storage?.mounts.length === 0 && "This release declares no persistent storage."}
             >
               <ChoiceList aria-label="Persistent storage">
-                {storage?.mounts.map((mount) => {
-                  const volume =
-                    mount.kind === "volume"
-                      ? volumes.data?.find((one) => one.name === mount.source)
-                      : undefined
-                  // The container that keeps its data in the volume, when
-                  // Docker says which; the live service otherwise.
-                  const keeper = services.find((service) =>
-                    volume?.usedBy.some((user) => user.id === service.containerId),
-                  )
-                  // Whoever keeps the data names the volume; failing that, the
-                  // directory it is mounted at does when only one program
-                  // keeps its data there, and the live service is the last
-                  // guess. Docker's whale says nothing the volume's glyph
-                  // does not, so it never names one.
-                  const keeperImage =
-                    keeper?.image ??
-                    containerFor(keeper?.containerId ?? volume?.usedBy[0]?.id ?? "")?.image
-                  const keeperProduct =
-                    (keeperImage
-                      ? volumeProduct(keeperImage, deployment.sourceKind, project.product)
-                      : undefined) ??
-                    mountTargetProduct(mount.target) ??
-                    (liveProduct === "docker" ? undefined : liveProduct)
-                  return (
-                    <MountCard
-                      key={`${mount.source}:${mount.target}`}
-                      mount={mount}
-                      product={keeperProduct}
-                      size={volume?.size}
-                      wide={roomy}
-                    />
-                  )
-                })}
+                {mounts.map(({ mount, size, product: keeperProduct }) => (
+                  <MountCard
+                    key={`${mount.source}:${mount.target}`}
+                    mount={mount}
+                    product={keeperProduct}
+                    size={size}
+                    wide={roomy}
+                  />
+                ))}
               </ChoiceList>
             </EvidenceBody>
             <Silence subjects={["storage"]} silences={silences} />
@@ -595,6 +668,87 @@ export function ProjectRuntime() {
         product={product(detailed?.image ?? containerFor(detailed?.containerId ?? "")?.image)}
         onClose={() => setDetailsId(undefined)}
       />
+    </div>
+  )
+}
+
+/**
+ * Which service the usage charts draw: each one as its product and its name,
+ * side by side while they fit — four at most — and a select past that, where
+ * a row of buttons would wrap under the title. A service that is not running
+ * has no socket to read, so it is shown and cannot be picked.
+ */
+function ServicePicker({
+  services,
+  selected,
+  onSelect,
+  productOf,
+  releaseOf,
+}: {
+  services: DeploymentRuntimeService[]
+  selected: string
+  onSelect: (containerId: string) => void
+  productOf: (service: DeploymentRuntimeService) => string
+  releaseOf: (service: DeploymentRuntimeService) => number | undefined
+}) {
+  if (services.length <= 4)
+    return (
+      <ToggleGroup
+        type="single"
+        value={selected}
+        // Radix reports "" when the pressed item is pressed again; the chart
+        // keeps its service rather than drawing nobody's.
+        onValueChange={(next) => next && onSelect(next)}
+        variant="outline"
+        size="sm"
+        aria-label="Usage of service"
+        className="max-w-full overflow-x-auto"
+      >
+        {services.map((service) => {
+          const name = service.service || service.name
+          const number = releaseOf(service)
+          return (
+            <ToggleGroupItem
+              key={service.containerId}
+              value={service.containerId}
+              disabled={service.state !== "running"}
+              className="gap-1.5 px-2.5 text-hint"
+            >
+              <ProductGlyph id={productOf(service)} />
+              <span className="max-w-32 truncate">{name}</span>
+              {!service.liveRelease && number !== undefined && (
+                <span className="numeric text-muted-foreground">#{number}</span>
+              )}
+            </ToggleGroupItem>
+          )
+        })}
+      </ToggleGroup>
+    )
+  return (
+    // Its own line on a phone, where a fixed width beside the title would
+    // push the title off the start of the header.
+    <div className="w-full sm:w-56">
+      <Select value={selected} onValueChange={onSelect}>
+        <SelectTrigger size="sm" className="w-full" aria-label="Usage of service">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {services.map((service) => {
+            const number = releaseOf(service)
+            return (
+              <SelectItem
+                key={service.containerId}
+                value={service.containerId}
+                disabled={service.state !== "running"}
+                hint={number !== undefined ? `#${number}` : undefined}
+              >
+                <ProductGlyph id={productOf(service)} />
+                <span className="truncate">{service.service || service.name}</span>
+              </SelectItem>
+            )
+          })}
+        </SelectContent>
+      </Select>
     </div>
   )
 }
@@ -819,13 +973,25 @@ function ServiceCard({
   const word = stateWord(service.state)
   // How long it has been up and what its check says; "no health check" is
   // Details' to say, not a line on every card.
-  const detail = !current
-    ? serviceHealth(service)
-    : current.state === "running"
-      ? [current.uptimeSeconds > 0 && duration(current.uptimeSeconds), current.health]
-          .filter(Boolean)
-          .join(" · ")
-      : statusDetail(current)
+  // A container Docker keeps restarting, or one the kernel killed for its
+  // memory, says so on its card: a "Running" that has restarted forty times
+  // is not the same reading as one that never has.
+  const history = [
+    service.oomKilled && "killed for memory",
+    service.restartCount && plural(service.restartCount, "restart"),
+  ]
+  const detail = [
+    !current
+      ? serviceHealth(service)
+      : current.state === "running"
+        ? [current.uptimeSeconds > 0 && duration(current.uptimeSeconds), current.health]
+            .filter(Boolean)
+            .join(" · ")
+        : statusDetail(current),
+    ...history,
+  ]
+    .filter(Boolean)
+    .join(" · ")
   const state = (
     <Status
       className="items-baseline"

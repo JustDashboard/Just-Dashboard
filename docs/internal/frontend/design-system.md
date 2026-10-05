@@ -104,7 +104,9 @@ taking a frame:
   Notifications — the projects on the left, this server in the middle, a mark per channel on the
   right, dashed rings for the kinds not yet added — and the GitHub App on Credentials — the
   accounts that installed it, the App and this server, with its setup path under it — stand on the
-  page's own ground over `wire-grid`, the dot grid that fades out towards its edges, which gives a
+  page's own ground over `wire-grid`, as does the map a project's Runtime opens on (its domains,
+  the containers answering them, and the volumes, folders and databases those keep, in three lanes
+  with `shape="s"` wires, `deploy/runtime-map.tsx`) — the dot grid that fades out towards its edges, which gives a
   picture a middle where a border gave it an outline. General's automatic deployment (the
   repository, the watch with when it last looked, the deploys, and the last check's decision on
   one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
@@ -781,9 +783,13 @@ rather than assembling its own recharts tree — adding a measurement should mea
   day nothing succeeded, the window's median ruled across and the top of the scale named.
 - **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
   magnitude. Where a page offers both, Live is a range of its own beside the recorded ones: a
-  project's Runtime draws the container's stats socket a frame a second over its last five minutes
+  project's Runtime draws the container's stats socket over its last five minutes
   (`useContainerLive`, which keeps the window per container so the Overview's minutes are already
-  on it), and 1h–7d from the record, in the same panels.
+  on it), and 1h–7d from the record, in the same panels. Live is drawn as five-second buckets,
+  each a mean inside the envelope of its frames' peak (`bucketLive`): a frame a second drew a
+  saw-tooth beside recorded ranges that drew a mean and its peaks, and the operator read the two
+  as two kinds of chart. Bucketing within one source is not splicing, and the one-second spike
+  survives as its bucket's peak.
 - **An axis ends on a round figure and ticks at its quarters.** Fitted to the data, recharts split a
   3.1 MB/s peak into 781.3 KB/s steps, and a container idling at 0.2% drew five ticks that all read
   "0%". A container's charts take `byteScale` and `cpuScale` (`lib/container-usage.ts`): byte
@@ -807,7 +813,12 @@ rather than assembling its own recharts tree — adding a measurement should mea
 - **A scale fitted a little above a limit splits into unround steps** (143 / 286 / 429 MB), so
   `yTicks` on `MetricChart` and `ChartPanel` names the ticks. A container's memory chart is scaled to
   its limit and ticks at the limit's quarters, so the top tick names the limit — on Docker's
-  container page and on a project's Runtime alike, since both draw `ContainerCharts`.
+  container page and on a project's Runtime alike, since both take `useContainerScales`.
+- **A series' hue is the measurement's, not the chart's position.** A project's Runtime draws
+  processor in `--chart-1`, memory in `--chart-4`, received and read in `--chart-2`, sent in
+  `--chart-5`, written in `--chart-4` and processes in `--chart-5`, so five charts that were all one
+  blue read apart at a glance; a chart's reading now in its head carries the same 2×10 key the
+  legend does.
 - **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
   one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
@@ -1727,11 +1738,14 @@ The passes, in order. Each one is a diff you can review on its own.
    `/git` exit exactly — every count (all, pending, secret, config, reaching the build, the runtime
    or a release task, holding a reference) is a filter chip over the list, where it also narrows
    to what it counts, and the products the environment talks to sit under the section's head. And a
-   project's Runtime page carries each count in the header of the block it counts, with five
-   moving readings — processor, memory, what it receives and what it sends, processes — over the
-   charts they move on. Those tiles carry no trend of their own: a 36px band could only say that
-   something moved, where the chart beneath has an axis to read it against, and in and out are two
-   readings because a flood and a large download share a sum.
+   project's Runtime page carries each count in the header of the block it counts. Its five moving
+   readings stood as tiles over the charts they move on until the operator asked for the tiles to
+   go; each now heads its own chart as the chart's reading now — the processor's share of a core
+   or its quota beside Processor, memory against its limit beside Memory, in and out beside
+   Network, read and written beside Disk, the process count against its limit beside Processes —
+   with a short meter where there is a ceiling, and what the tiles' hints said (the counters since
+   the container started, the quota and limits) is a fact list beside the Processes chart. In and
+   out stay two readings because a flood and a large download share a sum.
 
    Deployment history also takes this exit: each pair of readings stands over the chart it explains.
    Success and weekly frequency sit over releases per day; median duration and recovery time sit over
