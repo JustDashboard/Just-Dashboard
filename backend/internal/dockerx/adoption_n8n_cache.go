@@ -45,34 +45,38 @@ func (c *Client) captureRegenerableN8nCache(ctx context.Context, capture *Adopti
 	if err != nil {
 		return
 	}
-	for file, want := range n8nGeneratorDigests {
-		capture.RegenerableProofFailure = "generator_" + path.Base(file)
-		stream, _, err := cli.CopyFromContainer(ctx, capture.Inspection.ID, file)
+	distribution := c.cachedN8nImageProof(capture)
+	if distribution == nil {
+		for file, want := range n8nGeneratorDigests {
+			capture.RegenerableProofFailure = "generator_" + path.Base(file)
+			stream, _, err := cli.CopyFromContainer(ctx, capture.Inspection.ID, file)
+			if err != nil {
+				return
+			}
+			content, err := readN8nGenerator(stream, path.Base(file))
+			stream.Close()
+			if err != nil {
+				return
+			}
+			sum := sha256.Sum256(content)
+			if hex.EncodeToString(sum[:]) != want {
+				return
+			}
+		}
+		capture.RegenerableProofFailure = "editor_distribution_archive"
+		stream, _, err := cli.CopyFromContainer(ctx, capture.Inspection.ID, "/usr/local/lib/node_modules/n8n/node_modules/n8n-editor-ui/dist")
 		if err != nil {
 			return
 		}
-		content, err := readN8nGenerator(stream, path.Base(file))
+		distribution, err = readN8nArchiveModes(stream, "dist")
 		stream.Close()
 		if err != nil {
 			return
 		}
-		sum := sha256.Sum256(content)
-		if hex.EncodeToString(sum[:]) != want {
-			return
-		}
-	}
-	capture.RegenerableProofFailure = "editor_distribution_archive"
-	stream, _, err := cli.CopyFromContainer(ctx, capture.Inspection.ID, "/usr/local/lib/node_modules/n8n/node_modules/n8n-editor-ui/dist")
-	if err != nil {
-		return
-	}
-	distribution, err := readN8nArchiveModes(stream, "dist")
-	stream.Close()
-	if err != nil {
-		return
+		c.rememberN8nImageProof(capture, distribution)
 	}
 	capture.RegenerableProofFailure = "cache_archive"
-	stream, _, err = cli.CopyFromContainer(ctx, capture.Inspection.ID, n8nEditorCache)
+	stream, _, err := cli.CopyFromContainer(ctx, capture.Inspection.ID, n8nEditorCache)
 	if err != nil {
 		return
 	}
@@ -215,4 +219,60 @@ func verifiedN8nRegenerableChanges(changes []container.FilesystemChange, modes, 
 		}
 	}
 	return verified, nil
+}
+
+// Generator/distribution evidence belongs to one immutable image. Reuse only
+// when fresh Engine diff and mount inspection prove these original-image paths
+// remain untouched; mutable cache files and uploads are verified every time.
+func n8nImageProofReusable(capture *AdoptionContainer) bool {
+	if capture.Image == nil || capture.Image.ID == "" || capture.Image.ID != capture.Inspection.Image {
+		return false
+	}
+	sources := []string{"/usr/local/lib/node_modules/n8n/node_modules/n8n-editor-ui/dist"}
+	for source := range n8nGeneratorDigests {
+		sources = append(sources, source)
+	}
+	overlaps := func(a, b string) bool {
+		return a == b || strings.HasPrefix(a, strings.TrimSuffix(b, "/")+"/") || strings.HasPrefix(b, strings.TrimSuffix(a, "/")+"/")
+	}
+	for _, change := range capture.Changes {
+		for _, source := range sources {
+			if overlaps(change.Path, source) {
+				return false
+			}
+		}
+	}
+	for _, mount := range capture.Inspection.Mounts {
+		for _, source := range sources {
+			if overlaps(mount.Destination, source) {
+				return false
+			}
+		}
+	}
+	return true
+}
+func (c *Client) cachedN8nImageProof(capture *AdoptionContainer) map[string]os.FileMode {
+	if !n8nImageProofReusable(capture) {
+		return nil
+	}
+	c.n8nProofMu.Lock()
+	defer c.n8nProofMu.Unlock()
+	return c.n8nProofs[capture.Image.ID]
+}
+func (c *Client) rememberN8nImageProof(capture *AdoptionContainer, proof map[string]os.FileMode) {
+	if !n8nImageProofReusable(capture) {
+		return
+	}
+	c.n8nProofMu.Lock()
+	defer c.n8nProofMu.Unlock()
+	if c.n8nProofs == nil {
+		c.n8nProofs = map[string]map[string]os.FileMode{}
+	}
+	if len(c.n8nProofs) >= 8 && c.n8nProofs[capture.Image.ID] == nil {
+		for key := range c.n8nProofs {
+			delete(c.n8nProofs, key)
+			break
+		}
+	}
+	c.n8nProofs[capture.Image.ID] = proof
 }

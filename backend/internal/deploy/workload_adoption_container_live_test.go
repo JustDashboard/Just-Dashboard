@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -87,7 +88,7 @@ func liveManagedStandaloneAdoption(t *testing.T, missingImage bool) {
 	for _, existing := range []string{volume, volume + "-config", volume + "-caddy"} {
 		docker("volume", "create", existing)
 	}
-	id := strings.TrimSpace(string(docker("run", "--detach", "--name", name, "--network", network, "--network-alias", name+"-alias", "--publish", "127.0.0.1:"+strconv.Itoa(port)+":8080", "--volume", filepath.Join(root, "public")+":/srv:ro", "--volume", filepath.Join(root, "Caddyfile")+":/etc/caddy/Caddyfile:ro", "--volume", volume+":/persistent", "--volume", volume+"-config:/config", "--volume", volume+"-caddy:/data", "--memory", "100663296", "--cpus", "0.5", "--stop-timeout", "2", "--label", "fixture.just-dashboard.adoption="+name, "--env", "API_TOKEN=standalone-private-value", "--env", "EMPTY=", sourceTag)))
+	id := strings.TrimSpace(string(docker("run", "--detach", "--name", name, "--network", network, "--network-alias", name+"-alias", "--publish", "127.0.0.1:"+strconv.Itoa(port)+":8080", "--volume", filepath.Join(root, "public")+":/srv:ro", "--volume", filepath.Join(root, "Caddyfile")+":/etc/caddy/Caddyfile:ro", "--volume", volume+":/persistent", "--volume", volume+"-config:/config", "--volume", volume+"-caddy:/data", "--memory", "100663296", "--cpus", "0.5", "--stop-timeout", "2", "--label", "fixture.just-dashboard.adoption="+name, "--env", "API_TOKEN=standalone-private-value", "--env", "EMPTY=", "--env", "ROUNDTRIP_DOLLARS=prefix$UNSET-${HOME}-$$", "--env", "ROUNDTRIP_REFERENCE=${{credential.unrelated}}", sourceTag)))
 	adoptionLiveHTTP(t, port)
 	if missingImage {
 		image, err := client.InspectImage(ctx, sourceTag)
@@ -225,6 +226,9 @@ func liveManagedStandaloneAdoption(t *testing.T, missingImage bool) {
 		}
 		if capture.Inspection.Image != expectedManagedImage || capture.Inspection.HostConfig.Memory != original.Inspection.HostConfig.Memory || capture.Inspection.HostConfig.NanoCPUs != original.Inspection.HostConfig.NanoCPUs {
 			t.Fatal("managed standalone lost image or resource settings")
+		}
+		if !slices.Contains(capture.Inspection.Config.Env, "EMPTY=") || !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_DOLLARS=prefix$UNSET-${HOME}-$$") || !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_REFERENCE=${{credential.unrelated}}") {
+			t.Fatal("standalone exact empty/dollar/reference literal environment changed")
 		}
 		adoptionLiveHTTP(t, port)
 		if got := string(docker("exec", currentID, "/bin/cat", "/persistent/sentinel")); got != "persistent-proof" {

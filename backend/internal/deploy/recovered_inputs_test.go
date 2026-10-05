@@ -245,3 +245,18 @@ func TestRecoveredComposeRenderedLiteralsDecodeExactlyOnce(t *testing.T) {
 		t.Fatalf("rendered literal accumulated escaping: %q", final["x-literal"])
 	}
 }
+
+func TestFailedExistingContainerCaptureDoesNotPretendItIsAnAbsentDeclaration(t *testing.T) {
+	candidate, reader, paths, root := scopedComposeFixture(t)
+	candidate.Kind = "container"
+	candidate.Services = []WorkloadService{{Name: "original", ResourceID: "unavailable"}}
+	recovered, err := RecoverDockerWorkload(t.Context(), candidate, reader, paths, root)
+	if !errors.Is(err, ErrRecoveryBlocked) {
+		t.Fatal("failed existing capture accepted", err)
+	}
+	for _, issue := range recovered.Adoption.Issues {
+		if issue.Code == "inactive_service_image_missing" || issue.Code == "container_replacement" {
+			t.Fatal("capture failure produced an unrelated migration diagnosis", issue.Code)
+		}
+	}
+}

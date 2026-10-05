@@ -54,6 +54,14 @@ private capture never enters discovery, audit data or browser remembered setup. 
 sealed in draft and variable storage; recovered source documents use variable references instead
 of embedding captured environment, credential arguments or label values.
 
+Container capture reads authoritative image configuration without the image page's history or unrelated
+container inventory. Verified n8n generator/distribution evidence is cached per daemon client and
+immutable image (at most eight images), reusable only after fresh writable-layer changes and mount
+inspection prove its source paths remain untouched and unshadowed. Generated cache archives and
+upload emptiness are verified afresh each time. Recovery keeps its 60-second overall bound; timeout
+diagnostics name the capture phase without exposing Docker responses, and a failed existing-container
+read does not become a misleading missing-service diagnosis.
+
 Captured inputs carry server-owned original names, service identities, environment/image-default/runtime
 categories and retained/empty status. The wizard and project settings use those identities; opaque
 `JD_IMPORT_*` storage names keep service-local values separate internally. Display sensitivity does

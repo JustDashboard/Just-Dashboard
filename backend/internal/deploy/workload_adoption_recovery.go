@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -61,7 +62,17 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		seen[service.ResourceID] = true
 		captured, err := reader.CaptureAdoptionContainer(ctx, service.ResourceID)
 		if err != nil {
-			r.issue("runtime_capture_unavailable", "The original container image, configuration and writable layer could not all be captured.", service.Name, "", true)
+			code, message, field := "runtime_capture_unavailable", "The original container image, configuration and writable layer could not all be captured.", ""
+			var failure *dockerx.AdoptionCaptureError
+			if errors.As(err, &failure) {
+				field = failure.Stage
+				message = "The original container " + strings.ReplaceAll(failure.Stage, "_", " ") + " could not be verified. Retry recovery after resolving the Docker daemon read failure."
+				if errors.Is(err, context.DeadlineExceeded) {
+					code = "runtime_capture_timeout"
+					message = "The original container " + strings.ReplaceAll(failure.Stage, "_", " ") + " exceeded the bounded recovery time limit. Retry when the host has enough resources to finish its read-only checks."
+				}
+			}
+			r.issue(code, message, service.Name, field, true)
 			continue
 		}
 		name := "app"
@@ -97,6 +108,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	}
 	if len(r.containers) == 0 {
 		r.issue("runtime_missing", "No existing container could be captured for this workload.", "", "", true)
+		return result, ErrRecoveryBlocked
 	}
 	if candidate.Kind == "stack" && len(r.containers) > 0 {
 		r.readOriginalCompose(ctx, candidate, reader)

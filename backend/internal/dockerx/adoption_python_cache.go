@@ -23,7 +23,8 @@ func (c *Client) captureRegenerablePythonCaches(ctx context.Context, capture *Ad
 	}
 	for _, change := range capture.Changes {
 		match := pythonCacheName.FindStringSubmatch(path.Base(change.Path))
-		if change.Kind != container.ChangeAdd || len(match) != 2 || path.Base(path.Dir(change.Path)) != "__pycache__" || !capture.ChangeModes[change.Path].IsRegular() {
+		mode, known := capture.ChangeModes[change.Path]
+		if change.Kind != container.ChangeAdd || len(match) != 2 || path.Base(path.Dir(change.Path)) != "__pycache__" || !known || !mode.IsRegular() {
 			continue
 		}
 		source := path.Join(path.Dir(path.Dir(change.Path)), match[1]+".py")

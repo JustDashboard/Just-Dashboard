@@ -78,7 +78,7 @@ services:
     image: caddy:2-alpine
     entrypoint: ["/bin/sh"]
     command: ["-c", "exec sleep $$WAIT_SECONDS"]
-    environment: {WAIT_SECONDS: infinity}
+    environment: {WAIT_SECONDS: infinity, EMPTY: "", ROUNDTRIP_DOLLARS: "worker$$UNSET-$${HOME}-$$$$", ROUNDTRIP_REFERENCE: "$${{credential.unrelated}}"}
     healthcheck: {test: ["CMD-SHELL", "test \"$$WAIT_SECONDS\" = infinity"], interval: 1s}
     init: false
     stop_grace_period: 1s
@@ -133,14 +133,21 @@ volumes:
 	assertEnvironmentFile := func(id string) {
 		t.Helper()
 		capture, err := client.CaptureAdoptionContainer(ctx, id)
-		if err != nil || !slices.Contains(capture.Inspection.Config.Env, "FROM_ENV_FILE=owned-aliased-file-value") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		expected := "prefix$UNSET-${HOME}-$$"
+		if capture.Inspection.Config.Labels["com.docker.compose.service"] == "worker" {
+			expected = "worker$UNSET-${HOME}-$$"
+		} else if !slices.Contains(capture.Inspection.Config.Env, "FROM_ENV_FILE=owned-aliased-file-value") {
 			t.Fatal("aliased optional environment file was not preserved")
 		}
-		if !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_DOLLARS=prefix$UNSET-${HOME}-$$") || !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_REFERENCE=${{credential.unrelated}}") {
+		if !slices.Contains(capture.Inspection.Config.Env, "EMPTY=") || !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_DOLLARS="+expected) || !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_REFERENCE=${{credential.unrelated}}") {
 			t.Fatal("literal environment values changed during lifecycle replay")
 		}
 	}
 	assertEnvironmentFile(before["web"].ID)
+	assertEnvironmentFile(before["worker"].ID)
 	docker("exec", before["web"].ID, "/bin/sh", "-c", "printf persistent-proof > /persistent/sentinel")
 	adoptionLiveHTTP(t, port)
 	var httpSamples, httpFailures atomic.Int64
@@ -309,6 +316,7 @@ volumes:
 	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	deployed, _ := adoptionLiveInventory(t, client, project)
 	assertEnvironmentFile(deployed["web"].ID)
+	assertEnvironmentFile(deployed["worker"].ID)
 	expectedServices := 5
 	if scope == RecoveryExistingServices {
 		expectedServices = 4
@@ -330,6 +338,7 @@ volumes:
 	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	restored, _ := adoptionLiveInventory(t, client, project)
 	assertEnvironmentFile(restored["web"].ID)
+	assertEnvironmentFile(restored["worker"].ID)
 	orphanAfter, err = client.Inspect(ctx, orphanID)
 	if err != nil || orphanAfter.State != "running" || orphanAfter.ID != orphanBefore.ID || !orphanAfter.StartedAt.Equal(*orphanBefore.StartedAt) {
 		t.Fatalf("baseline rollback mutated external oneoff: %v", err)

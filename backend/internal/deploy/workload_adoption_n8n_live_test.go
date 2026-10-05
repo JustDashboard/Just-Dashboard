@@ -190,10 +190,12 @@ func TestLiveManagedN8NAdoptionAndRollback(t *testing.T) {
 	if strings.TrimSpace(string(docker(identityArgs...))) != originalProcess {
 		t.Fatal("the n8n process changed before its read-only recovery capture")
 	}
+	captureStart := time.Now()
 	original, err := client.CaptureAdoptionContainer(ctx, id)
 	if err != nil {
 		t.Fatal(err)
 	}
+	evidence["originalCaptureMilliseconds"] = time.Since(captureStart).Milliseconds()
 	evidence["originalWritableLayerChanges"] = original.Changes
 	evidence["originalWritableLayerStatCount"] = len(original.ChangeModes)
 	evidence["originalProcess"] = map[string]any{"containerId": id, "pid": original.Inspection.State.Pid, "startedAt": original.Inspection.State.StartedAt}
@@ -201,7 +203,9 @@ func TestLiveManagedN8NAdoptionAndRollback(t *testing.T) {
 	candidate := WorkloadCandidate{Key: "container:" + id, Kind: "container", Name: name, ResourceID: id, Running: 1, Total: 1,
 		Services: []WorkloadService{{Name: name, ResourceID: id, State: "running", Image: image, Ports: []dockerx.PortMapping{{HostIP: "127.0.0.1", HostPort: port, ContainerPort: 5678, Protocol: "tcp"}}}}}
 	candidate.Digest = WorkloadDigest(candidate)
+	captureStart = time.Now()
 	recovered, err := RecoverDockerWorkload(ctx, candidate, client, files.New([]string{root}), filepath.Join(root, "baseline-cache"))
+	evidence["recoveryMilliseconds"] = time.Since(captureStart).Milliseconds()
 	if strings.TrimSpace(string(docker(identityArgs...))) != originalProcess {
 		t.Fatal("read-only n8n recovery changed the original process or start time")
 	}
