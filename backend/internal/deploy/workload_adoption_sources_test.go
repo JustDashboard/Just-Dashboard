@@ -114,6 +114,15 @@ func TestNativeRecoveredSnapshotRetainsDataExclusionsWhenAttachingOriginalSource
 	if len(result.Source.ExcludePaths) != 2 || result.Source.ExcludePaths[0] != "data" || result.Source.ExcludePaths[1] != "uploads" {
 		t.Fatalf("recovered source lost live data exclusions: %+v", result.Source)
 	}
+	fixture := newPlanningStoreFixture(t)
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-source-exclusions", Profile: ProfileService}, result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := fixture.plans.Get(t.Context(), draft.ID)
+	if err != nil || loaded.Data.Source == nil || len(loaded.Data.Source.ExcludePaths) != 2 {
+		t.Fatalf("public recovered draft lost source exclusions: %v", err)
+	}
 	attached := result.Source
 	attached.Mode, attached.LocalPath, attached.ResourceID = SourceModeLocalDirectory, root, ""
 	detection, err := analyzer.Analyze(t.Context(), attached)
@@ -131,6 +140,24 @@ func TestNativeRecoveredSnapshotRetainsDataExclusionsWhenAttachingOriginalSource
 	}
 	if content, err := os.ReadFile(filepath.Join(root, "data", "state.json")); err != nil || !strings.Contains(string(content), "linked-live-data") {
 		t.Fatal("source reattachment modified linked live data")
+	}
+}
+
+func TestRecoveredSnapshotExclusionsAreLimitedToNativeSources(t *testing.T) {
+	handle := "sha256:" + strings.Repeat("a", 64)
+	for _, excluded := range [][]string{{"../outside"}, {"."}, {"data", "data"}, make([]string, 129)} {
+		if err := (DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeRecoveredSnapshot, ResourceID: handle, ExcludePaths: excluded}).ValidateForDeployment(); err == nil {
+			t.Fatalf("invalid native snapshot exclusions accepted: %v", excluded)
+		}
+	}
+	for _, source := range []DraftSourceConfig{
+		{Kind: SourceCompose, Mode: SourceModeRecoveredSnapshot, ResourceID: handle, ExcludePaths: []string{"data"}, ComposeFiles: []ComposeDocument{{Path: "compose.yml", Content: "services:\n  web:\n    image: nginx:alpine\n"}}},
+		{Kind: SourceImport, Mode: SourceModeRecoveredSnapshot, ResourceID: handle, ExcludePaths: []string{"data"}},
+		{Kind: SourceImport, Mode: SourceModeExistingPM2, ResourceID: "alice/default/app", ExcludePaths: []string{"data"}},
+	} {
+		if err := source.Validate(); err == nil {
+			t.Fatalf("non-native source accepted snapshot exclusions: %+v", source)
+		}
 	}
 }
 

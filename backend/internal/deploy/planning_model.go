@@ -928,16 +928,6 @@ func (c DraftSourceConfig) Validate() error {
 		}
 		if c.Mode == SourceModeLocalDirectory {
 			allowed = sourceFieldSet("localPath", "subdirectory", "excludePaths")
-			if len(c.ExcludePaths) > 128 {
-				return fmt.Errorf("%w: too many source exclusions", ErrInvalidSource)
-			}
-			seen := map[string]bool{}
-			for _, path := range c.ExcludePaths {
-				if path == "." || !safeRelativePath(path) || seen[path] {
-					return fmt.Errorf("%w: source exclusions must be unique relative paths", ErrInvalidSource)
-				}
-				seen[path] = true
-			}
 		}
 	case SourceModeComposeLocal:
 		allowed = sourceFieldSet("localPath", "subdirectory", "composeFiles")
@@ -971,8 +961,11 @@ func (c DraftSourceConfig) Validate() error {
 			if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
 				return err
 			}
-		} else if len(c.ComposeFiles) != 0 {
-			return fmt.Errorf("%w: native snapshot cannot contain Compose documents", ErrInvalidSource)
+		} else {
+			allowed = sourceFieldSet("resourceId", "subdirectory", "excludePaths")
+			if len(c.ComposeFiles) != 0 {
+				return fmt.Errorf("%w: native snapshot cannot contain Compose documents", ErrInvalidSource)
+			}
 		}
 	case SourceModeExistingContainer, SourceModeExistingStack, SourceModeExistingPM2, SourceModeExistingSystemd, SourceModeExistingProcess:
 		allowed = sourceFieldSet("resourceId")
@@ -1003,6 +996,18 @@ func (c DraftSourceConfig) Validate() error {
 	}
 	if field := c.firstUnexpectedField(allowed); field != "" {
 		return fmt.Errorf("%w: field %s is not valid for mode %s", ErrInvalidSource, field, c.Mode)
+	}
+	if allowed["excludePaths"] {
+		if len(c.ExcludePaths) > 128 {
+			return fmt.Errorf("%w: too many source exclusions", ErrInvalidSource)
+		}
+		seen := map[string]bool{}
+		for _, path := range c.ExcludePaths {
+			if path == "." || !safeRelativePath(path) || seen[path] {
+				return fmt.Errorf("%w: source exclusions must be unique relative paths", ErrInvalidSource)
+			}
+			seen[path] = true
+		}
 	}
 	return nil
 }
