@@ -1,0 +1,129 @@
+{
+  "originalManager": "Docker Compose",
+  "managedDeployment": true,
+  "liveReleaseId": 1,
+  "runtimeServices": 4,
+  "recoveryScope": "existing_services",
+  "excludedServices": [],
+  "originalContainersRemainLiveAuthority": true,
+  "managedContainerIds": [
+    "0932e0bd9e927524d643bc599df27009923611dcbd753d61f2a380ce8240ab87",
+    "780eaa402ad98c8a18926015a077d5a131e9b8a0f3c467bdd4370826aa006a23",
+    "bd5bcb9ecefd3a7ee36ff9c061130b28c5a9eb07cea9dc876967d24b6a4a253d",
+    "dd252c0841e8d89988d066bdf71a329af5920ea7869e9d0456671dedac7fb802"
+  ],
+  "existingStack": "jd-import-proof-1791220859360020413",
+  "isolatedProjectUrl": "http://127.0.0.1:43162/deploy/1",
+  "existingContainerCount": 4,
+  "configurationsAndStartTimesUnchanged": true,
+  "processIdentityAndStateUnchanged": true,
+  "liveCpuAndMemoryReadingsVerified": true,
+  "perServiceLiveStorageVerified": true,
+  "persistentMounts": [
+    {
+      "service": "web",
+      "target": "/config",
+      "kind": "volume",
+      "readOnly": false
+    },
+    {
+      "service": "web",
+      "target": "/data",
+      "kind": "volume",
+      "readOnly": false
+    },
+    {
+      "service": "web",
+      "target": "/www",
+      "kind": "bind",
+      "readOnly": true
+    },
+    {
+      "service": "worker",
+      "target": "/fixture-data",
+      "kind": "volume",
+      "readOnly": false
+    }
+  ],
+  "selectedRuntimeReadingVerified": "dd252c0841e8d89988d066bdf71a329af5920ea7869e9d0456671dedac7fb802",
+  "dockerLogTailReadVerified": true,
+  "overviewDockerPreflightVerified": true,
+  "runtimeReservationAvailabilityVerified": true,
+  "noRuntimeActionsInvoked": true,
+  "before": [
+    {
+      "id": "0932e0bd9e927524d643bc599df27009923611dcbd753d61f2a380ce8240ab87",
+      "pid": 0,
+      "running": false,
+      "status": "exited",
+      "startedAt": "2026-10-05T17:21:00.389369821Z",
+      "restartCount": 0,
+      "configurationDigest": "e6d41cd5174afd06db923e9ad2b4c4597d6fb002d753ce2a5ad2542a16fac210"
+    },
+    {
+      "id": "780eaa402ad98c8a18926015a077d5a131e9b8a0f3c467bdd4370826aa006a23",
+      "pid": 0,
+      "running": false,
+      "status": "exited",
+      "startedAt": "2026-10-05T17:21:00.218176356Z",
+      "restartCount": 0,
+      "configurationDigest": "dc5dbc811a752a4befc29a470d1ba9f4e64b0699b4e341084d48987ad97734af"
+    },
+    {
+      "id": "bd5bcb9ecefd3a7ee36ff9c061130b28c5a9eb07cea9dc876967d24b6a4a253d",
+      "pid": 3952549,
+      "running": true,
+      "status": "running",
+      "startedAt": "2026-10-05T17:21:00.040338515Z",
+      "restartCount": 0,
+      "configurationDigest": "0f07d36349983794911970be946e004a8a7c56f7a56c64d8477dd9238c5e56e6"
+    },
+    {
+      "id": "dd252c0841e8d89988d066bdf71a329af5920ea7869e9d0456671dedac7fb802",
+      "pid": 3952442,
+      "running": true,
+      "status": "running",
+      "startedAt": "2026-10-05T17:20:59.843855781Z",
+      "restartCount": 0,
+      "configurationDigest": "0fe6906ea21b25f928217ffdea8e21a7d25662adbc85a4e8f1d9aa0d96c8b15b"
+    }
+  ],
+  "after": [
+    {
+      "id": "0932e0bd9e927524d643bc599df27009923611dcbd753d61f2a380ce8240ab87",
+      "pid": 0,
+      "running": false,
+      "status": "exited",
+      "startedAt": "2026-10-05T17:21:00.389369821Z",
+      "restartCount": 0,
+      "configurationDigest": "e6d41cd5174afd06db923e9ad2b4c4597d6fb002d753ce2a5ad2542a16fac210"
+    },
+    {
+      "id": "780eaa402ad98c8a18926015a077d5a131e9b8a0f3c467bdd4370826aa006a23",
+      "pid": 0,
+      "running": false,
+      "status": "exited",
+      "startedAt": "2026-10-05T17:21:00.218176356Z",
+      "restartCount": 0,
+      "configurationDigest": "dc5dbc811a752a4befc29a470d1ba9f4e64b0699b4e341084d48987ad97734af"
+    },
+    {
+      "id": "bd5bcb9ecefd3a7ee36ff9c061130b28c5a9eb07cea9dc876967d24b6a4a253d",
+      "pid": 3952549,
+      "running": true,
+      "status": "running",
+      "startedAt": "2026-10-05T17:21:00.040338515Z",
+      "restartCount": 0,
+      "configurationDigest": "0f07d36349983794911970be946e004a8a7c56f7a56c64d8477dd9238c5e56e6"
+    },
+    {
+      "id": "dd252c0841e8d89988d066bdf71a329af5920ea7869e9d0456671dedac7fb802",
+      "pid": 3952442,
+      "running": true,
+      "status": "running",
+      "startedAt": "2026-10-05T17:20:59.843855781Z",
+      "restartCount": 0,
+      "configurationDigest": "0fe6906ea21b25f928217ffdea8e21a7d25662adbc85a4e8f1d9aa0d96c8b15b"
+    }
+  ]
+}
