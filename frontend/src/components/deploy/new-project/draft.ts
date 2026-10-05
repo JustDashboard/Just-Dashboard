@@ -11,7 +11,11 @@ import {
   synchronizePrimaryDomain,
 } from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
-import { adoptionReviewMetadata } from "@/lib/workload-import"
+import {
+  adoptionReviewMetadata,
+  recoveredEnvironmentSatisfied,
+  retainedVariableSatisfied,
+} from "@/lib/workload-import"
 import type {
   DeploymentConfiguration,
   DeploymentDetection,
@@ -344,11 +348,17 @@ export function stepAfter(step: ConfigureStepKey) {
  */
 export function declaredVariablesNeedReview(flow: ConfigureFlow) {
   const declared = flow.configuration.variables
+  const retained = flow.draft.environmentKeys ?? []
+  const inputs = flow.draft.data?.adoption?.inputs ?? []
   return (
     (flow.source.mode === "blueprint" && declared.length > 0) ||
     declared.some(
       (variable) =>
-        variable.required && !variable.reference && !variable.value && !variable.generate,
+        variable.required &&
+        !variable.reference &&
+        !variable.value &&
+        !variable.generate &&
+        !retainedVariableSatisfied(variable.name, retained, inputs),
     )
   )
 }
@@ -404,7 +414,16 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   // is the one thing nobody else can answer.
   if (
     declaredVariablesNeedReview(flow) ||
-    discoveredEnvironmentRows(candidate).some(rowNeedsOperator)
+    discoveredEnvironmentRows(candidate).some(
+      (row) =>
+        rowNeedsOperator(row) &&
+        !retainedVariableSatisfied(row.name, flow.draft.environmentKeys ?? []) &&
+        !recoveredEnvironmentSatisfied(
+          row.name,
+          flow.draft.environmentKeys ?? [],
+          flow.draft.data?.adoption?.inputs,
+        ),
+    )
   )
     return "variables"
   return "review"
@@ -416,7 +435,10 @@ export type FlowUpdate =
 
 /** A recovered directory can build a release without owning a Git branch to watch. */
 export function sourceWatchesGit(source: DeploymentDraftSource) {
-  return source.kind === "git" || (source.kind === "local" && source.mode !== "local_directory")
+  return (
+    source.kind === "git" ||
+    (source.kind === "local" && !["local_directory", "recovered_snapshot"].includes(source.mode))
+  )
 }
 
 /** Session storage remembers the form, while credentials stay in the live memory copy. */
@@ -786,6 +808,7 @@ export function githubRepoOf(url: string | undefined) {
 
 /** What the source row calls a draft's source — a repository, an image, a blueprint. */
 export function sourceLabelFromDraft(source: DeploymentDraftSource) {
+  if (source.mode === "recovered_snapshot") return "Captured application source"
   return (
     source.repository ||
     source.url ||

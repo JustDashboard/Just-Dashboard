@@ -318,9 +318,11 @@ export function StepProject({
               {flow.sourceLabel}
             </FormFact>
             <FormFact label="Kind">
-              {flow.source.mode === "local_directory"
-                ? "Local directory"
-                : SOURCE_KIND_LABELS[flow.source.kind]}
+              {flow.source.mode === "recovered_snapshot"
+                ? "Verified source snapshot"
+                : flow.source.mode === "local_directory"
+                  ? "Local directory"
+                  : SOURCE_KIND_LABELS[flow.source.kind]}
             </FormFact>
           </FormFacts>
         )}

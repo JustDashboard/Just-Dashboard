@@ -288,7 +288,7 @@ func writeComposeReleaseEnv(directory string, values map[string]string) (string,
 	for _, key := range keys {
 		contents.WriteString(key)
 		contents.WriteByte('=')
-		contents.WriteString(strconv.Quote(values[key]))
+		contents.WriteString(quoteComposeEnvironmentValue(values[key]))
 		contents.WriteByte('\n')
 	}
 	file, err := os.CreateTemp(directory, ".just-dashboard-env-*")
@@ -311,6 +311,13 @@ func writeComposeReleaseEnv(directory string, values map[string]string) (string,
 		return "", err
 	}
 	return name, nil
+}
+
+// Compose expands dollar expressions inside double-quoted dotenv values. Its
+// escape vocabulary is smaller than Go's, so strconv.Quote also corrupts
+// control bytes such as \x01 when a captured environment is replayed.
+func quoteComposeEnvironmentValue(value string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`, "$", "$$").Replace(value) + `"`
 }
 
 func validComposeService(name string) bool {

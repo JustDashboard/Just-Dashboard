@@ -103,6 +103,10 @@ type ImageUser struct {
 // (library/sha256…) must be lowercase` for every attempt to open an image by
 // its id — including every dangling image, which has no other handle.
 func (c *Client) InspectImage(ctx context.Context, ref string) (*ImageDetail, error) {
+	return c.inspectImage(ctx, ref, true)
+}
+
+func (c *Client) inspectImage(ctx context.Context, ref string, presentation bool) (*ImageDetail, error) {
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
@@ -157,19 +161,21 @@ func (c *Client) InspectImage(ctx context.Context, ref string) (*ImageDetail, er
 		}
 		sort.Strings(d.VolumePaths)
 	}
-	if hist, err := cli.ImageHistory(ctx, ref); err == nil {
-		for _, h := range hist {
-			d.Layers = append(d.Layers, ImageLayer{
-				ID:        h.ID,
-				Created:   time.Unix(h.Created, 0).UTC(),
-				CreatedBy: cleanHistoryLine(h.CreatedBy),
-				Size:      h.Size,
-				Comment:   h.Comment,
-				Tags:      orEmpty(h.Tags),
-			})
+	if presentation {
+		if hist, err := cli.ImageHistory(ctx, ref); err == nil {
+			for _, h := range hist {
+				d.Layers = append(d.Layers, ImageLayer{
+					ID:        h.ID,
+					Created:   time.Unix(h.Created, 0).UTC(),
+					CreatedBy: cleanHistoryLine(h.CreatedBy),
+					Size:      h.Size,
+					Comment:   h.Comment,
+					Tags:      orEmpty(h.Tags),
+				})
+			}
 		}
+		d.UsedBy = c.imageUsers(ctx, insp.ID)
 	}
-	d.UsedBy = c.imageUsers(ctx, insp.ID)
 	d.describeReference(requested)
 	return d, nil
 }

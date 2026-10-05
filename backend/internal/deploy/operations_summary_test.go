@@ -120,6 +120,11 @@ func operationsSnapshot() json.RawMessage {
 // a bind path, a domain, a backup job and a database connection.
 func liveOperationsFixture(t *testing.T) (*releaseStoreFixture, *ReleaseWithArtifacts) {
 	t.Helper()
+	return liveOperationsSnapshotFixture(t, operationsSnapshot())
+}
+
+func liveOperationsSnapshotFixture(t *testing.T, snapshot json.RawMessage) (*releaseStoreFixture, *ReleaseWithArtifacts) {
+	t.Helper()
 	fixture := newReleaseStoreFixture(t)
 	fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), RuntimePlanConfig{
 		InternalPort: 3000, BindAddress: "127.0.0.1", Strategy: StrategyBlueGreen,
@@ -130,7 +135,6 @@ func liveOperationsFixture(t *testing.T) (*releaseStoreFixture, *ReleaseWithArti
 		},
 	})
 	run, lease := fixture.claimedRun(t, 1)
-	snapshot := operationsSnapshot()
 	release, err := fixture.runs.CreateCandidateRelease(context.Background(), *run, lease.Token, CandidateReleaseInput{
 		Artifacts: []ReleaseArtifactInput{{
 			Kind: ArtifactImage, Reference: "example.test/app:v1", Digest: fakeContentDigest("operations-image"),

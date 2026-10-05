@@ -46,7 +46,10 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeServices(ctx context.Context, e
 	if o == nil || o.store == nil || environmentID <= 0 {
 		return result
 	}
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	// Native authority verification reads installed launchers and hashes the
+	// captured executable/source tree. Keep that bounded without giving it the
+	// shorter budget used for an ordinary Docker container list.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	query := `SELECT ` + qualifiedRuntimeColumns() + ` FROM deploy_release_runtimes runtime
 	 JOIN deploy_releases release ON release.id=runtime.release_id
@@ -58,6 +61,8 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeServices(ctx context.Context, e
 	} else {
 		query += ` AND runtime.state IN ('live','stopped','ready')`
 	}
+	query += ` ORDER BY (runtime.release_id=?) DESC, runtime.release_id DESC`
+	args = append(args, liveReleaseID)
 	rows, err := o.store.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return unavailableRecordedRuntime()
@@ -77,11 +82,16 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeServices(ctx context.Context, e
 		return unavailableRecordedRuntime()
 	}
 	seen := map[string]bool{}
+	seenNative := map[string]bool{}
 	for _, service := range result.Services {
 		seen["docker:"+service.ContainerID] = true
 	}
 	for _, runtime := range runtimes {
 		if runtime.Kind == "pm2" || runtime.Kind == "systemd" {
+			identity := runtime.Kind + "\x00" + runtime.RuntimeID
+			if seenNative[identity] {
+				continue
+			}
 			if o.native == nil {
 				return unavailableRecordedRuntime()
 			}
@@ -89,6 +99,7 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeServices(ctx context.Context, e
 			if observed.Status != "available" {
 				return unavailableRecordedRuntime()
 			}
+			seenNative[identity] = true
 			for _, service := range observed.Services {
 				service.ReleaseID = runtime.ReleaseID
 				service.LiveRelease = runtime.ReleaseID == liveReleaseID

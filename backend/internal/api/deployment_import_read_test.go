@@ -24,9 +24,10 @@ import (
 
 func wireWorkloadImportEvidenceDeployModules(s *Server) {
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots)
-	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning)
+	s.modules.deployStartup = deploy.NewNativeStartupStore(filepath.Join(s.Cfg.DataDir, "deployment-recovery"), s.Sealer)
+	s.modules.deploySources = deploy.NewHostSourceAnalyzer(s.Cfg.DeployRoots, s.Cfg.ComposeRoots, filepath.Join(s.Cfg.DataDir, "deployment-detection"), s.modules.docker, s.modules.deployPlanning).WithNativeStartupStore(s.modules.deployStartup)
 	s.modules.deployRuntime = deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
-	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd)
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(s.modules.deployRuntime, s.modules.pm2, s.modules.systemd).WithStartupStore(s.modules.deployStartup)
 	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
 	observer := deploy.NewHostPreflightObserver(s.Cfg.DeployRoots, s.Cfg.DataDir, s.modules.docker, s.modules.proxy).
 		WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions).withNativeRuntime(s.modules.deployNative))
@@ -158,6 +159,10 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		t.Fatal(err)
 	}
+	stackName := os.Getenv("JD_IMPORT_BROWSER_STACK")
+	if stackName == "" {
+		stackName = "bet-bot"
+	}
 	c, s := newClient(t)
 	s.Auth = auth.NewService(s.Store, s.Sealer, time.Hour, time.Hour, false)
 	s.Authn.Svc = s.Auth
@@ -237,13 +242,13 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 	}
 	var logContainerID string
 	for _, container := range containers {
-		if container.ComposeStack == "bet-bot" && container.State == "running" {
+		if container.ComposeStack == stackName && container.State == "running" {
 			logContainerID = container.ID
 			break
 		}
 	}
 	if logContainerID == "" {
-		t.Fatal("the native proof requires a running bet-bot container")
+		t.Fatal("the native proof requires a running container in its selected stack")
 	}
 	// Exercise the ordinary authenticated log route with one tail line. Log
 	// contents are discarded; only the successful Docker stream metadata is kept.
@@ -269,7 +274,8 @@ func TestWorkloadImportBrowserEvidenceServer(t *testing.T) {
 	logSocket.Close()
 	cookie := strings.SplitN(c.cookie, "=", 2)
 	ready, _ := json.Marshal(map[string]any{
-		"url": "http://" + listener.Addr().String(), "cookieName": cookie[0],
+		"stackName": stackName,
+		"url":       "http://" + listener.Addr().String(), "cookieName": cookie[0],
 		"cookieValue": cookie[1], "stopFile": filepath.Join(directory, "stop"),
 		"dockerLogTailRead":        true,
 		"dockerPreflightAvailable": true,

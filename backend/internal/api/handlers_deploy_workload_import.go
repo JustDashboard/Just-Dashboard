@@ -499,7 +499,8 @@ func (s *Server) recoverWorkloadWithScope(ctx context.Context, candidate *deploy
 		if s.modules.docker == nil {
 			return nil, deploy.ErrSourceUnavailable
 		}
-		return deploy.RecoverDockerWorkloadWithScope(ctx, *candidate, s.modules.docker, paths, root, scope)
+		recovered, err := deploy.RecoverDockerWorkloadWithScope(ctx, *candidate, s.modules.docker, paths, root, scope)
+		return s.attachWorkloadIngress(ctx, candidate, recovered, err)
 	default:
 		capture, err := s.captureHostWorkload(ctx, candidate)
 		if err != nil {
@@ -509,7 +510,7 @@ func (s *Server) recoverWorkloadWithScope(ctx context.Context, candidate *deploy
 		if recoverErr == nil && recovered != nil && recovered.Adoption != nil && len(recovered.Adoption.Blockers) != 0 {
 			recoverErr = deploy.ErrRecoveryBlocked
 		}
-		return recovered, recoverErr
+		return s.attachWorkloadIngress(ctx, candidate, recovered, recoverErr)
 	}
 }
 
@@ -580,6 +581,10 @@ func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.
 	if candidate.ImportedProjectID != 0 {
 		return httpx.Err(http.StatusConflict, "workload_already_imported", "This workload is already imported. Open its existing deployment.")
 	}
+	// An omitted scope is a new import, not the historical stored-scope default.
+	if request.Scope == "" && candidate.Kind == "stack" {
+		request.Scope = deploy.RecoveryExistingServices
+	}
 	if !request.Scope.ValidForKind(candidate.Kind) {
 		return httpx.Err(http.StatusBadRequest, "invalid_scope", "Existing services scope is available only for Compose stacks; choose all_services or existing_services.")
 	}
@@ -587,6 +592,7 @@ func (s *Server) handleDeploymentWorkloadRecover(w http.ResponseWriter, r *http.
 	if err != nil {
 		return recoveryError(recovered, err)
 	}
+	s.recoverExistingBackupPolicy(r.Context(), recovered)
 	profile := deploy.ProfileService
 	if recovered.Detection.SelectedID != "" {
 		for _, item := range recovered.Detection.Candidates {

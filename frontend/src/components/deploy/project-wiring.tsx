@@ -12,6 +12,7 @@ import {
   Layers,
 } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
+import { deploymentRouteId } from "@/lib/deployment-runtime-route"
 import type {
   DeploymentDomainRoute,
   DeploymentEngineRun,
@@ -21,7 +22,7 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { StatusDot, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
@@ -31,6 +32,8 @@ import { RunStrip } from "@/components/deploy/run-marks"
 import {
   CertificateReading,
   HealthStatus,
+  ROUTE_LABEL,
+  ROUTE_TONE,
   autoDeployReading,
   formatDuration,
   hostOf,
@@ -82,6 +85,7 @@ export function ProjectWiring({
   runs,
   runtime,
   domains,
+  domainsReason,
   url,
   watch,
 }: {
@@ -107,6 +111,7 @@ export function ProjectWiring({
   runtime?: DeploymentRuntimeServices
   /** The routes the operations owner reports, when it could read them. */
   domains?: DeploymentDomainRoute[]
+  domainsReason?: string
   url?: string
   watch?: DeploymentGitWatch
 }) {
@@ -366,26 +371,39 @@ export function ProjectWiring({
                   <ul className="grid grid-cols-1 gap-y-1 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)] sm:gap-x-3">
                     {domains.map((domain) => (
                       <li
-                        key={domain.hostname}
+                        key={deploymentRouteId(domain)}
                         className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 sm:col-span-2 sm:grid sm:grid-cols-subgrid"
                       >
                         <a
-                          href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
+                          href={`${domain.https ? "https" : "http"}://${domain.hostname}${domain.path || "/"}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
                         >
-                          <span className="truncate font-mono">{domain.hostname}</span>
+                          <span className="truncate font-mono">
+                            {domain.hostname}
+                            {domain.path && domain.path !== "/" ? domain.path : ""}
+                          </span>
                           <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
                         </a>
                         <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-normal">
                           <CertificateReading domain={domain} />
+                          {domain.proxyKind && (
+                            <Status
+                              tone={ROUTE_TONE[domain.route]}
+                              label={ROUTE_LABEL[domain.route]}
+                            />
+                          )}
+                          {domain.service && <Tag>{domain.service}</Tag>}
+                          {domain.servedBy && domain.proxyKind && <span>{domain.servedBy}</span>}
                           {domain.protected && <Tag>Password</Tag>}
                         </span>
                       </li>
                     ))}
                   </ul>
                 )
+              ) : domainsReason ? (
+                <span className="text-muted-foreground">{domainsReason}</span>
               ) : host ? (
                 <a
                   href={url}

@@ -1,10 +1,23 @@
 import { expect, test } from "bun:test"
 import {
   adoptionReviewMetadata,
+  groupImportWarnings,
+  recoveredEnvironmentGroups,
+  recoveredEnvironmentSatisfied,
+  recoveredInputBound,
+  retainedVariableSatisfied,
   workloadManagerUrl,
   workloadMatches,
   workloadPort,
 } from "./workload-import"
+
+test("recovered input protection follows current bindings and supports legacy aliases", () => {
+  expect(recoveredInputBound()).toBe(false)
+  expect(recoveredInputBound({ storageKey: "PORT" })).toBe(false)
+  expect(recoveredInputBound({ storageKey: "JD_IMPORT_ENV_PORT" })).toBe(true)
+  expect(recoveredInputBound({ storageKey: "JD_IMPORTED_ARG_0", bound: true })).toBe(true)
+  expect(recoveredInputBound({ storageKey: "JD_IMPORT_ENV_PORT", bound: false })).toBe(false)
+})
 
 test("remembered adoption preserves server scope and exclusions but drops baseline and private extras", () => {
   const metadata = adoptionReviewMetadata({
@@ -28,6 +41,147 @@ test("remembered adoption preserves server scope and exclusions but drops baseli
   expect(JSON.stringify(metadata)).not.toContain("must-not-persist")
   expect(metadata).not.toHaveProperty("baseline")
   expect(metadata).not.toHaveProperty("unexpectedEnvironment")
+})
+
+test("captured environment groups original keys by service and separates proven image defaults", () => {
+  const inputs = [
+    {
+      storageKey: "alias-one",
+      name: "TELEGRAM_CHAT_ID",
+      service: "worker",
+      kind: "environment",
+      category: "application",
+      empty: false,
+    },
+    {
+      storageKey: "alias-two",
+      name: "TELEGRAM_CHAT_ID",
+      service: "bot",
+      kind: "environment",
+      category: "application",
+      empty: true,
+    },
+    {
+      storageKey: "alias-path",
+      name: "PATH",
+      service: "worker",
+      kind: "environment",
+      category: "image_default",
+      empty: false,
+    },
+    {
+      storageKey: "alias-label",
+      name: "owner",
+      service: "worker",
+      kind: "label",
+      category: "runtime_setting",
+      empty: false,
+    },
+  ]
+  const groups = recoveredEnvironmentGroups(inputs)
+  expect(groups.map((group) => group.service)).toEqual(["worker", "bot"])
+  expect(groups[0].application.map((input) => input.name)).toEqual(["TELEGRAM_CHAT_ID"])
+  expect(groups[0].imageDefaults.map((input) => input.name)).toEqual(["PATH"])
+  expect(retainedVariableSatisfied("alias-one", ["alias-one"], inputs)).toBe(true)
+  expect(retainedVariableSatisfied("alias-two", ["alias-two"], inputs)).toBe(false)
+  expect(
+    recoveredEnvironmentSatisfied("TELEGRAM_CHAT_ID", ["alias-one", "alias-two"], inputs),
+  ).toBe(false)
+  expect(recoveredEnvironmentSatisfied("PATH", ["alias-path"], inputs)).toBe(true)
+})
+
+test("Compose operational warning groups preserve every distinct acknowledgement and evidence", () => {
+  const warnings = [
+    {
+      code: "compose_warning_1",
+      title: "Compose configuration needs review",
+      measured: "worker has no healthcheck",
+    },
+    {
+      code: "compose_warning_2",
+      title: "Compose configuration needs review",
+      measured: "web has no healthcheck",
+    },
+    { code: "backup_missing", title: "Backup missing", measured: "Storage needs coverage" },
+  ]
+  const groups = groupImportWarnings(warnings)
+  expect(groups).toHaveLength(2)
+  expect(groups[0].codes).toEqual(["compose_warning_1", "compose_warning_2"])
+  expect(groups[0].details.map((finding) => finding.measured)).toEqual([
+    "worker has no healthcheck",
+    "web has no healthcheck",
+  ])
+  expect(groups[1].codes).toEqual(["backup_missing"])
+})
+
+test("one grouped warning still requires every distinct server acknowledgement", () => {
+  const warnings = [
+    {
+      code: "adoption_data_abc",
+      issueCode: "persistent_data_reused",
+      service: "bot",
+      title: "Data",
+      severity: "warning",
+    },
+    {
+      code: "adoption_data_def",
+      issueCode: "persistent_data_reused",
+      service: "worker",
+      title: "Data",
+      severity: "warning",
+    },
+    { code: "runtime_privileged", title: "Runtime", severity: "warning" },
+  ]
+  const groups = groupImportWarnings(warnings)
+  expect(groups).toHaveLength(2)
+  expect(groups[0].codes).toEqual(["adoption_data_abc", "adoption_data_def"])
+  expect(groups[0].services).toEqual(["bot", "worker"])
+  expect(groups[0].details).toHaveLength(2)
+})
+
+test("remembered descriptors strip private additions recursively", () => {
+  const metadata = adoptionReviewMetadata({
+    key: "stack:bot",
+    digest: "inspected",
+    kind: "stack",
+    resourceId: "bot",
+    manager: "docker",
+    name: "bot",
+    serviceCount: 1,
+    runningCount: 1,
+    warnings: [],
+    blockers: [],
+    inputs: [
+      {
+        storageKey: "alias",
+        name: "TOKEN",
+        kind: "environment",
+        origin: "container",
+        category: "application",
+        sensitivity: "secret",
+        retained: true,
+        empty: false,
+        value: "never-persist",
+      },
+    ],
+    buildSources: [{ service: "bot", status: "snapshot", privatePath: "never-persist" }],
+    ingressBindings: [
+      {
+        id: "route",
+        hostname: "example.test",
+        path: "/",
+        service: "bot",
+        owner: "nginx",
+        proxyKind: "nginx",
+        status: "linked",
+        continuity: "host_port",
+        rawConfiguration: "never-persist",
+      },
+    ],
+  })
+  expect(JSON.stringify(metadata)).not.toContain("never-persist")
+  expect(metadata.inputs[0].name).toBe("TOKEN")
+  expect(metadata.ingressBindings[0].hostname).toBe("example.test")
 })
 
 const stack = {

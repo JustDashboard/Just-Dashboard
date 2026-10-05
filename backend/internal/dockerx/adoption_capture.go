@@ -22,31 +22,56 @@ type AdoptionContainer struct {
 	ChangeModes             map[string]os.FileMode       `json:"-"`
 	MissingImage            bool                         `json:"-"`
 	RegenerablePaths        []string                     `json:"-"`
+	VerifiedPythonCaches    []string                     `json:"-"`
 	RegenerableProofFailure string                       `json:"-"`
 	UnrepresentedOptions    []string                     `json:"-"`
+}
+
+// AdoptionCaptureError exposes a bounded phase name, never Docker response
+// bodies or configuration values. Cancellation remains inspectable internally.
+type AdoptionCaptureError struct {
+	Stage string
+	cause error
+}
+
+func (e *AdoptionCaptureError) Error() string {
+	reason := "could not be verified"
+	if errors.Is(e.cause, context.DeadlineExceeded) {
+		reason = "exceeded the capture time limit"
+	} else if errors.Is(e.cause, context.Canceled) {
+		reason = "was canceled"
+	}
+	return "container " + strings.ReplaceAll(e.Stage, "_", " ") + " " + reason
+}
+func (e *AdoptionCaptureError) Unwrap() error { return e.cause }
+func adoptionCaptureFailure(ctx context.Context, stage string, err error) error {
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return &AdoptionCaptureError{Stage: stage, cause: err}
 }
 
 func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*AdoptionContainer, error) {
 	cli, err := c.api()
 	if err != nil {
-		return nil, err
+		return nil, adoptionCaptureFailure(ctx, "daemon", err)
 	}
 	inspection, raw, err := cli.ContainerInspectWithRaw(ctx, id, false)
 	if err != nil || inspection.ID == "" || inspection.Config == nil || inspection.HostConfig == nil {
-		return nil, errors.New("the container configuration could not be captured")
+		return nil, adoptionCaptureFailure(ctx, "inspection", err)
 	}
 	unknownOptions, err := adoptionUnrepresentedConfiguration(raw)
 	if err != nil {
-		return nil, err
+		return nil, adoptionCaptureFailure(ctx, "configuration", err)
 	}
-	image, err := c.InspectImage(ctx, inspection.Image)
+	image, err := c.inspectImage(ctx, inspection.Image, false)
 	if err != nil && !errdefs.IsNotFound(err) {
-		return nil, errors.New("the original container image is unavailable locally")
+		return nil, adoptionCaptureFailure(ctx, "image", err)
 	}
 	missingImage := err != nil
 	changes, err := cli.ContainerDiff(ctx, inspection.ID)
 	if err != nil {
-		return nil, errors.New("the container writable layer could not be checked")
+		return nil, adoptionCaptureFailure(ctx, "writable_layer", err)
 	}
 	modes := map[string]os.FileMode{}
 	for _, change := range changes {
@@ -65,6 +90,10 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 	}
 	captured := &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage, UnrepresentedOptions: unknownOptions}
 	c.captureRegenerableN8nCache(ctx, captured)
+	c.captureRegenerablePythonCaches(ctx, captured)
+	if ctx.Err() != nil {
+		return nil, adoptionCaptureFailure(ctx, "generated_cache", ctx.Err())
+	}
 	return captured, nil
 }
 

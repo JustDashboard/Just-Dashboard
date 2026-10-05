@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 )
 
 func TestVerifiedN8nCacheRequiresOnlyAddedGeneratedFilesAndEmptyUploads(t *testing.T) {
@@ -131,4 +132,43 @@ func TestLiveHeldN8nCacheProof(t *testing.T) {
 		t.Fatal("read-only proof changed fixture runtime")
 	}
 	t.Logf("verified regenerated cache changes=%d; runtime ID/PID/start/config unchanged", len(capture.Changes))
+}
+
+func TestN8nImmutableImageProofReuseRequiresFreshUnchangedSourceAndNoShadowMount(t *testing.T) {
+	const image = "sha256:owned-immutable-fixture"
+	proof := map[string]os.FileMode{"": os.ModeDir, "assets/editor.js": 0644}
+	client := &Client{}
+	fixture := func() *AdoptionContainer {
+		return &AdoptionContainer{Image: &ImageDetail{ID: image}, Inspection: container.InspectResponse{ContainerJSONBase: &container.ContainerJSONBase{Image: image}}, Changes: []container.FilesystemChange{{Path: n8nEditorCache + "/assets/editor.js", Kind: container.ChangeAdd}}}
+	}
+	first := fixture()
+	client.rememberN8nImageProof(first, proof)
+	if got := client.cachedN8nImageProof(fixture()); !reflect.DeepEqual(got, proof) {
+		t.Fatal("same immutable source reread rather than reused")
+	}
+	for _, name := range []string{"source_modified", "source_deleted", "source_ancestor", "distribution_addition", "source_mount", "different_image", "missing_image"} {
+		t.Run(name, func(t *testing.T) {
+			current := fixture()
+			source := "/usr/local/lib/node_modules/n8n/dist/commands/start.js"
+			switch name {
+			case "source_modified":
+				current.Changes = append(current.Changes, container.FilesystemChange{Path: source, Kind: container.ChangeModify})
+			case "source_deleted":
+				current.Changes = append(current.Changes, container.FilesystemChange{Path: source, Kind: container.ChangeDelete})
+			case "source_ancestor":
+				current.Changes = append(current.Changes, container.FilesystemChange{Path: "/usr/local/lib/node_modules/n8n", Kind: container.ChangeModify})
+			case "distribution_addition":
+				current.Changes = append(current.Changes, container.FilesystemChange{Path: "/usr/local/lib/node_modules/n8n/node_modules/n8n-editor-ui/dist/assets/private.js", Kind: container.ChangeAdd})
+			case "source_mount":
+				current.Inspection.Mounts = []container.MountPoint{{Type: mount.TypeBind, Destination: "/usr/local/lib/node_modules/n8n"}}
+			case "different_image":
+				current.Inspection.Image = "sha256:another-image"
+			case "missing_image":
+				current.Image = nil
+			}
+			if client.cachedN8nImageProof(current) != nil {
+				t.Fatal("mutable or different source reused immutable proof")
+			}
+		})
+	}
 }

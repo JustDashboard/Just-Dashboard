@@ -1421,10 +1421,11 @@ test("Query hands over a SELECT in the engine's dialect, without reading the tab
   await page.goto(TABLE)
   await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
   await page.getByRole("button", { name: "Query", exact: true }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  expect(new URL(page.url()).searchParams.get("sql")).toBe(
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
+  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
     'SELECT * FROM "public"."orders" LIMIT 100',
   )
+  await expect(page.getByText("Nothing has been run in this tab", { exact: true })).toBeVisible()
   expect(sent.browse).toEqual([])
 })
 
@@ -1471,10 +1472,11 @@ test("a function is read as its definition and handed to Query; an overload is t
   await expect(page.getByText("Arguments", { exact: true })).toBeVisible()
 
   await page.getByRole("button", { name: "Open in Query" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  expect(new URL(page.url()).searchParams.get("sql")).toContain(
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
+  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toContainText(
     "CREATE OR REPLACE FUNCTION public.armor",
   )
+  await expect(page.getByText("Nothing has been run in this tab", { exact: true })).toBeVisible()
 })
 
 test("an enum's labels are read in order, and one is added beside another", async ({ page }) => {
@@ -1815,12 +1817,13 @@ test("a table's menu leads to its data, its schema and a SELECT in the engine's 
 
   await button.click()
   await page.getByRole("menuitem", { name: "Open a SELECT in Query" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
   // Both parts of the name quoted the engine's way — and written at once:
   // the table is not read to learn how it is read.
-  expect(new URL(page.url()).searchParams.get("sql")).toBe(
+  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
     'SELECT * FROM "sales"."orders" LIMIT 100',
   )
+  await expect(page.getByText("Nothing has been run in this tab", { exact: true })).toBeVisible()
   expect(sent.browse).toEqual([])
 
   await page.goBack()

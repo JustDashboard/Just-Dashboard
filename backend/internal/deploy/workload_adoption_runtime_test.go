@@ -135,11 +135,14 @@ func TestAdoptionOwnershipOverrideIsPrivateImmutableAndContained(t *testing.T) {
 }
 
 func TestWritableLayerPermitsOnlyVerifiedAddedRegenerableFiles(t *testing.T) {
-	for _, name := range []string{"added-bytecode", "missing-stat", "modified-bytecode", "modified-source", "unknown-ancestor", "unrelated-data", "docker-init", "fake-docker-init", "mount-directory", "mount-file", "mount-child"} {
+	for _, name := range []string{"added-bytecode", "unverified-bytecode", "missing-stat", "modified-bytecode", "modified-source", "unknown-ancestor", "unrelated-data", "docker-init", "fake-docker-init", "mount-directory", "mount-file", "mount-child"} {
 		t.Run(name, func(t *testing.T) {
 			capture := adoptionCaptureFixture(t, "web", true)
 			capture.Changes = []container.FilesystemChange{{Path: "/app", Kind: container.ChangeModify}, {Path: "/app/__pycache__", Kind: container.ChangeAdd}, {Path: "/app/__pycache__/server.cpython-311.pyc", Kind: container.ChangeAdd}}
 			capture.ChangeModes = map[string]os.FileMode{"/app": os.ModeDir, "/app/__pycache__": os.ModeDir, "/app/__pycache__/server.cpython-311.pyc": 0o644}
+			if name != "unverified-bytecode" {
+				capture.VerifiedPythonCaches = []string{"/app/__pycache__/server.cpython-311.pyc"}
+			}
 			want, cache := name == "added-bytecode", name == "added-bytecode"
 			switch name {
 			case "missing-stat":

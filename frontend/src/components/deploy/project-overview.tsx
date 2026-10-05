@@ -212,6 +212,7 @@ function ManagedProjectOverview() {
             runs={runs}
             runtime={runtime}
             domains={opsDomains}
+            domainsReason={project.operations?.domains.reason}
             url={url}
             watch={project.gitWatch}
           />

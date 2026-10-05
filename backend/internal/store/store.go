@@ -594,6 +594,7 @@ CREATE TABLE IF NOT EXISTS deploy_webhook_deliveries (
 );
 
 CREATE TABLE IF NOT EXISTS deploy_variable_revisions (
+	value_mode TEXT NOT NULL DEFAULT '',
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   environment_id INTEGER NOT NULL REFERENCES deploy_environments(id) ON DELETE CASCADE,
   key            TEXT NOT NULL,
@@ -1072,6 +1073,11 @@ BEFORE UPDATE OF environment_id, key, revision, sensitivity, scopes, value_enc,
 BEGIN
   SELECT RAISE(ABORT, 'deployment variable revision is immutable');
 END;
+CREATE TRIGGER IF NOT EXISTS deploy_variable_revision_mode_immutable
+BEFORE UPDATE OF value_mode ON deploy_variable_revisions
+BEGIN
+  SELECT RAISE(ABORT, 'deployment variable revision is immutable');
+END;
 `
 
 // addedColumns are columns that arrived after the table they belong to had
@@ -1117,6 +1123,7 @@ var addedColumns = []struct{ table, column, spec string }{
 	// so closing the preview can drop exactly the copies and nothing the
 	// operator typed there themselves.
 	{"deploy_variable_revisions", "copied_from_environment", "INTEGER NOT NULL DEFAULT 0"},
+	{"deploy_variable_revisions", "value_mode", "TEXT NOT NULL DEFAULT ''"},
 
 	{"deploy_git_watches", "reason", "TEXT NOT NULL DEFAULT ''"},
 	{"deploy_git_watches", "policy_key", "TEXT NOT NULL DEFAULT ''"},

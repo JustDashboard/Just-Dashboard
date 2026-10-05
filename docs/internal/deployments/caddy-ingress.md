@@ -104,3 +104,36 @@ tests remain required. The browser regression covers automatic Caddy HTTPS witho
 References: [Caddy commands](https://caddyserver.com/docs/command-line),
 [Caddyfile imports](https://caddyserver.com/docs/caddyfile/directives/import), and
 [the configuration API](https://caddyserver.com/docs/api).
+
+## External routes recovered by existing-workload import
+
+Recovered external routes use server-owned `existing_proxy_route` dependencies, separate from
+managed deployment domains. Import only reads their authoritative hostname/path/service bindings;
+it does not create managed routes, issue certificates or regenerate their authentication. Settings
+retain those frozen links, and duplication, previews and managed deletion never acquire their
+original proxy authority.
+
+A stable published host port stays unchanged. A Docker alias requires the exact shared network and
+one verified running owner. An intentionally stopped original can be captured and restored only
+when direct inspection verifies its frozen container ID, retained network and alias; a replacement
+still requires its own running owner. Static literal IP handoff changes only an isolated nginx
+upstream directive or a conventional Caddyfile with one `reverse_proxy`, no imports or snippets.
+Multiple nginx directives in the same file are journalled and changed together. Multiple stable
+Caddy hostname/path/service routes are supported; shared, dynamic or conditional upstreams require
+review. Adapted Caddyfile JSON must equal active local admin configuration. Conventional host Caddy
+uses the local admin endpoint; custom or disabled admin layouts do not authorize replacement.
+
+Private durable journals retain exact before/after bytes for failed reload, rollback and interrupted
+writes. File-descriptor and pathname identities, expected bytes and post-write verification provide
+bounded conflict detection while preserving the inode required by single-file Docker bind mounts.
+Dashboard locking serializes dashboard operations; it cannot make an in-place write atomic against
+an external writer after comparison. Operators must avoid concurrent edits during handoff, and
+later unrelated bytes or replaced inodes are rejected rather than overwritten. An installed binary or stopped/unassociated nginx does not establish an existing route. Known
+uninspectable active routes remain unverified deployment dependencies and block before runtime stop. Unassociated proxy
+manager presence is a hint, not permission to take over its configuration.
+
+`JD_DEPLOY_LIVE=1 go test -race ./internal/proxysvc -run '^TestLiveExisting' -count=1 -v`
+uses only owned loopback nginx and Docker Caddy fixtures. It verifies per-path services, alias
+ownership and stopped originals, static-IP handoff, TLS/auth/URI/WebSocket byte preservation,
+single-file mount identity, failed reload compensation, rollback, active-only drift and conflicting
+operator edits. It does not claim public certificate issuance or support arbitrary proxy managers.

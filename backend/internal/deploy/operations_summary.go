@@ -56,6 +56,12 @@ type DomainSummary struct {
 // DomainRoute separates the three facts a saved domain never proves on its
 // own: a route serves it, a certificate covers it, and nothing else claims it.
 type DomainRoute struct {
+	ID                  string        `json:"id,omitempty"`
+	Path                string        `json:"path,omitempty"`
+	Service             string        `json:"service,omitempty"`
+	ProxyKind           string        `json:"proxyKind,omitempty"`
+	Continuity          string        `json:"continuity,omitempty"`
+	Detail              string        `json:"detail,omitempty"`
 	Hostname            string        `json:"hostname"`
 	HTTPS               bool          `json:"https"`
 	Ownership           OwnershipMode `json:"ownership"`
@@ -85,14 +91,16 @@ type StorageSummary struct {
 }
 
 type StorageMount struct {
-	Source    string        `json:"source"`
-	Target    string        `json:"target"`
-	Kind      string        `json:"kind"`
-	ReadOnly  bool          `json:"readOnly,omitempty"`
-	Ownership OwnershipMode `json:"ownership"`
-	Status    string        `json:"status"`
-	Detail    string        `json:"detail,omitempty"`
-	DeepLink  string        `json:"deepLink,omitempty"`
+	Service     string        `json:"service,omitempty"`
+	ContainerID string        `json:"containerId,omitempty"`
+	Source      string        `json:"source"`
+	Target      string        `json:"target"`
+	Kind        string        `json:"kind"`
+	ReadOnly    bool          `json:"readOnly,omitempty"`
+	Ownership   OwnershipMode `json:"ownership"`
+	Status      string        `json:"status"`
+	Detail      string        `json:"detail,omitempty"`
+	DeepLink    string        `json:"deepLink,omitempty"`
 }
 
 type BackupSummary struct {
@@ -174,9 +182,14 @@ func (s *OrchestrationStore) Operations(
 		return result, nil
 	}
 	result.Evidence, result.ReleaseID = "release", summary.LiveReleaseID
-	observed := observeDependencies(ctx, owners.Dependencies, snapshot)
-	result.Domains = observeDomainRoutes(ctx, owners, snapshot.Domains, summary.EnvironmentID)
-	result.Storage = storageSummary(snapshot, observed)
+	storageSnapshot, mounts, storageErr := operationalStorageSnapshot(ctx, owners.Runtime, snapshot, result.Runtime, summary.LiveReleaseID)
+	observed := observeDependencies(ctx, owners.Dependencies, storageSnapshot)
+	result.Domains = observeReleaseDomainRoutes(ctx, owners, snapshot, summary.EnvironmentID)
+	if storageErr != nil {
+		result.Storage.Reason = "The live Compose service mounts could not be verified. Open Docker to inspect their storage."
+	} else {
+		result.Storage = recordedStorageSummary(storageSnapshot, observed, mounts)
+	}
 	result.Backups = backupSummary(snapshot, observed)
 	result.Dependencies = otherDependencySummary(snapshot, observed)
 	input.Domains, input.Storage = result.Domains, result.Storage
@@ -213,7 +226,7 @@ func observeDependencies(
 	seen := map[string]bool{}
 	add := func(dependency PlannedDependency) {
 		key := dependencyKey(dependency.ResourceKind, dependency.ResourceID)
-		if seen[key] || dependency.ResourceKind == "" || dependency.ResourceID == "" {
+		if seen[key] || dependency.ResourceKind == "" || dependency.ResourceID == "" || dependency.ResourceKind == existingIngressDependency {
 			return
 		}
 		seen[key] = true
@@ -338,6 +351,7 @@ func otherDependencySummary(snapshot runtimeReleaseSnapshot, observed dependency
 	declared := []PlannedDependency{}
 	for _, dependency := range snapshot.Dependencies {
 		switch {
+		case dependency.ResourceKind == existingIngressDependency:
 		case dependency.Kind == "backup" || dependency.ResourceKind == "backup_job":
 		case dependency.ResourceKind == "docker_volume" || dependency.ResourceKind == "bind_path":
 		default:

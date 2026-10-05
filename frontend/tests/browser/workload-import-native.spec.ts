@@ -3,8 +3,12 @@ import { readFileSync, mkdirSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
+import { bytes, percent } from "../../src/lib/format"
 
 const readyPath = process.env.JD_IMPORT_NATIVE_READY
+const selectedStack = readyPath
+  ? JSON.parse(readFileSync(readyPath, "utf8")).stackName || "bet-bot"
+  : "bet-bot"
 test.skip(!readyPath, "requires the isolated authenticated native discovery evidence server")
 test.use({ video: { mode: "on", size: { width: 1280, height: 900 } } })
 
@@ -21,7 +25,14 @@ type InspectedContainer = {
 function existingStackEvidence() {
   const ids = execFileSync(
     "docker",
-    ["ps", "-a", "--filter", "label=com.docker.compose.project=bet-bot", "--format", "{{.ID}}"],
+    [
+      "ps",
+      "-a",
+      "--filter",
+      `label=com.docker.compose.project=${selectedStack}`,
+      "--format",
+      "{{.ID}}",
+    ],
     { encoding: "utf8" },
   )
     .trim()
@@ -50,7 +61,7 @@ function existingStackEvidence() {
   }))
 }
 
-test("imports the real existing bet-bot stack without changing its containers", async ({
+test("imports the real selected stack without changing its containers", async ({
   page,
   context,
 }, testInfo) => {
@@ -70,16 +81,19 @@ test("imports the real existing bet-bot stack without changing its containers", 
     },
   ])
   const before = existingStackEvidence()
-  const excludedServices = ["eurobet-doubles-tracker", "eurobet-high-market-tracker"]
+  const excludedServices =
+    selectedStack === "bet-bot" ? ["eurobet-doubles-tracker", "eurobet-high-market-tracker"] : []
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto("/deploy")
   await expect(page.getByRole("link", { name: "Import existing" })).toBeVisible()
   await page.screenshot({ path: join(output, "native-before-deployments.png"), fullPage: true })
   await page.goto("/deploy/import")
-  await page.getByRole("textbox", { name: "Search workloads" }).fill("bet-bot")
-  await expect(page.getByRole("button", { name: "Review bet-bot" })).toBeVisible({ timeout: 30000 })
+  await page.getByRole("textbox", { name: "Search workloads" }).fill(selectedStack)
+  await expect(page.getByRole("button", { name: `Review ${selectedStack}` })).toBeVisible({
+    timeout: 30000,
+  })
   await page.screenshot({ path: join(output, "native-discovery-1280.png"), fullPage: true })
-  await page.getByRole("button", { name: "Review bet-bot" }).click()
+  await page.getByRole("button", { name: `Review ${selectedStack}` }).click()
   await expect(page.getByRole("button", { name: "Review migration" })).toBeVisible({
     timeout: 30000,
   })
@@ -98,13 +112,19 @@ test("imports the real existing bet-bot stack without changing its containers", 
   const recoveredDraft = await recovered.json()
   expect(recoveredDraft.data.adoption.scope).toBe("existing_services")
   expect(recoveredDraft.data.adoption.excludedServices).toEqual(excludedServices)
-  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible({
     timeout: 180000,
   })
   for (const name of excludedServices) {
     await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(name)
   }
   await page.screenshot({ path: join(output, "native-configuration-1280.png"), fullPage: true })
+  await page.getByRole("button", { name: "Back", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
+  const inputPanel = page.locator("[data-slot=flow-panel]")
+  await expect(inputPanel).toContainText("TELEGRAM_CHAT_ID")
+  await expect(inputPanel).not.toContainText("JD_IMPORT_ENV_")
+  await page.screenshot({ path: join(output, "native-original-inputs-1280.png"), fullPage: true })
   await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible({
     timeout: 30000,
@@ -191,6 +211,22 @@ test("imports the real existing bet-bot stack without changing its containers", 
   expect(managedContainerIds).toEqual(
     before.map((container: { id: string }) => container.id).sort(),
   )
+  const operationsResponse = await page.request.get(
+    new URL(`/api/v1${projectPath}/operations`, page.url()).toString(),
+  )
+  expect(operationsResponse.ok()).toBe(true)
+  const operations = await operationsResponse.json()
+  expect(operations.storage.status).toBe("available")
+  if (selectedStack.startsWith("jd-import-proof-")) {
+    expect(operations.storage.mounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ service: "worker", target: "/fixture-data", kind: "volume" }),
+        expect.objectContaining({ service: "web", target: "/www", kind: "bind", readOnly: true }),
+        expect.objectContaining({ service: "web", target: "/data", kind: "volume" }),
+        expect.objectContaining({ service: "web", target: "/config", kind: "volume" }),
+      ]),
+    )
+  }
   const selectedService =
     runtime.services.find(
       (service: { state: string; liveRelease: boolean }) =>
@@ -229,31 +265,40 @@ test("imports the real existing bet-bot stack without changing its containers", 
     })
   }
   const usage = page.locator('[data-slot="panel"]').filter({
-    has: page.getByRole("heading", { name: "Resource usage", exact: true }),
+    has: page.getByRole("heading", { name: "Usage", exact: true }),
   })
-  const cpu = usage.locator('[data-slot="stat-tile"]').filter({
-    has: page.getByText("CPU", { exact: true }),
-  })
-  const memory = usage.locator('[data-slot="stat-tile"]').filter({
-    has: page.getByText("Memory", { exact: true }),
-  })
+  if (selectedStack.startsWith("jd-import-proof-")) {
+    const storageList = page.getByRole("list", { name: "Persistent storage" })
+    await expect(storageList).toContainText("/fixture-data")
+    await expect(storageList).toContainText("worker")
+    await expect(storageList).toContainText("/www")
+    await expect(storageList).toContainText("read-only")
+    await storageList.scrollIntoViewIfNeeded()
+    await page.screenshot({
+      path: join(output, "native-storage-1280.png"),
+      fullPage: true,
+      animations: "disabled",
+    })
+  }
+  await expect(usage).toBeVisible()
+  await usage.scrollIntoViewIfNeeded()
   await expect
     .poll(
       async () => {
         const reading = runtimeReading
         if (!reading?.cpuReady) return false
-        const mib = reading.memUsage / 1024 / 1024
-        const memoryValue = mib >= 1024 ? (mib / 1024).toFixed(2) : mib.toFixed(0)
         return (
-          (await cpu.locator("span.numeric.truncate").innerText()) ===
-            reading.cpuPercent.toFixed(1) &&
-          (await memory.locator("span.numeric.truncate").innerText()) === memoryValue
+          (await usage.getByText(/^CPU now:/).textContent())?.startsWith(
+            `CPU now: ${percent(reading.cpuPercent)}`,
+          ) &&
+          (await usage.getByText(/^Memory now:/).textContent())?.startsWith(
+            `Memory now: ${bytes(reading.memUsage)}`,
+          )
         )
       },
       { timeout: 30000 },
     )
     .toBe(true)
-  await expect(cpu.getByText("%", { exact: true })).toBeVisible()
   await expect(usage.getByText("Connecting", { exact: true })).not.toBeVisible()
   await expect(usage.getByText("Waiting for Docker", { exact: true })).not.toBeVisible()
   await page.screenshot({
@@ -275,7 +320,7 @@ test("imports the real existing bet-bot stack without changing its containers", 
     animations: "disabled",
   })
   await page.goto("/deploy")
-  await expect(page.getByRole("link", { name: /bet-bot/ }).first()).toBeVisible()
+  await expect(page.getByRole("link", { name: selectedStack, exact: true }).first()).toBeVisible()
   await page.screenshot({ path: join(output, "native-after-deployments.png"), fullPage: true })
   const after = existingStackEvidence()
   expect(after).toEqual(before)
@@ -291,12 +336,21 @@ test("imports the real existing bet-bot stack without changing its containers", 
         excludedServices,
         originalContainersRemainLiveAuthority: true,
         managedContainerIds,
-        existingStack: "bet-bot",
+        existingStack: selectedStack,
         isolatedProjectUrl: projectUrl,
         existingContainerCount: before.length,
         configurationsAndStartTimesUnchanged: true,
         processIdentityAndStateUnchanged: true,
         liveCpuAndMemoryReadingsVerified: true,
+        perServiceLiveStorageVerified: true,
+        persistentMounts: operations.storage.mounts.map(
+          (mount: { service?: string; target: string; kind: string; readOnly?: boolean }) => ({
+            service: mount.service,
+            target: mount.target,
+            kind: mount.kind,
+            readOnly: Boolean(mount.readOnly),
+          }),
+        ),
         selectedRuntimeReadingVerified: selectedService.containerId,
         dockerLogTailReadVerified: ready.dockerLogTailRead,
         overviewDockerPreflightVerified: true,

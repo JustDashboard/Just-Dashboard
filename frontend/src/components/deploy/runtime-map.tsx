@@ -12,6 +12,7 @@ import {
   type Icon,
 } from "@/components/icons"
 import { bytes, percent } from "@/lib/format"
+import { deploymentRouteId, deploymentRouteTargets } from "@/lib/deployment-runtime-route"
 import type { ContainerStats, DeploymentDomainRoute, DeploymentRuntimeService } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo, issuerProduct } from "@/components/product-logo"
@@ -109,10 +110,10 @@ export function RuntimeMap({
 
   const edges: Edge[] = []
   for (const domain of domains ?? []) {
-    for (const target of reached) {
+    for (const target of deploymentRouteTargets(domain, services)) {
       const up = target.service.state === "running"
       edges.push({
-        from: `d:${domain.hostname}`,
+        from: deploymentRouteId(domain),
         to: `s:${target.id}`,
         tone: !up || ROUTE_TONE[domain.route] === "danger" ? "danger" : "default",
         dashed: domain.route === "missing" || domain.route === "unavailable",
@@ -121,7 +122,11 @@ export function RuntimeMap({
     }
   }
   for (const store of stores ?? []) {
-    const owner = store.ownerId && byId.has(store.ownerId) ? store.ownerId : fallbackOwner
+    const owner = store.ownerId
+      ? byId.has(store.ownerId)
+        ? store.ownerId
+        : undefined
+      : fallbackOwner
     if (!owner) continue
     const up = byId.get(owner)?.service.state === "running"
     const tone = store.status.tone
@@ -137,7 +142,7 @@ export function RuntimeMap({
   // One ref per node, remade only when the set of nodes changes, so a poll
   // that changes nothing does not redraw every wire.
   const ids = [
-    ...(domains ?? []).map((domain) => `d:${domain.hostname}`),
+    ...(domains ?? []).map(deploymentRouteId),
     ...services.map((one) => `s:${one.id}`),
     ...services.map((one) => `p:${one.id}`),
     ...(stores ?? []).map((store) => `t:${store.key}`),
@@ -217,11 +222,14 @@ export function RuntimeMap({
               </li>
             ) : (
               domains.map((domain) => {
-                const id = `d:${domain.hostname}`
+                const id = deploymentRouteId(domain)
+                const targets = deploymentRouteTargets(domain, services)
+                  .map((target) => target.service.service || target.service.name)
+                  .join(", ")
                 const issuer = issuerProduct(domain.certificateIssuer)
                 return (
                   <li
-                    key={domain.hostname}
+                    key={id}
                     {...watch(id)}
                     className={cn("min-w-0 transition-opacity", !related(id) && "opacity-40")}
                   >
@@ -243,12 +251,13 @@ export function RuntimeMap({
                       eyebrow={domain.https ? "HTTPS" : "HTTP only"}
                       title={
                         <a
-                          href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
+                          href={`${domain.https ? "https" : "http"}://${domain.hostname}${domain.path || "/"}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="block truncate rounded-sm font-mono focus-ring hover:underline"
                         >
                           {domain.hostname}
+                          {domain.path && domain.path !== "/" ? domain.path : ""}
                         </a>
                       }
                       hint={
@@ -260,7 +269,8 @@ export function RuntimeMap({
                             />
                           )}
                           {domain.https && <CertificateReading domain={domain} issuer={false} />}
-                          {reachedNames && <span className="lg:hidden">to {reachedNames}</span>}
+                          {domain.proxyKind && <span>{domain.servedBy || domain.proxyKind}</span>}
+                          {targets && <span className="lg:hidden">to {targets}</span>}
                         </span>
                       }
                     />

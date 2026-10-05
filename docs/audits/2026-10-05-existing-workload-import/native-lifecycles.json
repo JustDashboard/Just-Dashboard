@@ -1,0 +1,91 @@
+{
+  "sourceCommit": "1825796a0062a15b2ac7e813cdfb94ef1b075183",
+  "proofBinarySha256": "87f16fb8eb8bcbe9f12f5942018ca3c94824276dbdfeae533bfd510858800ec0",
+  "nativeLifecycles": [
+    {
+      "manager": "pm2",
+      "passed": true,
+      "duration": "67.80s",
+      "sourceCommit": "1825796a0062a15b2ac7e813cdfb94ef1b075183",
+      "reservationObservations": [
+        {
+          "elapsed": "1.829688689s",
+          "budget": "29.998243821s",
+          "status": "available",
+          "callerCancelled": false
+        },
+        {
+          "elapsed": "1.829681115s",
+          "budget": "29.998637614s",
+          "status": "available",
+          "callerCancelled": false
+        }
+      ],
+      "reservationMetadataUnchanged": true,
+      "proof": {
+        "absoluteDataDirectoryTranslated": true,
+        "adoptionRestartedOriginal": false,
+        "builtCandidateFailureRestoredNative": true,
+        "capturedEnvironmentPrivate": true,
+        "clonedNativeRollbackReservationVerified": true,
+        "dockerLogsAvailable": true,
+        "emptyEnvironmentPreserved": true,
+        "managedBuild": "recipe",
+        "managedRuntimeReservationVerified": true,
+        "manager": "pm2",
+        "nativeLogsAvailable": true,
+        "normalDockerMigrationSucceeded": true,
+        "originalEnvironmentSnapshotPreserved": true,
+        "originalManagerRollbackSucceeded": true,
+        "persistentDataRetained": true,
+        "runtimeUIDPreserved": true,
+        "workingDirectoryTranslated": "/app"
+      }
+    },
+    {
+      "manager": "systemd",
+      "passed": true,
+      "duration": "141.09s",
+      "sourceCommit": "1825796a0062a15b2ac7e813cdfb94ef1b075183",
+      "reservationObservations": [
+        {
+          "elapsed": "4.855749379s",
+          "budget": "29.999088871s",
+          "status": "available",
+          "callerCancelled": false
+        },
+        {
+          "elapsed": "4.737983392s",
+          "budget": "29.99944206s",
+          "status": "available",
+          "callerCancelled": false
+        }
+      ],
+      "reservationMetadataUnchanged": true,
+      "proof": {
+        "absoluteDataDirectoryTranslated": true,
+        "adoptionRestartedOriginal": false,
+        "builtCandidateFailureRestoredNative": true,
+        "capturedEnvironmentPrivate": true,
+        "clonedNativeRollbackReservationVerified": true,
+        "dockerLogsAvailable": true,
+        "emptyEnvironmentPreserved": true,
+        "managedBuild": "dockerfile",
+        "managedRuntimeReservationVerified": true,
+        "manager": "systemd",
+        "nativeLogsAvailable": true,
+        "normalDockerMigrationSucceeded": true,
+        "originalEnvironmentSnapshotPreserved": true,
+        "originalManagerRollbackSucceeded": true,
+        "persistentDataRetained": true,
+        "runtimeUIDPreserved": true,
+        "workingDirectoryTranslated": "/app"
+      }
+    }
+  ],
+  "ownedCleanupPassed": true,
+  "remainingOwnedNativeUnits": [],
+  "integrationCodeCommit": "fbc6712135a8e41d2b31258b84926a604327cd3f",
+  "backendTreeSHA": "573c5ce4b7e062c9a1872e21adab80c035d54ec6",
+  "backendIdenticalToIntegrationCode": true
+}

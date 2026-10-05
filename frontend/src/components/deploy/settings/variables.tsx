@@ -11,6 +11,7 @@ import { plural, relativeTime } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
+import { recoveredInputBound } from "@/lib/workload-import"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
@@ -284,6 +285,7 @@ function VariablesBody({
       : null,
   )
   const [valueError, setValueError] = useState("")
+  const [valueEntered, setValueEntered] = useState(false)
   const [shown, setShown] = useState(false)
   const [reference, setReference] = useSessionState(
     `${draft}.reference`,
@@ -355,7 +357,7 @@ function VariablesBody({
         )
       : undefined
   const productOf = (variable: DeploymentVariable) =>
-    linkFor(variable)?.driver ?? variableProduct(variable.name)
+    linkFor(variable)?.driver ?? variableProduct(variable.recoveredInput?.name ?? variable.name)
 
   const pendingChange = new Map(
     configuration.pending.changes
@@ -392,6 +394,7 @@ function VariablesBody({
   const resetForm = () => {
     setName("")
     setValue("")
+    setValueEntered(false)
     setValueError("")
     setShown(false)
     setReference(false)
@@ -449,7 +452,7 @@ function VariablesBody({
     // Edit never reads the stored value back, so `value` is empty unless the
     // operator retyped it or used "Reveal current" — saving that as the new
     // value would silently wipe whatever was there.
-    if (editingName && !reference && !value.trim()) {
+    if (editingName && !reference && !valueEntered && !value) {
       setValueError("Enter the value again — the dashboard does not read it back.")
       return
     }
@@ -541,6 +544,7 @@ function VariablesBody({
     setName(variable.name)
     setReference(Boolean(variable.reference))
     setValue(variable.reference ? referenceLiteral(variable.reference) : "")
+    setValueEntered(false)
     setShown(false)
     setSensitivity(variable.sensitivity)
     setScopes(variable.scopes)
@@ -558,6 +562,7 @@ function VariablesBody({
         `${base}/${encodeURIComponent(editingName)}/reveal`,
       )
       setValue(result.value)
+      setValueEntered(true)
       setValueError("")
     } catch (caught) {
       notify.error(`Could not reveal ${editingName}`, caught)
@@ -635,7 +640,7 @@ function VariablesBody({
         run: () => router.push(`/deploy/${projectId}/settings/databases`),
       })
     if (canEdit) {
-      if (variable.sensitivity === "secret")
+      if (variable.sensitivity === "secret" && !recoveredInputBound(variable.recoveredInput))
         verbs.push({
           key: "rotate",
           label: "Rotate",
@@ -644,23 +649,27 @@ function VariablesBody({
           disabled: Boolean(rowBusy),
           run: () => void rotate(variable),
         })
-      verbs.push({
-        key: "remove",
-        label: "Remove",
-        icon: Trash,
-        danger: true,
-        disabled: Boolean(rowBusy),
-        run: () => removeVariable(variable),
-      })
+      if (!recoveredInputBound(variable.recoveredInput))
+        verbs.push({
+          key: "remove",
+          label: "Remove",
+          icon: Trash,
+          danger: true,
+          disabled: Boolean(rowBusy),
+          run: () => removeVariable(variable),
+        })
     }
     return verbs
   }
 
   const needle = query.trim().toLowerCase()
   const active = FILTERS.find((item) => item.key === filter) ?? FILTERS[0]
-  const sorted = [...variables].sort((a, b) => a.name.localeCompare(b.name))
+  const sorted = [...variables].sort((a, b) =>
+    variableDisplayName(a).localeCompare(variableDisplayName(b)),
+  )
   const filtered = sorted.filter(
-    (variable) => active.test(variable) && variable.name.toLowerCase().includes(needle),
+    (variable) =>
+      active.test(variable) && variableDisplayName(variable).toLowerCase().includes(needle),
   )
   // Only the ones with a mark: a product drawn as nothing was counted in the
   // glyphs' "+N" as if it were overflow.
@@ -676,7 +685,7 @@ function VariablesBody({
   const editorFields = (
     <div className="space-y-6">
       <VariableSubject
-        name={name.trim()}
+        name={editing ? variableDisplayName(editing) : name.trim()}
         sensitivity={sensitivity}
         product={editing ? productOf(editing) : variableProduct(name.trim())}
         editing={editing}
@@ -723,7 +732,11 @@ function VariablesBody({
             </Field>
           )}
           <Field label="Type">
-            <ValueType value={sensitivity} onChange={setSensitivity} />
+            <ValueType
+              value={sensitivity}
+              onChange={setSensitivity}
+              disabled={recoveredInputBound(editing?.recoveredInput)}
+            />
           </Field>
         </div>
         <Field
@@ -755,6 +768,7 @@ function VariablesBody({
               value={value}
               onChange={(event) => {
                 setValue(event.target.value)
+                setValueEntered(true)
                 if (valueError) setValueError("")
               }}
               autoComplete="off"
@@ -798,6 +812,7 @@ function VariablesBody({
                 label="Reference"
                 aria-label="Reference a stored value"
                 pressed={reference}
+                disabled={recoveredInputBound(editing?.recoveredInput)}
                 onPressedChange={(next) => {
                   setReference(next)
                   setShown(false)
@@ -806,13 +821,32 @@ function VariablesBody({
             </InputGroupAddon>
           </InputGroup>
         </Field>
+        {editing?.recoveredInput && !reference && (
+          <OptionRow
+            title="Set an empty value"
+            hint="Keep this input in the application environment with an empty string."
+            checked={valueEntered && value === ""}
+            onCheckedChange={(checked) => {
+              setValue("")
+              setValueEntered(checked)
+              setValueError("")
+            }}
+          />
+        )}
         {reference && (links.data?.length ?? 0) > 0 && (
           <ReferencePicker links={links.data ?? []} value={value} onChange={setValue} />
         )}
       </div>
       {/* No count under the title: the three switches under it are the count. */}
       <FormSection title="Who can read it">
-        <ScopeOptions scopes={scopes} onToggle={toggleScope} />
+        {recoveredInputBound(editing?.recoveredInput) ? (
+          <FormNote>
+            Assigned to {editing?.recoveredInput?.service || "the original application"}. Its source
+            binding and scopes are preserved.
+          </FormNote>
+        ) : (
+          <ScopeOptions scopes={scopes} onToggle={toggleScope} />
+        )}
       </FormSection>
       {error && (
         <FormNote key={error} tone="danger" className="animate-rise">
@@ -1152,12 +1186,12 @@ function VariableRow({
   return (
     <ChoiceRow
       index={index}
-      verb={`Edit ${variable.name}`}
+      verb={`Edit ${variableDisplayName(variable)}`}
       disabled={!canEdit}
       onSelect={onEdit}
       busy={rotating}
       leading={<VariableMark variable={variable} product={product} />}
-      title={<VariableName name={variable.name} hue={hue} />}
+      title={<VariableName name={variableDisplayName(variable)} hue={hue} />}
       description={
         <ValueLine
           variable={variable}
@@ -1176,7 +1210,9 @@ function VariableRow({
           </>
         ) : undefined
       }
-      actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${variable.name}`} />}
+      actions={
+        <VerbActions dim verbs={verbs} menuLabel={`Actions for ${variableDisplayName(variable)}`} />
+      }
     >
       {(under || revealed !== undefined) && (
         <div className="min-w-0 space-y-2 sm:pl-11">
@@ -1207,6 +1243,11 @@ function VariableRow({
 }
 
 /** A name in monospace, its shared prefix in the family's hue. */
+function variableDisplayName(variable: DeploymentVariable) {
+  const input = variable.recoveredInput
+  return input ? `${input.service ? `${input.service} · ` : ""}${input.name}` : variable.name
+}
+
 function VariableName({ name, hue }: { name: string; hue?: string }) {
   if (!hue) return <span className="font-mono">{name}</span>
   const cut = name.indexOf("_")
@@ -1404,9 +1445,11 @@ function VariableSubject({
 function ValueType({
   value,
   onChange,
+  disabled,
 }: {
   value: Sensitivity
   onChange: (value: Sensitivity) => void
+  disabled?: boolean
 }) {
   return (
     <ToggleGroup
@@ -1414,6 +1457,7 @@ function ValueType({
       variant="outline"
       aria-label="Value type"
       value={value}
+      disabled={disabled}
       onValueChange={(next) => next && onChange(next as Sensitivity)}
       className="w-full sm:w-auto"
     >

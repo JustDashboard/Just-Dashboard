@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-10-05T18:29:27.596422+00:00",
+  "status": "pass",
+  "codeCommit": "fbc6712135a8e41d2b31258b84926a604327cd3f",
+  "baseBranch": "patch/0.7.1",
+  "baseCommit": "50a117f2a99820c4d76aed5c9115d8c6ab5177c2",
+  "environment": {
+    "go": "go1.26.8 linux/amd64",
+    "bun": "1.3.11"
+  },
+  "changedFileGate": {
+    "command": "JD_BROWSER_BASE_URL=http://127.0.0.1:43161 GOFLAGS='-p=2' GOMAXPROCS=2 scripts/test-changed.sh patch/0.7.1",
+    "exitCode": 0,
+    "prettierEslintTypeScript": "pass",
+    "logicTests": {
+      "passed": 2959,
+      "failed": 0,
+      "assertions": 12534
+    },
+    "goBuildAndSelectedPackageVet": "pass",
+    "selectedGoTests": {
+      "packages": [
+        "api",
+        "dockerx",
+        "procs",
+        "deploy",
+        "proxysvc",
+        "store"
+      ],
+      "status": "pass"
+    },
+    "selectedBrowserSpecs": {
+      "selected": 583,
+      "passed": 582,
+      "failed": 0,
+      "skipped": 1,
+      "duration": "9.5m",
+      "skipReason": "The live authenticated recording requires private ready-file authority; it passed separately with the opt-in fixture."
+    },
+    "privateRawLogSHA256": "53290219c5826ec211326d72db5faba7f39b993bc117140f2ddd8e0e02010891"
+  },
+  "raceTests": [
+    {
+      "sourceCommit": "7e840ad47f63b3539aee10c6165879653620793f",
+      "command": "GOMAXPROCS=2 go test -race -p 2 ./internal/deploy -count=1",
+      "status": "pass",
+      "elapsedSeconds": 231.621,
+      "backendUnchangedAtFinalCode": true,
+      "privateRawLogSHA256": "daa49f1351ab9de311afff39eea302a8cf536e7dd871ad6febcd1788a888f263"
+    },
+    {
+      "sourceCommit": "6b5d55e610ffe3264e876c958bd67d19f3c7ff02",
+      "command": "GOMAXPROCS=2 go test -race -p 2 ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1",
+      "status": "pass",
+      "elapsedSecondsByPackage": {
+        "deploy": 155.62,
+        "api": 289.226,
+        "proxysvc": 51.883,
+        "backups": 9.237,
+        "store": 43.804
+      },
+      "unchangedPackagesAtFinalCode": [
+        "api",
+        "proxysvc",
+        "backups",
+        "store"
+      ],
+      "note": "Deploy was rerun at the final backend above after native source-fence and budget changes.",
+      "privateRawLogSHA256": "e9bb4679a4be0f24ceeabe8394f1c9a5fb29ba9bcedb9348d0d9c06ca55acced"
+    },
+    {
+      "sourceCommit": "6b5d55e610ffe3264e876c958bd67d19f3c7ff02",
+      "command": "GOMAXPROCS=2 go test -race -p 2 ./internal/dockerx ./internal/procs -count=1",
+      "status": "pass",
+      "elapsedSecondsByPackage": {
+        "dockerx": 10.661,
+        "procs": 9.299
+      },
+      "packagesUnchangedAtFinalCode": true,
+      "privateRawLogSHA256": "f091a70d8d93752b83ffd64b2e6ab411219a391cd5258e2ef708e65e572ae64d"
+    }
+  ],
+  "realNativeLifecycles": {
+    "report": "native-lifecycles.json",
+    "sourceCommit": "1825796a0062a15b2ac7e813cdfb94ef1b075183",
+    "backendIdenticalToFinalCode": true,
+    "passed": [
+      "pm2",
+      "systemd"
+    ],
+    "privateRawLogSHA256": {
+      "pm2": "ded2fd5b2a5d7b9c6277ad01aa6ccff3e3afc3afcf4d5ca2bff023c03fc2743e",
+      "systemd": "e421b6685fca4c68f62bdead37ea72f97cbac5c4dd5acf3675e4860776d741f4"
+    }
+  },
+  "realBrowserRecording": {
+    "harnessCommit": "96fa404a3a584d53da90ae3a39db3d0e52565d40",
+    "frontendSourceCommit": "68b73d7a8529255d9d2d5ed7298d6b3efd2096c2",
+    "frontendSourceIdenticalToFinalCode": true,
+    "command": "JD_BROWSER_BASE_URL=http://127.0.0.1:43162 JD_IMPORT_NATIVE_READY=<private ready file> JD_IMPORT_NATIVE_EVIDENCE=<private evidence directory> bunx playwright test tests/browser/workload-import-native.spec.ts --workers=1",
+    "status": "pass",
+    "browserElapsedSeconds": 17.1,
+    "apiFixtureElapsedSeconds": 129.13,
+    "apiMocks": false,
+    "report": "native-continuity.json",
+    "video": "real-compose-import.webm",
+    "scope": "Four-container Compose import, original service inputs, live Docker CPU/memory and all actual service storage; subsequent native-only fences/budgets were proved separately above.",
+    "privateRawLogSHA256": "ddd008fc72df5e5bcbdb7f86f459e607f99aec51f0764588fe24f45aaedbc23c"
+  },
+  "liveProxyContinuity": {
+    "report": "proxy-continuity.json",
+    "sourceCommit": "6568649a",
+    "testedProxyAndCutoverFilesIdenticalToFinalCode": true,
+    "status": "pass",
+    "limitations": "Fixture TLS and loopback traffic; preserves WebSocket configuration without proving a full session; bounded in-place conflict checks cannot exclude all external writers atomically."
+  },
+  "otherLiveAcceptance": {
+    "dockerAndCompose": {
+      "status": "pass",
+      "reports": [
+        "docker-container.json",
+        "docker-deleted-image.json",
+        "compose-all-services.json",
+        "compose-existing-services.json"
+      ]
+    },
+    "n8n": {
+      "status": "pass",
+      "report": "n8n-lifecycle.json"
+    },
+    "publicImportAPI": {
+      "status": "pass",
+      "report": "api-import-continuity.json"
+    },
+    "deploymentEngineAPI": {
+      "status": "pass",
+      "assertionsPassed": 29,
+      "report": "engine-api.json"
+    },
+    "frameworkBuildsAndHTTP": {
+      "status": "pass",
+      "frameworks": [
+        "next",
+        "next-standalone",
+        "fastapi"
+      ],
+      "elapsedSeconds": 207.06,
+      "privateRawLogSHA256": "55d3145a7187a058a7677a8d6888aff58107d29d611e18922b4825e7a12bb9f7"
+    },
+    "artifactAndActivationLanes": {
+      "status": "pass",
+      "artifactCases": 6,
+      "activationCases": 4
+    },
+    "scope": "These independent earlier lanes remain scoped acceptance evidence; the final changed-file gate, unchanged-package races and final native proofs cover the integrated code."
+  },
+  "correctedVerificationFlake": {
+    "scope": "Existing notification browser fixture only; application behavior unchanged.",
+    "cause": "Independent timestamp creation could reorder equal-age deliveries, and real elapsed time made an exact two-hour reading gain seconds under worker load.",
+    "fix": "Use one fixture clock and Playwright fixed Date values while timers continue running.",
+    "concurrentRepeat": {
+      "status": "pass",
+      "passed": 3,
+      "workers": 3,
+      "elapsedSeconds": 3.6
+    },
+    "privateRawLogSHA256": "8133b1d2680aba85811be9f6553025cad76f155c4bf913b4b52fcddbe01eec5c",
+    "finalCombinedGate": "pass"
+  },
+  "correctedQueryHandoffAssertion": {
+    "scope": "Existing database home browser test only; Query behavior unchanged.",
+    "cause": "The test polled a SQL URL parameter that Query intentionally removes after loading the statement into its editor.",
+    "fix": "Assert the lasting pathname, exact editor contents and that the statement has not run.",
+    "concurrentRepeat": {
+      "status": "pass",
+      "passed": 3,
+      "workers": 3,
+      "elapsedSeconds": 14.4
+    },
+    "privateRawLogSHA256": "ce602ab796ce58573be547c6a4af7821d3cb057ad24f06c053979030de3f4c11",
+    "finalCombinedGate": "pass"
+  },
+  "ownership": "Isolated owned fixtures and loopback publications; no user workload changed. Authenticated ready files, raw logs and traces containing authority remain private.",
+  "artifactDigests": {
+    "api-import-continuity.json": {
+      "bytes": 539,
+      "sha256": "034201f13471500b815630d80883f6c931452afe3074df815096b498fbd224de"
+    },
+    "automated-review-1280.png": {
+      "bytes": 84096,
+      "sha256": "6eb7b7f97b186e81769d76021d759ea9a9fbaecac3286248c538a253a226b404"
+    },
+    "automated-review-1720.png": {
+      "bytes": 92781,
+      "sha256": "125219488a118907429689ba52884884874e961aa664533909c24796fc257219"
+    },
+    "compose-all-services.json": {
+      "bytes": 952,
+      "sha256": "40824290a97d8ba30672bdb8b14f67937543143edf1f351ab286108897aac8aa"
+    },
+    "compose-existing-services.json": {
+      "bytes": 986,
+      "sha256": "a84ff4122113bd612314b5588d33399dc6d3c1fb4da516b07e3ef3305108f5f6"
+    },
+    "docker-container.json": {
+      "bytes": 767,
+      "sha256": "7bad67998d44bf0d054eb4923ac826a1987924c01c52fb7ede9ca2c5fd312f31"
+    },
+    "docker-deleted-image.json": {
+      "bytes": 766,
+      "sha256": "653cbaf2807794e921962bb3b7d73024b57f9199dc30eea0349d611d38cd6ada"
+    },
+    "engine-api.json": {
+      "bytes": 2061,
+      "sha256": "c7d77458a01a9108e15afec23e131a67e7fb1343394273ad36a71d44a60fdce6"
+    },
+    "imported-domains-storage-1280.png": {
+      "bytes": 110528,
+      "sha256": "32f393e57ee238d657d03d9598fcbe23049a1ade8cebea3580ada79d747b55f8"
+    },
+    "n8n-lifecycle.json": {
+      "bytes": 1638,
+      "sha256": "4948dcfff3a5e993952132feff4973eea818fc4478cec5188b5bed2010f67b6d"
+    },
+    "native-adoption-review-1280.png": {
+      "bytes": 92913,
+      "sha256": "8329bbeb7dabd8353923d491547076816cf9d3c2541835483510497f078b2ec3"
+    },
+    "native-continuity.json": {
+      "bytes": 4345,
+      "sha256": "43606b0097f127fe7d604bda9d4d029b025faa1179da9857b225f1be1afa3fcb"
+    },
+    "native-lifecycles.json": {
+      "bytes": 3121,
+      "sha256": "2300e522021c4ed28379aaaddf0e0e9620a034466aaedff9d298309983dd0d0b"
+    },
+    "native-original-inputs-1280.png": {
+      "bytes": 82660,
+      "sha256": "8018674191bde14cbef27fa3729f8cf319fbc85f9cb7e4e9bf299e63da4da754"
+    },
+    "native-project-1280.png": {
+      "bytes": 110304,
+      "sha256": "828cb3d437c094802ca3ea0bc72f582dda49734183e7f2a3456c6143d0a4d6ba"
+    },
+    "native-review-1720.png": {
+      "bytes": 97990,
+      "sha256": "04e618dd9be60f31d073cc4058f23eef5361eb88746ab39d697d95c1cecc5f6a"
+    },
+    "native-runtime-1280.png": {
+      "bytes": 78823,
+      "sha256": "3f0089bcfe00f2e5971022ec1a59d78d643a6797c894657f6bc5b82c4bd0da4e"
+    },
+    "native-settings-1280.png": {
+      "bytes": 108252,
+      "sha256": "4072e98479efa710bc4b9018029968a9427e030f111a629f4fd91a19e9ee55b0"
+    },
+    "native-storage-1280.png": {
+      "bytes": 103055,
+      "sha256": "d50df7a22cef503ea5abcbabff7d1be0159d52aecf6aa3156b43af8ebdf13466"
+    },
+    "original-environment-1280.png": {
+      "bytes": 79549,
+      "sha256": "4bb14d6dbbed02091b3eac757607724c22b9b41db7f11b278fbf5bdbaedf15af"
+    },
+    "proxy-continuity.json": {
+      "bytes": 4021,
+      "sha256": "58cfe5f32323f46419678af69b94a2917446fa877fe622de9b6a202df61c0f9b"
+    },
+    "real-compose-import.webm": {
+      "bytes": 1832717,
+      "sha256": "2c8a63bae22c0aa26f45aa280b89f2147524fb6addb5f3484b5c3843e7839bcd"
+    }
+  },
+  "latestVerifiedCodeCommit": "75fa4a6f5c1c22801eefb33f2a0074d81279af8a",
+  "followUpChangedFileGate": {
+    "sourceCommit": "75fa4a6f5c1c22801eefb33f2a0074d81279af8a",
+    "baseCommit": "433aa04e745c30ee86da3780aa1aa70c29df4c0e",
+    "command": "JD_BROWSER_BASE_URL=http://127.0.0.1:43161 GOFLAGS='-p=2' GOMAXPROCS=2 scripts/test-changed.sh 433aa04e745c30ee86da3780aa1aa70c29df4c0e",
+    "exitCode": 0,
+    "scope": "Correct five remaining browser assertions against Query consuming the SQL handoff URL after loading its editor; no backend or product frontend changes.",
+    "prettierEslintTypeScript": "pass",
+    "logicTests": {
+      "passed": 2959,
+      "failed": 0,
+      "assertions": 12534
+    },
+    "selectedBrowserSpecs": [
+      "database-schema.spec.ts",
+      "database-performance.spec.ts"
+    ],
+    "browserTests": {
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0,
+      "duration": "3.6m"
+    },
+    "backendAndProductFrontendUnchanged": true,
+    "privateRawLogSHA256": "a0b826ac10760f1b2d738d97bdfa6caac1d72cd863afc1313046f0dbc2c61105"
+  },
+  "hostedCheckFollowUp": {
+    "run": "https://github.com/JustDashboard/Just-Dashboard/actions/runs/37356482435",
+    "sourceCommit": "433aa04e745c30ee86da3780aa1aa70c29df4c0e",
+    "passedJobs": 17,
+    "failedJobs": 1,
+    "failure": "browser (6): database-schema.spec.ts:1818 expected a SQL handoff parameter Query had already consumed; all other jobs passed.",
+    "resolution": "Corrected all five remaining assertions with loaded-editor and not-run evidence; the follow-up changed-file gate passed."
+  }
+}

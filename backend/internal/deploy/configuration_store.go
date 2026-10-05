@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 const (
@@ -23,6 +25,7 @@ const (
 // with read access cannot use value length or a reference chain to infer a
 // secret; revealing remains a separate admin/session action.
 type DeploymentVariable struct {
+	RecoveredInput  *RecoveredInput    `json:"recoveredInput,omitempty"`
 	Name            string             `json:"name"`
 	Revision        int                `json:"revision"`
 	Sensitivity     string             `json:"sensitivity"`
@@ -105,6 +108,7 @@ type PendingState struct {
 }
 
 type EnvironmentConfiguration struct {
+	Inputs       []RecoveredInput     `json:"inputs,omitempty"`
 	Revision     int                  `json:"revision"`
 	Build        BuildPlanConfig      `json:"build"`
 	Runtime      RuntimePlanConfig    `json:"runtime"`
@@ -127,7 +131,8 @@ type EnvironmentConfiguration struct {
 	// each package manager runs, so Build settings can say which choice
 	// matches the repository. It is absent once the build describes
 	// something detection did not read.
-	Detected *DetectedCandidate `json:"detected,omitempty"`
+	Detected        *DetectedCandidate                `json:"detected,omitempty"`
+	IngressBindings []proxysvc.ExistingIngressBinding `json:"ingressBindings,omitempty"`
 }
 
 type ConfigurationWriteRequest struct {
@@ -140,6 +145,7 @@ type ConfigurationWriteRequest struct {
 }
 
 type storedVariableValue struct {
+	valueMode       string
 	id              int64
 	name            string
 	revision        int
@@ -367,7 +373,20 @@ func (s *PlanningStore) ListVariables(ctx context.Context, projectID, environmen
 	if err != nil {
 		return nil, err
 	}
-	return variableViews(values), nil
+	views := variableViews(values)
+	inputs, err := s.importedInputs(ctx, environmentID, views)
+	if err != nil {
+		return nil, err
+	}
+	for i := range views {
+		for _, input := range inputs {
+			if input.StorageKey == views[i].Name {
+				copy := input
+				views[i].RecoveredInput = &copy
+			}
+		}
+	}
+	return views, nil
 }
 
 func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environmentID int64, name string) (*VariableReveal, error) {
@@ -383,7 +402,7 @@ func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environme
 			continue
 		}
 		result := &VariableReveal{Name: name, Value: value.value}
-		if reference, parseErr := ParseVariableReference(value.value); parseErr == nil {
+		if reference, parseErr := ParseVariableReference(value.value); parseErr == nil && value.valueMode != "literal" {
 			result.Reference = &reference
 		}
 		return result, nil
@@ -413,7 +432,10 @@ func (s *PlanningStore) PutVariable(
 	if err != nil {
 		return nil, err
 	}
-	if err := s.writeVariableRevisionTx(ctx, tx, environmentID, name, value, request.Sensitivity, request.Scopes, actor); err != nil {
+	if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, name, &request); err != nil {
+		return nil, err
+	}
+	if err := s.writeVariableRevisionTx(ctx, tx, environmentID, name, value, request.Sensitivity, request.Scopes, actor, variableWriteMode(request)); err != nil {
 		return nil, err
 	}
 	if err := s.validateActiveVariableGraphTx(ctx, tx, environmentID); err != nil {
@@ -520,6 +542,10 @@ func (s *PlanningStore) ImportDotenv(
 	sort.Strings(names)
 	for _, name := range names {
 		value := parsed[name]
+		template.Value = &value
+		if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, name, &template); err != nil {
+			return nil, err
+		}
 		if err := s.writeVariableRevisionTx(ctx, tx, environmentID, name, value, request.Sensitivity, request.Scopes, actor); err != nil {
 			return nil, err
 		}
@@ -579,14 +605,20 @@ func (s *PlanningStore) PreviewDotenvImport(
 	if _, err := validateVariableWrite(template); err != nil {
 		return nil, err
 	}
-	stored, err := s.activeVariableValues(ctx, s.db, projectID, environmentID)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	stored, err := s.activeVariableValues(ctx, tx, projectID, environmentID)
 	if err != nil {
 		return nil, err
 	}
 	current := make(map[string]storedVariableValue, len(stored))
 	after := make(map[string]string, len(stored)+len(entries))
+	modes := map[string]string{}
 	for _, value := range stored {
-		current[value.name], after[value.name] = value, value.value
+		current[value.name], after[value.name], modes[value.name] = value, value.value, value.valueMode
 	}
 	scopes := slices.Sorted(slices.Values(request.Scopes))
 	preview := &DotenvImportPreview{Variables: make([]DotenvImportVerdict, 0, len(entries))}
@@ -601,6 +633,12 @@ func (s *PlanningStore) PreviewDotenvImport(
 		position[entry.name] = len(preview.Variables)
 		verdict := DotenvImportVerdict{Name: entry.name, Line: entry.line}
 		existing, exists := current[entry.name]
+		if entry.refused == "" && !skipped[entry.name] {
+			template.Value = &entry.value
+			if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, entry.name, &template); err != nil {
+				return nil, err
+			}
+		}
 		switch {
 		case entry.refused != "":
 			verdict.Change, verdict.Reason = "refused", entry.refused
@@ -612,19 +650,20 @@ func (s *PlanningStore) PreviewDotenvImport(
 		case !exists:
 			verdict.Change = "added"
 		case existing.valueDigest == digestBytes([]byte(entry.value)) &&
+			existing.valueMode == "literal" &&
 			existing.sensitivity == request.Sensitivity &&
 			slices.Equal(slices.Sorted(slices.Values(existing.scopes)), scopes):
 			verdict.Change = "unchanged"
 		default:
 			verdict.Change = "changed"
 		}
-		after[entry.name] = entry.value
+		after[entry.name], modes[entry.name] = entry.value, "literal"
 		preview.Variables = append(preview.Variables, verdict)
 	}
 	// The import checks the references of the set it leaves behind. With a
 	// refused name there is no such set: the parse already refuses the import.
 	if !refused {
-		if _, _, err := ResolveVariableGraph(after, nil); err != nil {
+		if _, _, err := ResolveVariableGraphWithModes(after, modes, nil); err != nil {
 			return nil, err
 		}
 	}
@@ -647,6 +686,9 @@ func (s *PlanningStore) DeleteVariable(
 	defer tx.Rollback()
 	desired, err := s.advanceDesiredRevisionTx(ctx, tx, projectID, environmentID, revision)
 	if err != nil {
+		return 0, err
+	}
+	if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, name, nil); err != nil {
 		return 0, err
 	}
 	result, err := tx.ExecContext(ctx, `
@@ -712,11 +754,11 @@ func (s *PlanningStore) CopyEnvironmentVariables(
 	}
 	copied, skipped = []string{}, []string{}
 	for _, value := range values {
-		if strings.HasPrefix(value.value, "${{") || own[value.name] {
+		if (value.valueMode != "literal" && strings.HasPrefix(value.value, "${{")) || own[value.name] {
 			skipped = append(skipped, value.name)
 			continue
 		}
-		if err := s.writeVariableRevisionTx(ctx, tx, toEnvironmentID, value.name, value.value, value.sensitivity, value.scopes, actor); err != nil {
+		if err := s.writeVariableRevisionTx(ctx, tx, toEnvironmentID, value.name, value.value, value.sensitivity, value.scopes, actor, value.valueMode); err != nil {
 			return nil, nil, err
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -778,7 +820,12 @@ func (s *PlanningStore) writeVariableRevisionTx(
 	name, value, sensitivity string,
 	scopes []string,
 	actor string,
+	valueModes ...string,
 ) error {
+	mode := "literal"
+	if len(valueModes) > 0 {
+		mode = valueModes[0]
+	}
 	sealed, err := s.sealer.Seal(value)
 	if err != nil {
 		return err
@@ -797,10 +844,10 @@ func (s *PlanningStore) writeVariableRevisionTx(
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO deploy_variable_revisions(
 		  environment_id, key, revision, sensitivity, scopes, value_enc,
-		  value_digest, active, created_by, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`, environmentID, name, revision,
+		  value_digest, active, created_by, created_at, value_mode)
+		VALUES(?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`, environmentID, name, revision,
 		sensitivity, strings.Join(scopes, ","), sealed, digestBytes([]byte(value)), actor,
-		s.now().UTC().Unix())
+		s.now().UTC().Unix(), mode)
 	return err
 }
 
@@ -866,7 +913,7 @@ func (s *PlanningStore) activeVariableValues(
 ) ([]storedVariableValue, error) {
 	rows, err := query.QueryContext(ctx, `
 		SELECT v.id, v.key, v.revision, v.sensitivity, v.scopes, v.value_enc,
-		       v.value_digest, v.created_by, v.created_at, e.desired_revision,
+		       v.value_digest, v.created_by, v.created_at, e.desired_revision, v.value_mode,
 		       CASE WHEN e.live_release_id = 0 OR NOT EXISTS (
 		         SELECT 1 FROM deploy_releases live
 		         JOIN deploy_run_variable_revisions rv ON rv.run_id = live.run_id
@@ -888,7 +935,7 @@ func (s *PlanningStore) activeVariableValues(
 		var pending int
 		if err := rows.Scan(&value.id, &value.name, &value.revision, &value.sensitivity,
 			&scopes, &sealed, &value.valueDigest, &value.createdBy, &created,
-			&value.desiredRevision, &pending); err != nil {
+			&value.desiredRevision, &value.valueMode, &pending); err != nil {
 			return nil, err
 		}
 		value.scopes = strings.Split(scopes, ",")
@@ -932,7 +979,7 @@ func variableViews(values []storedVariableValue) []DeploymentVariable {
 			CreatedAt: value.createdAt, EnvironmentID: value.environmentID,
 			DesiredRevision: value.desiredRevision,
 		}
-		if reference, err := ParseVariableReference(value.value); err == nil {
+		if reference, err := ParseVariableReference(value.value); err == nil && value.valueMode != "literal" {
 			view.Reference = &reference
 		}
 		result = append(result, view)
@@ -942,28 +989,29 @@ func variableViews(values []storedVariableValue) []DeploymentVariable {
 
 func (s *PlanningStore) validateActiveVariableGraphTx(ctx context.Context, tx *sql.Tx, environmentID int64) error {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT key, value_enc FROM deploy_variable_revisions
+		SELECT key, value_enc, value_mode FROM deploy_variable_revisions
 		 WHERE environment_id = ? AND active = 1 ORDER BY key`, environmentID)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
 	values := map[string]string{}
+	modes := map[string]string{}
 	for rows.Next() {
-		var name, sealed string
-		if err := rows.Scan(&name, &sealed); err != nil {
+		var name, sealed, mode string
+		if err := rows.Scan(&name, &sealed, &mode); err != nil {
 			return err
 		}
 		value, err := s.sealer.Open(sealed)
 		if err != nil {
 			return err
 		}
-		values[name] = value
+		values[name], modes[name] = value, mode
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	_, _, err = ResolveVariableGraph(values, nil)
+	_, _, err = ResolveVariableGraphWithModes(values, modes, nil)
 	return err
 }
 
@@ -975,6 +1023,10 @@ func ResolveVariableGraph(
 	values map[string]string,
 	external func(VariableReference) (string, bool, error),
 ) (map[string]string, map[string]bool, error) {
+	return ResolveVariableGraphWithModes(values, nil, external)
+}
+
+func ResolveVariableGraphWithModes(values map[string]string, modes map[string]string, external func(VariableReference) (string, bool, error)) (map[string]string, map[string]bool, error) {
 	resolved := make(map[string]string, len(values))
 	secretLeaf := make(map[string]bool, len(values))
 	state := map[string]uint8{}
@@ -995,7 +1047,7 @@ func ResolveVariableGraph(
 		state[name] = 1
 		stack = append(stack, name)
 		resolvedValue, leafSecret := value, false
-		if reference, err := ParseVariableReference(value); err == nil {
+		if reference, err := ParseVariableReference(value); err == nil && modes[name] != "literal" {
 			if reference.Kind == "variable" {
 				resolvedValue, leafSecret, err = visit(reference.Target)
 				if err != nil {
@@ -1090,13 +1142,13 @@ func pendingState(ctx context.Context, db *sql.DB, projectID, environmentID int6
 		}
 	}
 	currentVariables, err := variableDigestMap(ctx, db, `
-		SELECT key, value_digest, sensitivity, scopes FROM deploy_variable_revisions
+		SELECT key, value_digest, sensitivity, scopes, value_mode FROM deploy_variable_revisions
 		 WHERE environment_id = ? AND active = 1 ORDER BY key`, environmentID)
 	if err != nil {
 		return nil, err
 	}
 	liveVariables, err := variableDigestMap(ctx, db, `
-		SELECT v.key, v.value_digest, v.sensitivity, v.scopes FROM deploy_run_variable_revisions rv
+		SELECT v.key, v.value_digest, v.sensitivity, v.scopes, v.value_mode FROM deploy_run_variable_revisions rv
 		 JOIN deploy_variable_revisions v ON v.id = rv.variable_revision_id
 		 WHERE rv.run_id = ? ORDER BY v.key`, liveRunID)
 	if err != nil {
@@ -1267,6 +1319,14 @@ func (s *PlanningStore) EnvironmentConfiguration(
 		return nil, err
 	}
 	result.Variables, err = s.ListVariables(ctx, projectID, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	result.Inputs, err = s.importedInputs(ctx, environmentID, result.Variables)
+	if err != nil {
+		return nil, err
+	}
+	result.IngressBindings, err = publicIngressBindingsFromDependencies(result.Dependencies)
 	if err != nil {
 		return nil, err
 	}
@@ -1553,6 +1613,9 @@ func (s *PlanningStore) saveEnvironmentSource(
 	}
 	var currentSource DraftSourceConfig
 	invalidCurrentSource := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil
+	if source.Mode == SourceModeRecoveredSnapshot && (invalidCurrentSource || currentSource.Mode != SourceModeRecoveredSnapshot || currentSource.ResourceID != source.ResourceID) {
+		return fail(fmt.Errorf("%w: recovered snapshot handles cannot be attached or replaced by a client", ErrInvalidSource))
+	}
 	if currentKind == SourceImport && (invalidCurrentSource || currentSource.Mode != SourceModeExistingCheckout || source.Mode != SourceModeExistingCheckout) {
 		return fail(fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan))
 	}
@@ -1724,15 +1787,15 @@ func variableDigestMap(ctx context.Context, query digestQuery, statement string,
 	defer rows.Close()
 	result := map[string]string{}
 	for rows.Next() {
-		var name, valueDigest, sensitivity, scopes string
-		if err := rows.Scan(&name, &valueDigest, &sensitivity, &scopes); err != nil {
+		var name, valueDigest, sensitivity, scopes, mode string
+		if err := rows.Scan(&name, &valueDigest, &sensitivity, &scopes, &mode); err != nil {
 			return nil, err
 		}
 		// Scopes are stored in the order they were sent; the same set in
 		// another order is the same variable.
 		scopeList := strings.Split(scopes, ",")
 		sort.Strings(scopeList)
-		result[name] = digestBytes([]byte(valueDigest), []byte(sensitivity), []byte(strings.Join(scopeList, ",")))
+		result[name] = digestBytes([]byte(valueDigest), []byte(sensitivity), []byte(strings.Join(scopeList, ",")), []byte(mode))
 	}
 	return result, rows.Err()
 }
@@ -1773,7 +1836,7 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 // Settings control deployable inputs, not the identity reserved by migration.
 // Preserve that server-owned relationship even when a client omits it.
 func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int64, requested []PlannedDependency) ([]PlannedDependency, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND kind='runtime' ORDER BY resource_kind,resource_id`, environmentID)
+	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND (kind='runtime' OR resource_kind='existing_proxy_route') ORDER BY resource_kind,resource_id`, environmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -1795,7 +1858,7 @@ func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int
 	}
 	result := []PlannedDependency{}
 	for _, dependency := range requested {
-		if dependency.Kind != "runtime" {
+		if dependency.Kind != "runtime" && dependency.ResourceKind != existingIngressDependency {
 			result = append(result, dependency)
 			continue
 		}

@@ -126,7 +126,8 @@ export function GeneralSettings({
                 />
               )}
               {configuration.source?.kind === "local" &&
-                configuration.source.mode === "local_directory" && (
+                (configuration.source.mode === "local_directory" ||
+                  configuration.source.mode === "recovered_snapshot") && (
                   <LocalSourceSettings
                     key={configuration.revision}
                     projectId={projectId}

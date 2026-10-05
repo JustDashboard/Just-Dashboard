@@ -120,15 +120,22 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 			rows.Close()
 			return nil, err
 		}
-		targetKind, owner, deepLink := "docker_container", "docker", "/docker/containers/"+runtimeID
-		if kind == "compose" {
+		var targetKind, deepLink string
+		switch kind {
+		case "container":
+			targetKind, deepLink = "docker_container", "/docker/containers/"+runtimeID
+		case "compose":
 			targetKind, deepLink = "compose_stack", "/docker/compose"
+		default:
+			// Native baseline records retain original-manager rollback authority;
+			// they do not authorize deleting that application's host service.
+			continue
 		}
 		if name == "" {
 			name = runtimeID
 		}
 		add(RemovalTarget{Kind: targetKind, ResourceID: runtimeID, DisplayName: name,
-			Owner: owner, DeepLink: deepLink, WorkingDirectory: workingDirectory})
+			Owner: "docker", DeepLink: deepLink, WorkingDirectory: workingDirectory})
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -187,6 +194,9 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 		if err := rows.Scan(&kind, &resourceID); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if kind == "pm2_process" || kind == "systemd_unit" || kind == "host_process" {
+			continue
 		}
 		target := RemovalTarget{Kind: kind, ResourceID: resourceID, DisplayName: resourceID,
 			Owner: removalOwner(kind), DeepLink: removalDeepLink(kind, resourceID)}

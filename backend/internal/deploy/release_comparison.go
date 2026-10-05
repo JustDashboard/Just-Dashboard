@@ -194,7 +194,7 @@ func diffNamedValues(before, after map[string]string) []ReleaseListChange {
 func variableDigestPairs(variables []ReleaseVariableSnapshot) map[string]string {
 	pairs := map[string]string{}
 	for _, variable := range variables {
-		pairs[variable.Name] = shortDigest(variable.ValueDigest) + " · " + variable.Sensitivity
+		pairs[variable.Name] = shortDigest(variable.ValueDigest) + " · " + variable.Sensitivity + " · " + variable.ValueMode
 	}
 	return pairs
 }

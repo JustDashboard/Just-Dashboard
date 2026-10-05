@@ -1,0 +1,19 @@
+{
+  "adoptionPreservedIDsPIDsStartedAtAndSettings": true,
+  "baselineRollbackRun": 4,
+  "baselineRollbackState": "succeeded",
+  "cachedImageStableAcrossRecoveryAndAdopt": true,
+  "checkedAt": "2026-10-05T16:02:11.79544759Z",
+  "failedDeployRestoredOriginalContainerID": true,
+  "failedDeployRun": 2,
+  "fixtureName": "jd-container-adoption-proof-1791216113312621056",
+  "fixtureRemovedAtCleanup": true,
+  "managedDeployRun": 3,
+  "managedDeployState": "succeeded",
+  "originalImageMissing": true,
+  "originalNameAndCustomNetworkAliasPreserved": true,
+  "persistentDataPreserved": true,
+  "runtimeReservationAvailableAfterBaselineRollback": true,
+  "runtimeReservationAvailableAfterDeploy": true,
+  "test": "TestLiveManagedDeletedImageContainerAdoptionAndRollback"
+}
