@@ -46,7 +46,10 @@ func (o *RecordedRuntimeObserver) RecordedRuntimeServices(ctx context.Context, e
 	if o == nil || o.store == nil || environmentID <= 0 {
 		return result
 	}
-	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	// Native authority verification reads installed launchers and hashes the
+	// captured executable/source tree. Keep that bounded without giving it the
+	// shorter budget used for an ordinary Docker container list.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	query := `SELECT ` + qualifiedRuntimeColumns() + ` FROM deploy_release_runtimes runtime
 	 JOIN deploy_releases release ON release.id=runtime.release_id

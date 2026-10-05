@@ -129,6 +129,10 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	assertLiveNativeResponse(t, port, source, account.Uid)
 	observation := ObserveRuntimeServices(t.Context(), owner, adopted.EnvironmentID, baseline.Release.ID)
 	if observation.Status != "available" || len(observation.Services) != 1 || observation.Services[0].Manager != kind || observation.Services[0].LogSource == "" {
+		runtime, readErr := runs.RuntimeForRelease(t.Context(), baseline.Release.ID)
+		if readErr == nil {
+			logOwnedNativeProof(t, owner, *runtime, native.capture)
+		}
 		t.Fatalf("native runtime/logs unavailable: %+v", observation)
 	}
 	native.assertLogs(t.Context())
@@ -139,7 +143,8 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	if strings.Contains(string(mustJSON(settings)), "owned-native-private-value") {
 		t.Fatal("settings exposed a captured private variable")
 	}
-	executor := NewNormalizedStepExecutor(runs, fixture.plans, analyzer, NewArtifactBuilder(NewDockerArtifactBackend(client)), owner, NewCheckRunner(client), nil, filepath.Join(root, "workspaces")).WithPreflightObserver(observer)
+	proofOwner := &ownedNativeProofOwner{NativeRuntimeOwner: owner, test: t, capture: native.capture}
+	executor := NewNormalizedStepExecutor(runs, fixture.plans, analyzer, NewArtifactBuilder(NewDockerArtifactBackend(client)), proofOwner, NewCheckRunner(client), nil, filepath.Join(root, "workspaces")).WithPreflightObserver(observer)
 	engine := NewEngine(runs, executor, nil, EngineConfig{WorkerID: "owned-native-proof", PollEvery: 20 * time.Millisecond, LeaseTTL: time.Minute}, nil)
 	engineCtx, cancelEngine := context.WithCancel(context.Background())
 	if err := engine.Start(engineCtx); err != nil {
@@ -317,6 +322,50 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 		}
 	}
 	t.Log(string(mustJSON(result)))
+}
+
+type ownedNativeProofOwner struct {
+	*NativeRuntimeOwner
+	test    *testing.T
+	capture func(context.Context) (*procs.HostWorkloadCapture, error)
+}
+
+func (o *ownedNativeProofOwner) Stop(ctx context.Context, runtime ReleaseRuntime, plan RuntimePlanConfig, variables map[string]string, remove bool, emit func(BuildLog) error) (RuntimeStopEvidence, error) {
+	started := time.Now()
+	result, err := o.NativeRuntimeOwner.Stop(ctx, runtime, plan, variables, remove, emit)
+	if err != nil && (runtime.Kind == "pm2" || runtime.Kind == "systemd") {
+		o.test.Logf("owned native stop failed after %s: %v", time.Since(started), err)
+		logOwnedNativeProof(o.test, o.NativeRuntimeOwner, runtime, o.capture)
+	}
+	return result, err
+}
+
+func logOwnedNativeProof(t *testing.T, owner *NativeRuntimeOwner, runtime ReleaseRuntime, capture func(context.Context) (*procs.HostWorkloadCapture, error)) {
+	t.Helper()
+	started := time.Now()
+	_, err := owner.CaptureRuntime(t.Context(), runtime)
+	t.Logf("owned native proof recapture after %s: %v", time.Since(started), err)
+	started = time.Now()
+	fresh, err := capture(t.Context())
+	if err != nil {
+		t.Logf("owned manager recapture after %s: %v", time.Since(started), err)
+		return
+	}
+	var expected NativeBaselineMetadata
+	_ = json.Unmarshal(runtime.Metadata, &expected)
+	t.Logf("owned manager digest proof after %s: configuration=%s expected=%s runtime=%s expectedRuntime=%s environment=%s startup=%s",
+		time.Since(started), fresh.ConfigurationDigest, expected.ConfigurationDigest, fresh.RuntimeConfigurationDigest, expected.RuntimeConfigurationDigest,
+		digestBytes(mustJSON(fresh.Environment)), digestBytes(fresh.StartupEvidence))
+	if owner.startup != nil && expected.StartupPlanDigest != "" {
+		err := owner.startup.withPlan(t.Context(), expected.StartupPlanDigest, func(plan *procs.NativeStartupPlan, journal *procs.NativeStartupJournal, _ func(procs.NativeStartupJournal) error) error {
+			t.Logf("owned startup journal phase=%s verifiedFiles=%v verifiedCapture=%v", journal.Phase,
+				procs.VerifyStartupHandoff(t.Context(), plan, *journal), procs.VerifyCapturedStartup(fresh, plan, *journal))
+			return nil
+		})
+		if err != nil {
+			t.Logf("owned startup journal read: %v", err)
+		}
+	}
 }
 
 type ownedLiveNativeManager struct {
