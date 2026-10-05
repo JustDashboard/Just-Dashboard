@@ -1176,7 +1176,13 @@ only renderer/executor/validation authority for their feature.
   named unavailable evidence rather than an empty success. A domain row names who issued its
   certificate (`certificateIssuer`, the issuer's common name — `R10`, `E6` for Let's Encrypt — read
   from the same certificate as its name and days left), so the issuer is observed rather than
-  inferred from how the domain is owned. A domain covered by the copy a Docker Caddy release kept reads
+  inferred from how the domain is owned. Imported external proxy bindings are read from the live
+  snapshot's server-owned `existing_proxy_route` dependencies and verified through the original
+  proxy reader. Each row retains its binding ID, path and exact service; private network routes are
+  not mapped to every published service. A verified link reads `served` with linked ownership;
+  unavailable or changed evidence reads `unavailable` with an explicit detail. External HTTPS stays
+  unassessed by this summary: it does not claim a dashboard certificate, issue one or invoke route
+  handoff. These links bypass the generic dependency inventory. A domain covered by the copy a Docker Caddy release kept reads
   `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the
   certificate it serves and never the copy, so the copy's expiry is not the domain's and raises no
   finding. A dependency's `deepLink` is the page that owns it: a backup
