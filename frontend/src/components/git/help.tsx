@@ -148,13 +148,20 @@ const STEPS = [
 ]
 
 /** The "new to git?" button: the four-step flow plus the words behind it. */
-export function GitHelp() {
+export function GitHelp({ compact }: { compact?: boolean }) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm">
+        {/* In the workspace strip the words give way to the book alone: the
+            strip is the repository's verbs, and a primer is not one of them. */}
+        <Button
+          variant="outline"
+          size={compact ? "icon-sm" : "sm"}
+          aria-label={compact ? "New to git?" : undefined}
+          title={compact ? "New to git?" : undefined}
+        >
           <BookOpen className="size-4" />
-          New to git?
+          {!compact && "New to git?"}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-96 space-y-3">

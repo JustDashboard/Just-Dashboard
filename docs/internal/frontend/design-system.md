@@ -1169,10 +1169,10 @@ fetched from, which is the argument §3 makes for `--brand` applied to somebody 
 lightness *is* ours, and it is one rule rather than twenty judgements: every `--language-*` in
 `globals.css` is the logo's hue and chroma at L 0.72, the rung `--tag-*` already sits on, because
 Linguist's values were picked for a white page and four of them (Lua's navy, Ruby's oxblood,
-Markdown's ink, C's grey) are invisible on a 0.16 ground. The rule is written out as twenty literal
+Markdown's ink, C's grey) are invisible on a 0.16 ground. The rule is written out as thirty literal
 `oklch()` values carrying their source hex in a comment rather than stated once as
 `oklch(from <hex> …)`: relative colour syntax is the one modern colour function Lightning CSS cannot
-downlevel, so those twenty would have been the only tokens in the file shipping without a fallback,
+downlevel, so those thirty would have been the only tokens in the file shipping without a fallback,
 below the floor Next's default browserslist target declares. Deleting the lightness dimension has a
 price, and it is paid by the pairs Linguist separated by lightness alone — Lua and Markdown come out
 as the same blue. The glyph shapes and the word beside them still tell those two rows apart, and a
@@ -1521,14 +1521,42 @@ on a 1x screen and left as drawn.
 **The same argument buys the git surface its own glyph set.** Heroicons draws no branch, no commit
 and no pull request, so `icons.tsx` maps those words onto the share, hash and chat-bubble marks —
 near enough on any other page, and wrong on the one screen where the reader identifies the thing *by*
-the drawing. `components/git/glyphs.tsx` takes six from Material Design Icons, which is already a
-dependency for the language marks (`language-icon.tsx`). Nothing else is imported from MDI there: a glyph that exists in both sets stays Heroicons, or the git pages grow a
-second icon weight. `AuthorMark` in `git/marks.tsx` is the coloured-wayfinding rule again — a column
+the drawing. `components/git/glyphs.tsx` takes seven from Material Design Icons, which is already a
+dependency for the language marks (`language-icon.tsx`) — the six git marks and the ringed dot a
+forge prints in front of an open issue. Nothing else is imported from MDI there: a glyph that exists
+in both sets stays Heroicons, or the git pages grow a second icon weight. `AuthorMark` in `git/marks.tsx` is the coloured-wayfinding rule again — a column
 of commits where mine and the bot's are two hues is scanned, one where they are the same grey is read
 — drawn as the account face without a picture (`InitialsMark`): the initial on a wash of the `LANES`
 hue the name is given in the rail and as a run's actor, hashed without its case, so one person is one
 colour in a commit line, a run row and a forge's face alike. A square rather than a circle, because a
-filled 16px round mark with a character in it is the pill §4 deleted.
+filled 16px round mark with a character in it is the pill §4 deleted. The one forge face that is
+round is the account the dashboard is signed in as (`ForgeFace account`, in the workspace strip's
+account control and beside the comment box), because that face is an account and §4 draws every
+account round, with `data-slot="user-avatar"` so the pill check knows it.
+
+**A pull request's state is its forge's glyph in its forge's colour.** A list of requests whose
+state was a word in the same grey as everything else is read; GitHub prints the state as the mark in
+front of the title — green while open, violet once merged, red when closed without it, grey as a
+draft — and that is the index the reader already has. `git/pull-state.tsx` draws it
+(`PullStateMark`, `PullStateWord`) in `--pull-open`, `--pull-merged`, `--pull-closed` and
+`--pull-draft`: GitHub's hues at one lightness, kept apart from the status hues so an open request
+never reads as a healthy service, and so merged has a hue none of them owns. How the checks and the
+reviews stand are readings of state, so they keep the status hues (`ChecksMark`, `ReviewMark`, an
+Actions run's tick, cross or clock). A merge commit in History and a merged branch in Branches take
+the merged glyph and hue for the same reason.
+
+**A checkout is drawn as what it is written in.** `/git` cards and the workspace strip open on
+`RepoMark` — the logo of the checkout's largest language on the product tile, git's own mark where the
+server could not read one — with the language strip under the name: the share of tracked bytes per
+language (`languages` on the repository summary) as one bar in the `--language-*` hues, and the
+largest three by their own logos (`git/languages.tsx`, over `lib/git-languages.ts`). The owner's
+face stays on the shelf rule, said once for every card under it.
+
+**Text a person wrote on a forge is drawn as the Markdown it is.** A pull request's description and
+each comment on it are rendered by `git/markdown.tsx` from the tree `lib/markdown.ts` reads, on this
+product's type ladder rather than GitHub's, with a `#123` and an `@mention` linking to the forge. It is
+drawn with elements, never `innerHTML`; raw HTML is dropped where it is layout and shown as text
+otherwise, and an image becomes a link to itself, because the page's `img-src` is its own origin.
 
 **A log line is read by its shapes, and coloured by the same rules as the rest of the product.**
 The logs console used to draw every line as one grey-white string with a 10px level tag in front of it,

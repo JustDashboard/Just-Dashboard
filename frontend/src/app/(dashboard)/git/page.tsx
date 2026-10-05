@@ -6,7 +6,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useSessionState } from "@/lib/view-state"
 import { CloudDownload, GitHubMark, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
-import { assignPulls, byUrgency, shelve, type RepoShelf } from "@/lib/git-repos"
+import { assignPulls, cardUrgency, nestWorktrees, shelve, type RepoShelf } from "@/lib/git-repos"
 import type { GitPullRequest, GitPullRequestSummary, GitRepo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -21,11 +21,12 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { ForgeFace } from "@/components/git/marks"
 import { REPO_GRID, RepoCard } from "@/components/git/repo-card"
 import { RepoWorkspace } from "@/components/git/repo-workspace"
+import { useCheckoutRemoval } from "@/components/git/remove-checkout"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
 
-type Filter = "all" | "dirty" | "behind" | "ahead" | "detached" | "pulls"
+type Filter = "all" | "dirty" | "behind" | "ahead" | "detached" | "pulls" | "worktrees"
 
 const FILTER_LABEL: Record<Filter, string> = {
   all: "All",
@@ -34,6 +35,7 @@ const FILTER_LABEL: Record<Filter, string> = {
   ahead: "Unpushed",
   detached: "Detached",
   pulls: "Pull requests",
+  worktrees: "Worktrees",
 }
 
 /** The search box matches a pull request by its number ("#12", "12") or by a word of its title. */
@@ -84,6 +86,14 @@ function ShelfMark({ shelf }: { shelf: RepoShelf }) {
  * each pull request is drawn once, on the checkout that is on its branch.
  * The shelves stay under a filter: they say *where*, which a chip does not.
  *
+ * A linked worktree is not a shelf-mate of the checkout it belongs to: it
+ * is drawn inside that checkout's card (`nestWorktrees`), so a repository
+ * worked on in three worktrees is one card with three rows rather than
+ * three cards with one name. A card ranks by the worst checkout in it, and a
+ * filter keeps it while any of them matches. Taking a checkout off the
+ * server — a worktree, or a repository's folder for good — goes through
+ * `remove-checkout.tsx`, whose one dialog the page holds.
+ *
  * The cards are choices, not readings — every one is a checkout to enter —
  * so they carry the lit edge §16 gives to things you pick.
  *
@@ -119,6 +129,8 @@ export default function GitPage() {
   )
 
   const list = useMemo(() => repos.data?.repos ?? [], [repos.data])
+  // A linked worktree is drawn inside its main checkout's card.
+  const { cards, worktrees } = useMemo(() => nestWorktrees(list), [list])
   // What each card draws: the summary with every request on one card only.
   const pullsByPath = useMemo(() => assignPulls(list, summary.data?.repos), [list, summary.data])
   const counts = useMemo(
@@ -129,31 +141,44 @@ export default function GitPage() {
       ahead: list.filter((r) => r.ahead > 0).length,
       detached: list.filter((r) => r.detached).length,
       pulls: list.filter((r) => (pullsByPath[r.path]?.pulls.length ?? 0) > 0).length,
+      worktrees: list.filter((r) => r.worktree).length,
     }),
     [list, pullsByPath],
   )
+  const removal = useCheckoutRemoval(() => {
+    repos.refresh()
+    summary.refresh()
+  })
 
   const visible = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     const openPulls = (r: GitRepo) => pullsByPath[r.path]?.pulls ?? []
-    return list
-      .filter((r) => {
-        if (state === "dirty" && !r.dirty) return false
-        if (state === "behind" && r.behind === 0) return false
-        if (state === "ahead" && r.ahead === 0) return false
-        if (state === "detached" && !r.detached) return false
-        if (state === "pulls" && openPulls(r).length === 0) return false
-        if (!needle) return true
-        return (
-          r.name.toLowerCase().includes(needle) ||
-          r.path.toLowerCase().includes(needle) ||
-          r.branch.toLowerCase().includes(needle) ||
-          openPulls(r).some((p) => matchesPull(p, needle))
-        )
-      })
-      .sort(byUrgency)
-  }, [list, filter, state, pullsByPath])
-  const shelves = useMemo(() => shelve(visible), [visible])
+    const matches = (r: GitRepo) => {
+      if (state === "dirty" && !r.dirty) return false
+      if (state === "behind" && r.behind === 0) return false
+      if (state === "ahead" && r.ahead === 0) return false
+      if (state === "detached" && !r.detached) return false
+      if (state === "pulls" && openPulls(r).length === 0) return false
+      if (state === "worktrees" && !r.worktree) return false
+      if (!needle) return true
+      return (
+        r.name.toLowerCase().includes(needle) ||
+        r.path.toLowerCase().includes(needle) ||
+        r.branch.toLowerCase().includes(needle) ||
+        openPulls(r).some((p) => matchesPull(p, needle))
+      )
+    }
+    // A card stays while it or any worktree inside it answers the filter, so
+    // "Uncommitted" finds the repository whose worktree has the work.
+    const rank = (r: GitRepo) => cardUrgency(r, worktrees[r.path])
+    return cards
+      .filter((r) => matches(r) || (worktrees[r.path] ?? []).some(matches))
+      .sort((a, b) => rank(a) - rank(b) || (b.commitAt ?? "").localeCompare(a.commitAt ?? ""))
+  }, [cards, worktrees, filter, state, pullsByPath])
+  const shelves = useMemo(
+    () => shelve(visible, (r) => cardUrgency(r, worktrees[r.path])),
+    [visible, worktrees],
+  )
 
   // A selected repository takes the whole page: the working copy is a place to
   // work, not a panel to peek at, and it needs the room for the tree, the
@@ -172,6 +197,11 @@ export default function GitPage() {
         repo={active}
         onBack={closeRepo}
         onRepoChanged={() => {
+          repos.refresh()
+          summary.refresh()
+        }}
+        onRepoRemoved={() => {
+          closeRepo()
           repos.refresh()
           summary.refresh()
         }}
@@ -266,7 +296,9 @@ export default function GitPage() {
                   only ever return nothing is furniture. The counts on them are
                   what the four tiles used to say. */}
                 <div className="flex min-w-0 flex-wrap items-center gap-1">
-                  {(["all", "dirty", "behind", "ahead", "detached", "pulls"] as const).map((key) =>
+                  {(
+                    ["all", "dirty", "behind", "ahead", "detached", "pulls", "worktrees"] as const
+                  ).map((key) =>
                     key === "all" || counts[key] > 0 ? (
                       <FilterChip
                         key={key}
@@ -329,9 +361,13 @@ export default function GitPage() {
                           index={index}
                           repo={repo}
                           pulls={pullsByPath[repo.path]}
-                          onOpen={() => select(repo.path)}
-                          onOpenPull={(number) => openRepoPull(repo.path, number)}
+                          worktrees={worktrees[repo.path]}
+                          worktreePulls={pullsByPath}
+                          onOpen={select}
+                          onOpenPull={openRepoPull}
                           onPullsChanged={summary.refresh}
+                          onDelete={removal.deleteCheckout}
+                          onRemoveWorktree={removal.removeWorktree}
                         />
                       ))}
                     </ul>
@@ -341,6 +377,7 @@ export default function GitPage() {
             </div>
           ))}
 
+        {removal.dialog}
         <CloneDialog
           open={cloning}
           onOpenChange={setCloning}

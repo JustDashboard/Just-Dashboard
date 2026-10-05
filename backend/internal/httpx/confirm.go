@@ -32,13 +32,14 @@ const ConfirmParam = "confirm"
 // same way. That habit is the thing this function is protecting on the routes
 // that still call it, so widening the set is how you weaken it.
 //
-// What is left is the rare and unrecoverable: dropping a table or a column,
-// emptying one, `compose down`, removing or pruning a Docker volume, deleting an
-// account, restoring over live data, discarding uncommitted work, turning the
-// firewall off, upgrading packages. A prune that leaves volumes alone is not on
-// that list — a container, network or image comes back from a registry or a
-// compose file — nor is deleting a proxy site, a stream or a branch, each of
-// which is recreated from the same form or recovered from the reflog.
+// What is left is the rare and unrecoverable, and invariant 3
+// (docs/internal/security/invariants.md) lists it: permanently deleting an
+// archived deployment project, dropping a database, taking a Compose stack
+// down (from its page or from an archived project's removal plan), and
+// deleting a Git checkout from the server. A prune is not on that list — a
+// container, network or image comes back from a registry or a compose file —
+// nor is deleting a proxy site, a stream or a branch, each of which is
+// recreated from the same form or recovered from the reflog.
 // Everything else keeps the capability check,
 // the tighter destructive budget and the audit entry — which is what
 // s.destructive is for — and pauses the operator with an ordinary dialog.

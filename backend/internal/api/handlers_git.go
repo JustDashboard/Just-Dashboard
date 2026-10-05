@@ -38,6 +38,9 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/blame", s.handle(s.handleGitBlame))
 		r.Method(http.MethodGet, "/signature", s.handle(s.handleGitSignature))
 		r.Method(http.MethodGet, "/worktrees", s.handle(s.handleGitWorktrees))
+		// What deleting a checkout would lose, read before the confirmation
+		// that asks for it.
+		r.Method(http.MethodGet, "/removal", s.handle(s.handleGitRemoval))
 		r.Method(http.MethodGet, "/conflict", s.handle(s.handleGitConflict))
 		r.Method(http.MethodGet, "/patch", s.handle(s.handleGitPartialDiff))
 		r.Method(http.MethodGet, "/rebase/plan", s.handle(s.handleGitRebasePlan))
@@ -120,6 +123,9 @@ func (s *Server) mountGitRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/branch/delete-remote", s.handle(s.handleGitBranchDeleteRemote))
 			r.Method(http.MethodPost, "/tag/delete", s.handle(s.handleGitTagDelete))
 			r.Method(http.MethodPost, "/remote/delete", s.handle(s.handleGitRemoteDelete))
+			// Deleting a whole checkout is typed for: uncommitted work, stashes
+			// and unpushed branches exist nowhere else (handleGitRepositoryDelete).
+			r.Method(http.MethodPost, "/repository/delete", s.handle(s.handleGitRepositoryDelete))
 		})
 	})
 }
@@ -144,6 +150,8 @@ func gitErr(err error) error {
 		return httpx.Err(http.StatusServiceUnavailable, "not_installed", err.Error())
 	case errors.Is(err, gitx.ErrOutsideRoots):
 		return httpx.Err(http.StatusForbidden, "outside_roots", err.Error())
+	case errors.Is(err, gitx.ErrProtected):
+		return httpx.Err(http.StatusConflict, "protected", err.Error())
 	case errors.Is(err, gitx.ErrNotARepo), errors.Is(err, gitx.ErrInvalidRef):
 		return httpx.BadRequest("%v", err)
 	}

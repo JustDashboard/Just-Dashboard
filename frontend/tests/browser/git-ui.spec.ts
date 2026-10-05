@@ -242,12 +242,13 @@ test("the list answers what is waiting before the rows are read", async ({ page 
  *
  * The pull requests used to live one click and a tab away, inside the
  * workspace, where the question the list page is opened with — is anything
- * waiting — could not see them. Now a card carries the first of them, a choice
- * of its own that opens the checkout *on* that request in one history entry,
- * and counts the rest. The foot must not disturb what the card already
- * promised: the repository's name is still the only button called that, and
- * the card is the height of every other card — three requests stacked on one
- * used to stretch its whole shelf into empty space.
+ * waiting — could not see them. Now a card carries the first two of them,
+ * each in its state's colour and a choice of its own that opens the checkout
+ * *on* that request in one history entry, and counts the rest. The foot must
+ * not disturb what the card already promised: the repository's name is still
+ * the only button called that, and the cards on one shelf are one height —
+ * the row stretches to the tallest, so a card with requests does not leave
+ * its neighbour short.
  */
 test("open pull requests sit on the card and open the checkout on them", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -285,22 +286,24 @@ test("open pull requests sit on the card and open the checkout on them", async (
   await page.goto("/git")
   await expect(page.getByRole("button", { name: "Pull requests 2" })).toBeVisible()
 
-  // The first on the card, and a count for the rest.
+  // The first two on the card, and a count for the rest.
   await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open pull request #13" })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "3 more pull requests" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #13" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #14" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "2 more pull requests" })).toBeVisible()
   // A checkout gh could not answer for says so in one quiet word.
   await expect(page.getByText("pull requests unavailable")).toBeVisible()
   // The foot adds no button named like a repository.
   await expect(page.getByRole("button", { name: /^(app|lib|web)$/ })).toHaveCount(3)
 
-  // Four requests, one, or a word for none: every card is one height, on
-  // either shelf.
-  const cards = page.locator("ul[aria-label='acme'] > li, ul[aria-label='No remote'] > li")
-  await expect(cards).toHaveCount(3)
-  const heights = await cards.evaluateAll((lis) =>
-    lis.map((li) => Math.round(li.getBoundingClientRect().height)),
-  )
+  // Four requests or one: the cards on a shelf are one height.
+  await expect(
+    page.locator("ul[aria-label='acme'] > li, ul[aria-label='No remote'] > li"),
+  ).toHaveCount(3)
+  const heights = await page
+    .locator("ul[aria-label='acme'] > li")
+    .evaluateAll((lis) => lis.map((li) => Math.round(li.getBoundingClientRect().height)))
+  expect(heights).toHaveLength(2)
   expect(new Set(heights).size).toBe(1)
 
   // The foot's verbs follow the Overview's rule: a request whose preview is
@@ -332,6 +335,145 @@ test("open pull requests sit on the card and open the checkout on them", async (
   await page.goBack()
   await expect(page).toHaveURL(/\/git$/)
   await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
+})
+
+/**
+ * A worktree is drawn inside the repository it belongs to, and taking a
+ * checkout off the server says what is lost before it asks for the name.
+ *
+ * Worktrees were cards of their own beside their main checkout, reading as a
+ * second repository with the first one's name, and removing one was three
+ * screens away. Deleting a repository's folder is the one act on this page
+ * that cannot be undone, so the dialog counts what exists only on this disk
+ * from the server's own answer and the request carries the typed name.
+ */
+test("worktrees sit inside their repository and checkouts are removed knowingly", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const tree = {
+    ...app,
+    path: "/srv/app/.worktrees/fix-login",
+    name: "fix-login",
+    branch: "fix/login",
+    dirty: false,
+    changes: 0,
+    staged: 0,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    worktree: true,
+    main: "/srv/app",
+    languages: [{ name: "Go", share: 0.7 }],
+  }
+  const withLanguages = {
+    ...app,
+    languages: [
+      { name: "Go", share: 0.6 },
+      { name: "TypeScript", share: 0.4 },
+    ],
+  }
+  const posted: { path: string; query: string; body: unknown; confirm?: string }[] = []
+  await page.route("**/api/v1/**", async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
+    if (req.method() === "POST") {
+      posted.push({
+        path,
+        query: url.searchParams.toString(),
+        body: req.postDataJSON(),
+        confirm: req.headers()["x-confirm"],
+      })
+      return json(route, { command: "git", output: "", ok: true, path: "/srv/lib", removed: true })
+    }
+    switch (path) {
+      case "/auth/session":
+        return json(route, user)
+      case "/git/":
+        return json(route, { available: true, repos: [withLanguages, tree, lib] })
+      case "/git/pull-requests":
+        return json(route, { available: true, repos: [] })
+      case "/git/github/":
+        return json(route, { available: true, account: { loggedIn: false, gitConfigured: false } })
+      case "/git/removal":
+        return json(
+          route,
+          url.searchParams.get("path") === "/srv/lib"
+            ? {
+                path: "/srv/lib",
+                name: "lib",
+                worktrees: [],
+                nested: [],
+                changes: 2,
+                untracked: 1,
+                conflicts: 0,
+                stashes: 1,
+                unpushed: 3,
+                localBranches: [{ name: "spike", unpushed: 3 }],
+                remotes: 0,
+              }
+            : {
+                path: "/srv/app",
+                name: "app",
+                worktrees: [{ path: tree.path, branch: "fix/login", dirty: false }],
+                nested: [],
+                changes: 0,
+                untracked: 0,
+                conflicts: 0,
+                stashes: 0,
+                unpushed: 0,
+                localBranches: [],
+                remotes: 1,
+                protected: "1 worktree is still attached: /srv/app/.worktrees/fix-login",
+              },
+        )
+    }
+    return json(route, [])
+  })
+  await page.goto("/git")
+
+  // One card for the repository, its worktree a row inside it; the chip
+  // counts the worktrees, and the language strip says what it is made of.
+  await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "fix-login", exact: true })).toHaveCount(0)
+  const trees = page.getByRole("list", { name: "Worktrees of app" })
+  await expect(trees.getByRole("button", { name: "fix/login", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Worktrees 1" })).toBeVisible()
+  await expect(page.getByRole("img", { name: "Go 60%, TypeScript 40%" })).toBeVisible()
+
+  // A clean worktree is removed with an ordinary confirmation, against the
+  // repository it belongs to.
+  await trees.getByRole("button", { name: "Remove the worktree on fix/login" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Remove worktree" }).click()
+  await expect
+    .poll(() => posted.find((p) => p.path === "/git/worktree/remove"))
+    .toMatchObject({ query: "path=%2Fsrv%2Fapp", body: { path: tree.path } })
+
+  // A repository with a worktree attached cannot be deleted under it: the
+  // dialog offers to remove the worktree first instead of asking for a name.
+  await page.getByRole("button", { name: "More for app" }).click()
+  await page.getByRole("menuitem", { name: /Delete from server/ }).click()
+  const blocked = page.getByRole("dialog")
+  await expect(blocked).toContainText("app cannot be deleted yet")
+  await expect(blocked).toContainText(tree.path)
+  await blocked.getByRole("button", { name: "Close" }).first().click()
+
+  // Deleting says what exists only here, and the button waits for the name.
+  await page.getByRole("button", { name: "More for lib" }).click()
+  await page.getByRole("menuitem", { name: /Delete from server/ }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("No remote")
+  await expect(dialog).toContainText("2 uncommitted changes")
+  await expect(dialog).toContainText("3 commits pushed nowhere")
+  await expect(dialog).toContainText("1 stash")
+  const go = dialog.getByRole("button", { name: "Delete forever" })
+  await expect(go).toBeDisabled()
+  await dialog.getByRole("textbox").fill("lib")
+  await go.click()
+  await expect
+    .poll(() => posted.find((p) => p.path === "/git/repository/delete"))
+    .toMatchObject({ body: { path: "/srv/lib" }, confirm: "lib" })
 })
 
 test("a file staged and edited again is listed on both sides", async ({ page }) => {

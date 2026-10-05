@@ -4902,6 +4902,37 @@ export type GitRepo = {
   gone?: boolean
   /** No commits yet. */
   empty?: boolean
+  /** A linked worktree: a second checkout of the repository at `main`. */
+  worktree?: boolean
+  /** The main checkout a linked worktree belongs to. */
+  main?: string
+  /** What the tracked files are written in, by share of bytes, largest first. */
+  languages?: { name: string; share: number }[]
+}
+
+/**
+ * What deleting a checkout from the server would take with it — everything
+ * that exists only on this disk — and, in `protected`, why it may not be
+ * deleted at all.
+ */
+export type GitRemoval = {
+  path: string
+  name: string
+  worktree?: boolean
+  main?: string
+  /** Linked worktrees still attached to a main checkout. */
+  worktrees: { path: string; branch: string; dirty: boolean }[]
+  /** Other checkouts inside its folder, which deleting it would take along. */
+  nested: string[]
+  changes: number
+  untracked: number
+  conflicts: number
+  stashes: number
+  /** Commits on local branches that no remote-tracking ref contains. */
+  unpushed: number
+  localBranches: { name: string; unpushed: number; upstream?: string }[]
+  remotes: number
+  protected?: string
 }
 
 /**

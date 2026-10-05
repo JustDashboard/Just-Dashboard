@@ -48,7 +48,10 @@ export function parseRemote(remote: string | undefined): RemoteOrigin | undefine
     const colon = raw.indexOf(":")
     const slash = raw.indexOf("/")
     if (colon > 0 && (slash === -1 || colon < slash)) {
-      host = raw.slice(0, colon).replace(/^[^@]*@/, "").toLowerCase()
+      host = raw
+        .slice(0, colon)
+        .replace(/^[^@]*@/, "")
+        .toLowerCase()
       path = raw.slice(colon + 1)
     }
   }
@@ -117,8 +120,9 @@ export function byUrgency(a: GitRepo, b: GitRepo): number {
  * wrong in it comes first; between two that are equally wrong, the names
  * decide, with the shelf of remote-less checkouts last — a repository nobody
  * pushes anywhere is the one the reader is least likely to be looking for.
+ * `rankOf` is how wrong one card is, which counts the worktrees inside it.
  */
-export function shelve(repos: GitRepo[]): RepoShelf[] {
+export function shelve(repos: GitRepo[], rankOf: (repo: GitRepo) => number = urgency): RepoShelf[] {
   const shelves = new Map<string, RepoShelf>()
   for (const repo of repos) {
     const head = shelfOf(repo)
@@ -130,7 +134,7 @@ export function shelve(repos: GitRepo[]): RepoShelf[] {
     shelf.repos.push(repo)
   }
   return [...shelves.values()].sort((a, b) => {
-    const rank = (s: RepoShelf) => Math.min(...s.repos.map(urgency))
+    const rank = (s: RepoShelf) => Math.min(...s.repos.map(rankOf))
     if (rank(a) !== rank(b)) return rank(a) - rank(b)
     if (!a.key !== !b.key) return a.key ? -1 : 1
     return a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
@@ -176,4 +180,67 @@ export function assignPulls(
     out[repo.path] = { ...entry, pulls: entry.pulls.filter(drawnHere) }
   }
   return out
+}
+
+/**
+ * The checkouts the page draws as cards, and the linked worktrees each card
+ * carries inside it.
+ *
+ * A worktree is a second working directory of one repository — the same
+ * history, another branch checked out — and drawn as a card of its own beside
+ * its main checkout it read as a second repository with the first one's name
+ * and owner. So it is drawn inside the main checkout's card, the way `git
+ * worktree list` prints it, and a card is as urgent as the worst checkout in
+ * it. A worktree whose main checkout the list does not have (outside the
+ * roots, or deleted from under it) has nowhere to sit and keeps a card of its
+ * own, which says whose worktree it is.
+ */
+export function nestWorktrees(repos: GitRepo[]): {
+  cards: GitRepo[]
+  worktrees: Record<string, GitRepo[]>
+} {
+  const paths = new Set(repos.map((r) => r.path))
+  const worktrees: Record<string, GitRepo[]> = {}
+  const cards: GitRepo[] = []
+  for (const repo of repos) {
+    if (repo.worktree && repo.main && repo.main !== repo.path && paths.has(repo.main)) {
+      ;(worktrees[repo.main] ??= []).push(repo)
+    } else {
+      cards.push(repo)
+    }
+  }
+  for (const list of Object.values(worktrees)) {
+    list.sort((a, b) => a.path.localeCompare(b.path))
+  }
+  return { cards, worktrees }
+}
+
+/** A card's urgency: the worst of its own checkout and every worktree inside it. */
+export function cardUrgency(repo: GitRepo, worktrees: GitRepo[] = []): number {
+  return Math.min(urgency(repo), ...worktrees.map(urgency))
+}
+
+/** Where a worktree sits, said from its main checkout: `.worktrees/fix-x`, not the whole path. */
+export function worktreePlace(worktree: GitRepo, main: string): string {
+  const prefix = main.replace(/\/$/, "") + "/"
+  return worktree.path.startsWith(prefix) ? worktree.path.slice(prefix.length) : worktree.path
+}
+
+/** The forges whose repository page is `https://<host>/<owner>/<name>`. */
+const FORGE_HOSTS = /^(www\.)?(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org)$/
+
+/**
+ * The repository a checkout pushes to, as the forge names it — `Wayy01/api` on
+ * github.com — with its page where the forge's address shape is known. An
+ * scp-style or ssh remote has no page of its own, but the repository on a
+ * known forge still does.
+ */
+export function forgeRepository(
+  remote: string | undefined,
+): { host: string; slug: string; url?: string } | undefined {
+  const origin = parseRemote(remote)
+  if (!origin?.host || !origin.owner) return undefined
+  const slug = `${origin.owner}/${origin.name}`
+  const host = origin.host.replace(/^www\./, "")
+  return { host, slug, url: FORGE_HOSTS.test(origin.host) ? `https://${host}/${slug}` : undefined }
 }

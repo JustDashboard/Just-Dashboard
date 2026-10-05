@@ -128,6 +128,17 @@
   --git-renamed: oklch(0.67 0.15 265);
   --git-conflict: oklch(0.66 0.21 8);
 
+  /* A pull request's state, in the forge's own convention: open is green,
+     merged violet, closed red, a draft grey. The hues are GitHub's — the
+     colours the same request carries on the site it lives on, the argument
+     the language marks make below — at one lightness tuned to this ground.
+     Kept apart from the status hues so an open request never reads as a
+     healthy service, and merged has a hue none of them owns. */
+  --pull-open: oklch(0.7 0.181 145.6);
+  --pull-merged: oklch(0.68 0.193 298.1);
+  --pull-closed: oklch(0.66 0.205 27);
+  --pull-draft: oklch(0.66 0.018 250.9);
+
   /* Shadows are for things that genuinely float above the page — a popover, a
      dropdown, a dialog. They are no longer spent on cards and buttons, which
      now separate by ground step and border alone. */
@@ -315,7 +326,7 @@
    * which states the rule once and would be the nicer source. Relative colour
    * syntax is the one modern colour function Lightning CSS cannot downlevel:
    * every other computed token in this file gets an automatic fallback (see
-   * the `@supports` guards in the built stylesheet), and these twenty would
+   * the `@supports` guards in the built stylesheet), and these thirty would
    * have shipped without one, below the floor Next's default browserslist
    * target declares — Firefox 111-127 and Chrome 111-118 are inside it and
    * parse none of it. The comment on each line carries the Linguist hex the
@@ -340,6 +351,16 @@
   --language-css: oklch(0.72 0.16 303.4); /* #663399 */
   --language-scss: oklch(0.72 0.159 352); /* #c6538c */
   --language-markdown: oklch(0.72 0.168 261.4); /* #083fa1 */
+  --language-shell: oklch(0.72 0.196 135.3); /* #89e051 */
+  --language-vue: oklch(0.72 0.132 160.5); /* #41b883 */
+  --language-svelte: oklch(0.72 0.234 34.2); /* #ff3e00 */
+  --language-dart: oklch(0.72 0.12 188.5); /* #00b4ab */
+  --language-elixir: oklch(0.72 0.092 314.9); /* #6e4a7e */
+  --language-scala: oklch(0.72 0.184 19.5); /* #c22d40 */
+  --language-zig: oklch(0.72 0.13 49.9); /* #ec915c */
+  --language-perl: oklch(0.72 0.122 226.9); /* #0298c3 */
+  --language-dockerfile: oklch(0.72 0.029 220.4); /* #384d54 */
+  --language-powershell: oklch(0.72 0.099 258.1); /* #012456 */
 
   /* The file manager's own artwork: a folder and a sheet of paper.
    *
