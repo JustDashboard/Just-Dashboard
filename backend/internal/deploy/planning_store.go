@@ -728,7 +728,7 @@ func (s *PlanningStore) Save(
 				valid := false
 				if draft.Data.Adoption != nil {
 					for _, binding := range draft.Data.Adoption.IngressBindings {
-						valid = valid || (((binding.Status == "linked" && dependency.Ownership == OwnershipLinked) || (binding.Status == "hint" && dependency.Ownership == OwnershipObserved)) && dependency.Kind == "ingress" && dependency.ResourceID == binding.ID && string(dependency.Config) == string(mustJSON(binding)))
+						valid = valid || ((((binding.Status == "linked" || binding.Status == "unverified") && dependency.Ownership == OwnershipLinked) || (binding.Status == "hint" && dependency.Ownership == OwnershipObserved)) && dependency.Kind == "ingress" && dependency.ResourceID == binding.ID && string(dependency.Config) == string(mustJSON(binding)))
 					}
 				}
 				if !valid {

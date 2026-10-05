@@ -161,8 +161,10 @@ func (s *Service) verifyIngressOwnership(ctx context.Context, b ExistingIngressB
 		if b.Network == "" || !found {
 			return ErrExistingIngressChanged
 		}
-		if b.Continuity == "network_alias" && !exclusiveIngressAlias(b, containers) {
-			return ErrExistingIngressChanged
+		if b.Continuity == "network_alias" {
+			if err := s.verifyIngressAlias(ctx, b, containers, true); err != nil {
+				return err
+			}
 		}
 	default:
 		return ErrExistingIngressChanged
@@ -239,6 +241,18 @@ func (s *Service) ApplyExistingIngress(ctx context.Context, owner, release int64
 	}
 	if err := s.VerifyExistingIngress(ctx, bindings); err != nil {
 		return err
+	}
+	for _, binding := range bindings {
+		if binding.Continuity == "network_alias" {
+			target, mode, matched := ingressMatches(binding.Upstream, targets, true)
+			containers, err := ingressContainers(ctx)
+			if err != nil {
+				return err
+			}
+			if !matched || mode != "network_alias" || target.Service != binding.Service || target.Stopped || !runningIngressAliasOwned(binding, target.ContainerID, containers) {
+				return ErrExistingIngressChanged
+			}
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,7 +339,7 @@ func (s *Service) ApplyExistingIngress(ctx context.Context, owner, release int64
 			return err
 		}
 		completed = append(completed, operation)
-		if err := writeIngressCAS(b.SourcePath, before, after, os.FileMode(operation.Mode)); err != nil {
+		if err := writeIngressCAS(b.SourcePath, before, after, os.FileMode(operation.Mode), b.SourceIdentity); err != nil {
 			return err
 		}
 		if err := s.reloadExistingIngress(ctx, b); err != nil {
@@ -377,7 +391,7 @@ func (s *Service) restoreIngressJournal(ctx context.Context, journal *ingressHan
 		return ErrExistingIngressChanged
 	}
 	if current != journal.Before {
-		if err := writeIngressCAS(journal.Binding.SourcePath, current, journal.Before, os.FileMode(journal.Mode)); err != nil {
+		if err := writeIngressCAS(journal.Binding.SourcePath, current, journal.Before, os.FileMode(journal.Mode), journal.Binding.SourceIdentity); err != nil {
 			return err
 		}
 	}
@@ -415,7 +429,7 @@ func attributableIngressWrite(current, before, after string) bool {
 	return current[prefix:] == before[prefix:]
 }
 
-func writeIngressCAS(path, before, after string, mode os.FileMode) error {
+func writeIngressCAS(path, before, after string, mode os.FileMode, expectedIdentity string) error {
 	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, mode)
 	if err != nil {
 		return err
@@ -425,11 +439,18 @@ func writeIngressCAS(path, before, after string, mode os.FileMode) error {
 	if err != nil || !info.Mode().IsRegular() || info.Size() != int64(len(before)) {
 		return ErrExistingIngressChanged
 	}
+	openedIdentity := ingressInfoIdentity(info)
+	if expectedIdentity == "" || openedIdentity != expectedIdentity || ingressFileIdentity(path) != openedIdentity {
+		return ErrExistingIngressChanged
+	}
 	current := make([]byte, len(before))
 	if _, err := f.ReadAt(current, 0); err != nil && len(current) > 0 {
 		return err
 	}
 	if string(current) != before {
+		return ErrExistingIngressChanged
+	}
+	if ingressFileIdentity(path) != openedIdentity {
 		return ErrExistingIngressChanged
 	}
 	// Single-file Docker bind mounts retain their inode. Atomic rename would
@@ -440,7 +461,13 @@ func writeIngressCAS(path, before, after string, mode os.FileMode) error {
 	if err := f.Truncate(int64(len(after))); err != nil {
 		return err
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if ingressFileIdentity(path) != openedIdentity {
+		return ErrExistingIngressChanged
+	}
+	return nil
 }
 
 func (s *Service) reloadExistingIngress(ctx context.Context, b ExistingIngressBinding) error {

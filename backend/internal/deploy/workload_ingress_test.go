@@ -104,3 +104,18 @@ func TestExistingLinkedDomainsNeverRenderManagedRouteOrProtection(t *testing.T) 
 		t.Fatal("linked domain changed managed certificate or authentication")
 	}
 }
+
+func TestExistingUnverifiedIngressRemainsADeploymentBlocker(t *testing.T) {
+	b := proxysvc.ExistingIngressBinding{ID: "known-manager-unavailable", Owner: "Existing proxy", ProxyKind: "unknown", Path: "/", Status: "unverified", Continuity: "unverified"}
+	recovered := &RecoveredWorkload{Adoption: &WorkloadAdoption{BaselineDigest: fakeContentDigest("baseline"), Snapshot: mustJSON(runtimeReleaseSnapshot{Version: 1})}}
+	if err := AttachRecoveredIngress(recovered, []proxysvc.ExistingIngressBinding{b}); err != nil {
+		t.Fatal(err)
+	}
+	bindings, err := ingressBindingsFromDependencies(recovered.Configuration.Dependencies)
+	if err != nil || len(bindings) != 1 || bindings[0].Status != "unverified" {
+		t.Fatal("unavailable manager was silently dropped", bindings, err)
+	}
+	if !errors.Is(validateExistingIngressPlan(runtimeReleaseSnapshot{}, bindings), proxysvc.ErrExistingIngressChanged) {
+		t.Fatal("unverified manager could reach runtime stop")
+	}
+}

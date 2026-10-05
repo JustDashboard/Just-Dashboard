@@ -2,6 +2,7 @@ package proxysvc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -36,6 +37,14 @@ func TestExistingCaddyIngressORMatchersDoNotCrossJoin(t *testing.T) {
 		if (b.Hostname == "a.example.test" && b.Path != "/a/*") || (b.Hostname == "b.example.test" && b.Path != "/b/*") {
 			t.Fatalf("cross match: %+v", b)
 		}
+	}
+}
+
+func TestExistingCaddyIngressRejectsContradictoryAndConditionalMatchers(t *testing.T) {
+	raw := []byte(`{"apps":{"http":{"servers":{"srv0":{"routes":[{"match":[{"host":["a.example.test"]}],"handle":[{"handler":"subroute","routes":[{"match":[{"host":["b.example.test"]}],"handle":[{"handler":"reverse_proxy","upstreams":[{"dial":"app:3000"}]}]}]}]},{"match":[{"host":["conditional.example.test"],"not":[{"path":["/admin/*"]}]}],"handle":[{"handler":"reverse_proxy","upstreams":[{"dial":"app:3000"}]}]}]}}}}}`)
+	bindings, err := existingCaddyBindings(raw, []ExistingIngressTarget{{Service: "app", Network: "owned", Alias: "app", ContainerPort: 3000}}, "docker-caddy", "edge", "/source", "", true)
+	if err != nil || len(bindings) != 1 || bindings[0].Hostname != "conditional.example.test" || bindings[0].Status != "blocked" {
+		t.Fatal("conditional/contradictory route was flattened into verified evidence", bindings, err)
 	}
 }
 
@@ -151,7 +160,7 @@ func TestExistingIngressReloadFailureAndCrashRestoreExactBytes(t *testing.T) {
 				if err := s.writeIngressJournal(journal); err != nil {
 					t.Fatal(err)
 				}
-				if err := writeIngressCAS(b.SourcePath, before, after, 0o640); err != nil {
+				if err := writeIngressCAS(b.SourcePath, before, after, 0o640, b.SourceIdentity); err != nil {
 					t.Fatal(err)
 				}
 				if err := s.RecoverExistingIngress(t.Context(), 11, 23, []ExistingIngressBinding{b}); err != nil {
@@ -227,6 +236,9 @@ func TestExistingIngressRefusesReplacedInodeAndRecoversInterruptedWrite(t *testi
 	if !errors.Is(s.VerifyExistingIngress(t.Context(), []ExistingIngressBinding{b}), ErrExistingIngressChanged) {
 		t.Fatal("replacement inode authorized stale mounted config")
 	}
+	if !errors.Is(writeIngressCAS(b.SourcePath, before, before+"# changed\n", 0o640, b.SourceIdentity), ErrExistingIngressChanged) {
+		t.Fatal("opened replacement inode was not fenced before CAS write")
+	}
 	if err := os.Remove(b.SourcePath); err != nil {
 		t.Fatal(err)
 	}
@@ -248,5 +260,38 @@ func TestExistingIngressRefusesReplacedInodeAndRecoversInterruptedWrite(t *testi
 	}
 	if raw, _ := os.ReadFile(b.SourcePath); string(raw) != before {
 		t.Fatal("interrupted exact write was not restored")
+	}
+}
+
+func TestExistingIngressStoppedAliasRequiresExactCapturedContainer(t *testing.T) {
+	id := strings.Repeat("a", 64)
+	binding := ExistingIngressBinding{Upstream: "api:3000", Network: "owned", TargetContainerID: id, CapturedStopped: true}
+	var container ingressContainer
+	if err := json.Unmarshal([]byte(`{"Id":"`+id+`","State":{"Running":false},"NetworkSettings":{"Networks":{"owned":{"Aliases":["api"]}}}}`), &container); err != nil {
+		t.Fatal(err)
+	}
+	if !stoppedIngressAlias(binding, container) {
+		t.Fatal("exact stopped alias was rejected")
+	}
+	foreign := container
+	foreign.ID = strings.Repeat("b", 64)
+	if stoppedIngressAlias(binding, foreign) {
+		t.Fatal("foreign stopped container accepted")
+	}
+	container.State.Running = true
+	if stoppedIngressAlias(binding, container) || !runningIngressAliasOwned(binding, id, []ingressContainer{container}) {
+		t.Fatal("running/stopped ownership was conflated")
+	}
+	if runningIngressAliasOwned(binding, foreign.ID, []ingressContainer{container}) {
+		t.Fatal("a different running alias owner was accepted")
+	}
+	foreign.State.Running = true
+	if runningIngressAliasOwned(binding, id, []ingressContainer{container, foreign}) {
+		t.Fatal("shared running alias was accepted")
+	}
+	delete(container.NetworkSettings.Networks, "owned")
+	container.State.Running = false
+	if stoppedIngressAlias(binding, container) {
+		t.Fatal("missing captured network was accepted")
 	}
 }

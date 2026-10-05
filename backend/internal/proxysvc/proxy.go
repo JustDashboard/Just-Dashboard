@@ -53,6 +53,7 @@ type Service struct {
 	dockerIngress     bool
 	ingressJournalDir string
 	ingressReload     func(context.Context, ExistingIngressBinding) error
+	ingressResolve    func(context.Context) (*dockerCaddy, error)
 	nginxDir          string
 	caddyFile         string
 
@@ -81,6 +82,9 @@ func NewWithDockerIngress(nginxDir, caddyFile string) *Service {
 }
 
 func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
+	if s.ingressResolve != nil {
+		return s.ingressResolve(ctx)
+	}
 	if !s.dockerIngress {
 		return nil, nil
 	}

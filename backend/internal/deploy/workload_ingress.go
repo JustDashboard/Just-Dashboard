@@ -27,7 +27,7 @@ func AttachRecoveredIngress(recovered *RecoveredWorkload, bindings []proxysvc.Ex
 			recovered.Adoption.Blockers = append(recovered.Adoption.Blockers, fmt.Sprintf("%s%s: %s", binding.Hostname, binding.Path, binding.PlannedChange))
 			continue
 		}
-		if binding.Status != "linked" && binding.Status != "hint" {
+		if binding.Status != "linked" && binding.Status != "hint" && binding.Status != "unverified" {
 			continue
 		}
 		if binding.Continuity == "retarget" {
@@ -63,7 +63,7 @@ func ingressBindingsFromDependencies(dependencies []PlannedDependency) ([]proxys
 	}
 	bindings := []proxysvc.ExistingIngressBinding{}
 	for _, binding := range all {
-		if binding.Status == "linked" {
+		if binding.Status == "linked" || binding.Status == "unverified" {
 			bindings = append(bindings, binding)
 		}
 	}
@@ -77,7 +77,7 @@ func publicIngressBindingsFromDependencies(dependencies []PlannedDependency) ([]
 			continue
 		}
 		var binding proxysvc.ExistingIngressBinding
-		if dependency.Kind != "ingress" || json.Unmarshal(dependency.Config, &binding) != nil || binding.ID != dependency.ResourceID || !((binding.Status == "linked" && dependency.Ownership == OwnershipLinked) || (binding.Status == "hint" && dependency.Ownership == OwnershipObserved)) {
+		if dependency.Kind != "ingress" || json.Unmarshal(dependency.Config, &binding) != nil || binding.ID != dependency.ResourceID || !(((binding.Status == "linked" || binding.Status == "unverified") && dependency.Ownership == OwnershipLinked) || (binding.Status == "hint" && dependency.Ownership == OwnershipObserved)) {
 			return nil, ErrInvalidPlan
 		}
 		bindings = append(bindings, binding)
@@ -154,14 +154,14 @@ func (o *DockerRuntimeOwner) ExistingIngressTargets(ctx context.Context, runtime
 			}
 		}
 		for _, network := range detail.NetworkList {
-			targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, Network: network.Name, Address: network.IPAddress})
+			targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, ContainerID: detail.ID, Stopped: detail.State != "running", Network: network.Name, Address: network.IPAddress})
 			for _, alias := range network.Aliases {
-				targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, Network: network.Name, Alias: alias, Address: network.IPAddress})
+				targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, ContainerID: detail.ID, Stopped: detail.State != "running", Network: network.Name, Alias: alias, Address: network.IPAddress})
 			}
 			for port := range ports {
-				targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, Network: network.Name, Address: network.IPAddress, ContainerPort: port})
+				targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, ContainerID: detail.ID, Stopped: detail.State != "running", Network: network.Name, Address: network.IPAddress, ContainerPort: port})
 				for _, alias := range network.Aliases {
-					targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, Network: network.Name, Alias: alias, Address: network.IPAddress, ContainerPort: port})
+					targets = append(targets, proxysvc.ExistingIngressTarget{Service: service, ContainerID: detail.ID, Stopped: detail.State != "running", Network: network.Name, Alias: alias, Address: network.IPAddress, ContainerPort: port})
 				}
 			}
 		}
@@ -205,6 +205,9 @@ func (e *NormalizedStepExecutor) verifyExistingIngressBeforeStop(ctx context.Con
 // Final inspection after start still verifies Docker's actual network aliases.
 func validateExistingIngressPlan(snapshot runtimeReleaseSnapshot, bindings []proxysvc.ExistingIngressBinding) error {
 	for _, binding := range bindings {
+		if binding.Status != "linked" {
+			return fmt.Errorf("%w: the original proxy link is unverified", proxysvc.ErrExistingIngressChanged)
+		}
 		raw := binding.Upstream
 		if !strings.Contains(raw, "://") {
 			raw = "http://" + raw

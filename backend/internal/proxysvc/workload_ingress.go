@@ -24,25 +24,27 @@ import (
 // managed DeploymentRoute: its certificates, authentication and URI behavior
 // remain the original proxy's responsibility.
 type ExistingIngressBinding struct {
-	ID              string `json:"id"`
-	Hostname        string `json:"hostname"`
-	Path            string `json:"path"`
-	Service         string `json:"service"`
-	Owner           string `json:"owner"`
-	ProxyKind       string `json:"proxyKind"`
-	Status          string `json:"status"`
-	Continuity      string `json:"continuity"`
-	PlannedChange   string `json:"plannedChange,omitempty"`
-	HTTPS           bool   `json:"https,omitempty"`
-	Upstream        string `json:"upstream,omitempty"`
-	SourcePath      string `json:"sourcePath,omitempty"`
-	SourceDigest    string `json:"sourceDigest,omitempty"`
-	SourceIdentity  string `json:"sourceIdentity,omitempty"`
-	Selector        string `json:"selector,omitempty"`
-	IngressIdentity string `json:"ingressIdentity,omitempty"`
-	ContainerID     string `json:"containerId,omitempty"`
-	Network         string `json:"network,omitempty"`
-	Port            int    `json:"port,omitempty"`
+	ID                string `json:"id"`
+	Hostname          string `json:"hostname"`
+	Path              string `json:"path"`
+	Service           string `json:"service"`
+	Owner             string `json:"owner"`
+	ProxyKind         string `json:"proxyKind"`
+	Status            string `json:"status"`
+	Continuity        string `json:"continuity"`
+	PlannedChange     string `json:"plannedChange,omitempty"`
+	HTTPS             bool   `json:"https,omitempty"`
+	Upstream          string `json:"upstream,omitempty"`
+	SourcePath        string `json:"sourcePath,omitempty"`
+	SourceDigest      string `json:"sourceDigest,omitempty"`
+	SourceIdentity    string `json:"sourceIdentity,omitempty"`
+	Selector          string `json:"selector,omitempty"`
+	IngressIdentity   string `json:"ingressIdentity,omitempty"`
+	ContainerID       string `json:"containerId,omitempty"`
+	TargetContainerID string `json:"targetContainerId,omitempty"`
+	CapturedStopped   bool   `json:"capturedStopped,omitempty"`
+	Network           string `json:"network,omitempty"`
+	Port              int    `json:"port,omitempty"`
 }
 
 type ExistingIngressTarget struct {
@@ -53,6 +55,8 @@ type ExistingIngressTarget struct {
 	Network       string
 	Alias         string
 	Address       string
+	ContainerID   string
+	Stopped       bool
 }
 
 func ingressEndpoint(raw string) (string, int, bool) {
@@ -112,6 +116,7 @@ func ingressMatches(raw string, targets []ExistingIngressTarget, docker bool) (E
 // a virtual host's independently flattened hostname and upstream lists.
 func (s *Service) CaptureExistingIngress(ctx context.Context, targets []ExistingIngressTarget) ([]ExistingIngressBinding, error) {
 	out := []ExistingIngressBinding{}
+	knownDockerEdge := ""
 	if hostexec.Available("nginx") {
 		pending, err := s.Pending(ctx, "")
 		if err != nil {
@@ -145,6 +150,7 @@ func (s *Service) CaptureExistingIngress(ctx context.Context, targets []Existing
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return nil, err
 	} else if edge != nil {
+		knownDockerEdge = edge.ID
 		containers, inspectErr := ingressContainers(ctx)
 		if inspectErr != nil {
 			return nil, errors.New("existing Caddy network ownership cannot be inspected")
@@ -178,7 +184,7 @@ func (s *Service) CaptureExistingIngress(ctx context.Context, targets []Existing
 		}
 		for i := range bindings {
 			bindings[i].IngressIdentity, bindings[i].ContainerID = edge.Identity, edge.ID
-			if bindings[i].Continuity == "network_alias" && !exclusiveIngressAlias(bindings[i], containers) {
+			if bindings[i].Continuity == "network_alias" && (s.verifyIngressAlias(ctx, bindings[i], containers, true) != nil || (!bindings[i].CapturedStopped && bindings[i].TargetContainerID != "" && !runningIngressAliasOwned(bindings[i], bindings[i].TargetContainerID, containers))) {
 				bindings[i].Status, bindings[i].Continuity, bindings[i].PlannedChange = "blocked", "unverified", "This network alias is shared by another running container; isolate the exact application upstream before Deploy changes."
 			}
 		}
@@ -203,9 +209,9 @@ func (s *Service) CaptureExistingIngress(ctx context.Context, targets []Existing
 			out = append(out, bindings...)
 		}
 	}
-	if hostexec.Available("docker") {
+	if (s.dockerIngress || s.ingressResolve != nil) && hostexec.Available("docker") {
 		if containers, err := ingressContainers(ctx); err == nil {
-			out = append(out, unknownIngressHints(containers, targets)...)
+			out = append(out, unknownIngressHints(containers, targets, knownDockerEdge)...)
 		}
 	}
 	for _, pidPath := range []string{"/run/apache2/apache2.pid", "/run/httpd/httpd.pid"} {
@@ -226,10 +232,10 @@ func (s *Service) CaptureExistingIngress(ctx context.Context, targets []Existing
 	return out, nil
 }
 
-func unknownIngressHints(containers []ingressContainer, targets []ExistingIngressTarget) []ExistingIngressBinding {
+func unknownIngressHints(containers []ingressContainer, targets []ExistingIngressTarget, knownEdge string) []ExistingIngressBinding {
 	bindings := []ExistingIngressBinding{}
 	for _, container := range containers {
-		if !container.State.Running {
+		if !container.State.Running || container.ID == knownEdge {
 			continue
 		}
 		image := strings.ToLower(container.Config.Image)
@@ -241,14 +247,20 @@ func unknownIngressHints(containers []ingressContainer, targets []ExistingIngres
 			kind, owner = "traefik", "Traefik"
 		case strings.Contains(image, "httpd") || strings.Contains(image, "apache"):
 			kind, owner = "apache", "Apache"
+		case strings.Contains(image, "caddy"):
+			kind, owner = "caddy", "Caddy"
+		case strings.Contains(image, "nginx"):
+			kind, owner = "nginx", "nginx"
 		}
 		if kind == "" {
 			continue
 		}
 		relevant := false
-		for _, target := range targets {
-			if _, present := container.NetworkSettings.Networks[target.Network]; target.Network != "" && present {
-				relevant = true
+		if kind != "nginx" && kind != "caddy" {
+			for _, target := range targets {
+				if _, present := container.NetworkSettings.Networks[target.Network]; target.Network != "" && present {
+					relevant = true
+				}
 			}
 		}
 		for _, port := range []string{"80/tcp", "443/tcp"} {
@@ -330,6 +342,57 @@ func exclusiveIngressAlias(b ExistingIngressBinding, containers []ingressContain
 	return count == 1
 }
 
+func runningIngressAliasOwned(b ExistingIngressBinding, targetID string, containers []ingressContainer) bool {
+	if targetID == "" || !exclusiveIngressAlias(b, containers) {
+		return false
+	}
+	host, _, _ := ingressEndpoint(b.Upstream)
+	for _, container := range containers {
+		network, present := container.NetworkSettings.Networks[b.Network]
+		if container.ID == targetID && container.State.Running && present && containsIngressString(network.Aliases, host) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Service) verifyIngressAlias(ctx context.Context, b ExistingIngressBinding, containers []ingressContainer, allowStopped bool) error {
+	if exclusiveIngressAlias(b, containers) {
+		return nil
+	}
+	host, _, ok := ingressEndpoint(b.Upstream)
+	if !allowStopped || !ok || !b.CapturedStopped || len(b.TargetContainerID) != 64 {
+		return ErrExistingIngressChanged
+	}
+	for _, r := range b.TargetContainerID {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return ErrExistingIngressChanged
+		}
+	}
+	for _, container := range containers {
+		if container.State.Running {
+			if network, present := container.NetworkSettings.Networks[b.Network]; present && containsIngressString(network.Aliases, host) {
+				return ErrExistingIngressChanged
+			}
+		}
+	}
+	raw, err := hostexec.Command(ctx, "docker", "inspect", "--", b.TargetContainerID).Output()
+	if err != nil || len(raw) > 4<<20 {
+		return ErrExistingIngressChanged
+	}
+	var captured []ingressContainer
+	if json.Unmarshal(raw, &captured) != nil || len(captured) != 1 || !stoppedIngressAlias(b, captured[0]) {
+		return ErrExistingIngressChanged
+	}
+	return nil
+}
+
+func stoppedIngressAlias(b ExistingIngressBinding, container ingressContainer) bool {
+	host, _, ok := ingressEndpoint(b.Upstream)
+	network, present := container.NetworkSettings.Networks[b.Network]
+	return ok && b.CapturedStopped && container.ID == b.TargetContainerID && !container.State.Running && present && containsIngressString(network.Aliases, host)
+}
+
 func boundedIngressFile(path string) (string, error) {
 	return boundedIngressFileLimit(path, 4<<20)
 }
@@ -354,6 +417,9 @@ func boundedIngressFileLimit(path string, limit int64) (string, error) {
 func newIngressBinding(host, path, upstream, driver, owner, source, selector, content string, target ExistingIngressTarget, mode string, ready bool) ExistingIngressBinding {
 	b := ExistingIngressBinding{Hostname: host, Path: path, Service: target.Service, Owner: owner, ProxyKind: driver, Status: "linked", Continuity: mode, Upstream: upstream, SourcePath: source, SourceDigest: routeDigest(content), Selector: selector, Network: target.Network, Port: target.ContainerPort}
 	b.SourceIdentity = ingressFileIdentity(source)
+	if mode == "network_alias" {
+		b.TargetContainerID, b.CapturedStopped = target.ContainerID, target.Stopped
+	}
 	b.ID = routeDigest(driver + "\x00" + source + "\x00" + selector + "\x00" + host + "\x00" + path + "\x00" + target.Service)
 	if mode == "retarget" {
 		b.PlannedChange = "Update only this route's literal upstream address at Deploy changes; preserve the existing proxy configuration."
@@ -369,6 +435,10 @@ func ingressFileIdentity(path string) string {
 	if err != nil || !info.Mode().IsRegular() {
 		return ""
 	}
+	return ingressInfoIdentity(info)
+}
+
+func ingressInfoIdentity(info os.FileInfo) string {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return ""
@@ -491,14 +561,15 @@ func existingCaddyBindings(raw []byte, targets []ExistingIngressTarget, driver, 
 		return nil, errors.New("existing Caddy route tree is invalid")
 	}
 	out := []ExistingIngressBinding{}
-	var routes func([]any, []string, []string, string, bool)
-	routes = func(nodes []any, inheritedHosts, inheritedPaths []string, pointer string, tls bool) {
+	var routes func([]any, []string, []string, string, bool, bool)
+	routes = func(nodes []any, inheritedHosts, inheritedPaths []string, pointer string, tls bool, inheritedUnverified bool) {
 		for i, rawRoute := range nodes {
 			route, ok := rawRoute.(map[string]any)
 			if !ok {
 				continue
 			}
 			hosts, paths := inheritedHosts, inheritedPaths
+			unverified := inheritedUnverified
 			if matches, ok := route["match"].([]any); ok {
 				// Match objects are OR alternatives; their host/path pairing must
 				// stay intact instead of forming a Cartesian product.
@@ -508,6 +579,12 @@ func existingCaddyBindings(raw []byte, targets []ExistingIngressTarget, driver, 
 						continue
 					}
 					mh, mp := hosts, paths
+					uncertain := unverified
+					for key := range match {
+						if key != "host" && key != "path" {
+							uncertain = true
+						}
+					}
 					if h, ok := match["host"].([]any); ok {
 						mh = nil
 						for _, v := range h {
@@ -531,7 +608,7 @@ func existingCaddyBindings(raw []byte, targets []ExistingIngressTarget, driver, 
 						continue
 					}
 					copy := map[string]any{"handle": route["handle"]}
-					routes([]any{copy}, mh, mp, fmt.Sprintf("%s/%d/match/%d", pointer, i, m), tls)
+					routes([]any{copy}, mh, mp, fmt.Sprintf("%s/%d/match/%d", pointer, i, m), tls, uncertain)
 				}
 				continue
 			}
@@ -543,7 +620,7 @@ func existingCaddyBindings(raw []byte, targets []ExistingIngressTarget, driver, 
 				}
 				slot := fmt.Sprintf("%s/%d/handle/%d", pointer, i, n)
 				if children, ok := handler["routes"].([]any); ok {
-					routes(children, hosts, paths, slot+"/routes", tls)
+					routes(children, hosts, paths, slot+"/routes", tls, unverified)
 				}
 				if handler["handler"] != "reverse_proxy" {
 					continue
@@ -566,6 +643,9 @@ func existingCaddyBindings(raw []byte, targets []ExistingIngressTarget, driver, 
 						for _, path := range paths {
 							b := newIngressBinding(host, path, dial, driver, owner, source, fmt.Sprintf("%s/upstreams/%d", slot, u), content, target, mode, ready)
 							b.HTTPS = tls
+							if unverified {
+								b.Status, b.Continuity, b.PlannedChange = "blocked", "unverified", "This conditional Caddy matcher cannot be represented as an exact hostname and path; verify its original route before Deploy changes."
+							}
 							if len(upstreams) != 1 || handler["dynamic_upstreams"] != nil {
 								b.Status, b.Continuity, b.PlannedChange = "blocked", "unverified", "This shared or dynamic upstream needs an explicit external proxy handoff before Deploy changes."
 							}
@@ -586,11 +666,14 @@ func existingCaddyBindings(raw []byte, targets []ExistingIngressTarget, driver, 
 		server, _ := value.(map[string]any)
 		list, _ := server["routes"].([]any)
 		tls := false
+		if policies, ok := server["tls_connection_policies"].([]any); ok && len(policies) > 0 {
+			tls = true
+		}
 		for _, listen := range anySlice(server["listen"]) {
 			text, _ := listen.(string)
 			tls = tls || strings.HasSuffix(text, ":443")
 		}
-		routes(list, nil, nil, "/apps/http/servers/"+name+"/routes", tls)
+		routes(list, nil, nil, "/apps/http/servers/"+name+"/routes", tls, false)
 	}
 	return out, nil
 }

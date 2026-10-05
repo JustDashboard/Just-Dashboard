@@ -22,6 +22,9 @@ func (adoptionPreflightFake) Observe(context.Context, deploy.ObservationRequest)
 
 func TestWorkloadAdoptionAPIRecoversReviewsAndRegistersWithoutDockerMutations(t *testing.T) {
 	s := testServer(t)
+	// This Docker API fixture has no external proxy. Proxy continuity uses
+	// separate owned ingress fixtures rather than the test runner's host.
+	s.modules.proxy = nil
 	root := t.TempDir()
 	s.Cfg.DeployRoots = []string{root}
 	s.Cfg.ComposeRoots = []string{root}

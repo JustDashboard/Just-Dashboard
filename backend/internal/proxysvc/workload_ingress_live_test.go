@@ -47,6 +47,18 @@ func TestLiveExistingIngressHandoffAndRollback(t *testing.T) {
 	}
 	backend(blueListener, "blue")
 	backend(greenListener, "green")
+	jobsBlue, err := net.Listen("tcp4", "127.0.0.2:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	jobsPort := jobsBlue.Addr().(*net.TCPAddr).Port
+	jobsGreen, err := net.Listen("tcp4", net.JoinHostPort("127.0.0.3", strconv.Itoa(jobsPort)))
+	if err != nil {
+		jobsBlue.Close()
+		t.Fatal(err)
+	}
+	backend(jobsBlue, "jobs-blue")
+	backend(jobsGreen, "jobs-green")
 	stable := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "stable:"+r.URL.Path) }))
 	t.Cleanup(stable.Close)
 	stablePort, _ := strconv.Atoi(strings.Split(stable.Listener.Addr().String(), ":")[1])
@@ -88,8 +100,11 @@ func TestLiveExistingIngressHandoffAndRollback(t *testing.T) {
   auth_basic_user_file %s;
   proxy_pass %s;
  }
+ location /jobs/ {
+  proxy_pass http://127.0.0.2:%d/queue/;
+ }
 }
-`, port, tlsPort, certPath, keyPath, stable.URL, upstreamPort, authPath, stable.URL)
+`, port, tlsPort, certPath, keyPath, stable.URL, upstreamPort, authPath, stable.URL, jobsPort)
 	writeFile(t, path, before)
 	symlink(t, path, filepath.Join(root, "sites-enabled", "imported"))
 	// Match only this fixture's nginx process, never the host's own proxy.
@@ -119,9 +134,9 @@ func TestLiveExistingIngressHandoffAndRollback(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	targets := []ExistingIngressTarget{{Service: "stable", Host: "127.0.0.1", Port: stablePort, ContainerPort: stablePort}, {Service: "api", Address: "127.0.0.2", Network: "owned", ContainerPort: upstreamPort}}
+	targets := []ExistingIngressTarget{{Service: "stable", Host: "127.0.0.1", Port: stablePort, ContainerPort: stablePort}, {Service: "api", Address: "127.0.0.2", Network: "owned", ContainerPort: upstreamPort}, {Service: "jobs", Address: "127.0.0.2", Network: "owned", ContainerPort: jobsPort}}
 	bindings, err := svc.CaptureExistingIngress(ctx, targets)
-	if err != nil || len(bindings) != 3 {
+	if err != nil || len(bindings) != 4 {
 		t.Fatalf("capture: %+v, %v", bindings, err)
 	}
 	for _, b := range bindings {
@@ -133,12 +148,16 @@ func TestLiveExistingIngressHandoffAndRollback(t *testing.T) {
 		t.Fatal("capture mutated live workload")
 	}
 	targets[1].Address = "127.0.0.3"
+	targets[2].Address = "127.0.0.3"
 	if err := svc.ApplyExistingIngress(ctx, 31, 41, bindings, targets); err != nil {
 		t.Fatal(err)
 	}
-	want := strings.Replace(before, "127.0.0.2:", "127.0.0.3:", 1)
+	want := strings.ReplaceAll(before, "127.0.0.2:", "127.0.0.3:")
 	if string(mustIngressRead(t, path)) != want || request("/api/item") != "green:/preserved/item" || request("/stable/item") != "stable:/original/item" {
 		t.Fatal("handoff changed unrelated bytes or served wrong service")
+	}
+	if request("/jobs/item") != "jobs-green:/queue/item" {
+		t.Fatal("second retarget service did not activate atomically")
 	}
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
 	response, err := client.Get("https://127.0.0.1:" + strconv.Itoa(tlsPort) + "/api/item")
@@ -160,6 +179,9 @@ func TestLiveExistingIngressHandoffAndRollback(t *testing.T) {
 	if string(mustIngressRead(t, path)) != before || request("/api/item") != "blue:/preserved/item" {
 		t.Fatal("rollback did not restore exact original traffic and bytes")
 	}
+	if request("/jobs/item") != "jobs-blue:/queue/item" {
+		t.Fatal("second retarget service did not roll back")
+	}
 	reloads := 0
 	svc.ingressReload = func(ctx context.Context, _ ExistingIngressBinding) error {
 		reloads++
@@ -175,6 +197,9 @@ func TestLiveExistingIngressHandoffAndRollback(t *testing.T) {
 	svc.ingressReload = nil
 	if string(mustIngressRead(t, path)) != before || request("/api/item") != "blue:/preserved/item" {
 		t.Fatal("failed activation did not compensate exact original route")
+	}
+	if request("/jobs/item") != "jobs-blue:/queue/item" {
+		t.Fatal("failed activation did not compensate both retarget services")
 	}
 	writeFile(t, path, before+"# later operator edit\n")
 	if !errors.Is(svc.VerifyExistingIngress(ctx, bindings), ErrExistingIngressChanged) {
