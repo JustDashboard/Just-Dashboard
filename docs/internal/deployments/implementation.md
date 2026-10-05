@@ -57,17 +57,23 @@ only renderer/executor/validation authority for their feature.
   offered for resumption behind a counted button beside the question; a source strip offers a Git
   repository (connected GitHub list or a pasted URL), a Docker image (images already on the server or
   a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
-  fallback shelf for a blueprint the frontend does not name), a database and a Compose stack (paste,
-  upload, Git, local). Choosing a
+  fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has no
+  tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
+  Project step's *Deploy as a Compose stack*), adopted from this server through `/deploy/import`, or
+  resumed as an unfinished setup, and a saved stack's documents are edited on Settings → General.
+  Choosing a
   source creates a draft, saves the intent and source, and runs detection in one action; when
   detection finds more than one candidate they are offered ranked, each saying why it ranks where it
   does (an example, a docs site, not a service), as a choice that re-runs detection with
-  `selectedId`. The configure screen draws the plan beside the form — source → build → runtime →
-  address, in the same `wire.tsx` vocabulary the project overview uses for a deployment that already
-  exists, with a dashed ring for a step not yet decided and nothing pulsing, because a pulse means
-  live traffic and a plan has none. Every step is pressable and opens the fields that decide it,
-  which is what puts the release strategy and the memory limit on screen without opening Advanced to
-  find them; an unbounded container reads as "No memory or CPU limit" there rather than as silence.
+  `selectedId`. Each configure screen reads the plan down a rail beside the form
+  (`new-project/plan-rail.tsx` over `plan-reading.ts`, the run page's rail before the run): the four
+  steps under their segments of the spine, each holding the parts of the plan it decides — source and
+  build; container, address, health check, resources and storage; the environment; the server's check
+  and automatic deployment — each on the tile of the product it is, with what it says now and, where
+  there is one, the command, request, path or variable name as code. Every row is pressable and opens
+  the fields that decide it, which is what puts the release strategy and the memory limit on screen
+  without opening a fold to find them; an unbounded container reads as "No memory or CPU limit" there
+  rather than as silence, and a part that wants a look before Deploy is marked in its tile's corner.
   The form itself holds the name, the type, the detected build and output
   settings, environment variables, an optional database, the public address (with the hostname
   suggestion and certificate readiness), automatic deployment for a Git source, and an Advanced
@@ -103,8 +109,9 @@ only renderer/executor/validation authority for their feature.
   with the plan read back and Deploy under it. **Review saves the configuration and runs preflight on
   arrival**, not under the button: preflight used to run inside the press, so the screen asking "is
   this right" had checked nothing by the time it was read, its findings landed under a button the
-  reader had already pressed, and the first press of Deploy was really a check. It reads the plan back
-  as what the drawing beside it cannot carry — the mounts kept between rebuilds and their backup
+  reader had already pressed, and the first press of Deploy was really a check. It opens on what the server said — the findings to fix and the warnings to acknowledge under one
+  line saying what stands between the plan and Deploy — and reads the plan back as what the rail
+  beside it cannot carry, each drawn as a row of what it is — the mounts kept between rebuilds and their backup
   coverage, the variables generated on this server and their length, the readiness check's target and
   budget, and what the cutover strategy costs — plus every preflight `pass` as a checked line, where
   before only `blocked`, `decision` and `warning` were drawn and a plan with nothing wrong with it

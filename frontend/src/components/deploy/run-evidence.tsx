@@ -715,6 +715,65 @@ function quote(word: string) {
   return /[\s"'$`\\]/.test(word) ? `'${word.replaceAll("'", "'\\''")}'` : word
 }
 
+const SHELL_WORD = /"(?:[^"\\]|\\.)*"|'[^']*'|&&|\|\||[|;]|\S+/g
+
+/**
+ * A command as it was typed — a build or start command, a check's request —
+ * coloured the way `CommandBlock` colours one the engine ran, inline in a line
+ * that reads a plan back. The words are the reader's own, so nothing is quoted
+ * again: the program after each `&&`, `|` or `;`, a flag, a path, a quoted
+ * word and a variable each take their hue, and an assignment in front of the
+ * program keeps its name and its value apart.
+ */
+export function ShellWords({ command, className }: { command: string; className?: string }) {
+  const out: React.ReactNode[] = []
+  let at = 0
+  let program = true
+  for (const match of command.matchAll(SHELL_WORD)) {
+    const index = match.index ?? 0
+    if (index > at) out.push(command.slice(at, index))
+    const word = match[0]
+    const operator = word === "&&" || word === "||" || word === "|" || word === ";"
+    const assignment: boolean = program && /^[A-Za-z_][A-Za-z0-9_]*=/.test(word)
+    out.push(
+      assignment ? (
+        <span key={index}>
+          <span className={CODE.key}>{word.slice(0, word.indexOf("="))}</span>
+          <span className={CODE.punct}>=</span>
+          <span className={CODE.string}>{word.slice(word.indexOf("=") + 1)}</span>
+        </span>
+      ) : (
+        <span
+          key={index}
+          className={
+            operator
+              ? CODE.punct
+              : program
+                ? CODE.program
+                : /^["']/.test(word)
+                  ? CODE.string
+                  : word.startsWith("-")
+                    ? CODE.flag
+                    : word.startsWith("$")
+                      ? CODE.variable
+                      : PATH.test(word) || word === "."
+                        ? CODE.path
+                        : /^\d+$/.test(word)
+                          ? CODE.number
+                          : undefined
+          }
+        >
+          {word}
+        </span>
+      ),
+    )
+    program = operator || assignment
+    at = index + word.length
+  }
+  if (at < command.length) out.push(command.slice(at))
+  return <code className={cn("font-mono", className)}>{out}</code>
+}
+
 /**
  * The hues a code block draws in: the `--tag-*` rung the log console's tokens
  * sit on, so no kind outshouts another, and none of the status hues — a
@@ -722,7 +781,7 @@ function quote(word: string) {
  * values the green and the pink, paths the cyan the console gives a path,
  * and the punctuation steps back.
  */
-const CODE = {
+export const CODE = {
   key: "text-[var(--tag-blue)]",
   keyword: "font-semibold text-[var(--tag-violet)]",
   literal: "text-[var(--tag-violet)]",

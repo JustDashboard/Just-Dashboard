@@ -20,7 +20,7 @@ import { Status } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
 import { LanguageMark } from "@/components/language-icon"
-import { ForgeFace } from "@/components/git/marks"
+import { BranchChip, ForgeFace } from "@/components/git/marks"
 import { BadgedLogo } from "@/components/client-mark"
 import { ProductGlyph, ProductLogo, hostProduct } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
@@ -756,6 +756,10 @@ function RepoRow({
           )}
           {repo.archived && <Tag>archived</Tag>}
           {repo.fork && <Tag>fork</Tag>}
+          {/* The branch an import builds unless it is told otherwise, drawn as
+              the Git page draws one — the repository whose default is not
+              `main` is the one this saves a trip back for. */}
+          <BranchChip branch={repo.defaultBranch} className="hidden max-w-28 md:inline-flex" />
           {/* On a phone the coloured mark is the language (§14) and the name
               needs the width the word took — "acme/design-tok…" beside a full
               TYPESCRIPT. A language with no mark keeps its word. */}

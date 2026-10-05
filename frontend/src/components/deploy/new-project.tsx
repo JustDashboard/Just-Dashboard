@@ -4,16 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import {
-  ArrowLeft,
-  Box,
-  Clock,
-  Database,
-  GitHubMark,
-  GridMasonry,
-  Layers,
-  Trash,
-} from "@/components/icons"
+import { ArrowLeft, Box, Clock, Database, GitHubMark, GridMasonry, Trash } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -56,11 +47,10 @@ import { SourceGit } from "@/components/deploy/new-project/source-git"
 import { SourceImage } from "@/components/deploy/new-project/source-image"
 import { SourceTemplate } from "@/components/deploy/new-project/source-template"
 import { SourceDatabase } from "@/components/deploy/new-project/source-database"
-import { SourceCompose } from "@/components/deploy/new-project/source-compose"
 import { Configure } from "@/components/deploy/new-project/configure"
 
-// The mark is wayfinding, not decoration: five words set in one line are five
-// words to read, and the reader is choosing between five *kinds* of thing.
+// The mark is wayfinding, not decoration: four words set in one line are four
+// words to read, and the reader is choosing between four *kinds* of thing.
 // §14 bans a glyph in front of a heading because you are already there; a
 // chooser is the opposite case, and the same rule keeps the sidebar's and the
 // overview tiles' marks. Every one is `aria-hidden`, so the button's
@@ -74,15 +64,15 @@ const TABS: {
   { key: "image", label: "Docker image", icon: Box },
   { key: "template", label: "Template", icon: GridMasonry },
   { key: "database", label: "Database", icon: Database },
-  { key: "compose", label: "Compose", icon: Layers },
 ]
 
 // A profile from a link written before this page existed — the source tab
-// that gets you the closest to what that outcome meant.
+// that gets you the closest to what that outcome meant. A Compose stack is
+// built from the repository that holds its file now, so its links open Git.
 const LEGACY_PROFILE_TAB: Record<string, SourceTabKey> = {
   service: "template",
   game: "template",
-  compose: "compose",
+  compose: "git",
   image: "image",
   static: "git",
   worker: "git",
@@ -445,13 +435,13 @@ export function NewProject({
               steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
             />
             {/* A group of pressed buttons, not a tablist: a tablist must own
-              tabs, and these are five toggles for one answer. On a phone the
-              five do not fit, so the strip runs to the screen's edge and
+              tabs, and these are four toggles for one answer. On a phone the
+              four do not fit, so the strip runs to the screen's edge and
               scrolls there, and the source cut off at the edge is what says
               there are more — `ChipStrip`'s answer, since the scroll shade
               is drawn in the page's own ground and cannot show on it. The
               chosen one is brought into view, so a link that arrives on
-              Compose does not open on a strip that hides it. */}
+              Database does not open on a strip that hides it. */}
             <div
               ref={strip}
               role="group"
@@ -493,7 +483,6 @@ export function NewProject({
                 <SourceTemplate key="template" onInspected={inspected} initialTemplate={template} />
               )}
               {tab === "database" && <SourceDatabase key="database" />}
-              {tab === "compose" && <SourceCompose key="compose" onInspected={inspected} />}
             </div>
           </>
         ) : (

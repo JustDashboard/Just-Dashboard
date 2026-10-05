@@ -15,7 +15,15 @@ import type { ConfigureStepKey } from "@/components/deploy/new-project/draft"
  * serves all three and a finding lands on the screen that owns its field.
  */
 export type PlanSection =
-  "source" | "build" | "runtime" | "limits" | "storage" | "address" | "checks" | "variables"
+  | "source"
+  | "build"
+  | "runtime"
+  | "limits"
+  | "storage"
+  | "address"
+  | "checks"
+  | "variables"
+  | "automatic"
 
 export const SECTION_IDS = {
   source: "plan-source",
@@ -26,6 +34,7 @@ export const SECTION_IDS = {
   address: "plan-address",
   checks: "plan-checks",
   variables: "plan-variables",
+  automatic: "plan-automatic",
 } as const satisfies Record<PlanSection, string>
 
 export const SECTION_STEPS = {
@@ -37,6 +46,7 @@ export const SECTION_STEPS = {
   address: "runtime",
   checks: "runtime",
   variables: "variables",
+  automatic: "review",
 } as const satisfies Record<PlanSection, ConfigureStepKey>
 
 /**
