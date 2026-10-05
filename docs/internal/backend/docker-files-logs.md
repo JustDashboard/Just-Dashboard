@@ -138,13 +138,23 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   `ListRunning` is the Engine's list of running containers mapped with no inspect at all, for the ports
   page, which asks every fifteen seconds only which container a published port belongs to.
   `ListContainersWithLabels` applies exact label filters in the Engine list call before health/uptime
-  enrichment, so a deployment detail read inspects only its matching running containers. The uptime pass
+  enrichment, so a deployment detail read inspects only its matching containers; unlike `ListContainers` it
+  also inspects the matching stopped ones, for the exit code, OOM verdict and restart count the Runtime
+  services carry (`Container.Restarts`, `Exited`, `WasOOMKilled`, none of them on the listing's wire). The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,
   and marks the rows it did not inspect (`Inspected`) so the UI never renders an absence as an answer.
   It also inspects any container, stopped or not, that the Engine lists by bare `sha256:…` id — which it
   does once the container's tag has moved on to a newer pull — and reports the name from the container's
   own config instead, as `Inspect` does. An id named no product, so every page drew such a container as
   Docker's whale and database discovery (which reads the engine off the name) skipped it.
+  `GET /docker/containers/stats` reads `ListRunning` rather than the enriched listing and samples through
+  the shared `StatsSampler`, which is **not** the recorder's. Its `WithMaxAge(30s)` drops a previous
+  sample older than the bound, so CPU is a recent interval or `cpuReady: false` (the first call, or one
+  after a gap), never an average over however long ago anyone last asked. A call that names only some
+  containers keeps the others' baselines until they pass the bound, so two pages polling different
+  projects do not erase each other's. The optional `ids` query
+  (comma-separated, full container ids or prefixes of at least 12 hex characters, at most 64; a bad
+  value is a 400) restricts the stats reads to those running containers; the response shape is unchanged.
   Writable-layer sizes ride along on the stats sampler from the shared disk cache, rather than a
   separate layer walk per sample, so "grew 6.4 GB today" is a measurement rather than a guess.
 - **Disk accounting has bounded staleness.** One client shares a disk walk between concurrent cold

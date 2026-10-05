@@ -2,6 +2,7 @@ package dockerx
 
 import (
 	"testing"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 )
@@ -214,5 +215,70 @@ func TestSamplerDistinguishesIdleCPUFromUnmeasuredCPU(t *testing.T) {
 	s.fillCPU("abc", &reset, 4)
 	if reset.CPUReady {
 		t.Fatal("a reset is not an idle interval")
+	}
+}
+
+// A shared sampler is differenced against whoever called last. Past the bound
+// that is an average over an arbitrary stretch, so it must read as unmeasured.
+func TestSamplerDropsABaselineOlderThanItsBound(t *testing.T) {
+	t.Parallel()
+	at := time.Unix(1_800_000_000, 0).UTC()
+	cases := []struct {
+		name      string
+		gap       time.Duration
+		wantReady bool
+	}{
+		{name: "recent", gap: 10 * time.Second, wantReady: true},
+		{name: "at the bound", gap: 30 * time.Second, wantReady: true},
+		{name: "stale", gap: time.Hour, wantReady: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := (&Client{}).NewStatsSampler().WithMaxAge(30 * time.Second)
+			first := ContainerStats{TS: at, CPUTotal: 100, SystemCPU: 1000}
+			s.fillCPU("abc", &first, 4)
+			second := ContainerStats{TS: at.Add(tc.gap), CPUTotal: 200, SystemCPU: 2000}
+			s.fillCPU("abc", &second, 4)
+			if second.CPUReady != tc.wantReady {
+				t.Fatalf("CPUReady = %v, want %v", second.CPUReady, tc.wantReady)
+			}
+			if !tc.wantReady && second.CPUPercent != 0 {
+				t.Fatalf("an unmeasured sample reported %v%%", second.CPUPercent)
+			}
+			third := ContainerStats{TS: second.TS.Add(5 * time.Second), CPUTotal: 300, SystemCPU: 3000}
+			s.fillCPU("abc", &third, 4)
+			if !third.CPUReady {
+				t.Fatal("the stale sample should have become the new baseline")
+			}
+		})
+	}
+}
+
+// The shared sampler is asked for one project's containers at a time, so a
+// call that does not name a container must not erase the baseline another
+// caller is about to difference against — only one too old to use.
+func TestBoundedSamplerKeepsOtherCallersBaselines(t *testing.T) {
+	t.Parallel()
+	s := (&Client{}).NewStatsSampler().WithMaxAge(30 * time.Second)
+	now := time.Now()
+	fresh := ContainerStats{TS: now, CPUTotal: 1, SystemCPU: 1}
+	s.fillCPU("other", &fresh, 1)
+	stale := ContainerStats{TS: now.Add(-time.Hour), CPUTotal: 1, SystemCPU: 1}
+	s.fillCPU("gone", &stale, 1)
+	mine := ContainerStats{TS: now, CPUTotal: 1, SystemCPU: 1}
+	s.fillCPU("mine", &mine, 1)
+	s.forget(map[string]struct{}{"mine": {}})
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.prev["other"]; !ok {
+		t.Fatal("erased another caller's recent baseline")
+	}
+	if _, ok := s.prev["gone"]; ok {
+		t.Fatal("kept a baseline too old to difference against")
+	}
+	if _, ok := s.prev["mine"]; !ok {
+		t.Fatal("forgot the container this call sampled")
 	}
 }

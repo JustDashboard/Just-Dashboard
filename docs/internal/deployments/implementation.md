@@ -1122,11 +1122,14 @@ only renderer/executor/validation authority for their feature.
   page reads whether messages arrive without a request per channel. See
   [notifications](notifications.md).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
-  managed environment labels at the daemon before inspecting matching running containers once each.
+  managed environment labels at the daemon before inspecting matching containers once each — running
+  or stopped, since the set is one environment's.
   The five-second bounded read returns container/release/Compose identities, the image reference the
   container was created from as Docker reports it (`image`, so a service is drawn as the product it
   runs without a join to the container list), state, health and start
-  time, without command text, environment values or arbitrary labels. `liveRelease` identifies the
+  time, and from the same inspect `restartCount`, `exitCode` (only for an exited, dead or restarting
+  container; a running or never-started one has no exit to report) and `oomKilled`, each omitted when
+  unknown or zero, without command text, environment values or arbitrary labels. `liveRelease` identifies the
   persisted live release, not a current health verdict. Failed or missing Docker is `unavailable` with
   a fixed recovery hint; a successful empty inventory is `available`. Missing health inspection evidence
   remains `unavailable`. The overview renders these services with live/other-release labels and links to

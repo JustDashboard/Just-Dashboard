@@ -126,7 +126,9 @@ type moduleSet struct {
 func (s *Server) initModules() {
 	s.modules.sys = sysinfo.NewCollector()
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
-	s.modules.dockerStats = s.modules.docker.NewStatsSampler()
+	// Callers of the shared sampler arrive when a page asks, not on a cadence,
+	// so a baseline older than this is dropped rather than averaged over.
+	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)
 	s.modules.dockerEvents = s.modules.docker.NewEventLog(s.Log)
 	s.modules.dockerDeploys = dockerx.NewDeploymentStore(s.Store.DB)
 	// The recorder gets a sampler of its own rather than the shared one: a

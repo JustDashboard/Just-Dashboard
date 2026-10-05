@@ -6,7 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
@@ -319,26 +321,73 @@ func (s *Server) handleContainerInspect(w http.ResponseWriter, r *http.Request) 
 	return nil
 }
 
+// statsMaxAge is how old the shared sampler's previous reading may be and
+// still be differenced against. The Runtime page polls every ten seconds; past
+// this the CPU is reported as not ready instead of as a long average.
+const statsMaxAge = 30 * time.Second
+
+// maxStatsIDs bounds the ids query so one request cannot fan out into an
+// arbitrary number of stats reads.
+const maxStatsIDs = 64
+
+// handleContainerStatsAll reads one stats sample for the running containers,
+// or only for those named by the optional ids query: comma-separated container
+// ids, each the full id or a prefix of at least twelve characters.
 func (s *Server) handleContainerStatsAll(w http.ResponseWriter, r *http.Request) error {
-	list, err := s.modules.docker.ListContainers(r.Context(), false)
+	want, err := parseStatsIDs(r.URL.Query().Get("ids"))
+	if err != nil {
+		return err
+	}
+	// The daemon's plain listing: the table-oriented one inspects every
+	// running container for limits and uptime that nothing here reads.
+	list, err := s.modules.docker.ListRunning(r.Context())
 	if err != nil {
 		return s.dockerErr(err)
 	}
-	ids := make([]string, 0, len(list))
-	for _, c := range list {
-		if c.State == "running" {
-			ids = append(ids, c.ID)
-		}
-	}
 	// The shared sampler, not a fresh one: a single request has no previous
 	// sample of its own to difference against, and would answer 0% for every
-	// container. The recorder keeps this one warm.
-	stats, err := s.modules.dockerStats.Sample(r.Context(), ids)
+	// container. It is not the recorder's — that one keeps its own baseline —
+	// so the first call reports cpuReady=false, and so does one that follows
+	// the previous call by more than statsMaxAge.
+	stats, err := s.modules.dockerStats.Sample(r.Context(), selectStatsIDs(list, want))
 	if err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.JSON(w, http.StatusOK, stats)
 	return nil
+}
+
+// parseStatsIDs reads the ids query. An empty value means every container.
+func parseStatsIDs(raw string) ([]string, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > maxStatsIDs {
+		return nil, httpx.BadRequest("ids names at most %d containers", maxStatsIDs)
+	}
+	for _, id := range parts {
+		if len(id) < 12 || len(id) > 64 || strings.Trim(id, "0123456789abcdef") != "" {
+			return nil, httpx.BadRequest("ids must be comma-separated container ids of at least 12 hex characters")
+		}
+	}
+	return parts, nil
+}
+
+// selectStatsIDs returns the full ids of the running containers, narrowed to
+// those matching one of want when it is set.
+func selectStatsIDs(list []dockerx.Container, want []string) []string {
+	ids := make([]string, 0, len(list))
+	for _, c := range list {
+		if c.State != "running" {
+			continue
+		}
+		if want != nil && !slices.ContainsFunc(want, func(w string) bool { return strings.HasPrefix(c.ID, w) }) {
+			continue
+		}
+		ids = append(ids, c.ID)
+	}
+	return ids
 }
 
 // handleContainerStatsHistory answers what a container was doing before you
