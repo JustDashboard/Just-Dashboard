@@ -1,5 +1,13 @@
 import { expect, test } from "@playwright/test"
-import { json, mockProject, now, run as fixtureRun, steps as fixtureSteps } from "./deploy-fixture"
+import {
+  deployment,
+  json,
+  mockProject,
+  now,
+  project,
+  run as fixtureRun,
+  steps as fixtureSteps,
+} from "./deploy-fixture"
 import type { DeploymentEngineRun, DeploymentStep } from "../../src/lib/types"
 
 /**
@@ -675,6 +683,79 @@ test("visit and the ready block appear only when this run's release is the live 
     "/deploy/7",
   )
   await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
+})
+
+test("a Stop that succeeded reads as stopped and offers Start, not as a deploy that went live", async ({
+  page,
+}, testInfo) => {
+  await mockProject(page)
+  const stop: Partial<DeploymentEngineRun> = {
+    operation: "stop",
+    state: "succeeded",
+    releaseId: 20,
+    slotClass: "light",
+    endedAt: now,
+    metadata: { targetReleaseId: 20 },
+  }
+  // A Stop plans three steps, the first of them start_candidate against the live release.
+  const stopSteps = steps
+    .filter((step) => ["start_candidate", "record_release", "notify"].includes(step.key))
+    .map((step) => ({ ...step, state: "passed" as const, endedAt: now }))
+  let readProject = { stopped: true, lastRun: { ...run, ...stop } }
+  await page.route("**/api/v1/deploy/7", (route) =>
+    route.request().method() === "GET"
+      ? json(route, {
+          project,
+          running: false,
+          deployment: { ...deployment, activeRun: undefined, ...readProject },
+        })
+      : route.fallback(),
+  )
+  await page.route("**/api/v1/deploy/7/runs/84", (route) => json(route, snapshot(stop, stopSteps)))
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({ type: "snapshot", data: snapshot(stop, stopSteps), ts: Date.now() }),
+    )
+  })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto("/deploy/7/runs/84")
+
+  const identity = page.locator('[data-slot="run-identity"]')
+  await expect(page.getByText("Your release is stopped", { exact: true })).toBeVisible()
+  await expect(page.getByText("Your release is ready", { exact: true })).toHaveCount(0)
+  await expect(identity.getByText("Stopped", { exact: true })).toBeVisible()
+  await expect(identity.getByText("Ready", { exact: true })).toHaveCount(0)
+  // The Stop's target is the live release it stopped, not one it rolls back to.
+  await expect(page.getByText(/rolls back to/)).toHaveCount(0)
+  const path = page.getByRole("list", { name: "Release path" })
+  await expect(path.getByText("Stop", { exact: true })).toBeVisible()
+  await expect(path.getByText("Start", { exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Redeploy", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("link", { name: "Visit", exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath("run-stopped.png") })
+
+  await page.getByRole("button", { name: "Details", exact: true }).click()
+  await expect(page.getByText("Stop live release", { exact: true })).toBeVisible()
+  await expect(page.getByText("Start new release", { exact: true })).toHaveCount(0)
+
+  // Start is the answer to Stopped, and it asks for a start run.
+  const started = page.waitForRequest(
+    (request) =>
+      request.method() === "POST" &&
+      request.url().endsWith("/api/v1/deploy/7/environments/12/runs"),
+  )
+  await page.getByRole("button", { name: "Start", exact: true }).click()
+  expect((await started).postDataJSON()).toEqual({ operation: "start" })
+  await expect(page).toHaveURL(/\/deploy\/7\/runs\/88$/)
+
+  // Once a newer run has started it again, the Stop says so rather than
+  // "stopped" for ever, and offers no Start.
+  readProject = { stopped: false, lastRun: { ...run, ...stop, id: 88, operation: "start" } }
+  await page.goto("/deploy/7/runs/84")
+  await expect(
+    page.getByText("Started again since — release #2 is running", { exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole("button", { name: "Start", exact: true })).toHaveCount(0)
 })
 
 test("cancel disappears once activation begins, and a rolled-back run offers no retry", async ({

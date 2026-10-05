@@ -901,7 +901,7 @@ above:
   release #14*, *deploying #14*, *running now*;
 - *once* — `Confetti` fires only when a release goes live in front of the reader — on the run page,
   and on the Overview when a run watched there from start to finish ends in success — never on
-  arrival.
+  arrival, and never for a Stop, which takes the release down.
 
 `animate-sweep` is spent the same way, on the three waits in the section that cannot say how far
 along they are: a credential's test while the server tries it, the website preview while the site

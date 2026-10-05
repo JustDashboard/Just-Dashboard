@@ -83,6 +83,7 @@ const FILL: Partial<Record<DeploymentStep["state"], string>> = {
 export function RunSteps({
   projectId,
   steps,
+  operation,
   now,
   lineCounts,
   onSelectStep,
@@ -90,6 +91,8 @@ export function RunSteps({
   /** The project, so a preflight finding can open the settings page holding its field. */
   projectId?: number
   steps: DeploymentStep[]
+  /** The run's operation, which names a step a Stop or Restart takes against the live release. */
+  operation?: string
   now: number
   /** How many lines each step wrote to the build log; a step that wrote none is absent. */
   lineCounts: Map<number, number>
@@ -170,7 +173,7 @@ export function RunSteps({
                         step.state === "pending" && "text-muted-foreground",
                       )}
                     >
-                      {stepName(step.key)}
+                      {stepName(step.key, operation)}
                     </span>
                     {reading && (
                       <span className="block truncate text-hint font-normal text-muted-foreground">

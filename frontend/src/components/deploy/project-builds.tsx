@@ -156,7 +156,7 @@ const RAIL_FROM = 900
 function RunHint({ run }: { run: DeploymentEngineRun }) {
   return (
     <span className="flex items-center gap-1.5">
-      <RunStatus state={run.state} className="shrink-0" />
+      <RunStatus state={run.state} operation={run.operation} className="shrink-0" />
       <FactDot />
       <span className="numeric">{relativeTime(run.requestedAt)}</span>
     </span>
@@ -198,7 +198,12 @@ function BuildRow({
           {subject && <span className="truncate text-hint text-muted-foreground">{subject}</span>}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-          <RunStatus state={run.state} live={active} className="shrink-0" />
+          <RunStatus
+            state={run.state}
+            operation={run.operation}
+            live={active}
+            className="shrink-0"
+          />
           <FactDot />
           <span className="numeric shrink-0">{formatDuration(runDurationSeconds(run, now))}</span>
           <FactDot />
@@ -234,6 +239,7 @@ function Transcript({ projectId, run }: { projectId: number; run: DeploymentEngi
       steps={transcript.steps}
       active={active}
       outcome={current.state}
+      operation={current.operation}
       connected={transcript.connected}
       startedAt={current.claimedAt ?? current.requestedAt}
       runNumber={current.runNumber}
