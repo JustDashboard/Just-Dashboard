@@ -313,7 +313,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			return recovered, nil
 		}
 		origin.RecoveryDirectory = private
-		recovered.Source = DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeRecoveredSnapshot, ResourceID: digest}
+		recovered.Source = DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeRecoveredSnapshot, ResourceID: digest, ExcludePaths: append([]string{}, recovered.Source.ExcludePaths...)}
 		recovered.Detection.Source.LocalPath = ""
 	}
 	if selected != nil {

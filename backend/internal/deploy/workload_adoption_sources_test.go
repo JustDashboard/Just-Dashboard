@@ -101,6 +101,39 @@ func TestNativeRecoveryBindsNestedWorkerAndPreservesSourceLayout(t *testing.T) {
 	}
 }
 
+func TestNativeRecoveredSnapshotRetainsDataExclusionsWhenAttachingOriginalSource(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	recovery := t.TempDir()
+	analyzer.WithRecoveryRoot(recovery)
+	writeBuildFixture(t, root, "data/state.json", `{"token":"linked-live-data"}`)
+	writeBuildFixture(t, root, "uploads/private.txt", "linked-private-upload")
+	result, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), recovery)
+	if err != nil || len(result.Adoption.Blockers) != 0 {
+		t.Fatalf("recovery=%v blockers=%v", err, result.Adoption.Blockers)
+	}
+	if len(result.Source.ExcludePaths) != 2 || result.Source.ExcludePaths[0] != "data" || result.Source.ExcludePaths[1] != "uploads" {
+		t.Fatalf("recovered source lost live data exclusions: %+v", result.Source)
+	}
+	attached := result.Source
+	attached.Mode, attached.LocalPath, attached.ResourceID = SourceModeLocalDirectory, root, ""
+	detection, err := analyzer.Analyze(t.Context(), attached)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, err := analyzer.Materialize(t.Context(), attached, detection.Source, 1, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, excluded := range []string{"data", "uploads"} {
+		if _, err := os.Stat(filepath.Join(materialized.Root, excluded)); !os.IsNotExist(err) {
+			t.Fatalf("reattached source copied linked live data %q", excluded)
+		}
+	}
+	if content, err := os.ReadFile(filepath.Join(root, "data", "state.json")); err != nil || !strings.Contains(string(content), "linked-live-data") {
+		t.Fatal("source reattachment modified linked live data")
+	}
+}
+
 func TestNativePythonRecoveryPreservesInterpreterVersionAndCommand(t *testing.T) {
 	root, analyzer, candidate, capture := hostRecoveryFixture(t)
 	if err := os.Remove(filepath.Join(root, "package.json")); err != nil {

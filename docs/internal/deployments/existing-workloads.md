@@ -337,7 +337,8 @@ General settings also exposes the build directory and optional subdirectory for 
 `local_directory` sources. Select a separate allowed directory for new code: a source save inspects
 it and creates a pending revision, while the frozen original source remains the baseline rollback
 input. Captured data exclusions are shown read-only and retained on save along with the source's
-other metadata. Rejected paths or revision conflicts keep the unsaved fields visible; readers can
+other metadata, including when an immutable recovery snapshot is later replaced with the original
+local directory. Rejected paths or revision conflicts keep the unsaved fields visible; readers can
 inspect them without editing, and source paths are not remembered in browser storage.
 
 Original startup authority also needs a reversible handoff before container migration. PM2 capture
