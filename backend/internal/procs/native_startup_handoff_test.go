@@ -96,6 +96,23 @@ func TestNativePM2StartupHandoffRetiresAndRestoresOnlySelectedRows(t *testing.T)
 	if !equalStartupJSON(fresh.StartupEvidence, capture.StartupEvidence) {
 		t.Fatal("rollback changed selected startup settings")
 	}
+	digest := plan.Digest
+	for cycle := 0; cycle < 2; cycle++ {
+		if err := RetireStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+			t.Fatal("next cutover could not retire restored startup", err)
+		}
+		fresh.StartupEvidence, _ = capturePM2Startup(pm2Home{daemonDir: root}, "default", "owned")
+		if err := VerifyCapturedStartup(&fresh, plan, journal); err != nil {
+			t.Fatal("next retirement evidence rejected", err)
+		}
+		if err := RestoreStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+			t.Fatal("next rollback could not restore startup", err)
+		}
+		fresh.StartupEvidence, _ = capturePM2Startup(pm2Home{daemonDir: root}, "default", "owned")
+		if err := VerifyCapturedStartup(&fresh, plan, journal); err != nil || plan.Digest != digest || journal.Actions[0].BeforeFingerprint != plan.Actions[0].Fingerprint {
+			t.Fatal("repeated cycles changed original authority", err)
+		}
+	}
 	entries, _ := os.ReadDir(root)
 	if len(entries) != 2 {
 		t.Fatal("completed handoff left shared startup backup artifacts")
@@ -260,6 +277,20 @@ func TestNativeSystemdStartupHandoffRetiresExactDirectLinks(t *testing.T) {
 	if err := VerifyCapturedStartup(&fresh, plan, journal); err != nil {
 		t.Fatal("verified restored links with cached retired relationships rejected", err)
 	}
+	for cycle := 0; cycle < 2; cycle++ {
+		if err := RetireStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+			t.Fatal("next cutover could not retire restored direct links", err)
+		}
+		if err := VerifyCapturedStartup(&fresh, plan, journal); err != nil {
+			t.Fatal("next link retirement evidence rejected", err)
+		}
+		if err := RestoreStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+			t.Fatal("next rollback could not restore direct links", err)
+		}
+		if target, err := os.Readlink(selected); err != nil || target != "../owned.service" {
+			t.Fatal("repeated cycle changed original direct link")
+		}
+	}
 }
 
 func TestNativeSystemdStartupHandoffRefusesSharedOrAmbiguousAuthority(t *testing.T) {
@@ -371,5 +402,100 @@ func TestNativeStartupHandoffCompensatesInterruptedRetirement(t *testing.T) {
 	}
 	if journal.Phase != "restored" || journal.Actions[0].Phase != "restored" || journal.Actions[1].Phase != "restored" {
 		t.Fatal("compensation journal incomplete")
+	}
+}
+
+func TestNativeStartupHandoffRepeatsRestoredCyclesWithDurableCAS(t *testing.T) {
+	for _, manager := range []string{"pm2", "systemd"} {
+		t.Run(manager, func(t *testing.T) {
+			fixture := pm2StartupPlanFixture
+			if manager == "systemd" {
+				fixture = systemdStartupPlanFixture
+			}
+			t.Run("interrupted next retirement", func(t *testing.T) {
+				plan, capture, root := fixture(t)
+				var journal, saved NativeStartupJournal
+				persist := func(value NativeStartupJournal) error { saved = saveStartupJournal(value); return nil }
+				if err := RetireStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+					t.Fatal(err)
+				}
+				if err := RestoreStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+					t.Fatal(err)
+				}
+				if manager == "pm2" && journal.Actions[0].RestoredFingerprint == journal.Actions[0].BeforeFingerprint {
+					t.Fatal("fixture does not exercise restored PM2 formatting changes")
+				}
+				persist = func(value NativeStartupJournal) error {
+					if value.Actions[0].Phase == "retired" {
+						return errors.New("next retirement outcome not stored")
+					}
+					saved = saveStartupJournal(value)
+					return nil
+				}
+				if err := RetireStartupHandoff(t.Context(), plan, &journal, persist); err == nil {
+					t.Fatal("injected next-cycle crash ignored")
+				}
+				journal = saved
+				if journal.Actions[0].Phase != "retiring" || journal.Actions[0].RetirementSourceFingerprint == "" {
+					t.Fatal("next-cycle source comparison was not durable")
+				}
+				if err := RetireStartupHandoff(t.Context(), plan, &journal, func(NativeStartupJournal) error { return nil }); err != nil {
+					t.Fatal("next-cycle interrupted publish could not resume", err)
+				}
+				if err := RestoreStartupHandoff(t.Context(), plan, &journal, func(NativeStartupJournal) error { return nil }); err != nil {
+					t.Fatal("next-cycle rollback failed", err)
+				}
+				fresh := *capture
+				if manager == "pm2" {
+					fresh.StartupEvidence, _ = capturePM2Startup(pm2Home{daemonDir: root}, "default", "owned")
+				}
+				if err := VerifyCapturedStartup(&fresh, plan, journal); err != nil {
+					t.Fatal("resumed next cycle changed original startup proof", err)
+				}
+				entries, _ := os.ReadDir(filepath.Dir(plan.Actions[0].Path))
+				for _, entry := range entries {
+					if strings.HasPrefix(entry.Name(), ".jd-startup-") {
+						t.Fatal("resumed next cycle leaked private authority temporary")
+					}
+				}
+			})
+			t.Run("foreign next-cycle write", func(t *testing.T) {
+				plan, _, _ := fixture(t)
+				var journal NativeStartupJournal
+				persist := func(NativeStartupJournal) error { return nil }
+				if err := RetireStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+					t.Fatal(err)
+				}
+				if err := RestoreStartupHandoff(t.Context(), plan, &journal, persist); err != nil {
+					t.Fatal(err)
+				}
+				foreign := `[{"name":"foreign","namespace":"default"}]`
+				changed := false
+				persist = func(value NativeStartupJournal) error {
+					if !changed && value.Actions[0].Phase == "retiring" {
+						changed = true
+						if manager == "pm2" {
+							return os.WriteFile(plan.Actions[0].Path, []byte(foreign), 0640)
+						}
+						if err := os.Remove(plan.Actions[0].Path); err != nil {
+							return err
+						}
+						return os.Symlink("../foreign.service", plan.Actions[0].Path)
+					}
+					return nil
+				}
+				if err := RetireStartupHandoff(t.Context(), plan, &journal, persist); !errors.Is(err, ErrHostWorkloadChanged) {
+					t.Fatal("unknown authority change accepted during next cycle", err)
+				}
+				if manager == "pm2" {
+					data, _ := os.ReadFile(plan.Actions[0].Path)
+					if string(data) != foreign {
+						t.Fatal("unknown next-cycle saved list was overwritten")
+					}
+				} else if target, err := os.Readlink(plan.Actions[0].Path); err != nil || target != "../foreign.service" {
+					t.Fatal("unknown next-cycle direct link was overwritten", err)
+				}
+			})
+		})
 	}
 }

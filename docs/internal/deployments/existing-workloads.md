@@ -400,6 +400,9 @@ exchange verify displaced file bytes against the prepared fingerprint, preservin
 than overwriting them. Interrupted publishes reconcile through their recorded temporary path before
 continuing or compensating. Completed operations remove temporary backups. A foreign saved-list/link
 change blocks retirement or rollback; runtime digest normalization alone cannot grant restart authority.
+Later cutovers can retire the same verified restored authority again. Each cycle records its exact
+restored source fingerprint before publication, while the original sealed plan and before fingerprint
+remain immutable. Old journals without a cycle source retain their first-cycle comparison semantics.
 The full original discovery digest remains intact, and the separate runtime digest is accepted only
 with verified startup evidence and the journal's exact controlled transition.
 

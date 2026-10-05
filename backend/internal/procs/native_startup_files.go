@@ -156,7 +156,7 @@ func executeStartupHandoff(ctx context.Context, plan *NativeStartupPlan, journal
 		case "restored":
 			allowed = state.RestoredFingerprint
 		case "retiring":
-			if current.Fingerprint != state.BeforeFingerprint && current.Fingerprint != state.RetiredFingerprint {
+			if current.Fingerprint != startupRetirementSource(state) && current.Fingerprint != state.RetiredFingerprint {
 				return ErrHostWorkloadChanged
 			}
 			continue
@@ -224,7 +224,7 @@ func executeStartupAction(ctx context.Context, action NativeStartupAction, state
 		}
 	}
 	finished, pending := "retired", "retiring"
-	source := state.BeforeFingerprint
+	source := startupRetirementSource(*state)
 	planned := state.RetiredFingerprint
 	if restore {
 		finished, pending = "restored", "restoring"
@@ -243,7 +243,17 @@ func executeStartupAction(ctx context.Context, action NativeStartupAction, state
 		return persist(*journal)
 	}
 	if !restore && state.Phase == "restored" {
-		return fmt.Errorf("a restored handoff requires a fresh prepared plan")
+		if current.Fingerprint != state.RestoredFingerprint {
+			return ErrHostWorkloadChanged
+		}
+		if err := cleanupStartupPending(parent, state, action.Kind); err != nil {
+			return err
+		}
+		// A rollback can restore equivalent PM2 JSON with different formatting.
+		// Each later cycle fences those exact restored bytes; the plan's original
+		// fingerprint remains immutable and still binds journal initialization.
+		state.RetirementSourceFingerprint = state.RestoredFingerprint
+		source = state.RetirementSourceFingerprint
 	}
 	if state.Phase != pending {
 		if current.Fingerprint != source {
@@ -416,7 +426,7 @@ func cleanupStartupPending(parent *os.File, state *NativeStartupActionJournal, k
 	if current.Absent {
 		return nil
 	}
-	expected := state.BeforeFingerprint
+	expected := startupRetirementSource(*state)
 	if state.Phase == "restored" {
 		expected = state.RetiredFingerprint
 	}
@@ -431,6 +441,13 @@ func cleanupStartupPending(parent *os.File, state *NativeStartupActionJournal, k
 		return err
 	}
 	return parent.Sync()
+}
+
+func startupRetirementSource(state NativeStartupActionJournal) string {
+	if state.RetirementSourceFingerprint != "" {
+		return state.RetirementSourceFingerprint
+	}
+	return state.BeforeFingerprint
 }
 func startupTemporaryName() (string, error) {
 	var nonce [16]byte

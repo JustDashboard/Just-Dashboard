@@ -56,11 +56,12 @@ type NativeStartupJournal struct {
 }
 
 type NativeStartupActionJournal struct {
-	Phase               string `json:"phase"`
-	BeforeFingerprint   string `json:"beforeFingerprint"`
-	RetiredFingerprint  string `json:"retiredFingerprint,omitempty"`
-	RestoredFingerprint string `json:"restoredFingerprint,omitempty"`
-	PendingPath         string `json:"pendingPath,omitempty"`
+	Phase                       string `json:"phase"`
+	BeforeFingerprint           string `json:"beforeFingerprint"`
+	RetirementSourceFingerprint string `json:"retirementSourceFingerprint,omitempty"`
+	RetiredFingerprint          string `json:"retiredFingerprint,omitempty"`
+	RestoredFingerprint         string `json:"restoredFingerprint,omitempty"`
+	PendingPath                 string `json:"pendingPath,omitempty"`
 }
 
 type NativeStartupSummary struct {
