@@ -50,7 +50,7 @@ func liveManagedComposeAdoption(t *testing.T, scope WorkloadRecoveryScope) {
 	if err := os.WriteFile(filepath.Join(root, "Caddyfile"), []byte("{\n admin off\n auto_https off\n}\n:8080 {\n root * /srv\n file_server\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "fixture.env"), []byte("FROM_ENV_FILE=owned-aliased-file-value\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "fixture.env"), []byte("FROM_ENV_FILE=owned-aliased-file-value\nROUNDTRIP_DOLLARS='prefix$UNSET-${HOME}-$$'\nROUNDTRIP_REFERENCE='${{credential.unrelated}}'\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	compose := fmt.Sprintf(`x-web-inputs: &web-inputs
@@ -76,8 +76,10 @@ services:
     logging: {driver: local, options: {max-size: 5m}}
   worker:
     image: caddy:2-alpine
-    entrypoint: ["/bin/sleep"]
-    command: ["infinity"]
+    entrypoint: ["/bin/sh"]
+    command: ["-c", "exec sleep $$WAIT_SECONDS"]
+    environment: {WAIT_SECONDS: infinity}
+    healthcheck: {test: ["CMD-SHELL", "test \"$$WAIT_SECONDS\" = infinity"], interval: 1s}
     init: false
     stop_grace_period: 1s
   inactive_a:
@@ -133,6 +135,9 @@ volumes:
 		capture, err := client.CaptureAdoptionContainer(ctx, id)
 		if err != nil || !slices.Contains(capture.Inspection.Config.Env, "FROM_ENV_FILE=owned-aliased-file-value") {
 			t.Fatal("aliased optional environment file was not preserved")
+		}
+		if !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_DOLLARS=prefix$UNSET-${HOME}-$$") || !slices.Contains(capture.Inspection.Config.Env, "ROUNDTRIP_REFERENCE=${{credential.unrelated}}") {
+			t.Fatal("literal environment values changed during lifecycle replay")
 		}
 	}
 	assertEnvironmentFile(before["web"].ID)

@@ -957,7 +957,7 @@ func preflightFindings(
 				"", "deploy", "runtime.strategy"))
 		}
 	}
-	resolvedVariables, _, variableErr := ResolveVariableGraph(draft.variableValues(configuration), nil)
+	resolvedVariables, _, variableErr := ResolveVariableGraphWithModes(draft.variableValues(configuration), draft.variableModes(configuration), nil)
 	if variableErr != nil {
 		findings = append(findings, finding("variable_graph_invalid", PreflightBlocked,
 			"Variable references cannot resolve", "", "A variable reference is missing or cyclic.",
@@ -997,12 +997,7 @@ func preflightFindings(
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
-	persistentStorage := len(configuration.Runtime.Mounts)
-	if detection.Compose != nil {
-		for _, service := range detection.Compose.Services {
-			persistentStorage += len(service.Mounts)
-		}
-	}
+	persistentStorage := writablePersistentStorageCount(draft, configuration)
 	if persistentStorage > 0 && !hasBackupDependency(configuration.Dependencies) {
 		item := finding("backup_policy_missing", PreflightWarning,
 			"Persistent storage has no linked backup policy", fmt.Sprintf("%d mount(s)", persistentStorage),

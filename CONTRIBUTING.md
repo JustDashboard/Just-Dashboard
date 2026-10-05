@@ -216,7 +216,9 @@ to the contribution terms above, including the additional licence grant to the p
   acceptance includes existing stopped replicas, a declared missing service and an external one-off
   container which must remain untouched. It also preserves values inherited through YAML aliases
   from optional environment files across deployment and baseline rollback, while accepting an absent
-  optional file. Deleted-image acceptance verifies bounded read-only export,
+  optional file. Captured dollar expressions and literal dashboard-reference-shaped environment values
+  also survive deployment and baseline rollback. `TestComposeEnvironmentValuesRoundTripThroughRealParser`
+  exercises the installed Compose parser without creating any Docker resource. Deleted-image acceptance verifies bounded read-only export,
   stable cached identity, normal managed deployment and baseline rollback. Scoped Compose acceptance
   explicitly excludes an absent declaration whose image is unavailable and verifies the retained
   four-container/two-running baseline through failure recovery, Deploy and rollback. `JD_ADOPTION_EVIDENCE_DIR` writes sanitized lifecycle

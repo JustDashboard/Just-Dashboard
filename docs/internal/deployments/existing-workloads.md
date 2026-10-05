@@ -9,8 +9,9 @@ original runtime. Recovery refuses incomplete translations instead of claiming t
 ## Workflow and API
 
 An administrator opens **Import existing** on `/deploy`, discovers the workload, reviews the
-inventory, and chooses **Review migration**. `/deploy/import` then opens the normal Configure,
-Variables and Review sequence with the recovered settings. The final **Adopt deployment** action
+inventory, and chooses **Review migration**. `/deploy/import` opens final Review when all inputs
+are retained and the recovered configuration is complete. Configure and Variables remain available
+for reviewing or replacing captured settings. The final **Adopt deployment** action
 records the existing app. **Deploy changes** later applies the desired recipe. **Redeploy** restores
 the frozen live release; it does not apply pending settings. Docker adoption retains existing Docker
 resources; an explicitly deployed PM2/systemd recipe runs under the dashboard's Docker deployment
@@ -22,7 +23,7 @@ engine, with the original manager retained as the baseline recovery authority.
   draft. Recovery reads private configuration separately from the public inventory. It returns
   `422 recovery_blocked` with actionable reasons if a complete supported recipe cannot be recovered.
   Compose stacks additionally accept `scope: "all_services" | "existing_services"`, defaulting to
-  the full declared recipe. **Existing containers only** retains every running and stopped container
+  `existing_services` for new imports. **Existing containers only** retains every running and stopped container
   and excludes only declared services with no container. The server reports the exact excluded names
   in the recovered draft and requires acknowledgement in final Review; missing dependencies remain
   blockers. Scope and exclusions are sealed server-owned provenance, not adoption request authority.
@@ -53,6 +54,27 @@ private capture never enters discovery, audit data or browser remembered setup. 
 sealed in draft and variable storage; recovered source documents use variable references instead
 of embedding captured environment, credential arguments or label values.
 
+Captured inputs carry server-owned original names, service identities, environment/image-default/runtime
+categories and retained/empty status. The wizard and project settings use those identities; opaque
+`JD_IMPORT_*` storage names keep service-local values separate internally. Display sensitivity does
+not make a captured value public: all values remain sealed, including ordinary image defaults and
+intentionally empty strings. Source-bound captured inputs accept literal value replacement; removal,
+reference conversion or scope changes require updating the source binding first.
+
+Variable revisions record explicit literal/reference intent. New captured inputs and dotenv/value
+writes are literal, so a running app's `${{credential.name}}` text is never interpreted as dashboard
+authority. The additive `value_mode` migration defaults existing rows to the shipped inference behavior;
+old drafts, snapshots and release digests retain that meaning. Run snapshots bind the mode alongside
+the value digest, and desired edits cannot change a frozen baseline's mode or values.
+
+Captured runtime strings escape literal dollar signs before Compose rendering. Temporary Compose
+interpolation files use Compose-specific literal encoding rather than Go string quoting, preserving
+dollars, quotes, backslashes, line breaks, Unicode and supported control bytes without expanding a
+captured value against the dashboard's process environment. Escaped source literals are distinguished
+from unresolved interpolation inputs. Private/shareable IPC is not host-equivalent authority, and
+backup coverage counts distinct writable persistent resources rather than read-only source mounts or
+multiple mounts of the same volume.
+
 Recovery writes only private, bounded staging files under the dashboard data directory. It never
 writes the application's original directory. Docker effective configuration is read with Compose
 `config`, not `up`, `build` or `pull`; source inspection does not execute an ecosystem JavaScript
@@ -66,11 +88,12 @@ and recovered separately. Captured secrets remain sealed variables rather than i
 In the default complete-recipe scope, an absent service with no image or container still requires
 its original image/source before adoption.
 
-Compose recovery defaults to `all_services`, including every declared service. A separately reviewed
-`existing_services` scope includes every existing container, running or stopped, and explicitly lists
-only declarations with no container under `excludedServices`. Recovery records one
+New Compose imports default to `existing_services`, including every existing container, running or
+stopped, and explicitly list
+only declarations with no container under `excludedServices`. An explicitly selected `all_services`
+scope includes every declared service; historical persisted empty scopes retain `all_services` meaning. Recovery records one
 `compose_services_excluded` issue for each omitted declaration. Normal preflight turns each adoption
-warning into an `adoption_warning_N` finding, whose code must be acknowledged at commit. Deploy changes
+issue into a stable structured finding, whose code must be acknowledged at commit. Deploy changes
 does not create the excluded services, and their original Compose definitions stay untouched. Retained dependencies, links,
 service namespaces, volumes-from or shared build contexts referring to an exclusion block recovery;
 the importer never removes those relationships to force a usable recipe. Unused resources belonging
@@ -171,8 +194,8 @@ filename checks cannot identify every embedded secret. Static-serving recipes ca
 those migrations require a reviewed Dockerfile instead of an automatic runtime override.
 
 Docker writable-layer checks block application data, altered source and unknown file changes.
-Verified Docker-generated files and narrowly identified regenerable Python bytecode caches are
-reported separately; this is not a blanket exemption for `/tmp`, logs or cache directories. Stopped
+Verified Docker-generated files and timestamp-validated Python bytecode caches backed by unchanged regular source are
+reported separately. Sourceless, hash-based and unverifiable bytecode remains blocking; this is not a blanket exemption for `/tmp`, logs or cache directories. Stopped
 and missing services remain inactive during adoption. A later Deploy changes may create/start the
 services in the reviewed recipe; baseline redeploy/rollback restores only the captured existing
 replicas and running set.

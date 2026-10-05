@@ -236,6 +236,9 @@ func TestOpenAddsPullRequestPreviewColumnsToAPreExistingDatabase(t *testing.T) {
 	if !variables["copied_from_environment"] {
 		t.Error("deploy_variable_revisions.copied_from_environment was not added to the existing table")
 	}
+	if !variables["value_mode"] {
+		t.Error("existing variable table did not receive value_mode")
+	}
 	addresses, err := tableColumns(ctx, st.DB, "deploy_preview_addresses")
 	if err != nil {
 		t.Fatal(err)
@@ -256,12 +259,18 @@ func TestOpenAddsPullRequestPreviewColumnsToAPreExistingDatabase(t *testing.T) {
 	if state != "open" || origin != "" || title != "" || head != "" || copiedRevision != "" {
 		t.Errorf("preview row = %q/%q/%q/%q/%q, want open and empty defaults", state, origin, title, head, copiedRevision)
 	}
-	var sealed string
+	var sealed, mode string
 	var copiedFrom int64
-	if err := st.DB.QueryRow(`SELECT value_enc, copied_from_environment FROM deploy_variable_revisions WHERE key = 'TOKEN'`).Scan(&sealed, &copiedFrom); err != nil {
+	if err := st.DB.QueryRow(`SELECT value_enc, copied_from_environment, value_mode FROM deploy_variable_revisions WHERE key = 'TOKEN'`).Scan(&sealed, &copiedFrom, &mode); err != nil {
 		t.Fatalf("the pre-existing variable did not survive: %v", err)
 	}
 	if sealed != "sealed" || copiedFrom != 0 {
 		t.Errorf("variable row = %q/%d, want sealed/0", sealed, copiedFrom)
+	}
+	if mode != "" {
+		t.Error("existing value no longer has legacy auto semantics")
+	}
+	if _, err := st.DB.Exec(`UPDATE deploy_variable_revisions SET value_mode='literal' WHERE key='TOKEN'`); err == nil {
+		t.Fatal("immutable stored variable mode can be changed")
 	}
 }

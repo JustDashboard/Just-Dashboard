@@ -276,6 +276,12 @@ func composeServiceFromNode(name string, node *yaml.Node, documentPath string) (
 	}
 	for key, label := range advancedKeys {
 		if value := mappingValue(node, key); value != nil {
+			if key == "ipc" && (value.Value == "private" || value.Value == "shareable" || value.Value == "none" || value.Value == "") {
+				continue
+			}
+			if key == "pid" && value.Value != "host" && !strings.HasPrefix(value.Value, "service:") && !strings.HasPrefix(value.Value, "container:") {
+				continue
+			}
 			if key != "privileged" || strings.EqualFold(value.Value, "true") {
 				service.Advanced = append(service.Advanced, label)
 			}
@@ -381,7 +387,7 @@ func composeMountValue(node *yaml.Node) (string, error) {
 }
 
 func validateComposeMountSource(value string) error {
-	if strings.Contains(value, "${") {
+	if strings.Contains(strings.ReplaceAll(value, "$$", ""), "${") {
 		return fmt.Errorf("dynamic mount sources cannot be contained during preflight")
 	}
 	parts := strings.Split(value, ":")

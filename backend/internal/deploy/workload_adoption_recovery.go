@@ -190,6 +190,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	delete(r.model, "name")
 	delete(r.model, "include")
 	r.sanitizeStrings(r.model, "", "")
+	escapeRecoveredLiterals(r.model, result.Environment)
 	if len(r.result.Adoption.Issues) > 0 {
 		sort.Slice(r.result.Adoption.Issues, func(i, j int) bool {
 			return string(mustJSON(r.result.Adoption.Issues[i])) < string(mustJSON(r.result.Adoption.Issues[j]))
@@ -207,7 +208,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		result.Configuration.Runtime.ComposeProjectName = candidate.ResourceID
 	}
 	for _, name := range sortedStringMapKeys(result.Environment) {
-		result.Configuration.Variables = append(result.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, Required: result.Environment[name] != ""})
+		result.Configuration.Variables = append(result.Configuration.Variables, PlannedVariable{Name: name, ValueMode: "literal", Sensitivity: "secret", Scopes: []string{"runtime"}})
 	}
 	analysis, analyzeErr := analyzeComposeDocuments(result.Source.ComposeFiles)
 	if analyzeErr != nil {
@@ -437,6 +438,17 @@ func recoveryVariableName(service, key string) string {
 func (r *dockerRecovery) privateValue(service, key, value string) string {
 	name := recoveryVariableName(service, key)
 	r.result.Environment[name] = value
+	kind, original, category := "runtime_setting", key, "runtime_setting"
+	if strings.HasPrefix(key, "env_") {
+		kind, original, category = "environment", strings.TrimPrefix(key, "env_"), "application"
+	}
+	if strings.HasPrefix(key, "label_") {
+		kind, original = "label", strings.TrimPrefix(key, "label_")
+	}
+	if strings.HasPrefix(key, "log_") {
+		kind, original = "log_option", strings.TrimPrefix(key, "log_")
+	}
+	AddRecoveredInput(r.result, name, original, service, kind, "container", category)
 	return "${" + name + "}"
 }
 
@@ -454,6 +466,7 @@ func (r *dockerRecovery) captureEnvironment(name string, service map[string]any)
 			}
 		}
 		environment[key] = r.privateValue(name, "env_"+key, value)
+		AddRecoveredInput(r.result, recoveryVariableName(name, "env_"+key), key, name, "environment", "compose", "application")
 	}
 }
 
@@ -563,5 +576,5 @@ func replicaNetworkDigest(capture *dockerx.AdoptionContainer) string {
 
 func containsSourceInterpolation(value any) bool {
 	encoded, _ := json.Marshal(value)
-	return strings.Contains(string(encoded), "${")
+	return composeInterpolationRE.MatchString(strings.ReplaceAll(string(encoded), "$$", ""))
 }

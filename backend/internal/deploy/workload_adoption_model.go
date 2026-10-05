@@ -47,6 +47,7 @@ type AdoptionIssue struct {
 // Baseline values are stored separately under encryption; a source document
 // references their variable names rather than containing their values.
 type WorkloadAdoption struct {
+	Inputs                      []RecoveredInput      `json:"inputs,omitempty"`
 	Key                         string                `json:"key"`
 	Digest                      string                `json:"digest"`
 	Kind                        string                `json:"kind"`

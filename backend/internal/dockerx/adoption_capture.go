@@ -22,6 +22,7 @@ type AdoptionContainer struct {
 	ChangeModes             map[string]os.FileMode       `json:"-"`
 	MissingImage            bool                         `json:"-"`
 	RegenerablePaths        []string                     `json:"-"`
+	VerifiedPythonCaches    []string                     `json:"-"`
 	RegenerableProofFailure string                       `json:"-"`
 	UnrepresentedOptions    []string                     `json:"-"`
 }
@@ -65,6 +66,7 @@ func (c *Client) CaptureAdoptionContainer(ctx context.Context, id string) (*Adop
 	}
 	captured := &AdoptionContainer{Inspection: inspection, Image: image, Changes: changes, ChangeModes: modes, MissingImage: missingImage, UnrepresentedOptions: unknownOptions}
 	c.captureRegenerableN8nCache(ctx, captured)
+	c.captureRegenerablePythonCaches(ctx, captured)
 	return captured, nil
 }
 

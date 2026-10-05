@@ -202,7 +202,7 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 	if err := s.snapshotAdoptionVariablesTx(ctx, tx, draft, runID, environmentID, now); err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT v.key,v.sensitivity,v.scopes,v.value_digest FROM deploy_run_variable_revisions rv
+	rows, err := tx.QueryContext(ctx, `SELECT v.key,v.sensitivity,v.scopes,v.value_digest,v.value_mode FROM deploy_run_variable_revisions rv
 	 JOIN deploy_variable_revisions v ON v.id=rv.variable_revision_id WHERE rv.run_id=? ORDER BY rv.ordinal`, runID)
 	if err != nil {
 		return err
@@ -210,7 +210,7 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 	snapshot.Variables = []ReleaseVariableSnapshot{}
 	for rows.Next() {
 		var variable ReleaseVariableSnapshot
-		if err := rows.Scan(&variable.Name, &variable.Sensitivity, &variable.Scopes, &variable.ValueDigest); err != nil {
+		if err := rows.Scan(&variable.Name, &variable.Sensitivity, &variable.Scopes, &variable.ValueDigest, &variable.ValueMode); err != nil {
 			rows.Close()
 			return err
 		}
@@ -241,7 +241,7 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 		return err
 	}
 	configDigest := digestBytes(raw)
-	provenance := mustJSON(map[string]any{"adopted": true, "workloadKey": adoption.Key, "baselineDigest": adoption.BaselineDigest, "builder": PreparedBuild{Method: configuration.Build.Method}})
+	provenance := mustJSON(map[string]any{"adopted": true, "workloadKey": adoption.Key, "baselineDigest": adoption.BaselineDigest, "inputs": adoption.Inputs, "builder": PreparedBuild{Method: configuration.Build.Method}})
 	result, err = tx.ExecContext(ctx, `INSERT INTO deploy_releases(project_id,environment_id,release_number,run_id,state,plan_revision,source_id,build_plan_id,runtime_plan_id,source_identity_json,image_digest,config_digest,variables_digest,strategy,expected_downtime,provenance_json,created_at,activated_at,pinned)
 	 VALUES(?,?,1,?,'live',1,?,?,?,?,?,?,?,?,1,?,?,?,1)`, projectID, environmentID, runID, sourceID, buildID, runtimeID, string(identityJSON), snapshot.Image.Digest, configDigest, variablesDigest, configuration.Runtime.Strategy, string(provenance), now.Unix(), now.Unix())
 	if err != nil {
@@ -308,8 +308,8 @@ func (s *PlanningStore) snapshotAdoptionVariablesTx(ctx context.Context, tx *sql
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_variable_revisions(environment_id,key,revision,sensitivity,scopes,value_enc,value_digest,active,created_by,created_at)
-		 VALUES(?,?,0,?,?,?,?,1,?,?)`, environmentID, variable.Name, suppliedVariableSensitivity(variable), strings.Join(variable.Scopes, ","), sealed, digestBytes([]byte(value)), draft.OwnerUsername, now.Unix()); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO deploy_variable_revisions(environment_id,key,revision,sensitivity,scopes,value_enc,value_digest,active,created_by,created_at,value_mode)
+		 VALUES(?,?,0,?,?,?,?,1,?,?,?)`, environmentID, variable.Name, suppliedVariableSensitivity(variable), strings.Join(variable.Scopes, ","), sealed, digestBytes([]byte(value)), draft.OwnerUsername, now.Unix(), variable.ValueMode); err != nil {
 			return err
 		}
 	}
