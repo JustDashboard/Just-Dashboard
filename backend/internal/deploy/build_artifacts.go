@@ -699,6 +699,7 @@ type selectedRecipe struct {
 	// startCommand are the plan's commands on the resolved manager's runner.
 	nodeInstall                nodeInstallPlan
 	member, contextDir         string
+	installDirectory           string
 	buildCommand, startCommand string
 	nodeInputs                 []string
 	// serving is how nginx serves static output; site is a site generator's
@@ -775,6 +776,21 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 				recipe.contextDir = "."
 			}
 		}
+		if config.PreserveSourceRoot {
+			recipe.contextDir = "."
+			recipe.member = checkoutPath(boundary, root)
+			if source.context == source.dir {
+				recipe.installDirectory = recipe.member
+				for i, input := range recipe.nodeInputs {
+					recipe.nodeInputs[i] = joinRoot(recipe.member, input)
+				}
+			} else if source.context != "" {
+				recipe.installDirectory = source.context
+				for i, input := range recipe.nodeInputs {
+					recipe.nodeInputs[i] = joinRoot(source.context, input)
+				}
+			}
+		}
 		return recipe, nil
 	case "go":
 		if !regularExists(root, "go.mod") {
@@ -825,6 +841,14 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		python, err := selectPythonRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
+		}
+		if config.PreserveSourceRoot && checkoutPath(boundary, root) != "" {
+			if python.assets != nil || python.contextDir != "" {
+				return selectedRecipe{}, fmt.Errorf("%w: native Python nested asset/workspace layout needs a reviewed Dockerfile", ErrUnsupportedBuilder)
+			}
+			python.contextDir = "."
+			python.workdir = checkoutPath(boundary, root)
+			python.installDirectory = python.workdir
 		}
 		recipe := selectedRecipe{kind: "python", catalogueKey: "python", lockfile: python.install.kind, python: python, nodeInputs: python.inputs}
 		if python.contextDir != "" {

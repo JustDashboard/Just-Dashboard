@@ -81,6 +81,7 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		// carrying the private argv/environment into the recovered source plan.
 		out.Account, out.UID, out.GID = live.Account, live.UID, live.GID
 		out.SourceDirectory, out.SourcePath = live.SourceDirectory, live.SourcePath
+		out.InterpreterPath = live.InterpreterPath
 		out.Command, out.Environment = live.Command, live.Environment
 		out.EnvironmentNames = live.EnvironmentNames
 		out.Processes = live.Processes
@@ -133,6 +134,9 @@ func (s *Systemd) CaptureExisting(ctx context.Context, name string) (*HostWorklo
 		out.SourceFiles, err = CaptureHostSourceFiles(paths)
 		if err != nil {
 			out.Blockers = append(out.Blockers, "The original service executable cannot be verified for safe restoration.")
+		}
+		if version, probeErr := ProbeCapturedInterpreter(ctx, out); probeErr == nil {
+			out.InterpreterVersion = version
 		}
 	}
 	return out, nil

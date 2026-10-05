@@ -51,6 +51,7 @@ type HostSourceAnalyzer struct {
 	credentials  CredentialReader
 	composeRoots []string
 	cacheRoot    string
+	recoveryRoot string
 	detector     Detector
 	gitMu        sync.Mutex
 	// inspectMu serializes copies of local checkouts made for inspection,
@@ -68,7 +69,8 @@ func NewHostSourceAnalyzer(
 	return &HostSourceAnalyzer{
 		paths: files.New(deployRoots), docker: docker, credentials: credentials,
 		composeRoots: append([]string(nil), composeRoots...), cacheRoot: cacheRoot,
-		detector: Detector{},
+		recoveryRoot: filepath.Join(filepath.Dir(cacheRoot), "deployment-recovery"),
+		detector:     Detector{},
 	}
 }
 
@@ -84,6 +86,8 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 		return a.analyzeLocal(ctx, source)
 	case SourceModeLocalDirectory:
 		return a.analyzeLocalDirectory(ctx, source)
+	case SourceModeRecoveredSnapshot:
+		return a.analyzeRecoveredSnapshot(ctx, source)
 	case SourceModeComposeLocal:
 		return a.analyzeLocalCompose(ctx, source)
 	case SourceModeComposePaste, SourceModeComposeUpload:

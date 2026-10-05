@@ -526,7 +526,7 @@ func PreflightDraftWithSource(
 func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) ObservationRequest {
 	source := draft.Data.Source
 	request := ObservationRequest{
-		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal && source.Mode != SourceModeLocalDirectory || source.Mode == SourceModeComposeGit,
+		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal && source.Mode != SourceModeLocalDirectory && source.Mode != SourceModeRecoveredSnapshot || source.Mode == SourceModeComposeGit,
 		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
 		NeedsDocker:  configuration.Build.Method != BuildNone,
 		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),

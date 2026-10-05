@@ -33,6 +33,7 @@ type HostWorkloadCapture struct {
 	Name                string               `json:"name"`
 	Account             string               `json:"account,omitempty"`
 	InterpreterVersion  string               `json:"interpreterVersion,omitempty"`
+	InterpreterPath     string               `json:"-"`
 	UID                 uint32               `json:"uid"`
 	GID                 uint32               `json:"gid"`
 	RestartPolicy       string               `json:"restartPolicy,omitempty"`
@@ -130,7 +131,8 @@ func CaptureExistingProcess(ctx context.Context, pid int32, created int64) (*Hos
 		Manager: "process", ResourceID: strconv.Itoa(int(pid)) + ":" + strconv.FormatInt(created, 10),
 		Name: filepath.Base(executable), Account: account, UID: uint32(uids[1]), GID: uint32(gids[1]),
 		SourceDirectory: cwd, SourcePath: executable, Command: command, Environment: environment,
-		OriginalConfig: private, ConfigurationDigest: captureDigest(private), EnvironmentNames: captureEnvironmentNames(environment),
+		InterpreterPath: executable,
+		OriginalConfig:  private, ConfigurationDigest: captureDigest(private), EnvironmentNames: captureEnvironmentNames(environment),
 		Processes: []HostProcessCapture{{PID: pid, CreateTime: created, State: "running", LogSources: []string{}, Environment: environment, Command: command}},
 		Blockers:  []string{"This process has no verified restart manager. Automatic cutover cannot restore it if a replacement fails. Configure an authoritative service or PM2 manager before migration."},
 		Warnings:  []string{"Open files and live memory do not describe every data dependency. Review persistence and operating-system dependencies before container migration."},

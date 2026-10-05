@@ -688,6 +688,9 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
 		copy := canonicalSourceConfig(*request.Source)
+		if copy.Mode == SourceModeRecoveredSnapshot {
+			return nil, fmt.Errorf("%w: recovered snapshots are attached only by the workload recovery reader", ErrInvalidSource)
+		}
 		if err := copy.validateForNewDeployment(); err != nil {
 			return nil, err
 		}

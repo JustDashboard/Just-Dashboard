@@ -21,7 +21,7 @@ func (s *PlanningStore) CreateRecoveredDraft(ctx context.Context, ownerID int64,
 	if err := intent.Validate(); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidPlan, err)
 	}
-	if err := recovered.Source.validateForNewDeployment(); err != nil {
+	if err := recovered.Source.ValidateForDeployment(); err != nil {
 		return nil, err
 	}
 	if err := validateDetectionResult(&recovered.Source, recovered.Detection); err != nil {
@@ -152,7 +152,16 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 		return fmt.Errorf("%w: recovered baseline snapshot is invalid", ErrInvalidPlan)
 	}
 	snapshot.Plan = configuration.Runtime
-	identity := draft.Data.Detection.Source
+	baselineDetection := adoption.BaselineDetection
+	// Old drafts predate separate baseline evidence and have identical desired
+	// and baseline sources. New recovery never borrows desired build identity.
+	if baselineDetection.Source.Kind == "" {
+		if string(mustJSON(adoption.BaselineSource)) != string(mustJSON(draft.Data.Source)) {
+			return fmt.Errorf("%w: baseline source evidence is unavailable", ErrInvalidPlan)
+		}
+		baselineDetection = *draft.Data.Detection
+	}
+	identity := baselineDetection.Source
 	snapshot.SourceIdentity = identity
 	snapshot.Dependencies = append([]PlannedDependency(nil), configuration.Dependencies...)
 	snapshot.Checks = append([]PlannedCheck(nil), configuration.Checks...)
@@ -169,7 +178,7 @@ func (s *PlanningStore) commitAdoptionBaselineTx(ctx context.Context, tx *sql.Tx
 		return err
 	}
 	buildJSON := mustJSON(configuration.Build)
-	evidence := mustJSON(StoredBuildEvidence{Candidates: draft.Data.Detection.Candidates, Compose: draft.Data.Detection.Compose, GitRequirements: draft.Data.Detection.GitRequirements})
+	evidence := mustJSON(StoredBuildEvidence{Candidates: baselineDetection.Candidates, Compose: baselineDetection.Compose, GitRequirements: baselineDetection.GitRequirements})
 	result, err = tx.ExecContext(ctx, `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at)
 	 VALUES(?,1,?,?,?,?,?,?)`, environmentID, configuration.Build.Method, string(buildJSON), string(evidence), renderBuildPreview(configuration.Build), buildPlanDigest(configuration.Build), now.Unix())
 	if err != nil {

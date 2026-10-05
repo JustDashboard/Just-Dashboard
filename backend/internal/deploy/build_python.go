@@ -682,10 +682,11 @@ func pythonServerRequirement(server string) string {
 
 // pythonRecipe is everything the Python recipe renders from.
 type pythonRecipe struct {
-	version   pythonVersionChoice
-	install   pythonInstall
-	framework string
-	servers   []string
+	installDirectory string
+	version          pythonVersionChoice
+	install          pythonInstall
+	framework        string
+	servers          []string
 	// systemPackages are installed from Debian before the source is copied
 	// in: what the dependencies need, and what the plan adds.
 	systemPackages []string
@@ -934,6 +935,9 @@ func renderPythonDockerfile(recipe pythonRecipe, config BuildPlanConfig, bases [
 	}
 	if sanitize := recipe.install.sanitizeLine(); sanitize != "" {
 		lines = append(lines, sanitize)
+	}
+	if recipe.installDirectory != "" {
+		lines = append(lines, "WORKDIR /app/"+recipe.installDirectory)
 	}
 	lines = append(lines, "RUN "+installSecrets+recipe.install.command)
 	for _, server := range recipe.servers {

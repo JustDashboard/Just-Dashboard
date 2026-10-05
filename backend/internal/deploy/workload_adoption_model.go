@@ -43,33 +43,49 @@ type AdoptionIssue struct {
 	Blocking bool   `json:"blocking"`
 }
 
+// RecoveredBuildSource describes verified build inputs without exposing private
+// files or claiming that a source build is byte-identical to the live image.
+type RecoveredBuildSource struct {
+	Service        string              `json:"service"`
+	Name           string              `json:"name,omitempty"`
+	Framework      string              `json:"framework,omitempty"`
+	Language       string              `json:"language,omitempty"`
+	Role           WorkloadProfile     `json:"role,omitempty"`
+	Confidence     DetectionConfidence `json:"confidence,omitempty"`
+	Status         string              `json:"status"`
+	Reason         string              `json:"reason,omitempty"`
+	SnapshotDigest string              `json:"snapshotDigest,omitempty"`
+}
+
 // WorkloadAdoption contains only sanitized, server-produced recovery evidence.
 // Baseline values are stored separately under encryption; a source document
 // references their variable names rather than containing their values.
 type WorkloadAdoption struct {
-	Inputs                      []RecoveredInput      `json:"inputs,omitempty"`
-	Key                         string                `json:"key"`
-	Digest                      string                `json:"digest"`
-	Kind                        string                `json:"kind"`
-	ResourceID                  string                `json:"resourceId"`
-	Manager                     string                `json:"manager"`
-	Name                        string                `json:"name"`
-	Scope                       WorkloadRecoveryScope `json:"scope,omitempty"`
-	ExcludedServices            []string              `json:"excludedServices"`
-	OriginalConfigurationDigest string                `json:"originalConfigurationDigest,omitempty"`
-	Warnings                    []string              `json:"warnings"`
-	Blockers                    []string              `json:"blockers"`
-	Issues                      []AdoptionIssue       `json:"issues"`
-	ServiceCount                int                   `json:"serviceCount"`
-	RunningCount                int                   `json:"runningCount"`
-	OriginalSourcePath          string                `json:"originalSourcePath,omitempty"`
-	ConfigFiles                 []string              `json:"configFiles,omitempty"`
-	BaselineSource              DraftSourceConfig     `json:"baselineSource"`
-	BaselineConfiguration       PlanConfiguration     `json:"baselineConfiguration"`
-	BaselineDigest              string                `json:"baselineDigest"`
-	Runtime                     ReleaseRuntimeInput   `json:"runtime"`
-	Snapshot                    json.RawMessage       `json:"snapshot"`
-	RecoveryDirectory           string                `json:"recoveryDirectory,omitempty"`
+	Inputs                      []RecoveredInput       `json:"inputs,omitempty"`
+	Key                         string                 `json:"key"`
+	Digest                      string                 `json:"digest"`
+	Kind                        string                 `json:"kind"`
+	ResourceID                  string                 `json:"resourceId"`
+	Manager                     string                 `json:"manager"`
+	Name                        string                 `json:"name"`
+	Scope                       WorkloadRecoveryScope  `json:"scope,omitempty"`
+	ExcludedServices            []string               `json:"excludedServices"`
+	OriginalConfigurationDigest string                 `json:"originalConfigurationDigest,omitempty"`
+	Warnings                    []string               `json:"warnings"`
+	Blockers                    []string               `json:"blockers"`
+	Issues                      []AdoptionIssue        `json:"issues"`
+	ServiceCount                int                    `json:"serviceCount"`
+	RunningCount                int                    `json:"runningCount"`
+	OriginalSourcePath          string                 `json:"originalSourcePath,omitempty"`
+	ConfigFiles                 []string               `json:"configFiles,omitempty"`
+	BaselineSource              DraftSourceConfig      `json:"baselineSource"`
+	BaselineDetection           DetectionResult        `json:"baselineDetection"`
+	BuildSources                []RecoveredBuildSource `json:"buildSources,omitempty"`
+	BaselineConfiguration       PlanConfiguration      `json:"baselineConfiguration"`
+	BaselineDigest              string                 `json:"baselineDigest"`
+	Runtime                     ReleaseRuntimeInput    `json:"runtime"`
+	Snapshot                    json.RawMessage        `json:"snapshot"`
+	RecoveryDirectory           string                 `json:"recoveryDirectory,omitempty"`
 }
 
 // WorkloadAdoptionOrigin is kept as a named alias for feature owners which

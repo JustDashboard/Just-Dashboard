@@ -21,6 +21,7 @@ type dockerRecovery struct {
 	paths      *files.Service
 	containers map[string][]*dockerx.AdoptionContainer
 	model      map[string]any
+	builds     map[string]any
 }
 
 type dockerAdoptionImageRecoverer interface {
@@ -46,7 +47,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 		ServiceCount: candidate.Total, RunningCount: candidate.Running,
 		Scope: scope, ExcludedServices: []string{},
 	}}
-	r := &dockerRecovery{result: result, paths: paths, containers: map[string][]*dockerx.AdoptionContainer{}, model: map[string]any{}}
+	r := &dockerRecovery{result: result, paths: paths, containers: map[string][]*dockerx.AdoptionContainer{}, model: map[string]any{}, builds: map[string]any{}}
 	if reader == nil || paths == nil || (candidate.Kind != "stack" && candidate.Kind != "container") || recoveryRoot == "" {
 		return nil, fmt.Errorf("%w: Docker recovery is unavailable", ErrSourceUnavailable)
 	}
@@ -173,7 +174,10 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 			continue
 		}
 		if _, exists := service["build"]; exists {
-			r.issue("build_source_retained", "The running image is preserved as the initial redeploy source. Its original Compose build definition is retained in the original project; attach its source checkout for future builds.", name, "build", false)
+			// Keep the resolved definition outside the immutable image baseline.
+			var build any
+			_ = json.Unmarshal(mustJSON(service["build"]), &build)
+			r.builds[name] = build
 		}
 		delete(service, "build")
 		delete(service, "env_file")
@@ -214,6 +218,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	if analyzeErr != nil {
 		r.issue("recovered_source_unsupported", "The recovered configuration contains options or credential arguments that the deployment parser cannot safely manage. Resolve those settings in the original manager before adoption.", "", "", true)
 	} else {
+		analysis.PrimaryService = r.recoveredPrimaryService(analysis)
 		for _, reason := range analysis.Unsupported {
 			r.issue("compose_option_unsupported", reason, "", "", true)
 		}
@@ -233,6 +238,11 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	r.captureBaseline(candidate, resolved)
 	result.Configuration = canonicalConfiguration(result.Configuration)
 	r.result.Adoption.BaselineSource = result.Source
+	r.result.Adoption.BaselineDetection = result.Detection
+	result.BaselineEnvironment = make(map[string]string, len(result.Environment))
+	for name, value := range result.Environment {
+		result.BaselineEnvironment[name] = value
+	}
 	r.result.Adoption.BaselineConfiguration = result.Configuration
 	r.result.Adoption.BaselineConfiguration.Build.PrimaryService = resolved.PrimaryService
 	r.result.Adoption.BaselineDigest = recoveredDockerBaselineDigest(result)
@@ -253,6 +263,21 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	}
 	if err := r.stageBaseline(recoveryRoot, content); err != nil {
 		return nil, err
+	}
+	if err := r.attachBuildSources(ctx, recoveryRoot); err != nil {
+		return nil, err
+	}
+	if len(result.Adoption.Blockers) > 0 {
+		return result, ErrRecoveryBlocked
+	}
+	if err := result.Source.ValidateForDeployment(); err != nil {
+		return result, fmt.Errorf("%w: prepared source is not deployable", ErrRecoveryBlocked)
+	}
+	if err := result.Configuration.Validate(); err != nil {
+		return result, fmt.Errorf("%w: prepared runtime plan is not deployable", ErrRecoveryBlocked)
+	}
+	if err := validateDetectionResult(&result.Source, result.Detection); err != nil {
+		return result, fmt.Errorf("%w: prepared source evidence is invalid", ErrRecoveryBlocked)
 	}
 	return result, nil
 }
@@ -343,7 +368,7 @@ func (r *dockerRecovery) captureBaseline(candidate WorkloadCandidate, resolved *
 				score += 8
 			}
 			if name == resolved.PrimaryService {
-				score++
+				score += 100
 			}
 			if len(capture.Inspection.HostConfig.PortBindings) > 0 {
 				score += 4

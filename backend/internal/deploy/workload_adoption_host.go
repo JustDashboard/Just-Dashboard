@@ -55,6 +55,11 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		return recovered, nil
 	}
 	recovered.Source = DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: root}
+	for _, directory := range []string{"node_modules", ".venv", "venv", "__pycache__"} {
+		if info, err := os.Stat(filepath.Join(root, directory)); err == nil && info.IsDir() {
+			recovered.Source.ExcludePaths = append(recovered.Source.ExcludePaths, directory)
+		}
+	}
 	for _, directory := range []string{"data", "uploads", "storage"} {
 		if info, err := os.Stat(filepath.Join(root, directory)); err == nil && info.IsDir() {
 			recovered.Source.ExcludePaths = append(recovered.Source.ExcludePaths, directory)
@@ -65,6 +70,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		block("host_source_snapshot_unavailable", "The source could not be safely snapshotted. It may contain unsupported special files, external symlinks, or exceed the source limits.", "source.localPath")
 		return recovered, nil
 	}
+	bindHostRecoveryCandidate(&detection, capture, root)
 	recovered.Detection = detection
 	drift, driftErr := knownHostSourceDrift(ctx, root, capture, recovered.Source.ExcludePaths)
 	if driftErr != nil {
@@ -93,9 +99,16 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	recovered.Configuration.Runtime.GracePeriodSeconds = capture.GracePeriodSeconds
 	recovered.Configuration.Variables = []PlannedVariable{}
 	selected := selectedHostRecoveryCandidate(detection)
+	if selected != nil && selected.BuildMethod == BuildRecipe {
+		recovered.Configuration.Build.PreserveSourceRoot = true
+	}
 	for name, value := range capture.Environment {
 		if name == "NODE_CHANNEL_FD" || name == "NODE_CHANNEL_SERIALIZATION_MODE" {
 			origin.Warnings = append(origin.Warnings, "The original Node IPC channel belongs to its manager and is not transferred into the container. Applications that use process.send or manager messages require an explicit process-manager migration plan.")
+			continue
+		}
+		if name == "VIRTUAL_ENV" && selected != nil && selected.Recipe == "python" {
+			origin.Warnings = append(origin.Warnings, "The container installs the captured Python dependencies into its own interpreter; the original virtual environment remains part of the native baseline.")
 			continue
 		}
 		if ValidateEnvKey(name) != nil {
@@ -120,16 +133,35 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			value = translated
 			origin.Warnings = append(origin.Warnings, "The application variable "+name+" uses the source's /app container layout. Its original value is retained separately for the native baseline.")
 		}
+		if name == "PATH" && selected != nil && (selected.Recipe == "node" || selected.Recipe == "python") && !strings.Contains(":"+value+":", ":/usr/local/bin:") {
+			value = "/usr/local/bin:" + value
+		}
 		recovered.Environment[name] = value
 		scopes := []string{"runtime"}
+		buildStep := ""
 		if selected != nil {
 			for _, variable := range selected.Variables {
 				if variable.Name == name && (variable.Phase == "build" || variable.BrowserInlined || variable.Step == "install") {
-					scopes = append(scopes, "build")
-					recovered.Configuration.Build.Secrets = append(recovered.Configuration.Build.Secrets, BuildSecretConfig{Variable: name, Step: "install_and_build"})
+					buildStep = "build"
+					if variable.Step == "install" {
+						buildStep = "install"
+					}
 					break
 				}
 			}
+			for _, prefix := range selected.BrowserPrefixes {
+				if strings.HasPrefix(name, prefix) {
+					if buildStep == "install" {
+						buildStep = "install_and_build"
+					} else {
+						buildStep = "build"
+					}
+				}
+			}
+		}
+		if buildStep != "" {
+			scopes = append(scopes, "build")
+			recovered.Configuration.Build.Secrets = append(recovered.Configuration.Build.Secrets, BuildSecretConfig{Variable: name, Step: buildStep})
 		}
 		recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: scopes})
 	}
@@ -143,19 +175,37 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 			verifyHostDockerfileLayout(root, recovered.Configuration.Build, block)
 			origin.Warnings = append(origin.Warnings, "The Dockerfile must provide the original application's operating-system and interpreter dependencies. Review its entrypoint and user permissions before cutover.")
 		case BuildRecipe:
-			origin.Warnings = append(origin.Warnings, "The managed Node recipe uses the captured interpreter major with the catalogue image's patch version and container operating system. Confirm the application works without host-installed packages, native host dependencies or PM2 IPC before deploying changes; provide a Dockerfile when it needs them.")
-			origin.Warnings = append(origin.Warnings, "The Node recipe installs dependencies from the reviewed manifests and lockfiles. It does not reproduce patched node_modules or undeclared global dependencies from the host. Verify these inputs match the running application, or provide a reviewed Dockerfile and source plan preserving those dependencies before cutover.")
+			origin.Warnings = append(origin.Warnings, "The managed recipe uses the captured interpreter's supported version with the catalogue image's patch version and container operating system. Confirm the application works without host-installed packages or native host dependencies before deploying changes; provide a Dockerfile when it needs them.")
+			origin.Warnings = append(origin.Warnings, "The recipe installs dependencies from the reviewed manifests and lockfiles. It does not reproduce patched dependency directories or undeclared global dependencies from the host. Verify these inputs match the running application, or provide a reviewed Dockerfile before cutover.")
 			if selected.Profile == ProfileStatic || strings.TrimSpace(recovered.Configuration.Build.OutputDirectory) != "" {
 				block("host_runtime_layout_unsupported", "The detected recipe creates a static serving image whose files and command differ from this running Node process. Provide a reviewed Dockerfile preserving the original source, interpreter and command before migration.", "build.method")
 			}
-			if selected.Recipe != "node" {
-				block("host_runtime_compatibility_unknown", "Automatic host recovery currently requires a Node recipe or an existing Dockerfile. Other interpreters need a reviewed Dockerfile before migration.", "build.method")
+			switch selected.Recipe {
+			case "node":
+				version := strings.Split(strings.TrimPrefix(capture.InterpreterVersion, "v"), ".")[0]
+				if version == "20" || version == "22" || version == "24" {
+					recovered.Configuration.Build.NodeVersion = version
+				} else {
+					block("host_interpreter_version_unknown", "The original Node interpreter version is unavailable or outside the managed recipe catalogue. Select a verified runtime version or provide a Dockerfile.", "build.nodeVersion")
+				}
+			case "python":
+				version := strings.Split(strings.TrimPrefix(capture.InterpreterVersion, "Python "), ".")
+				if len(version) >= 2 && pythonRecipeVersionRE.MatchString(strings.Join(version[:2], ".")) {
+					recovered.Configuration.Build.PythonVersion = strings.Join(version[:2], ".")
+				} else {
+					block("host_interpreter_version_unknown", "The captured Python interpreter version is unavailable or outside the supported recipe catalogue. Provide a reviewed Dockerfile.", "build.pythonVersion")
+				}
+				if !supportedNativePythonCommand(capture.Command) {
+					block("host_python_command_unsupported", "Automatic Python recovery supports a verified interpreter running a source file or module; wrappers, inline programs and external launchers need a reviewed Dockerfile.", "runtime.command")
+				}
+			default:
+				block("host_runtime_compatibility_unknown", "Automatic host recovery requires a verified Node or Python interpreter, or an existing Dockerfile. Other native runtimes need a reviewed Dockerfile.", "build.method")
 			}
-			version := strings.Split(strings.TrimPrefix(capture.InterpreterVersion, "v"), ".")[0]
-			if version == "20" || version == "22" || version == "24" {
-				recovered.Configuration.Build.NodeVersion = version
-			} else {
-				block("host_interpreter_version_unknown", "The original Node interpreter version is unavailable or outside the managed recipe catalogue. Select a verified runtime version or provide a Dockerfile.", "build.nodeVersion")
+			if selected.Recipe == "node" || selected.Recipe == "python" {
+				buildRoot := filepath.Join(root, filepath.FromSlash(recovered.Configuration.Build.RootDirectory))
+				if _, err := selectRecipe(root, buildRoot, recovered.Configuration.Build); err != nil {
+					block("host_recipe_inputs_unsupported", "The captured manifest, interpreter and full source layout cannot form a supported recipe. Provide a reviewed Dockerfile before migration.", "build.method")
+				}
 			}
 		default:
 			block("host_build_compatibility_unknown", "The detected build does not preserve the current host command. Choose a reviewed container build before migration.", "build.method")
@@ -198,7 +248,13 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	}
 	mode := map[string]SourceMode{"pm2": SourceModeExistingPM2, "systemd": SourceModeExistingSystemd, "process": SourceModeExistingProcess}[capture.Manager]
 	origin.BaselineSource = DraftSourceConfig{Kind: SourceImport, Mode: mode, ResourceID: candidate.ResourceID}
-	origin.BaselineConfiguration = PlanConfiguration{Build: BuildPlanConfig{Method: BuildNone, Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}}, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, HostPort: port, InternalPort: port, BindAddress: host}, Variables: recovered.Configuration.Variables, Checks: recovered.Configuration.Checks, Dependencies: []PlannedDependency{}, Domains: []PlannedDomain{}}
+	baselineCandidate := newDetectedCandidate("", BuildNone, DetectedCandidate{Name: candidate.Name, Profile: ProfileImported, Confidence: ConfidenceHigh, Evidence: []DetectionEvidence{{Path: candidate.ResourceID, Reason: "verified original native restart manager"}}})
+	origin.BaselineDetection = DetectionResult{Source: SourceIdentity{Kind: SourceImport, Repository: candidate.Name}, Candidates: []DetectedCandidate{baselineCandidate}, SelectedID: baselineCandidate.ID}
+	baselineVariables := make([]PlannedVariable, 0, len(capture.Environment))
+	for _, name := range sortedStringMapKeys(capture.Environment) {
+		baselineVariables = append(baselineVariables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}})
+	}
+	origin.BaselineConfiguration = PlanConfiguration{Build: BuildPlanConfig{Method: BuildNone, Secrets: []BuildSecretConfig{}, ReleaseTasks: []ReleaseTaskConfig{}}, Runtime: RuntimePlanConfig{Strategy: StrategyStopFirst, HostPort: port, InternalPort: port, BindAddress: host}, Variables: baselineVariables, Checks: recovered.Configuration.Checks, Dependencies: []PlannedDependency{}, Domains: []PlannedDomain{}}
 	if capture.Manager != "process" {
 		origin.Runtime, err = NativeBaselineRuntimeInput(capture, 0)
 		if err != nil {
@@ -228,21 +284,19 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		if err := makePrivateDirectory(cacheRoot); err != nil {
 			return nil, err
 		}
-		private, err := os.MkdirTemp(cacheRoot, "host-adoption-")
-		if err != nil {
-			return nil, err
-		}
-		if err := copyContainedTree(root, private, copyTreeLimits{ExcludePrivateFiles: true, ExcludePaths: recovered.Source.ExcludePaths}); err != nil {
-			_ = os.RemoveAll(private)
-			return nil, err
-		}
-		digest, err := localDirectoryDigest(ctx, private, recovered.Source.ExcludePaths)
+		digest, private, err := stageRecoveredSource(ctx, cacheRoot, func(tree string) error {
+			return copyContainedTree(root, tree, copyTreeLimits{ExcludePrivateFiles: true, ExcludePaths: recovered.Source.ExcludePaths})
+		})
 		if err != nil || digest != detection.Source.Digest {
-			_ = os.RemoveAll(private)
 			block("host_source_changed", "The source changed during recovery. Refresh discovery and review a new snapshot before migration.", "source")
 			return recovered, nil
 		}
 		origin.RecoveryDirectory = private
+		recovered.Source = DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeRecoveredSnapshot, ResourceID: digest}
+		recovered.Detection.Source.LocalPath = ""
+	}
+	if selected != nil {
+		origin.BuildSources = []RecoveredBuildSource{{Service: candidate.Name, Name: selected.Name, Framework: selected.Framework, Language: selected.Recipe, Role: selected.Profile, Confidence: selected.Confidence, Status: "snapshot", SnapshotDigest: detection.Source.Digest, Reason: "Verified source and captured command were prepared without changing the original runtime."}}
 	}
 	sort.Slice(recovered.Configuration.Variables, func(i, j int) bool {
 		return recovered.Configuration.Variables[i].Name < recovered.Configuration.Variables[j].Name
@@ -471,7 +525,7 @@ func selectedHostRecoveryCandidate(detection DetectionResult) *DetectedCandidate
 			return &detection.Candidates[index]
 		}
 	}
-	if len(detection.Candidates) == 1 {
+	if detection.SelectedID == "" && len(detection.Candidates) == 1 {
 		return &detection.Candidates[0]
 	}
 	return nil
@@ -542,7 +596,11 @@ func hostCommandForContainer(command []string, root, recipe string) ([]string, e
 			return nil, ErrRecoveryBlocked
 		}
 		if index == 0 && (filepath.Base(arg) == "node" || filepath.Base(arg) == "nodejs") {
-			out[index] = "node"
+			out[index] = "/usr/local/bin/node"
+			continue
+		}
+		if index == 0 && recipe == "python" && (filepath.Base(arg) == "python" || filepath.Base(arg) == "python3" || strings.HasPrefix(filepath.Base(arg), "python3.")) {
+			out[index] = "/usr/local/bin/python"
 			continue
 		}
 		if strings.HasPrefix(arg, "-") {

@@ -1594,6 +1594,9 @@ func (s *PlanningStore) saveEnvironmentSource(
 	}
 	var currentSource DraftSourceConfig
 	invalidCurrentSource := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil
+	if source.Mode == SourceModeRecoveredSnapshot && (invalidCurrentSource || currentSource.Mode != SourceModeRecoveredSnapshot || currentSource.ResourceID != source.ResourceID) {
+		return fail(fmt.Errorf("%w: recovered snapshot handles cannot be attached or replaced by a client", ErrInvalidSource))
+	}
 	if currentKind == SourceImport && (invalidCurrentSource || currentSource.Mode != SourceModeExistingCheckout || source.Mode != SourceModeExistingCheckout) {
 		return fail(fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan))
 	}

@@ -59,7 +59,7 @@ func testLiveNativeAdoption(t *testing.T, kind string) {
 	}
 	originalPID := capture.Processes[0].PID
 	candidate := WorkloadCandidate{Key: kind + ":" + capture.ResourceID, Kind: kind, ResourceID: capture.ResourceID, Name: capture.Name, Running: 1, Total: 1, Digest: "owned-live-fixture", Services: []WorkloadService{{Name: capture.Name, PID: originalPID, CreatedAt: capture.Processes[0].CreateTime, Ports: []dockerx.PortMapping{{HostIP: "127.0.0.1", HostPort: port, ContainerPort: port, Protocol: "tcp"}}}}}
-	analyzer := NewHostSourceAnalyzer([]string{root}, nil, filepath.Join(root, "source-cache"), client, nil)
+	analyzer := NewHostSourceAnalyzer([]string{root}, nil, filepath.Join(root, "source-cache"), client, nil).WithRecoveryRoot(filepath.Join(root, "recovery-cache"))
 	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), filepath.Join(root, "recovery-cache"))
 	if err != nil {
 		t.Fatal(err)

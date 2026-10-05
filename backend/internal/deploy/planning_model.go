@@ -51,6 +51,7 @@ const (
 	SourceModeExistingPM2         SourceMode = "existing_pm2"
 	SourceModeExistingSystemd     SourceMode = "existing_systemd"
 	SourceModeExistingProcess     SourceMode = "existing_process"
+	SourceModeRecoveredSnapshot   SourceMode = "recovered_snapshot"
 )
 
 type Draft struct {
@@ -524,18 +525,21 @@ type GitRequirements struct {
 }
 
 type BuildPlanConfig struct {
-	Method          BuildMethod `json:"method"`
-	Recipe          string      `json:"recipe,omitempty"`
-	GoVersion       string      `json:"goVersion,omitempty"`
-	PythonVersion   string      `json:"pythonVersion,omitempty"`
-	NodeVersion     string      `json:"nodeVersion,omitempty"`
-	PHPVersion      string      `json:"phpVersion,omitempty"`
-	PackageManager  string      `json:"packageManager,omitempty"`
-	RootDirectory   string      `json:"rootDirectory,omitempty"`
-	Dockerfile      string      `json:"dockerfile,omitempty"`
-	BuildCommand    string      `json:"buildCommand,omitempty"`
-	StartCommand    string      `json:"startCommand,omitempty"`
-	OutputDirectory string      `json:"outputDirectory,omitempty"`
+	Method         BuildMethod `json:"method"`
+	Recipe         string      `json:"recipe,omitempty"`
+	GoVersion      string      `json:"goVersion,omitempty"`
+	PythonVersion  string      `json:"pythonVersion,omitempty"`
+	NodeVersion    string      `json:"nodeVersion,omitempty"`
+	PHPVersion     string      `json:"phpVersion,omitempty"`
+	PackageManager string      `json:"packageManager,omitempty"`
+	RootDirectory  string      `json:"rootDirectory,omitempty"`
+	// PreserveSourceRoot retains a native application's original source/cwd
+	// layout when its manifest is nested under that source root.
+	PreserveSourceRoot bool   `json:"preserveSourceRoot,omitempty"`
+	Dockerfile         string `json:"dockerfile,omitempty"`
+	BuildCommand       string `json:"buildCommand,omitempty"`
+	StartCommand       string `json:"startCommand,omitempty"`
+	OutputDirectory    string `json:"outputDirectory,omitempty"`
 	// SPAFallback makes the static server answer unknown paths with
 	// index.html, for a site whose client owns its routes.
 	SPAFallback    bool                `json:"spaFallback,omitempty"`
@@ -958,6 +962,18 @@ func (c DraftSourceConfig) Validate() error {
 		if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
 			return err
 		}
+	case SourceModeRecoveredSnapshot:
+		allowed = sourceFieldSet("resourceId", "composeFiles", "subdirectory")
+		if !contentDigestRE.MatchString(c.ResourceID) {
+			return fmt.Errorf("%w: recovered source has no immutable snapshot handle", ErrInvalidSource)
+		}
+		if c.Kind == SourceCompose {
+			if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
+				return err
+			}
+		} else if len(c.ComposeFiles) != 0 {
+			return fmt.Errorf("%w: native snapshot cannot contain Compose documents", ErrInvalidSource)
+		}
 	case SourceModeExistingContainer, SourceModeExistingStack, SourceModeExistingPM2, SourceModeExistingSystemd, SourceModeExistingProcess:
 		allowed = sourceFieldSet("resourceId")
 		limit := 256
@@ -1051,12 +1067,12 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 	case SourceGit:
 		return mode == SourceModeGitURL || mode == SourceModeConnectedRepository || mode == SourceModeLocalCheckout
 	case SourceLocal:
-		return mode == SourceModeLocalCheckout || mode == SourceModeLocalDirectory
+		return mode == SourceModeLocalCheckout || mode == SourceModeLocalDirectory || mode == SourceModeRecoveredSnapshot
 	case SourceImage:
 		return mode == SourceModeImageReference
 	case SourceCompose:
 		return mode == SourceModeComposePaste || mode == SourceModeComposeUpload ||
-			mode == SourceModeComposeGit || mode == SourceModeComposeLocal
+			mode == SourceModeComposeGit || mode == SourceModeComposeLocal || mode == SourceModeRecoveredSnapshot
 	case SourceBlueprint:
 		return mode == SourceModeBlueprint
 	case SourceImport:
@@ -1272,6 +1288,9 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if c.Build.GoPackage != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "go" || !validGoPackagePath(c.Build.GoPackage)) {
 		return fmt.Errorf("Go main package must be a directory inside the root, such as cmd/api, in a Go recipe")
+	}
+	if c.Build.PreserveSourceRoot && (c.Build.Method != BuildRecipe || (c.Build.Recipe != "node" && c.Build.Recipe != "python")) {
+		return invalidField("build.preserveSourceRoot", "the retained source layout applies only to a Node or Python recipe")
 	}
 	if c.Build.CargoBin != "" && (c.Build.Method != BuildRecipe || c.Build.Recipe != "rust" || !rustBinaryNameRE.MatchString(c.Build.CargoBin)) {
 		return invalidField("build.cargoBin", "the Rust binary names one binary target, such as server, in a Rust recipe")

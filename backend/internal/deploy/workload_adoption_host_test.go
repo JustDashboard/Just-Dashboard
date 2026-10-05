@@ -89,14 +89,14 @@ func TestHostRecoveryCreatesNormalManagedNodePlanAndNativeRollbackBaseline(t *te
 	if len(recovered.Adoption.Blockers) != 0 {
 		t.Fatalf("supported node recovery blocked: %v", recovered.Adoption.Blockers)
 	}
-	if recovered.Source.Kind != SourceLocal || recovered.Source.Mode != SourceModeLocalDirectory || recovered.Configuration.Build.Method != BuildRecipe || recovered.Configuration.Build.Recipe != "node" || recovered.Configuration.Build.NodeVersion != "24" {
+	if recovered.Source.Kind != SourceLocal || recovered.Source.Mode != SourceModeRecoveredSnapshot || recovered.Configuration.Build.Method != BuildRecipe || recovered.Configuration.Build.Recipe != "node" || recovered.Configuration.Build.NodeVersion != "24" {
 		t.Fatalf("source/build not restored: %+v %+v", recovered.Source, recovered.Configuration.Build)
 	}
 	runtime := recovered.Configuration.Runtime
 	if runtime.User != "1000:1001" || runtime.WorkingDirectory != "/app" || !runtime.HostNetwork || runtime.HostPort != 3000 || runtime.Strategy != StrategyStopFirst {
 		t.Fatalf("runtime parity missing: %+v", runtime)
 	}
-	if recovered.Environment["TOKEN"] != "private-production-value" || recovered.Environment["JD_IMPORTED_ARG_0"] != "node" || recovered.Environment["JD_IMPORTED_ARG_1"] != "/app/server.js" {
+	if recovered.Environment["TOKEN"] != "private-production-value" || recovered.Environment["JD_IMPORTED_ARG_0"] != "/usr/local/bin/node" || recovered.Environment["JD_IMPORTED_ARG_1"] != "/app/server.js" {
 		t.Fatal("environment or exact argv lost")
 	}
 	if recovered.Adoption.Runtime.Kind != "pm2" || recovered.Adoption.Runtime.RuntimeID != candidate.ResourceID || recovered.Adoption.Runtime.Port != 3000 {
@@ -147,14 +147,18 @@ func TestHostRecoveryRetainsDataWithoutCopyingLiveFilesAndBlocksPrivateConfig(t 
 			t.Fatalf("private/live %s copied into source archive", name)
 		}
 	}
-	before, err := localDirectoryDigest(context.Background(), root, recovered.Source.ExcludePaths)
+	var baseline NativeBaselineMetadata
+	if err := json.Unmarshal(recovered.Adoption.Runtime.Metadata, &baseline); err != nil {
+		t.Fatal(err)
+	}
+	before, err := localDirectoryDigest(context.Background(), root, baseline.SourceExclusions)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "data", "production.sqlite"), []byte("database changes while app remains live"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	after, err := localDirectoryDigest(context.Background(), root, recovered.Source.ExcludePaths)
+	after, err := localDirectoryDigest(context.Background(), root, baseline.SourceExclusions)
 	if err != nil || before != after {
 		t.Fatal("mutable linked data invalidates source capture")
 	}
