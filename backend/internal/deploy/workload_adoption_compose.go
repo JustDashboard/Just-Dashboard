@@ -86,7 +86,11 @@ func (r *dockerRecovery) containedOriginalFile(path string) (string, error) {
 }
 
 func (r *dockerRecovery) checkOriginalReferences(path, directory string) error {
-	file, err := os.Open(path)
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 8<<20 {
+		return fmt.Errorf("original file is unavailable")
+	}
+	file, err := openRegularSnapshotFile(path, info)
 	if err != nil {
 		return err
 	}
@@ -98,6 +102,12 @@ func (r *dockerRecovery) checkOriginalReferences(path, directory string) error {
 	var root yaml.Node
 	if yaml.Unmarshal(raw, &root) != nil || countYAMLNodes(&root, 0) > 100_000 {
 		return fmt.Errorf("original Compose is invalid")
+	}
+	// Compose follows aliases and merge keys. Inspect the same effective
+	// mappings so an inherited file reference cannot bypass containment.
+	var expanded map[string]any
+	if root.Decode(&expanded) != nil || root.Encode(expanded) != nil || countYAMLNodes(&root, 0) > 100_000 {
+		return fmt.Errorf("original Compose mappings could not be resolved safely")
 	}
 	mapping := documentMapping(&root)
 	if mapping == nil {
@@ -116,13 +126,8 @@ func (r *dockerRecovery) checkOriginalReferences(path, directory string) error {
 			if mappingValue(service, "extends") != nil {
 				return fmt.Errorf("extends requires a source snapshot")
 			}
-			for _, env := range composeEnvFiles(mappingValue(service, "env_file")) {
-				if !env.Required {
-					continue
-				}
-				if _, err := r.resolveOriginalReference(directory, env.Path, true); err != nil {
-					return err
-				}
+			if err := r.checkOriginalEnvironmentFiles(directory, mappingValue(service, "env_file")); err != nil {
+				return err
 			}
 			if build := mappingValue(service, "build"); build != nil {
 				context := build.Value
@@ -148,6 +153,52 @@ func (r *dockerRecovery) checkOriginalReferences(path, directory string) error {
 					}
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func (r *dockerRecovery) checkOriginalEnvironmentFiles(directory string, node *yaml.Node) error {
+	if node == nil || node.Tag == "!!null" {
+		return nil
+	}
+	items := []*yaml.Node{node}
+	if node.Kind == yaml.SequenceNode {
+		items = node.Content
+	}
+	// Do not reuse composeEnvFiles: its display inventory stops at sixteen,
+	// while containment must check every reference Compose will read.
+	for _, item := range items {
+		var path string
+		required := true
+		switch item.Kind {
+		case yaml.ScalarNode:
+			if item.Tag == "!!str" {
+				path = item.Value
+			}
+		case yaml.MappingNode:
+			if value := mappingValue(item, "path"); value != nil && value.Kind == yaml.ScalarNode && value.Tag == "!!str" {
+				path = value.Value
+			}
+			if value := mappingValue(item, "required"); value != nil {
+				if value.Tag != "!!bool" || value.Decode(&required) != nil {
+					return fmt.Errorf("original environment file requirement is invalid")
+				}
+			}
+		}
+		if path == "" {
+			return fmt.Errorf("original environment file path is invalid")
+		}
+		resolved, err := r.resolveOriginalReference(directory, path, false)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(resolved)
+		if !required && os.IsNotExist(err) {
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 8<<20 {
+			return fmt.Errorf("original environment file is unavailable")
 		}
 	}
 	return nil

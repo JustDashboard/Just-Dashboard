@@ -161,7 +161,33 @@ configured separately. Data/schema changes require application-appropriate
 backup/restore; image/configuration rollback does not reverse them. The coverage matrix and manager
 limits are in [existing-workloads.md](../../internal/deployments/existing-workloads.md).
 
-## Final local verification and documentation review
+## Premerge Compose containment review (2026-10-05)
+
+Revalidation against release branch `14a19593` found that optional environment files, YAML aliases
+and merge keys, and references after the planning parser's sixteen-file display limit could reach
+Compose before path containment. Six regression cases reproduced the bypass before the fix.
+Recovery now expands the effective YAML mappings and checks every environment-file reference,
+including optional files. Missing optional files inside allowed roots, safe aliases, null overrides
+and longer contained lists remain supported. Special Compose files are refused before opening them.
+
+The new regression matrix also covers inherited includes/extends, dynamic optional paths, symlink
+escapes and FIFOs. Focused recovery tests passed under the race detector. Both real Compose lifecycle
+fixtures now inherit optional environment files through a YAML merge; their values survived adoption,
+managed deployment and baseline rollback, and an absent optional file remained valid. The complete
+and existing-services scenarios passed in 48.12 and 38.51 seconds respectively, including stopped
+replicas, failure compensation, persistent data, runtime reservations and the unrelated one-off.
+
+Fresh standalone, deleted-image, PM2, systemd and real n8n lifecycle runs also passed, together with
+the authenticated four-container API continuity fixture and PM2 saved-startup refusal. n8n's
+workflow and decrypted credentials survived Deploy and rollback. The real bet-bot browser proof
+passed again against a rebuilt production frontend and temporary database: identities/settings,
+live readings, logs access and editable source were verified without invoking runtime actions.
+The general real-backend acceptance lane passed 29/29 checks. All API race processes and deployment,
+proxy, backup, store, Docker and process race packages passed. A focused changed-files gate passed
+after the containment fix. The release branch's replacement race-helper command is now reflected
+in `CONTRIBUTING.md`; no CI configuration was changed.
+
+## Earlier local verification and documentation review
 
 - A fresh production frontend build passed. Its source matches the final UI tree; the later changes
   affect backend readers, tests and evidence only.

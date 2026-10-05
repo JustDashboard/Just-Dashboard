@@ -214,7 +214,9 @@ to the contribution terms above, including the additional licence grant to the p
   These use unique owned projects/containers and a temporary database to verify import continuity,
   a failed first replacement, normal deployment and baseline rollback with persistent data. Compose
   acceptance includes existing stopped replicas, a declared missing service and an external one-off
-  container which must remain untouched. Deleted-image acceptance verifies bounded read-only export,
+  container which must remain untouched. It also preserves values inherited through YAML aliases
+  from optional environment files across deployment and baseline rollback, while accepting an absent
+  optional file. Deleted-image acceptance verifies bounded read-only export,
   stable cached identity, normal managed deployment and baseline rollback. Scoped Compose acceptance
   explicitly excludes an absent declaration whose image is unavailable and verifies the retained
   four-container/two-running baseline through failure recovery, Deploy and rollback. `JD_ADOPTION_EVIDENCE_DIR` writes sanitized lifecycle
@@ -264,10 +266,11 @@ to the contribution terms above, including the additional licence grant to the p
   providers were exercised.
 - Changes to deployment variables, feature links, backup gates or managed-resource lifecycle also run
   `go test -race ./internal/deploy ./internal/api ./internal/proxysvc ./internal/backups ./internal/store -count=1`.
-  On a busy host use all local shards of `../scripts/go-test-shard.sh` from `backend/`
-  (for example, `../scripts/go-test-shard.sh 1 3 ./internal/deploy`, then shards 2 and 3), as the existing
-  race gate does. It skips only the reference-scale latency assertions, which must pass separately
-  without instrumentation. Engine state/side-effect waits stay bounded at 30 seconds so race overhead
+  On a busy host use `../scripts/go-test-race.sh 4 ./internal/api` from `backend/` to distribute
+  the API tests across four processes. Use the same helper with one process for `./internal/deploy`,
+  `./internal/proxysvc`, `./internal/backups` and `./internal/store`, whose tests already run in parallel,
+  as the existing race gate does. It skips only the reference-scale latency assertions, which must pass
+  separately without instrumentation. Engine state/side-effect waits stay bounded at 30 seconds so race overhead
   does not turn completed work into a false three-second timeout.
   The browser gate covers the project overview, build transcript and focused settings, including
   variables, domains, storage, dependencies, automation and lifecycle.

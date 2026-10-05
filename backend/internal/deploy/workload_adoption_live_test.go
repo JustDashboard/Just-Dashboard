@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,8 +50,16 @@ func liveManagedComposeAdoption(t *testing.T, scope WorkloadRecoveryScope) {
 	if err := os.WriteFile(filepath.Join(root, "Caddyfile"), []byte("{\n admin off\n auto_https off\n}\n:8080 {\n root * /srv\n file_server\n}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	compose := fmt.Sprintf(`services:
+	if err := os.WriteFile(filepath.Join(root, "fixture.env"), []byte("FROM_ENV_FILE=owned-aliased-file-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	compose := fmt.Sprintf(`x-web-inputs: &web-inputs
+  env_file:
+    - {path: fixture.env, required: false}
+    - {path: absent.env, required: false}
+services:
   web:
+    <<: *web-inputs
     image: caddy:2-alpine
     ports: ["127.0.0.1:%d:8080"]
     volumes:
@@ -119,6 +128,14 @@ volumes:
 	if len(before) != 4 || candidate.Running != 2 {
 		t.Fatalf("invalid original fixture: %d containers %d running", len(before), candidate.Running)
 	}
+	assertEnvironmentFile := func(id string) {
+		t.Helper()
+		capture, err := client.CaptureAdoptionContainer(ctx, id)
+		if err != nil || !slices.Contains(capture.Inspection.Config.Env, "FROM_ENV_FILE=owned-aliased-file-value") {
+			t.Fatal("aliased optional environment file was not preserved")
+		}
+	}
+	assertEnvironmentFile(before["web"].ID)
 	docker("exec", before["web"].ID, "/bin/sh", "-c", "printf persistent-proof > /persistent/sentinel")
 	adoptionLiveHTTP(t, port)
 	var httpSamples, httpFailures atomic.Int64
@@ -286,6 +303,7 @@ volumes:
 	}
 	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
 	deployed, _ := adoptionLiveInventory(t, client, project)
+	assertEnvironmentFile(deployed["web"].ID)
 	expectedServices := 5
 	if scope == RecoveryExistingServices {
 		expectedServices = 4
@@ -305,6 +323,8 @@ volumes:
 	}
 	adoptionLiveAssertBaseline(t, client, project, port)
 	assertLiveRuntimeReservation(t, fixture.plans, fixture.store, client, result.ProjectID, result.EnvironmentID)
+	restored, _ := adoptionLiveInventory(t, client, project)
+	assertEnvironmentFile(restored["web"].ID)
 	orphanAfter, err = client.Inspect(ctx, orphanID)
 	if err != nil || orphanAfter.State != "running" || orphanAfter.ID != orphanBefore.ID || !orphanAfter.StartedAt.Equal(*orphanBefore.StartedAt) {
 		t.Fatalf("baseline rollback mutated external oneoff: %v", err)
@@ -312,6 +332,7 @@ volumes:
 	evidence := map[string]any{"test": t.Name(), "fixtureProject": project, "checkedAt": time.Now().UTC(), "baselineReleaseId": baseline.Release.ID, "adoptionPreservedIDsPIDsStartedAtAndSettings": true, "originalContainers": 4, "originalRunning": 2, "declaredServices": 5, "failedDeployRun": failed.ID, "failedDeployState": failed.State, "managedDeployRun": successful.ID, "managedDeployState": successful.State, "baselineRollbackRun": rolled.ID, "baselineRollbackState": rolled.State, "persistentDataPreserved": true, "externalOneoffPreserved": true, "HTTPContinuityAtAdoption": true, "HTTPAdoptionSamples": httpSamples.Load(), "HTTPAdoptionFailures": httpFailures.Load(), "fixtureRemovedAtCleanup": true}
 	evidence["scope"], evidence["excludedServices"], evidence["managedRecipeServices"] = scope, recovered.Adoption.ExcludedServices, expectedServices
 	evidence["runtimeReservationAvailableAfterDeploy"], evidence["runtimeReservationAvailableAfterBaselineRollback"] = true, true
+	evidence["aliasedOptionalEnvironmentPreserved"] = true
 	if location := os.Getenv("JD_ADOPTION_EVIDENCE_DIR"); location != "" {
 		if err := os.MkdirAll(location, 0o700); err != nil {
 			t.Fatal(err)

@@ -40,7 +40,12 @@ These routes require an administrator's browser session, CSRF for writes, and au
 Discovery accepts only a discovered resource identity, not a host command. Host commands use explicit
 `hostexec` arguments. Client source and storage paths use `files.Resolve` and `JD_DEPLOY_ROOTS`,
 including Compose files, includes, environment files, bind mounts and native working/source
-directories. Systemd unit and drop-in paths come from the authoritative manager rather than a client
+directories. Compose reference checks expand YAML aliases and merge keys before inspecting paths.
+Optional environment files still require containment; only a missing file inside the allowed roots
+may be ignored. Every environment-file reference is checked, including entries beyond the planning
+display's sixteen-file limit. Original Compose documents use bounded no-follow regular-file reads;
+includes and extends require a reviewed source snapshot and remain blocked before Compose runs.
+Systemd unit and drop-in paths come from the authoritative manager rather than a client
 path: their absolute paths can be outside deployment roots, such as `/etc/systemd/system`. Capture
 reads them with per-file size limits and binds their configuration to the retained original-manager
 digest; it never exposes their private contents or grants a client an arbitrary host-file read. The
