@@ -686,6 +686,21 @@ func inspectHostRecoveryFiles(ctx context.Context, root string, capture *procs.H
 		if path == root {
 			return nil
 		}
+		if entry.IsDir() && filepath.Dir(path) == root && (entry.Name() == "data" || entry.Name() == "uploads" || entry.Name() == "storage") {
+			recovered.Configuration.Runtime.Mounts = append(recovered.Configuration.Runtime.Mounts, RuntimeMount{Source: path, Target: filepath.Join("/app", entry.Name()), Ownership: OwnershipLinked})
+			recovered.Adoption.Warnings = append(recovered.Adoption.Warnings, "Existing "+entry.Name()+" is retained as a linked host data directory. Review every persistent path before cutover; importing does not copy or delete its contents.")
+			return filepath.SkipDir
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if excludedLocalSourcePath(relative, recovered.Source.ExcludePaths) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".just-dashboard" || entry.Name() == "node_modules") {
 			return filepath.SkipDir
 		}
@@ -704,10 +719,10 @@ func inspectHostRecoveryFiles(ctx context.Context, root string, capture *procs.H
 		if !entry.IsDir() && info.Mode().IsRegular() && capture.UID != 0 && info.Mode().Perm()&0004 == 0 {
 			block("host_source_permissions", "Some source files are private to the original account. Use a Dockerfile with explicit COPY ownership so the preserved runtime UID can read them.", "runtime.user")
 		}
-		if entry.IsDir() && filepath.Dir(path) == root && (entry.Name() == "data" || entry.Name() == "uploads" || entry.Name() == "storage") {
-			recovered.Configuration.Runtime.Mounts = append(recovered.Configuration.Runtime.Mounts, RuntimeMount{Source: path, Target: filepath.Join("/app", entry.Name()), Ownership: OwnershipLinked})
-			recovered.Adoption.Warnings = append(recovered.Adoption.Warnings, "Existing "+entry.Name()+" is retained as a linked host data directory. Review every persistent path before cutover; importing does not copy or delete its contents.")
-			return filepath.SkipDir
+		// COPY makes retained source root-owned, while runtime keeps the original
+		// UID:GID. Its host account ownership and supplementary groups do not carry.
+		if entry.IsDir() && capture.UID != 0 && info.Mode().Perm()&0001 == 0 {
+			block("host_source_directory_permissions", "Some retained source directories cannot be traversed by the preserved non-root runtime user after Docker copies them as root. Provide a reviewed Dockerfile with explicit COPY ownership before migration.", "runtime.user")
 		}
 		lower := strings.ToLower(entry.Name())
 		if strings.HasSuffix(lower, ".db") || strings.HasSuffix(lower, ".sqlite") || strings.HasSuffix(lower, ".sqlite3") {

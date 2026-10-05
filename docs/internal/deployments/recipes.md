@@ -25,6 +25,13 @@ system dependencies, unsupported manager settings, unreadable source, and unveri
 produce explicit migration blockers. A bare process has no restart authority and cannot be stopped
 automatically. Review must resolve these limits before cutover; a build and readiness check remain
 required even when capture succeeds.
+
+Retained source files must be readable and nested source directories traversable by the preserved
+non-root runtime user after Docker copies them as root. Host ownership and supplementary groups do
+not transfer. A missing world-read or directory world-execute bit blocks migration before adoption;
+recovery never broadens original permissions or changes the runtime UID. Linked data and excluded
+dependency environments keep their original host ownership and permissions outside the build copy.
+
 The Node recipe installs from reviewed manifests and lockfiles, with the host `node_modules`
 excluded from the build context. Recovery warns that patched dependency files and undeclared global
 modules need a reviewed Dockerfile/source plan; those changes are not reconstructed by a clean

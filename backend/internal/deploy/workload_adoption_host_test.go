@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,88 @@ func hostRecoveryFixture(t *testing.T) (string, *HostSourceAnalyzer, WorkloadCan
 	candidate := WorkloadCandidate{Key: "pm2:alice/default/api", Kind: "pm2", ResourceID: "alice/default/api", Name: "api", Running: 1, Total: 1, Digest: "fresh-discovery", Services: []WorkloadService{{Name: "api", Ports: []dockerx.PortMapping{{HostIP: "127.0.0.1", HostPort: 3000, ContainerPort: 3000, Protocol: "tcp"}}}}}
 	capture := &procs.HostWorkloadCapture{Manager: "pm2", ResourceID: candidate.ResourceID, Name: "api", Account: "alice", UID: 1000, GID: 1001, SourceDirectory: root, SourcePath: filepath.Join(root, "server.js"), InterpreterVersion: "24.12.0", ConfigurationDigest: "fresh-config", Environment: map[string]string{"PORT": "3000", "TOKEN": "private-production-value"}, EnvironmentNames: []string{"PORT", "TOKEN"}, Command: []string{"/usr/local/bin/node", filepath.Join(root, "server.js")}, Processes: []procs.HostProcessCapture{{ID: 7, PID: 123, CreateTime: time.Now().UnixMilli(), State: "online", LogSources: []string{"pm2:alice/7/api"}}}}
 	return root, analyzer, candidate, capture
+}
+
+func TestHostRecoveryRequiresCopiedDirectoryTraversalForPreservedUser(t *testing.T) {
+	for _, fixture := range []struct {
+		name    string
+		mode    os.FileMode
+		uid     uint32
+		blocked bool
+	}{
+		{"private directory", 0700, 1000, true},
+		{"readable without traversal", 0744, 1000, true},
+		{"host group traversal", 0770, 1000, true},
+		{"traversable without listing", 0751, 1000, false},
+		{"root runtime", 0700, 0, false},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root, analyzer, candidate, capture := hostRecoveryFixture(t)
+			capture.UID = fixture.uid
+			directory := filepath.Join(root, "lib")
+			if err := os.Mkdir(directory, fixture.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(directory, fixture.mode); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(directory, "handler.js"), []byte("module.exports = () => 'native application'"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocked := false
+			for _, issue := range recovered.Adoption.Issues {
+				if issue.Code == "host_source_directory_permissions" {
+					blocked = issue.Blocking && issue.Field == "runtime.user" && strings.Contains(issue.Message, "COPY ownership")
+				}
+			}
+			if blocked != fixture.blocked || (len(recovered.Adoption.Blockers) != 0) != fixture.blocked {
+				t.Fatalf("directory traversal blocker=%v issues=%v", blocked, recovered.Adoption.Issues)
+			}
+			store := newPlanningStoreFixture(t)
+			_, err = store.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-directory-proof", Profile: ProfileService}, recovered)
+			if fixture.blocked && !errors.Is(err, ErrPreflightBlocked) || !fixture.blocked && err != nil {
+				t.Fatalf("public draft traversal boundary: %v", err)
+			}
+			if recovered.Configuration.Runtime.User != strconv.FormatUint(uint64(fixture.uid), 10)+":1001" {
+				t.Fatal("recovery changed the original runtime account")
+			}
+			if info, err := os.Stat(directory); err != nil || info.Mode().Perm() != fixture.mode {
+				t.Fatal("recovery changed original source permissions", err)
+			}
+		})
+	}
+}
+
+func TestHostRecoveryDoesNotApplyCopiedDirectoryPermissionsToExcludedData(t *testing.T) {
+	root, analyzer, candidate, capture := hostRecoveryFixture(t)
+	for _, name := range []string{"data", ".venv"} {
+		directory := filepath.Join(root, name)
+		if err := os.Mkdir(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, "original-private-state"), []byte("retained outside the build"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recovered, err := RecoverHostWorkload(t.Context(), candidate, capture, analyzer, files.New([]string{root}), t.TempDir())
+	if err != nil || len(recovered.Adoption.Blockers) != 0 {
+		t.Fatalf("excluded host directory blocked copying: %v %v", err, recovered.Adoption.Blockers)
+	}
+	if len(recovered.Configuration.Runtime.Mounts) != 1 || recovered.Configuration.Runtime.Mounts[0].Source != filepath.Join(root, "data") || recovered.Configuration.Runtime.Mounts[0].Ownership != OwnershipLinked {
+		t.Fatal("private linked data lost its retained mount")
+	}
+	for _, name := range []string{"data", ".venv"} {
+		if _, err := os.Stat(filepath.Join(recovered.Adoption.RecoveryDirectory, name)); !os.IsNotExist(err) {
+			t.Fatal("excluded private directory entered the build snapshot", name, err)
+		}
+		if info, err := os.Stat(filepath.Join(root, name)); err != nil || info.Mode().Perm() != 0700 {
+			t.Fatal("recovery changed excluded directory permissions", name, err)
+		}
+	}
 }
 
 func TestHostRecoveryCreatesNormalManagedNodePlanAndNativeRollbackBaseline(t *testing.T) {

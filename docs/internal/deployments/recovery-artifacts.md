@@ -20,7 +20,9 @@ and pin the supported interpreter major/minor. Version probes execute only a cla
 captured ELF interpreter as its original account with fixed version flags, a sanitized environment
 and a bounded timeout. Build input scopes include source-detected build/install reads and framework
 browser prefixes, while baseline variables remain the original runtime inputs. Other native
-interpreters require a verified Dockerfile that preserves the original layout and command.
+interpreters and wrappers require an explicit verified command/layout migration; a Dockerfile alone
+does not establish support. Absolute external command paths remain `host_command_unsupported`
+unless the importer has a verified container mapping for them.
 
 The server prunes source snapshots once at startup and every 24 hours. Every persisted source
 revision and unexpired draft protects its snapshot. Unreferenced snapshots receive a full 30-day
