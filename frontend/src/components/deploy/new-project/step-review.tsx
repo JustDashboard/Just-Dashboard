@@ -1,18 +1,21 @@
 "use client"
 
 import Link from "next/link"
-import { FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
+import { Disclosure, FormFact, FormFacts, FormNote, FormSection } from "@/components/form"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import type { DeploymentConfiguration, DeploymentPreflightFinding } from "@/lib/types"
 import { FindingRow, findingRemedy } from "@/components/deploy/deployment-findings"
 import { variableFixLabel } from "@/components/deploy/failure-cause"
 import { WORKLOAD_LABELS } from "@/components/deploy/vocabulary"
 import { AutomaticDeployment } from "@/components/deploy/new-project/automatic-deployment"
+import { Notice } from "@/components/state"
 import type { ConfigureFlow, DraftGitPolicy } from "@/components/deploy/new-project/draft"
+import { sourceWatchesGit } from "@/components/deploy/new-project/draft"
 
 /**
  * Step four: **is this right.**
@@ -53,6 +56,7 @@ export function StepReview({
   blockers,
   warnings,
   acknowledged,
+  acknowledgementsDisabled,
   onAcknowledgedChange,
   onOpenRemedy,
   canOpenRemedy,
@@ -73,6 +77,7 @@ export function StepReview({
   blockers: DeploymentPreflightFinding[]
   warnings: DeploymentPreflightFinding[]
   acknowledged: string[]
+  acknowledgementsDisabled: boolean
   onAcknowledgedChange: (codes: string[]) => void
   onOpenRemedy: (finding: DeploymentPreflightFinding) => void
   canOpenRemedy: (finding: DeploymentPreflightFinding) => boolean
@@ -89,8 +94,9 @@ export function StepReview({
    */
   onInspectAgain?: () => void
 }) {
-  const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
+  const isGitSource = sourceWatchesGit(flow.source)
   const configuration = flow.configuration
+  const adoption = flow.draft.data.adoption
   const declared = configuration.variables
   const generated = declared.filter(
     (variable) => (variable.generate ?? 0) > 0 && !suppliedVariables.includes(variable.name),
@@ -104,12 +110,79 @@ export function StepReview({
       !suppliedVariables.includes(variable.name),
   )
   const mounts = configuration.runtime.mounts ?? []
+  const compose = configuration.build.method === "compose"
+  const composeMounts = (flow.detection?.compose?.services ?? []).flatMap((service) =>
+    (service.mounts ?? []).map((mount) => ({ service: service.name, mount })),
+  )
   const readiness = configuration.checks.filter((check) => check.phase === "readiness")
   const smoke = configuration.checks.filter((check) => check.phase === "smoke")
   const gated = flow.profile === "web" || flow.profile === "static"
 
   return (
     <>
+      {adoption && (
+        <FormSection title="Existing live deployment">
+          <FormFacts>
+            <FormFact label="Original name" mono>
+              {adoption.name}
+            </FormFact>
+            <FormFact label="Manager">{adoption.manager}</FormFact>
+            <FormFact label="Services">
+              {adoption.runningCount} of {adoption.serviceCount} running
+            </FormFact>
+            <FormFact label="Private inputs">
+              {flow.draft.environmentKeys?.length ?? 0} saved on the server
+            </FormFact>
+            {adoption.kind === "stack" && adoption.scope && (
+              <FormFact label="Recovery scope">
+                {adoption.scope === "existing_services"
+                  ? "Existing containers only · running and stopped"
+                  : "Every declared service"}
+              </FormFact>
+            )}
+          </FormFacts>
+          <Notice title="Adoption keeps this application running">
+            The current services become the live baseline. No deployment run starts, and stopped
+            services stay stopped. Deploy changes uses the settings below; Redeploy live release
+            restores the original baseline.
+          </Notice>
+          {(adoption.excludedServices?.length ?? 0) > 0 && (
+            <Notice title="Services excluded from this deployment" tone="warning">
+              These declared services have no existing container. The recovered recipe will not
+              create them on Deploy changes; this does not remove any existing container.
+              <ul aria-label="Excluded Compose services" className="mt-2 space-y-1 font-mono">
+                {adoption.excludedServices!.map((service) => (
+                  <li key={service}>{service}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
+          {(adoption.blockers?.length ?? 0) > 0 && (
+            <Notice title="Resolve migration blockers before adoption" tone="danger">
+              <ul className="space-y-1">
+                {adoption.blockers.map((blocker, index) => (
+                  <li key={index}>{blocker}</li>
+                ))}
+              </ul>
+            </Notice>
+          )}
+          {(adoption.warnings ?? [])
+            .filter(
+              (warning) =>
+                !findings.some(
+                  (finding) =>
+                    finding.title === warning ||
+                    finding.means === warning ||
+                    finding.measured === warning,
+                ),
+            )
+            .map((warning, index) => (
+              <FormNote key={index} tone="warning">
+                {warning}
+              </FormNote>
+            ))}
+        </FormSection>
+      )}
       <FormSection title="Project">
         <FormFacts>
           <FormFact label="Name" mono>
@@ -128,11 +201,32 @@ export function StepReview({
       </FormSection>
 
       <FormSection title="Data it keeps">
+        {compose && (
+          <>
+            <FormNote>
+              Each service keeps the volumes and bind mounts declared in the Compose source. The
+              fields below are additional overrides, so an empty list does not mean the stack has no
+              persistent storage. Review the full service configuration below.
+            </FormNote>
+            {composeMounts.length > 0 && (
+              <ul aria-label="Compose service mounts" className="min-w-0 space-y-1.5 text-hint">
+                {composeMounts.map(({ service, mount }, index) => (
+                  <li key={`${service}-${index}`} className="min-w-0 break-all">
+                    <span className="font-mono text-foreground">{service}</span>{" "}
+                    <span className="font-mono text-muted-foreground">{mount}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
         {mounts.length === 0 ? (
-          <FormNote>
-            Nothing survives a rebuild. Every release starts from the image, so anything the
-            application writes is gone when the next one replaces it.
-          </FormNote>
+          !compose && (
+            <FormNote>
+              Nothing survives a rebuild. Every release starts from the image, so anything the
+              application writes is gone when the next one replaces it.
+            </FormNote>
+          )
         ) : (
           <ul className="min-w-0 space-y-1.5 text-hint">
             {mounts.map((mount) => {
@@ -143,12 +237,15 @@ export function StepReview({
               return (
                 <li key={`${mount.source}:${mount.target}`} className="min-w-0">
                   <span className="block font-mono break-all text-foreground">{mount.target}</span>
+                  {adoption && <span className="block font-mono break-all">{mount.source}</span>}
                   <span className="block text-muted-foreground">
                     {[
                       config.purpose,
                       mount.ownership === "managed"
                         ? "kept in a managed volume"
-                        : "an existing path on this host",
+                        : dependency?.resourceKind === "volume"
+                          ? "an existing named volume"
+                          : "an existing path on this host",
                       mount.readOnly && "read-only",
                       config.backup && "included in backups",
                     ]
@@ -161,6 +258,27 @@ export function StepReview({
           </ul>
         )}
       </FormSection>
+
+      {compose && (flow.source.composeFiles?.length ?? 0) > 0 && (
+        <Disclosure summary="Compose service configuration">
+          <FormNote>
+            These saved files carry per-service images, limits, ports, commands and storage. Private
+            inputs stay on the server behind their variable references. After adoption, edit these
+            files in Settings → General; saving changes leaves the live baseline running until you
+            choose Deploy changes.
+          </FormNote>
+          {flow.source.composeFiles!.map((document, index) => (
+            <Textarea
+              key={`${document.path}-${index}`}
+              aria-label={`Reviewed ${document.path}`}
+              readOnly
+              value={document.content || "This file is read from the source directory."}
+              rows={10}
+              className="font-mono sm:text-xs"
+            />
+          ))}
+        </Disclosure>
+      )}
 
       {generated.length > 0 && (
         <FormSection title="Secrets made on this server">
@@ -229,20 +347,35 @@ export function StepReview({
         )}
       </FormSection>
 
-      <FormSection title="At the cutover">
+      <FormSection title={adoption ? "When you deploy changes" : "At the cutover"}>
+        {adoption && (
+          <FormNote>
+            Adoption does not perform this cutover. Deploy changes or an enabled automatic
+            deployment does.
+          </FormNote>
+        )}
         <FormNote>
           {/* "Nothing is lost" only when something is kept: with no mounts the
               section above has just said the opposite. */}
-          {configuration.runtime.strategy === "blue_green"
-            ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
-            : mounts.length === 0
-              ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
-              : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."}
+          {adoption && configuration.runtime.strategy === "stop_first"
+            ? "The first deployment of changes stops the original runtime before the replacement starts, causing an outage. Review the recovered storage and backup coverage first; state outside the declared mounts is not preserved by a rebuild."
+            : configuration.runtime.strategy === "blue_green"
+              ? "The new container starts beside the running one and only takes the address once it has answered, so a release that never becomes ready changes nothing."
+              : mounts.length === 0
+                ? "The running container is stopped before the new one starts, so on every release after the first this project is unreachable for a few seconds."
+                : "The running container is stopped before the new one starts. Nothing is lost — the data above is kept — but on every release after the first this project is unreachable for a few seconds."}
         </FormNote>
       </FormSection>
 
       {isGitSource && (
-        <AutomaticDeployment branch={branch} policy={gitPolicy} onChange={onGitPolicyChange} />
+        <AutomaticDeployment
+          branch={branch}
+          policy={gitPolicy}
+          onChange={onGitPolicyChange}
+          storageKey={
+            adoption ? `deploy.new.configure.adoption.${flow.draft.id}.gitPolicy` : undefined
+          }
+        />
       )}
 
       {(blockers.length > 0 || warnings.length > 0) && (
@@ -264,7 +397,7 @@ export function StepReview({
             ))}
           </div>
           {warnings.length > 0 && (
-            <Group tone="warning" className="space-y-2">
+            <Group id="deployment-warning-acknowledgements" tone="warning" className="space-y-2">
               {warnings.map((finding, index) => (
                 <Label
                   key={`${finding.code}:${finding.fieldId ?? index}`}
@@ -277,6 +410,7 @@ export function StepReview({
                   <Checkbox
                     className="mt-0.5"
                     checked={acknowledged.includes(finding.code)}
+                    disabled={acknowledgementsDisabled}
                     onCheckedChange={(checked) =>
                       onAcknowledgedChange(
                         checked

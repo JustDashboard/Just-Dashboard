@@ -38,6 +38,7 @@ const (
 	SourceModeGitURL              SourceMode = "git_url"
 	SourceModeConnectedRepository SourceMode = "connected_repository"
 	SourceModeLocalCheckout       SourceMode = "local_checkout"
+	SourceModeLocalDirectory      SourceMode = "local_directory"
 	SourceModeImageReference      SourceMode = "image_reference"
 	SourceModeComposePaste        SourceMode = "compose_paste"
 	SourceModeComposeUpload       SourceMode = "compose_upload"
@@ -47,6 +48,9 @@ const (
 	SourceModeExistingCheckout    SourceMode = "existing_checkout"
 	SourceModeExistingContainer   SourceMode = "existing_container"
 	SourceModeExistingStack       SourceMode = "existing_stack"
+	SourceModeExistingPM2         SourceMode = "existing_pm2"
+	SourceModeExistingSystemd     SourceMode = "existing_systemd"
+	SourceModeExistingProcess     SourceMode = "existing_process"
 )
 
 type Draft struct {
@@ -65,8 +69,10 @@ type Draft struct {
 	EnvironmentKeys    []string           `json:"environmentKeys,omitempty"`
 	// Values live only in the separately sealed draft column, never data_json,
 	// plan previews, or the draft returned to a browser.
-	environment    map[string]string
-	environmentEnc string
+	environment         map[string]string
+	environmentEnc      string
+	adoptionEnvironment map[string]string
+	adoptionEnc         string
 }
 
 type DraftData struct {
@@ -74,6 +80,7 @@ type DraftData struct {
 	Source        *DraftSourceConfig `json:"source,omitempty"`
 	Detection     *DetectionResult   `json:"detection,omitempty"`
 	Configuration *PlanConfiguration `json:"configuration,omitempty"`
+	Adoption      *WorkloadAdoption  `json:"adoption,omitempty"`
 }
 
 // DraftSummary is what the new-project page shows to offer resuming an
@@ -128,6 +135,7 @@ type DraftSourceConfig struct {
 	Ref               string            `json:"ref,omitempty"`
 	CredentialID      int64             `json:"credentialId,omitempty"`
 	LocalPath         string            `json:"localPath,omitempty"`
+	ExcludePaths      []string          `json:"excludePaths,omitempty"`
 	Subdirectory      string            `json:"subdirectory,omitempty"`
 	ManagedInPlace    bool              `json:"managedInPlace,omitempty"`
 	IncludeSubmodules bool              `json:"includeSubmodules,omitempty"`
@@ -590,9 +598,14 @@ type ReleaseTaskConfig struct {
 }
 
 type RuntimePlanConfig struct {
+	// Imported Compose projects retain their identity so fixed names and
+	// external clients keep addressing the same stack after a reviewed deploy.
+	ComposeProjectName string          `json:"composeProjectName,omitempty"`
 	PreviewIsolation   bool            `json:"previewIsolation,omitempty"`
 	Protocol           string          `json:"protocol,omitempty"`
 	Image              string          `json:"image,omitempty"`
+	User               string          `json:"user,omitempty"`
+	WorkingDirectory   string          `json:"workingDirectory,omitempty"`
 	Command            []string        `json:"command,omitempty"`
 	InternalPort       int             `json:"internalPort,omitempty"`
 	HostPort           int             `json:"hostPort,omitempty"`
@@ -903,10 +916,23 @@ func (c DraftSourceConfig) Validate() error {
 		} else if c.ProviderBaseURL != "" {
 			return fmt.Errorf("%w: provider base URL is supported only for Gitea", ErrInvalidSource)
 		}
-	case SourceModeLocalCheckout:
+	case SourceModeLocalCheckout, SourceModeLocalDirectory:
 		allowed = sourceFieldSet("localPath", "subdirectory", "includeSubmodules", "includeLfs")
 		if !filepath.IsAbs(c.LocalPath) || len(c.LocalPath) > 4096 {
 			return fmt.Errorf("%w: local path must be absolute", ErrInvalidSource)
+		}
+		if c.Mode == SourceModeLocalDirectory {
+			allowed = sourceFieldSet("localPath", "subdirectory", "excludePaths")
+			if len(c.ExcludePaths) > 128 {
+				return fmt.Errorf("%w: too many source exclusions", ErrInvalidSource)
+			}
+			seen := map[string]bool{}
+			for _, path := range c.ExcludePaths {
+				if path == "." || !safeRelativePath(path) || seen[path] {
+					return fmt.Errorf("%w: source exclusions must be unique relative paths", ErrInvalidSource)
+				}
+				seen[path] = true
+			}
 		}
 	case SourceModeComposeLocal:
 		allowed = sourceFieldSet("localPath", "subdirectory", "composeFiles")
@@ -931,9 +957,13 @@ func (c DraftSourceConfig) Validate() error {
 		if _, err := analyzeComposeDocuments(c.ComposeFiles); err != nil {
 			return err
 		}
-	case SourceModeExistingContainer, SourceModeExistingStack:
+	case SourceModeExistingContainer, SourceModeExistingStack, SourceModeExistingPM2, SourceModeExistingSystemd, SourceModeExistingProcess:
 		allowed = sourceFieldSet("resourceId")
-		if c.ResourceID == "" || len(c.ResourceID) > 256 || strings.ContainsAny(c.ResourceID, "\x00\r\n") {
+		limit := 256
+		if c.Mode == SourceModeExistingPM2 {
+			limit = 1000
+		}
+		if c.ResourceID == "" || len(c.ResourceID) > limit || strings.ContainsAny(c.ResourceID, "\x00\r\n") {
 			return fmt.Errorf("%w: import resource id is required", ErrInvalidSource)
 		}
 	case SourceModeBlueprint:
@@ -976,6 +1006,7 @@ func (c DraftSourceConfig) firstUnexpectedField(allowed map[string]bool) string 
 		{"url", c.URL != ""}, {"provider", c.Provider != ""}, {"providerBaseUrl", c.ProviderBaseURL != ""},
 		{"repository", c.Repository != ""}, {"ref", c.Ref != ""}, {"credentialId", c.CredentialID != 0},
 		{"localPath", c.LocalPath != ""}, {"subdirectory", c.Subdirectory != ""}, {"managedInPlace", c.ManagedInPlace},
+		{"excludePaths", len(c.ExcludePaths) != 0},
 		{"includeSubmodules", c.IncludeSubmodules}, {"includeLfs", c.IncludeLFS}, {"image", c.Image != ""},
 		{"platform", c.Platform != ""}, {"composeFiles", len(c.ComposeFiles) != 0}, {"resourceId", c.ResourceID != ""},
 		{"blueprintId", c.BlueprintID != ""}, {"blueprintVersion", c.BlueprintVersion != ""},
@@ -1019,7 +1050,7 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 	case SourceGit:
 		return mode == SourceModeGitURL || mode == SourceModeConnectedRepository || mode == SourceModeLocalCheckout
 	case SourceLocal:
-		return mode == SourceModeLocalCheckout
+		return mode == SourceModeLocalCheckout || mode == SourceModeLocalDirectory
 	case SourceImage:
 		return mode == SourceModeImageReference
 	case SourceCompose:
@@ -1028,7 +1059,8 @@ func validModeForKind(kind SourceKind, mode SourceMode) bool {
 	case SourceBlueprint:
 		return mode == SourceModeBlueprint
 	case SourceImport:
-		return mode == SourceModeExistingCheckout || mode == SourceModeExistingContainer || mode == SourceModeExistingStack
+		return mode == SourceModeExistingCheckout || mode == SourceModeExistingContainer || mode == SourceModeExistingStack ||
+			mode == SourceModeExistingPM2 || mode == SourceModeExistingSystemd || mode == SourceModeExistingProcess
 	default:
 		return false
 	}
@@ -1162,6 +1194,9 @@ func normalizeImageReference(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || len(raw) > 512 || strings.ContainsAny(raw, "\x00\r\n\t ") {
 		return "", fmt.Errorf("%w: malformed image reference", ErrInvalidImage)
+	}
+	if contentDigestRE.MatchString(raw) {
+		return raw, nil
 	}
 	named, err := reference.ParseNormalizedNamed(raw)
 	if err != nil {
@@ -1307,6 +1342,20 @@ func (c PlanConfiguration) Validate() error {
 	}
 	if !validStrategy(c.Runtime.Strategy) {
 		return fmt.Errorf("invalid release strategy %q", c.Runtime.Strategy)
+	}
+	if c.Runtime.User != "" {
+		identity := strings.Split(c.Runtime.User, ":")
+		if len(identity) != 2 {
+			return invalidField("runtime.user", "runtime user must be a numeric UID:GID pair")
+		}
+		for _, number := range identity {
+			if _, err := strconv.ParseUint(number, 10, 32); err != nil || number == "" || strings.HasPrefix(number, "+") {
+				return invalidField("runtime.user", "runtime user must be a numeric UID:GID pair")
+			}
+		}
+	}
+	if c.Runtime.WorkingDirectory != "" && (!filepath.IsAbs(c.Runtime.WorkingDirectory) || len(c.Runtime.WorkingDirectory) > 4096 || strings.ContainsAny(c.Runtime.WorkingDirectory, "\x00\r\n")) {
+		return invalidField("runtime.workingDirectory", "runtime working directory must be an absolute container path")
 	}
 	if c.Runtime.Image != "" && !validPlannedReference(c.Runtime.Image) {
 		if _, err := normalizeImageReference(c.Runtime.Image); err != nil {
@@ -2286,6 +2335,13 @@ func canonicalSourceConfig(source DraftSourceConfig) DraftSourceConfig {
 	if source.LocalPath != "" {
 		source.LocalPath = filepath.Clean(source.LocalPath)
 	}
+	source.ExcludePaths = append([]string{}, source.ExcludePaths...)
+	for index, path := range source.ExcludePaths {
+		if safeRelativePath(path) {
+			source.ExcludePaths[index] = filepath.Clean(path)
+		}
+	}
+	sort.Strings(source.ExcludePaths)
 	if source.Subdirectory != "" {
 		source.Subdirectory = filepath.ToSlash(filepath.Clean(source.Subdirectory))
 	}

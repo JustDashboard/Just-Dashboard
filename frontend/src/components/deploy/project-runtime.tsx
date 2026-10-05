@@ -96,6 +96,13 @@ import { RuntimePorts } from "@/components/deploy/runtime-ports"
 import { serviceProduct, volumeProduct } from "@/components/deploy/service-product"
 import { RuntimeUsage } from "@/components/deploy/runtime-usage"
 import {
+  isDockerService,
+  runtimeLogSource,
+  runtimeManagerLabel,
+  runtimeManagerUrl,
+  runtimeServiceId,
+} from "@/components/deploy/runtime-service"
+import {
   CertificateReading,
   DATABASE_ENGINE_LABELS,
   LINK_STATUS,
@@ -166,15 +173,17 @@ export function ProjectRuntime() {
     [available, runtime, releaseById],
   )
   const running = services.filter((service) => service.state === "running")
+  const dockerServices = services.filter(isDockerService)
+  const dockerRunning = dockerServices.filter((service) => service.state === "running")
   const [picked, setPicked] = useSessionState<string | undefined>(
     `deploy.${project.projectId}.runtime.service`,
     undefined,
   )
   // Only a running container has a stats socket with anything to say.
   const selected =
-    running.find((service) => service.containerId === picked) ??
-    running.find((service) => service.liveRelease) ??
-    running[0]
+    dockerRunning.find((service) => service.containerId === picked) ??
+    dockerRunning.find((service) => service.liveRelease) ??
+    dockerRunning[0]
   // The usage tiles' socket frames, so the selected service's card shows the
   // figure the tiles show rather than a poll from a few seconds before it.
   const [liveStat, setLiveStat] = useState<{ containerId: string; stats: ContainerStats }>()
@@ -186,12 +195,12 @@ export function ProjectRuntime() {
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
     60_000,
     [],
-    { enabled: services.length > 0 },
+    { enabled: dockerServices.length > 0 },
   )
   // A container a deployment has just created is not in a listing read up to
   // a minute ago, so a change in which containers the release has asks again
   // rather than leaving the newest card without its readings until then.
-  const ids = services.map((service) => service.containerId).join()
+  const ids = dockerServices.map((service) => service.containerId).join()
   const refreshContainers = containers.refresh
   const seenIds = useRef(ids)
   useEffect(() => {
@@ -201,12 +210,12 @@ export function ProjectRuntime() {
   }, [ids, refreshContainers])
   // Only this release's running containers: the endpoint inspects and reads
   // every container it is asked about, and the host may run fifty.
-  const runningIds = running.map((service) => service.containerId).join(",")
+  const runningIds = dockerRunning.map((service) => service.containerId).join(",")
   const stats = usePoll(
     (signal) => get<ContainerStats[]>("/docker/containers/stats", { ids: runningIds }, signal),
     10_000,
     [runningIds],
-    { enabled: running.length > 0 },
+    { enabled: dockerRunning.length > 0 },
   )
   const trends = usePoll(
     (signal) =>
@@ -217,7 +226,7 @@ export function ProjectRuntime() {
       ),
     120_000,
     [],
-    { enabled: running.length > 0 },
+    { enabled: dockerRunning.length > 0 },
   )
   // A lifecycle verb changes what the release engine reports, what Docker's
   // listing says and what the stats socket carries, and each is on a timer;
@@ -338,26 +347,34 @@ export function ProjectRuntime() {
     return { mount, size: volume?.size, keeper, product: keeperProduct }
   })
 
-  // The map's three lanes. The live release's containers, or every container
+  // The map's three lanes. The live release's services, or every service
   // while none of them is live; the data the release declares, once the
-  // owners have answered.
+  // owners have answered. A native service — a PM2 app, a systemd unit — is
+  // drawn as its manager and keyed as the Services list keys it, since it has
+  // no container.
   const mapped = services.some((service) => service.liveRelease)
     ? services.filter((service) => service.liveRelease)
     : services
   const reached = new Set(
     publicServices(
       mapped.map((service) => ({ ...service, liveRelease: true })),
-      (service) => publishedPorts(containerFor(service.containerId)?.exposure).length > 0,
+      (service) =>
+        isDockerService(service) &&
+        publishedPorts(containerFor(service.containerId)?.exposure).length > 0,
       (service) => Object.hasOwn(DATABASE_ENGINE_LABELS, productOf(service)),
-    ).map((service) => service.containerId),
+    ).map(runtimeServiceId),
   )
-  const mapServices: MapService[] = mapped.map((service) => ({
-    service,
-    product: productOf(service),
-    stat: statFor(service.containerId),
-    release: releaseById.get(service.releaseId)?.number,
-    reached: reached.has(service.containerId),
-  }))
+  const mapServices: MapService[] = mapped.map((service) => {
+    const docker = isDockerService(service)
+    return {
+      id: runtimeServiceId(service),
+      service,
+      product: docker ? productOf(service) : service.manager === "pm2" ? "pm2" : undefined,
+      stat: docker ? statFor(service.containerId) : undefined,
+      release: releaseById.get(service.releaseId)?.number,
+      reached: reached.has(runtimeServiceId(service)),
+    }
+  })
   const storageRead = storage?.status === "available"
   const dependenciesRead = dependencies?.status === "available"
   const mapStores: MapStore[] | undefined =
@@ -442,12 +459,22 @@ export function ProjectRuntime() {
             <EmptyState
               mark={<ProjectMark deployment={deployment} product={project.product} />}
               title="No managed runtime services"
-              description="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
+              description="The runtime owner returned no services for this environment. Refresh the project or check its manager."
               className="border-0 py-6"
             />
           ) : (
             <ChoiceList aria-label="Runtime services">
               {services.map((service, index) => {
+                if (!isDockerService(service))
+                  return (
+                    <NativeServiceCard
+                      key={`${service.releaseId}:${runtimeServiceId(service)}`}
+                      service={service}
+                      release={releaseById.get(service.releaseId)}
+                      projectId={project.projectId}
+                      index={index}
+                    />
+                  )
                 const container = containerFor(service.containerId)
                 return (
                   <ServiceCard
@@ -493,9 +520,9 @@ export function ProjectRuntime() {
           events={events}
           onStats={(frame) => setLiveStat({ containerId: selected.containerId, stats: frame })}
           picker={
-            running.length > 1 && (
+            dockerRunning.length > 1 && (
               <ServicePicker
-                services={services}
+                services={dockerServices}
                 selected={selected.containerId}
                 onSelect={setPicked}
                 productOf={productOf}
@@ -750,6 +777,57 @@ function ServicePicker({
         </SelectContent>
       </Select>
     </div>
+  )
+}
+
+function NativeServiceCard({
+  service,
+  release,
+  projectId,
+  index,
+}: {
+  service: DeploymentRuntimeService
+  release?: DeploymentRelease
+  projectId: number
+  index: number
+}) {
+  const manager = runtimeManagerLabel(service)
+  return (
+    <ChoiceRow
+      href={runtimeManagerUrl(service)}
+      verb={`Open ${service.name} in ${manager}`}
+      title={service.name}
+      description={
+        <span className="font-mono break-all">
+          {manager} · {service.resourceId || service.name}
+        </span>
+      }
+      leading={
+        <ProductLogo
+          id={service.manager === "pm2" ? "pm2" : undefined}
+          fallback={Terminal}
+          size="sm"
+        />
+      }
+      trailing={
+        <>
+          <ReleaseCell service={service} release={release} />
+          <Status state={service.state} />
+        </>
+      }
+      actions={
+        runtimeLogSource(service) && (
+          <Button variant="ghost" size="sm" asChild>
+            <Link
+              href={`/deploy/${projectId}/logs?view=output&service=${encodeURIComponent(runtimeServiceId(service))}`}
+            >
+              Logs
+            </Link>
+          </Button>
+        )
+      }
+      index={index}
+    />
   )
 }
 

@@ -2617,6 +2617,7 @@ export type DeploymentSourceMode =
   | "git_url"
   | "connected_repository"
   | "local_checkout"
+  | "local_directory"
   | "image_reference"
   | "compose_paste"
   | "compose_upload"
@@ -2626,6 +2627,9 @@ export type DeploymentSourceMode =
   | "existing_checkout"
   | "existing_container"
   | "existing_stack"
+  | "existing_pm2"
+  | "existing_systemd"
+  | "existing_process"
 
 export type DeploymentRunState =
   | "requested"
@@ -2820,6 +2824,10 @@ export type DeploymentRunEvent = {
 
 export type DeploymentRuntimeService = {
   containerId: string
+  manager?: "docker" | "pm2" | "systemd" | "process"
+  resourceId?: string
+  logSource?: string
+  pid?: number
   name: string
   releaseId: number
   liveRelease: boolean
@@ -3703,6 +3711,7 @@ export type DeploymentDraftSource = {
   ref?: string
   credentialId?: number
   localPath?: string
+  excludePaths?: string[]
   subdirectory?: string
   managedInPlace?: boolean
   includeSubmodules?: boolean
@@ -4477,6 +4486,8 @@ export type DeploymentConfiguration = {
     previewIsolation?: boolean
     image?: string
     command?: string[]
+    user?: string
+    workingDirectory?: string
     internalPort?: number
     hostPort?: number
     ports?: DeploymentPublishedPort[]
@@ -4738,6 +4749,7 @@ export type DeploymentDraft = {
     source?: DeploymentDraftSource
     detection?: DeploymentDetection
     configuration?: DeploymentConfiguration
+    adoption?: import("./workload-import").WorkloadAdoption
   }
   findings: DeploymentPreflightFinding[]
   planPreview: string

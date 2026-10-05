@@ -1,6 +1,7 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { mockProject } from "./deploy-fixture"
+import { mockWorkloadImport } from "./workload-import-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -79,6 +80,9 @@ async function mockShell(page: Page) {
       })
     }
     if (path === "/deploy/github-app/") return json(route, { configured: false, installations: [] })
+    if (path === "/deploy/import/discovery") {
+      return json(route, { checkedAt: now, items: [], silences: [] })
+    }
     if (path.startsWith("/audit")) {
       return json(route, {
         entries: [
@@ -112,6 +116,7 @@ const SURFACES = [
   "/deploy/notifications",
   "/deploy/credentials",
   "/deploy/new",
+  "/deploy/import",
   "/account",
   "/account/security",
   "/account/sessions",
@@ -668,3 +673,14 @@ function expectOneRegister(path: string, seen: { registers: string[]; panels: nu
     expect(seen.panels, `a reading page drew a flow panel on ${path}`).toBe(0)
   }
 }
+
+test("import review has one foreground, named controls and no status pills", async ({ page }) => {
+  await mockWorkloadImport(page)
+  await page.goto("/deploy/import")
+  await page.getByRole("button", { name: "Review bet-bot" }).click()
+  await expect(page.getByRole("button", { name: "Review migration" })).toBeVisible()
+  expectOneRegister("/deploy/import", await registers(page))
+  expect(await unnamedControls(page)).toEqual([])
+  expect(await filledPills(page)).toEqual([])
+  expect(await offCentreText(page)).toEqual([])
+})

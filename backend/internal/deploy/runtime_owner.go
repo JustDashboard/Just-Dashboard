@@ -54,6 +54,10 @@ type RuntimeOwner interface {
 	Stop(context.Context, ReleaseRuntime, RuntimePlanConfig, map[string]string, bool, func(BuildLog) error) (RuntimeStopEvidence, error)
 }
 
+type RuntimeCandidateScopeValidator interface {
+	ValidateCandidateScope(context.Context, CandidateRuntimeRequest) error
+}
+
 type RuntimeStorageOwner interface {
 	PersistentSources(context.Context, CandidateRuntimeRequest) ([]string, error)
 }
@@ -107,19 +111,23 @@ type RuntimeNetworkOwner interface {
 }
 
 type dockerReleaseRuntimeMetadata struct {
-	Version            int      `json:"version"`
-	Strategy           string   `json:"strategy"`
-	Image              string   `json:"image,omitempty"`
-	ImageDigest        string   `json:"imageDigest,omitempty"`
-	ConfigDigest       string   `json:"configDigest,omitempty"`
-	PortLeaseToken     string   `json:"portLeaseToken,omitempty"`
-	ProjectName        string   `json:"projectName,omitempty"`
-	ProjectDirectory   string   `json:"projectDirectory,omitempty"`
-	ComposeFiles       []string `json:"composeFiles,omitempty"`
-	OverrideFile       string   `json:"overrideFile,omitempty"`
-	PrimaryContainerID string   `json:"primaryContainerId,omitempty"`
-	ContainerIDs       []string `json:"containerIds,omitempty"`
-	VariableNames      []string `json:"variableNames"`
+	Adopted            bool               `json:"adopted,omitempty"`
+	SharedProject      bool               `json:"sharedProject,omitempty"`
+	BaselineContainers []AdoptedContainer `json:"baselineContainers,omitempty"`
+	Version            int                `json:"version"`
+	Strategy           string             `json:"strategy"`
+	Image              string             `json:"image,omitempty"`
+	ImageDigest        string             `json:"imageDigest,omitempty"`
+	ConfigDigest       string             `json:"configDigest,omitempty"`
+	PortLeaseToken     string             `json:"portLeaseToken,omitempty"`
+	ProjectName        string             `json:"projectName,omitempty"`
+	ProjectDirectory   string             `json:"projectDirectory,omitempty"`
+	ComposeFiles       []string           `json:"composeFiles,omitempty"`
+	OverrideFile       string             `json:"overrideFile,omitempty"`
+	PrimaryContainerID string             `json:"primaryContainerId,omitempty"`
+	ContainerIDs       []string           `json:"containerIds,omitempty"`
+	ServiceNames       []string           `json:"serviceNames,omitempty"`
+	VariableNames      []string           `json:"variableNames"`
 }
 
 // DockerRuntimeOwner is the only deployment adapter allowed to own runtime
@@ -274,6 +282,9 @@ func (o *DockerRuntimeOwner) StartCandidate(
 		request.Release.RunID != request.Run.ID {
 		return StartedRuntime{}, fmt.Errorf("%w: candidate release identity is inconsistent", ErrInvalidPlan)
 	}
+	if err := o.ValidateCandidateScope(ctx, request); err != nil {
+		return StartedRuntime{}, err
+	}
 	if o.networks != nil {
 		var err error
 		request.Networks, err = o.networks.NetworksForRuntime(ctx, request.Release.EnvironmentID, request.Snapshot.Plan, request.RuntimeVariables)
@@ -379,6 +390,7 @@ func (o *DockerRuntimeOwner) startContainer(
 	}
 	result, err := o.client.Create(ctx, dockerx.ContainerSpec{
 		Name: name, Image: image, Command: append([]string(nil), plan.Command...), Env: environment,
+		User: plan.User, WorkingDir: plan.WorkingDirectory,
 		Ports: ports, Mounts: mounts, Devices: devices, Labels: labels, Networks: networks,
 		NetworkMode:   map[bool]string{true: "host"}[plan.HostNetwork],
 		RestartPolicy: plan.EffectiveRestartPolicy(), Logging: dockerx.CappedLogging(), StopSignal: stopSignal,
@@ -420,6 +432,12 @@ func (o *DockerRuntimeOwner) startCompose(
 		return StartedRuntime{}, fmt.Errorf("%w: Compose runtime snapshot is incomplete", ErrArtifactMissing)
 	}
 	project := fmt.Sprintf("jd-e%d", request.Release.EnvironmentID)
+	if request.Snapshot.Plan.ComposeProjectName != "" {
+		project = request.Snapshot.Plan.ComposeProjectName
+	}
+	if err := o.ValidateCandidateScope(ctx, request); err != nil {
+		return StartedRuntime{}, err
+	}
 	override := filepath.Join(request.SourceRoot, ".just-dashboard", "release.yml")
 	content, err := renderComposeReleaseOverride(request)
 	if err != nil {
@@ -438,6 +456,15 @@ func (o *DockerRuntimeOwner) startCompose(
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		Files: append([]string(nil), resolved.Files...), OverrideFile: override,
 		Environment: request.RuntimeVariables,
+		KeepOrphans: request.Snapshot.Plan.ComposeProjectName != "",
+	}
+	if len(request.Snapshot.ComposeBaseline) > 0 {
+		if err := configureComposeBaseline(&spec, request.Snapshot.ComposeBaseline); err != nil {
+			return StartedRuntime{}, err
+		}
+		if err := o.removeOwnedBaselineExtras(ctx, project, request.Release.EnvironmentID, request.Snapshot.ComposeBaseline, request.Release.ID, request.Release.PredecessorReleaseID); err != nil {
+			return StartedRuntime{}, err
+		}
 	}
 	if err := o.client.RunComposeRelease(ctx, spec, dockerx.ComposeReleaseUp, runtimeGrace(request.Snapshot.Plan), composeBuildEmitter(emit)); err != nil {
 		return StartedRuntime{}, err
@@ -453,6 +480,11 @@ func (o *DockerRuntimeOwner) startCompose(
 	})
 	if err != nil {
 		return StartedRuntime{}, err
+	}
+	if len(request.Snapshot.ComposeBaseline) > 0 {
+		if err := o.startComposeBaselineContainers(ctx, containers, request.Snapshot.ComposeBaseline, ReleaseRuntime{EnvironmentID: request.Release.EnvironmentID, ReleaseID: request.Release.ID}); err != nil {
+			return StartedRuntime{}, err
+		}
 	}
 	containerIDs, primaryID := composeRuntimeIdentities(containers, request.Release.EnvironmentID, request.Release.ID, project, primaryService)
 	if primaryID == "" {
@@ -475,10 +507,19 @@ func (o *DockerRuntimeOwner) startCompose(
 	}
 	sort.Strings(variableNames)
 	metadata := dockerReleaseRuntimeMetadata{
-		Version: 1, Strategy: string(request.Snapshot.Plan.Strategy), PortLeaseToken: request.PortLeaseToken,
+		SharedProject: request.Snapshot.Plan.ComposeProjectName != "",
+		Version:       1, Strategy: string(request.Snapshot.Plan.Strategy), PortLeaseToken: request.PortLeaseToken,
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		ComposeFiles: append([]string(nil), resolved.Files...), OverrideFile: override,
 		PrimaryContainerID: primaryID, ContainerIDs: containerIDs, VariableNames: variableNames,
+	}
+	for _, service := range resolved.Services {
+		metadata.ServiceNames = append(metadata.ServiceNames, service.Plan.Name)
+	}
+	sort.Strings(metadata.ServiceNames)
+	if len(request.Snapshot.ComposeBaseline) > 0 {
+		metadata.Adopted = true
+		metadata.BaselineContainers = updatedComposeBaseline(containers, request.Snapshot.ComposeBaseline)
 	}
 	return StartedRuntime{
 		Input: ReleaseRuntimeInput{
@@ -668,6 +709,18 @@ func (o *DockerRuntimeOwner) StartExisting(
 		if err != nil {
 			return err
 		}
+		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
+			return o.restoreComposeBaseline(ctx, runtime, metadata, variables, emit)
+		}
+		if metadata.SharedProject {
+			containers, err := o.client.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": metadata.ProjectName})
+			if err != nil {
+				return err
+			}
+			if err := sharedExistingPopulationScope(containers, metadata, runtime); err != nil {
+				return err
+			}
+		}
 		return o.client.RunComposeRelease(ctx, composeSpecFromMetadata(metadata, variables),
 			dockerx.ComposeReleaseUp, 0, composeBuildEmitter(emit))
 	default:
@@ -720,6 +773,16 @@ func (o *DockerRuntimeOwner) Stop(
 			err = decodeErr
 			break
 		}
+		if metadata.Adopted && len(metadata.BaselineContainers) > 0 {
+			err = o.stopComposeBaseline(ctx, runtime, metadata, grace, remove)
+			evidence.Removed = remove && err == nil
+			break
+		}
+		if metadata.SharedProject {
+			err = o.stopSharedComposeRuntime(ctx, runtime, metadata, grace, remove)
+			evidence.Removed = remove && err == nil
+			break
+		}
 		spec := composeSpecFromMetadata(metadata, variables)
 		action := dockerx.ComposeReleaseStop
 		if remove {
@@ -762,7 +825,7 @@ func composeSpecFromMetadata(metadata dockerReleaseRuntimeMetadata, variables ma
 	return dockerx.ComposeReleaseSpec{
 		ProjectName: metadata.ProjectName, ProjectDirectory: metadata.ProjectDirectory,
 		Files: append([]string(nil), metadata.ComposeFiles...), OverrideFile: metadata.OverrideFile,
-		Environment: variables,
+		Environment: variables, KeepOrphans: metadata.SharedProject,
 	}
 }
 

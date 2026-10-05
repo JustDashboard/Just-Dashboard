@@ -100,6 +100,10 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				r.Method(http.MethodPost, "/drafts", s.handle(s.handleDeploymentDraftCreate))
 				r.Method(http.MethodPost, "/drafts/{draft}/commit", s.handle(s.handleDeploymentDraftCommit))
 				r.Method(http.MethodPost, "/import/preview", s.handle(s.handleDeploymentImportPreview))
+				r.Method(http.MethodGet, "/import/discovery", s.handle(s.handleDeploymentWorkloadDiscovery))
+				r.Method(http.MethodPost, "/import/inspect", s.handle(s.handleDeploymentWorkloadInspect))
+				r.Method(http.MethodPost, "/import/recover", s.handle(s.handleDeploymentWorkloadRecover))
+				r.Method(http.MethodPost, "/import/register", s.handle(s.handleDeploymentWorkloadRegister))
 				r.Method(http.MethodPost, "/game/import/preview", s.handle(s.handleGameImportPreview))
 				r.Method(http.MethodPost, "/import/adopt", s.handle(s.handleDeploymentImportAdopt))
 				r.Method(http.MethodPost, "/{id}/unarchive", s.handle(s.handleDeploymentUnarchive))
@@ -258,6 +262,7 @@ func (s *Server) handleDeployList(w http.ResponseWriter, r *http.Request) error 
 		if err != nil {
 			return httpx.Internal(err)
 		}
+		s.refreshImportedDeployments(r.Context(), fleet.Deployments)
 		httpx.JSON(w, http.StatusOK, fleet)
 		return nil
 	}
@@ -316,10 +321,10 @@ func (s *Server) handleDeployGet(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapDeployError(err)
 	}
-	var runtimeOwner deploy.RuntimeObserver
-	if s.modules.docker != nil {
-		runtimeOwner = s.modules.docker
-	}
+	runtimeOwner := s.deploymentRuntimeObserver()
+	imported := []deploy.DeploymentSummary{*summary}
+	s.refreshImportedDeployments(r.Context(), imported)
+	*summary = imported[0]
 	runtime := deploy.ObserveRuntimeServices(r.Context(), runtimeOwner, summary.EnvironmentID, summary.LiveReleaseID)
 	httpx.JSON(w, http.StatusOK, map[string]any{
 		"project": p, "running": running, "deployment": summary, "runtime": runtime,
@@ -829,6 +834,16 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 	if target.BuildMethod == deploy.BuildLegacyCompose {
 		return nil, fmt.Errorf("%w: normalized action requires a normalized deployment", deploy.ErrInvalidPlan)
 	}
+	var sourceKind, sourceConfig string
+	if err := s.Store.DB.QueryRowContext(ctx,
+		`SELECT kind, config_json FROM deploy_sources WHERE environment_id = ? AND revision = ?`,
+		environmentID, target.DesiredRevision).Scan(&sourceKind, &sourceConfig); err != nil {
+		return nil, err
+	}
+	var importedSource deploy.DraftSourceConfig
+	if sourceKind == string(deploy.SourceImport) && (json.Unmarshal([]byte(sourceConfig), &importedSource) != nil || importedSource.Mode != deploy.SourceModeExistingCheckout) {
+		return nil, fmt.Errorf("%w: imported workloads stay with their original manager; open that manager to change or restart them", deploy.ErrInvalidPlan)
+	}
 	if operation == deploy.OperationPreviewRemove && (target.Kind != deploy.EnvironmentPreview || trigger != deploy.TriggerPreview) {
 		return nil, fmt.Errorf("%w: preview cleanup requires an authorized preview lifecycle event", deploy.ErrInvalidPlan)
 	}
@@ -865,11 +880,7 @@ func (s *Server) enqueueNormalizedDeploymentAtSource(
 			return nil, deploy.ErrAlreadyStopped
 		}
 		if operation == deploy.OperationStart && runtime.State != "stopped" {
-			var observer deploy.RuntimeObserver
-			if s.modules.docker != nil {
-				observer = s.modules.docker
-			}
-			if runtime.State != "live" || !deploy.ReleaseRuntimeDown(ctx, observer, *runtime) {
+			if runtime.State != "live" || !deploy.ReleaseRuntimeDown(ctx, s.deploymentRuntimeObserver(), *runtime) {
 				return nil, deploy.ErrNotStopped
 			}
 		}
@@ -1104,10 +1115,7 @@ func (s *Server) handleDeploymentRunLogs(w http.ResponseWriter, r *http.Request)
 	if snapshot.Run.ProjectID != projectID {
 		return mapDeployError(deploy.ErrRunNotFound)
 	}
-	var owner deploy.RuntimeObserver
-	if s.modules.docker != nil {
-		owner = s.modules.docker
-	}
+	owner := s.deploymentRuntimeObserver()
 	httpx.JSON(w, http.StatusOK, deploy.ObserveRunLogs(r.Context(), owner, *snapshot))
 	return nil
 }
@@ -1143,6 +1151,9 @@ func (s *Server) handleDeploymentRunRetry(w http.ResponseWriter, r *http.Request
 		if err == nil {
 			err = deploy.ErrRunNotFound
 		}
+		return mapDeployError(err)
+	}
+	if err := s.requireManagedDeploymentAutomation(r.Context(), projectID, prior.EnvironmentID); err != nil {
 		return mapDeployError(err)
 	}
 	p := httpx.MustPrincipal(r)
@@ -1412,6 +1423,9 @@ func (s *Server) enqueueLegacyDeployment(
 ) (*deploy.EngineRun, error) {
 	environmentID, revision, err := s.modules.deployRuns.ProductionEnvironment(ctx, project.ID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireManagedDeploymentAutomation(ctx, project.ID, environmentID); err != nil {
 		return nil, err
 	}
 	metadata, err := json.Marshal(map[string]any{

@@ -82,6 +82,8 @@ func (a *HostSourceAnalyzer) Analyze(ctx context.Context, source DraftSourceConf
 		return a.analyzeRemoteGit(ctx, source)
 	case SourceModeLocalCheckout, SourceModeExistingCheckout:
 		return a.analyzeLocal(ctx, source)
+	case SourceModeLocalDirectory:
+		return a.analyzeLocalDirectory(ctx, source)
 	case SourceModeComposeLocal:
 		return a.analyzeLocalCompose(ctx, source)
 	case SourceModeComposePaste, SourceModeComposeUpload:

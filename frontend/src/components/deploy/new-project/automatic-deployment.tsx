@@ -31,17 +31,19 @@ export function AutomaticDeployment({
   branch,
   policy,
   onChange,
+  storageKey = "deploy.new.configure.gitPolicy",
 }: {
   branch?: string
   policy: DraftGitPolicy
   onChange: (policy: DraftGitPolicy) => void
+  storageKey?: string
 }) {
   // The text is what is edited and the lines are what is committed, kept
   // apart the way the Automation page keeps them: a field that re-renders
   // itself from `filter(Boolean)` refuses the blank line you have to type to
   // reach the second pattern.
   const [patterns, setPatterns] = useSessionState(
-    "deploy.new.configure.gitPolicy.include",
+    `${storageKey}.include`,
     policy.watchInclude.join("\n"),
   )
   return (

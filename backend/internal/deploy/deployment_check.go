@@ -37,9 +37,10 @@ type deploymentPlan struct {
 	Evidence       StoredBuildEvidence
 	BuildVariables []string
 
-	ProxySite   string
-	RuntimeID   string
-	RuntimeKind string
+	ProxySite       string
+	RuntimeID       string
+	RuntimeKind     string
+	RuntimeMetadata json.RawMessage
 }
 
 // sourceReading is what reading the commit's tree produced.
@@ -183,6 +184,7 @@ func evaluateDeployment(
 	request := preflightObservationRequest(draft, configuration)
 	request.ExistingProxySite = plan.ProxySite
 	request.ExistingRuntimeID, request.ExistingRuntimeKind = plan.RuntimeID, plan.RuntimeKind
+	request.ExistingRuntimeMetadata = plan.RuntimeMetadata
 	observation, err := observer.Observe(ctx, request)
 	if err != nil {
 		return deploymentEvaluation{}, err
@@ -391,7 +393,7 @@ func NewDeploymentChecker(
 	runs *OrchestrationStore,
 	planning *PlanningStore,
 	sources *HostSourceAnalyzer,
-	observer *HostPreflightObserver,
+	observer PreflightObserver,
 ) *DeploymentChecker {
 	checker := &DeploymentChecker{
 		runs: runs, planning: planning,
@@ -403,7 +405,16 @@ func NewDeploymentChecker(
 	if sources != nil {
 		checker.sources = sources
 	}
-	if observer != nil {
+	switch typed := observer.(type) {
+	case *HostPreflightObserver:
+		if typed != nil {
+			checker.observer = typed
+		}
+	case *NativePreflightObserver:
+		if typed != nil {
+			checker.observer = typed
+		}
+	default:
 		checker.observer = observer
 	}
 	return checker
@@ -566,6 +577,7 @@ func (c *DeploymentChecker) desiredPlan(ctx context.Context, projectID, environm
 		}
 		if runtime != nil {
 			plan.RuntimeID, plan.RuntimeKind = runtime.RuntimeID, runtime.Kind
+			plan.RuntimeMetadata = runtime.Metadata
 		}
 	case !errors.Is(err, ErrArtifactMissing):
 		return nil, 0, err

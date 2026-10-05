@@ -23,8 +23,10 @@ import { CertificateReading, ROUTE_LABEL, ROUTE_TONE } from "@/components/deploy
 
 /** A live container of the release, as the map draws it. */
 export type MapService = {
+  /** The container's id, or a native service's own (`runtimeServiceId`). */
+  id: string
   service: DeploymentRuntimeService
-  product: string
+  product?: string
   stat?: ContainerStats
   /** The release's number, when the list has brought it. */
   release?: number
@@ -102,8 +104,8 @@ export function RuntimeMap({
   const container = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
   const reached = services.filter((one) => one.reached)
-  const fallbackOwner = reached[0]?.service.containerId
-  const byId = new Map(services.map((one) => [one.service.containerId, one]))
+  const fallbackOwner = reached[0]?.id
+  const byId = new Map(services.map((one) => [one.id, one]))
 
   const edges: Edge[] = []
   for (const domain of domains ?? []) {
@@ -111,7 +113,7 @@ export function RuntimeMap({
       const up = target.service.state === "running"
       edges.push({
         from: `d:${domain.hostname}`,
-        to: `s:${target.service.containerId}`,
+        to: `s:${target.id}`,
         tone: !up || ROUTE_TONE[domain.route] === "danger" ? "danger" : "default",
         dashed: domain.route === "missing" || domain.route === "unavailable",
         carries: up && domain.route === "served",
@@ -136,8 +138,8 @@ export function RuntimeMap({
   // that changes nothing does not redraw every wire.
   const ids = [
     ...(domains ?? []).map((domain) => `d:${domain.hostname}`),
-    ...services.map((one) => `s:${one.service.containerId}`),
-    ...services.map((one) => `p:${one.service.containerId}`),
+    ...services.map((one) => `s:${one.id}`),
+    ...services.map((one) => `p:${one.id}`),
     ...(stores ?? []).map((store) => `t:${store.key}`),
   ].join("\n")
   const refs = useMemo(() => {
@@ -273,7 +275,7 @@ export function RuntimeMap({
           <Lane title="Services" count={services.length}>
             {services.map((one) => {
               const { service, stat } = one
-              const id = `s:${service.containerId}`
+              const id = `s:${one.id}`
               const up = service.state === "running"
               const readings =
                 up && stat
@@ -286,7 +288,7 @@ export function RuntimeMap({
                   : undefined
               return (
                 <li
-                  key={service.containerId}
+                  key={one.id}
                   {...watch(id)}
                   className={cn("min-w-0 transition-opacity", !related(id) && "opacity-40")}
                 >
@@ -315,7 +317,7 @@ export function RuntimeMap({
                       }
                       title={
                         <span className="block truncate">
-                          {service.name || service.containerId.slice(0, 12)}
+                          {service.name || one.id.slice(0, 12)}
                         </span>
                       }
                       hint={
@@ -330,7 +332,7 @@ export function RuntimeMap({
                     {/* The port a wire to its data leaves from, at the lane's edge
                         so a column of them reads as one. */}
                     <span
-                      ref={refFor(`p:${service.containerId}`)}
+                      ref={refFor(`p:${one.id}`)}
                       aria-hidden
                       className={cn(
                         "relative z-10 hidden size-1.5 shrink-0 rounded-full lg:block",

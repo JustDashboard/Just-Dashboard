@@ -40,7 +40,7 @@ type SourceInspector interface {
 func sourceHasTree(source DraftSourceConfig) bool {
 	switch source.Mode {
 	case SourceModeGitURL, SourceModeConnectedRepository, SourceModeComposeGit,
-		SourceModeLocalCheckout, SourceModeExistingCheckout:
+		SourceModeLocalCheckout, SourceModeExistingCheckout, SourceModeLocalDirectory:
 		return true
 	}
 	return false
@@ -58,6 +58,9 @@ func (a *HostSourceAnalyzer) InspectRevision(
 	}
 	if err := source.Validate(); err != nil {
 		return err
+	}
+	if source.Mode == SourceModeLocalDirectory {
+		return a.inspectLocalDirectory(ctx, source, identity, inspect)
 	}
 	if IsRemoteGitSource(source) {
 		return a.inspectRemoteGit(ctx, source, identity.Revision, inspect)

@@ -119,8 +119,14 @@ only renderer/executor/validation authority for their feature.
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
-  is re-detected rather than refused. `?mode=advanced` opens Advanced, and existing workloads adopt
-  through `/deploy/import/adopt` without a run. For a Git source the commit carries a `gitPolicy`
+  is re-detected rather than refused. `?mode=advanced` opens Advanced, and legacy existing-checkout
+  imports adopt through `/deploy/import/adopt` without a run. Existing runtime workloads use the
+  discovery/recovery flow at `/deploy/import`, then normal Configure/Variables/Review.
+  `/deploy/import/recover` creates a server-owned draft; `/deploy/import/adopt` records a pinned
+  original live baseline and reviewed desired plan without enqueueing a run. See
+  [existing workload adoption](existing-workloads.md) for translation and compensation boundaries.
+  `/deploy/import/register` remains the legacy observation-only endpoint.
+  For a Git source the commit carries a `gitPolicy`
   (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
   `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so
   every caller that does not ask keeps the defaults in `gitDeploymentPolicy` exactly as they were.
@@ -937,7 +943,13 @@ only renderer/executor/validation authority for their feature.
   artifact existence. See [restore verification](restore-verification.md).
   Coverage resolves named volumes and every writable merged Compose service mount, verifies the immutable
   manifest and artifact checksum, and rejects filtered or uncovered data. See [backup coverage](backup-coverage.md).
-- Import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
+- Existing-workload discovery and managed adoption are described in
+  [existing-workloads.md](existing-workloads.md). A server-recovered recipe, independently sealed
+  original/desired inputs, immutable artifacts and pinned live baseline commit atomically without
+  enqueueing a run. Initial observation uses exact original Docker IDs or verified native managers;
+  normal settings and lifecycle apply afterward. Explicit Compose scoping reviews excluded absent
+  declarations. Legacy observation-only records retain their execution/conversion guards.
+- Legacy checkout import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
   exact acknowledgement of unsupported observations. It records the external resource as observed and
   does not start, stop, reset or claim it. Archiving disables deployment triggers, the project's schedules
   and visibility; it never removes runtime or data. Schedules are disabled directly (`ClaimDueSchedules`
@@ -1425,14 +1437,22 @@ only renderer/executor/validation authority for their feature.
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the
-  source and the build/runtime/dependency/check rows verbatim and changes exactly three things: domains are
+  source and the build/runtime/dependency/check rows with these isolation changes: domains are
   dropped (a hostname belongs to one project), variables are flattened to name/sensitivity/scopes with every
   value cleared and `required` set (a secret's plaintext is never available to copy, and a reference names
   something scoped to the source project), and a managed Docker volume's literal name is re-derived with the
   same `<slug>-<hash>` shape a blueprint's own volumes already get (`blueprintVolumePrefix`, keyed on the new
   name and the old literal volume name so two mounts never collide) — committing the duplicate unchanged
-  would otherwise hand it the source project's own live volume. A linked or observed dependency, and a
-  bind-path mount, are left exactly as saved: nothing about their identity is owned by lifecycle re-derivation.
+  would otherwise hand it the source project's own live volume. Runtime ownership dependencies are
+  omitted and `composeProjectName` is cleared: a duplicate has no authority over the original runtime
+  or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
+  before a draft is created. Compose sources additionally need inspectable files without fixed
+  container names, external/fixed-name networks, inherited runtime namespaces, external links or
+  shared writable volumes. Project-scoped Compose volumes remain supported, including declarations
+  across override files; read-only host mounts and read-only external volumes may remain linked.
+  Compose aliases/merge keys and unsupported inclusions require a flattened independent copy for
+  review. The refusal explains which independent names, networks or storage must be configured;
+  duplication never rewrites or takes over the original resources.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
   are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
 

@@ -740,7 +740,9 @@ set another. A 12px `Status` or `Tag` inside it rests on that box's baseline, th
 button beside it: the database strip's "connected", a deployment's route and certificate columns,
 a container card's state, a release note's kind and the identity line's aside all shipped that way.
 A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items-start` for a state
-over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
+over its detail), or it carries its content's own type size and line height. The Audit header's
+small request count uses `leading-none` so its animated inline number does not inherit a larger
+line box and shift the count off the header's centre line. A glyph beside a title is nudged by
 the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
 pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
 field is 44px on a phone and the button is not. A view strip's tabs carry `pt-0.5` against their
@@ -1933,6 +1935,7 @@ the reader through it.
 | Host Overview, metrics, Docker, Security, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
+| `/deploy/import` — an existing workload | **Flow** | Discover → recover settings → review migration: inspect something already on this server, recover a normal deployment draft, review settings and server-issued warnings in `/deploy/new`, then adopt its live baseline without starting a deployment run. |
 | Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | A database's Data, Query, Schema, Diagram and Logs | Reading, as a workbench | The reader works rather than scrolls, so the page is one frame held to the window (`<Page fill>` through `SectionFrame`, which takes the fact from the engine registry). A workbench is a layout of this register (§2), not a third one: same grounds, same type ladder, no flow panel. |
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's only flow page. |
