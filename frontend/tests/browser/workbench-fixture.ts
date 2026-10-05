@@ -4,8 +4,8 @@ import type { Page, Route } from "@playwright/test"
  * A server with three backup jobs (one failing, one paused), a coverage report
  * across every kind of thing, the containers the volumes and stacks are drawn
  * from, and four terminal sessions each running something different beside a
- * repository with staged, unstaged, untracked and deleted work. Shared by the
- * Backups and terminal Diff specs.
+ * repository with staged, unstaged, untracked and deleted work, its branches
+ * and its open pull requests. Shared by the Backups and terminal Git specs.
  */
 
 const now = Date.now()
@@ -370,10 +370,63 @@ new file mode 100644
 +}
 +
 `
+const repoPath = "/home/ubuntu/Just-Dashboard"
+const branch = (name: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  current: false,
+  remote: false,
+  ahead: 0,
+  behind: 0,
+  subject: `Work on ${name}`,
+  at: iso(now - 2 * H),
+  ...extra,
+})
+const branches = [
+  branch("patch/0.7.0", { current: true, ahead: 2, upstream: "origin/patch/0.7.0" }),
+  branch("main", { upstream: "origin/main", behind: 3 }),
+  branch("feat/backup-cards", { worktree: "/home/ubuntu/Just-Dashboard-backups" }),
+  branch("origin/main", { remote: true, remoteName: "origin", local: "main" }),
+  branch("origin/fix/terminal-paste", {
+    remote: true,
+    remoteName: "origin",
+    local: "fix/terminal-paste",
+  }),
+]
+const pull = (
+  number: number,
+  title: string,
+  head: string,
+  extra: Record<string, unknown> = {},
+) => ({
+  number,
+  title,
+  head,
+  base: "patch/0.7.0",
+  url: `https://github.com/JustDashboard/Just-Dashboard/pull/${number}`,
+  state: "open",
+  draft: false,
+  author: "wayy",
+  comments: 0,
+  updatedAt: iso(now - number * 60_000),
+  ...extra,
+})
+const pulls = [
+  pull(146, "Redesign the backups page around job cards", "patch/0.7.0", { checks: "success" }),
+  pull(144, "Fix pasting images into split panes", "fix/terminal-paste", { checks: "pending" }),
+  pull(141, "Draft: stream deploy logs over one socket", "feat/deploy-stream", {
+    draft: true,
+    checks: "failure",
+  }),
+]
+const readme = "# Just Dashboard\n\nA control panel for one Linux server.\n"
+
+export type WorkbenchMutation = { method: string; path: string; query: string; body: unknown }
+
 async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
 export async function mockWorkbench(page: Page, tab = "git") {
+  const mutations: WorkbenchMutation[] = []
   await page.addInitScript((tab) => {
     localStorage.setItem(
       "jd.view.state",
@@ -383,6 +436,15 @@ export async function mockWorkbench(page: Page, tab = "git") {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")
+    const method = route.request().method()
+    if (method !== "GET") {
+      mutations.push({
+        method,
+        path,
+        query: url.searchParams.toString(),
+        body: route.request().postDataJSON(),
+      })
+    }
     if (path === "/auth/session") return json(route, user)
     if (path === "/backups/") return json(route, jobs)
     if (path === "/backups/resources") return json(route, resources)
@@ -420,8 +482,45 @@ export async function mockWorkbench(page: Page, tab = "git") {
             : diff,
       })
     }
+    if (path === "/git/branches") return json(route, branches)
+    if (path === "/git/checkout")
+      return json(route, { command: "git checkout", output: "Switched", ok: true })
+    if (path === "/git/github/")
+      return json(route, { available: true, account: { loggedIn: true, login: "wayy" } })
+    if (path === "/git/github/pulls") return json(route, pulls)
+    if (/^\/git\/github\/pulls\/\d+\/checkout$/.test(path)) return json(route, { ok: true })
     if (path === "/files/list" || path === "/files/")
-      return json(route, { path: "/home/ubuntu/Just-Dashboard", entries: [] })
+      return json(route, {
+        path: repoPath,
+        parent: "/home/ubuntu",
+        roots: ["/"],
+        entries: [
+          {
+            name: "README.md",
+            path: `${repoPath}/README.md`,
+            size: readme.length,
+            mode: "-rw-r--r--",
+            modeOctal: "0644",
+            isDir: false,
+            isSymlink: false,
+            modified: iso(now - H),
+            owner: "ubuntu",
+            group: "ubuntu",
+            uid: 1000,
+            gid: 1000,
+          },
+        ],
+      })
+    if (path === "/files/read")
+      return json(route, {
+        path: `${repoPath}/README.md`,
+        content: readme,
+        size: readme.length,
+        language: "markdown",
+        binary: false,
+        modeOctal: "0644",
+      })
+    if (path === "/files/write") return json(route, { ok: true })
     if (path === "/dashboard/update")
       return json(route, {
         version: "0.7.0",
@@ -442,4 +541,5 @@ export async function mockWorkbench(page: Page, tab = "git") {
       ),
     )
   })
+  return { mutations }
 }

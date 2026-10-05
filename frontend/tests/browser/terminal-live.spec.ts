@@ -231,6 +231,9 @@ test("native PTYs inherit the live directory and resize every focused split", as
     await expect.poll(() => streams.get(source)?.output).toContain("Command: jd-resize-tui")
     await assertNativeGrids(page, streams)
 
+    // The source pane is holding the resize TUI, so each agent gets a window
+    // of its own rather than being typed into the program as its input.
+    await expect(page.locator(`[data-window="${source}"]`)).toHaveAttribute("data-busy", "true")
     for (const agent of ["codex", "claude"] as const) {
       if (agent === "claude") {
         await page.locator(`[data-window="${source}"]`).getByRole("button").first().click()

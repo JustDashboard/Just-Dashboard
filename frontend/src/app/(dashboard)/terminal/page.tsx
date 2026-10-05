@@ -46,6 +46,7 @@ import { XtermPane, type XtermActions } from "@/components/xterm-pane"
 import { SplitDivider } from "@/components/terminal/split-divider"
 import { SplitDropOverlay } from "@/components/terminal/split-drop-overlay"
 import { ProgramMark, ActivityMark } from "@/components/terminal/activity-mark"
+import { ProductGlyph } from "@/components/product-logo"
 import { windowLabel, windowProgram, windowActivity } from "@/lib/terminal-activity"
 import {
   canSplit,
@@ -90,6 +91,11 @@ type TerminalList = {
   login: { user: string; home: string; shell: string; error?: string }
   sessions: TerminalWorkspace[]
 }
+
+const AGENTS = {
+  codex: { name: "Codex", command: "codex --yolo", logo: "openai" },
+  claude: { name: "Claude", command: "claude --dangerously-skip-permissions", logo: "claude" },
+} as const
 
 const RAIL = { min: 208, max: 480, base: 288 }
 const TOOLS = { min: 256, max: 640, base: 336 }
@@ -478,6 +484,17 @@ export default function TerminalPage() {
       setCreating(false)
     }
   }
+  // An agent starts in the shell you are looking at, as if you had typed it
+  // there. Only a terminal already holding a program gets a window of its own:
+  // typed into an editor or another agent, the command would be its input.
+  const launchAgent = (agent: keyof typeof AGENTS) => {
+    if (!activeWindow) return
+    if (windowActivity(activeWindow, activity[activeWindow.id]).busy) {
+      void openWindow(undefined, agent)
+      return
+    }
+    actionsRef.current?.run(AGENTS[agent].command)
+  }
   const changeSplit = (id: string, ratio: number, commit: boolean) => {
     if (!active) return
     const current = draftLayoutsRef.current[active] ?? groups
@@ -680,24 +697,24 @@ export default function TerminalPage() {
         </span>
       )}
       <div className="flex shrink-0 items-center gap-0.5">
-        <Button
-          variant="ghost"
-          size="xs"
-          disabled={!activeWindow || creating || !data.persistent}
-          title="Open codex --yolo in the focused terminal's current directory"
-          onClick={() => void openWindow(undefined, "codex")}
-        >
-          Codex
-        </Button>
-        <Button
-          variant="ghost"
-          size="xs"
-          disabled={!activeWindow || creating || !data.persistent}
-          title="Open claude --dangerously-skip-permissions in the focused terminal's current directory"
-          onClick={() => void openWindow(undefined, "claude")}
-        >
-          Claude
-        </Button>
+        {(Object.keys(AGENTS) as (keyof typeof AGENTS)[]).map((agent) => (
+          <Tooltip key={agent}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={AGENTS[agent].name}
+                disabled={!activeWindow || creating}
+                onClick={() => launchAgent(agent)}
+              >
+                <ProductGlyph id={AGENTS[agent].logo} className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              Run <span className="font-mono">{AGENTS[agent].command}</span> in this terminal
+            </TooltipContent>
+          </Tooltip>
+        ))}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

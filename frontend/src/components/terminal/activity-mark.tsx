@@ -48,7 +48,7 @@ export function ActivityMark({
  * The program a terminal is running, as the product it is — Claude, Neovim,
  * Node, psql — in a slot the width of the line's height, so a column of tabs
  * and rows says what each is doing before any of them is read. A shell at its
- * prompt, or a program with no mark of its own (`htop`, Codex, OpenCode), is
+ * prompt, or a program with no mark of its own (`htop`, OpenCode), is
  * drawn as a terminal: left empty, an agent the list had no logo for read as
  * a window with nothing in it, and a tab with no mark as a different kind of tab.
  */

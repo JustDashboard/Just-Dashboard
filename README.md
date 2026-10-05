@@ -201,11 +201,13 @@ share one window tab. Each pane's **Open as separate window** button returns it 
 restarting its shell. Drag a window tab onto a terminal to split at the hovered edge; a live overlay
 previews the placement. The Split terminal menu can also move an existing window into a split. Windows
 retain their screens when switching tabs or sessions, and each browser remembers its split layout.
-The Codex and Claude buttons open a fresh terminal in the focused pane's current directory and run
-`codex --yolo` or `claude --dangerously-skip-permissions`. The tools must already be installed for
-the terminal account; automatic launch supports Bash and Zsh. Search remains available with its
+The Codex and Claude buttons run `codex --yolo` or `claude --dangerously-skip-permissions` in the
+focused terminal, in whatever directory its shell is in. If that terminal is already running a
+program, the agent opens in a new window there instead. The tools must already be installed for the
+terminal account; the new-window launch supports Bash and Zsh. Search remains available with its
 keyboard shortcut.
-Files and Diff sit beside the shell.
+Files and Git sit beside the shell: the Git tab shows what changed, switches branch and checks out an
+open pull request to try it. An open file shows Save only once it has been edited.
 
 ### Boards
 

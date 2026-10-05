@@ -571,6 +571,7 @@ const PROGRAMS: Record<string, string> = {
   "cypher-shell": "neo4j",
   nats: "nats",
   claude: "claude",
+  codex: "openai",
   kubectl: "kubernetes",
   k9s: "kubernetes",
   helm: "kubernetes",

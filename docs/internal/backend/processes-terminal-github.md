@@ -203,7 +203,9 @@ a busy foreground program or a nested account shell still reports its own direct
 Foreground process liveness comes from its cwd symlink, rather than its command line: an empty argv
 during exec, or a deliberate empty argv[0], does not redirect lookup back to the parent shell.
 The optional `agent` is a closed vocabulary: `codex` launches `codex --yolo`, and `claude` launches
-`claude --dangerously-skip-permissions`, always in a newly held PTY. Unknown agents and foreign or
+`claude --dangerously-skip-permissions`, always in a newly held PTY. (The terminal page asks for this
+only when the focused terminal is holding a program; at a prompt it types the command into that
+shell instead.) Unknown agents and foreign or
 missing source windows return HTTP 400 without opening anything. An unavailable source directory
 returns HTTP 503 for an agent launch instead of silently running the tool somewhere else.
 

@@ -16,29 +16,29 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
 import { DiffView } from "@/components/files/diff-view"
-import { DiffTools } from "@/components/terminal/diff-tools"
-import { Tag } from "@/components/tag"
+import { GitTools } from "@/components/terminal/git-tools"
 import { ChipCount, tabClasses } from "@/components/tabs"
 import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay = { kind: "file"; path: string } | null
 
-type Tab = "files" | "diff"
+type Tab = "files" | "git"
 
 /**
- * The Files + Diff companion for the terminal.
+ * The Files + Git companion for the terminal.
  *
  * It owns the git detection and status polls once for both tabs — the tree
- * borrows the status to badge changed files, and the diff tab reads it as the
+ * borrows the status to badge changed files, and the git tab reads it as the
  * list of what changed — and it owns every surface that would otherwise be a
  * portalled dialog: the file viewer/editor and the confirm. They are drawn
  * *inside* this panel so the whole thing keeps working when the workspace is
  * in the browser's real fullscreen, where a portal to document.body renders
  * outside the fullscreen element and vanishes.
  *
- * The second tab was a git client — stage, commit, push, history, branches —
- * and is now only the diff: beside a shell the question is what the work is,
- * and the Git page is the client, one click away from the tab's own link.
+ * The second tab is the repository the shell is in: its diff first, then the
+ * two moves made from a shell's directory — switching branch and checking out
+ * a pull request to try it. Staging, committing and the rest stay on the Git
+ * page, one click away from the tab's own link.
  */
 export function WorkspaceTools({
   dir,
@@ -54,9 +54,9 @@ export function WorkspaceTools({
   const { can } = useAuth()
   // Which half of the companion you had open, kept across a navigation:
   // somebody working out of git is on that tab all afternoon.
-  const [stored, setTab] = useViewState<Tab | "git">("terminal.tools.tab", "files")
-  // A browser that last had the old Git tab open comes back to what replaced it.
-  const tab: Tab = stored === "git" ? "diff" : stored
+  const [stored, setTab] = useViewState<Tab | "diff">("terminal.tools.tab", "files")
+  // A browser that last had the Diff tab open comes back to the tab it grew into.
+  const tab: Tab = stored === "diff" ? "git" : stored
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
 
@@ -115,12 +115,14 @@ export function WorkspaceTools({
 
   return (
     <Pane flush className="relative flex-1">
-      {/* The two halves are section tabs: the brand underline says which one
+      {/* The two halves are section tabs that split the strip between them:
+          two small words at the left edge of a 336px column read as a label
+          rather than as the panel's switch. The brand underline says which one
           you are in, the way it does under the top bar. No glyph beside the
           word — a folder in front of "Files" is the label twice — and the one
           fact worth carrying across is the count of changed files, which is
           what decides whether the git half needs a visit. */}
-      <PaneHeader className="h-10 gap-0 px-1 py-0">
+      <PaneHeader className="h-10 gap-0 p-0">
         <TabButton
           active={tab === "files"}
           onClick={() => showTab("files")}
@@ -129,11 +131,11 @@ export function WorkspaceTools({
           Files
         </TabButton>
         <TabButton
-          active={tab === "diff"}
-          onClick={() => showTab("diff")}
-          hint="What changed in the repository the shell is in — the Git page does the rest"
+          active={tab === "git"}
+          onClick={() => showTab("git")}
+          hint="The repository the shell is in — what changed, its branches and pull requests"
         >
-          Diff
+          Git
           {changed > 0 && <ChipCount>{changed}</ChipCount>}
         </TabButton>
         {onClose && (
@@ -144,13 +146,13 @@ export function WorkspaceTools({
                 size="sm"
                 variant="ghost"
                 aria-label="Hide this panel"
-                className="mr-1 ml-auto size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                className="mx-1 size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
                 onClick={onClose}
               >
                 <SidebarRightClose />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Hide files &amp; diff</TooltipContent>
+            <TooltipContent>Hide files &amp; git</TooltipContent>
           </Tooltip>
         )}
       </PaneHeader>
@@ -186,12 +188,14 @@ export function WorkspaceTools({
                 onOpenInFiles={onOpenInFiles}
               />
             </div>
-            <div className={cn("flex min-h-0 flex-1 flex-col", tab !== "diff" && "hidden")}>
-              <DiffTools
+            <div className={cn("flex min-h-0 flex-1 flex-col", tab !== "git" && "hidden")}>
+              <GitTools
                 detect={detect.data}
                 detectLoading={detect.loading}
                 detectError={detect.error}
                 status={status}
+                active={tab === "git"}
+                onChanged={refreshGit}
               />
             </div>
           </>
@@ -237,7 +241,7 @@ function TabButton({
           type="button"
           aria-current={active ? "page" : undefined}
           onClick={onClick}
-          className={tabClasses(active, "self-stretch")}
+          className={tabClasses(active, "flex-1 justify-center self-stretch")}
         >
           {children}
         </button>
@@ -348,7 +352,6 @@ function InlineFile({
         <span className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
           {path.split("/").pop()}
         </span>
-        {dirty && <Tag tone="warning">unsaved</Tag>}
         {change && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -375,17 +378,6 @@ function InlineFile({
             </TooltipContent>
           </Tooltip>
         )}
-        {file && !file.binary && canWrite && !showDiff && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="xs" onClick={save} disabled={!dirty || saving} pending={saving}>
-                <FloppyDisk className="size-3.5" />
-                Save
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Write this file back to disk</TooltipContent>
-          </Tooltip>
-        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -401,7 +393,7 @@ function InlineFile({
           <TooltipContent>Close this file (Esc)</TooltipContent>
         </Tooltip>
       </PaneHeader>
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         {showDiff ? (
           current?.error ? (
             <ErrorState error={current.error} className="m-3" />
@@ -435,9 +427,41 @@ function InlineFile({
                 onChange={setDraft}
                 language={file.language}
                 readOnly={!canWrite}
+                onSave={() => {
+                  if (canWrite && dirty && !saving) void save()
+                }}
               />
             )}
           </>
+        )}
+        {/* Save exists only while there is something to save. A Save in the
+            header of every file opened to be read was a command on screen
+            with nothing to do; here it arrives with the first edit, at the
+            foot of the text where the eye already is, and leaves once the
+            file on disk matches it again. */}
+        {dirty && canWrite && !showDiff && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-3">
+            <div className="pointer-events-auto flex animate-rise items-center gap-1 rounded-lg border border-border-strong bg-popover py-1 pr-1 pl-3 text-popover-foreground shadow-lg">
+              <span className="mr-1 text-xs text-muted-foreground">Unsaved changes</span>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={saving}
+                onClick={() => file && setDraft(file.content)}
+              >
+                Discard
+              </Button>
+              <Button
+                size="xs"
+                onClick={save}
+                pending={saving}
+                title="Write this file back to disk (Ctrl+S)"
+              >
+                <FloppyDisk className="size-3.5" />
+                Save
+              </Button>
+            </div>
+          </div>
         )}
       </div>
     </div>
