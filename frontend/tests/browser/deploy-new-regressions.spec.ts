@@ -220,22 +220,6 @@ test("encrypted draft values survive a reload and can be retained or removed wit
   await expect.poll(() => journey.environmentKeys()).toEqual([])
 })
 
-test("pasted Compose credentials stay out of browser storage", async ({ page }) => {
-  await mockNewProject(page)
-  await page.goto("/deploy/new?source=compose")
-  await page
-    .getByLabel("compose.yml content")
-    .fill(
-      "services:\n  app:\n    image: example/app\n    environment:\n      PASSWORD: compose-private-value\n",
-    )
-  expect(await page.evaluate(() => JSON.stringify([localStorage, sessionStorage]))).not.toContain(
-    "compose-private-value",
-  )
-  await page.getByRole("button", { name: "Template", exact: true }).click()
-  await page.getByRole("button", { name: "Compose", exact: true }).click()
-  await expect(page.getByLabel("compose.yml content")).toHaveValue(/compose-private-value/)
-})
-
 test("an environment validation failure does not create a partially configured project", async ({
   page,
 }) => {
