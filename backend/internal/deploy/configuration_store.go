@@ -650,6 +650,7 @@ func (s *PlanningStore) PreviewDotenvImport(
 		case !exists:
 			verdict.Change = "added"
 		case existing.valueDigest == digestBytes([]byte(entry.value)) &&
+			existing.valueMode == "literal" &&
 			existing.sensitivity == request.Sensitivity &&
 			slices.Equal(slices.Sorted(slices.Values(existing.scopes)), scopes):
 			verdict.Change = "unchanged"

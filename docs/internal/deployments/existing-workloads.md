@@ -83,6 +83,8 @@ writes are literal, so a running app's `${{credential.name}}` text is never inte
 authority. The additive `value_mode` migration defaults existing rows to the shipped inference behavior;
 old drafts, snapshots and release digests retain that meaning. Run snapshots bind the mode alongside
 the value digest, and desired edits cannot change a frozen baseline's mode or values.
+Dotenv previews preserve that distinction: reference-shaped text is accepted as literal input, and
+replacing an old inferred or explicit reference with the same literal text is reported as a change.
 
 Effective `compose config` output first loses its reusable-document dollar escaping, while its
 original serialized digest stays frozen for fresh inspection. Engine overlays and decoded retained
