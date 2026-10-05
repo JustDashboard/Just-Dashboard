@@ -18,7 +18,7 @@ import type {
 import { FlowActions, FlowPanel, FlowPanelBody } from "@/components/flow"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { ErrorState, Notice } from "@/components/state"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
@@ -46,7 +46,6 @@ import {
   type PlanSection,
 } from "@/components/deploy/new-project/plan-sections"
 import {
-  adoptImport,
   commitDraft,
   configurationForSave,
   withHeldDomainVariables,
@@ -60,7 +59,6 @@ import {
   redetectedConfiguration,
   saveConfiguration,
   saveIntent,
-  sourceWatchesGit,
   selectCandidate,
   stepAfter,
   stepBefore,
@@ -90,7 +88,7 @@ function asError(error: unknown) {
 
 /**
  * The configure half of `/deploy/new`, for every source from a picked
- * repository to an adopted container — and, since this pass, four screens
+ * repository to a reviewed template — and, since this pass, four screens
  * rather than one.
  *
  * One screen carried the source controls, the name, the type, a ten-field
@@ -150,7 +148,6 @@ export function Configure({
     null,
   )
   const draftId = flow.draft.id
-  const adoption = flow.draft.data.adoption
   const own = environment?.draftId === draftId ? environment : null
   const discovered = useMemo(
     () =>
@@ -306,10 +303,8 @@ export function Configure({
   // The server's own defaults, shown rather than assumed: this is the decision
   // that used to be reachable only after the first push had already deployed.
   const [gitPolicy, setGitPolicy] = useSessionState<DraftGitPolicy>(
-    adoption
-      ? `deploy.new.configure.adoption.${draftId}.gitPolicy`
-      : "deploy.new.configure.gitPolicy",
-    { automatic: !adoption, watchInclude: [], watchExclude: [], commitStatuses: true },
+    "deploy.new.configure.gitPolicy",
+    { automatic: true, watchInclude: [], watchExclude: [], commitStatuses: true },
   )
   const [created, setCreated] = useState<{
     projectId: number
@@ -356,9 +351,7 @@ export function Configure({
   )
 
   const configuration = flow.configuration
-  const isGitSource = sourceWatchesGit(flow.source)
-  const isImport = flow.source.kind === "import"
-  const adoptsExisting = isImport || Boolean(adoption)
+  const isGitSource = flow.source.kind === "git" || flow.source.kind === "local"
   const nameCollides = nameTaken === flow.name.trim() && flow.name.trim() !== ""
   // A detected row the operator left empty is skipped, not set to nothing:
   // the application may have a default for it, and an empty secret is a
@@ -733,8 +726,7 @@ export function Configure({
       onFlowChange((current) =>
         current ? { ...current, draft: checkedDraft.draft, configuration: canonical } : current,
       )
-      const checkedSignature = signatureFor(canonical)
-      setPreflight(checkedDraft.preflight, checkedSignature)
+      setPreflight(checkedDraft.preflight, signatureFor(canonical))
       // Review's own arrival runs this far and no further: the screen asks
       // "is this right", and it cannot answer without having asked the server.
       if (operation === "check") return
@@ -742,39 +734,22 @@ export function Configure({
       const blockers = blockingFindings(checkedDraft.preflight.findings)
       const warnings = warningFindings(checkedDraft.preflight.findings)
       if (blockers.length) return
-      if (checkedDraft.draft.data.adoption?.blockers?.length) return
-      if (checkedSignature !== planSignature) {
-        setFailure(
-          new Error(
-            "The server updated this plan during validation. Review the updated settings and acknowledge its warnings before continuing.",
-          ),
-        )
-        return
-      }
       const outstanding = warnings.filter((finding) => !acknowledged.includes(finding.code))
       if (outstanding.length) return
 
-      const commit = adoptsExisting
-        ? await adoptImport(
-            checkedDraft.draft,
-            acknowledged,
-            flow.importPreview?.unsupported ?? [],
-            adoption && isGitSource ? gitPolicy : undefined,
-          )
-        : await commitDraft(
-            checkedDraft.draft,
-            acknowledged,
-            // Only a Git source polls a branch, so only a Git source has a
-            // policy to record; anything else keeps the server's defaults.
-            isGitSource ? gitPolicy : undefined,
-          )
+      const commit = await commitDraft(
+        checkedDraft.draft,
+        acknowledged,
+        // Only Git sources poll a branch and need a watch policy.
+        isGitSource ? gitPolicy : undefined,
+      )
       onStepChange("done")
       setCreated({
         projectId: commit.projectId,
         environmentId: commit.environmentId,
       })
 
-      if (operation === "deploy" && !adoptsExisting) {
+      if (operation === "deploy") {
         const run = await enqueueDeploy(
           commit.projectId,
           commit.environmentId,
@@ -982,24 +957,6 @@ export function Configure({
             className="animate-rise space-y-6 xl:min-h-0 xl:overflow-y-auto"
           >
             {failure && <ErrorState error={failure} />}
-            {adoption && failure instanceof ApiError && failure.code === "workload_changed" && (
-              <Button variant="outline" asChild>
-                <Link href="/deploy/import">Reinspect workload</Link>
-              </Button>
-            )}
-
-            {current !== "review" && (adoption?.excludedServices?.length ?? 0) > 0 && (
-              <Notice title="Services excluded from this deployment" tone="warning">
-                Only existing running and stopped containers are included. These declared services
-                have no container and will not be created on Deploy changes. Review these exclusions
-                before adoption; the original Compose definition is unchanged.
-                <ul aria-label="Excluded Compose services" className="mt-2 space-y-1 font-mono">
-                  {adoption!.excludedServices!.map((service) => (
-                    <li key={service}>{service}</li>
-                  ))}
-                </ul>
-              </Notice>
-            )}
 
             {current === "project" && (
               <StepProject
@@ -1059,7 +1016,6 @@ export function Configure({
                 blockers={blockers}
                 warnings={warnings}
                 acknowledged={acknowledged}
-                acknowledgementsDisabled={Boolean(busy)}
                 onAcknowledgedChange={setAcknowledged}
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
@@ -1076,11 +1032,7 @@ export function Configure({
             note={
               !last
                 ? undefined
-                : adoption
-                  ? "Adoption records the current live deployment without restarting it. Deploy changes applies this plan later; Redeploy live release restores the baseline."
-                  : isImport
-                    ? "Adopting records this workload as a deployment without starting, stopping, or changing it."
-                    : "Deploy saves the plan, applies the environment, and starts the release."
+                : "Deploy saves the plan, applies the environment, and starts the release."
             }
             secondary={
               <>
@@ -1092,7 +1044,7 @@ export function Configure({
                 >
                   {current === "project" ? "Change source" : "Back"}
                 </Button>
-                {last && !adoptsExisting && (
+                {last && (
                   <Button
                     variant="ghost"
                     className="h-11 sm:h-9"
@@ -1109,35 +1061,16 @@ export function Configure({
             {last ? (
               <Button
                 className="h-11 sm:h-9"
-                onClick={() => {
-                  if (preflight && blockers.length === 0 && outstanding.length > 0) {
-                    // Current findings already describe this plan. Let the reader
-                    // acknowledge them before the final fresh server check.
-                    document
-                      .getElementById("deployment-warning-acknowledgements")
-                      ?.querySelector<HTMLElement>('[role="checkbox"][aria-checked="false"]')
-                      ?.focus()
-                    return
-                  }
-                  void submit("deploy")
-                }}
+                onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
-                disabled={Boolean(busy) || Boolean(adoption?.blockers?.length)}
+                disabled={Boolean(busy)}
               >
                 <ArrowRight className="size-4" />
-                {adoption
-                  ? blockers.length
-                    ? "Re-check adoption"
-                    : outstanding.length
-                      ? "Acknowledge, then adopt"
-                      : "Adopt deployment"
-                  : isImport
-                    ? "Adopt workload"
-                    : blockers.length
-                      ? "Re-check and deploy"
-                      : outstanding.length
-                        ? "Acknowledge, then deploy"
-                        : "Deploy"}
+                {blockers.length
+                  ? "Re-check and deploy"
+                  : outstanding.length
+                    ? "Acknowledge, then deploy"
+                    : "Deploy"}
               </Button>
             ) : (
               <Button className="h-11 sm:h-9" onClick={advance} disabled={Boolean(busy)}>

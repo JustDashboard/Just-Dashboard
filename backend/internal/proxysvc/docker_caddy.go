@@ -43,21 +43,14 @@ type ingressContainer struct {
 		Running   bool
 		StartedAt string
 	}
-	Config struct {
-		Cmd    []string
-		Image  string
-		Labels map[string]string
-	}
+	Config struct{ Cmd []string }
 	Mounts []struct {
 		Type, Source, Destination string
 		RW                        bool
 	}
 	NetworkSettings struct {
 		Ports    map[string][]struct{ HostIP, HostPort string }
-		Networks map[string]struct {
-			IPAddress string
-			Aliases   []string
-		}
+		Networks map[string]struct{ IPAddress string }
 	}
 }
 

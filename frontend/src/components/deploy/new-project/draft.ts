@@ -11,11 +11,6 @@ import {
   synchronizePrimaryDomain,
 } from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
-import {
-  adoptionReviewMetadata,
-  recoveredEnvironmentSatisfied,
-  retainedVariableSatisfied,
-} from "@/lib/workload-import"
 import type {
   DeploymentConfiguration,
   DeploymentDetection,
@@ -43,13 +38,6 @@ export type SourceTabKey = "git" | "image" | "template" | "database"
  * preflight, and committing. One place drives the API so five sources cannot
  * disagree about the sequence.
  */
-
-export type ImportPreview = {
-  name: string
-  unsupported: string[]
-  warnings: string[]
-  wouldChange: string[]
-}
 
 export type DraftCommitResult = {
   projectId: number
@@ -171,25 +159,6 @@ export async function discardAbandoned(id: string | undefined) {
   }
 }
 
-export async function previewImport(source: DeploymentDraftSource) {
-  return post<ImportPreview>("/deploy/import/preview", source)
-}
-
-export async function adoptImport(
-  draft: DeploymentDraft,
-  acknowledgedWarnings: string[],
-  acknowledgedUnsupported: string[],
-  gitPolicy?: DraftGitPolicy,
-) {
-  return post<DraftCommitResult>("/deploy/import/adopt", {
-    draftId: draft.id,
-    revision: draft.revision,
-    acknowledgedWarnings,
-    acknowledgedUnsupported,
-    ...(gitPolicy ? { gitPolicy } : {}),
-  })
-}
-
 export async function importEnvironment(
   projectId: number,
   environmentId: number,
@@ -282,7 +251,7 @@ export type InspectOutcome = {
  * One shape for all five sources rather than one state tree per source: a
  * source tab's only job is to fill this in and hand it up, and Configure
  * never has to ask which tab it came from except for the three things that
- * genuinely differ (`sourceLabel`, `githubRepo`, `importPreview`).
+ * genuinely differ (`sourceLabel`, `githubRepo`).
  */
 export type ConfigureFlow = {
   name: string
@@ -297,8 +266,6 @@ export type ConfigureFlow = {
   /** Set when the repository came from the signed-in GitHub account: feeds the branch Select. */
   githubRepo?: string
   hostname?: DeploymentHostnameSuggestion
-  /** Carried from the existing-workload tab through to the final adopt call. */
-  importPreview?: ImportPreview
 }
 
 /**
@@ -348,17 +315,11 @@ export function stepAfter(step: ConfigureStepKey) {
  */
 export function declaredVariablesNeedReview(flow: ConfigureFlow) {
   const declared = flow.configuration.variables
-  const retained = flow.draft.environmentKeys ?? []
-  const inputs = flow.draft.data?.adoption?.inputs ?? []
   return (
     (flow.source.mode === "blueprint" && declared.length > 0) ||
     declared.some(
       (variable) =>
-        variable.required &&
-        !variable.reference &&
-        !variable.value &&
-        !variable.generate &&
-        !retainedVariableSatisfied(variable.name, retained, inputs),
+        variable.required && !variable.reference && !variable.value && !variable.generate,
     )
   )
 }
@@ -414,16 +375,7 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
   // is the one thing nobody else can answer.
   if (
     declaredVariablesNeedReview(flow) ||
-    discoveredEnvironmentRows(candidate).some(
-      (row) =>
-        rowNeedsOperator(row) &&
-        !retainedVariableSatisfied(row.name, flow.draft.environmentKeys ?? []) &&
-        !recoveredEnvironmentSatisfied(
-          row.name,
-          flow.draft.environmentKeys ?? [],
-          flow.draft.data?.adoption?.inputs,
-        ),
-    )
+    discoveredEnvironmentRows(candidate).some(rowNeedsOperator)
   )
     return "variables"
   return "review"
@@ -432,14 +384,6 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
 /** What Configure hands back: a whole flow, nothing (back to the chooser), or an update of the current one. */
 export type FlowUpdate =
   ConfigureFlow | null | ((current: ConfigureFlow | null) => ConfigureFlow | null)
-
-/** A recovered directory can build a release without owning a Git branch to watch. */
-export function sourceWatchesGit(source: DeploymentDraftSource) {
-  return (
-    source.kind === "git" ||
-    (source.kind === "local" && !["local_directory", "recovered_snapshot"].includes(source.mode))
-  )
-}
 
 /** Session storage remembers the form, while credentials stay in the live memory copy. */
 export function persistableFlow(flow: ConfigureFlow | null): ConfigureFlow | null {
@@ -474,8 +418,6 @@ export function persistableFlow(flow: ConfigureFlow | null): ConfigureFlow | nul
   scrubSource(safe.draft.data.source)
   scrubConfiguration(safe.configuration)
   scrubConfiguration(safe.draft.data.configuration)
-  if (safe.draft.data.adoption)
-    safe.draft.data.adoption = adoptionReviewMetadata(safe.draft.data.adoption)
   if (safe.detection?.compose) safe.detection.compose.preview = ""
   if (safe.draft.data.detection?.compose) safe.draft.data.detection.compose.preview = ""
   safe.draft.planPreview = ""
@@ -755,7 +697,7 @@ export async function inspectAndPrepare(
   name: string,
   profile: WorkloadProfile,
   initialSource: DeploymentDraftSource,
-  extra: { sourceLabel: string; githubRepo?: string; importPreview?: ImportPreview },
+  extra: { sourceLabel: string; githubRepo?: string },
 ): Promise<ConfigureFlow> {
   let source = initialSource
   let result = await inspectSource(name, profile, source)
@@ -808,7 +750,6 @@ export function githubRepoOf(url: string | undefined) {
 
 /** What the source row calls a draft's source — a repository, an image, a blueprint. */
 export function sourceLabelFromDraft(source: DeploymentDraftSource) {
-  if (source.mode === "recovered_snapshot") return "Captured application source"
   return (
     source.repository ||
     source.url ||

@@ -59,10 +59,8 @@ only renderer/executor/validation authority for their feature.
   a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
   fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has no
   tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
-  Project step's *Deploy as a Compose stack*), adopted from this server through `/deploy/import`, or
-  resumed as an unfinished setup, and a saved stack's documents are edited on Settings → General.
-  Choosing a
-  source creates a draft, saves the intent and source, and runs detection in one action; when
+  Project step's *Deploy as a Compose stack*) or resumed as an unfinished setup.
+  Choosing a source creates a draft, saves the intent and source, and runs detection in one action; when
   detection finds more than one candidate they are offered ranked, each saying why it ranks where it
   does (an example, a docs site, not a service), as a choice that re-runs detection with
   `selectedId`. Each configure screen reads the plan down a rail beside the form
@@ -126,14 +124,7 @@ only renderer/executor/validation authority for their feature.
   strands the draft, and a `draft_revision_conflict` re-reads the draft once. `?draft=` resumes a
   draft (including one produced by `POST /deploy/{id}/duplicate`); a draft saved without a
   configuration — every draft abandoned from Configure, since the configuration is saved at Deploy —
-  is re-detected rather than refused. `?mode=advanced` opens Advanced, and legacy existing-checkout
-  imports adopt through `/deploy/import/adopt` without a run. Existing runtime workloads use the
-  discovery/recovery flow at `/deploy/import`, then normal Configure/Variables/Review.
-  `/deploy/import/recover` creates a server-owned draft; `/deploy/import/adopt` records a pinned
-  original live baseline and reviewed desired plan without enqueueing a run. See
-  [existing workload adoption](existing-workloads.md) for translation and compensation boundaries.
-  `/deploy/import/register` remains the legacy observation-only endpoint.
-  For a Git source the commit carries a `gitPolicy`
+  is re-detected rather than refused. `?mode=advanced` opens Advanced. For a Git source the commit carries a `gitPolicy`
   (`automatic`, `watchInclude`, `watchExclude`, `commitStatuses`), written as the environment's
   `deploy_git_policies` row at revision 1 inside the same transaction; no decision writes no row, so
   every caller that does not ask keeps the defaults in `gitDeploymentPolicy` exactly as they were.
@@ -773,7 +764,7 @@ only renderer/executor/validation authority for their feature.
   SvelteKit's header variables), which is safe only while the proxy fronts the release alone. The
   release's runtime snapshot records which of those settings the recipe image's final stage sets
   (`proxyTrust`, read from the rendered Dockerfile by `imageProxyTrust`); a repository Dockerfile, a
-  pulled image or an adopted container records none. When the release has no route, or its port is
+  pulled image records none. When the release has no route, or its port is
   reachable directly (a `0.0.0.0`/`::` bind, host networking, or the application's port published again
   on every interface), `startContainer` writes the withdrawn value of each recorded setting unless the
   plan sets the variable itself (`network_trust.go`). Nothing is written over a user's own image.
@@ -909,17 +900,15 @@ only renderer/executor/validation authority for their feature.
   frozen variable/dependency/check snapshots, by names and digests only; a run clears only the revision it
   actually applied, so a change saved after enqueue stays pending. It is pending only when that comparison
   names a change: the revision number counts saves, so an edit undone (a variable added then removed) moves
-  it on with nothing to deploy. A variable compares by value digest, sensitivity and scope set, so a
+  it on with nothing to deploy. A variable compares by value digest, sensitivity, scope set and literal/reference mode, so a
   scope-only edit is still named. The fleet summary's `pendingChanges` — the header's "Deploy changes",
   the Settings dot, the fleet chip — runs the same comparison for each deployment whose desired revision
   is not the live one.
 - Deployment variables are encrypted, immutable revisions with an exact closed scope set (`build`,
   `runtime`, `release_task`). Lists use a fixed mask; reveal is a separate session-only admin read with an
-  explicit audit entry. Bulk dotenv parsing is bounded and inert. New captured and value/dotenv writes
-  record literal intent; reference writes record explicit reference intent. The additive `value_mode`
-  migration preserves the shipped inference behavior for historical rows with an empty mode, while
-  new literal `${{credential.name}}` text stays an application value. Frozen snapshots and run digests
-  bind this intent alongside each value digest. Full typed references are parsed into a
+  explicit audit entry. Stored `value_mode` keeps literal values literal, including reference-shaped
+  text. New values and dotenv entries are literal; an explicit reference uses reference mode. Empty
+  mode preserves historical value-shape inference. Bulk dotenv parsing is bounded and inert. Full typed references are parsed into a
   closed kind/target model; missing variable references and cycles fail before commit, secret leaves stay
   masked, and enqueue freezes exact variable revision ids so retries cannot observe a later variable
   rotation. Execution resolves external credential/database/domain/Compose-service references only through
@@ -960,15 +949,20 @@ only renderer/executor/validation authority for their feature.
   artifact existence. See [restore verification](restore-verification.md).
   Coverage resolves named volumes and every writable merged Compose service mount, verifies the immutable
   manifest and artifact checksum, and rejects filtered or uncovered data. See [backup coverage](backup-coverage.md).
-- Existing-workload discovery and managed adoption are described in
-  [existing-workloads.md](existing-workloads.md). A server-recovered recipe, independently sealed
-  original/desired inputs, immutable artifacts and pinned live baseline commit atomically without
-  enqueueing a run. Initial observation uses exact original Docker IDs or verified native managers;
-  normal settings and lifecycle apply afterward. Explicit Compose scoping reviews excluded absent
-  declarations. Legacy observation-only records retain their execution/conversion guards.
-- Legacy checkout import adoption is a dedicated, session-only admin commit that re-runs the read-only preview and requires
-  exact acknowledgement of unsupported observations. It records the external resource as observed and
-  does not start, stop, reset or claim it. Archiving disables deployment triggers, the project's schedules
+- Existing-workload discovery and adoption were removed by reverting #136 and #145. The
+  `/deploy/import` page and workload discovery/recovery endpoints are absent. The older
+  `/deploy/import/preview` and `/deploy/import/adopt` APIs remain only for Git-checkout imports;
+  container and Compose workload imports are refused.
+  Previously adopted projects and legacy external observations retain their database records and
+  runtime resources, but project mutations, new runs, queued execution, provider hooks and schedules
+  are refused. Their baseline and native startup authority require the removed engine; use the
+  original Docker/Compose/PM2/systemd tools, or restore an import-capable version to manage them.
+  Existing Git-checkout sources remain supported. The additive `adoption_enc` and `value_mode`
+  columns and the immutable-value trigger remain in the migration path. Literal/reference value
+  interpretation and variable snapshot digests are retained for compatibility with saved releases;
+  no stored data is erased.
+  Stop or drain deployment runs before switching versions. An import review draft cannot be committed
+  through the ordinary draft endpoint. Archiving disables deployment triggers, the project's schedules
   and visibility; it never removes runtime or data. Schedules are disabled directly (`ClaimDueSchedules`
   already excludes an archived *environment*, not an archived *project*, so without this a schedule kept
   firing and failing every occurrence at `environment_not_found`, invisibly, because even its summary
@@ -1187,26 +1181,10 @@ only renderer/executor/validation authority for their feature.
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
   batched call. Every section carries its own availability, so a host without nginx or Backups renders
-  named unavailable evidence rather than an empty success. Compose storage comes from exact live
-  release containers rather than aggregate plan overrides: actual volume names and bind paths retain
-  read-only flags, service names and container IDs, including shared replica mounts. This is a
-  read-only enrichment of the dependency inventory, bounded to 128 containers and ten seconds;
-  missing or mismatched Docker evidence reads unavailable rather than verified empty storage.
-  Native runtime observations prefer the current live release over historical rollback rows for the
-  same manager identity while retaining all instances from its capture. A domain row names who issued its
+  named unavailable evidence rather than an empty success. A domain row names who issued its
   certificate (`certificateIssuer`, the issuer's common name — `R10`, `E6` for Let's Encrypt — read
   from the same certificate as its name and days left), so the issuer is observed rather than
-  inferred from how the domain is owned. Imported external proxy bindings are read from the live
-  snapshot's server-owned `existing_proxy_route` dependencies and verified through the original
-  proxy reader. Each row retains its binding ID, path and exact service; private network routes are
-  not mapped to every published service. A verified link reads `served` with linked ownership;
-  unavailable or changed evidence reads `unavailable` with an explicit detail. An unverified known
-  manager with no authoritative hostname makes domain evidence unavailable rather than claiming
-  there is no public domain. Runtime maps and lists retain distinct hostname/path/service bindings
-  and exact storage owners; an absent explicit owner never falls back to a different service.
-  External HTTPS stays
-  unassessed by this summary: it does not claim a dashboard certificate, issue one or invoke route
-  handoff. These links bypass the generic dependency inventory. A domain covered by the copy a Docker Caddy release kept reads
+  inferred from how the domain is owned. A domain covered by the copy a Docker Caddy release kept reads
   `valid` with `certificateRenewedBy: "caddy"` and no days left or certificate link: Caddy renews the
   certificate it serves and never the copy, so the copy's expiry is not the domain's and raises no
   finding. A dependency's `deepLink` is the page that owns it: a backup
@@ -1472,22 +1450,14 @@ only renderer/executor/validation authority for their feature.
   a draft pre-filled from the project's current desired source and configuration — the same draft the
   new-project page resumes with `?draft=`, landing at the `configuration` step with no `detection` yet, so
   the operator still runs detect/preflight/commit like any other draft. `PlanningStore.Duplicate` copies the
-  source and the build/runtime/dependency/check rows with these isolation changes: domains are
+  source and the build/runtime/dependency/check rows verbatim and changes exactly three things: domains are
   dropped (a hostname belongs to one project), variables are flattened to name/sensitivity/scopes with every
   value cleared and `required` set (a secret's plaintext is never available to copy, and a reference names
   something scoped to the source project), and a managed Docker volume's literal name is re-derived with the
   same `<slug>-<hash>` shape a blueprint's own volumes already get (`blueprintVolumePrefix`, keyed on the new
   name and the old literal volume name so two mounts never collide) — committing the duplicate unchanged
-  would otherwise hand it the source project's own live volume. Runtime ownership dependencies are
-  omitted, along with all externally owned imported proxy links, and `composeProjectName` is cleared:
-  a duplicate has no authority over the original runtime, proxy or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
-  before a draft is created. Compose sources additionally need inspectable files without fixed
-  container names, external/fixed-name networks, inherited runtime namespaces, external links or
-  shared writable volumes. Project-scoped Compose volumes remain supported, including declarations
-  across override files; read-only host mounts and read-only external volumes may remain linked.
-  Compose aliases/merge keys and unsupported inclusions require a flattened independent copy for
-  review. The refusal explains which independent names, networks or storage must be configured;
-  duplication never rewrites or takes over the original resources.
+  would otherwise hand it the source project's own live volume. A linked or observed dependency, and a
+  bind-path mount, are left exactly as saved: nothing about their identity is owned by lifecycle re-derivation.
 - Closed vocabularies, route capabilities/confirmations/audit actions, retention limits and error codes
   are contracts. Change one only with an ADR plus migration and exhaustive transition/route tests.
 

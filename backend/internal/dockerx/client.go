@@ -14,7 +14,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -43,9 +42,6 @@ type Client struct {
 	duAt         time.Time
 	duGeneration uint64
 	duFlight     *diskUsageRead
-
-	n8nProofMu sync.Mutex
-	n8nProofs  map[string]map[string]os.FileMode
 
 	updateMu      sync.Mutex
 	updates       map[string]updateEntry

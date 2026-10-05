@@ -3,7 +3,6 @@ package deploy
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 )
 
@@ -12,55 +11,6 @@ type managedRemovalFake struct{ removed []RemovalTarget }
 func (f *managedRemovalFake) RemoveManagedResource(_ context.Context, target RemovalTarget) error {
 	f.removed = append(f.removed, target)
 	return nil
-}
-
-func TestNativeBaselineRemovalPlanPreservesOriginalManagerAuthority(t *testing.T) {
-	for _, manager := range []string{"pm2", "systemd"} {
-		t.Run(manager, func(t *testing.T) {
-			fixture := newReleaseStoreFixture(t)
-			plan := RuntimePlanConfig{Strategy: StrategyStopFirst}
-			fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), plan)
-			run, lease := fixture.claimedRun(t, 1)
-			metadata := NativeBaselineMetadata{Version: 1, Manager: manager, ConfigurationDigest: strings.Repeat("a", 64)}
-			baseline := ReleaseRuntimeInput{Kind: manager, RuntimeID: "original-native-app", Name: "original-native-app", Metadata: mustJSON(metadata)}
-			snapshot := runtimeReleaseSnapshot{Version: 1, Plan: plan, NativeBaseline: &baseline}
-			release, err := fixture.runs.CreateCandidateRelease(t.Context(), *run, lease.Token, CandidateReleaseInput{RuntimeSnapshot: mustJSON(snapshot)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			baseline.ReleaseID = release.Release.ID
-			if _, err := fixture.runs.RecordCandidateRuntime(t.Context(), *run, lease.Token, baseline); err != nil {
-				t.Fatal(err)
-			}
-			resourceKind := adoptionResourceKind(manager)
-			if _, err := fixture.base.DB.Exec(`INSERT INTO deploy_dependencies(environment_id,release_id,kind,ownership,resource_kind,resource_id,config_json,created_at)
-				VALUES(?,0,'runtime','managed',?,?,'{}',?)`, fixture.envID, resourceKind, baseline.RuntimeID, fixture.now.Unix()); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := fixture.base.DB.Exec(`UPDATE deploy_projects SET archived_at=? WHERE id=?`, fixture.now.Unix(), fixture.projectID); err != nil {
-				t.Fatal(err)
-			}
-			removal, err := fixture.variables.RemovalPlan(t.Context(), fixture.projectID)
-			if err != nil || len(removal.Targets) != 0 {
-				t.Fatalf("native manager appeared as a removal target: %+v %v", removal, err)
-			}
-			remover := &managedRemovalFake{}
-			for _, kind := range []string{resourceKind, "docker_container"} {
-				if _, err := fixture.variables.RemoveManaged(t.Context(), fixture.projectID, "operator", RemoveManagedRequest{
-					PlanDigest: removal.Digest, TargetIDs: []string{removalTargetID(kind, baseline.RuntimeID)},
-				}, remover); !errors.Is(err, ErrRemovalTarget) {
-					t.Fatalf("native removal request was accepted: %v", err)
-				}
-			}
-			if len(remover.removed) != 0 {
-				t.Fatal("native deletion invoked a resource owner")
-			}
-			retained, err := fixture.runs.RuntimeForRelease(t.Context(), release.Release.ID)
-			if err != nil || retained.Kind != manager || retained.State == "removed" {
-				t.Fatalf("native restart authority was changed by removal review: %+v %v", retained, err)
-			}
-		})
-	}
 }
 
 // failingRemovalFake succeeds for every target except one kind, so a test can

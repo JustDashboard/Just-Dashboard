@@ -92,7 +92,7 @@ type moduleSet struct {
 	deployEngine    *deploy.Engine
 	deployPlanning  *deploy.PlanningStore
 	deploySources   *deploy.HostSourceAnalyzer
-	deployPreflight deploy.PreflightObserver
+	deployPreflight *deploy.HostPreflightObserver
 	// deployChecker answers the advisory check and Detect again with the
 	// evaluation analyze_plan runs before every build.
 	deployChecker    *deploy.DeploymentChecker
@@ -103,8 +103,6 @@ type moduleSet struct {
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
 	deployRuntime    *deploy.DockerRuntimeOwner
-	deployNative     *deploy.NativeRuntimeOwner
-	deployStartup    *deploy.NativeStartupStore
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
@@ -198,7 +196,7 @@ func (s *Server) initModules() {
 	// that serves it, because Caddy reads a file-based certificate once.
 	s.modules.certKeeper = selfcfg.NewCertKeeper(
 		s.Cfg.Site, s.Cfg.TLSMode, s.Cfg.DataDir, s.restartProxy, s.Log)
-	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile).WithIngressJournalDir(filepath.Join(s.Cfg.DataDir, "proxy-ingress-handoffs"))
+	s.modules.proxy = proxysvc.NewWithDockerIngress(s.Cfg.NginxDir, s.Cfg.CaddyFile)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
@@ -230,32 +228,28 @@ func (s *Server) initModules() {
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
-	s.modules.deployStartup = deploy.NewNativeStartupStore(filepath.Join(s.Cfg.DataDir, "deployment-recovery"), s.Sealer)
 	s.modules.deploySources = deploy.NewHostSourceAnalyzer(
 		s.Cfg.DeployRoots,
 		s.Cfg.ComposeRoots,
 		filepath.Join(s.Cfg.DataDir, "deployment-detection"),
 		s.modules.docker,
 		s.modules.deployPlanning,
-	).WithNativeStartupStore(s.modules.deployStartup)
-	dependencyObserver := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions)
+	)
 	s.modules.deployPreflight = deploy.NewHostPreflightObserver(
 		s.Cfg.DeployRoots,
 		s.Cfg.DataDir,
 		s.modules.docker,
 		s.modules.proxy,
-	).WithFirewall(s.modules.netsec).WithDependencies(dependencyObserver)
+	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
+		s.Store, s.modules.backupStore, s.modules.docker,
+	).withExtensionProbe(s.databaseExtensions))
+	s.modules.deployChecker = deploy.NewDeploymentChecker(
+		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
+	)
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
-	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd).WithStartupStore(s.modules.deployStartup)
-	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
-	dependencyObserver.withNativeRuntime(s.modules.deployNative)
-	s.modules.deployPreflight = deploy.NewNativePreflightObserver(s.modules.deployPreflight, s.modules.deployNative, s.modules.deployRuns)
-	s.modules.deployChecker = deploy.NewDeploymentChecker(
-		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
-	)
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
@@ -266,7 +260,7 @@ func (s *Server) initModules() {
 		s.modules.deployPlanning,
 		s.modules.deploySources,
 		s.modules.deployArtifacts,
-		s.modules.deployNative,
+		runtimeOwner,
 		deploy.NewCheckRunner(s.modules.docker),
 		s.modules.proxy,
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),

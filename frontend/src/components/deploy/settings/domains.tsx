@@ -54,7 +54,6 @@ import {
   settingStatus,
 } from "@/components/deploy/settings/setting-card"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
-import { ExistingIngressRoutes } from "@/components/deploy/existing-ingress-routes"
 import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useProject } from "@/components/deploy/project-context"
 
@@ -129,7 +128,7 @@ function DomainsForm({
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
   const observed =
     project.operations?.domains.status === "available" ? project.operations.domains : undefined
-  const routes = observed?.domains.filter((route) => !route.proxyKind && !route.id)
+  const routes = observed?.domains
   // Which names the live release carries, read from its own list whether or
   // not Proxy could be asked about them — without Proxy the routes are
   // unknown, but the names are still the release's. A read that failed before
@@ -138,11 +137,7 @@ function DomainsForm({
   const liveKnown = Boolean(
     liveList && (liveList.status === "available" || liveList.domains.length > 0),
   )
-  const liveNames = new Set(
-    liveList?.domains
-      .filter((route) => !route.proxyKind && !route.id)
-      .map((route) => route.hostname.toLowerCase()),
-  )
+  const liveNames = new Set(liveList?.domains.map((route) => route.hostname.toLowerCase()))
 
   const routeFor = (hostname: string) =>
     routes?.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
@@ -215,7 +210,6 @@ function DomainsForm({
 
   return (
     <>
-      <ExistingIngressRoutes bindings={configuration.ingressBindings ?? []} />
       <SettingForm
         name="Domains"
         onSave={onSave}
@@ -264,11 +258,7 @@ function DomainsForm({
           {domains.length === 0 && leaving.length === 0 ? (
             <EmptyState
               icon={Globe}
-              title={
-                configuration.ingressBindings?.length
-                  ? "No additional managed domains"
-                  : "No public domains yet"
-              }
+              title="No public domains yet"
               description="Add a hostname to route its traffic here through Proxy, with a certificate issued on the first deployment."
             />
           ) : (

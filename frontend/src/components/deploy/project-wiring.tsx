@@ -12,7 +12,6 @@ import {
   Layers,
 } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
-import { deploymentRouteId } from "@/lib/deployment-runtime-route"
 import type {
   DeploymentDomainRoute,
   DeploymentEngineRun,
@@ -22,7 +21,7 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { Status, StatusDot, type DotTone } from "@/components/status-dot"
+import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
@@ -32,8 +31,6 @@ import { RunStrip } from "@/components/deploy/run-marks"
 import {
   CertificateReading,
   HealthStatus,
-  ROUTE_LABEL,
-  ROUTE_TONE,
   autoDeployReading,
   formatDuration,
   hostOf,
@@ -42,7 +39,6 @@ import {
 } from "@/components/deploy/vocabulary"
 import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { serviceProduct } from "@/components/deploy/service-product"
-import { isDockerService, runtimeServiceId } from "@/components/deploy/runtime-service"
 
 /** How many of the environment's runs the release node's strip draws. */
 const STRIP = 14
@@ -85,7 +81,6 @@ export function ProjectWiring({
   runs,
   runtime,
   domains,
-  domainsReason,
   url,
   watch,
 }: {
@@ -111,7 +106,6 @@ export function ProjectWiring({
   runtime?: DeploymentRuntimeServices
   /** The routes the operations owner reports, when it could read them. */
   domains?: DeploymentDomainRoute[]
-  domainsReason?: string
   url?: string
   watch?: DeploymentGitWatch
 }) {
@@ -302,18 +296,11 @@ export function ProjectWiring({
             title={
               services ? (
                 services.length === 0 ? (
-                  <span className="text-muted-foreground">No services</span>
+                  <span className="text-muted-foreground">No containers</span>
                 ) : (
                   <span className="numeric">
                     {running.length} of {services.length}{" "}
-                    {services.every(isDockerService)
-                      ? services.length === 1
-                        ? "container"
-                        : "containers"
-                      : services.length === 1
-                        ? "service"
-                        : "services"}{" "}
-                    running
+                    {services.length === 1 ? "container" : "containers"} running
                   </span>
                 )
               ) : (
@@ -328,7 +315,7 @@ export function ProjectWiring({
                   {running.length > 0 && <HealthStatus health={deployment.health} />}
                   {services.map((service) => (
                     <span
-                      key={runtimeServiceId(service)}
+                      key={service.containerId}
                       className="inline-flex min-w-0 items-center gap-1 font-mono"
                     >
                       <ProductGlyph
@@ -339,7 +326,7 @@ export function ProjectWiring({
                   ))}
                 </span>
               ) : (
-                runtime?.reason || "The runtime has not reported this release yet"
+                runtime?.reason || "Docker has not reported this release yet"
               )
             }
           />
@@ -371,39 +358,26 @@ export function ProjectWiring({
                   <ul className="grid grid-cols-1 gap-y-1 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)] sm:gap-x-3">
                     {domains.map((domain) => (
                       <li
-                        key={deploymentRouteId(domain)}
+                        key={domain.hostname}
                         className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 sm:col-span-2 sm:grid sm:grid-cols-subgrid"
                       >
                         <a
-                          href={`${domain.https ? "https" : "http"}://${domain.hostname}${domain.path || "/"}`}
+                          href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
                         >
-                          <span className="truncate font-mono">
-                            {domain.hostname}
-                            {domain.path && domain.path !== "/" ? domain.path : ""}
-                          </span>
+                          <span className="truncate font-mono">{domain.hostname}</span>
                           <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
                         </a>
                         <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-normal">
                           <CertificateReading domain={domain} />
-                          {domain.proxyKind && (
-                            <Status
-                              tone={ROUTE_TONE[domain.route]}
-                              label={ROUTE_LABEL[domain.route]}
-                            />
-                          )}
-                          {domain.service && <Tag>{domain.service}</Tag>}
-                          {domain.servedBy && domain.proxyKind && <span>{domain.servedBy}</span>}
                           {domain.protected && <Tag>Password</Tag>}
                         </span>
                       </li>
                     ))}
                   </ul>
                 )
-              ) : domainsReason ? (
-                <span className="text-muted-foreground">{domainsReason}</span>
               ) : host ? (
                 <a
                   href={url}

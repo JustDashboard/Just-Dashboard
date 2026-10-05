@@ -319,9 +319,7 @@ func waitForRunState(
 	want RunState,
 ) *EngineRun {
 	t.Helper()
-	// These assertions verify persisted state and side effects. The race
-	// detector makes SQLite much slower; latency has its own budget tests.
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	var last *EngineRun
 	for time.Now().Before(deadline) {
 		run, err := store.Run(context.Background(), runID)

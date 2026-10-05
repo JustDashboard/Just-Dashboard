@@ -61,7 +61,6 @@ export function StepRuntime({
   const setConfiguration = (next: typeof configuration) =>
     onFlowChange({ ...flow, configuration: next })
   const runtime = configuration.runtime
-  const compose = configuration.build.method === "compose"
   const worker = flow.profile === "worker"
 
   const readiness = configuration.checks.find((check) => check.phase === "readiness")
@@ -90,9 +89,7 @@ export function StepRuntime({
   const mounts = runtime.mounts ?? []
   const storageFacts =
     mounts.length === 0
-      ? compose
-        ? "Kept in Compose source"
-        : "Nothing survives a rebuild"
+      ? "Nothing survives a rebuild"
       : `${mounts.length} ${mounts.length === 1 ? "mount" : "mounts"}`
 
   const accessFacts =
@@ -103,7 +100,7 @@ export function StepRuntime({
       (runtime.devices?.length ?? 0) > 0 && `${runtime.devices!.length} devices`,
     ]
       .filter(Boolean)
-      .join(" · ") || (compose ? "Kept in Compose source" : "Unprivileged, own network")
+      .join(" · ") || "Unprivileged, own network"
 
   return (
     <>

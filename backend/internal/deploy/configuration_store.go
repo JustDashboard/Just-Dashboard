@@ -11,8 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 const (
@@ -25,7 +23,6 @@ const (
 // with read access cannot use value length or a reference chain to infer a
 // secret; revealing remains a separate admin/session action.
 type DeploymentVariable struct {
-	RecoveredInput  *RecoveredInput    `json:"recoveredInput,omitempty"`
 	Name            string             `json:"name"`
 	Revision        int                `json:"revision"`
 	Sensitivity     string             `json:"sensitivity"`
@@ -108,7 +105,6 @@ type PendingState struct {
 }
 
 type EnvironmentConfiguration struct {
-	Inputs       []RecoveredInput     `json:"inputs,omitempty"`
 	Revision     int                  `json:"revision"`
 	Build        BuildPlanConfig      `json:"build"`
 	Runtime      RuntimePlanConfig    `json:"runtime"`
@@ -131,8 +127,7 @@ type EnvironmentConfiguration struct {
 	// each package manager runs, so Build settings can say which choice
 	// matches the repository. It is absent once the build describes
 	// something detection did not read.
-	Detected        *DetectedCandidate                `json:"detected,omitempty"`
-	IngressBindings []proxysvc.ExistingIngressBinding `json:"ingressBindings,omitempty"`
+	Detected *DetectedCandidate `json:"detected,omitempty"`
 }
 
 type ConfigurationWriteRequest struct {
@@ -373,20 +368,7 @@ func (s *PlanningStore) ListVariables(ctx context.Context, projectID, environmen
 	if err != nil {
 		return nil, err
 	}
-	views := variableViews(values)
-	inputs, err := s.importedInputs(ctx, environmentID, views)
-	if err != nil {
-		return nil, err
-	}
-	for i := range views {
-		for _, input := range inputs {
-			if input.StorageKey == views[i].Name {
-				copy := input
-				views[i].RecoveredInput = &copy
-			}
-		}
-	}
-	return views, nil
+	return variableViews(values), nil
 }
 
 func (s *PlanningStore) RevealVariable(ctx context.Context, projectID, environmentID int64, name string) (*VariableReveal, error) {
@@ -430,9 +412,6 @@ func (s *PlanningStore) PutVariable(
 	defer tx.Rollback()
 	desired, err := s.advanceDesiredRevisionTx(ctx, tx, projectID, environmentID, request.Revision)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, name, &request); err != nil {
 		return nil, err
 	}
 	if err := s.writeVariableRevisionTx(ctx, tx, environmentID, name, value, request.Sensitivity, request.Scopes, actor, variableWriteMode(request)); err != nil {
@@ -542,10 +521,6 @@ func (s *PlanningStore) ImportDotenv(
 	sort.Strings(names)
 	for _, name := range names {
 		value := parsed[name]
-		template.Value = &value
-		if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, name, &template); err != nil {
-			return nil, err
-		}
 		if err := s.writeVariableRevisionTx(ctx, tx, environmentID, name, value, request.Sensitivity, request.Scopes, actor); err != nil {
 			return nil, err
 		}
@@ -633,12 +608,6 @@ func (s *PlanningStore) PreviewDotenvImport(
 		position[entry.name] = len(preview.Variables)
 		verdict := DotenvImportVerdict{Name: entry.name, Line: entry.line}
 		existing, exists := current[entry.name]
-		if entry.refused == "" && !skipped[entry.name] {
-			template.Value = &entry.value
-			if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, entry.name, &template); err != nil {
-				return nil, err
-			}
-		}
 		switch {
 		case entry.refused != "":
 			verdict.Change, verdict.Reason = "refused", entry.refused
@@ -686,9 +655,6 @@ func (s *PlanningStore) DeleteVariable(
 	defer tx.Rollback()
 	desired, err := s.advanceDesiredRevisionTx(ctx, tx, projectID, environmentID, revision)
 	if err != nil {
-		return 0, err
-	}
-	if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, name, nil); err != nil {
 		return 0, err
 	}
 	result, err := tx.ExecContext(ctx, `
@@ -1322,14 +1288,6 @@ func (s *PlanningStore) EnvironmentConfiguration(
 	if err != nil {
 		return nil, err
 	}
-	result.Inputs, err = s.importedInputs(ctx, environmentID, result.Variables)
-	if err != nil {
-		return nil, err
-	}
-	result.IngressBindings, err = publicIngressBindingsFromDependencies(result.Dependencies)
-	if err != nil {
-		return nil, err
-	}
 	result.Pending, err = s.PendingState(ctx, projectID, environmentID)
 	return result, err
 }
@@ -1374,12 +1332,9 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	defer tx.Rollback()
 	var current int
-	var sourceKind, sourceConfig sql.NullString
 	if err := tx.QueryRowContext(ctx, `
-		SELECT e.desired_revision, s.kind, s.config_json FROM deploy_environments e
-		  LEFT JOIN deploy_sources s ON s.environment_id = e.id AND s.revision = e.desired_revision
-		 WHERE e.id = ? AND e.project_id = ? AND e.archived_at = 0`, environmentID, projectID).
-		Scan(&current, &sourceKind, &sourceConfig); err != nil {
+		SELECT desired_revision FROM deploy_environments
+		 WHERE id = ? AND project_id = ? AND archived_at = 0`, environmentID, projectID).Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrEnvironmentNotFound
 		}
@@ -1387,31 +1342,6 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	}
 	if current != request.Revision {
 		return nil, fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current)
-	}
-	var originalRuntimeJSON string
-	if err := tx.QueryRowContext(ctx, `SELECT config_json FROM deploy_runtime_plans WHERE environment_id=? AND revision=?`, environmentID, current).Scan(&originalRuntimeJSON); err != nil {
-		return nil, err
-	}
-	var originalRuntime RuntimePlanConfig
-	if json.Unmarshal([]byte(originalRuntimeJSON), &originalRuntime) != nil {
-		return nil, fmt.Errorf("%w: desired runtime configuration is malformed", ErrInvalidPlan)
-	}
-	if configuration.Runtime.ComposeProjectName != "" && configuration.Runtime.ComposeProjectName != originalRuntime.ComposeProjectName {
-		return nil, fmt.Errorf("%w: the original Compose project identity cannot be changed through settings", ErrInvalidPlan)
-	}
-	configuration.Runtime.ComposeProjectName = originalRuntime.ComposeProjectName
-	configuration.Dependencies, err = retainRuntimeOwnershipTx(ctx, tx, environmentID, configuration.Dependencies)
-	if err != nil {
-		return nil, err
-	}
-	if sourceKind.String == string(SourceImport) {
-		var source DraftSourceConfig
-		if json.Unmarshal([]byte(sourceConfig.String), &source) != nil {
-			return nil, fmt.Errorf("%w: desired source configuration is malformed", ErrInvalidPlan)
-		}
-		if source.Mode != SourceModeExistingCheckout {
-			return nil, fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan)
-		}
 	}
 	var kind EnvironmentKind
 	if err := tx.QueryRowContext(ctx, `SELECT kind FROM deploy_environments WHERE id=?`, environmentID).Scan(&kind); err != nil {
@@ -1611,14 +1541,6 @@ func (s *PlanningStore) saveEnvironmentSource(
 	if current != revision {
 		return fail(fmt.Errorf("%w: current revision is %d", ErrRevisionConflict, current))
 	}
-	var currentSource DraftSourceConfig
-	invalidCurrentSource := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil
-	if source.Mode == SourceModeRecoveredSnapshot && (invalidCurrentSource || currentSource.Mode != SourceModeRecoveredSnapshot || currentSource.ResourceID != source.ResourceID) {
-		return fail(fmt.Errorf("%w: recovered snapshot handles cannot be attached or replaced by a client", ErrInvalidSource))
-	}
-	if currentKind == SourceImport && (invalidCurrentSource || currentSource.Mode != SourceModeExistingCheckout || source.Mode != SourceModeExistingCheckout) {
-		return fail(fmt.Errorf("%w: imported workloads must be configured through their existing manager", ErrInvalidPlan))
-	}
 	if currentKind != source.Kind {
 		return fail(fmt.Errorf("%w: source kind cannot change from %s to %s", ErrInvalidSource, currentKind, source.Kind))
 	}
@@ -1631,7 +1553,9 @@ func (s *PlanningStore) saveEnvironmentSource(
 		source.CredentialID, string(identityJSON), digestBytes(sourceJSON, identityJSON), now); err != nil {
 		return fail(err)
 	}
-	moved := invalidCurrentSource || !sameSourceLocation(canonicalSourceConfig(currentSource), source)
+	var currentSource DraftSourceConfig
+	moved := json.Unmarshal([]byte(currentSourceJSON), &currentSource) != nil ||
+		!sameSourceLocation(canonicalSourceConfig(currentSource), source)
 	var proposal *DetectionProposal
 	if detection == nil {
 		if err := cloneBuildPlanTx(ctx, tx, environmentID, current, next, now, moved); err != nil {
@@ -1831,47 +1755,4 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 		})
 	}
 	return changes
-}
-
-// Settings control deployable inputs, not the identity reserved by migration.
-// Preserve that server-owned relationship even when a client omits it.
-func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int64, requested []PlannedDependency) ([]PlannedDependency, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND (kind='runtime' OR resource_kind='existing_proxy_route') ORDER BY resource_kind,resource_id`, environmentID)
-	if err != nil {
-		return nil, err
-	}
-	originals := []PlannedDependency{}
-	for rows.Next() {
-		var dependency PlannedDependency
-		var config string
-		if err := rows.Scan(&dependency.Kind, &dependency.Ownership, &dependency.ResourceKind, &dependency.ResourceID, &config); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		dependency.Config = json.RawMessage(config)
-		originals = append(originals, dependency)
-	}
-	readErr := rows.Err()
-	rows.Close()
-	if readErr != nil {
-		return nil, readErr
-	}
-	result := []PlannedDependency{}
-	for _, dependency := range requested {
-		if dependency.Kind != "runtime" && dependency.ResourceKind != existingIngressDependency {
-			result = append(result, dependency)
-			continue
-		}
-		valid := false
-		for _, original := range originals {
-			if string(mustJSON(dependency)) == string(mustJSON(original)) {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return nil, fmt.Errorf("%w: runtime ownership cannot be changed through settings", ErrInvalidPlan)
-		}
-	}
-	return append(result, originals...), nil
 }

@@ -23,7 +23,6 @@ import {
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { unusableReason } from "@/lib/db-connections"
-import { deploymentRouteId } from "@/lib/deployment-runtime-route"
 import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
@@ -97,13 +96,6 @@ import { RuntimePorts } from "@/components/deploy/runtime-ports"
 import { serviceProduct, volumeProduct } from "@/components/deploy/service-product"
 import { RuntimeUsage } from "@/components/deploy/runtime-usage"
 import {
-  isDockerService,
-  runtimeLogSource,
-  runtimeManagerLabel,
-  runtimeManagerUrl,
-  runtimeServiceId,
-} from "@/components/deploy/runtime-service"
-import {
   CertificateReading,
   DATABASE_ENGINE_LABELS,
   LINK_STATUS,
@@ -174,17 +166,15 @@ export function ProjectRuntime() {
     [available, runtime, releaseById],
   )
   const running = services.filter((service) => service.state === "running")
-  const dockerServices = services.filter(isDockerService)
-  const dockerRunning = dockerServices.filter((service) => service.state === "running")
   const [picked, setPicked] = useSessionState<string | undefined>(
     `deploy.${project.projectId}.runtime.service`,
     undefined,
   )
   // Only a running container has a stats socket with anything to say.
   const selected =
-    dockerRunning.find((service) => service.containerId === picked) ??
-    dockerRunning.find((service) => service.liveRelease) ??
-    dockerRunning[0]
+    running.find((service) => service.containerId === picked) ??
+    running.find((service) => service.liveRelease) ??
+    running[0]
   // The usage tiles' socket frames, so the selected service's card shows the
   // figure the tiles show rather than a poll from a few seconds before it.
   const [liveStat, setLiveStat] = useState<{ containerId: string; stats: ContainerStats }>()
@@ -196,12 +186,12 @@ export function ProjectRuntime() {
     (signal) => get<Container[]>("/docker/containers/", undefined, signal),
     60_000,
     [],
-    { enabled: dockerServices.length > 0 },
+    { enabled: services.length > 0 },
   )
   // A container a deployment has just created is not in a listing read up to
   // a minute ago, so a change in which containers the release has asks again
   // rather than leaving the newest card without its readings until then.
-  const ids = dockerServices.map((service) => service.containerId).join()
+  const ids = services.map((service) => service.containerId).join()
   const refreshContainers = containers.refresh
   const seenIds = useRef(ids)
   useEffect(() => {
@@ -211,12 +201,12 @@ export function ProjectRuntime() {
   }, [ids, refreshContainers])
   // Only this release's running containers: the endpoint inspects and reads
   // every container it is asked about, and the host may run fifty.
-  const runningIds = dockerRunning.map((service) => service.containerId).join(",")
+  const runningIds = running.map((service) => service.containerId).join(",")
   const stats = usePoll(
     (signal) => get<ContainerStats[]>("/docker/containers/stats", { ids: runningIds }, signal),
     10_000,
     [runningIds],
-    { enabled: dockerRunning.length > 0 },
+    { enabled: running.length > 0 },
   )
   const trends = usePoll(
     (signal) =>
@@ -227,7 +217,7 @@ export function ProjectRuntime() {
       ),
     120_000,
     [],
-    { enabled: dockerRunning.length > 0 },
+    { enabled: running.length > 0 },
   )
   // A lifecycle verb changes what the release engine reports, what Docker's
   // listing says and what the stats socket carries, and each is on a timer;
@@ -331,9 +321,7 @@ export function ProjectRuntime() {
     // The container that keeps its data in the volume, when Docker says which;
     // the live service otherwise.
     const keeper = services.find((service) =>
-      mount.containerId
-        ? service.containerId === mount.containerId
-        : volume?.usedBy.some((user) => user.id === service.containerId),
+      volume?.usedBy.some((user) => user.id === service.containerId),
     )
     // Whoever keeps the data names the volume; failing that, the directory it
     // is mounted at does when only one program keeps its data there, and the
@@ -352,30 +340,25 @@ export function ProjectRuntime() {
 
   // The map's three lanes. The live release's services, or every service
   // while none of them is live; the data the release declares, once the
-  // owners have answered. A native service — a PM2 app, a systemd unit — is
-  // drawn as its manager and keyed as the Services list keys it, since it has
-  // no container.
+  // owners have answered.
   const mapped = services.some((service) => service.liveRelease)
     ? services.filter((service) => service.liveRelease)
     : services
   const reached = new Set(
     publicServices(
       mapped.map((service) => ({ ...service, liveRelease: true })),
-      (service) =>
-        isDockerService(service) &&
-        publishedPorts(containerFor(service.containerId)?.exposure).length > 0,
+      (service) => publishedPorts(containerFor(service.containerId)?.exposure).length > 0,
       (service) => Object.hasOwn(DATABASE_ENGINE_LABELS, productOf(service)),
-    ).map(runtimeServiceId),
+    ).map((service) => service.containerId),
   )
   const mapServices: MapService[] = mapped.map((service) => {
-    const docker = isDockerService(service)
     return {
-      id: runtimeServiceId(service),
+      id: service.containerId,
       service,
-      product: docker ? productOf(service) : service.manager === "pm2" ? "pm2" : undefined,
-      stat: docker ? statFor(service.containerId) : undefined,
+      product: productOf(service),
+      stat: statFor(service.containerId),
       release: releaseById.get(service.releaseId)?.number,
-      reached: reached.has(runtimeServiceId(service)),
+      reached: reached.has(service.containerId),
     }
   })
   const storageRead = storage?.status === "available"
@@ -386,13 +369,13 @@ export function ProjectRuntime() {
       : [
           ...(storageRead ? mounts : []).map(
             ({ mount, size, keeper, product: keeperProduct }): MapStore => ({
-              key: `${mount.source}:${mount.target}:${mount.service || ""}:${mount.containerId || ""}`,
+              key: `${mount.source}:${mount.target}`,
               kind: mount.kind === "bind" ? "bind" : "volume",
               eyebrow: mount.kind === "bind" ? "Folder on this server" : "Volume",
               title: mount.source,
-              detail: `at ${mount.target}${mount.service ? ` · ${mount.service}` : ""}${size ? ` · ${bytes(size)}` : ""}`,
+              detail: `at ${mount.target}${size ? ` · ${bytes(size)}` : ""}`,
               product: mount.kind === "bind" ? undefined : keeperProduct,
-              ownerId: mount.containerId || keeper?.containerId,
+              ownerId: keeper?.containerId,
               status: MOUNT_STATUS[mount.status],
             }),
           ),
@@ -462,22 +445,12 @@ export function ProjectRuntime() {
             <EmptyState
               mark={<ProjectMark deployment={deployment} product={project.product} />}
               title="No managed runtime services"
-              description="The runtime owner returned no services for this environment. Refresh the project or check its manager."
+              description="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
               className="border-0 py-6"
             />
           ) : (
             <ChoiceList aria-label="Runtime services">
               {services.map((service, index) => {
-                if (!isDockerService(service))
-                  return (
-                    <NativeServiceCard
-                      key={`${service.releaseId}:${runtimeServiceId(service)}`}
-                      service={service}
-                      release={releaseById.get(service.releaseId)}
-                      projectId={project.projectId}
-                      index={index}
-                    />
-                  )
                 const container = containerFor(service.containerId)
                 return (
                   <ServiceCard
@@ -523,9 +496,9 @@ export function ProjectRuntime() {
           events={events}
           onStats={(frame) => setLiveStat({ containerId: selected.containerId, stats: frame })}
           picker={
-            dockerRunning.length > 1 && (
+            running.length > 1 && (
               <ServicePicker
-                services={dockerServices}
+                services={services}
                 selected={selected.containerId}
                 onSelect={setPicked}
                 productOf={productOf}
@@ -558,7 +531,7 @@ export function ProjectRuntime() {
             <ChoiceList aria-label="Deployment domains">
               {domains?.domains.map((domain) => (
                 <DomainCard
-                  key={deploymentRouteId(domain)}
+                  key={domain.hostname}
                   domain={domain}
                   siteName={domains.siteName}
                   projectId={project.projectId}
@@ -596,7 +569,7 @@ export function ProjectRuntime() {
               <ChoiceList aria-label="Persistent storage">
                 {mounts.map(({ mount, size, product: keeperProduct }) => (
                   <MountCard
-                    key={`${mount.source}:${mount.target}:${mount.service || ""}:${mount.containerId || ""}`}
+                    key={`${mount.source}:${mount.target}`}
                     mount={mount}
                     product={keeperProduct}
                     size={size}
@@ -780,57 +753,6 @@ function ServicePicker({
         </SelectContent>
       </Select>
     </div>
-  )
-}
-
-function NativeServiceCard({
-  service,
-  release,
-  projectId,
-  index,
-}: {
-  service: DeploymentRuntimeService
-  release?: DeploymentRelease
-  projectId: number
-  index: number
-}) {
-  const manager = runtimeManagerLabel(service)
-  return (
-    <ChoiceRow
-      href={runtimeManagerUrl(service)}
-      verb={`Open ${service.name} in ${manager}`}
-      title={service.name}
-      description={
-        <span className="font-mono break-all">
-          {manager} · {service.resourceId || service.name}
-        </span>
-      }
-      leading={
-        <ProductLogo
-          id={service.manager === "pm2" ? "pm2" : undefined}
-          fallback={Terminal}
-          size="sm"
-        />
-      }
-      trailing={
-        <>
-          <ReleaseCell service={service} release={release} />
-          <Status state={service.state} />
-        </>
-      }
-      actions={
-        runtimeLogSource(service) && (
-          <Button variant="ghost" size="sm" asChild>
-            <Link
-              href={`/deploy/${projectId}/logs?view=output&service=${encodeURIComponent(runtimeServiceId(service))}`}
-            >
-              Logs
-            </Link>
-          </Button>
-        )
-      }
-      index={index}
-    />
   )
 }
 
@@ -1281,8 +1203,7 @@ function DomainCard({
   wide: boolean
 }) {
   const router = useRouter()
-  const address = `${domain.hostname}${domain.path && domain.path !== "/" ? domain.path : ""}`
-  const url = `${domain.https ? "https" : "http"}://${domain.hostname}${domain.path || "/"}`
+  const url = `${domain.https ? "https" : "http"}://${domain.hostname}/`
   const verbs: Verb[] = [
     {
       key: "visit",
@@ -1321,9 +1242,11 @@ function DomainCard({
 
   return (
     <ChoiceRow
-      verb={address}
+      verb={domain.hostname}
       href={domain.deepLink}
       disabled={!domain.deepLink}
+      // The certificate's issuer, as Settings → Domains leads the same name:
+      // a hostname is one row wherever it is listed.
       leading={
         <ProductLogo
           size="sm"
@@ -1331,7 +1254,7 @@ function DomainCard({
           fallback={domain.https ? LockClosed : LockOpen}
         />
       }
-      title={<span className="font-mono">{address}</span>}
+      title={<span className="font-mono">{domain.hostname}</span>}
       description={
         <>
           {elsewhere && (
@@ -1348,8 +1271,6 @@ function DomainCard({
             </>
           )}
           <Tag>{OWNERSHIP_WORD[domain.ownership]}</Tag>
-          {domain.service && ` · ${domain.service}`}
-          {domain.detail && ` · ${domain.detail}`}
         </>
       }
       trailing={
@@ -1362,7 +1283,7 @@ function DomainCard({
           </>
         )
       }
-      actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${address}`} />}
+      actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${domain.hostname}`} />}
     >
       {!wide && (
         <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 sm:pl-11">
@@ -1412,7 +1333,6 @@ function MountCard({
       description={
         <>
           mounted at <span className="font-mono">{mount.target}</span>
-          {mount.service && ` · ${mount.service}`}
           {mount.readOnly && " · read-only"}
           {" · "}
           <Tag>{OWNERSHIP_WORD[mount.ownership]}</Tag>

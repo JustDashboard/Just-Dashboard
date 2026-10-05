@@ -49,10 +49,9 @@ strategy, and feature ownership behind those rules.
 
 - [`deployments/caddy-ingress.md`](deployments/caddy-ingress.md) — automatic public Docker Caddy sharing,
   fresh-host provisioning, certificates, route recovery and ownership boundaries.
-- [`deployments/existing-workloads.md`](deployments/existing-workloads.md) — discover existing workloads and recover
-  supported Compose, Docker and native apps into reviewed managed deployments with live baselines.
 - [`deployments/implementation.md`](deployments/implementation.md) — implemented deployment model through
-  C7, execution/activation/recovery, feature joins, automation, previews, and production topology.
+  C7, execution/activation/recovery, feature joins, automation, previews, production topology, and
+  compatibility after removing existing-workload import.
 - [`deployments/redesign-plan.md`](deployments/redesign-plan.md) — deployment experience redesign,
   delivered workflows, and validation evidence.
 - The historical `docs/plans/0.6.7-deployments/` directory is absent from this checkout. Use the
@@ -72,7 +71,6 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
-- [`../audits/2026-10-05-existing-workload-import/README.md`](../audits/2026-10-05-existing-workload-import/README.md) — import overhaul root causes, automatic preparation, preserved domains, isolated live acceptance and real browser recording.
 - [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
   select/menu inventory, single-column option layout, opening behavior and verification coverage.
 

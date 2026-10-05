@@ -508,7 +508,7 @@ func (s *PlanningStore) Create(ctx context.Context, ownerUserID int64, ownerUser
 func (s *PlanningStore) Get(ctx context.Context, id string) (*Draft, error) {
 	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
-		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc, adoption_enc
+		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDraftNotFound
@@ -590,7 +590,7 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 	var created, updated, expires int64
 	if err := row.Scan(&draft.ID, &draft.OwnerUserID, &draft.OwnerUsername, &draft.CurrentStep,
 		&draft.Revision, &data, &findings, &draft.PlanPreview, &draft.CommittedProjectID,
-		&created, &updated, &expires, &draft.environmentEnc, &draft.adoptionEnc); err != nil {
+		&created, &updated, &expires, &draft.environmentEnc); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(data), &draft.Data); err != nil {
@@ -615,31 +615,6 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 		}
 	}
 	draft.refreshEnvironmentKeys()
-	if draft.Data.Adoption != nil && len(draft.Data.Adoption.Inputs) == 0 {
-		draft.Data.Adoption.Inputs = recoveredInputBindings(draft.Data.Adoption.BaselineSource)
-		if draft.Data.Configuration != nil {
-			draft.Data.Adoption.Inputs = append(draft.Data.Adoption.Inputs, legacyNativeInputBindings(draft.Data.Adoption.BaselineSource, draft.Data.Configuration.Runtime)...)
-		}
-	}
-	if draft.Data.Adoption != nil {
-		bindings := map[string]bool{}
-		if draft.Data.Configuration != nil {
-			bindings = recoveredInputBindingKeys(draft.Data.Source, draft.Data.Configuration.Runtime)
-		}
-		for i := range draft.Data.Adoption.Inputs {
-			input := &draft.Data.Adoption.Inputs[i]
-			value, exists := draft.environment[input.StorageKey]
-			input.Retained = exists
-			input.Empty = exists && value == ""
-			input.Bound = bindings[input.StorageKey]
-		}
-	}
-	if draft.adoptionEnc != "" {
-		plaintext, err := s.sealer.Open(draft.adoptionEnc)
-		if err != nil || json.Unmarshal([]byte(plaintext), &draft.adoptionEnvironment) != nil {
-			return nil, fmt.Errorf("deployment adoption environment cannot be decrypted")
-		}
-	}
 	return &draft, nil
 }
 
@@ -689,16 +664,10 @@ func (s *PlanningStore) Save(
 		copy := *request.Intent
 		draft.Data.Intent = &copy
 	case DraftSource:
-		if draft.Data.Adoption != nil {
-			return nil, fmt.Errorf("%w: an adoption retains its reviewed source; change source after importing", ErrInvalidPlan)
-		}
 		if request.Source == nil || request.Intent != nil || request.Configuration != nil || request.Dotenv != nil {
 			return nil, fmt.Errorf("%w: source step requires only source data", ErrInvalidPlan)
 		}
 		copy := canonicalSourceConfig(*request.Source)
-		if copy.Mode == SourceModeRecoveredSnapshot {
-			return nil, fmt.Errorf("%w: recovered snapshots are attached only by the workload recovery reader", ErrInvalidSource)
-		}
 		if err := copy.validateForNewDeployment(); err != nil {
 			return nil, err
 		}
@@ -728,39 +697,6 @@ func (s *PlanningStore) Save(
 			return nil, fmt.Errorf("%w: configuration step requires only configuration data", ErrInvalidPlan)
 		}
 		copy := canonicalConfiguration(*request.Configuration)
-		for _, dependency := range copy.Dependencies {
-			if dependency.Kind == "runtime" {
-				return nil, fmt.Errorf("%w: runtime ownership is assigned only by recovery", ErrInvalidPlan)
-			}
-			if dependency.ResourceKind == existingIngressDependency {
-				valid := false
-				if draft.Data.Adoption != nil {
-					for _, binding := range draft.Data.Adoption.IngressBindings {
-						valid = valid || ((((binding.Status == "linked" || binding.Status == "unverified") && dependency.Ownership == OwnershipLinked) || (binding.Status == "hint" && dependency.Ownership == OwnershipObserved)) && dependency.Kind == "ingress" && dependency.ResourceID == binding.ID && string(dependency.Config) == string(mustJSON(binding)))
-					}
-				}
-				if !valid {
-					return nil, fmt.Errorf("%w: existing ingress ownership is assigned only by recovery", ErrInvalidPlan)
-				}
-			}
-		}
-		if draft.Data.Adoption != nil {
-			copy.Runtime.ComposeProjectName = draft.Data.Adoption.BaselineConfiguration.Runtime.ComposeProjectName
-			for _, original := range draft.Data.Adoption.BaselineConfiguration.Dependencies {
-				if original.ResourceKind != existingIngressDependency {
-					continue
-				}
-				found := false
-				for _, requested := range copy.Dependencies {
-					found = found || (requested.ResourceKind == existingIngressDependency && requested.ResourceID == original.ResourceID)
-				}
-				if !found {
-					copy.Dependencies = append(copy.Dependencies, original)
-				}
-			}
-		} else if copy.Runtime.ComposeProjectName != "" {
-			return nil, fmt.Errorf("%w: existing Compose ownership requires a recovered adoption", ErrInvalidPlan)
-		}
 		// Detection names the framework at commit; the browser does not.
 		copy.Build.Framework = ""
 		if request.Dotenv != nil {
@@ -794,9 +730,6 @@ func (s *PlanningStore) Save(
 			draft.refreshEnvironmentKeys()
 		}
 		copy = draft.withEnvironmentMetadata(copy)
-		if err := draft.validateRecoveredInputBindings(copy); err != nil {
-			return nil, err
-		}
 		if err := sealDomainProtection(&copy); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
@@ -949,10 +882,10 @@ func (s *PlanningStore) persistDraft(ctx context.Context, draft *Draft) (*Draft,
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE deploy_drafts
 		   SET current_step = ?, revision = ?, data_json = ?, findings_json = ?,
-		       plan_preview = ?, updated_at = ?, environment_enc = ?, adoption_enc = ?
+		       plan_preview = ?, updated_at = ?, environment_enc = ?
 		 WHERE id = ? AND revision = ? AND committed_project_id = 0`,
 		draft.CurrentStep, draft.Revision, string(data), string(findings), draft.PlanPreview,
-		draft.UpdatedAt.Unix(), draft.environmentEnc, draft.adoptionEnc, draft.ID, draft.Revision-1)
+		draft.UpdatedAt.Unix(), draft.environmentEnc, draft.ID, draft.Revision-1)
 	if err != nil {
 		return nil, err
 	}
@@ -965,7 +898,7 @@ func (s *PlanningStore) persistDraft(ctx context.Context, draft *Draft) (*Draft,
 func (s *PlanningStore) getUnlocked(ctx context.Context, id string) (*Draft, error) {
 	draft, err := s.scanDraft(s.db.QueryRowContext(ctx, `
 		SELECT id, owner_user_id, owner_username, current_step, revision, data_json,
-		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc, adoption_enc
+		       findings_json, plan_preview, committed_project_id, created_at, updated_at, expires_at, environment_enc
 		  FROM deploy_drafts WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDraftNotFound
@@ -995,15 +928,25 @@ func (s *PlanningStore) Commit(
 	if err := AuthorizeDraft(draft, userID, admin); err != nil {
 		return nil, err
 	}
+	var data string
+	if err := s.db.QueryRowContext(ctx, `SELECT data_json FROM deploy_drafts WHERE id = ?`, id).Scan(&data); err != nil {
+		return nil, err
+	}
+	var savedData map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(data), &savedData); err != nil {
+		return nil, err
+	}
+	if adoption := savedData["adoption"]; len(adoption) > 0 && string(adoption) != "null" {
+		return nil, fmt.Errorf("%w: existing-workload import reviews are no longer supported", ErrInvalidPlan)
+	}
 	if draft.CommittedProjectID != 0 {
 		var environmentID int64
-		var revision int
 		err := s.db.QueryRowContext(ctx, `
-			SELECT id, desired_revision FROM deploy_environments
-			 WHERE project_id = ? AND slug = 'production'`, draft.CommittedProjectID).Scan(&environmentID, &revision)
+			SELECT id FROM deploy_environments
+			 WHERE project_id = ? AND slug = 'production'`, draft.CommittedProjectID).Scan(&environmentID)
 		return &DraftCommitResult{
 			ProjectID: draft.CommittedProjectID, EnvironmentID: environmentID,
-			PlanRevision: revision, Created: false,
+			PlanRevision: 1, Created: false,
 		}, err
 	}
 	if request.Revision != draft.Revision {
@@ -1037,14 +980,6 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	defer tx.Rollback()
-	if draft.Data.Adoption != nil {
-		if len(draft.Data.Adoption.Blockers) != 0 {
-			return nil, fmt.Errorf("%w: migration has unresolved compatibility blockers", ErrPreflightBlocked)
-		}
-		if err := assertAdoptionUnownedTx(ctx, tx, draft.Data.Adoption); err != nil {
-			return nil, err
-		}
-	}
 	owners, err := managedVolumeOwners(ctx, tx, plannedManagedVolumes(canonicalConfiguration(*draft.Data.Configuration)))
 	if err != nil {
 		return nil, err
@@ -1053,12 +988,6 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	now := s.now().UTC()
-	planRevision := 1
-	if draft.Data.Adoption != nil {
-		// Revision one describes the app that is already serving. Review may
-		// edit the desired plan without rewriting that recovery baseline.
-		planRevision = 2
-	}
 	repoPath := sourceRepositoryPath(s.managedRoot, draft)
 	branch := draft.Data.Source.Ref
 	if branch == "" {
@@ -1097,8 +1026,8 @@ func (s *PlanningStore) Commit(
 		INSERT INTO deploy_environments(
 		  project_id, name, slug, kind, desired_revision, strategy,
 		  expected_downtime, protected, created_at, updated_at)
-		VALUES(?, 'production', 'production', ?, ?, ?, ?, 1, ?, ?)`,
-		projectID, EnvironmentProduction, planRevision, configuration.Runtime.Strategy,
+		VALUES(?, 'production', 'production', ?, 1, ?, ?, 1, ?, ?)`,
+		projectID, EnvironmentProduction, configuration.Runtime.Strategy,
 		expectedDowntime, now.Unix(), now.Unix())
 	if err != nil {
 		return nil, err
@@ -1117,7 +1046,7 @@ func (s *PlanningStore) Commit(
 		INSERT INTO deploy_sources(
 		  environment_id, revision, kind, config_json, credential_id,
 		  identity_json, digest, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, planRevision, draft.Data.Source.Kind,
+		VALUES(?, 1, ?, ?, ?, ?, ?, ?)`, environmentID, draft.Data.Source.Kind,
 		string(sourceJSON), draft.Data.Source.CredentialID, string(identityJSON), sourceDigest, now.Unix()); err != nil {
 		return nil, err
 	}
@@ -1135,7 +1064,7 @@ func (s *PlanningStore) Commit(
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO deploy_build_plans(
 		  environment_id, revision, method, config_json, evidence_json, preview, digest, created_at)
-		VALUES(?, ?, ?, ?, ?, ?, ?, ?)`, environmentID, planRevision, configuration.Build.Method,
+		VALUES(?, 1, ?, ?, ?, ?, ?, ?)`, environmentID, configuration.Build.Method,
 		string(buildJSON), string(detectionJSON), buildPreview, buildPlanDigest(configuration.Build), now.Unix()); err != nil {
 		return nil, err
 	}
@@ -1144,7 +1073,7 @@ func (s *PlanningStore) Commit(
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO deploy_runtime_plans(
 		  environment_id, revision, config_json, preview, digest, created_at)
-		VALUES(?, ?, ?, ?, ?, ?)`, environmentID, planRevision, string(runtimeJSON), runtimePreview,
+		VALUES(?, 1, ?, ?, ?, ?)`, environmentID, string(runtimeJSON), runtimePreview,
 		digestBytes(runtimeJSON), now.Unix()); err != nil {
 		return nil, err
 	}
@@ -1240,11 +1169,6 @@ func (s *PlanningStore) Commit(
 			return nil, err
 		}
 	}
-	if draft.Data.Adoption != nil {
-		if err := s.commitAdoptionBaselineTx(ctx, tx, draft, projectID, environmentID, now); err != nil {
-			return nil, err
-		}
-	}
 	update, err := tx.ExecContext(ctx, `
 		UPDATE deploy_drafts SET committed_project_id = ?, updated_at = ?
 		 WHERE id = ? AND revision = ? AND committed_project_id = 0`,
@@ -1259,7 +1183,7 @@ func (s *PlanningStore) Commit(
 		return nil, err
 	}
 	return &DraftCommitResult{
-		ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: planRevision, Created: true,
+		ProjectID: projectID, EnvironmentID: environmentID, PlanRevision: 1, Created: true,
 	}, nil
 }
 

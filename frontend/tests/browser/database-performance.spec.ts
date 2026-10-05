@@ -1289,11 +1289,8 @@ test("statements are ranked by their share, ordered by the server, and one opens
   })
 
   await dialog(page).getByRole("button", { name: "Open in Query" }).click()
-  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
-  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
-    "SELECT count(*) FROM order_items",
-  )
-  await expect(page.getByText("Nothing has been run in this tab", { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
+  expect(new URL(page.url()).searchParams.get("sql")).toBe("SELECT count(*) FROM order_items")
 })
 
 test("statement statistics that are off say how to turn them on, to the role that may", async ({
@@ -2387,11 +2384,8 @@ test("a fix the server classes as destructive is only handed to Query, and says 
   await expect(body.getByRole("button", { name: /^Apply/ })).toHaveCount(0)
 
   await body.getByRole("button", { name: "Open in Query" }).click()
-  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
-  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
-    ADVISOR.findings[3].sql!,
-  )
-  await expect(page.getByText("Nothing has been run in this tab", { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
+  expect(new URL(page.url()).searchParams.get("sql")).toBe(ADVISOR.findings[3].sql)
 })
 
 test("a fix that is the engine's own maintenance is run as maintenance, with its output", async ({

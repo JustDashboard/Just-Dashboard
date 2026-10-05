@@ -72,28 +72,6 @@ func TestPreviewApprovalIsBoundToExactRevisionAndProjectBeforeCreatingWork(t *te
 	}
 }
 
-func TestPreviewCreationRefusesInheritedComposeNamespaceBeforeWritingPlans(t *testing.T) {
-	f := newAutomationFixture(t)
-	tx, err := f.store.DB.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(t.Context(), `INSERT INTO deploy_build_plans(environment_id,revision,method,config_json,evidence_json,preview,digest,created_at) VALUES(?,2,'recipe','{}','[]','','build',1)`, f.environmentID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(t.Context(), `INSERT INTO deploy_runtime_plans(environment_id,revision,config_json,preview,digest,created_at) VALUES(?,2,'{"composeProjectName":"original-stack"}','','runtime',1)`, f.environmentID); err != nil {
-		t.Fatal(err)
-	}
-	if err := createIsolatedPreviewPlansTx(t.Context(), tx, f.environmentID, 2, f.environmentID, 3, 1); !errors.Is(err, ErrPreviewIsolation) {
-		t.Fatalf("preview inherited production's Compose namespace: %v", err)
-	}
-	var written int
-	if err := tx.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM deploy_runtime_plans WHERE environment_id=? AND revision=3`, f.environmentID).Scan(&written); err != nil || written != 0 {
-		t.Fatalf("unsafe preview wrote a plan: count=%d err=%v", written, err)
-	}
-}
-
 // A rejected revision must not be approvable afterward without a new event,
 // and it must not show up in the pending list an administrator reviews.
 func TestRejectPreviewClosesTheApprovalUntilANewEvent(t *testing.T) {
@@ -186,17 +164,6 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 	if _, err := f.store.DB.Exec(`INSERT INTO deploy_runtime_plans(environment_id,revision,config_json,preview,digest,created_at) VALUES(?,2,?,'','runtime',1)`, f.environmentID, string(mustJSON(runtime))); err != nil {
 		t.Fatal(err)
 	}
-	for _, status := range []string{"linked", "unverified", "hint"} {
-		binding := linkedIngressFixture()
-		binding.ID, binding.Status = "production-"+status, status
-		ownership := OwnershipLinked
-		if status == "hint" {
-			ownership = OwnershipObserved
-		}
-		if _, err := f.store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id,release_id,kind,ownership,resource_kind,resource_id,config_json,created_at) VALUES(?,0,'ingress',?,?,?,?,1)`, f.environmentID, ownership, existingIngressDependency, binding.ID, string(mustJSON(binding))); err != nil {
-			t.Fatal(err)
-		}
-	}
 	created, err := f.automation.CreateTrigger(t.Context(), f.projectID, f.environmentID, TriggerWrite{Name: "Review", Kind: TriggerGitHub, Provider: "github", Enabled: true, Config: TriggerConfig{Repository: "acme/app", Ref: "main", Preview: true}})
 	if err != nil {
 		t.Fatal(err)
@@ -206,13 +173,6 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 	preview, _, err := f.automation.EnsurePreview(t.Context(), &created.Trigger, event)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var previewLinks, productionLinks int
-	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id=? AND resource_kind=?`, preview.EnvironmentID, existingIngressDependency).Scan(&previewLinks); err != nil || previewLinks != 0 {
-		t.Fatal("preview inherited production proxy authority", previewLinks, err)
-	}
-	if err := f.store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_dependencies WHERE environment_id=? AND resource_kind=?`, f.environmentID, existingIngressDependency).Scan(&productionLinks); err != nil || productionLinks != 3 {
-		t.Fatal("preview changed production proxy authority", productionLinks, err)
 	}
 	var buildRaw, runtimeRaw string
 	if err := f.store.DB.QueryRow(`SELECT b.config_json,r.config_json FROM deploy_build_plans b JOIN deploy_runtime_plans r ON r.environment_id=b.environment_id AND r.revision=b.revision WHERE b.environment_id=?`, preview.EnvironmentID).Scan(&buildRaw, &runtimeRaw); err != nil {
@@ -249,7 +209,6 @@ func TestPreviewPlansReplaceAllProductionStorageAndOmitHostReleaseTasks(t *testi
 		},
 		func(p *RuntimePlanConfig) { p.HostNetwork = true },
 		func(p *RuntimePlanConfig) { p.Privileged = true },
-		func(p *RuntimePlanConfig) { p.ComposeProjectName = "production-stack" },
 		func(p *RuntimePlanConfig) { p.Ports = []PublishedPort{{HostPort: 2222, ContainerPort: 2222}} },
 	} {
 		copy := runtime

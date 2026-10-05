@@ -27,9 +27,7 @@ routes, database networks, persistent storage, checkouts, and on-disk artifacts 
 reconciliation ends when its binding records are deleted. Their deployment ownership and
 rollback history are forgotten. Operators wanting managed resources removed must use the existing
 previewed Configuration removal flow first; managed Compose stacks there also require a typed phrase,
-while other targets use ordinary confirmation. Captured PM2/systemd baselines retain original-manager
-restart authority and are excluded from managed resource removal; their reservation records never
-become Docker container IDs or permission to delete host services. The permanent-delete dialog explicitly explains both the record loss and retained resources, as
+while other targets use ordinary confirmation. The permanent-delete dialog explicitly explains both the record loss and retained resources, as
 two lists — what is deleted for good and what stays on the server — under the project it names, and
 it asks for the project's name to be typed before its button is live. The name is sent in `X-Confirm`
 and checked by the API before records are deleted.

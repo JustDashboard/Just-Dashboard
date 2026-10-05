@@ -383,11 +383,6 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	if err != nil {
 		return nil, err
 	}
-	if recipe.installDirectory != "" {
-		// The install remains beside its manifest while the image keeps the
-		// complete native source layout and original working directory.
-		lines = append(lines[:len(lines)-1], append([]string{"WORKDIR /app/" + recipe.installDirectory}, lines[len(lines)-1:]...)...)
-	}
 	workdir, binPath := "/app", "/app/node_modules/.bin"
 	if recipe.member != "" {
 		workdir = "/app/" + recipe.member

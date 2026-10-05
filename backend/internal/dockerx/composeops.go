@@ -145,10 +145,6 @@ type ComposeReleaseSpec struct {
 	Files            []string
 	OverrideFile     string
 	Environment      map[string]string
-	Services         []string
-	Scales           map[string]int
-	NoStart          bool
-	KeepOrphans      bool
 }
 
 type ComposeReleaseAction string
@@ -176,9 +172,6 @@ func (c *Client) RunComposeRelease(
 		len(spec.Files) == 0 || len(spec.Files) > 16 || graceSeconds < 0 || graceSeconds > 300 {
 		return errors.New("invalid deployment Compose invocation")
 	}
-	if spec.NoStart && len(spec.Services) == 0 {
-		return errors.New("an adopted Compose baseline needs explicit services")
-	}
 	args := []string{"compose", "--project-name", spec.ProjectName, "--project-directory", spec.ProjectDirectory}
 	for _, configured := range spec.Files {
 		path := configured
@@ -205,29 +198,7 @@ func (c *Client) RunComposeRelease(
 	args = nil
 	switch action {
 	case ComposeReleaseUp:
-		args = append(args, "up", "--no-build")
-		if spec.NoStart {
-			args = append(args, "--no-start", "--no-deps")
-		} else {
-			args = append(args, "-d")
-		}
-		if !spec.KeepOrphans {
-			args = append(args, "--remove-orphans")
-		}
-		services := append([]string(nil), spec.Services...)
-		sort.Strings(services)
-		for _, service := range services {
-			if !validComposeService(service) {
-				return errors.New("invalid deployment Compose service")
-			}
-			if scale, exists := spec.Scales[service]; exists {
-				if scale < 1 || scale > 1000 {
-					return errors.New("invalid deployment Compose service scale")
-				}
-				args = append(args, "--scale", service+"="+strconv.Itoa(scale))
-			}
-		}
-		args = append(args, services...)
+		args = append(args, "up", "-d", "--no-build", "--remove-orphans")
 	case ComposeReleaseStart:
 		args = append(args, "start")
 	case ComposeReleaseStop:
@@ -288,7 +259,7 @@ func writeComposeReleaseEnv(directory string, values map[string]string) (string,
 	for _, key := range keys {
 		contents.WriteString(key)
 		contents.WriteByte('=')
-		contents.WriteString(quoteComposeEnvironmentValue(values[key]))
+		contents.WriteString(strconv.Quote(values[key]))
 		contents.WriteByte('\n')
 	}
 	file, err := os.CreateTemp(directory, ".just-dashboard-env-*")
@@ -311,25 +282,6 @@ func writeComposeReleaseEnv(directory string, values map[string]string) (string,
 		return "", err
 	}
 	return name, nil
-}
-
-// Compose expands dollar expressions inside double-quoted dotenv values. Its
-// escape vocabulary is smaller than Go's, so strconv.Quote also corrupts
-// control bytes such as \x01 when a captured environment is replayed.
-func quoteComposeEnvironmentValue(value string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`, "$", "$$").Replace(value) + `"`
-}
-
-func validComposeService(name string) bool {
-	if name == "" || len(name) > 128 {
-		return false
-	}
-	for _, char := range name {
-		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || strings.ContainsRune("_.-", char)) {
-			return false
-		}
-	}
-	return name[0] != '-'
 }
 
 func composeReleaseProcessEnvironment(host, directory string) []string {

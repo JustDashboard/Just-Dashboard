@@ -222,6 +222,9 @@ func (s *OrchestrationStore) Retry(
 // events together. Returning a run therefore proves it can be recovered after
 // the caller disconnects. The bool is false for an idempotent replay.
 func (s *OrchestrationStore) Enqueue(ctx context.Context, req RunRequest) (*EngineRun, bool, error) {
+	if err := RequireSupportedProject(ctx, s.db, req.ProjectID); err != nil {
+		return nil, false, err
+	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 	if err := normalizeRunRequest(&req); err != nil {

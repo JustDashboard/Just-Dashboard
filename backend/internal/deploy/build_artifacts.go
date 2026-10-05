@@ -615,21 +615,6 @@ func (b *ArtifactBuilder) Build(
 			if service.Image == "" || strings.Contains(service.Image, "${") {
 				return result, fmt.Errorf("%w: Compose service %s has no immutable image or supported build", ErrUnsupportedBuilder, service.Name)
 			}
-			if contentDigestRE.MatchString(service.Image) {
-				image, err := b.backend.InspectImage(ctx, service.Image)
-				if err != nil {
-					return result, fmt.Errorf("inspect Compose service %s local image: %w", service.Name, err)
-				}
-				if image.ConfigDigest != service.Image {
-					return result, fmt.Errorf("%w: Compose service %s local image identity changed", ErrArtifactMissing, service.Name)
-				}
-				if err := validateResolvedImage(image); err != nil {
-					return result, err
-				}
-				resolved.Services = append(resolved.Services, composeResolvedService(service, image, "adopted_local_image"))
-				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, image, prepared, "adopted_local_image"))
-				continue
-			}
 			image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
 			if err != nil {
 				return result, fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
@@ -659,18 +644,6 @@ func (b *ArtifactBuilder) Build(
 	default:
 		return result, ErrUnsupportedBuilder
 	}
-	// Multiple services can share one immutable image. Service identities
-	// remain in the Compose snapshot; the artifact table stores that image once.
-	unique := make([]ReleaseArtifactInput, 0, len(result.Artifacts))
-	seenArtifacts := map[string]bool{}
-	for _, artifact := range result.Artifacts {
-		key := string(artifact.Kind) + "\x00" + artifact.Reference + "\x00" + artifact.Digest
-		if !seenArtifacts[key] {
-			seenArtifacts[key] = true
-			unique = append(unique, artifact)
-		}
-	}
-	result.Artifacts = unique
 	return result, nil
 }
 
@@ -699,7 +672,6 @@ type selectedRecipe struct {
 	// startCommand are the plan's commands on the resolved manager's runner.
 	nodeInstall                nodeInstallPlan
 	member, contextDir         string
-	installDirectory           string
 	buildCommand, startCommand string
 	nodeInputs                 []string
 	// serving is how nginx serves static output; site is a site generator's
@@ -776,21 +748,6 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 				recipe.contextDir = "."
 			}
 		}
-		if config.PreserveSourceRoot {
-			recipe.contextDir = "."
-			recipe.member = checkoutPath(boundary, root)
-			if source.context == source.dir {
-				recipe.installDirectory = recipe.member
-				for i, input := range recipe.nodeInputs {
-					recipe.nodeInputs[i] = joinRoot(recipe.member, input)
-				}
-			} else if source.context != "" {
-				recipe.installDirectory = source.context
-				for i, input := range recipe.nodeInputs {
-					recipe.nodeInputs[i] = joinRoot(source.context, input)
-				}
-			}
-		}
 		return recipe, nil
 	case "go":
 		if !regularExists(root, "go.mod") {
@@ -841,14 +798,6 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		python, err := selectPythonRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
-		}
-		if config.PreserveSourceRoot && checkoutPath(boundary, root) != "" {
-			if python.assets != nil || python.contextDir != "" {
-				return selectedRecipe{}, fmt.Errorf("%w: native Python nested asset/workspace layout needs a reviewed Dockerfile", ErrUnsupportedBuilder)
-			}
-			python.contextDir = "."
-			python.workdir = checkoutPath(boundary, root)
-			python.installDirectory = python.workdir
 		}
 		recipe := selectedRecipe{kind: "python", catalogueKey: "python", lockfile: python.install.kind, python: python, nodeInputs: python.inputs}
 		if python.contextDir != "" {

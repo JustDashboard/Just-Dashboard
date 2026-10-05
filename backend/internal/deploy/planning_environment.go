@@ -15,13 +15,6 @@ func (d *Draft) refreshEnvironmentKeys() {
 }
 
 func (d *Draft) withEnvironmentMetadata(configuration PlanConfiguration) PlanConfiguration {
-	if d.Data.Adoption != nil {
-		bindings := recoveredInputBindingKeys(d.Data.Source, configuration.Runtime)
-		for i := range d.Data.Adoption.Inputs {
-			input := &d.Data.Adoption.Inputs[i]
-			input.Bound = bindings[input.StorageKey]
-		}
-	}
 	seen := map[string]bool{}
 	for _, variable := range configuration.Variables {
 		seen[variable.Name] = true

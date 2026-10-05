@@ -182,7 +182,7 @@ export default function AuditPage() {
             title="Recorded requests"
             actions={
               total !== undefined && (
-                <span className="text-hint leading-none text-muted-foreground">
+                <span className="text-hint text-muted-foreground">
                   {filtered ? "Matching" : "Recorded"}{" "}
                   <span key={total} className="numeric inline-block animate-rise text-foreground">
                     {total.toLocaleString()}

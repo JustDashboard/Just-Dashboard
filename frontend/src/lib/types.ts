@@ -2617,8 +2617,6 @@ export type DeploymentSourceMode =
   | "git_url"
   | "connected_repository"
   | "local_checkout"
-  | "local_directory"
-  | "recovered_snapshot"
   | "image_reference"
   | "compose_paste"
   | "compose_upload"
@@ -2628,9 +2626,6 @@ export type DeploymentSourceMode =
   | "existing_checkout"
   | "existing_container"
   | "existing_stack"
-  | "existing_pm2"
-  | "existing_systemd"
-  | "existing_process"
 
 export type DeploymentRunState =
   | "requested"
@@ -2825,10 +2820,6 @@ export type DeploymentRunEvent = {
 
 export type DeploymentRuntimeService = {
   containerId: string
-  manager?: "docker" | "pm2" | "systemd" | "process"
-  resourceId?: string
-  logSource?: string
-  pid?: number
   name: string
   releaseId: number
   liveRelease: boolean
@@ -3141,12 +3132,6 @@ export type DeploymentDiagnosis = {
 }
 
 export type DeploymentDomainRoute = {
-  id?: string
-  path?: string
-  service?: string
-  proxyKind?: string
-  continuity?: string
-  detail?: string
   hostname: string
   https: boolean
   ownership: DeploymentOwnership
@@ -3168,8 +3153,6 @@ export type DeploymentDomainRoute = {
 }
 
 export type DeploymentStorageMount = {
-  service?: string
-  containerId?: string
   source: string
   target: string
   kind: "volume" | "bind"
@@ -3720,7 +3703,6 @@ export type DeploymentDraftSource = {
   ref?: string
   credentialId?: number
   localPath?: string
-  excludePaths?: string[]
   subdirectory?: string
   managedInPlace?: boolean
   includeSubmodules?: boolean
@@ -4479,8 +4461,6 @@ export type DeploymentConfiguration = {
     target?: string
     /** The Compose service readiness and the release's container follow; empty keeps detection's. */
     primaryService?: string
-    /** Imported native commands keep their captured paths under the full source tree. */
-    preserveSourceRoot?: boolean
     noCache?: boolean
     secrets?: { variable: string; step: BuildSecretStep }[]
     releaseTasks?: {
@@ -4497,8 +4477,6 @@ export type DeploymentConfiguration = {
     previewIsolation?: boolean
     image?: string
     command?: string[]
-    user?: string
-    workingDirectory?: string
     internalPort?: number
     hostPort?: number
     ports?: DeploymentPublishedPort[]
@@ -4529,7 +4507,6 @@ export type DeploymentConfiguration = {
   }
   variables: {
     name: string
-    valueMode?: "literal" | "reference" | ""
     sensitivity: "plain" | "secret"
     scopes: string[]
     required?: boolean
@@ -4576,7 +4553,6 @@ export type DeploymentPlannedDomain = {
 
 export type DeploymentVariable = {
   name: string
-  recoveredInput?: import("./workload-import").RecoveredInput
   revision: number
   sensitivity: "plain" | "secret"
   scopes: ("build" | "runtime" | "release_task")[]
@@ -4622,8 +4598,6 @@ export type DeploymentPendingState = {
 }
 
 export type DeploymentEnvironmentConfiguration = Omit<DeploymentConfiguration, "variables"> & {
-  inputs?: import("./workload-import").RecoveredInput[]
-  ingressBindings?: import("./workload-import").ExistingIngressBinding[]
   revision: number
   variables: DeploymentVariable[]
   pending: DeploymentPendingState
@@ -4696,8 +4670,6 @@ export type DeploymentBackupGateEvidence = {
 }
 
 export type DeploymentPreflightFinding = {
-  issueCode?: string
-  service?: string
   code: string
   severity: "pass" | "decision" | "warning" | "blocked" | "unavailable"
   title: string
@@ -4766,7 +4738,6 @@ export type DeploymentDraft = {
     source?: DeploymentDraftSource
     detection?: DeploymentDetection
     configuration?: DeploymentConfiguration
-    adoption?: import("./workload-import").WorkloadAdoption
   }
   findings: DeploymentPreflightFinding[]
   planPreview: string

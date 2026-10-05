@@ -2,45 +2,10 @@
 
 ## Processes
 
-Deployment discovery uses a separate `PM2.ListExisting` reader. It connects directly to already
-existing default-home daemon sockets using the monitor RPC transport under the owning host account;
-it does not invoke the PM2 CLI or start a missing daemon. Successful accounts remain visible when
-another account cannot be read. Application identity includes account, namespace and name, so cluster
-instances group without combining identically named applications in different namespaces. Only
-sanitized identity, status, PID and script path reach the import inventory; process environment and
-arguments stay out of inventory. Managed recovery captures them privately and seals them as
-server-side inputs, retains exact original manager restart authority, and blocks unsupported
-translations. See [existing workload import](../deployments/existing-workloads.md).
-
 The live frontend can pause scheduled inventory reads and holds row order while a process has focus,
 using PID plus creation time as identity. Keyboard inspection and place restoration use the shared
 [workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
 still read while paused. Signal and priority route guards remain the contracts below.
-
-Managed adoption has separate private host captures. PM2 captures one account/namespace/application
-through its existing monitor socket without executing ecosystem JavaScript, and lifecycle operations
-compare the captured configuration before calling the exact existing process IDs over that socket.
-Systemd captures its unit, drop-ins and effective execution properties; a running process supplies its
-actual argv and initial environment. Unit/drop-in paths are manager-provided absolute paths with
-bounded reads and configuration digests, and can lie outside deployment roots. Native source and
-working directories still pass deployment-root resolution and host/dashboard path-identity checks. These values are private input for encrypted deployment variables,
-never discovery JSON or audit metadata. Bare processes are fenced by PID creation time on both sides
-of the procfs read and have no automatic migration without a verified restart authority.
-
-Private configuration, entrypoint and procfs capture opens are nonblocking and inspect the opened
-descriptor before reading: FIFOs, devices and directories are refused. These authoritative readers
-retain permitted final symlinks and zero-sized regular procfs files, with their existing byte limits;
-deployment source containment and snapshot identity remain separate checks.
-
-Native baseline releases keep PM2 or systemd as their restart authority. They retain the original
-configuration and entrypoint hashes, stop only after a replacement is prepared, and can be restored
-through the original manager when activation fails. They never delete the original manager entry or
-rewrite its environment. Cluster/watch/IPC behavior, unsupported systemd lifecycle or isolation,
-credentials, environment-file expansion and unverified persistence are migration decisions or blockers,
-not settings the recovery reader silently drops. Executable/entrypoint hashes are accompanied by a
-full bounded source-tree digest checked before native control, covering modules beyond the entrypoint.
-Known source writes newer than an active process block initial recovery. These filesystem checks do
-not reconstruct arbitrary in-memory code or undo mutable application data.
 
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
 membership identifies systemd services, containers and login sessions; an empty command line identifies a
@@ -122,21 +87,6 @@ socket-activated service's port.
 - PM2 log filenames cannot grant access outside `JD_LOG_ROOTS`. An administrator must explicitly
   configure custom log directories; the source list and stream errors explain this requirement. Unified
   log source ids carry account, numeric id and name, while unique legacy name-only ids remain accepted.
-- Deployment adoption captures PM2 configuration through an existing daemon socket without starting a
-  daemon or evaluating an ecosystem file. Native baseline actions verify the account, namespace,
-  process IDs, stable manager configuration, and entrypoint hashes before controlling exact IDs.
-  Rollback restarts only instances that were running in the captured baseline; stopped instances stay
-  stopped. Simple systemd baselines retain the original unit and account, while incompatible sandbox,
-  credential, lifecycle, or source settings block automatic container migration. The original manager
-  entry is retained after migration so failed cutover can restore it. Runtime observation and logs name
-  the native manager directly, without presenting a native PID as a Docker container.
-  Active PM2 captures fence the actual procfs PID birth time and read the process's effective initial
-  environment and numeric UID:GID; the daemon account can differ from its child's configured account.
-  PM2's volatile process-tree cache is excluded from configuration identity because a stop populates
-  it. Autorestart, SIGINT shutdown, and supported grace periods become the managed runtime settings;
-  custom delayed/backoff restart policies remain explicit blockers. Trusted server integrations can
-  select one existing custom `PM2_HOME` with `NewPM2ForExistingDaemon`; the constructor requires an
-  existing socket owned by the verified host account and never starts a daemon.
 - **The per-feature log routes are gone.** `GET /systemd/{name}/journal`, `/systemd/{name}/journal/stream`
   and `/pm2/{name}/logs/stream` had no caller once the sheets embedded the service logs, and they read
   a unit's journal and a process's files around what the `/logs` routes decide — the auth-data gate

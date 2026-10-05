@@ -12,7 +12,6 @@ import {
   persistableFlow,
   railsDatabaseRows,
   submodulesForRoot,
-  sourceWatchesGit,
   withHeldDomainVariables,
   rootEditCandidate,
   withSuggestedHostname,
@@ -38,15 +37,6 @@ const candidate = (overrides = {}) => ({
   evidence: [],
   needsDecision: [],
   ...overrides,
-})
-
-test("a captured application directory has no Git automation while Git checkouts retain it", () => {
-  expect(sourceWatchesGit({ kind: "local", mode: "local_directory", localPath: "/srv/app" })).toBe(
-    false,
-  )
-  expect(sourceWatchesGit({ kind: "local", mode: "local_checkout" })).toBe(true)
-  expect(sourceWatchesGit({ kind: "git", mode: "git_url" })).toBe(true)
-  expect(sourceWatchesGit({ kind: "compose", mode: "compose_local" })).toBe(false)
 })
 
 function flowFor({
@@ -166,34 +156,6 @@ test("a clean Compose stack lands on Review", () => {
     detection: { compose: { variables: [] } },
   })
   expect(landingStep(flow)).toBe("review")
-})
-
-test("captured sealed inputs satisfy Compose declarations and land directly on Review", () => {
-  const flow = flowFor({
-    candidate: candidate({ profile: "compose", buildMethod: "compose" }),
-    source: { kind: "compose", mode: "compose_paste" },
-    detection: { compose: { variables: ["JD_IMPORT_ENV_TOKEN_WORKER"] } },
-  })
-  flow.draft.environmentKeys = ["JD_IMPORT_ENV_TOKEN_WORKER"]
-  flow.draft.data = {
-    adoption: {
-      inputs: [
-        {
-          storageKey: "JD_IMPORT_ENV_TOKEN_WORKER",
-          name: "TOKEN",
-          kind: "environment",
-          service: "worker",
-          empty: false,
-        },
-      ],
-    },
-  }
-  expect(landingStep(flow)).toBe("review")
-  flow.draft.data.adoption.inputs[0].empty = true
-  expect(landingStep(flow)).toBe("variables")
-  flow.draft.data.adoption.inputs[0].empty = false
-  flow.draft.environmentKeys = []
-  expect(landingStep(flow)).toBe("variables")
 })
 
 test("a variable the source was read as needing, with nothing in it, opens the variables screen", () => {
@@ -360,20 +322,6 @@ test("persisting a flow excludes credentials from both live and server draft sna
   }
   flow.detection = { compose: { preview: "# preview-private-value" } }
   flow.draft.data.detection = structuredClone(flow.detection)
-  flow.draft.data.adoption = {
-    key: "stack:live",
-    digest: "reviewed",
-    kind: "stack",
-    resourceId: "live",
-    manager: "docker",
-    name: "live",
-    warnings: ["Review the first redeploy."],
-    blockers: [],
-    serviceCount: 4,
-    runningCount: 2,
-    baseline: { environment: { TOKEN: "baseline-private-value" } },
-    originalEnvironment: { TOKEN: "unexpected-private-value" },
-  }
   flow.draft.planPreview = JSON.stringify({ compose: { preview: "# preview-private-value" } })
   const saved = persistableFlow(flow)
   for (const secret of [
@@ -381,16 +329,11 @@ test("persisting a flow excludes credentials from both live and server draft sna
     "compose-secret",
     "visitor-secret",
     "preview-private-value",
-    "baseline-private-value",
-    "unexpected-private-value",
   ]) {
     expect(JSON.stringify(saved)).not.toContain(secret)
     expect(JSON.stringify(flow)).toContain(secret)
   }
   expect(saved.configuration.domains[0].protection.username).toBe("reader")
-  expect(saved.draft.data.adoption.key).toBe("stack:live")
-  expect(saved.draft.data.adoption.runningCount).toBe(2)
-  expect(saved.draft.data.adoption.baseline).toBeUndefined()
 })
 
 test("an address held back while no domain is planned binds to a domain added after the check", () => {

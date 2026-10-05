@@ -343,14 +343,6 @@ func (e *NormalizedStepExecutor) startCandidate(
 	if err := validateRuntimeActivationStrategy(snapshot); err != nil {
 		return normalizedStepFailure(err)
 	}
-	if err := e.verifyExistingIngressBeforeStop(ctx, execution, snapshot); err != nil {
-		return runtimeStepFailure(err, "existing_ingress_changed", "the existing proxy route could not be verified; no runtime was stopped", nil)
-	}
-	if validator, ok := e.runtime.(RuntimeCandidateScopeValidator); ok {
-		if err := validator.ValidateCandidateScope(ctx, CandidateRuntimeRequest{Run: execution.Run, Release: release.Release, Snapshot: snapshot}); err != nil {
-			return runtimeStepFailure(err, "candidate_scope_changed", "the existing Compose service population changed; no runtime was stopped", nil)
-		}
-	}
 
 	var previousStop *RuntimeStopEvidence
 	if snapshot.Plan.Strategy == StrategyStopFirst && release.Release.PredecessorReleaseID != 0 {
@@ -584,14 +576,13 @@ func (e *NormalizedStepExecutor) activate(
 	evidence := activationStepEvidence{ReleaseID: release.Release.ID, PublicChecks: []CheckEvidence{}}
 	var route *proxysvc.DeploymentRoute
 	var appliedRoute *proxysvc.DeploymentRouteResult
-	managed := managedDomains(snapshot.Domains)
-	if len(managed) > 0 {
+	if len(snapshot.Domains) > 0 {
 		if runtime.Port == 0 || e.proxy == nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 			evidence.Recovery = &recovery
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
-		routeValue := deploymentRoute(release.Release.EnvironmentID, managed, runtime.Host, runtime.Port)
+		routeValue := deploymentRoute(release.Release.EnvironmentID, snapshot.Domains, runtime.Host, runtime.Port)
 		routeValue.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
@@ -621,11 +612,6 @@ func (e *NormalizedStepExecutor) activate(
 			evidence.Recovery = &recovery
 			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
-	}
-	if err := e.applyExistingIngress(ctx, release.Release, *runtime, snapshot); err != nil {
-		recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
-		evidence.Recovery = &recovery
-		return StepResult{State: StepFailed, ErrorCode: "existing_ingress_handoff_failed", ErrorMessage: "the original proxy upstream handoff failed and recovery was checked", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 	}
 
 	publicChecks := []PlannedCheck{}
@@ -704,9 +690,6 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, host string, 
 	var users []proxysvc.BasicAuthUser
 	seen := map[string]bool{}
 	for _, domain := range domains {
-		if domain.Ownership == OwnershipLinked {
-			continue
-		}
 		names = append(names, strings.ToLower(domain.Hostname))
 		tls = tls || domain.HTTPS
 		if domain.Protection != nil && !seen[domain.Protection.Username] {
@@ -753,15 +736,11 @@ func (e *NormalizedStepExecutor) stopCandidateAndRestore(
 	if route != nil && e.proxy != nil {
 		recovery.RouteRestored = e.proxy.RestoreDeploymentRoute(recoveryCtx, route.Snapshot) == nil
 	}
-	if _, snapshot, snapshotErr := e.releaseSnapshotForRun(recoveryCtx, execution.Run.ID); snapshotErr == nil {
-		recovery.RouteRestored = recovery.RouteRestored && e.restoreExistingIngress(recoveryCtx, release, snapshot) == nil
-	}
 	previous := e.restorePrevious(recoveryCtx, execution, release, plan)
 	if previous == nil {
 		recovery.RuntimeRestored = release.PredecessorReleaseID == 0 || plan.Strategy == StrategyBlueGreen
 	} else {
 		recovery.RuntimeRestored = previous.RuntimeRestored
-		recovery.RouteRestored = recovery.RouteRestored && previous.RouteRestored
 	}
 	recovery.TailnetRestored = e.restoreTailnet(recoveryCtx, execution, release, recovery.RuntimeRestored)
 	_ = e.store.SetRuntimeState(recoveryCtx, execution.Run.ID, execution.ClaimToken, release.ID, "failed")
@@ -798,18 +777,6 @@ func (e *NormalizedStepExecutor) restorePrevious(
 	}
 	if err := e.runtime.StartExisting(recoveryCtx, *previousRuntime, variables,
 		func(line BuildLog) error { return stepLog(execution, line.Stream, line.Text) }); err != nil {
-		return recovery
-	}
-	previousRelease, releaseErr := e.store.Release(recoveryCtx, release.PredecessorReleaseID)
-	if releaseErr != nil {
-		return recovery
-	}
-	previousSnapshot, snapshotErr := decodeReleaseRuntimeSnapshot(previousRelease)
-	if snapshotErr != nil {
-		return recovery
-	}
-	if err := e.applyExistingIngress(recoveryCtx, previousRelease.Release, *previousRuntime, previousSnapshot); err != nil {
-		recovery.RouteRestored = false
 		return recovery
 	}
 	if err := e.store.SetRuntimeState(recoveryCtx, execution.Run.ID, execution.ClaimToken, previousRuntime.ReleaseID, "live"); err != nil {
@@ -855,8 +822,7 @@ func (e *NormalizedStepExecutor) retirePrevious(
 	// containers were already replaced by `up`; stopping that identity here
 	// would stop the newly activated release.
 	sharedComposeProject := previous.Kind == "compose" && current.Kind == "compose" && previous.RuntimeID == current.RuntimeID
-	sharedNativeRuntime := (previous.Kind == "pm2" || previous.Kind == "systemd") && previous.Kind == current.Kind && previous.RuntimeID == current.RuntimeID
-	if !sharedComposeProject && !sharedNativeRuntime {
+	if !sharedComposeProject {
 		if snapshot.Plan.DrainSeconds > 0 {
 			timer := time.NewTimer(time.Duration(snapshot.Plan.DrainSeconds) * time.Second)
 			select {
@@ -1069,18 +1035,8 @@ func decodeReleaseRuntimeSnapshot(release *ReleaseWithArtifacts) (runtimeRelease
 		if json.Unmarshal(envelope.Snapshot, &snapshot) != nil || snapshot.Version != 1 {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot is malformed", ErrArtifactMissing)
 		}
-		imageMatches := snapshot.Image.Digest == release.Release.ImageDigest
-		if snapshot.Compose != nil {
-			imageMatches = false
-			for _, service := range snapshot.Compose.Services {
-				if service.Digest == release.Release.ImageDigest {
-					imageMatches = true
-					break
-				}
-			}
-		}
 		if snapshot.Plan.Strategy != release.Release.Strategy ||
-			(release.Release.ImageDigest != "" && !imageMatches) {
+			(release.Release.ImageDigest != "" && snapshot.Image.Digest != release.Release.ImageDigest) {
 			return runtimeReleaseSnapshot{}, fmt.Errorf("%w: runtime snapshot does not match release identity", ErrInvalidPlan)
 		}
 		return snapshot, nil

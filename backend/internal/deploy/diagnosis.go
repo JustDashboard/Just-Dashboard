@@ -143,10 +143,6 @@ func Diagnose(input DiagnosisInput) Diagnosis {
 	} else {
 		for _, domain := range input.Domains.Domains {
 			switch domain.Route {
-			case statusUnavailable:
-				if domain.Ownership == OwnershipLinked {
-					silence("domains", domain.Detail)
-				}
 			case "missing":
 				find(DiagnosisFinding{
 					Code: "domain_unrouted", Severity: DiagnosisWarning,
@@ -178,11 +174,7 @@ func Diagnose(input DiagnosisInput) Diagnosis {
 			switch domain.Certificate {
 			case statusUnavailable:
 				if domain.HTTPS {
-					if domain.Ownership == OwnershipLinked {
-						silence("certificates", fmt.Sprintf("The existing proxy owns HTTPS for %s; its certificate validity was not independently assessed.", domain.Hostname))
-					} else {
-						silence("certificates", fmt.Sprintf("Certificate inventory is unavailable, so HTTPS for %s was not assessed.", domain.Hostname))
-					}
+					silence("certificates", fmt.Sprintf("Certificate inventory is unavailable, so HTTPS for %s was not assessed.", domain.Hostname))
 				}
 			case "missing":
 				find(DiagnosisFinding{

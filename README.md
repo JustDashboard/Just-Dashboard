@@ -44,12 +44,6 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   builds before it builds, what would stop it or deserves a look is shown before Deploy is pressed,
   and a build that still fails names its cause and the setting that fixes it. Every release is
   immutable, so rollback reactivates what ran before. Web services get a health-gated cutover.
-- **Adopts supported applications already running on the server.** Import existing discovers Docker
-  containers and Compose stacks, PM2 applications and systemd services, recovers their configuration,
-  and records the current app as a live deployment without restarting it. Settings, sealed variables,
-  logs, history and deployment controls use the normal deployment pages. Recovery explains missing
-  requirements and refuses unsupported conversions; review the
-  [adoption and rollback boundaries](docs/internal/deployments/existing-workloads.md) before migration.
 - **Every database on the server, each as its own engine.** It finds what is here — in containers,
   installed on the machine, a SQLite file on disk — and opens each one as what it is: a table editor
   and a SQL editor for a SQL server, keys and a console for Redis, documents and pipelines for
@@ -252,28 +246,17 @@ or connect a GitLab/Gitea token for requests on those providers.
 
 ![A project's website preview, live release, running containers and traffic metrics](docs/deployments.png)
 
-Point it at a repository, an image, a template or a Compose file. It
+Point it at a repository, an image, a template, a Compose stack or something already running. It
 says what it found, shows the plan, and runs it as a job with a permanent URL. Each project has
 an overview with a live preview, deployments with rollback, logs, runtime, a console and settings.
 Setup can generate template credentials and suggest a public address, create and connect a private
 database on this server, or use an external database connection. Build commands, variables, storage,
 health checks and runtime limits remain editable before the first deployment.
 
-Already have applications on this server? **Import existing** discovers Docker Compose stacks,
-standalone containers, existing PM2 applications, systemd services and listening host processes.
-Review and recover the services, ports, configuration, storage and original manager, then adopt a
-normal deployment with a pinned live release. Existing stopped containers are included; a four-container
-stack with two running stays one project. New Compose imports default to existing containers only,
-with absent declarations listed before adoption. Original environment names remain grouped by service;
-their exact values stay sealed. Verified build sources and app-specific configuration are prepared
-automatically, with immutable images retained as the live baseline. Existing domains keep their current
-proxy, TLS and path rules; verified upstream changes and native startup handoffs are prepared for later
-cutover and restored on failure or baseline rollback. Import leaves the application running. Settings, variables, logs, history,
-deployment controls and applicable automation use the regular deployment pages. Settings stay pending
-until Deploy changes; Redeploy and rollback use the frozen baseline. PM2/systemd applications retain
-their original manager until an explicit Docker migration. Recovery blocks incomplete or unsupported
-translations, including unmanaged processes without restart authority. See the
-[coverage and rollback boundaries](docs/internal/deployments/existing-workloads.md).
+Existing-workload deployment import is unavailable after reverting PRs #136 and #145. Previously
+imported projects keep their records and running resources, but deployment mutations and automation
+are blocked. Manage those workloads with Docker/Compose/PM2/systemd directly, or restore an
+import-capable version. Stop or drain deployment runs before changing versions.
 
 The Database source uses the same engine catalogue and settings panel as Add a database, with animated
 startup stages until the connection is verified. It then offers the connection string and a link to

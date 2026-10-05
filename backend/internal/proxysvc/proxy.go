@@ -50,12 +50,9 @@ func (k Kind) Known() bool {
 }
 
 type Service struct {
-	dockerIngress     bool
-	ingressJournalDir string
-	ingressReload     func(context.Context, ExistingIngressBinding) error
-	ingressResolve    func(context.Context) (*dockerCaddy, error)
-	nginxDir          string
-	caddyFile         string
+	dockerIngress bool
+	nginxDir      string
+	caddyFile     string
 
 	// nginx has no way to test a config fragment in isolation, so validation
 	// has to put the candidate where nginx expects it and take it away again.
@@ -82,9 +79,6 @@ func NewWithDockerIngress(nginxDir, caddyFile string) *Service {
 }
 
 func (s *Service) dockerCaddy(ctx context.Context) (*dockerCaddy, error) {
-	if s.ingressResolve != nil {
-		return s.ingressResolve(ctx)
-	}
 	if !s.dockerIngress {
 		return nil, nil
 	}

@@ -51,7 +51,6 @@ import {
 } from "@/components/deploy/settings/setting-card"
 import { SettingPicture } from "@/components/deploy/settings/setting-picture"
 import { Segments } from "@/components/deploy/settings/segments"
-import { ComposeSettingsNote } from "@/components/deploy/settings/compose-settings-note"
 import {
   DEFAULT_GRACE_SECONDS,
   DEFAULT_STOP_SIGNAL,
@@ -340,7 +339,6 @@ function RuntimeForm({
     fieldError !== undefined && FIELD_SECTION[fieldError.id] === section
 
   const method = configuration.build.method
-  const compose = method === "compose"
   const built = method === "recipe" || method === "dockerfile" || method === "static"
   const argv = linesOf(runtime.commandText)
   const capabilities = linesOf(runtime.capabilitiesText)
@@ -420,16 +418,6 @@ function RuntimeForm({
       applies="next-deployment"
       error={error}
     >
-      {compose && (
-        <ComposeSettingsNote
-          projectId={projectId}
-          sourceSection={
-            (configuration.source?.kind ?? deployment.sourceKind) === "compose"
-              ? "compose-source"
-              : "source"
-          }
-        />
-      )}
       {/* The head is the command as one line, which the field under it, one
           argument per line, does not show; the image was the field under it
           again, glyph and all. The line rises when it swaps between the
@@ -447,8 +435,6 @@ function RuntimeForm({
               <>
                 runs <span className="font-mono text-foreground">{argv.join(" ")}</span>
               </>
-            ) : compose ? (
-              "keeps each service's Compose command"
             ) : (
               "runs the image's own command"
             )}
@@ -664,7 +650,7 @@ function RuntimeForm({
         id="resources"
         title="Resources"
         status={statuses(
-          !compose && memory === 0 && cpus === 0 && pids === 0 && (
+          memory === 0 && cpus === 0 && pids === 0 && (
             <Status key="uncapped" tone="warning" label="No limits" className="animate-rise" />
           ),
           settingStatus({
@@ -682,12 +668,7 @@ function RuntimeForm({
             value={memory}
             peak={usage.state === "ready" ? usage.memory / MIB : undefined}
             peakLabel={(value) => `${Math.round(value)} MiB`}
-            info={
-              compose
-                ? "Zero keeps each service's Compose memory limit. A positive value overrides it on the next deployment."
-                : "Zero means no limit. The kernel stops a container that goes past its limit, and the run's diagnostics say so."
-            }
-            zeroLabel={compose ? "keeps Compose limits" : undefined}
+            info="Zero means no limit. The kernel stops a container that goes past its limit, and the run's diagnostics say so."
             error={errorFor("runtime-memory")}
             disabled={!canEdit}
             onChange={(memoryMb) => patch({ memoryMb })}
@@ -700,12 +681,7 @@ function RuntimeForm({
             value={cpus}
             peak={usage.state === "ready" ? usage.cpus : undefined}
             peakLabel={(value) => `${value.toFixed(2)} cores`}
-            info={
-              compose
-                ? "Zero keeps each service's Compose CPU limit. A positive value overrides it on the next deployment."
-                : "Whole or fractional CPUs, for example 0.5 or 2. Zero means no limit."
-            }
-            zeroLabel={compose ? "keeps Compose limits" : undefined}
+            info="Whole or fractional CPUs, for example 0.5 or 2. Zero means no limit."
             error={errorFor("runtime-cpus")}
             disabled={!canEdit}
             onChange={(next) => patch({ cpus: next })}
@@ -718,12 +694,7 @@ function RuntimeForm({
             value={pids}
             peak={usage.state === "ready" ? usage.processes : undefined}
             peakLabel={(value) => `${value} processes`}
-            info={
-              compose
-                ? "Zero keeps each service's Compose process limit. A positive value overrides it on the next deployment."
-                : "The most processes and threads the container may run at once. Zero means no limit."
-            }
-            zeroLabel={compose ? "keeps Compose limits" : undefined}
+            info="The most processes and threads the container may run at once. Zero means no limit."
             error={errorFor("runtime-pids")}
             disabled={!canEdit}
             onChange={(pidsLimit) => patch({ pidsLimit })}
@@ -1010,7 +981,6 @@ function LimitField({
   error,
   disabled,
   onChange,
-  zeroLabel = "no limit",
 }: {
   id: string
   label: string
@@ -1023,7 +993,6 @@ function LimitField({
   error?: string
   disabled: boolean
   onChange: (value: number) => void
-  zeroLabel?: string
 }) {
   const pct = peak !== undefined && value > 0 ? (peak / value) * 100 : undefined
   // Keyed on which line it is rather than on its text, so "no limit" rises as
@@ -1036,7 +1005,7 @@ function LimitField({
       </span>
     ) : value === 0 ? (
       <span key="unlimited" className="block animate-rise">
-        {zeroLabel}
+        no limit
       </span>
     ) : undefined
   return (

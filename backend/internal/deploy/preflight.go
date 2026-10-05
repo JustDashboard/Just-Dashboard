@@ -107,9 +107,6 @@ type DependencyObservation struct {
 	Status   string `json:"status,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	DeepLink string `json:"deepLink,omitempty"`
-	// Warning reports lost retained recovery authority separately from a
-	// verified current runtime; it must not masquerade as current availability.
-	Warning string `json:"warning,omitempty"`
 
 	// Extensions are the schema extensions a linked PostgreSQL server
 	// offers among those detection asks about; nil when it was not asked.
@@ -128,15 +125,14 @@ type ObservationRequest struct {
 	// ExistingProxySite is the deployment-owned route being replaced. It is
 	// excluded from conflict detection while every other matching site remains
 	// a hard ownership conflict.
-	ExistingProxySite       string
-	ExistingRuntimeID       string
-	ExistingRuntimeKind     string
-	ExistingRuntimeMetadata json.RawMessage
-	Paths                   []string
-	Ports                   []PortObservation
-	Domains                 []PlannedDomain
-	Dependencies            []PlannedDependency
-	NeedsFirewall           bool
+	ExistingProxySite   string
+	ExistingRuntimeID   string
+	ExistingRuntimeKind string
+	Paths               []string
+	Ports               []PortObservation
+	Domains             []PlannedDomain
+	Dependencies        []PlannedDependency
+	NeedsFirewall       bool
 	// DatabaseExtensions are the schema extensions detection says a linked
 	// PostgreSQL must offer; only then is each linked server asked.
 	DatabaseExtensions []string
@@ -383,43 +379,24 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 		}
 	}
 	if len(request.Dependencies) > 0 && o.resources != nil {
-		groups := [2][]PlannedDependency{}
-		for _, dependency := range request.Dependencies {
-			if dependency.ResourceKind != existingIngressDependency {
-				index := 0
-				if nativeReservationDependency(dependency) {
-					index = 1
+		dependencyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		observed, err := o.resources.ObserveDependencies(dependencyCtx, request.Dependencies)
+		if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
+			for index := range observed {
+				if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
+					continue
 				}
-				groups[index] = append(groups[index], dependency)
-			}
-		}
-		verified := []DependencyObservation{}
-		for _, dependencies := range groups {
-			if len(dependencies) == 0 {
-				continue
-			}
-			dependencyCtx, cancel := context.WithTimeout(ctx, preflightDependencyTimeout(dependencies))
-			observed, err := o.resources.ObserveDependencies(dependencyCtx, dependencies)
-			if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
-				for index := range observed {
-					if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
-						continue
-					}
-					// Unknown is not a refusal: a server that cannot be asked
-					// leaves the finding to the first migration.
-					if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
-						observed[index].Extensions = available
-					}
+				// Unknown is not a refusal: a server that cannot be asked
+				// leaves the finding to the first migration.
+				if available, probeErr := prober.DatabaseExtensions(dependencyCtx, observed[index].ResourceID, request.DatabaseExtensions); probeErr == nil {
+					observed[index].Extensions = available
 				}
 			}
-			cancel()
-			if err != nil {
-				verified = nil
-				break
-			}
-			verified = append(verified, observed...)
 		}
-		observation.Dependencies = verified
+		cancel()
+		if err == nil {
+			observation.Dependencies = observed
+		}
 	}
 	observation.AvailableMemory, observation.AvailableSwap = hostMemory()
 	observation.CPUCount = runtime.NumCPU()
@@ -432,44 +409,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if syscall.Statfs(diskRoot, &stat) == nil {
 		observation.AvailableDisk = int64(stat.Bavail) * int64(stat.Bsize)
 	}
-	if bindings, err := publicIngressBindingsFromDependencies(request.Dependencies); err != nil {
-		return observation, err
-	} else if len(bindings) > 0 {
-		controller, available := o.proxy.(interface {
-			VerifyExistingIngress(context.Context, []proxysvc.ExistingIngressBinding) error
-		})
-		for _, binding := range bindings {
-			observed := DependencyObservation{Kind: "ingress", ResourceKind: existingIngressDependency, ResourceID: binding.ID, DeepLink: "/proxy"}
-			if binding.Status == "hint" {
-				observed.Detail, observed.Status = binding.PlannedChange, "unverified"
-				observation.Dependencies = append(observation.Dependencies, observed)
-				continue
-			}
-			if available && controller.VerifyExistingIngress(ctx, []proxysvc.ExistingIngressBinding{binding}) == nil {
-				observed.Available, observed.Status = true, "linked external route"
-			} else {
-				observed.Detail = "the original proxy route or active configuration could not be verified"
-			}
-			observation.Dependencies = append(observation.Dependencies, observed)
-		}
-	}
 	return observation, nil
-}
-
-func preflightDependencyTimeout(dependencies []PlannedDependency) time.Duration {
-	for _, dependency := range dependencies {
-		if nativeReservationDependency(dependency) {
-			// These reservations recapture installed startup authority and the
-			// original source, with the same bound as recorded native observation.
-			return 30 * time.Second
-		}
-	}
-	return 10 * time.Second
-}
-
-func nativeReservationDependency(dependency PlannedDependency) bool {
-	return dependency.Kind == "runtime" && dependency.Ownership == OwnershipManaged &&
-		(dependency.ResourceKind == "pm2_process" || dependency.ResourceKind == "systemd_unit")
 }
 
 func (o *HostPreflightObserver) existingDeploymentPorts(
@@ -582,7 +522,7 @@ func PreflightDraftWithSource(
 func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) ObservationRequest {
 	source := draft.Data.Source
 	request := ObservationRequest{
-		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal && source.Mode != SourceModeLocalDirectory && source.Mode != SourceModeRecoveredSnapshot || source.Mode == SourceModeComposeGit,
+		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
 		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
 		NeedsDocker:  configuration.Build.Method != BuildNone,
 		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
@@ -590,10 +530,6 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 		Paths:        []string{}, Ports: []PortObservation{},
 		Domains:      append([]PlannedDomain(nil), configuration.Domains...),
 		Dependencies: append([]PlannedDependency(nil), configuration.Dependencies...),
-	}
-	if adoption := draft.Data.Adoption; adoption != nil {
-		request.ExistingRuntimeID, request.ExistingRuntimeKind = adoption.Runtime.RuntimeID, adoption.Runtime.Kind
-		request.ExistingRuntimeMetadata = adoption.Runtime.Metadata
 	}
 	if source.LocalPath != "" {
 		request.Paths = append(request.Paths, source.LocalPath)
@@ -650,15 +586,6 @@ func preflightFindings(
 	advancedAllowed bool,
 ) []PreflightFinding {
 	findings := []PreflightFinding{}
-	if adoption := draft.Data.Adoption; adoption != nil {
-		findings = append(findings, adoptionPreflightFindings(adoption)...)
-	}
-	if facility, ok := observation.Facilities["native-runtime"]; ok && !facility.Available {
-		findings = append(findings, finding("native_runtime_changed", PreflightBlocked,
-			"Original runtime ownership could not be verified", facility.Detail,
-			"Stopping or reusing an unverified runtime would put another application at risk.",
-			"Inspect the original workload again or restore its captured manager configuration.", "deploy", "adoption"))
-	}
 	detection := draft.Data.Detection
 	if detection.Unavailable != "" {
 		findings = append(findings, finding("source_unavailable", PreflightUnavailable,
@@ -1053,7 +980,12 @@ func preflightFindings(
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))
-	persistentStorage := writablePersistentStorageCount(draft, configuration)
+	persistentStorage := len(configuration.Runtime.Mounts)
+	if detection.Compose != nil {
+		for _, service := range detection.Compose.Services {
+			persistentStorage += len(service.Mounts)
+		}
+	}
 	if persistentStorage > 0 && !hasBackupDependency(configuration.Dependencies) {
 		item := finding("backup_policy_missing", PreflightWarning,
 			"Persistent storage has no linked backup policy", fmt.Sprintf("%d mount(s)", persistentStorage),
@@ -1073,17 +1005,11 @@ func preflightFindings(
 		key := dependency.Kind + "\x00" + dependency.ResourceKind + "\x00" + dependency.ResourceID
 		observed, ok := dependencyEvidence[key]
 		if !ok {
-			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" || dependency.Kind == "runtime" || dependency.ResourceKind == existingIngressDependency {
-				severity := PreflightUnavailable
-				action := "Open the owning feature and verify the linked resource."
-				if dependency.Kind == "runtime" || dependency.ResourceKind == existingIngressDependency {
-					severity = PreflightBlocked
-					action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
-				}
-				findings = append(findings, finding("dependency_unavailable", severity,
+			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" {
+				findings = append(findings, finding("dependency_unavailable", PreflightUnavailable,
 					"Dependency evidence is unavailable", dependency.ResourceKind+" "+dependency.ResourceID,
 					"The owning feature did not return inventory evidence.",
-					action, dependencyOwner(dependency), field))
+					"Open the owning feature and verify the linked resource.", dependencyOwner(dependency), field))
 			}
 			continue
 		}
@@ -1109,12 +1035,6 @@ func preflightFindings(
 				"The deployment cannot safely use the named owning-feature resource.",
 				"Repair, relink, or remove this dependency.", dependencyOwner(dependency), field)
 			item.DeepLink = observed.DeepLink
-			if dependency.Kind == "runtime" {
-				item.Action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
-			}
-			if dependency.ResourceKind == existingIngressDependency {
-				item.Action = "Restore and verify the existing external route. Its original ownership and configuration cannot be removed or relinked."
-			}
 			findings = append(findings, item)
 			continue
 		}
@@ -1124,14 +1044,6 @@ func preflightFindings(
 			"", dependencyOwner(dependency), field)
 		item.DeepLink = observed.DeepLink
 		findings = append(findings, item)
-		if dependency.Kind == "runtime" && observed.Warning != "" {
-			item := finding("runtime_baseline_unavailable", PreflightWarning,
-				"Original rollback authority is unavailable", observed.Warning,
-				"The current managed runtime is available, but its original native baseline cannot currently be verified.",
-				"Restore the original manager and source before rolling back to the imported baseline.", "deployments", field)
-			item.DeepLink = observed.DeepLink
-			findings = append(findings, item)
-		}
 		if dependency.Kind == "backup" && observed.Status != "" && !observed.Fresh {
 			item := finding("backup_stale", PreflightWarning,
 				"Latest backup is outside the freshness policy", observed.Status,
@@ -1170,20 +1082,6 @@ func preflightFindings(
 		findings = append(findings, finding("host_disk_low", PreflightWarning,
 			"Host disk headroom is low", fmt.Sprintf("%d MiB available", observation.AvailableDisk>>20),
 			"Build layers or pulled images may fill the filesystem.", "Free disk before deploying.", "metrics", ""))
-	}
-	if bindings, err := ingressBindingsFromDependencies(configuration.Dependencies); err != nil {
-		findings = append(findings, finding("existing_ingress_invalid", PreflightBlocked, "Existing proxy evidence is invalid", "The frozen route identity cannot be decoded.", "Deployment cannot verify the original external route.", "Inspect the original workload again.", "proxy", "ingress"))
-	} else if len(bindings) > 0 {
-		snapshot := runtimeReleaseSnapshot{Plan: configuration.Runtime}
-		if configuration.Build.Method == BuildCompose && draft.Data.Detection.Compose != nil {
-			snapshot.Compose = &ResolvedComposeSnapshot{}
-			for _, service := range draft.Data.Detection.Compose.Services {
-				snapshot.Compose.Services = append(snapshot.Compose.Services, ResolvedComposeService{Plan: service})
-			}
-		}
-		if err := validateExistingIngressPlan(snapshot, bindings); err != nil {
-			findings = append(findings, finding("existing_ingress_endpoint_changed", PreflightBlocked, "Existing proxy endpoint changed", err.Error(), "The desired plan would remove the original service port, network or alias.", "Restore the exact linked endpoint before Deploy changes.", "proxy", "ingress"))
-		}
 	}
 	return findings
 }
@@ -1401,7 +1299,7 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 		case StepProvisionCertificate:
 			action.Action = "resolve or issue the certificate for the planned HTTPS domains"
 			for _, domain := range configuration.Domains {
-				if domain.HTTPS && domain.Ownership != OwnershipLinked {
+				if domain.HTTPS {
 					action.Arguments = append(action.Arguments, domain.Hostname)
 				}
 			}
@@ -1446,11 +1344,6 @@ func cloneComposeAnalysis(source *ComposeAnalysis) *ComposeAnalysis {
 		copy.Services[index].Ports = append([]string(nil), source.Services[index].Ports...)
 		copy.Services[index].Mounts = append([]string(nil), source.Services[index].Mounts...)
 		copy.Services[index].Advanced = append([]string(nil), source.Services[index].Advanced...)
-		copy.Services[index].ExposedPorts = append([]int(nil), source.Services[index].ExposedPorts...)
-		copy.Services[index].Networks = map[string][]string{}
-		for network, aliases := range source.Services[index].Networks {
-			copy.Services[index].Networks[network] = append([]string(nil), aliases...)
-		}
 		copy.Services[index].BuildArgs = append([]ComposeBuildArg(nil), source.Services[index].BuildArgs...)
 		copy.Services[index].EnvFiles = append([]ComposeEnvFile(nil), source.Services[index].EnvFiles...)
 		copy.Services[index].ImagePlatforms = append([]string(nil), source.Services[index].ImagePlatforms...)
