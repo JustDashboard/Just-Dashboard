@@ -117,6 +117,31 @@ is available only to Compose stacks; containers and native managers keep their c
 
 ## Supported recovery and explicit boundaries
 
+### Existing domains and proxy continuity
+
+Recovered external routes are recorded separately from managed deployment domains. **Keep current
+proxy** preserves each authoritative hostname/path/service binding, TLS, authentication, rewrite and
+WebSocket configuration. Host nginx and host or Docker Caddy are inspected using bounded persistent
+configuration plus authoritative active-manager evidence; unsynced Caddy configuration is rejected.
+Discovery never guesses a domain from `APP_URL` or assigns every hostname to every stack service.
+
+A verified host-port upstream stays unchanged. A Docker alias requires exact network membership and
+one verified running owner. A literal container-IP upstream can receive a targeted, reversible
+address update on **Deploy changes** when the exact persisted nginx directive or closed Caddy
+`reverse_proxy` literal can be isolated. A private durable journal binds before/after bytes and
+configuration identity; validate/reload failures compensate, and rollback reconciles the restored
+runtime's actual endpoint. Surrounding proxy configuration is preserved. Desired service ports and
+network aliases are checked before stopping the live application, then actual endpoints are verified
+after start. Configuration drift or a conflicting external edit is refused without overwriting it.
+
+Shared, dynamic, imported or otherwise ambiguous upstreams need a verified external handoff. Known
+routes whose manager cannot be inspected remain explicit unverified dependencies and block replacement
+before stop. Traefik host labels are unverified routing evidence, not proof of active middleware or
+upstream continuity. Unassociated Apache, Traefik and nginx-proxy-manager presence is a discovery hint;
+the dashboard never takes over those managers implicitly. Linked existing routes remain server-owned
+across settings saves and are excluded from managed certificate rendering, preview routing and managed
+resource deletion. Additional managed domains can still be added through the ordinary Domains page.
+
 Docker capture also checks the original raw `Config` and `HostConfig` against the negotiated SDK
 representation, including nested mounts, health checks and structured options. Unknown effective
 fields block adoption before any missing-image export/import; field names are reported without their
@@ -147,12 +172,23 @@ also block before image recovery, with a specific reason instead of a partial re
 | Bare listening process | PID plus creation time and safe inventory; capture can explain the source and missing requirements. | No verified manager can restart the original process for compensation. Automatic managed adoption is refused until a reproducible source and restart authority exist. A port or framework name alone cannot supply these. |
 
 The source of an image-only workload is its immutable local image. Recovery cannot manufacture the
-original Git history or source checkout. An existing Compose `build` definition is reported for
-review; the captured image is the initial reproducible baseline/redeploy input. The source settings
-can later attach supported Compose source for builds. A native plain/dirty directory uses
-`local_directory`: a bounded content identity and private copy preserve uncommitted files without
-pretending they are a Git commit. Excluded persistent data remains linked rather than copied into
-an image. Source-copy containment, symlink checks and size/count limits fail closed.
+original Git history or source checkout. Verified local Compose build contexts and Dockerfiles are
+copied into bounded immutable source snapshots for future builds, while the exact captured images,
+variables and runtime remain an independent frozen baseline. Unsupported external, missing, private
+or unresolved historical build inputs retain the image-only fallback, with a service-specific reason.
+Original build declarations and contexts remain untouched. Multiple service contexts are inspected
+independently; a framework candidate belongs to its service rather than every container in the stack.
+
+Native recovery selects a source candidate containing the actual captured entrypoint, preserves a
+monorepo's source-root layout and prepares a server-owned `recovered_snapshot`. Supported interpreter
+identity is positively verified using the captured executable, bounded version probes and unchanged
+file evidence; it is not inferred from an administrator's current Node or Python executable. Recovery
+inspects manifests, locks and runtime command/image-family evidence without executing application
+scripts. Inlined Next.js browser settings receive build scope; ordinary runtime inputs keep their
+original runtime bindings and independent baseline values. General settings can later attach an
+allowed local build directory without retaining the immutable snapshot handle. Excluded persistent
+data remains linked rather than copied into an image. Source-copy containment, symlink checks and
+size/count limits fail closed.
 Source hashes and private copies open regular files through no-follow, nonblocking descriptors and
 verify descriptor identity before reading; a file replaced by a FIFO cannot stall recovery.
 The dashboard-visible source directory must be the same filesystem object as the host directory.

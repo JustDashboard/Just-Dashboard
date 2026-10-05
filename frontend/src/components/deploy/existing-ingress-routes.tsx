@@ -10,12 +10,12 @@ export function ExistingIngressRoutes({ bindings }: { bindings: ExistingIngressB
         {bindings.map((binding) => (
           <li key={binding.id} className="min-w-0 space-y-1">
             <p className="font-mono text-body break-all">
-              {binding.hostname}
-              {binding.path === "/" ? "" : binding.path}
+              {binding.hostname || binding.owner}
+              {binding.hostname && binding.path !== "/" ? binding.path : ""}
             </p>
             <Status
               tone={binding.status === "linked" ? "running" : "warning"}
-              label={`${binding.proxyKind} · ${binding.service} · ${binding.status === "linked" ? "verified route" : "verification required"}`}
+              label={`${binding.proxyKind} · ${binding.service || binding.owner} · ${binding.status === "linked" ? "verified route" : "verification required"}`}
             />
             <FormNote>
               {binding.plannedChange ||

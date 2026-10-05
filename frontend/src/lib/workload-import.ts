@@ -84,8 +84,8 @@ export type ExistingIngressBinding = {
   path: string
   service: string
   owner: string
-  proxyKind: "nginx" | "caddy" | "docker-caddy"
-  status: "linked" | "blocked" | "hint"
+  proxyKind: string
+  status: "linked" | "blocked" | "hint" | "unverified"
   continuity: "host_port" | "network_alias" | "retarget" | "unverified"
   plannedChange?: string
   https?: boolean

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import type { DeploymentDraft } from "../../src/lib/types"
-import { json } from "./deploy-fixture"
+import { json, mockProject, now } from "./deploy-fixture"
 import { betBot, mockWorkloadImport, recoveredWorkloadDraft } from "./workload-import-fixture"
 
 test.use({ video: { mode: "on", size: { width: 1280, height: 900 } } })
@@ -99,6 +99,72 @@ function automatedDraft(): DeploymentDraft {
   }
   return draft
 }
+
+test("captured settings show original names and require explicit intent to replace a value with empty", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const writes: Record<string, unknown>[] = []
+  await page.route("**/api/v1/deploy/7/environments/12/configuration", (route) =>
+    json(route, {
+      revision: 3,
+      build: { method: "compose" },
+      runtime: { strategy: "stop_first" },
+      variables: [
+        {
+          name: "JD_IMPORT_ENV_TELEGRAM_CHAT_ID_FIRST",
+          revision: 1,
+          sensitivity: "secret",
+          scopes: ["runtime"],
+          masked: "••••••••",
+          valueDigest: `sha256:${"1".repeat(64)}`,
+          createdBy: "operator",
+          createdAt: now,
+          environmentId: 12,
+          desiredRevision: 3,
+          recoveredInput: automatedDraft().data.adoption!.inputs![0],
+        },
+      ],
+      dependencies: [],
+      checks: [],
+      domains: [],
+      pending: {
+        pending: false,
+        desiredRevision: 3,
+        liveReleaseId: 20,
+        livePlanRevision: 3,
+        changes: [],
+      },
+    }),
+  )
+  await page.route("**/api/v1/deploy/7/environments/12/variables/*", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    writes.push(route.request().postDataJSON())
+    return json(route, { desiredRevision: 4 })
+  })
+  await page.goto("/deploy/7/settings/variables")
+  const list = page.getByRole("list", { name: "Environment variables" })
+  await expect(list).toContainText("doubles-games-tracker · TELEGRAM_CHAT_ID")
+  await expect(list).not.toContainText("JD_IMPORT_ENV_")
+  await list
+    .getByRole("button", { name: "Actions for doubles-games-tracker · TELEGRAM_CHAT_ID" })
+    .click()
+  await expect(page.getByRole("menuitem", { name: "Remove" })).toHaveCount(0)
+  await page.getByRole("menuitem", { name: "Edit" }).click()
+  const editor = page.getByRole("dialog", { name: "Edit variable" })
+  await editor.getByRole("button", { name: "Save variable" }).click()
+  await expect(
+    editor
+      .getByText("Enter the value again — the dashboard does not read it back.", { exact: true })
+      .last(),
+  ).toBeVisible()
+  expect(writes).toHaveLength(0)
+  await editor.getByRole("switch", { name: "Set an empty value", exact: true }).click()
+  await editor.getByRole("button", { name: "Save variable" }).click()
+  await expect.poll(() => writes.length).toBe(1)
+  expect(writes[0]).toEqual({ revision: 3, value: "", sensitivity: "secret", scopes: ["runtime"] })
+  await expect(editor).toHaveCount(0)
+})
 
 test("automation retains service-specific inputs and reviews grouped evidence and existing domains", async ({
   page,
