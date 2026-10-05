@@ -4,11 +4,20 @@ import {
   groupImportWarnings,
   recoveredEnvironmentGroups,
   recoveredEnvironmentSatisfied,
+  recoveredInputBound,
   retainedVariableSatisfied,
   workloadManagerUrl,
   workloadMatches,
   workloadPort,
 } from "./workload-import"
+
+test("recovered input protection follows current bindings and supports legacy aliases", () => {
+  expect(recoveredInputBound()).toBe(false)
+  expect(recoveredInputBound({ storageKey: "PORT" })).toBe(false)
+  expect(recoveredInputBound({ storageKey: "JD_IMPORT_ENV_PORT" })).toBe(true)
+  expect(recoveredInputBound({ storageKey: "JD_IMPORTED_ARG_0", bound: true })).toBe(true)
+  expect(recoveredInputBound({ storageKey: "JD_IMPORT_ENV_PORT", bound: false })).toBe(false)
+})
 
 test("remembered adoption preserves server scope and exclusions but drops baseline and private extras", () => {
   const metadata = adoptionReviewMetadata({

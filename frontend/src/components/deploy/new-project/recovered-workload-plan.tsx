@@ -52,7 +52,7 @@ export function RecoveredWorkloadPlan({ adoption }: { adoption: WorkloadAdoption
         <FormSection title="Prepared startup handoff">
           <FormFacts>
             <FormFact label="Original manager">{adoption.startupHandoff.manager}</FormFact>
-            <FormFact label="Startup entries">
+            <FormFact label="Startup actions">
               {adoption.startupHandoff.actionCount} verified
             </FormFact>
           </FormFacts>

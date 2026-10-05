@@ -37,6 +37,10 @@ export function LocalSourceSettings({
     Number(subdirectory !== (source.subdirectory ?? ""))
 
   const save = async () => {
+    if (!directory.trim()) {
+      setError("Enter a build directory to attach new source.")
+      return false
+    }
     setSaving(true)
     setError(undefined)
     try {
@@ -69,6 +73,7 @@ export function LocalSourceSettings({
       dirty={changes > 0}
       changes={changes}
       saving={saving}
+      invalid={!directory.trim()}
       canEdit={canEdit}
       onDiscard={() => {
         setDirectory(source.localPath ?? "")
@@ -97,6 +102,11 @@ export function LocalSourceSettings({
           label="Build directory"
           htmlFor="local-source-directory"
           hint="An absolute directory allowed by this server's deployment roots."
+          error={
+            changes > 0 && !directory.trim()
+              ? "Enter a build directory to attach new source."
+              : undefined
+          }
         >
           <Input
             id="local-source-directory"

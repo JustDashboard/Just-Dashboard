@@ -118,6 +118,13 @@ test("imports the real selected stack without changing its containers", async ({
     await expect(page.getByRole("list", { name: "Excluded Compose services" })).toContainText(name)
   }
   await page.screenshot({ path: join(output, "native-configuration-1280.png"), fullPage: true })
+  await page.getByRole("button", { name: "Back", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "What does it need to run?" })).toBeVisible()
+  const inputPanel = page.locator("[data-slot=flow-panel]")
+  await expect(inputPanel).toContainText("TELEGRAM_CHAT_ID")
+  await expect(inputPanel).not.toContainText("JD_IMPORT_ENV_")
+  await page.screenshot({ path: join(output, "native-original-inputs-1280.png"), fullPage: true })
+  await page.getByRole("button", { name: "Continue", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Ready to adopt this deployment?" })).toBeVisible({
     timeout: 30000,
   })

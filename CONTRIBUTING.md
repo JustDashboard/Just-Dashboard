@@ -256,11 +256,19 @@ to the contribution terms above, including the additional licence grant to the p
   The corresponding persistent systemd-unit path runs
   `JD_SYSTEMD_ADOPTION_LIVE=1 go test ./internal/deploy -run '^TestLiveSystemdAdoptionMigratesWithManagedFeaturesAndRestoresBaseline$' -count=1 -v -timeout 20m`.
   It requires a reachable host systemd manager, Node and root/passwordless sudo. It installs one
-  uniquely named disabled unit in `/etc/systemd/system`, operates only on that unit, and removes that
-  exact file; it never reloads the global manager or modifies an existing unit. It proves native journal
+  uniquely named unit and target in `/etc/systemd/system`, with a direct target enablement link.
+  It operates only on those owned paths and removes them during cleanup; it never reloads the global
+  manager or modifies an existing unit. When using passwordless sudo, compile the test binary first
+  and execute that binary with the opt-in environment under sudo rather than changing the checkout's
+  ownership. It proves native journal
   output and the same adoption/build/compensation/Docker-migration/original-unit rollback sequence.
   `JD_SYSTEMD_ADOPTION_EVIDENCE_DIR` writes sanitized acceptance JSON.
-  The opt-in native browser server and recording commands are documented in
+  The API fixture also supports `JD_WORKLOAD_IMPORT_BROWSER=1` and
+  `JD_IMPORT_BROWSER_EVIDENCE_DIR` to keep its uniquely owned stack and isolated authenticated API
+  available for a real browser recording. Its private ready file contains session authority and must
+  never be published. The current reproduction and sanitized evidence are documented in
+  [the import-overhaul acceptance record](docs/audits/2026-10-05-existing-workload-import/README.md).
+  The earlier opt-in native browser server and recording commands are documented in
   [the workload-import acceptance record](docs/audits/2026-10-04-existing-workloads/README.md).
 - Notification channels (Discord, Slack, Telegram, e-mail, signed webhook) and GitHub commit statuses are
   covered by component tests with fake providers; a real provider or GitHub post is verified manually

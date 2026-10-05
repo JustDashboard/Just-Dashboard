@@ -110,6 +110,12 @@ test("a recovered native source can attach future code without retaining the pri
   const fixture = await mockLocalProject(page, true)
   await page.goto("/deploy/7/settings/general")
   await expect(page.getByText(/verified source snapshot captured during import/)).toBeVisible()
+  await page.getByRole("textbox", { name: "Subdirectory", exact: true }).fill("packages/server")
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled()
+  await expect(
+    page.getByText("Enter a build directory to attach new source.", { exact: true }),
+  ).toBeVisible()
+  expect(fixture.sources).toHaveLength(0)
   await page.getByRole("textbox", { name: "Build directory", exact: true }).fill("/srv/future-app")
   await saveSettings(page)
   await expect.poll(() => fixture.source().mode).toBe("local_directory")

@@ -56,6 +56,7 @@ export type RecoveredInput = {
   sensitivity: "plain" | "secret"
   retained: boolean
   empty: boolean
+  bound?: boolean
 }
 
 export type AdoptionIssue = {
@@ -64,6 +65,11 @@ export type AdoptionIssue = {
   service?: string
   field?: string
   blocking: boolean
+}
+
+export function recoveredInputBound(input?: RecoveredInput): boolean {
+  if (!input) return false
+  return input.bound ?? /^(JD_IMPORT_|JD_IMPORTED_)/.test(input.storageKey)
 }
 
 export type RecoveredBuildSource = {
@@ -140,7 +146,7 @@ export function adoptionReviewMetadata(
     excludedServices: adoption.excludedServices,
     // Construct every descriptor: server-private additions must never leak to Web Storage.
     inputs: adoption.inputs?.map(
-      ({ storageKey, name, service, kind, origin, category, sensitivity, retained, empty }) => ({
+      ({
         storageKey,
         name,
         service,
@@ -150,6 +156,18 @@ export function adoptionReviewMetadata(
         sensitivity,
         retained,
         empty,
+        bound,
+      }) => ({
+        storageKey,
+        name,
+        service,
+        kind,
+        origin,
+        category,
+        sensitivity,
+        retained,
+        empty,
+        bound,
       }),
     ),
     issues: adoption.issues?.map(({ code, message, service, field, blocking }) => ({

@@ -66,8 +66,11 @@ Captured inputs carry server-owned original names, service identities, environme
 categories and retained/empty status. The wizard and project settings use those identities; opaque
 `JD_IMPORT_*` storage names keep service-local values separate internally. Display sensitivity does
 not make a captured value public: all values remain sealed, including ordinary image defaults and
-intentionally empty strings. Source-bound captured inputs accept literal value replacement; removal,
-reference conversion or scope changes require updating the source binding first.
+intentionally empty strings. The read DTO's `bound` flag follows references in the current desired
+source and runtime command, including captured native argument aliases. Bound captured inputs accept
+literal value replacement; removal, reference conversion or scope changes require updating that
+binding first. Ordinary native environment values and inputs whose desired binding was removed remain
+editable through normal variable controls; their original identity and frozen baseline stay intact.
 
 Variable revisions record explicit literal/reference intent. New captured inputs and dotenv/value
 writes are literal, so a running app's `${{credential.name}}` text is never interpreted as dashboard
@@ -194,7 +197,9 @@ file evidence; it is not inferred from an administrator's current Node or Python
 inspects manifests, locks and runtime command/image-family evidence without executing application
 scripts. Inlined Next.js browser settings receive build scope; ordinary runtime inputs keep their
 original runtime bindings and independent baseline values. General settings can later attach an
-allowed local build directory without retaining the immutable snapshot handle. Excluded persistent
+allowed local build directory without retaining the immutable snapshot handle. Editing captured
+Compose YAML retains its source mode and handle. Native source settings require an explicit local
+directory before switching to a local build. Excluded persistent
 data remains linked rather than copied into an image. Source-copy containment, symlink checks and
 size/count limits fail closed.
 Source hashes and private copies open regular files through no-follow, nonblocking descriptors and
@@ -227,7 +232,8 @@ Explicit systemd directives outside the supported unit subset fail closed, inclu
 rlimits, scheduling, watchdog/backoff, additional lifecycle commands, dependencies and sandbox policy.
 The supported file directives are `Description`/`Documentation`, `Type`, `User`/`Group`,
 `WorkingDirectory`, `ExecStart`, `Environment`, `Restart`, `KillMode`/`KillSignal` and `TimeoutStopSec`;
-install metadata is retained only alongside verifiably disabled startup authority. Unknown directives
+install metadata is retained only alongside verifiably disabled startup authority or an exact
+reversible handoff for direct enablement links. Unknown directives
 or sections require explicit review instead of silently losing their behavior.
 
 Whole filesystem environment values within the captured source and local `file`/`sqlite` URIs map

@@ -11,6 +11,7 @@ import { plural, relativeTime } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
+import { recoveredInputBound } from "@/lib/workload-import"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
@@ -639,7 +640,7 @@ function VariablesBody({
         run: () => router.push(`/deploy/${projectId}/settings/databases`),
       })
     if (canEdit) {
-      if (variable.sensitivity === "secret" && !variable.recoveredInput)
+      if (variable.sensitivity === "secret" && !recoveredInputBound(variable.recoveredInput))
         verbs.push({
           key: "rotate",
           label: "Rotate",
@@ -648,7 +649,7 @@ function VariablesBody({
           disabled: Boolean(rowBusy),
           run: () => void rotate(variable),
         })
-      if (!variable.recoveredInput)
+      if (!recoveredInputBound(variable.recoveredInput))
         verbs.push({
           key: "remove",
           label: "Remove",
@@ -734,7 +735,7 @@ function VariablesBody({
             <ValueType
               value={sensitivity}
               onChange={setSensitivity}
-              disabled={Boolean(editing?.recoveredInput)}
+              disabled={recoveredInputBound(editing?.recoveredInput)}
             />
           </Field>
         </div>
@@ -811,7 +812,7 @@ function VariablesBody({
                 label="Reference"
                 aria-label="Reference a stored value"
                 pressed={reference}
-                disabled={Boolean(editing?.recoveredInput)}
+                disabled={recoveredInputBound(editing?.recoveredInput)}
                 onPressedChange={(next) => {
                   setReference(next)
                   setShown(false)
@@ -838,9 +839,9 @@ function VariablesBody({
       </div>
       {/* No count under the title: the three switches under it are the count. */}
       <FormSection title="Who can read it">
-        {editing?.recoveredInput ? (
+        {recoveredInputBound(editing?.recoveredInput) ? (
           <FormNote>
-            Assigned to {editing.recoveredInput.service || "the original application"}. Its source
+            Assigned to {editing?.recoveredInput?.service || "the original application"}. Its source
             binding and scopes are preserved.
           </FormNote>
         ) : (
