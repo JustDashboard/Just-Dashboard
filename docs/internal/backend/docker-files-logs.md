@@ -138,9 +138,11 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   `ListRunning` is the Engine's list of running containers mapped with no inspect at all, for the ports
   page, which asks every fifteen seconds only which container a published port belongs to.
   `ListContainersWithLabels` applies exact label filters in the Engine list call before health/uptime
-  enrichment, so a deployment detail read inspects only its matching containers; unlike `ListContainers` it
-  also inspects the matching stopped ones, for the exit code, OOM verdict and restart count the Runtime
-  services carry (`Container.Restarts`, `Exited`, `WasOOMKilled`, none of them on the listing's wire). The uptime pass
+  enrichment, so a deployment detail read inspects only its matching running containers.
+  `ListContainersWithLastRun` is the same listing that also inspects the matching stopped ones, for the
+  exit code, OOM verdict and restart count the Runtime services carry (`Container.Restarts`, `Exited`,
+  `WasOOMKilled`, none of them on the listing's wire); only the runtime services read asks for it, so the
+  cleanup and recovery paths that share the labelled listing pay nothing for it. The uptime pass
   also collects limits, health-check presence and restart policy from the inspect it was already making,
   and marks the rows it did not inspect (`Inspected`) so the UI never renders an absence as an answer.
   It also inspects any container, stopped or not, that the Engine lists by bare `sha256:…` id — which it

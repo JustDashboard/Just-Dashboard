@@ -1135,7 +1135,8 @@ only renderer/executor/validation authority for their feature.
   [notifications](notifications.md).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
   managed environment labels at the daemon before inspecting matching containers once each — running
-  or stopped, since the set is one environment's.
+  or stopped, since the set is one environment's (`ListContainersWithLastRun`; the plain labelled
+  listing that cleanup and recovery read still inspects only running ones).
   The five-second bounded read returns container/release/Compose identities, the image reference the
   container was created from as Docker reports it (`image`, so a service is drawn as the product it
   runs without a join to the container list), state, health and start

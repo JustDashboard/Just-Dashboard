@@ -46,9 +46,10 @@ func TestFilteredContainerInventoryInspectsOnlySelectedRuntime(t *testing.T) {
 	}
 }
 
-// A labelled listing is one environment's containers, so the stopped ones are
-// inspected too: their exit code and restart count are what the Runtime page
-// shows for a service that is down. The unfiltered listing must not pay that.
+// The runtime services read inspects one environment's stopped containers too:
+// their exit code and restart count are what the Runtime page shows for a
+// service that is down. The plain labelled listing, which cleanup and recovery
+// share, and the unfiltered one must not pay that.
 func TestFilteredContainerInventoryReadsLastRunOfStoppedContainers(t *testing.T) {
 	inspected := map[string]int{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +82,7 @@ func TestFilteredContainerInventoryReadsLastRunOfStoppedContainers(t *testing.T)
 	defer cli.Close()
 	owner := &Client{cli: cli}
 
-	items, err := owner.ListContainersWithLabels(t.Context(), map[string]string{"io.just-dashboard.managed": "true"})
+	items, err := owner.ListContainersWithLastRun(t.Context(), map[string]string{"io.just-dashboard.managed": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,11 +100,18 @@ func TestFilteredContainerInventoryReadsLastRunOfStoppedContainers(t *testing.T)
 		t.Fatalf("a created container has not exited: %+v", fresh)
 	}
 
-	inspected = map[string]int{}
-	if _, err := owner.ListContainers(t.Context(), true); err != nil {
-		t.Fatal(err)
-	}
-	if inspected["oom"] != 0 || inspected["fresh"] != 0 {
-		t.Fatalf("the unfiltered listing inspected stopped containers: %v", inspected)
+	for name, list := range map[string]func() ([]Container, error){
+		"unfiltered": func() ([]Container, error) { return owner.ListContainers(t.Context(), true) },
+		"labelled": func() ([]Container, error) {
+			return owner.ListContainersWithLabels(t.Context(), map[string]string{"io.just-dashboard.managed": "true"})
+		},
+	} {
+		inspected = map[string]int{}
+		if _, err := list(); err != nil {
+			t.Fatal(err)
+		}
+		if inspected["oom"] != 0 || inspected["fresh"] != 0 {
+			t.Fatalf("the %s listing inspected stopped containers: %v", name, inspected)
+		}
 	}
 }

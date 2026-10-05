@@ -94,7 +94,15 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 	if onlyReleaseID > 0 {
 		labels["io.just-dashboard.release-id"] = strconv.FormatInt(onlyReleaseID, 10)
 	}
-	containers, err := owner.ListContainersWithLabels(ctx, labels)
+	list := owner.ListContainersWithLabels
+	// The Docker client can also read what a stopped container's last run left
+	// behind. Only this read wants it, so it is asked for here and nowhere else.
+	if lastRun, ok := owner.(interface {
+		ListContainersWithLastRun(context.Context, map[string]string) ([]dockerx.Container, error)
+	}); ok {
+		list = lastRun.ListContainersWithLastRun
+	}
+	containers, err := list(ctx, labels)
 	if err != nil {
 		// Owner errors can contain daemon addresses and credentials; expose only
 		// the availability result, never the transport error.

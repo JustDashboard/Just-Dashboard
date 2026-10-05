@@ -90,17 +90,25 @@ func (c *Client) ListContainers(ctx context.Context, all bool) ([]Container, err
 
 // ListContainersWithLabels filters at the daemon before uptime/health inspection,
 // so observing one deployment does not inspect every running container on the host.
-//
-// Unlike ListContainers it also inspects the labelled containers that have
-// stopped, for their exit code and restart count: the set is one
-// environment's, which is bounded, where the unfiltered listing is the whole
-// host's.
 func (c *Client) ListContainersWithLabels(ctx context.Context, labels map[string]string) ([]Container, error) {
+	return c.listContainers(ctx, container.ListOptions{All: true, Filters: labelFilters(labels)}, false)
+}
+
+// ListContainersWithLastRun is ListContainersWithLabels that also inspects the
+// matching containers that have stopped, for their exit code, OOM verdict and
+// restart count. Only the runtime services read asks for it: the set is one
+// environment's, and the cleanup and recovery paths that share the labelled
+// listing have no use for a stopped container's last run.
+func (c *Client) ListContainersWithLastRun(ctx context.Context, labels map[string]string) ([]Container, error) {
+	return c.listContainers(ctx, container.ListOptions{All: true, Filters: labelFilters(labels)}, true)
+}
+
+func labelFilters(labels map[string]string) filters.Args {
 	args := filters.NewArgs()
 	for key, value := range labels {
 		args.Add("label", key+"="+value)
 	}
-	return c.listContainers(ctx, container.ListOptions{All: true, Filters: args}, true)
+	return args
 }
 
 func (c *Client) listContainers(ctx context.Context, options container.ListOptions, inspectStopped bool) ([]Container, error) {
