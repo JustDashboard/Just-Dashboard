@@ -27,6 +27,8 @@ type deploymentDependencyObserver struct {
 	// before the first migration fails. Preflight asks through
 	// DatabaseExtensions, and only when detection says the schema needs one.
 	extensions func(context.Context, int64) ([]string, error)
+	native     deploy.NativeBaselineObserver
+	containers deploy.RecordedContainerReader
 }
 
 // DatabaseExtensions answers which of the wanted extensions a linked
@@ -49,7 +51,16 @@ func newDeploymentDependencyObserver(
 	backupStore *backups.Store,
 	docker *dockerx.Client,
 ) *deploymentDependencyObserver {
-	return &deploymentDependencyObserver{store: store, backups: backupStore, docker: docker, now: time.Now}
+	observer := &deploymentDependencyObserver{store: store, backups: backupStore, docker: docker, now: time.Now}
+	if docker != nil {
+		observer.containers = docker
+	}
+	return observer
+}
+
+func (o *deploymentDependencyObserver) withNativeRuntime(native deploy.NativeBaselineObserver) *deploymentDependencyObserver {
+	o.native = native
+	return o
 }
 
 func (o *deploymentDependencyObserver) ObserveDependencies(
@@ -62,6 +73,8 @@ func (o *deploymentDependencyObserver) ObserveDependencies(
 			Kind: dependency.Kind, ResourceKind: dependency.ResourceKind, ResourceID: dependency.ResourceID,
 		}
 		switch dependency.ResourceKind {
+		case "compose_stack", "docker_container", "pm2_process", "systemd_unit":
+			observed = o.observeReservedRuntime(ctx, dependency)
 		case "backup_job":
 			// The list until the job is known to exist; its own page after.
 			observed.DeepLink = "/backups"

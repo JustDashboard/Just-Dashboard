@@ -48,6 +48,8 @@ import {
   rememberDeploymentCheck,
 } from "@/components/deploy/deploy-check-state"
 import { runPlanIsStale } from "@/components/deploy/failure-cause"
+import { importedWorkloadOf, isObservedImport } from "@/components/deploy/imported-workload"
+import { isDockerService } from "@/components/deploy/runtime-service"
 import {
   deploymentURL,
   hostOf,
@@ -190,7 +192,7 @@ function DockerGlyph({ className }: { className?: string }) {
   return <ProductGlyph id="docker" className={className} />
 }
 
-const COMMANDS = new Set(["view", "start", "deploy", "redeploy"])
+const COMMANDS = new Set(["view", "start", "deploy", "redeploy", "manager"])
 
 /**
  * The project's one command: the verb a header draws as its button, and every
@@ -260,7 +262,8 @@ export function useProjectVerbs(
   // The compatibility pipeline takes only "deploy"; the engine's other
   // operations belong to the projects it runs.
   const normalized = summary.buildMethod !== "legacy_compose"
-  const control = can("service.control") && !archived
+  const imported = isObservedImport(summary)
+  const control = can("service.control") && !archived && !imported
   const canRun = control && normalized
   const active = summary.activeRun
   const last = summary.lastRun
@@ -327,6 +330,16 @@ export function useProjectVerbs(
   }
 
   const verbs: Verb[] = []
+  const workload = importedWorkloadOf(summary)
+  if (imported && workload) {
+    verbs.push({
+      key: "manager",
+      label: "Open original manager",
+      icon: Servers,
+      group: "Project",
+      run: () => router.push(workload.managerUrl),
+    })
+  }
   if (navigation && url) {
     verbs.push({
       key: "visit",
@@ -498,7 +511,7 @@ export function useProjectVerbs(
       },
     )
   }
-  if (can("system.admin") && !archived && onDuplicate) {
+  if (can("system.admin") && !archived && !imported && onDuplicate) {
     verbs.push({
       key: "duplicate",
       label: "Duplicate project…",
@@ -507,10 +520,11 @@ export function useProjectVerbs(
       run: onDuplicate,
     })
   }
-  if (runtime?.status === "available" && runtime.services.length > 0) {
-    const container = (
-      runtime.services.find((service) => service.liveRelease) ?? runtime.services[0]
-    ).containerId
+  const dockerServices =
+    runtime?.status === "available" ? runtime.services.filter(isDockerService) : []
+  if (dockerServices.length > 0) {
+    const container = (dockerServices.find((service) => service.liveRelease) ?? dockerServices[0])
+      .containerId
     verbs.push({
       key: "docker",
       label: "Open in Docker",
@@ -545,7 +559,11 @@ export function useProjectVerbs(
   // each time it changes, so Restart and Stop declared after the command
   // would split Building in two. The sort is stable, so each group keeps its
   // order — and the command stays the first of its keys.
-  return verbs.sort((a, b) => verbRank(a) - verbRank(b))
+  return verbs
+    .filter(
+      (verb) => !imported || !["deployments", "logs", "runtime", "settings"].includes(verb.key),
+    )
+    .sort((a, b) => verbRank(a) - verbRank(b))
 }
 
 /** A project as a confirmation draws it: its mark, its name, and what tells it apart. */

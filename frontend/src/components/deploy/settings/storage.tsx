@@ -31,6 +31,8 @@ import { emptyMount, MountRows, type MountValue } from "@/components/deploy/sett
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { volumeBackup } from "@/components/deploy/settings/volume-backup"
 import { useProject } from "@/components/deploy/project-context"
+import { FormNote } from "@/components/form"
+import { ComposeSettingsNote } from "@/components/deploy/settings/compose-settings-note"
 
 /**
  * Storage — what the container keeps across releases.
@@ -115,6 +117,7 @@ function StorageForm({
   const [saving, setSaving] = useState(false)
   const [mountError, setMountError] = useState<{ index: number; message: string }>()
   const storage = facts.operations?.storage
+  const compose = configuration.build.method === "compose"
 
   // The container that keeps its data in a volume names it, as on Runtime.
   const product = volumeProduct(
@@ -182,13 +185,29 @@ function StorageForm({
             )
           }
         >
-          <MountRows
-            mounts={mounts}
-            onChange={draft.set}
-            readOnly={!canAdmin}
-            product={product}
-            rowError={(index) => (mountError?.index === index ? mountError.message : undefined)}
-          />
+          {compose && (
+            <ComposeSettingsNote
+              projectId={project.projectId}
+              sourceSection={
+                (configuration.source?.kind ?? project.detail.deployment.sourceKind) === "compose"
+                  ? "compose-source"
+                  : "source"
+              }
+            />
+          )}
+          {compose && mounts.length === 0 ? (
+            <FormNote>
+              No additional mount overrides. Each service keeps its Compose volumes and bind mounts.
+            </FormNote>
+          ) : (
+            <MountRows
+              mounts={mounts}
+              onChange={draft.set}
+              readOnly={!canAdmin}
+              product={product}
+              rowError={(index) => (mountError?.index === index ? mountError.message : undefined)}
+            />
+          )}
         </SettingSection>
       </SettingForm>
 
@@ -200,7 +219,9 @@ function StorageForm({
             </EmptyNote>
           ) : storage.mounts.length === 0 ? (
             <EmptyNote className="px-0 text-left">
-              This release declares no persistent storage.
+              {compose
+                ? "No mounts were reported in this view. Check the Compose source and each current service's Runtime details before treating storage as absent."
+                : "This release declares no persistent storage."}
             </EmptyNote>
           ) : (
             <ChoiceList aria-label="In the live release">

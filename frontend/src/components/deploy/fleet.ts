@@ -126,6 +126,9 @@ const RANK: Record<ProjectState, number> = {
   stopped: 5,
   not_deployed: 6,
   archived: 7,
+  observed: 4,
+  partial: 1,
+  unavailable: 6,
 }
 
 /**

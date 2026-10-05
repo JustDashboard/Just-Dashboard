@@ -92,7 +92,7 @@ type moduleSet struct {
 	deployEngine    *deploy.Engine
 	deployPlanning  *deploy.PlanningStore
 	deploySources   *deploy.HostSourceAnalyzer
-	deployPreflight *deploy.HostPreflightObserver
+	deployPreflight deploy.PreflightObserver
 	// deployChecker answers the advisory check and Detect again with the
 	// evaluation analyze_plan runs before every build.
 	deployChecker    *deploy.DeploymentChecker
@@ -103,6 +103,7 @@ type moduleSet struct {
 	deployDatabases  *deploymentDatabaseNetworks
 	deployPreviews   *deploy.PreviewQuarantineController
 	deployRuntime    *deploy.DockerRuntimeOwner
+	deployNative     *deploy.NativeRuntimeOwner
 	// deployExecutor is the normalized release path, kept for the tailnet
 	// sweep Start runs once the engine is up.
 	deployExecutor *deploy.NormalizedStepExecutor
@@ -233,21 +234,24 @@ func (s *Server) initModules() {
 		s.modules.docker,
 		s.modules.deployPlanning,
 	)
+	dependencyObserver := newDeploymentDependencyObserver(s.Store, s.modules.backupStore, s.modules.docker).withExtensionProbe(s.databaseExtensions)
 	s.modules.deployPreflight = deploy.NewHostPreflightObserver(
 		s.Cfg.DeployRoots,
 		s.Cfg.DataDir,
 		s.modules.docker,
 		s.modules.proxy,
-	).WithFirewall(s.modules.netsec).WithDependencies(newDeploymentDependencyObserver(
-		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions))
-	s.modules.deployChecker = deploy.NewDeploymentChecker(
-		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
-	)
+	).WithFirewall(s.modules.netsec).WithDependencies(dependencyObserver)
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker)
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
+	s.modules.deployNative = deploy.NewNativeRuntimeOwner(runtimeOwner, s.modules.pm2, s.modules.systemd)
+	s.modules.deployNative.WithRecordedRuntimeObserver(s.deploymentRuntimeObserver())
+	dependencyObserver.withNativeRuntime(s.modules.deployNative)
+	s.modules.deployPreflight = deploy.NewNativePreflightObserver(s.modules.deployPreflight, s.modules.deployNative, s.modules.deployRuns)
+	s.modules.deployChecker = deploy.NewDeploymentChecker(
+		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
+	)
 	s.modules.deployPreviews = deploy.NewPreviewQuarantineController(s.modules.deployRuns, runtimeOwner, s.modules.proxy,
 		func(ctx context.Context, environmentID int64, phase string, success bool) {
 			s.Audit.Record(ctx, audit.Entry{Actor: "system", Action: "deploy.preview.quarantine." + phase, Target: strconv.FormatInt(environmentID, 10), Success: success})
@@ -258,7 +262,7 @@ func (s *Server) initModules() {
 		s.modules.deployPlanning,
 		s.modules.deploySources,
 		s.modules.deployArtifacts,
-		runtimeOwner,
+		s.modules.deployNative,
 		deploy.NewCheckRunner(s.modules.docker),
 		s.modules.proxy,
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),

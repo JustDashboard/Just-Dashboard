@@ -65,6 +65,10 @@ type DeploymentSummary struct {
 	// recentRunLimit, so a card can draw its run history without a request
 	// per project. The first one is LastRun.
 	RecentRuns []RecentRun `json:"recentRuns,omitempty"`
+	// ImportedWorkload is an observed runtime, never an activation or a claim
+	// that the dashboard can reconstruct its original configuration.
+	ImportedWorkload *WorkloadCandidate `json:"importedWorkload,omitempty"`
+	ImportMode       SourceMode         `json:"importMode,omitempty"`
 }
 
 // RecentRun is one run in a deployment's history strip: its outcome and
@@ -183,7 +187,11 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = e.id AND d.kind = 'domain'
 		          ORDER BY d.id LIMIT 1
-		       ), '')
+		       ), ''),
+		       COALESCE(src.config_json, '{}'),
+		       COALESCE((SELECT d.config_json FROM deploy_dependencies d
+		         WHERE d.environment_id = e.id AND d.kind = 'runtime'
+		           AND d.ownership = 'observed' ORDER BY d.id LIMIT 1), '{}')
 		  FROM deploy_projects p
 		  JOIN deploy_environments e ON e.project_id = p.id
 		   AND e.slug = 'production' AND e.archived_at = 0
@@ -205,14 +213,14 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 		var summary DeploymentSummary
 		var updated int64
 		var expectedDowntime, livePort int
-		var identityJSON, buildJSON, runtimeJSON, liveRuntimeState string
+		var identityJSON, buildJSON, runtimeJSON, liveRuntimeState, importedJSON, sourceConfigJSON string
 		if err := rows.Scan(
 			&summary.ID, &summary.Name, &summary.Profile, &updated,
 			&summary.EnvironmentID, &summary.EnvironmentName, &summary.EnvironmentKind,
 			&summary.DesiredRevision, &summary.LiveReleaseID, &summary.Strategy,
 			&expectedDowntime, &summary.LivePlanRevision, &summary.SourceKind,
 			&identityJSON, &summary.BuildMethod, &buildJSON, &runtimeJSON, &livePort, &liveRuntimeState,
-			&summary.Endpoint,
+			&summary.Endpoint, &sourceConfigJSON, &importedJSON,
 		); err != nil {
 			return nil, err
 		}
@@ -245,6 +253,19 @@ func (s *OrchestrationStore) fleet(ctx context.Context, budget QueueBudget, proj
 			summary.HostPort = livePort
 		}
 		summary.PendingChanges = summary.LiveReleaseID == 0
+		if summary.SourceKind == SourceImport {
+			var source DraftSourceConfig
+			if json.Unmarshal([]byte(sourceConfigJSON), &source) == nil {
+				summary.ImportMode = source.Mode
+			}
+			var candidate WorkloadCandidate
+			if json.Unmarshal([]byte(importedJSON), &candidate) == nil && candidate.Key != "" {
+				summary.ImportedWorkload = &candidate
+			}
+			if summary.ImportMode != SourceModeExistingCheckout {
+				summary.PendingChanges = false
+			}
+		}
 		result.Deployments = append(result.Deployments, summary)
 	}
 	if err := rows.Err(); err != nil {

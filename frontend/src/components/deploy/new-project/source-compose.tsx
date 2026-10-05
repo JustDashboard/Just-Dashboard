@@ -295,16 +295,18 @@ export function SourceCompose({ onInspected }: { onInspected: (flow: ConfigureFl
 }
 
 /** The Compose documents pasted or uploaded directly: path, then content. */
-function ComposeFilesEditor({
+export function ComposeFilesEditor({
   documents,
   onChange,
   upload,
   error,
+  readOnly = false,
 }: {
   documents: DeploymentComposeDocument[]
   onChange: (documents: DeploymentComposeDocument[]) => void
   upload: boolean
   error?: string
+  readOnly?: boolean
 }) {
   const update = (index: number, field: "path" | "content", value: string) =>
     onChange(
@@ -322,6 +324,7 @@ function ComposeFilesEditor({
           type="button"
           size="sm"
           variant="outline"
+          disabled={readOnly}
           onClick={() =>
             onChange([
               ...documents,
@@ -363,13 +366,14 @@ function ComposeFilesEditor({
           <div className="mb-2 flex items-center gap-2">
             <Input
               value={document.path}
+              readOnly={readOnly}
               onChange={(event) => update(index, "path", event.target.value)}
               aria-label={`Compose file ${index + 1} path`}
               className="font-mono sm:text-xs"
             />
             <IconAction
               label={`Remove ${document.path}`}
-              disabled={documents.length === 1}
+              disabled={readOnly || documents.length === 1}
               onClick={() => remove(index)}
             >
               <Trash />
@@ -377,6 +381,7 @@ function ComposeFilesEditor({
           </div>
           <Textarea
             value={document.content}
+            readOnly={readOnly}
             onChange={(event) => update(index, "content", event.target.value)}
             aria-label={`${document.path} content`}
             rows={10}

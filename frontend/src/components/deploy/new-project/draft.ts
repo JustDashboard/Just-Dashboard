@@ -11,6 +11,7 @@ import {
   synchronizePrimaryDomain,
 } from "@/components/deploy/new-project/domain-bindings"
 import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
+import { adoptionReviewMetadata } from "@/lib/workload-import"
 import type {
   DeploymentConfiguration,
   DeploymentDetection,
@@ -174,12 +175,14 @@ export async function adoptImport(
   draft: DeploymentDraft,
   acknowledgedWarnings: string[],
   acknowledgedUnsupported: string[],
+  gitPolicy?: DraftGitPolicy,
 ) {
   return post<DraftCommitResult>("/deploy/import/adopt", {
     draftId: draft.id,
     revision: draft.revision,
     acknowledgedWarnings,
     acknowledgedUnsupported,
+    ...(gitPolicy ? { gitPolicy } : {}),
   })
 }
 
@@ -411,6 +414,11 @@ export function landingStep(flow: ConfigureFlow, advanced = false): ConfigureSte
 export type FlowUpdate =
   ConfigureFlow | null | ((current: ConfigureFlow | null) => ConfigureFlow | null)
 
+/** A recovered directory can build a release without owning a Git branch to watch. */
+export function sourceWatchesGit(source: DeploymentDraftSource) {
+  return source.kind === "git" || (source.kind === "local" && source.mode !== "local_directory")
+}
+
 /** Session storage remembers the form, while credentials stay in the live memory copy. */
 export function persistableFlow(flow: ConfigureFlow | null): ConfigureFlow | null {
   if (!flow) return null
@@ -444,6 +452,8 @@ export function persistableFlow(flow: ConfigureFlow | null): ConfigureFlow | nul
   scrubSource(safe.draft.data.source)
   scrubConfiguration(safe.configuration)
   scrubConfiguration(safe.draft.data.configuration)
+  if (safe.draft.data.adoption)
+    safe.draft.data.adoption = adoptionReviewMetadata(safe.draft.data.adoption)
   if (safe.detection?.compose) safe.detection.compose.preview = ""
   if (safe.draft.data.detection?.compose) safe.draft.data.detection.compose.preview = ""
   safe.draft.planPreview = ""

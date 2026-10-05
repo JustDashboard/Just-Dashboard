@@ -107,6 +107,9 @@ type DependencyObservation struct {
 	Status   string `json:"status,omitempty"`
 	Detail   string `json:"detail,omitempty"`
 	DeepLink string `json:"deepLink,omitempty"`
+	// Warning reports lost retained recovery authority separately from a
+	// verified current runtime; it must not masquerade as current availability.
+	Warning string `json:"warning,omitempty"`
 
 	// Extensions are the schema extensions a linked PostgreSQL server
 	// offers among those detection asks about; nil when it was not asked.
@@ -125,14 +128,15 @@ type ObservationRequest struct {
 	// ExistingProxySite is the deployment-owned route being replaced. It is
 	// excluded from conflict detection while every other matching site remains
 	// a hard ownership conflict.
-	ExistingProxySite   string
-	ExistingRuntimeID   string
-	ExistingRuntimeKind string
-	Paths               []string
-	Ports               []PortObservation
-	Domains             []PlannedDomain
-	Dependencies        []PlannedDependency
-	NeedsFirewall       bool
+	ExistingProxySite       string
+	ExistingRuntimeID       string
+	ExistingRuntimeKind     string
+	ExistingRuntimeMetadata json.RawMessage
+	Paths                   []string
+	Ports                   []PortObservation
+	Domains                 []PlannedDomain
+	Dependencies            []PlannedDependency
+	NeedsFirewall           bool
 	// DatabaseExtensions are the schema extensions detection says a linked
 	// PostgreSQL must offer; only then is each linked server asked.
 	DatabaseExtensions []string
@@ -522,7 +526,7 @@ func PreflightDraftWithSource(
 func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) ObservationRequest {
 	source := draft.Data.Source
 	request := ObservationRequest{
-		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit,
+		NeedsGit:     source.Kind == SourceGit || source.Kind == SourceLocal && source.Mode != SourceModeLocalDirectory || source.Mode == SourceModeComposeGit,
 		NeedsGitLFS:  source.IncludeLFS && (source.Kind == SourceGit || source.Kind == SourceLocal || source.Mode == SourceModeComposeGit),
 		NeedsDocker:  configuration.Build.Method != BuildNone,
 		NeedsBuildx:  buildMethodNeedsBuildx(configuration.Build.Method, draft.Data.Detection.Compose),
@@ -530,6 +534,10 @@ func preflightObservationRequest(draft *Draft, configuration PlanConfiguration) 
 		Paths:        []string{}, Ports: []PortObservation{},
 		Domains:      append([]PlannedDomain(nil), configuration.Domains...),
 		Dependencies: append([]PlannedDependency(nil), configuration.Dependencies...),
+	}
+	if adoption := draft.Data.Adoption; adoption != nil {
+		request.ExistingRuntimeID, request.ExistingRuntimeKind = adoption.Runtime.RuntimeID, adoption.Runtime.Kind
+		request.ExistingRuntimeMetadata = adoption.Runtime.Metadata
 	}
 	if source.LocalPath != "" {
 		request.Paths = append(request.Paths, source.LocalPath)
@@ -586,6 +594,25 @@ func preflightFindings(
 	advancedAllowed bool,
 ) []PreflightFinding {
 	findings := []PreflightFinding{}
+	if adoption := draft.Data.Adoption; adoption != nil {
+		for index, message := range adoption.Warnings {
+			findings = append(findings, finding(fmt.Sprintf("adoption_warning_%d", index+1), PreflightWarning,
+				"Review recovered runtime behavior", message,
+				"Import registers the current runtime. A later Deploy applies the reviewed recipe and may restart services.",
+				"Review this limitation before adopting the workload.", "deploy", "adoption"))
+		}
+		for index, message := range adoption.Blockers {
+			findings = append(findings, finding(fmt.Sprintf("adoption_blocked_%d", index+1), PreflightBlocked,
+				"Recovery has an unresolved limitation", message, "A complete replacement cannot yet be reproduced safely.",
+				"Resolve the original configuration and inspect again.", "deploy", "adoption"))
+		}
+	}
+	if facility, ok := observation.Facilities["native-runtime"]; ok && !facility.Available {
+		findings = append(findings, finding("native_runtime_changed", PreflightBlocked,
+			"Original runtime ownership could not be verified", facility.Detail,
+			"Stopping or reusing an unverified runtime would put another application at risk.",
+			"Inspect the original workload again or restore its captured manager configuration.", "deploy", "adoption"))
+	}
 	detection := draft.Data.Detection
 	if detection.Unavailable != "" {
 		findings = append(findings, finding("source_unavailable", PreflightUnavailable,
@@ -1005,11 +1032,17 @@ func preflightFindings(
 		key := dependency.Kind + "\x00" + dependency.ResourceKind + "\x00" + dependency.ResourceID
 		observed, ok := dependencyEvidence[key]
 		if !ok {
-			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" {
-				findings = append(findings, finding("dependency_unavailable", PreflightUnavailable,
+			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" || dependency.Kind == "runtime" {
+				severity := PreflightUnavailable
+				action := "Open the owning feature and verify the linked resource."
+				if dependency.Kind == "runtime" {
+					severity = PreflightBlocked
+					action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
+				}
+				findings = append(findings, finding("dependency_unavailable", severity,
 					"Dependency evidence is unavailable", dependency.ResourceKind+" "+dependency.ResourceID,
 					"The owning feature did not return inventory evidence.",
-					"Open the owning feature and verify the linked resource.", dependencyOwner(dependency), field))
+					action, dependencyOwner(dependency), field))
 			}
 			continue
 		}
@@ -1035,6 +1068,9 @@ func preflightFindings(
 				"The deployment cannot safely use the named owning-feature resource.",
 				"Repair, relink, or remove this dependency.", dependencyOwner(dependency), field)
 			item.DeepLink = observed.DeepLink
+			if dependency.Kind == "runtime" {
+				item.Action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
+			}
 			findings = append(findings, item)
 			continue
 		}
@@ -1044,6 +1080,14 @@ func preflightFindings(
 			"", dependencyOwner(dependency), field)
 		item.DeepLink = observed.DeepLink
 		findings = append(findings, item)
+		if dependency.Kind == "runtime" && observed.Warning != "" {
+			item := finding("runtime_baseline_unavailable", PreflightWarning,
+				"Original rollback authority is unavailable", observed.Warning,
+				"The current managed runtime is available, but its original native baseline cannot currently be verified.",
+				"Restore the original manager and source before rolling back to the imported baseline.", "deployments", field)
+			item.DeepLink = observed.DeepLink
+			findings = append(findings, item)
+		}
 		if dependency.Kind == "backup" && observed.Status != "" && !observed.Fresh {
 			item := finding("backup_stale", PreflightWarning,
 				"Latest backup is outside the freshness policy", observed.Status,

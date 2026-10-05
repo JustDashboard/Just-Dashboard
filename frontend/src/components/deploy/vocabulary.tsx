@@ -35,6 +35,7 @@ import {
   webhookProduct,
 } from "@/components/product-logo"
 import { wordsProduct } from "@/lib/clients"
+import { importedWorkloadState, isObservedImport } from "@/components/deploy/imported-workload"
 import type {
   BlueprintSummary,
   DeploymentBuildMethod,
@@ -384,7 +385,16 @@ export function useNow(intervalMs = 1000, enabled = true) {
 // ---------------------------------------------------------------------------
 
 export type ProjectState =
-  "deploying" | "ready" | "failed" | "unhealthy" | "stopped" | "not_deployed" | "archived"
+  | "deploying"
+  | "ready"
+  | "failed"
+  | "unhealthy"
+  | "stopped"
+  | "not_deployed"
+  | "archived"
+  | "observed"
+  | "partial"
+  | "unavailable"
 
 const PROJECT_LABELS: Record<ProjectState, string> = {
   deploying: "Deploying",
@@ -394,6 +404,9 @@ const PROJECT_LABELS: Record<ProjectState, string> = {
   stopped: "Stopped",
   not_deployed: "Not deployed",
   archived: "Archived",
+  observed: "Running",
+  partial: "Partly running",
+  unavailable: "Not observed",
 }
 
 const PROJECT_TONES: Record<ProjectState, DotTone> = {
@@ -404,6 +417,9 @@ const PROJECT_TONES: Record<ProjectState, DotTone> = {
   stopped: "stopped",
   not_deployed: "stopped",
   archived: "stopped",
+  observed: "running",
+  partial: "warning",
+  unavailable: "unknown",
 }
 
 /**
@@ -425,6 +441,7 @@ export function projectState(
 ): ProjectState {
   if (archived) return "archived"
   if (summary.activeRun) return "deploying"
+  if (isObservedImport(summary)) return importedWorkloadState(summary)
   if (!summary.liveReleaseId) return runFailed(summary.lastRun?.state) ? "failed" : "not_deployed"
   if (summary.stopped || runtimeStopped(runtime, summary.liveReleaseId)) return "stopped"
   // A failed run newer than the live release is news; a failure the live
