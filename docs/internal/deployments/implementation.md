@@ -1164,13 +1164,14 @@ only renderer/executor/validation authority for their feature.
   successful activation step's completion only when
   its persisted evidence identifies that release and contains no recovery. It never uses the current
   live release's activation timestamp to describe an older run. Missing/failed activation has no history
-  link; removed runtimes point the operator to the transcript or an external log archive. The run page embeds application runtime logs separately from the orchestrator transcript, and the
-  project Logs page's Output view reads the observed runtime sources (the live release's containers,
-  "All services" for a stack, then older releases'). Both embed the service logs
-  (`components/logs/service-logs.tsx`) for live streaming, pause/resume, filters, each image's lens and
-  historical search without leaving the deployment. The run
-  viewer uses the server-provided activation window when available. A removed selected service
-  is reported as unavailable rather than silently replaced by another service.
+  link; removed runtimes point the operator to the transcript or an external log archive. No page
+  reads it since the run page's Runtime logs view was removed on 2026-10-05 (the endpoint, like
+  `…/runs/{run}/metrics` and `…/traffic`, stays for API callers). The project Logs page's Output view
+  reads the observed runtime sources (the live release's containers, "All services" for a stack, then
+  older releases') through the service logs (`components/logs/service-logs.tsx`) for live streaming,
+  pause/resume, filters, each image's lens and historical search without leaving the deployment. A
+  removed selected service is reported as unavailable rather than silently replaced by another
+  service.
 - `GET /deploy/{id}/operations` is the one operational read. It resolves the live release's own runtime
   snapshot and asks each feature owner once: Docker for containers, Proxy for routes and certificates, and
   the C6 dependency observer for volumes, bind paths, backup jobs and database connections in a single
@@ -1762,40 +1763,48 @@ or Start, Archive or Restore, managed-resource removal — whose plan loads as s
 archived — and permanent deletion, which asks for the project's name.
 
 The deployment page (`/deploy/[id]/runs/[run]`) keeps the sequence-based stream, resync and the
-5,000-event cap. It opens on an identity line — the source as its forge, the commit, who or what
-started the run and where, how long it has taken, and beside its state the verbs that act on it
-(Cancel, Retry, Redeploy, Visit and the release's menu) — then the release path (a stage the run did
-not include drawn dashed), and how the run ended: a failure in words with the engine's code beside it and a way to
-the failing step, the live address, or which release is live now. A failure is titled from the cause
+5,000-event cap. It opens on the header every page of its project opens on, saying what the run is
+(`run-header.tsx`): the project's tile, the commit as the title, the run's state with the step at work
+and how long it has taken, the verbs that act on it at the far end (Cancel, Retry, Redeploy, Visit and
+the release's menu), and one line of provenance — the run's number, branch and commit with their forge,
+the commit's author, what the run did and who or what started it, the environment, when, and how long it
+queued. Then the release path (a stage the run did not include drawn dashed), and how the run ended: a
+failure (`run-outcome.tsx`) drawn on the tile of the step it stopped at, in words with the engine's
+code beside it, where in the run it stopped, the engine's reason, the last four lines the step wrote and
+what to do — the fix, Show in build logs (Show the line when the cause names one) and Step details —
+the live address, or which release is live now. A failure is titled from the cause
 the failed step recorded (`failure-cause.ts` reads a build's or release task's `cause` and a health
 gate's `diagnostics.cause`), lists the identifiers it named, and offers its fix — to an administrator —
 as a button that opens the field it targets: the Build section for a package manager or version, the
 commands for a command, the output or the root, Runtime for the port or memory, Databases for a
 localhost database, and Variables with the editor opened on the variable (`?variable=NAME&scope=…`,
-plus `&value=…` for a computed flag) with the scope it lacked. "Show the line" selects the failing
-step and scrolls the console to the transcript line the cause points at, clearing a search or the
-errors filter that could hide it. When `GET /deploy/{id}/runs/{run}/settings-drift` says the plan or
+plus `&value=…` for a computed flag) with the scope it lacked. "Show the line" narrows the console to
+the failing step, brings it into view and scrolls it to the transcript line the cause points at,
+clearing a search or the errors filter that could hide it. When
+`GET /deploy/{id}/runs/{run}/settings-drift` says the plan or
 the variables changed since the run — the plan revision's fields and the variables' names, digests
 and scopes, never a value — the header's command becomes Deploy with current settings (the run's own
 commit for a remote Git source whose drift names no source change, a plain deploy otherwise — a source
 moved to another branch or repository is never asked for the old commit), Retry moves to the menu as
 "Retry with the settings it used", and one line under the failure says what changed. A run that failed
 with `source_revision_unavailable` offers Deploy the branch head the same way, since its commit cannot
-be fetched again. The build console paints its lines
-through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`), numbers
-them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage and
-errors (with a count), shows the time since the run began, wraps, follows, copies and downloads
-`deployment-N.log`, and stays mounted while Details, Runtime logs or Metrics are open so its search and
-scroll position survive the switch; the release path shows each group's duration; Details lists every
-step attempt with its evidence and where in the run it ran; Runtime logs draws each source as its
-image's product and keeps its server-provided windows, the one around activation offered as an
-*Around activation* chip that opens the history there rather than as a second Live beside the
-workspace's own. Metrics reads each figure as before → after, amber once a reading is half again
-what it was (the traffic panel's rule for "slower"), over one strip per measure: the ten minutes
-before and the ten after at equal widths on one scale, with a brand rule at the instant the release
-went live. Its windows name a single-container release's series by container (`sources`; a Compose
-release's stay unnamed, because its recorded runtime lists container ids without the service each
-ran). A successful run shows Visit
+be fetched again. Under that the run is two parts with no strip between them. The build console paints
+its lines through the painter the dashboard's own transcripts use (`components/transcript-line.tsx`),
+numbers them, strips terminal escapes, groups each step's lines under a sticky rule, filters by stage
+and errors (with a count), shows the time since the run began, wraps, follows, copies and downloads
+`deployment-N.log`; the release path shows each group's duration. Details (`run-steps.tsx`) is one
+working surface: a rail of every step attempt under the stage it belongs to — each step on the tile of
+the product it works with (the forge for the source, the toolchain for the build context, Docker for the
+build and the runtime, Let's Encrypt for a certificate, a glyph for the dashboard's own bookkeeping),
+what it concluded, how long it took and where in the run it ran — beside an inspector of the picked
+step, which opens on the failed step, else the one at work, else the build. The inspector draws the
+step's state and times, its error, preflight's findings for Check plan, the last eight lines it wrote
+with Build output into the console, and its evidence read by shape (`run-evidence.tsx`): facts with
+the products they name, digests cut short with a copy, a commit as the Git page draws one, images and
+health checks as rows, a Dockerfile, a command and any record nested past two levels as code in the
+`--tag-*` hues, and the record as it was kept in a fold. Runtime logs and Metrics around activation
+were views of this page until 2026-10-05; what a release does once it runs is the project's Logs and
+Runtime pages. A successful run shows Visit
 only when its recorded release is the project's current live release; the success block waits for the
 project read so it never flashes Superseded first.
 

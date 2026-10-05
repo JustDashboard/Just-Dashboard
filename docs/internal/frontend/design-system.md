@@ -116,7 +116,9 @@ taking a frame:
   draws through the same component and keeps its frame, as a block among framed readings. The
   preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
-  and the two shells, Docker's and a game server's, are `Pane`s and a game's raw settings file is
+  and the two shells, Docker's and a game server's, are `Pane`s, the run page's Details is one frame
+  around a rail of the run's steps and an inspector of the picked one (Security's Tools shape, the
+  rail deciding what the inspector shows), and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
   everything inside it changes what the deployment is, so one red edge says "careful" once where
   four red cards said it four times. The release path on a deployment page is not a wiring
@@ -880,7 +882,7 @@ above:
   at twelve so a long list does not spend a second arriving, and `ChoiceCard` staggers a grid by its
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
   the fleet's live and build-slot figures, the
-  Overview's requests, the delivery insights, the run page's traffic after activation, Automation's
+  Overview's requests, the delivery insights, Automation's
   revisions awaiting review and alerts firing, the live usage tiles, and the readings on
   Packages, System users and the audit log. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
@@ -1094,7 +1096,7 @@ The deployment section declares its two sets the same way. A project's verbs are
 `projectCommand`, is the first of View, Start, Deploy and Redeploy the list holds — by a fleet
 card's menu and by a fleet row, so a card and the context row cannot disagree about what can be done to
 a project. A run's and its release's are declared once in `deploy/run-verbs.tsx` and drawn by a
-Deployments row's menu and by the run page's identity line, which is what keeps a finished run from
+Deployments row's menu and by the run page's header, which is what keeps a finished run from
 being a dead end. A long menu is grouped: a `Verb` may name its `group` — Running, Building, Project,
 *Release #4* — and `VerbMenu` draws an eyebrow and a separator where the group changes, because
 eleven words in a row are a wall and the same eleven under three names are three short lists.
@@ -1267,8 +1269,10 @@ live, so `github-actions` is GitHub's, and `backup-cron`, whose name says nothin
 from `LANES` — `AuthorMark`'s argument: a users list of eight brand-blue squares was a texture, and
 the same person now keeps one colour in the rail, the list and their own profile. The profile opens on
 `HostIdentity` with that picture where the tile would be, which makes it the fourth page that
-describes a thing the same way; a project's header and a deployment's run page are the fifth and
-sixth. A game server's three pages add one line under that header (`GameIdentity`) with what only
+describes a thing the same way; a project's header is the fifth, and a deployment's run page
+opens on that same header saying what the run is (`run-header.tsx`) — it had its own identity line,
+a 48px tile and the duration as a 24px figure, until the operator asked for the project's compact
+one. A game server's three pages add one line under that header (`GameIdentity`) with what only
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
@@ -1446,7 +1450,7 @@ registry host or an image reference is drawn as the forge or registry it names (
 GitHub, `ghcr.io` included, GitLab, Bitbucket, Codeberg, Gitea, Forgejo, Docker Hub, Quay, Harbor,
 Azure, AWS and Google Cloud's registries, and a self-hosted host whose name carries one of those
 words), falling back to git's or Docker's own mark — on a fleet card's source line, the run page's
-identity line, and as the field is typed on `/deploy/new`'s Clone URL, Compose Git URL and Image
+header, and as the field is typed on `/deploy/new`'s Clone URL, Compose Git URL and Image
 reference and the credential sheet's Host. A saved credential is the host it signs in to, an SSH key
 with a key in the tile's corner and a GitHub App credential as the installed account's face with
 GitHub's there. What is pasted into a credential's secret is read for what it says about itself
@@ -1578,6 +1582,23 @@ a write takes the method hue while a read stays muted (a `DELETE` is a change, n
 path and query are tokens, and an address takes the address hue beside the client drawn as itself.
 Its Colour switch is the console's own; turned off it keeps a failure, a refusal and an answer
 slower than a second, because those are readings of state (§3) rather than decoration.
+
+**A step's record is read by its shapes, and code is coloured by the same rules.** The run page's
+Details drew a step's evidence as a well of grey JSON under an accordion row: the commit a build
+checked out, the Dockerfile it wrote and the image it made were all found by reading braces.
+`deploy/run-evidence.tsx` reads the record by shape instead — a value by its key, a list by what its
+items carry — and draws each the way the product draws it elsewhere: a toolchain, a Node version, a
+platform or an image beside its product's mark, a digest cut to twelve characters with a copy, a
+commit as the Git page draws one, a list of images as rows of their products with size and platform,
+a list of health checks as rows of their outcomes. What is text — a Dockerfile, a command line, a
+record nested past two levels — is a `CodeBlock`: the `Well`'s ground with a strip naming it, its
+length and a copy, and its tokens in the `--tag-*` hues the log console's tokens sit on (keys blue,
+strings green, numbers pink, literals and a Dockerfile's instructions violet, paths and flags cyan,
+digests slate, punctuation and comments stepped back). None of the status hues: a string is not a
+success. A step is drawn on the tile of the product it works with (`StepTile`, its state in the
+tile's corner the way `ProjectMark` carries a framework) — the forge for the source, the toolchain
+for the build context, Docker for the build and the runtime, Let's Encrypt for a certificate, the
+authority certbot asks — and a step that is the dashboard's own bookkeeping keeps a glyph.
 
 **A file is drawn as what it is, and a folder in the colour it was given.** The file manager drew
 Material Design Icons' file family, a stencil per category in one flat tone: it told a config from a
@@ -1941,7 +1962,7 @@ the reader through it.
 | `/databases/new` — add a database | **Flow** | A question with an outcome: which database, started here or connected, ending in the one command that does it. The section's only flow page. |
 | Any page with a run of *choices* on it | either | The register is about the page; the lit choice is about the thing. A reading page with a picker on it — the generators on a database's Generate page — gets the edge on that picker and changes in no other way. |
 | `/deploy/new` — Configure | **Flow** | Step two of three, ending in the one command that creates the project. |
-| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the run's identity line with its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the line's end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
+| A run in progress (`/deploy/[id]/runs/[run]`) | Reading | You are *watching*, not deciding. The page opens on the project header's shape saying what the run is, its verbs — Cancel, Retry, Redeploy, Visit, the release's menu — at the far end beside its state, and nothing above it: the sequence on `/deploy/new` ended when the project was created, so a first run is read the same way as the fortieth, with no spine claiming the screens before it. |
 | Deploy settings, credentials, notifications | Reading | Editable readings of state, not a sequence with an end. |
 | Sign-in, first-run setup | **Flow** | A sequence with an outcome. |
 

@@ -244,11 +244,12 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
   verbs in `actions`, then the resource name and state among the page's facts — a `MetricStrip` on
   a container's and a stack's page. The run page (`deploy/run-page.tsx`) goes one step further:
-  since the 2026-09-24 pass it opens on the `HostIdentity` line the host Overview opens on (the
-  source as its forge, the commit, who or what started the run, how long it has taken), because a
-  run is one thing described the way the product describes every thing, and since 2026-09-25 that
-  line is the first thing on the page — its verbs sit at the line's end beside the run's state, and
-  the way back is the rail's panel and the menu's Open project rather than an eyebrow. A container,
+  since 2026-10-05 it opens on the header its project's pages open on (`run-header.tsx`, the
+  project's tile, the commit, the run's state and how long it took, one line of provenance),
+  because a run is one of the project's Deployments, and that header is the first thing on the
+  page — its verbs sit at its far end beside the run's state, and the way back is the rail's panel
+  and the menu's Open project rather than an eyebrow. (From 2026-09-24 it opened on the
+  `HostIdentity` line the host Overview opens on instead.) A container,
   a compose stack and a backup job went that way on 2026-09-21, and a proxy site
   (`/proxy/sites/<name>`) on 2026-09-27, since it now holds its logs — the way back is a "Sites" link
   beside its verbs, the form and the raw file staying sheets it opens; every other detail in the

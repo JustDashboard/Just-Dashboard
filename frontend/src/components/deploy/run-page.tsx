@@ -1,27 +1,22 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ArrowUpRight,
   External,
-  GitCommit,
-  Globe,
   Link as LinkGlyph,
-  LockClosed,
   Play,
   RefreshClockwise,
   StopCircle,
   Warning,
 } from "@/components/icons"
 import { get, post, put } from "@/lib/api"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
-import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type {
@@ -34,54 +29,35 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
-import { Page, PageContext } from "@/components/page"
+import { Page, PageContext, Section } from "@/components/page"
 import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { StatusDot } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
-import { Tag } from "@/components/tag"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
 import {
-  RunStatus,
   deploymentURL,
-  formatDuration,
   hostOf,
   isActiveRun,
   isCancellable,
   isRetryable,
   latestAttempts,
-  operationLabel,
   projectProduct,
-  runCommit,
-  runDurationSeconds,
   runFailed,
   runLabel,
-  runRef,
-  runRevision,
   runStopped,
-  runSubject,
-  runTriggerLine,
-  shortIdentity,
-  shortRevision,
-  sourceProduct,
   stepName,
   useNow,
 } from "@/components/deploy/vocabulary"
 import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
-import { RunSteps } from "@/components/deploy/run-steps"
-import { RunLogs } from "@/components/deploy/run-logs"
+import { RunDetails, initialStep } from "@/components/deploy/run-steps"
+import { RunHeader } from "@/components/deploy/run-header"
+import { RunFailure, RunReady } from "@/components/deploy/run-outcome"
 import { useRunStream } from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
-import { RunMetrics } from "@/components/deploy/run-metrics"
-import { RunActorMark } from "@/components/deploy/run-marks"
 import { releaseVerbs } from "@/components/deploy/run-verbs"
 import {
-  causeHeadline,
-  causeTitle,
   deployWithCurrentSettings,
   driftLine,
   failureCause,
@@ -92,33 +68,29 @@ import { RollbackDialog } from "@/components/deploy/rollback-dialog"
 import { useCheckedDeploy } from "@/components/deploy/deploy-check"
 import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-sheet"
 
-const VIEWS = [
-  ["build", "Build logs"],
-  ["runtime", "Runtime logs"],
-  ["details", "Details"],
-  ["metrics", "Metrics"],
-] as const
-type View = (typeof VIEWS)[number][0]
-
 /**
  * The deployment's own destination — a breadcrumb back to the project, not a
  * tab of it, exactly as a Vercel deployment page sits outside the project
  * shell it was built from.
  *
- * It opens on the identity line every page that describes one thing shares
- * (`HostIdentity`: the Overview's host, Version's install, the account's
- * profile): where the source lives, drawn as that forge or product; the commit
- * the run built as its subject, with its branch, sha and author as the Git
- * page draws a commit; and the run itself as a sentence — what it did, who or
- * what asked for it as their face or product, where, and when — beside the one
- * figure the page is watched for, how long it has taken. Then the release
- * path, how the run ended, and four views of it.
+ * It opens on the header every page of its project opens on, saying what the
+ * run is instead (`RunHeader`): the project's tile, the commit the run built,
+ * its state and how long it took, the verbs at the far end, and one line of
+ * provenance. Then the release path, how the run ended, and the run itself in
+ * two parts, one under the other: its build logs, and its details — every
+ * step it took beside what the picked one recorded.
+ *
+ * There were four views behind a strip. Runtime logs and Metrics went at the
+ * operator's request: what the release does once it runs is the project's
+ * Logs and Runtime pages, which read it live, and on a run that never started
+ * a container they were a sentence saying so. With two left, a strip hid one
+ * of them behind a press for nothing, so both are on the page.
  *
  * How it ended is said once, in the shape its meaning takes (§14): a failure
- * that needs a decision is a `Notice` in the reader's words with the engine's
- * code as a literal beside them and a way to the step that failed; a release
- * that went live is a state and an address; one that has been replaced since
- * says which is live now.
+ * is the one block that asks for a decision (`RunFailure`) — what broke on
+ * the tile of the step it broke in, the engine's reason, the last lines the
+ * step wrote and what to do; a release that went live is a state and an
+ * address; one that has been replaced since says which is live now.
  *
  * The header's menu carries what can be done to the release this run made —
  * compare it, roll back to it, pin it — declared once with the Deployments
@@ -138,7 +110,11 @@ export function RunPage() {
     [projectId, runId],
     { enabled: validIds },
   )
+  // The stage the build console is narrowed to, and the step Details shows:
+  // two choices, since reading a step's record is no reason to hide the rest
+  // of the transcript.
   const [selectedStepId, setSelectedStepId] = useState<number>()
+  const [inspectedStepId, setInspectedStepId] = useState<number>()
   const [working, setWorking] = useState<
     "cancel" | "retry" | "redeploy" | "start" | "deploy" | "pin"
   >()
@@ -152,7 +128,6 @@ export function RunPage() {
     releaseId?: number
     fromReleaseId?: number
   }>({ open: false })
-  const [view, setView] = useSessionState<View>(`deploy.run.${projectId}.${runId}.view`, "build")
   const stream = useRunStream(projectId, runId, { enabled: validIds, initial: initial.data })
   const setLiveSnapshot = stream.setSnapshot
   const events = stream.events
@@ -168,7 +143,7 @@ export function RunPage() {
     { enabled: validIds },
   )
   // Worth asking once the run has a release to place — the one it made, the
-  // one it is making, the one it rolls back to, or the two Metrics compares:
+  // one it is making, or the one it rolls back to:
   // resolving a release id to the number an operator recognises ("release
   // #12") needs the environment's release list, which nothing else on this
   // page reads.
@@ -190,8 +165,7 @@ export function RunPage() {
           (snapshot.run.releaseId ||
             snapshot.run.candidateReleaseId ||
             targetReleaseId ||
-            snapshot.run.state === "succeeded" ||
-            view === "metrics"),
+            snapshot.run.state === "succeeded"),
         ),
     },
   )
@@ -240,8 +214,8 @@ export function RunPage() {
   )
 
   const attempts = useMemo(() => latestAttempts(snapshot?.steps ?? []), [snapshot?.steps])
-  // The transcript is parsed once, here, for the console and for the counts
-  // the view strip and Details read from it.
+  // The transcript is parsed once, here, for the console and for what
+  // Details and the failure read from it.
   const rows = useMemo(() => consoleRows(events), [events])
   const transcript = useMemo(() => transcriptSummary(rows), [rows])
   const now = useNow(1000, isActiveRun(snapshot?.run.state))
@@ -306,7 +280,6 @@ export function RunPage() {
   // run, and does not say stopped yet.
   const stopped = runStopped(run)
   const startedSince = stopped && !deployment?.stopped && (deployment?.lastRun?.id ?? 0) > run.id
-  const serving = isLiveRelease && (!stopped || startedSince)
   const release = releases.data?.find((candidate) => candidate.id === run.releaseId)
   const liveRelease = releases.data?.find((candidate) => candidate.id === deployment?.liveReleaseId)
   // The release that stayed live when this run rolled back is the one its
@@ -331,10 +304,8 @@ export function RunPage() {
     (commitGone || (drift.data ? drift.data.changed : runPlanIsStale(run, deployment)))
   const changedSince = isRetryable(run.state) ? driftLine(drift.data) : undefined
 
-  const selected =
-    attempts.find((step) => step.id === selectedStepId) ??
-    attempts.find((step) => step.state === "running" || step.state === "failed") ??
-    attempts.at(-1)
+  const current =
+    attempts.find((step) => step.state === "running" || step.state === "failed") ?? attempts.at(-1)
 
   const cancel = async () => {
     if (working) return
@@ -432,16 +403,24 @@ export function RunPage() {
     }
   }
 
-  const showFailure = () => {
-    if (!failedStep) return
-    setSelectedStepId(failedStep.id)
-    setView("build")
+  // Both parts are on the page, so leading to one is narrowing it and
+  // bringing it into view.
+  const showOutput = (stepId: number) => {
+    setSelectedStepId(stepId)
+    document.getElementById("build-logs")?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
-  const showLine = () => {
-    if (!cause?.lineSeq) return
-    showFailure()
-    setFocusLine((current) => ({ seq: cause.lineSeq!, nonce: (current?.nonce ?? 0) + 1 }))
+  const showFailure = () => {
+    if (!failedStep) return
+    showOutput(failedStep.id)
+    if (cause?.lineSeq)
+      setFocusLine((focus) => ({ seq: cause.lineSeq!, nonce: (focus?.nonce ?? 0) + 1 }))
+  }
+
+  const showFailedStep = () => {
+    if (!failedStep) return
+    setInspectedStepId(failedStep.id)
+    document.getElementById("run-details")?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   // The header's buttons are the run's own verbs; the menu is the release's,
@@ -551,28 +530,33 @@ export function RunPage() {
   )
 
   return (
-    <Page className="animate-rise">
+    <Page className="animate-rise pt-4 md:pt-5">
       <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
       {checkedDeploy.gate}
-      {/* The name is for assistive technology alone (§15): the identity line
-          is the first thing drawn. */}
+      {/* The name is for assistive technology alone (§15): the header is the
+          first thing drawn. */}
       <PageContext title={`Deployment #${run.runNumber}`} />
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         Deployment state: {runLabel(run.state, run.operation)}
-        {selected
-          ? `. Current step: ${stepName(selected.key, run.operation)}, ${selected.state}`
-          : ""}
+        {current ? `. Current step: ${stepName(current.key, run.operation)}, ${current.state}` : ""}
       </p>
 
-      <RunIdentity
+      <RunHeader
         run={run}
         release={release}
         deployment={deployment}
+        product={deployment && projectProduct(deployment)}
         branch={project.data?.project.branch}
+        steps={attempts}
         now={clock}
-        releaseNumbers={releaseNumbers}
-        targetReleaseId={targetReleaseId}
+        // Redeploy, Restart, Stop and Start record the live release as their
+        // target too, which they act on rather than roll back to.
+        rollsBackTo={
+          run.operation === "rollback" && targetReleaseId
+            ? releaseNumbers.get(targetReleaseId)
+            : undefined
+        }
         projectId={projectId}
         verbs={verbs}
       />
@@ -597,66 +581,23 @@ export function RunPage() {
           The current operation will stop safely and run its cleanup.
         </Notice>
       ) : runFailed(run.state) && (run.terminalReason || run.terminalCode) ? (
-        <Notice
-          tone={run.state === "rolled_back" ? "warning" : "danger"}
-          icon={Warning}
-          title={
-            <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>
-                {run.state === "rolled_back"
-                  ? `Rolled back — ${kept ? `release #${kept.number}` : "the previous release"} stayed live`
-                  : cause
-                    ? causeHeadline(cause)
-                    : causeTitle(run.terminalCode || "deployment_failed")}
-              </span>
-              {run.terminalCode && <Tag mono>{run.terminalCode}</Tag>}
-            </span>
-          }
-        >
-          {cause?.subjects && cause.subjects.length > 0 && (
-            <p className="mb-1.5 flex flex-wrap gap-1.5" aria-label="Named by the failure">
-              {cause.subjects.map((subject) => (
-                <Tag key={subject} mono>
-                  {subject}
-                </Tag>
-              ))}
-            </p>
-          )}
-          {run.terminalReason && <p>{run.terminalReason}</p>}
-          {changedSince && <p className="mt-1.5 text-hint text-muted-foreground">{changedSince}</p>}
-          {(fix || failedStep) && (
-            <div className="mt-2.5 flex flex-wrap gap-2">
-              {fix && (
-                // Once the settings have moved on, the header's deploy is the
-                // way forward and the fix is a place to check, not the command.
-                <Button
-                  size="sm"
-                  variant={stale ? "outline" : "default"}
-                  asChild
-                  className="max-sm:w-full"
-                >
-                  <Link href={fix.href}>{fix.label}</Link>
-                </Button>
-              )}
-              {cause?.lineSeq ? (
-                <Button variant="outline" size="sm" className="max-sm:w-full" onClick={showLine}>
-                  Show the line
-                </Button>
-              ) : (
-                failedStep && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="max-sm:w-full"
-                    onClick={showFailure}
-                  >
-                    Show the failing step
-                  </Button>
-                )
-              )}
-            </div>
-          )}
-        </Notice>
+        <RunFailure
+          run={run}
+          step={failedStep}
+          steps={attempts}
+          cause={cause}
+          kept={kept}
+          rows={rows}
+          deployment={deployment}
+          now={clock}
+          changedSince={changedSince}
+          fix={fix}
+          // Once the settings have moved on, the header's deploy is the way
+          // forward and the fix is a place to check, not the command.
+          fixIsCommand={!stale}
+          onShowOutput={showFailure}
+          onShowStep={showFailedStep}
+        />
       ) : (run.state === "cancelled" || run.state === "superseded") && run.terminalReason ? (
         // Nothing to decide, so a reading rather than a notice: why it stopped.
         <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
@@ -669,154 +610,63 @@ export function RunPage() {
           isLiveRelease before it lands would flash "Superseded" for every
           successful run while the project fetch is still in flight. */}
       {run.state === "succeeded" && project.data && (
-        <section
-          aria-label="Outcome"
-          className="flex flex-wrap items-center justify-between gap-4 border-t border-hairline pt-5"
-        >
-          <div className="min-w-0 space-y-1.5">
-            <p className="flex min-w-0 items-center gap-2.5 text-title font-semibold tracking-tight">
-              <StatusDot tone={serving ? "running" : "stopped"} />
-              <span className="min-w-0">
-                {!isLiveRelease
-                  ? `Superseded — release #${liveRelease?.number ?? "—"} is live now`
-                  : !stopped
-                    ? "Your release is ready"
-                    : startedSince
-                      ? `Started again since — release #${release?.number ?? "—"} is running`
-                      : "Your release is stopped"}
-              </span>
-            </p>
-            {isLiveRelease && stopped && !startedSince && (
-              <p className="-my-1 ml-4 overflow-hidden py-1 text-xs text-muted-foreground">
-                <span className="-ml-5 flex min-w-0 flex-wrap items-center gap-y-1">
-                  {release && <Fact className="numeric">Release #{release.number}</Fact>}
-                  {run.endedAt && <Fact>stopped {relativeTime(run.endedAt)}</Fact>}
-                  <Fact>visitors get an error until it is started</Fact>
-                </span>
-              </p>
-            )}
-            {serving && (
-              // The run line's clipped dots (`Fact`): a phone wraps the release
-              // under the address, and the dot does not lead the line.
-              <p className="-my-1 ml-4 overflow-hidden py-1 text-xs text-muted-foreground">
-                <span className="-ml-5 flex min-w-0 flex-wrap items-center gap-y-1">
-                  <Fact className="max-w-full">
-                    {url ? (
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm font-mono text-foreground/85 focus-ring hover:text-foreground hover:underline"
-                      >
-                        {url.startsWith("https:") ? (
-                          <LockClosed aria-hidden className="size-3.5 shrink-0 text-success" />
-                        ) : (
-                          <Globe aria-hidden className="size-3.5 shrink-0" />
-                        )}
-                        <span className="truncate">{url}</span>
-                      </a>
-                    ) : (
-                      <span className="font-mono">Private service on your server</span>
-                    )}
-                  </Fact>
-                  {release && <Fact className="numeric">Release #{release.number}</Fact>}
-                  {release?.activatedAt && (
-                    <Fact>live since {relativeTime(release.activatedAt)}</Fact>
-                  )}
-                </span>
-              </p>
-            )}
-          </div>
-          {!isLiveRelease && (
-            <Button variant="outline" size="sm" asChild className="max-sm:w-full">
-              <Link href={`/deploy/${projectId}`}>Open project</Link>
-            </Button>
-          )}
-        </section>
-      )}
-
-      <div
-        role="group"
-        aria-label="Run views"
-        className="flex flex-wrap gap-1 border-b border-hairline"
-      >
-        {VIEWS.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            aria-pressed={view === key}
-            onClick={() => setView(key)}
-            className={tabClasses(view === key, "h-10")}
-          >
-            {label}
-            {/* Readings, not part of the name: the count beside a label (§4). */}
-            {key === "build" && transcript.lines > 0 && (
-              <span aria-hidden className="inline-flex items-center gap-1.5">
-                <span className="max-sm:hidden">
-                  <ChipCount>{transcript.lines.toLocaleString()}</ChipCount>
-                </span>
-                {transcript.errors > 0 && <StatusDot tone="danger" />}
-              </span>
-            )}
-            {/* On a phone the four names fill the strip; the counts stay above it. */}
-            {key === "details" && attempts.length > 0 && (
-              <span aria-hidden className="max-sm:hidden">
-                <ChipCount>
-                  {attempts.filter((step) => step.state === "passed").length}/{attempts.length}
-                </ChipCount>
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Always mounted, only hidden: unmounting on every view switch reset
-          Search/Wrap/Follow and the scroll position each time. */}
-      <BuildConsole
-        hidden={view !== "build"}
-        rows={rows}
-        summary={transcript}
-        capped={stream.capped}
-        steps={attempts}
-        active={active}
-        outcome={run.state}
-        operation={run.operation}
-        connected={stream.socket === "open"}
-        startedAt={run.claimedAt ?? run.requestedAt}
-        runNumber={run.runNumber}
-        now={clock}
-        selectedStep={selectedStepId}
-        onSelectStep={setSelectedStepId}
-        focusLine={focusLine}
-      />
-      {view === "runtime" && (
-        <RunLogs
+        <RunReady
+          live={isLiveRelease}
+          stopped={stopped}
+          startedSince={startedSince}
+          stoppedAt={run.endedAt}
+          url={url}
+          release={release}
+          liveRelease={liveRelease}
           projectId={projectId}
-          runId={runId}
-          kind={deployment?.sourceKind}
-          product={deployment && projectProduct(deployment)}
         />
       )}
-      {view === "details" && (
-        <RunSteps
+
+      <Section
+        title="Build logs"
+        actions={
+          transcript.lines > 0 && (
+            <p className="numeric text-xs text-muted-foreground">
+              {transcript.lines.toLocaleString()} lines
+              {transcript.errors > 0 && (
+                <span className="text-destructive"> · {plural(transcript.errors, "error")}</span>
+              )}
+            </p>
+          )
+        }
+      >
+        <div id="build-logs" className="min-w-0 scroll-mt-16">
+          <BuildConsole
+            rows={rows}
+            summary={transcript}
+            capped={stream.capped}
+            steps={attempts}
+            active={active}
+            outcome={run.state}
+            operation={run.operation}
+            connected={stream.socket === "open"}
+            startedAt={run.claimedAt ?? run.requestedAt}
+            runNumber={run.runNumber}
+            now={clock}
+            selectedStep={selectedStepId}
+            onSelectStep={setSelectedStepId}
+            focusLine={focusLine}
+          />
+        </div>
+      </Section>
+
+      {attempts.length > 0 && (
+        <RunDetails
           projectId={projectId}
+          deployment={deployment}
           steps={attempts}
           operation={run.operation}
           now={clock}
+          rows={rows}
           lineCounts={transcript.perStep}
-          onSelectStep={(id) => {
-            setSelectedStepId(id)
-            setView("build")
-          }}
-        />
-      )}
-      {view === "metrics" && (
-        <RunMetrics
-          projectId={projectId}
-          runId={runId}
-          releaseNumbers={releaseNumbers}
-          kind={deployment?.sourceKind}
-          product={deployment && projectProduct(deployment)}
+          selected={inspectedStepId ?? initialStep(attempts)?.id}
+          onSelect={setInspectedStepId}
+          onShowOutput={showOutput}
         />
       )}
 
@@ -855,191 +705,6 @@ function rollbackDomains(
   const url = deploymentURL(deployment?.endpoint)
   const host = url && hostOf(url)
   return host ? [host] : []
-}
-
-/**
- * The run as one identity line: its source drawn as the product that holds
- * it, the commit it built as the title, and two lines of facts — the commit
- * (branch, sha, author, when it was written) and the run (what it did, who
- * asked, where and when) — with how long it took as the line's one figure.
- *
- * A git run with no recorded commit is titled by its repository and keeps the
- * branch among its facts; with neither, the branch is the title and is not
- * drawn twice. Until the project is read the source's kind is unknown, and
- * the line says only what the run itself holds rather than guessing git.
- */
-function RunIdentity({
-  run,
-  release,
-  deployment,
-  branch: configured,
-  now,
-  releaseNumbers,
-  targetReleaseId,
-  projectId,
-  verbs,
-}: {
-  run: DeploymentEngineRun
-  /** The release the run made, whose commit names a run that recorded none. */
-  release?: DeploymentRelease
-  deployment?: DeploymentSummary
-  branch?: string
-  now: number
-  releaseNumbers: Map<number, number>
-  targetReleaseId?: number
-  projectId: number
-  /** What can be done to the run, drawn beside its state. */
-  verbs: React.ReactNode
-}) {
-  const commit = runCommit(run)
-  const kind = deployment?.sourceKind
-  const git = kind === "git" || kind === "local"
-  const branch = runRef(run, deployment?.sourceRef || configured)
-  const reference = deployment?.sourceRepository || deployment?.sourceRef || ""
-  const revision = runRevision(run, release)
-  const title =
-    runSubject(run) ??
-    (!kind
-      ? operationLabel(run.operation)
-      : git
-        ? deployment?.sourceRepository || branch
-        : kind === "compose"
-          ? "Compose stack"
-          : kind === "import"
-            ? "Adopted workload"
-            : reference || operationLabel(run.operation))
-  const titleIsLiteral = !runSubject(run) && (kind === "image" || kind === "blueprint")
-  const active = isActiveRun(run.state)
-  const seconds = runDurationSeconds(run, now)
-  const claimed = run.claimedAt ? new Date(run.claimedAt).getTime() : undefined
-  const queued = new Date(run.queuedAt ?? run.requestedAt).getTime()
-  const changedPaths = Array.isArray(run.metadata?.changedPaths)
-    ? run.metadata.changedPaths.length
-    : 0
-  // Redeploy, Restart, Stop and Start record the live release as their target
-  // too, which they act on rather than roll back to.
-  const rollsBackTo =
-    run.operation === "rollback" && targetReleaseId
-      ? releaseNumbers.get(targetReleaseId)
-      : undefined
-  // A run that has not reached a slot, or never did, has only been queued:
-  // "took" would name its queue time as a build's.
-  const unclaimed = claimed === undefined
-  const slot =
-    !unclaimed && !Number.isNaN(queued)
-      ? `queued ${formatDuration(Math.max(0, (claimed - queued) / 1000))} · ${run.slotClass} build slot`
-      : active
-        ? `waiting for a ${run.slotClass} build slot`
-        : "never reached a build slot"
-
-  return (
-    <div data-slot="run-identity" className="min-w-0">
-      <HostIdentity
-        mark={deployment ? sourceProduct(deployment) : undefined}
-        fallback={GitCommit}
-        className="pb-5"
-        title={<span className={cn(titleIsLiteral && "font-mono text-body")}>{title}</span>}
-        facts={
-          <>
-            <span className="numeric font-medium text-foreground">Deployment #{run.runNumber}</span>
-            {git && title !== branch && <BranchChip branch={branch} className="max-w-48" />}
-            {git ? (
-              <ShortSha sha={shortRevision(revision)} />
-            ) : (
-              kind && revision && <span className="font-mono">{shortIdentity(revision)}</span>
-            )}
-            {commit?.author && (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <AuthorMark name={commit.author} />
-                <span className="truncate max-sm:hidden">{commit.author}</span>
-              </span>
-            )}
-            {commit?.authoredAt && <span>authored {relativeTime(commit.authoredAt)}</span>}
-            {/* Each fact carries the dot before it, in one unit that does
-                not break, and the row sits one dot's width to the left inside
-                a box that clips: the fact that starts a line — the first, or
-                one a phone wrapped — has its dot cut off, so a dot only ever
-                stands between two facts. */}
-            <span className="-my-1 basis-full overflow-hidden py-1">
-              <span className="-ml-5 flex min-w-0 flex-wrap items-center gap-y-1">
-                <Fact>
-                  <span className="font-medium text-foreground/85">
-                    {operationLabel(run.operation)}
-                  </span>
-                </Fact>
-                <Fact>
-                  <RunActorMark run={run} remote={deployment?.sourceRemote} size="xs" />
-                  <span>{runTriggerLine(run)}</span>
-                </Fact>
-                {deployment && <Fact>{deployment.environmentName}</Fact>}
-                <Fact>
-                  <time dateTime={run.requestedAt} title={relativeTime(run.requestedAt)}>
-                    {timestamp(run.requestedAt)}
-                  </time>
-                </Fact>
-                {rollsBackTo !== undefined && (
-                  <Fact className="numeric">rolls back to release #{rollsBackTo}</Fact>
-                )}
-                {run.retryOfRunId && (
-                  <Fact>
-                    <Link
-                      href={`/deploy/${projectId}/runs/${run.retryOfRunId}`}
-                      className="rounded-sm focus-ring hover:text-foreground hover:underline"
-                    >
-                      retry of an earlier run
-                    </Link>
-                  </Fact>
-                )}
-                {run.supersededBy && (
-                  <Fact>
-                    <Link
-                      href={`/deploy/${projectId}/runs/${run.supersededBy}`}
-                      className="rounded-sm focus-ring hover:text-foreground hover:underline"
-                    >
-                      superseded by a newer run
-                    </Link>
-                  </Fact>
-                )}
-                {changedPaths > 0 && (
-                  <Fact className="numeric">{plural(changedPaths, "path")} changed</Fact>
-                )}
-              </span>
-            </span>
-          </>
-        }
-        aside={
-          <div className="min-w-0 sm:text-right">
-            {/* The state and what answers it on one row, then how long. */}
-            <div className="mb-2 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 sm:justify-end">
-              <RunStatus state={run.state} operation={run.operation} live />
-              <div className="flex flex-wrap items-center gap-2">{verbs}</div>
-            </div>
-            <p className="eyebrow">{unclaimed ? "Queued for" : active ? "Running for" : "Took"}</p>
-            <p className="numeric text-2xl leading-tight font-semibold tracking-tight">
-              {formatDuration(seconds)}
-            </p>
-            <p className="numeric text-hint text-muted-foreground">{slot}</p>
-          </div>
-        }
-      />
-    </div>
-  )
-}
-
-/**
- * One fact of the run's line, with the dot that parts it from the one before:
- * 20px ahead of the words (`pl-2`, the dot's `w-1`, `gap-2`), which is what
- * the row's `-ml-5` hides for the fact that starts a line.
- */
-function Fact({ className, children }: { className?: string; children: React.ReactNode }) {
-  return (
-    <span className={cn("inline-flex items-center gap-2 pl-2 whitespace-nowrap", className)}>
-      <span aria-hidden className="inline-flex w-1 justify-center">
-        <FactDot />
-      </span>
-      <span className="inline-flex min-w-0 items-center gap-1.5">{children}</span>
-    </span>
-  )
 }
 
 function numberOf(value: unknown) {
