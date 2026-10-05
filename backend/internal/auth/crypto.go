@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"testing"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -102,6 +103,13 @@ type argonParams struct {
 
 var defaultArgon = argonParams{time: 3, memory: 64 * 1024, threads: 4, keyLen: 32}
 
+// What a test binary hashes with. The cost is the point of the parameters above
+// and proves nothing in a test, where it was seventy percent of what the API
+// suite spent: every test makes an account and signs in. The parameters are
+// written into the hash, so verification reads whichever made it, and
+// testing.Testing is false in anything but a test binary.
+var testArgon = argonParams{time: 1, memory: 64, threads: 1, keyLen: 32}
+
 // HashPassword returns a PHC-formatted argon2id hash.
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, 16)
@@ -109,6 +117,9 @@ func HashPassword(password string) (string, error) {
 		return "", err
 	}
 	p := defaultArgon
+	if testing.Testing() {
+		p = testArgon
+	}
 	sum := argon2.IDKey([]byte(password), salt, p.time, p.memory, p.threads, p.keyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, p.memory, p.time, p.threads,

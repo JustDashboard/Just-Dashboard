@@ -92,34 +92,52 @@ to the contribution terms above, including the additional licence grant to the p
   machine fail the install intermittently. The emitted application is byte-for-byte identical
   either way. So a type error you do not catch with `bun run build` will not be caught anywhere
   later; it will ship.
-- `.github/workflows/verify.yml` runs for every push, and for pull requests from forks. A first job
-  reads which paths the push changed and starts only the gates they reach: `backend/` starts the
-  backend and race jobs, `frontend/` the frontend and browser jobs, and the deployment packages
-  (`internal/{deploy,api,proxysvc,dockerx,store,backups}`, `go.mod`) the live Docker job; a change to
-  the workflow or its scripts starts everything, as does a new branch or a manual run, and a
-  documentation-only push runs nothing past that first job. The backend, race, frontend and browser
-  jobs run on GitHub's hosted runners, in parallel — the repository is public, so they cost nothing —
-  and the two long suites are sharded: the race gate is nine jobs (`./internal/api` in five,
-  `./internal/deploy` in three, the rest in one, split by `scripts/go-test-shard.sh`) and the browser
-  suite six (`playwright test --shard`). The latency budgets are asserted in the plain test run and
-  skipped under the race detector, which multiplies a SQLite read ten- to twenty-five-fold and so
-  measures itself and the runner's load rather than the read. Go and Bun come from `go.mod` and
-  `package.json`; dependencies use the frozen Bun lockfile, and the module, Bun, Playwright and Next
-  caches are restored between runs.
+- `.github/workflows/verify.yml` runs for every pull request, as it would merge, and for every push to
+  `main` or a `patch/*` branch. A first job, `plan`, reads the change and starts only what it reaches;
+  `scripts/ci-plan.py` is the picking, and `python3 scripts/test_ci_plan.py` checks it. A Go package is
+  checked when it changed or imports one that did, so a change to one handler does not run the
+  deployment suite and a change to the store runs everything above it. `backend` builds, vets, and tests
+  those packages plainly; the six of the race gate (`internal/{api,deploy,proxysvc,backups,store,dockerx}`)
+  run under the race detector instead, in at most two jobs — `scripts/go-test-race.sh` splits
+  `./internal/api` across four processes to fill the runner's cores — and only their latency budgets
+  run plainly, because the detector multiplies a SQLite read ten- to twenty-five-fold and so measures
+  itself rather than the read. A package whose tests read the frontend's half of a contract
+  (`internal/version`, `internal/deploy`) runs when that file changes. `frontend` lints the changed
+  files (the whole tree when the rules or the dependencies change), type-checks, and runs the unit
+  tests. `browser` runs the specs `scripts/test-changed.sh` would pick, except that a change reaching
+  the dashboard's shell runs the whole suite rather than the two specs that open every page; the specs
+  are dealt into up to eight jobs of about two hundred tests each, in name order, so that a slow
+  section is spread over the jobs. A change to the workflow or its scripts runs everything,
+  as does a manual run, and a documentation-only change runs nothing past `plan`.
+  GitHub runs twenty jobs of a public repository's at once across every branch, so the suites are
+  split only as far as a runner's four cores are full: more jobs than that queue behind each other and
+  behind every other pull request. Go and Bun come from `go.mod` and `package.json`, and dependencies
+  use the frozen Bun lockfile. The module, build, Bun, Playwright, Next and `tsc` caches are saved only
+  by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
+  the caches of its base branch and never those of another task branch.
   Real-nginx tests that use `http2 on;` probe the installed nginx first and skip if it lacks that
   directive; the other nginx tests still run.
-- The live Docker fixtures need a real Docker daemon, so they run on a **self-hosted runner** on the
-  release host (labels `self-hosted, linux, x64, just-dashboard`), a systemd service under
-  `~/actions-runner` running as `ubuntu`, one job at a time. It used to take every job, one after
-  another — about fifty-five minutes a push, on the machine that serves the dashboard — and now takes
-  only this one. The framework and artifact command has a 90-minute test timeout, and the live job
-  allows 150 minutes for its remaining fixture commands and evidence cleanup. Required live fixtures
-  fail CI if skipped or absent. Logs and browser failure traces are retained for 30 days, including
-  failed runs. The live job ends by pruning the BuildKit cache its fixtures fill back to two gigabytes,
-  because the runner shares the host's Docker daemon and a few unpruned runs fill the disk. Workflows
-  from outside contributors wait for approval before they
-  touch the runner. CI does not replace public TLS, clean-host installation, remote-host,
-  architecture or soak acceptance.
+- The live Docker fixtures need a real Docker daemon, which GitHub's hosted Ubuntu runners provide, so
+  they run there like the other jobs, each job on a fresh daemon, and only when one of the six
+  deployment packages (those of the race gate) or `go.mod` changed: `live (fixtures)` runs the
+  artifact, activation, preview, runtime-fault, database, Compose and cutover fixtures of whichever of
+  `internal/{deploy,api,dockerx,proxysvc}` the change reaches, and a change reaching `internal/deploy`
+  also builds the framework fixtures in four jobs. The lists are
+  in `scripts/ci-plan.py`; the last framework job runs every framework the others do not name, so a
+  new one is built without being added there. They used to run on a self-hosted runner on the release
+  host, which put the fixtures' builds on the daemon that serves the dashboard, needed its BuildKit
+  cache pruned after every run, and left every run waiting whenever that service was down. Each live
+  job has a 45-minute test timeout. Required live fixtures fail CI if skipped or absent. Logs and
+  browser failure traces are retained for 30 days, including failed runs. CI does not replace public
+  TLS, clean-host installation, remote-host, architecture or soak acceptance.
+- A test that wants the dashboard's store opens it with `storetest.Open` (`internal/store/storetest`),
+  which copies a database built once per test binary instead of running the schema again: under the
+  race detector the schema was nearly two seconds of every such test. `store.Open` itself stays for
+  the tests of the schema and its migrations. A test binary hashes passwords with parameters that
+  cost nothing (`auth.HashPassword` under `testing.Testing()`): the real ones were seventy percent of
+  what the API suite spent, and a hash carries its own parameters, so verification is unchanged. A
+  test that names a MongoDB nothing listens on puts `serverSelectionTimeoutMS` in the connection
+  string, or it waits eight seconds to find out.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
   host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
   Recipe/detection/default changes also run

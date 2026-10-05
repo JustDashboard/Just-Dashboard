@@ -891,8 +891,10 @@ test.describe("a deployment's traffic", () => {
     const feed = page.getByRole("region", { name: "Container events" })
     await expect(feed.getByText("exit 137")).toBeVisible()
     // The feed reads under the hour it happened in, each event on the thing
-    // it happened to with what happened in the corner.
-    await expect(feed.getByText(/^\d{2}:00$/).first()).toBeVisible()
+    // it happened to with what happened in the corner. The events are minutes
+    // old, so for the hour after midnight they span two days and the heading
+    // leads with the date ("Oct 5 · 00:00"): this failed every run in that hour.
+    await expect(feed.getByText(/(^|· )\d{2}:00$/).first()).toBeVisible()
     // Docker records what happened and never who asked, so "the daemon did
     // this on its own" is the distinction worth drawing.
     await expect(page.getByText("docker itself").first()).toBeVisible()

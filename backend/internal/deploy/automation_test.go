@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 type automationFixture struct {
@@ -25,7 +26,7 @@ type automationFixture struct {
 
 func newAutomationFixture(t *testing.T) *automationFixture {
 	t.Helper()
-	st, err := basestore.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	basestore "github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // seedFactsDeployment writes one production deployment with the given source
@@ -133,7 +134,7 @@ func seedFactsDeployment(
 // of it is read by the statements the fleet already performs.
 func TestFleetSummaryNamesSourceBuildAndImages(t *testing.T) {
 	t.Parallel()
-	base, err := basestore.Open(t.TempDir())
+	base, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +328,7 @@ func TestStepLabelsNameEveryStep(t *testing.T) {
 // a live deployment is not in it.
 func TestArchivedDeploymentFactsReadEveryArchivedProject(t *testing.T) {
 	t.Parallel()
-	base, err := basestore.Open(t.TempDir())
+	base, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

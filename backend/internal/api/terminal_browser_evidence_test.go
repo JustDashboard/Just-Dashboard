@@ -20,7 +20,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/wsx"
 )
@@ -94,7 +94,7 @@ func TestTerminalBrowserEvidenceServer(t *testing.T) {
 		}
 		manager.Shutdown()
 	})
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

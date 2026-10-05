@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func TestBackupPathsAreContainedBeforeSaving(t *testing.T) {
@@ -34,7 +34,7 @@ func TestBackupPathsAreContainedBeforeSaving(t *testing.T) {
 
 func TestExistingBackupRechecksRootsAndCanBeRepaired(t *testing.T) {
 	ctx := t.Context()
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestExistingBackupRechecksRootsAndCanBeRepaired(t *testing.T) {
 
 func TestBackupArtifactReadsRespectCurrentRoots(t *testing.T) {
 	ctx := t.Context()
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -184,8 +184,14 @@ func TestCertbotJobsRefuseToRunTwice(t *testing.T) {
 	if final := waitForJob(t, s, running.ID); final.Status != jobs.StatusSucceeded {
 		t.Fatalf("the first job = %+v", final)
 	}
-	if w := c.do(http.MethodPost, "/api/v1/certificates/renew", `{"name":"app.example.com","dryRun":true}`, nil); w.Code != http.StatusAccepted {
+	w = c.do(http.MethodPost, "/api/v1/certificates/renew", `{"name":"app.example.com","dryRun":true}`, nil)
+	if w.Code != http.StatusAccepted {
 		t.Fatalf("renew after the first finished = %d: %s", w.Code, w.Body.String())
+	}
+	// The job reads the certbot directories the test swapped in; letting it
+	// outlive the test races their restoration.
+	if final := waitForJob(t, s, decodeJob(t, w.Body.Bytes()).ID); final.Status != jobs.StatusSucceeded {
+		t.Fatalf("the second job = %+v", final)
 	}
 }
 

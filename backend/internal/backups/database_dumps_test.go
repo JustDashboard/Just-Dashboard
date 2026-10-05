@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // fakeDumper stands in for the Databases owner: it writes a known dump file
@@ -58,7 +58,7 @@ func (f *fakeDumper) RestoreDatabase(_ context.Context, id int64, database, dump
 
 func dumpFixture(t *testing.T, dumper *fakeDumper, connections []int64) (*Store, *Runner, *Job) {
 	t.Helper()
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestBackupFailsWhenADatabaseDumpFails(t *testing.T) {
 
 func TestBackupJobRefusesUnknownOrDuplicateDatabaseDumps(t *testing.T) {
 	dumper := &fakeDumper{described: map[int64]DatabaseDescription{7: {ID: 7, Name: "shop"}}}
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
