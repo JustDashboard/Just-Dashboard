@@ -65,14 +65,24 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 		return recovered, nil
 	}
 	recovered.Source = DraftSourceConfig{Kind: SourceLocal, Mode: SourceModeLocalDirectory, LocalPath: root}
+	// Rebuilding installs dependencies afresh, but native rollback still reads
+	// their original files. Only retained mutable application data is outside
+	// the original-manager source and drift fence.
+	nativeExclusions := []string{}
 	for _, directory := range []string{"node_modules", ".venv", "venv", "__pycache__"} {
 		if info, err := os.Stat(filepath.Join(root, directory)); err == nil && info.IsDir() {
 			recovered.Source.ExcludePaths = append(recovered.Source.ExcludePaths, directory)
 		}
 	}
 	for _, directory := range []string{"data", "uploads", "storage"} {
-		if info, err := os.Stat(filepath.Join(root, directory)); err == nil && info.IsDir() {
+		info, err := os.Lstat(filepath.Join(root, directory))
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			block("host_data_path_unverified", "A detected persistent data path is a symlink. Verify its exact retained host directory and mount before migration; recovery cannot exclude or copy ambiguous application storage.", "runtime.mounts")
+			continue
+		}
+		if err == nil && info.IsDir() {
 			recovered.Source.ExcludePaths = append(recovered.Source.ExcludePaths, directory)
+			nativeExclusions = append(nativeExclusions, directory)
 		}
 	}
 	detection, err := analyzer.Analyze(ctx, recovered.Source)
@@ -82,7 +92,7 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 	}
 	bindHostRecoveryCandidate(&detection, capture, root)
 	recovered.Detection = detection
-	drift, driftErr := knownHostSourceDrift(ctx, root, capture, recovered.Source.ExcludePaths)
+	drift, driftErr := knownHostSourceDrift(ctx, root, capture, nativeExclusions)
 	if driftErr != nil {
 		block("host_running_source_unverified", "The current source cannot be verified against a running process. Review its current startup source under the original manager before migration.", "source.localPath")
 	} else if drift {
@@ -276,10 +286,10 @@ func RecoverHostWorkload(ctx context.Context, candidate WorkloadCandidate, captu
 				return nil, ErrInvalidPlan
 			}
 			metadata.SourceRoot = root
-			metadata.SourceExclusions = append([]string{}, recovered.Source.ExcludePaths...)
+			metadata.SourceExclusions = append([]string{}, nativeExclusions...)
 			metadata.SourceDigest, err = nativeDirectoryDigest(ctx, root, metadata.SourceExclusions)
 			if err != nil {
-				block("host_native_source_fence_unavailable", "The original source could not be fenced safely for native restart authority. Review its private files, permissions and source limits before migration.", "source.localPath")
+				block("host_native_source_fence_unavailable", "The original source and installed dependencies could not be fenced safely for native restart authority. External dependency symlinks, special files, unreadable inputs or source limits need an explicit verified migration before adoption.", "source.localPath")
 			}
 			metadata.SourcePrivateFence = true
 			if capture.StartupPlan != nil && analyzer.startup != nil {

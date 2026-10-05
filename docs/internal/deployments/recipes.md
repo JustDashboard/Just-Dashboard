@@ -31,6 +31,12 @@ non-root runtime user after Docker copies them as root. Host ownership and suppl
 not transfer. A missing world-read or directory world-execute bit blocks migration before adoption;
 recovery never broadens original permissions or changes the runtime UID. Linked data and excluded
 dependency environments keep their original host ownership and permissions outside the build copy.
+Installed dependencies remain inside the separate native restart and running-source drift fences;
+only linked mutable application data is excluded there. External dependency symlinks, special files
+or dependency trees exceeding the bounded source limits block native adoption with
+`host_native_source_fence_unavailable`, even when the desired build can reinstall those packages.
+Recognized persistent data symlinks require an explicit verified retained directory/mount before
+adoption; recovery does not guess their storage target or omit them from native source authority.
 
 The Node recipe installs from reviewed manifests and lockfiles, with the host `node_modules`
 excluded from the build context. Recovery warns that patched dependency files and undeclared global
