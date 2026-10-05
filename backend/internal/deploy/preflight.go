@@ -384,7 +384,13 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	}
 	if len(request.Dependencies) > 0 && o.resources != nil {
 		dependencyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		observed, err := o.resources.ObserveDependencies(dependencyCtx, request.Dependencies)
+		external := []PlannedDependency{}
+		for _, dependency := range request.Dependencies {
+			if dependency.ResourceKind != existingIngressDependency {
+				external = append(external, dependency)
+			}
+		}
+		observed, err := o.resources.ObserveDependencies(dependencyCtx, external)
 		if prober, ok := o.resources.(PlanningDatabaseExtensions); ok && err == nil && len(request.DatabaseExtensions) > 0 {
 			for index := range observed {
 				if observed[index].ResourceKind != "database_connection" || !observed[index].Available {
@@ -412,6 +418,27 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	var stat syscall.Statfs_t
 	if syscall.Statfs(diskRoot, &stat) == nil {
 		observation.AvailableDisk = int64(stat.Bavail) * int64(stat.Bsize)
+	}
+	if bindings, err := publicIngressBindingsFromDependencies(request.Dependencies); err != nil {
+		return observation, err
+	} else if len(bindings) > 0 {
+		controller, available := o.proxy.(interface {
+			VerifyExistingIngress(context.Context, []proxysvc.ExistingIngressBinding) error
+		})
+		for _, binding := range bindings {
+			observed := DependencyObservation{Kind: "ingress", ResourceKind: existingIngressDependency, ResourceID: binding.ID, DeepLink: "/proxy"}
+			if binding.Status == "hint" {
+				observed.Detail, observed.Status = binding.PlannedChange, "unverified"
+				observation.Dependencies = append(observation.Dependencies, observed)
+				continue
+			}
+			if available && controller.VerifyExistingIngress(ctx, []proxysvc.ExistingIngressBinding{binding}) == nil {
+				observed.Available, observed.Status = true, "linked external route"
+			} else {
+				observed.Detail = "the original proxy route or active configuration could not be verified"
+			}
+			observation.Dependencies = append(observation.Dependencies, observed)
+		}
 	}
 	return observation, nil
 }
@@ -1017,10 +1044,10 @@ func preflightFindings(
 		key := dependency.Kind + "\x00" + dependency.ResourceKind + "\x00" + dependency.ResourceID
 		observed, ok := dependencyEvidence[key]
 		if !ok {
-			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" || dependency.Kind == "runtime" {
+			if dependency.Kind == "backup" || dependency.Kind == "storage" || dependency.Kind == "database" || dependency.Kind == "runtime" || dependency.ResourceKind == existingIngressDependency {
 				severity := PreflightUnavailable
 				action := "Open the owning feature and verify the linked resource."
-				if dependency.Kind == "runtime" {
+				if dependency.Kind == "runtime" || dependency.ResourceKind == existingIngressDependency {
 					severity = PreflightBlocked
 					action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
 				}
@@ -1055,6 +1082,9 @@ func preflightFindings(
 			item.DeepLink = observed.DeepLink
 			if dependency.Kind == "runtime" {
 				item.Action = "Restore the captured original authority or the current environment-owned runtime. The original reservation cannot be removed or relinked."
+			}
+			if dependency.ResourceKind == existingIngressDependency {
+				item.Action = "Restore and verify the existing external route. Its original ownership and configuration cannot be removed or relinked."
 			}
 			findings = append(findings, item)
 			continue
@@ -1111,6 +1141,20 @@ func preflightFindings(
 		findings = append(findings, finding("host_disk_low", PreflightWarning,
 			"Host disk headroom is low", fmt.Sprintf("%d MiB available", observation.AvailableDisk>>20),
 			"Build layers or pulled images may fill the filesystem.", "Free disk before deploying.", "metrics", ""))
+	}
+	if bindings, err := ingressBindingsFromDependencies(configuration.Dependencies); err != nil {
+		findings = append(findings, finding("existing_ingress_invalid", PreflightBlocked, "Existing proxy evidence is invalid", "The frozen route identity cannot be decoded.", "Deployment cannot verify the original external route.", "Inspect the original workload again.", "proxy", "ingress"))
+	} else if len(bindings) > 0 {
+		snapshot := runtimeReleaseSnapshot{Plan: configuration.Runtime}
+		if configuration.Build.Method == BuildCompose && draft.Data.Detection.Compose != nil {
+			snapshot.Compose = &ResolvedComposeSnapshot{}
+			for _, service := range draft.Data.Detection.Compose.Services {
+				snapshot.Compose.Services = append(snapshot.Compose.Services, ResolvedComposeService{Plan: service})
+			}
+		}
+		if err := validateExistingIngressPlan(snapshot, bindings); err != nil {
+			findings = append(findings, finding("existing_ingress_endpoint_changed", PreflightBlocked, "Existing proxy endpoint changed", err.Error(), "The desired plan would remove the original service port, network or alias.", "Restore the exact linked endpoint before Deploy changes.", "proxy", "ingress"))
+		}
 	}
 	return findings
 }
@@ -1328,7 +1372,7 @@ func exactPlan(draft *Draft, configuration PlanConfiguration) ExactPlan {
 		case StepProvisionCertificate:
 			action.Action = "resolve or issue the certificate for the planned HTTPS domains"
 			for _, domain := range configuration.Domains {
-				if domain.HTTPS {
+				if domain.HTTPS && domain.Ownership != OwnershipLinked {
 					action.Arguments = append(action.Arguments, domain.Hostname)
 				}
 			}
@@ -1373,6 +1417,11 @@ func cloneComposeAnalysis(source *ComposeAnalysis) *ComposeAnalysis {
 		copy.Services[index].Ports = append([]string(nil), source.Services[index].Ports...)
 		copy.Services[index].Mounts = append([]string(nil), source.Services[index].Mounts...)
 		copy.Services[index].Advanced = append([]string(nil), source.Services[index].Advanced...)
+		copy.Services[index].ExposedPorts = append([]int(nil), source.Services[index].ExposedPorts...)
+		copy.Services[index].Networks = map[string][]string{}
+		for network, aliases := range source.Services[index].Networks {
+			copy.Services[index].Networks[network] = append([]string(nil), aliases...)
+		}
 		copy.Services[index].BuildArgs = append([]ComposeBuildArg(nil), source.Services[index].BuildArgs...)
 		copy.Services[index].EnvFiles = append([]ComposeEnvFile(nil), source.Services[index].EnvFiles...)
 		copy.Services[index].ImagePlatforms = append([]string(nil), source.Services[index].ImagePlatforms...)

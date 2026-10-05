@@ -499,7 +499,8 @@ func (s *Server) recoverWorkloadWithScope(ctx context.Context, candidate *deploy
 		if s.modules.docker == nil {
 			return nil, deploy.ErrSourceUnavailable
 		}
-		return deploy.RecoverDockerWorkloadWithScope(ctx, *candidate, s.modules.docker, paths, root, scope)
+		recovered, err := deploy.RecoverDockerWorkloadWithScope(ctx, *candidate, s.modules.docker, paths, root, scope)
+		return s.attachWorkloadIngress(ctx, candidate, recovered, err)
 	default:
 		capture, err := s.captureHostWorkload(ctx, candidate)
 		if err != nil {
@@ -509,7 +510,7 @@ func (s *Server) recoverWorkloadWithScope(ctx context.Context, candidate *deploy
 		if recoverErr == nil && recovered != nil && recovered.Adoption != nil && len(recovered.Adoption.Blockers) != 0 {
 			recoverErr = deploy.ErrRecoveryBlocked
 		}
-		return recovered, recoverErr
+		return s.attachWorkloadIngress(ctx, candidate, recovered, recoverErr)
 	}
 }
 

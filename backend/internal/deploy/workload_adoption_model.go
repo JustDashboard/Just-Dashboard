@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 var ErrRecoveryBlocked = errors.New("this workload cannot yet be safely adopted")
@@ -61,31 +62,32 @@ type RecoveredBuildSource struct {
 // Baseline values are stored separately under encryption; a source document
 // references their variable names rather than containing their values.
 type WorkloadAdoption struct {
-	Inputs                      []RecoveredInput       `json:"inputs,omitempty"`
-	Key                         string                 `json:"key"`
-	Digest                      string                 `json:"digest"`
-	Kind                        string                 `json:"kind"`
-	ResourceID                  string                 `json:"resourceId"`
-	Manager                     string                 `json:"manager"`
-	Name                        string                 `json:"name"`
-	Scope                       WorkloadRecoveryScope  `json:"scope,omitempty"`
-	ExcludedServices            []string               `json:"excludedServices"`
-	OriginalConfigurationDigest string                 `json:"originalConfigurationDigest,omitempty"`
-	Warnings                    []string               `json:"warnings"`
-	Blockers                    []string               `json:"blockers"`
-	Issues                      []AdoptionIssue        `json:"issues"`
-	ServiceCount                int                    `json:"serviceCount"`
-	RunningCount                int                    `json:"runningCount"`
-	OriginalSourcePath          string                 `json:"originalSourcePath,omitempty"`
-	ConfigFiles                 []string               `json:"configFiles,omitempty"`
-	BaselineSource              DraftSourceConfig      `json:"baselineSource"`
-	BaselineDetection           DetectionResult        `json:"baselineDetection"`
-	BuildSources                []RecoveredBuildSource `json:"buildSources,omitempty"`
-	BaselineConfiguration       PlanConfiguration      `json:"baselineConfiguration"`
-	BaselineDigest              string                 `json:"baselineDigest"`
-	Runtime                     ReleaseRuntimeInput    `json:"runtime"`
-	Snapshot                    json.RawMessage        `json:"snapshot"`
-	RecoveryDirectory           string                 `json:"recoveryDirectory,omitempty"`
+	Inputs                      []RecoveredInput                  `json:"inputs,omitempty"`
+	Key                         string                            `json:"key"`
+	Digest                      string                            `json:"digest"`
+	Kind                        string                            `json:"kind"`
+	ResourceID                  string                            `json:"resourceId"`
+	Manager                     string                            `json:"manager"`
+	Name                        string                            `json:"name"`
+	Scope                       WorkloadRecoveryScope             `json:"scope,omitempty"`
+	IngressBindings             []proxysvc.ExistingIngressBinding `json:"ingressBindings,omitempty"`
+	ExcludedServices            []string                          `json:"excludedServices"`
+	OriginalConfigurationDigest string                            `json:"originalConfigurationDigest,omitempty"`
+	Warnings                    []string                          `json:"warnings"`
+	Blockers                    []string                          `json:"blockers"`
+	Issues                      []AdoptionIssue                   `json:"issues"`
+	ServiceCount                int                               `json:"serviceCount"`
+	RunningCount                int                               `json:"runningCount"`
+	OriginalSourcePath          string                            `json:"originalSourcePath,omitempty"`
+	ConfigFiles                 []string                          `json:"configFiles,omitempty"`
+	BaselineSource              DraftSourceConfig                 `json:"baselineSource"`
+	BaselineDetection           DetectionResult                   `json:"baselineDetection"`
+	BuildSources                []RecoveredBuildSource            `json:"buildSources,omitempty"`
+	BaselineConfiguration       PlanConfiguration                 `json:"baselineConfiguration"`
+	BaselineDigest              string                            `json:"baselineDigest"`
+	Runtime                     ReleaseRuntimeInput               `json:"runtime"`
+	Snapshot                    json.RawMessage                   `json:"snapshot"`
+	RecoveryDirectory           string                            `json:"recoveryDirectory,omitempty"`
 }
 
 // WorkloadAdoptionOrigin is kept as a named alias for feature owners which

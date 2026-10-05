@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 const (
@@ -129,7 +131,8 @@ type EnvironmentConfiguration struct {
 	// each package manager runs, so Build settings can say which choice
 	// matches the repository. It is absent once the build describes
 	// something detection did not read.
-	Detected *DetectedCandidate `json:"detected,omitempty"`
+	Detected        *DetectedCandidate                `json:"detected,omitempty"`
+	IngressBindings []proxysvc.ExistingIngressBinding `json:"ingressBindings,omitempty"`
 }
 
 type ConfigurationWriteRequest struct {
@@ -1311,6 +1314,10 @@ func (s *PlanningStore) EnvironmentConfiguration(
 	if err != nil {
 		return nil, err
 	}
+	result.IngressBindings, err = publicIngressBindingsFromDependencies(result.Dependencies)
+	if err != nil {
+		return nil, err
+	}
 	result.Pending, err = s.PendingState(ctx, projectID, environmentID)
 	return result, err
 }
@@ -1817,7 +1824,7 @@ func diffNamedDigests(kind string, before, after map[string]string) []PendingCha
 // Settings control deployable inputs, not the identity reserved by migration.
 // Preserve that server-owned relationship even when a client omits it.
 func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int64, requested []PlannedDependency) ([]PlannedDependency, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND kind='runtime' ORDER BY resource_kind,resource_id`, environmentID)
+	rows, err := tx.QueryContext(ctx, `SELECT kind,ownership,resource_kind,resource_id,config_json FROM deploy_dependencies WHERE environment_id=? AND release_id=0 AND (kind='runtime' OR resource_kind='existing_proxy_route') ORDER BY resource_kind,resource_id`, environmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -1839,7 +1846,7 @@ func retainRuntimeOwnershipTx(ctx context.Context, tx *sql.Tx, environmentID int
 	}
 	result := []PlannedDependency{}
 	for _, dependency := range requested {
-		if dependency.Kind != "runtime" {
+		if dependency.Kind != "runtime" && dependency.ResourceKind != existingIngressDependency {
 			result = append(result, dependency)
 			continue
 		}

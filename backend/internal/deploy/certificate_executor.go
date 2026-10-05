@@ -55,7 +55,7 @@ func (e *NormalizedStepExecutor) provisionCertificate(
 	}
 	names := make([]string, 0, len(snapshot.Domains))
 	for _, domain := range snapshot.Domains {
-		if domain.HTTPS {
+		if domain.HTTPS && domain.Ownership != OwnershipLinked {
 			names = append(names, strings.ToLower(strings.TrimSpace(domain.Hostname)))
 		}
 	}

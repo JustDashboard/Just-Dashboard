@@ -15,14 +15,16 @@ import (
 )
 
 type ComposeServicePlan struct {
-	Name            string   `json:"name"`
-	Image           string   `json:"image,omitempty"`
-	BuildContext    string   `json:"buildContext,omitempty"`
-	BuildDockerfile string   `json:"buildDockerfile,omitempty"`
-	Ports           []string `json:"ports"`
-	Mounts          []string `json:"mounts"`
-	Healthcheck     bool     `json:"healthcheck"`
-	Advanced        []string `json:"advanced"`
+	Name            string              `json:"name"`
+	Image           string              `json:"image,omitempty"`
+	BuildContext    string              `json:"buildContext,omitempty"`
+	BuildDockerfile string              `json:"buildDockerfile,omitempty"`
+	Ports           []string            `json:"ports"`
+	Mounts          []string            `json:"mounts"`
+	Healthcheck     bool                `json:"healthcheck"`
+	Advanced        []string            `json:"advanced"`
+	Networks        map[string][]string `json:"networks,omitempty"`
+	ExposedPorts    []int               `json:"exposedPorts,omitempty"`
 
 	// The rest of a service's build (compose_build.go): the stage, the
 	// build arguments by name with the file's own value expression, the
@@ -71,6 +73,7 @@ func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, erro
 	}
 	hash := sha256.New()
 	serviceMap := map[string]ComposeServicePlan{}
+	networkNames := map[string]string{}
 	variableSet := map[string]bool{}
 	optionalSet := map[string]composeVariableUse{}
 	previews := make([]string, 0, len(documents))
@@ -90,6 +93,13 @@ func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, erro
 		mapping := documentMapping(&root)
 		if mapping == nil {
 			return ComposeAnalysis{}, fmt.Errorf("%w: %s must contain a mapping", ErrInvalidCompose, document.Path)
+		}
+		if networks := mappingValue(mapping, "networks"); networks != nil && networks.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(networks.Content); i += 2 {
+				if name := scalarMappingValue(networks.Content[i+1], "name"); name != "" {
+					networkNames[networks.Content[i].Value] = name
+				}
+			}
 		}
 		services := mappingValue(mapping, "services")
 		if services == nil || services.Kind != yaml.MappingNode {
@@ -139,6 +149,15 @@ func analyzeComposeDocuments(documents []ComposeDocument) (ComposeAnalysis, erro
 	sort.Strings(names)
 	for _, name := range names {
 		service := serviceMap[name]
+		resolvedNetworks := map[string][]string{}
+		for key, aliases := range service.Networks {
+			actual := key
+			if name := networkNames[key]; name != "" {
+				actual = name
+			}
+			resolvedNetworks[actual] = aliases
+		}
+		service.Networks = resolvedNetworks
 		sort.Strings(service.Ports)
 		sort.Strings(service.Mounts)
 		sort.Strings(service.Advanced)
@@ -183,6 +202,38 @@ func composeServiceFromNode(name string, node *yaml.Node, documentPath string) (
 	service := ComposeServicePlan{Name: name, Ports: []string{}, Mounts: []string{}, Advanced: []string{}}
 	warnings := []string{}
 	unsupported := []string{}
+	if exposed := mappingValue(node, "expose"); exposed != nil && exposed.Kind == yaml.SequenceNode {
+		for _, value := range exposed.Content {
+			if port, err := strconv.Atoi(strings.TrimSuffix(value.Value, "/tcp")); err == nil && port > 0 && port <= 65535 {
+				service.ExposedPorts = append(service.ExposedPorts, port)
+			}
+		}
+	}
+	service.Networks = map[string][]string{}
+	if networks := mappingValue(node, "networks"); networks != nil {
+		switch networks.Kind {
+		case yaml.SequenceNode:
+			for _, network := range networks.Content {
+				if network.Kind == yaml.ScalarNode {
+					service.Networks[network.Value] = []string{name}
+				}
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(networks.Content); i += 2 {
+				aliases := []string{name}
+				if values := mappingValue(networks.Content[i+1], "aliases"); values != nil && values.Kind == yaml.SequenceNode {
+					for _, alias := range values.Content {
+						if alias.Kind == yaml.ScalarNode {
+							aliases = append(aliases, alias.Value)
+						}
+					}
+				}
+				service.Networks[networks.Content[i].Value] = uniqueSorted(aliases)
+			}
+		}
+	} else if mappingValue(node, "network_mode") == nil {
+		service.Networks["default"] = []string{name}
+	}
 	for _, key := range []string{"command", "entrypoint"} {
 		if err := rejectComposeCommandSecrets(mappingValue(node, key)); err != nil {
 			return service, nil, nil, fmt.Errorf("%s: %w", key, err)

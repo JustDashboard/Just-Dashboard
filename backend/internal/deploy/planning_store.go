@@ -724,9 +724,32 @@ func (s *PlanningStore) Save(
 			if dependency.Kind == "runtime" {
 				return nil, fmt.Errorf("%w: runtime ownership is assigned only by recovery", ErrInvalidPlan)
 			}
+			if dependency.ResourceKind == existingIngressDependency {
+				valid := false
+				if draft.Data.Adoption != nil {
+					for _, binding := range draft.Data.Adoption.IngressBindings {
+						valid = valid || (((binding.Status == "linked" && dependency.Ownership == OwnershipLinked) || (binding.Status == "hint" && dependency.Ownership == OwnershipObserved)) && dependency.Kind == "ingress" && dependency.ResourceID == binding.ID && string(dependency.Config) == string(mustJSON(binding)))
+					}
+				}
+				if !valid {
+					return nil, fmt.Errorf("%w: existing ingress ownership is assigned only by recovery", ErrInvalidPlan)
+				}
+			}
 		}
 		if draft.Data.Adoption != nil {
 			copy.Runtime.ComposeProjectName = draft.Data.Adoption.BaselineConfiguration.Runtime.ComposeProjectName
+			for _, original := range draft.Data.Adoption.BaselineConfiguration.Dependencies {
+				if original.ResourceKind != existingIngressDependency {
+					continue
+				}
+				found := false
+				for _, requested := range copy.Dependencies {
+					found = found || (requested.ResourceKind == existingIngressDependency && requested.ResourceID == original.ResourceID)
+				}
+				if !found {
+					copy.Dependencies = append(copy.Dependencies, original)
+				}
+			}
 		} else if copy.Runtime.ComposeProjectName != "" {
 			return nil, fmt.Errorf("%w: existing Compose ownership requires a recovered adoption", ErrInvalidPlan)
 		}
