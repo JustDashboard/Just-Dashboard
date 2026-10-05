@@ -85,14 +85,16 @@ type StorageSummary struct {
 }
 
 type StorageMount struct {
-	Source    string        `json:"source"`
-	Target    string        `json:"target"`
-	Kind      string        `json:"kind"`
-	ReadOnly  bool          `json:"readOnly,omitempty"`
-	Ownership OwnershipMode `json:"ownership"`
-	Status    string        `json:"status"`
-	Detail    string        `json:"detail,omitempty"`
-	DeepLink  string        `json:"deepLink,omitempty"`
+	Service     string        `json:"service,omitempty"`
+	ContainerID string        `json:"containerId,omitempty"`
+	Source      string        `json:"source"`
+	Target      string        `json:"target"`
+	Kind        string        `json:"kind"`
+	ReadOnly    bool          `json:"readOnly,omitempty"`
+	Ownership   OwnershipMode `json:"ownership"`
+	Status      string        `json:"status"`
+	Detail      string        `json:"detail,omitempty"`
+	DeepLink    string        `json:"deepLink,omitempty"`
 }
 
 type BackupSummary struct {
@@ -174,9 +176,14 @@ func (s *OrchestrationStore) Operations(
 		return result, nil
 	}
 	result.Evidence, result.ReleaseID = "release", summary.LiveReleaseID
-	observed := observeDependencies(ctx, owners.Dependencies, snapshot)
+	storageSnapshot, mounts, storageErr := operationalStorageSnapshot(ctx, owners.Runtime, snapshot, result.Runtime, summary.LiveReleaseID)
+	observed := observeDependencies(ctx, owners.Dependencies, storageSnapshot)
 	result.Domains = observeDomainRoutes(ctx, owners, snapshot.Domains, summary.EnvironmentID)
-	result.Storage = storageSummary(snapshot, observed)
+	if storageErr != nil {
+		result.Storage.Reason = "The live Compose service mounts could not be verified. Open Docker to inspect their storage."
+	} else {
+		result.Storage = recordedStorageSummary(storageSnapshot, observed, mounts)
+	}
 	result.Backups = backupSummary(snapshot, observed)
 	result.Dependencies = otherDependencySummary(snapshot, observed)
 	input.Domains, input.Storage = result.Domains, result.Storage
