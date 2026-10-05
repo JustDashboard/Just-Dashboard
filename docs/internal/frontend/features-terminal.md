@@ -237,7 +237,7 @@ History.
 `components/terminal/` is the session rail and window strip; `components/xterm-pane.tsx` is the emulator. The
 split matters — the pane is reused by the compose runner and knows nothing about sessions.
 
-- The page is **one framed workbench**. The rail, the emulator and the Files/Diff column are `Pane flush`
+- The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
   inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
   edge and the tools column's left edge). Three framed panes with a gutter between them read as three
   boxes floating on the page; the screen is one working surface. The three columns' top strips are all
@@ -301,7 +301,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   tab you had open, which is furniture. Entries for sessions that have ended are dropped as the
   listing arrives.
 - `window-strip.tsx` places compact, horizontally scrolling direct-PTY tabs between exactly two workspace
-  toggles: sessions on the left and Files/Diff on the right. Each draws the side its panel is on and
+  toggles: sessions on the left and Files/Git on the right. Each draws the side its panel is on and
   the way pressing it moves the panel (`SidebarLeftOpen`/`Close`, `SidebarRightOpen`/`Close`). The strip
   lives in the shared terminal title bar above the pane canvas; there is no separate workspace bar or
   working-directory/shell title.
@@ -313,6 +313,15 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   selecting the current tab retains its focused pane. Window shortcuts traverse these same tabs,
   while pane shortcuts traverse the visible leaves.
   Closing the last window closes its session through the session endpoint.
+  **Overflow:** tabs give up width first, the way a browser's do, but only to 128px (`min-w-32`), so
+  a label still reads a word rather than "cl…". Past that the tabs scroll inside their own scroller,
+  which draws **no scrollbar** — a ten-pixel bar across the labels in a 40px title bar was the
+  loudest thing on the page — and fades whichever edge has tabs past it (a `mask-image` driven by the
+  scroll position, `data-overflow-start`/`-end`). While anything is out of view, a chevron sits at
+  each end of the strip (disabled at the end already reached) and scrolls it by most of its width —
+  the fade alone read as a gap rather than as more tabs. A vertical mouse wheel scrolls the strip sideways,
+  the active tab scrolls itself into view, and **New window** sits outside the scroller, right after
+  the last visible tab, so it never scrolls away with the tabs it adds to.
 - **Directional splits** use `lib/terminal-layout.ts`'s binary layout trees, grouped per session in
   `terminal.layouts`. Each new split adds a direct-PTY window above/below/left/right of the focused
   leaf; a new window or agent launch creates an independent tab. Closed leaves collapse their parent,
@@ -335,7 +344,7 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   internal-header changes.
   Only the focused pane auto-focuses and sends the `focus` frame. Pointer and keyboard focus capture
   selects a pane before xterm can stop propagation. An active inset rule and pane title identify where
-  typing goes; Files/Diff follows that pane. Hidden groups continue parsing at their last visible size.
+  typing goes; Files/Git follows that pane. Hidden groups continue parsing at their last visible size.
   `split-divider.tsx` supports pointer capture, arrows (Shift for larger steps), Home and double-click
   balance. Pointer moves stay in component state; the final ratio is remembered. Nested minimum sizes
   bound each divider. On narrower viewports existing groups shrink proportionally within the canvas;
@@ -348,44 +357,69 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   focus to the terminal instead of its trigger; the new pane takes focus when its socket attaches.
 - The control-key row under the emulator is a run of monospace words on the footer strip, not framed
   keycaps.
-- `workspace-tools.tsx` is the Files/Diff companion. Its header is two section tabs (`tabClasses`, the
-  brand underline, no glyphs) with the changed-file count beside "Diff". Under that, the Files half is a
+- `workspace-tools.tsx` is the Files/Git companion. Its header is two section tabs (`tabClasses`, the
+  brand underline, no glyphs) that **split the strip between them** — each `flex-1`, label centred —
+  with the changed-file count beside "Git". Two small words at the left edge of a 336px column read as
+  a label rather than as the panel's switch. Under that, the Files half is a
   strip with the root path (middle-truncated), **new file** and **refresh** inline, and hidden files /
   new folder / open in Files behind one menu — `file-tree.tsx` draws that strip, and each entry in the
   same folders and pages the Files page draws (`files/file-icon.tsx`), in the colours folders were
   labelled with there. (The Files page's own sidebar is no longer this tree but a fixed list of
-  places, `files-sidebar.tsx`.) The
-  second tab is **Diff** (`diff-tools.tsx`), and it is only that: the work in the repository the shell
-  is in, read rather than operated on. It was a git client — pull, push, stash, stage, commit, history,
-  branches — beside a terminal that already has git in it and a Git page that is the client, so it was
-  cut to the one question a column beside a shell answers: *what have I changed?* A strip names the
-  branch (with the git mark, and ahead/behind) and links **Open in Git** to `/git?repo=<path>`; a
-  second says how many files and how many lines added and removed, with fold-all and unfold-all; then
-  every changed file under its name — the status letter in its colour (M amber, A and untracked green,
-  D red, R cyan), the directory muted before the file name, the file's own +/− — with its diff below
-  it, staged and unstaged halves both shown and labelled when a file has both. Long diffs start folded.
-  The list is the status the panel already polls; the diffs are read again when that list changes, as
-  the whole unstaged and the whole staged diff plus one request per untracked file (the first twenty),
-  split per file by `lib/diff-files.ts`. A browser that had the old Git tab open (`terminal.tools.tab`
-  stored as `git`) comes back to Diff.
+  places, `files-sidebar.tsx`.) A file opens over the panel body (`InlineFile`) with no Save in its
+  header: a Save on every file opened to be read was a command with nothing to do. The first edit
+  brings up a floating bar at the foot of the text — *Unsaved changes*, **Discard**, **Save**, on the
+  popover surface and shadow the settings save bar uses (`design-system.md` §2) — and it leaves once
+  the file on disk matches again. Ctrl/⌘+S in the editor is the same Save.
+  The second tab is **Git** (`git-tools.tsx`): the repository the shell is in. A strip names the
+  branch (with the git mark, and ahead/behind) as a button that opens the branch list, and links
+  **Open in Git** to `/git?repo=<path>`; under it three chips choose the view (`terminal.tools.git`):
+  - **Changes** (`diff-tools.tsx`) is the diff, and only that — *what have I changed?* A strip says
+    how many files and how many lines added and removed, with fold-all and unfold-all; then every
+    changed file under its name — the status letter in its colour (M amber, A and untracked green, D
+    red, R cyan), the directory muted before the file name, the file's own +/− — with its diff below
+    it, staged and unstaged halves both shown and labelled when a file has both. Long diffs start
+    folded. The list is the status the panel already polls; the diffs are read again when that list
+    changes, as the whole unstaged and the whole staged diff plus one request per untracked file (the
+    first twenty), split per file by `lib/diff-files.ts`.
+  - **Branches** lists local branches (current one ticked, a branch another worktree holds says
+    where and offers nothing) with **Switch**, and remote branches with no local counterpart with
+    **Check out**, which makes the tracking branch (`POST /git/checkout` with `local`). A filter box
+    appears past six branches.
+  - **Pull requests** lists the open pull requests through gh (`/git/github/pulls`), each with its
+    number, head branch, author, age, checks dot and draft tag, and **Check out**
+    (`/git/github/pulls/{n}/checkout`, i.e. `gh pr checkout`) to try it in this checkout; the one whose
+    branch is checked out says so instead. gh is asked only while the Git tab is on screen, which is
+    also what gives the chip its count. Without gh, or signed out, the view says so and links to the
+    Git page, where signing in lives.
+  Switching and checking out need `service.control`; a refusal is shown in git's own words. Staging,
+  committing, pushing and the rest stay on the Git page: these are the two moves made *from* a
+  shell's directory, and the shell's prompt shows the result. A browser that had the earlier Diff tab
+  open (`terminal.tools.tab` stored as `diff`) comes back to Git.
   Each rail row and each window tab also carries **the program it is running** as that program's own
   mark (`ProgramMark` in `activity-mark.tsx`, `programProduct` in `product-logo.tsx`: Claude, Neovim,
   Vim, Node, Bun, Python, Go, git, Docker, psql, redis-cli, kubectl and the rest), read off the
-  foreground process the backend reports while a window is busy. A shell at its prompt, or a program
-  with no mark of its own (`htop`, Codex, OpenCode), is drawn as a terminal
+  foreground process the backend reports while a window is busy — Codex as OpenAI's mark, the same one
+  its toolbar button carries. A shell at its prompt, or a program
+  with no mark of its own (`htop`, OpenCode), is drawn as a terminal
   (`public/logos/terminal.svg`, drawn for this product): left empty, an agent with no logo read as a
   window with nothing in it.
-  The shared toolbar offers **Codex**, **Claude**, **Split terminal**, Terminal actions and fullscreen.
+  The shared toolbar offers **Codex** and **Claude** (each drawn as its maker's mark — OpenAI's and
+  Claude's — with the name as its accessible label and the exact command in its tooltip), **Split
+  terminal**, Terminal actions and fullscreen.
   Search, snippets and terminal behaviour buttons are absent from the terminal page; search remains
   available through its shortcut. Terminal actions apply to the focused pane (copy, export, working
   folder, shortcuts and clear). Docker consoles keep their own emulator controls; deployment console
   toolbars show only Terminal actions and fullscreen, with search available through its shortcut.
-  Codex/Claude create a fresh sibling window with the exact `codex --yolo` or
-  `claude --dangerously-skip-permissions` command, after the native Bash/Zsh configuration loads.
-  The backend reads the focused `sourceWindowId`'s directory at creation time, including a recent `cd`;
-  the existing pane's running program is unaffected. Missing tools print the shell error and leave
-  that new shell usable. Unsupported shells report the launch limitation rather than silently opening
-  an ordinary terminal.
+  Codex/Claude **run in the focused terminal**: the exact `codex --yolo` or
+  `claude --dangerously-skip-permissions` line is typed into that pane's shell with Enter
+  (`XtermActions.run`), as if you had typed it, so it starts in whatever directory the shell is in
+  and opens no tab. The one exception is a focused terminal already holding a program (`busy` — an
+  editor, another agent, a TUI): typed there, the command would be that program's input, so the page
+  falls back to the window API and opens a sibling window with the agent, after the native Bash/Zsh
+  configuration loads. The backend reads the focused `sourceWindowId`'s directory at creation time,
+  including a recent `cd`; the existing pane's running program is unaffected. Missing tools print the
+  shell error and leave the shell usable. Unsupported shells report the launch limitation rather than
+  silently opening an ordinary terminal.
   Input stays in the shell: there is no separate composer or Workspace/Focus mode. Bundled Bash and
   Zsh startup files install a compact directory/chevron prompt — which also sets the window title to
   the directory (`\W`, `%1~`), the title the tab shows at a prompt — and native Tab completion in new

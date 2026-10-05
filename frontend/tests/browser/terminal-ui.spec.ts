@@ -1137,7 +1137,7 @@ test.describe("terminal splits", () => {
     })
   }
 
-  test("launches agents from the focused shell and keeps the launch separate from reconnect", async ({
+  test("runs agents in the focused shell, and gives one its own window only when a program holds it", async ({
     page,
   }) => {
     test.setTimeout(TERMINAL_TIMEOUT)
@@ -1147,40 +1147,48 @@ test.describe("terminal splits", () => {
     await expect.poll(() => creates.length).toBe(1)
     const source = creates[0].id
     await expect(terminalPane(page, source).locator(".xterm-helper-textarea")).toBeFocused()
-    await page.getByRole("button", { name: "Codex", exact: true }).click()
-    await expect.poll(() => creates.length).toBe(2)
-    expect(creates[1]).toMatchObject({ sourceWindowId: source, agent: "codex" })
-    const codex = creates[1].id
-    await expect(terminalPane(page, codex).locator(".xterm-helper-textarea")).toBeFocused()
-    await assertTerminalGrids(page, connections)
-    await splitEvidence(page, "codex-launch.png")
-    connections.get(codex)![0].socket.close()
-    await expect.poll(() => connections.get(codex)?.length).toBe(2)
-    expect(creates).toHaveLength(2)
-    expect(
+    const codex = page.getByRole("button", { name: "Codex", exact: true })
+    await expect(codex.locator('img[src="/logos/openai.svg"]')).toBeVisible()
+    await expect(
+      page
+        .getByRole("button", { name: "Claude", exact: true })
+        .locator('img[src="/logos/claude.svg"]'),
+    ).toBeVisible()
+    await codex.click()
+    const typed = (id: string) =>
       connections
-        .get(codex)!
+        .get(id)!
         .flatMap((connection) => connection.input)
-        .join(""),
-    ).not.toContain("codex --yolo")
+        .join("")
+    await expect.poll(() => typed(source)).toContain("codex --yolo\r")
+    expect(creates).toHaveLength(1)
+    await expect(terminalPane(page, source).locator(".xterm-helper-textarea")).toBeFocused()
+    await splitEvidence(page, "codex-launch.png")
 
+    // A program holding the terminal would read the command as its own input.
     await page
       .locator('[data-window="window-a"]')
       .getByRole("button", { name: "window-a", exact: true })
       .click()
     await focusTerminal(page, "window-a")
+    connections
+      .get("window-a")!
+      .at(-1)!
+      .socket.send(JSON.stringify({ type: "state", data: { busy: true, process: "nvim" } }))
+    await expect(page.locator('[data-window="window-a"]')).toHaveAttribute("data-busy", "true")
     await page.getByRole("button", { name: "Claude", exact: true }).click()
-    await expect.poll(() => creates.length).toBe(3)
-    expect(creates[2]).toMatchObject({ sourceWindowId: "window-a", agent: "claude" })
-    const claude = creates[2].id
+    await expect.poll(() => creates.length).toBe(2)
+    expect(creates[1]).toMatchObject({ sourceWindowId: "window-a", agent: "claude" })
+    expect(typed("window-a")).not.toContain("claude --dangerously-skip-permissions")
+    const claude = creates[1].id
     await expect(terminalPane(page, claude).locator(".xterm-helper-textarea")).toBeFocused()
     await assertTerminalGrids(page, connections)
     await splitEvidence(page, "claude-launch.png")
     await page.getByRole("button", { name: "New window", exact: true }).click()
-    await expect.poll(() => creates.length).toBe(4)
-    expect(creates[3].sourceWindowId).toBe(claude)
-    expect(creates[3].agent).toBeUndefined()
-    await expect(terminalPane(page, creates[3].id).locator(".xterm-helper-textarea")).toBeFocused()
+    await expect.poll(() => creates.length).toBe(3)
+    expect(creates[2].sourceWindowId).toBe(claude)
+    expect(creates[2].agent).toBeUndefined()
+    await expect(terminalPane(page, creates[2].id).locator(".xterm-helper-textarea")).toBeFocused()
     expect(errors).toEqual([])
   })
 })

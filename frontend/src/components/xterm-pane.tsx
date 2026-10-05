@@ -68,6 +68,8 @@ export type XtermActions = {
   save: () => void
   clear: () => void
   shortcuts: () => void
+  /** Types a command line into this pane's shell and presses Enter. */
+  run: (command: string) => void
 }
 
 type Query = Record<string, string | number | boolean | undefined | null>
@@ -1048,6 +1050,15 @@ export function XtermPane({
         termRef.current?.focus()
       },
       shortcuts: () => setShortcuts(true),
+      run: (command) => {
+        const socket = socketRef.current
+        if (socket?.readyState !== WebSocket.OPEN) {
+          notify.error("Not connected")
+          return
+        }
+        sendTerminalInput(socket, `${command}\r`)
+        termRef.current?.focus()
+      },
     }
     actionsRef.current = actions
     return () => {
