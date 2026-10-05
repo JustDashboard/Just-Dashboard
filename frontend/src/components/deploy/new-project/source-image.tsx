@@ -186,8 +186,15 @@ export function SourceImage({
 
       {/* The registry field is a task of its own, not a footnote under the
           list: an image that is not on this server yet is the other half of
-          the answer to "which image", and at this width it can sit beside it. */}
-      <Panel plain className="min-w-0 xl:min-h-0 xl:overflow-y-auto">
+          the answer to "which image", and at this width it can sit beside it.
+          Beside it, it scrolls, and a scroll container clips the focus ring
+          drawn outside each field; the padding makes the room and the margin
+          takes it back, the same bleed as the Git column's, so the fields stay
+          where they were. */}
+      <Panel
+        plain
+        className="min-w-0 xl:-mx-3 xl:-my-1 xl:min-h-0 xl:overflow-y-auto xl:px-3 xl:py-1"
+      >
         <PanelHeader title="Pull from a registry" />
         <PanelBody className="space-y-3">
           <Field

@@ -875,7 +875,13 @@ only renderer/executor/validation authority for their feature.
   release containers Docker reports all down counts as stopped for start (`ReleaseRuntimeDown`, checked
   at admission and again in `start_candidate`): containers that exit, are stopped in Docker, or are not
   brought back after a daemon restart never pass through a stop run, and the project page already draws
-  that observation as stopped and offers Start. The fleet and workspace read models report the
+  that observation as stopped and offers Start. A Stop's own run page — where pressing Stop lands — reads
+  as the runtime it left rather than as a release that went live: the run is *Stopped* (`runStopped`),
+  its one stage is Stop and `start_candidate` is *Stop live release* (Restart's and Start's are named for
+  the live release the same way, in the run lists' current step too: `liveReleaseStepLabels`), the
+  outcome says the release is stopped with Start beside it until a newer run starts it again, and it
+  offers neither Redeploy nor Visit and fires no confetti. Only a rollback's identity line names a
+  release it rolls back to; every other operation's `targetReleaseId` is the live release it acts on. The fleet and workspace read models report the
   live runtime's stopped state as `stopped`, folded into the existing batched runtime join, and the Git
   watcher persists the decision reason `stopped` instead of enqueueing an automatic deployment while the
   live runtime is stopped; a manual deploy remains allowed and, on success, leaves the new release live
