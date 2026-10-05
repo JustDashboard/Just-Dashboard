@@ -67,6 +67,10 @@ checks and 582 browser cases; its opt-in live recording passed separately. Race 
 packages, with the deployment package rerun after the final native changes. Source commits, unchanged
 code comparisons, corrected browser assertions and artifact digests are recorded in
 [verification.json](verification.json).
+The existing hosted run then exposed another consumed-SQL URL assertion. Its test-only follow-up
+passed the required changed-file gate against the previously verified PR head: 121 schema/performance
+browser cases plus formatting, lint, types and logic tests. Backend and product frontend code stayed
+identical; no CI configuration changed.
 Private raw logs, session ready files and traces containing authority are deliberately excluded. The
 proxy report retains its raw-log digest and explicit fixture limitations. Evidence gathered before
 final operational-view changes remains specific to the unchanged lifecycle paths it tested.

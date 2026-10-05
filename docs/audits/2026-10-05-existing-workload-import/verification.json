@@ -271,5 +271,39 @@
       "bytes": 1832717,
       "sha256": "2c8a63bae22c0aa26f45aa280b89f2147524fb6addb5f3484b5c3843e7839bcd"
     }
+  },
+  "latestVerifiedCodeCommit": "75fa4a6f5c1c22801eefb33f2a0074d81279af8a",
+  "followUpChangedFileGate": {
+    "sourceCommit": "75fa4a6f5c1c22801eefb33f2a0074d81279af8a",
+    "baseCommit": "433aa04e745c30ee86da3780aa1aa70c29df4c0e",
+    "command": "JD_BROWSER_BASE_URL=http://127.0.0.1:43161 GOFLAGS='-p=2' GOMAXPROCS=2 scripts/test-changed.sh 433aa04e745c30ee86da3780aa1aa70c29df4c0e",
+    "exitCode": 0,
+    "scope": "Correct five remaining browser assertions against Query consuming the SQL handoff URL after loading its editor; no backend or product frontend changes.",
+    "prettierEslintTypeScript": "pass",
+    "logicTests": {
+      "passed": 2959,
+      "failed": 0,
+      "assertions": 12534
+    },
+    "selectedBrowserSpecs": [
+      "database-schema.spec.ts",
+      "database-performance.spec.ts"
+    ],
+    "browserTests": {
+      "passed": 121,
+      "failed": 0,
+      "skipped": 0,
+      "duration": "3.6m"
+    },
+    "backendAndProductFrontendUnchanged": true,
+    "privateRawLogSHA256": "a0b826ac10760f1b2d738d97bdfa6caac1d72cd863afc1313046f0dbc2c61105"
+  },
+  "hostedCheckFollowUp": {
+    "run": "https://github.com/JustDashboard/Just-Dashboard/actions/runs/37356482435",
+    "sourceCommit": "433aa04e745c30ee86da3780aa1aa70c29df4c0e",
+    "passedJobs": 17,
+    "failedJobs": 1,
+    "failure": "browser (6): database-schema.spec.ts:1818 expected a SQL handoff parameter Query had already consumed; all other jobs passed.",
+    "resolution": "Corrected all five remaining assertions with loaded-editor and not-run evidence; the follow-up changed-file gate passed."
   }
 }
