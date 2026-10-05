@@ -317,7 +317,9 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   a label still reads a word rather than "cl…". Past that the tabs scroll inside their own scroller,
   which draws **no scrollbar** — a ten-pixel bar across the labels in a 40px title bar was the
   loudest thing on the page — and fades whichever edge has tabs past it (a `mask-image` driven by the
-  scroll position, `data-overflow-start`/`-end`). A vertical mouse wheel scrolls the strip sideways,
+  scroll position, `data-overflow-start`/`-end`). While anything is out of view, a chevron sits at
+  each end of the strip (disabled at the end already reached) and scrolls it by most of its width —
+  the fade alone read as a gap rather than as more tabs. A vertical mouse wheel scrolls the strip sideways,
   the active tab scrolls itself into view, and **New window** sits outside the scroller, right after
   the last visible tab, so it never scrolls away with the tabs it adds to.
 - **Directional splits** use `lib/terminal-layout.ts`'s binary layout trees, grouped per session in
