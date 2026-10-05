@@ -575,6 +575,67 @@ test("a process named by its whole command line stays inside its cell", async ({
   expect(bleeding, "content painted past the cell holding it").toEqual([])
 })
 
+test("the wheel over a half-shown table brings all of it on screen before its rows move", async ({
+  page,
+}) => {
+  const many = Array.from({ length: 80 }, (_, i) =>
+    process({ pid: 2000 + i, name: `worker-${i}`, cpuPercent: 80 - i / 2 }),
+  )
+  await mockHost(page)
+  await page.route("**/api/v1/processes/inventory*", (route) =>
+    json(route, { ...inventory, processes: many, total: many.length }),
+  )
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto("/processes")
+  await expect(page.getByRole("button", { name: "worker-0", exact: true })).toBeVisible()
+
+  const table = page
+    .locator('[data-slot="table-container"]')
+    .filter({ has: page.getByRole("button", { name: "worker-0", exact: true }) })
+  const read = () =>
+    table.evaluate((region) => {
+      const port = document.querySelector<HTMLElement>("[data-workspace-shell-scroll]")!
+      const box = region.getBoundingClientRect()
+      const view = port.getBoundingClientRect()
+      return {
+        top: box.top - view.top,
+        bottom: view.bottom - box.bottom,
+        page: port.scrollTop,
+        rows: region.scrollTop,
+        x: box.left + box.width / 2,
+        y: (Math.max(box.top, view.top) + Math.min(box.bottom, view.bottom)) / 2,
+      }
+    })
+
+  const start = await read()
+  expect(start.bottom, "the table starts below the fold").toBeLessThan(0)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.wheel(0, 120)
+  await expect.poll(async () => (await read()).bottom).toBeGreaterThanOrEqual(0)
+  const revealed = await read()
+  expect(revealed.top).toBeGreaterThanOrEqual(0)
+  expect(revealed.rows, "the rows held still while the page moved").toBe(0)
+
+  await page.mouse.move(revealed.x, revealed.y)
+  await page.mouse.wheel(0, 120)
+  await expect.poll(async () => (await read()).rows).toBeGreaterThan(0)
+  expect((await read()).page, "a table in view keeps the wheel").toBe(revealed.page)
+
+  // Clipped at the top, the wheel upward brings it back down into view. The
+  // page ends just under this table, so it is given room to scroll past it.
+  await table.evaluate((region) => {
+    const port = document.querySelector<HTMLElement>("[data-workspace-shell-scroll]")!
+    port.append(Object.assign(document.createElement("div"), { style: "height: 100vh" }))
+    port.scrollTop += region.getBoundingClientRect().top - port.getBoundingClientRect().top + 120
+  })
+  const clipped = await read()
+  expect(clipped.top).toBeLessThan(0)
+  await page.mouse.move(clipped.x, clipped.y)
+  await page.mouse.wheel(0, -120)
+  await expect.poll(async () => (await read()).top).toBeGreaterThanOrEqual(0)
+  expect((await read()).rows).toBe(clipped.rows)
+})
+
 test("PM2 says whether it survives a reboot and offers the housekeeping verbs", async ({
   page,
 }) => {
