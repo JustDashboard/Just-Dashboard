@@ -459,8 +459,8 @@ container's lens — folded under it while the container exists, open by default
 failure; a removed container's newest failure says it was removed rather than searching. The Overview
 carries two of this page's readings among its own four (requests a minute with
 the hour's line, and the failing share), and each fleet card a sparkline with the rate, both from
-`/deploy/traffic`; the run page's Metrics view leads with `RunTrafficPanel` — requests/min, failing
-share and p95 before → after activation. The readings are
+`/deploy/traffic`. (The run page's Metrics view, which led with requests/min, failing share and p95
+before → after activation, left the page on 2026-10-05.) The readings are
 the page's own, over a fixed last hour, so they hold still while the reader narrows the rows beneath
 them — which is what lets the error rate be the thing that sent them to Output in the first place.
 Each is a rate or a share rather than a count: a figure whose meaning depends on a control somewhere

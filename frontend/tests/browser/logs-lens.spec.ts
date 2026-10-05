@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { json, mockProject, run as fixtureRun, steps as fixtureSteps } from "./deploy-fixture"
+import { json, mockProject, now } from "./deploy-fixture"
 import { PG, mockLensLogs } from "./logs-lens-fixture"
 
 /**
@@ -173,26 +173,28 @@ test("the rail draws a stack as what it runs and offers the journal's readings a
 test("a service page's logs open on the lens's defaults and drop them for another vocabulary", async ({
   page,
 }) => {
-  // `/deploy/7/runs/84`'s runtime logs are the service logs every page embeds.
-  await mockProject(page)
-  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
-    socket.send(
-      JSON.stringify({
-        type: "snapshot",
-        data: { run: fixtureRun, steps: fixtureSteps },
-        ts: Date.now(),
-      }),
-    )
+  // A deployment's Output is the service logs every page embeds, one source
+  // per container its release runs.
+  const container = (containerId: string, name: string, image: string) => ({
+    containerId,
+    name,
+    releaseId: 20,
+    liveRelease: true,
+    state: "running",
+    health: "healthy",
+    imageId: `sha256:${containerId.padEnd(64, "0")}`,
+    image,
   })
-  await page.route("**/api/v1/deploy/7/runs/84/logs", (route) =>
-    json(route, {
+  await mockProject(page, {
+    runtime: {
       status: "available",
-      sources: [
-        { containerId: "gate", name: "ssh-gate", liveUrl: "" },
-        { containerId: "db", name: "shop-db", liveUrl: "" },
+      observedAt: now,
+      services: [
+        container("gate", "ssh-gate", "linuxserver/openssh-server"),
+        container("db", "shop-db", "postgres:16"),
       ],
-    }),
-  )
+    },
+  })
   const sockets: URLSearchParams[] = []
   await page.routeWebSocket(/\/api\/v1\/logs\/stream/, (socket) => {
     const params = new URL(socket.url()).searchParams
@@ -218,11 +220,7 @@ test("a service page's logs open on the lens's defaults and drop them for anothe
     return json(route, {})
   })
 
-  await page.goto("/deploy/7/runs/84")
-  await page
-    .getByRole("group", { name: "Run views" })
-    .getByRole("button", { name: "Runtime logs", exact: true })
-    .click()
+  await page.goto("/deploy/7/logs?view=output&service=gate")
   await expect(page.getByText("hello from docker:gate")).toBeVisible()
   // The auth lens hides its scans and cron sessions from the first socket —
   // not a second one after the fact — and says so as a chip.
@@ -232,7 +230,7 @@ test("a service page's logs open on the lens's defaults and drop them for anothe
   expect(sockets).toHaveLength(1)
   expect(sockets[0].getAll("f")).toEqual(["event:!cron_session", "event:!ssh_scan"])
 
-  await page.getByRole("combobox", { name: "Runtime log source" }).click()
+  await page.getByRole("combobox", { name: "Service" }).click()
   await page.getByRole("option", { name: "shop-db" }).click()
   await expect(page.getByText("hello from docker:db")).toBeVisible()
   expect(sockets.at(-1)!.getAll("f")).toEqual([])
