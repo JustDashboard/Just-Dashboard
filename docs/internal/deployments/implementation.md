@@ -59,10 +59,8 @@ only renderer/executor/validation authority for their feature.
   a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
   fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has no
   tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
-  Project step's *Deploy as a Compose stack*) or
-  resumed as an unfinished setup.
-  Choosing a
-  source creates a draft, saves the intent and source, and runs detection in one action; when
+  Project step's *Deploy as a Compose stack*) or resumed as an unfinished setup.
+  Choosing a source creates a draft, saves the intent and source, and runs detection in one action; when
   detection finds more than one candidate they are offered ranked, each saying why it ranks where it
   does (an example, a docs site, not a service), as a choice that re-runs detection with
   `selectedId`. Each configure screen reads the plan down a rail beside the form
@@ -926,7 +924,7 @@ only renderer/executor/validation authority for their feature.
   server, and the answer carries neither a value nor a digest. It is audited under an action of its
   own, `deploy.variable.import_preview` (the name count, sensitivity and scopes), rather than as the
   import it did not perform. What the import refuses as a whole — a
-  line the parser cannot read past, a bad sensitivity or scope, a reference that would not resolve —
+  line the parser cannot read past or a bad sensitivity or scope —
   is refused with the import's own error; a refusal that belongs to one name is that name's verdict,
   so every other line can still be read. `dryRun` must parse as a boolean, because a preview that
   failed to parse must never fall through to the import. Both paths share `parseDotenvEntries`, and

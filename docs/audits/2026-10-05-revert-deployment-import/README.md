@@ -37,7 +37,7 @@ Additional live acceptance uses isolated Docker fixtures:
 - `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run '^TestLiveCutover(TrafficContinuity|SurvivesProxyLoss)$' -count=1 -v`
 - `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run '^(TestLiveRuntimeLossKeepsExactlyOneReleaseLive|TestLiveBackendKillAtEveryStepLeavesOneRecoveredRun)$' -count=1 -v`
 - `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run '^TestLiveC4ArtifactAdapters$' -count=1 -v`
-- `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run '^TestLiveDetectedFrameworkBuildAndServing$' -count=1 -v`
+- `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run '^TestLiveDetectedFrameworkBuildAndServing$' -timeout 45m -count=1 -v`
 
 The PR records the completed check results and limits. Retirement tests cover read-only records,
 import-review refusal, endpoint boundaries, queued execution without steps and literal values that
