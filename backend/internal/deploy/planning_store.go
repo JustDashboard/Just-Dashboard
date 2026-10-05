@@ -617,13 +617,21 @@ func (s *PlanningStore) scanDraft(row interface{ Scan(...any) error }) (*Draft, 
 	draft.refreshEnvironmentKeys()
 	if draft.Data.Adoption != nil && len(draft.Data.Adoption.Inputs) == 0 {
 		draft.Data.Adoption.Inputs = recoveredInputBindings(draft.Data.Adoption.BaselineSource)
+		if draft.Data.Configuration != nil {
+			draft.Data.Adoption.Inputs = append(draft.Data.Adoption.Inputs, legacyNativeInputBindings(draft.Data.Adoption.BaselineSource, draft.Data.Configuration.Runtime)...)
+		}
 	}
 	if draft.Data.Adoption != nil {
+		bindings := map[string]bool{}
+		if draft.Data.Configuration != nil {
+			bindings = recoveredInputBindingKeys(draft.Data.Source, draft.Data.Configuration.Runtime)
+		}
 		for i := range draft.Data.Adoption.Inputs {
 			input := &draft.Data.Adoption.Inputs[i]
 			value, exists := draft.environment[input.StorageKey]
 			input.Retained = exists
 			input.Empty = exists && value == ""
+			input.Bound = bindings[input.StorageKey]
 		}
 	}
 	if draft.adoptionEnc != "" {

@@ -63,14 +63,17 @@ diagnostics name the capture phase without exposing Docker responses, and a fail
 read does not become a misleading missing-service diagnosis.
 
 Captured inputs carry server-owned original names, service identities, environment/image-default/runtime
-categories and retained/empty status. The wizard and project settings use those identities; opaque
+categories and retained/empty status. Reads also compute `bound` from the current desired source and
+runtime, including the shell argument aliases retained for native migrations. The wizard and project
+settings use those identities; opaque
 `JD_IMPORT_*` storage names keep service-local values separate internally. Display sensitivity does
 not make a captured value public: all values remain sealed, including ordinary image defaults and
-intentionally empty strings. The read DTO's `bound` flag follows references in the current desired
-source and runtime command, including captured native argument aliases. Bound captured inputs accept
-literal value replacement; removal, reference conversion or scope changes require updating that
-binding first. Ordinary native environment values and inputs whose desired binding was removed remain
-editable through normal variable controls; their original identity and frozen baseline stay intact.
+intentionally empty strings. Source-bound captured inputs accept literal value replacement; removal,
+reference conversion or scope changes require updating the source or runtime binding first. Ordinary
+native environment names and captured inputs whose bindings have been removed remain editable through
+the normal variable controls, while their original-name metadata remains available. Old native imports
+without metadata recover argument identities only from their known native baseline source mode and the
+aliases referenced by the first managed runtime command.
 
 Variable revisions record explicit literal/reference intent. New captured inputs and dotenv/value
 writes are literal, so a running app's `${{credential.name}}` text is never interpreted as dashboard

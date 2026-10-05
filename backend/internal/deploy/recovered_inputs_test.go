@@ -3,10 +3,12 @@ package deploy
 import (
 	"encoding/json"
 	"errors"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"gopkg.in/yaml.v3"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"gopkg.in/yaml.v3"
 )
 
 func TestRecoveredInputsRetainServiceNamesAndLiteralValuesThroughAdoption(t *testing.T) {
@@ -86,6 +88,17 @@ func TestRecoveredInputsRetainServiceNamesAndLiteralValuesThroughAdoption(t *tes
 	if _, err := fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, ids["web"], 2); !errors.Is(err, ErrInvalidVariable) {
 		t.Fatal("bound input deletion accepted", err)
 	}
+	importRequest := DotenvImportRequest{Revision: adopted.PlanRevision, Dotenv: ids["web"] + "=replacement", Sensitivity: "secret", Scopes: []string{"runtime", "build"}}
+	if _, err := fixture.plans.PreviewDotenvImport(t.Context(), adopted.ProjectID, adopted.EnvironmentID, importRequest); !errors.Is(err, ErrInvalidVariable) {
+		t.Fatal("dotenv preview accepted a bound input scope change", err)
+	}
+	if _, err := fixture.plans.ImportDotenv(t.Context(), adopted.ProjectID, adopted.EnvironmentID, "operator", importRequest); !errors.Is(err, ErrInvalidVariable) {
+		t.Fatal("dotenv import accepted a bound input scope change", err)
+	}
+	importRequest.Scopes = []string{"runtime"}
+	if _, err := fixture.plans.PreviewDotenvImport(t.Context(), adopted.ProjectID, adopted.EnvironmentID, importRequest); err != nil {
+		t.Fatal("dotenv preview refused a literal replacement", err)
+	}
 	empty := ""
 	if _, err := fixture.plans.PutVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, ids["web"], "operator", VariableWriteRequest{Revision: 2, Value: &empty, Sensitivity: "secret", Scopes: []string{"runtime"}}); err != nil {
 		t.Fatal("literal empty replacement rejected", err)
@@ -111,6 +124,31 @@ func TestRecoveredInputsRetainServiceNamesAndLiteralValuesThroughAdoption(t *tes
 		if value.Name == ids["web"] && value.Value != "a" {
 			t.Fatal("desired edit changed frozen baseline")
 		}
+	}
+	desired, err := fixture.plans.EnvironmentConfiguration(t.Context(), adopted.ProjectID, adopted.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := *desired.Source
+	source.ComposeFiles = append([]ComposeDocument{}, source.ComposeFiles...)
+	source.ComposeFiles[0].Content = strings.ReplaceAll(source.ComposeFiles[0].Content, "${"+ids["web"]+"}", "replacement-without-a-binding")
+	analysis, err := analyzeComposeDocuments(source.ComposeFiles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := recovered.Detection.Source
+	identity.Digest = analysis.Digest
+	desired, err = fixture.plans.SaveEnvironmentSource(t.Context(), adopted.ProjectID, adopted.EnvironmentID, desired.Revision, source, identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range desired.Variables {
+		if view.Name == ids["web"] && (view.RecoveredInput == nil || view.RecoveredInput.Bound || view.RecoveredInput.Name != "TELEGRAM_CHAT_ID") {
+			t.Fatal("removed source binding hid metadata or still protected its declaration")
+		}
+	}
+	if _, err := fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, ids["web"], desired.Revision); err != nil {
+		t.Fatal("unused captured input deletion refused", err)
 	}
 }
 
@@ -258,5 +296,135 @@ func TestFailedExistingContainerCaptureDoesNotPretendItIsAnAbsentDeclaration(t *
 		if issue.Code == "inactive_service_image_missing" || issue.Code == "container_replacement" {
 			t.Fatal("capture failure produced an unrelated migration diagnosis", issue.Code)
 		}
+	}
+}
+
+func TestRecoveredInputsProtectNativeArgumentsAndReleaseUnboundVariables(t *testing.T) {
+	fixture := newPlanningStoreFixture(t)
+	recovered := recoveredStoreFixture(t)
+	for _, name := range []string{"NATIVE_ENV", "JD_IMPORTED_ARG_0"} {
+		recovered.Environment[name] = "original"
+		recovered.Configuration.Variables = append(recovered.Configuration.Variables, PlannedVariable{Name: name, Sensitivity: "secret", Scopes: []string{"runtime"}, ValueMode: "literal"})
+		kind := "environment"
+		if name == "JD_IMPORTED_ARG_0" {
+			kind = "argument"
+		}
+		AddRecoveredInput(recovered, name, name, "native-app", kind, "native", "application")
+	}
+	recovered.Configuration.Runtime.Command = []string{"/bin/sh", "-c", `exec "$JD_IMPORTED_ARG_0"`}
+	recovered.Adoption.BaselineConfiguration = recovered.Configuration
+	draft, err := fixture.plans.CreateRecoveredDraft(t.Context(), 41, "operator", DraftIntentConfig{Name: "native-input-binding", Profile: ProfileCompose}, recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, input := range draft.Data.Adoption.Inputs {
+		if input.Bound != (input.Kind == "argument") {
+			t.Fatal("draft bound state did not follow runtime", input.Name)
+		}
+	}
+	configuration := *draft.Data.Configuration
+	configuration.Variables = slices.DeleteFunc(append([]PlannedVariable{}, configuration.Variables...), func(variable PlannedVariable) bool { return variable.Name == "JD_IMPORTED_ARG_0" })
+	if err := draft.validateRecoveredInputBindings(configuration); !errors.Is(err, ErrInvalidVariable) {
+		t.Fatal("native command alias deletion accepted in draft", err)
+	}
+	configuration.Runtime.Command = nil
+	if err := draft.validateRecoveredInputBindings(configuration); err != nil {
+		t.Fatal("unused native alias remains protected", err)
+	}
+	draft = checkRecoveredDraft(t, fixture, draft)
+	var ack []string
+	for _, finding := range draft.Findings {
+		if finding.Severity == PreflightWarning {
+			ack = append(ack, finding.Code)
+		}
+	}
+	adopted, err := fixture.plans.Commit(t.Context(), draft.ID, 41, false, DraftCommitRequest{Revision: draft.Revision, AcknowledgedWarnings: ack})
+	if err != nil {
+		t.Fatal(err)
+	}
+	views, err := fixture.plans.ListVariables(t.Context(), adopted.ProjectID, adopted.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range views {
+		if view.RecoveredInput != nil && view.RecoveredInput.Bound != (view.Name == "JD_IMPORTED_ARG_0") {
+			t.Fatal("settings bound state does not follow desired runtime", view.Name)
+		}
+	}
+	revision := adopted.PlanRevision
+	if _, err := fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, "JD_IMPORTED_ARG_0", revision); !errors.Is(err, ErrInvalidVariable) {
+		t.Fatal("bound native argument deletion accepted", err)
+	}
+	replacement := "replacement"
+	for _, request := range []VariableWriteRequest{
+		{Revision: revision, Value: &replacement, Sensitivity: "secret", Scopes: []string{"build"}},
+		{Revision: revision, Reference: "${{variable.NATIVE_ENV}}", Sensitivity: "secret", Scopes: []string{"runtime"}},
+	} {
+		if _, err := fixture.plans.PutVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, "JD_IMPORTED_ARG_0", "operator", request); !errors.Is(err, ErrInvalidVariable) {
+			t.Fatal("bound native argument declaration changed", err)
+		}
+	}
+	result, err := fixture.plans.PutVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, "NATIVE_ENV", "operator", VariableWriteRequest{Revision: revision, Value: &replacement, Sensitivity: "plain", Scopes: []string{"runtime", "build"}})
+	if err != nil {
+		t.Fatal("ordinary native environment variable edit refused", err)
+	}
+	_, err = fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, "NATIVE_ENV", result.DesiredRevision)
+	if err != nil {
+		t.Fatal("ordinary native environment variable deletion refused", err)
+	}
+	desired, err := fixture.plans.EnvironmentConfiguration(t.Context(), adopted.ProjectID, adopted.EnvironmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desired.Runtime.Command = nil
+	desired, err = fixture.plans.SaveEnvironmentConfiguration(t.Context(), adopted.ProjectID, adopted.EnvironmentID, ConfigurationWriteRequest{Revision: desired.Revision, Build: desired.Build, Runtime: desired.Runtime, Checks: desired.Checks, Dependencies: desired.Dependencies, Domains: desired.Domains})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, view := range desired.Variables {
+		if view.Name == "JD_IMPORTED_ARG_0" && (view.RecoveredInput == nil || view.RecoveredInput.Bound) {
+			t.Fatal("removed native argument binding still protected its declaration")
+		}
+	}
+	if _, err := fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, "JD_IMPORTED_ARG_0", desired.Revision); err != nil {
+		t.Fatal("unused native command argument deletion refused", err)
+	}
+}
+
+func TestRecoveredInputBindingIgnoresEscapedLiteralsAndTracksExactNames(t *testing.T) {
+	name := "JD_IMPORT_ENV_NAME"
+	for _, fixture := range []struct {
+		content string
+		bound   bool
+	}{
+		{"services: {app: {environment: {NAME: '${JD_IMPORT_ENV_NAME}'}}}", true},
+		{"services: {app: {environment: {NAME: '$JD_IMPORT_ENV_NAME'}}}", true},
+		{"services: {app: {environment: {NAME: '${JD_IMPORT_ENV_NAME:-fallback}'}}}", true},
+		{"services: {app: {environment: {NAME: '$${JD_IMPORT_ENV_NAME}'}}}", false},
+		{"services: {app: {labels: {'${JD_IMPORT_ENV_NAME}': ordinary}}}", false},
+		{"services: {app: {environment: {NAME: '${JD_IMPORT_ENV_NAME_OTHER}'}}}", false},
+		{"services: {app: {image: nginx}} # ${JD_IMPORT_ENV_NAME}\n", false},
+	} {
+		if got := recoveredInputBound(&DraftSourceConfig{ComposeFiles: []ComposeDocument{{Content: fixture.content}}}, RuntimePlanConfig{}, name); got != fixture.bound {
+			t.Errorf("binding = %v, want %v for %s", got, fixture.bound, fixture.content)
+		}
+	}
+	if !recoveredInputBound(nil, RuntimePlanConfig{Command: []string{"/bin/sh", "-c", `exec "$JD_IMPORTED_ARG_0"`}}, "JD_IMPORTED_ARG_0") || recoveredInputBound(nil, RuntimePlanConfig{Command: []string{"$JD_IMPORTED_ARG_01"}}, "JD_IMPORTED_ARG_0") {
+		t.Fatal("native exact argument reference was not distinguished")
+	}
+}
+
+func TestLegacyNativeArgumentMetadataUsesVerifiedBaselineModeAndInitialCommand(t *testing.T) {
+	source := DraftSourceConfig{Kind: SourceImport, Mode: SourceModeExistingPM2}
+	runtime := RuntimePlanConfig{Command: []string{"/bin/sh", "-c", `exec "$JD_IMPORTED_ARG_0" "$JD_IMPORTED_abcdef123456_ARG_1" "$ORIGINAL_ENV"`}}
+	inputs := legacyNativeInputBindings(source, runtime)
+	if len(inputs) != 2 || inputs[0].Name != "Argument 0" || inputs[1].Name != "Argument 1" {
+		t.Fatal("old command aliases were not recovered", inputs)
+	}
+	if len(legacyNativeInputBindings(DraftSourceConfig{Kind: SourceLocal}, runtime)) != 0 {
+		t.Fatal("ordinary source claimed native recovery provenance")
+	}
+	if len(legacyNativeInputBindings(source, RuntimePlanConfig{})) != 0 {
+		t.Fatal("absent command inferred unrelated native variables")
 	}
 }

@@ -605,7 +605,12 @@ func (s *PlanningStore) PreviewDotenvImport(
 	if _, err := validateVariableWrite(template); err != nil {
 		return nil, err
 	}
-	stored, err := s.activeVariableValues(ctx, s.db, projectID, environmentID)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	stored, err := s.activeVariableValues(ctx, tx, projectID, environmentID)
 	if err != nil {
 		return nil, err
 	}
@@ -628,6 +633,12 @@ func (s *PlanningStore) PreviewDotenvImport(
 		position[entry.name] = len(preview.Variables)
 		verdict := DotenvImportVerdict{Name: entry.name, Line: entry.line}
 		existing, exists := current[entry.name]
+		if entry.refused == "" && !skipped[entry.name] {
+			template.Value = &entry.value
+			if err := s.validateRecoveredInputMutationTx(ctx, tx, environmentID, entry.name, &template); err != nil {
+				return nil, err
+			}
+		}
 		switch {
 		case entry.refused != "":
 			verdict.Change, verdict.Reason = "refused", entry.refused
