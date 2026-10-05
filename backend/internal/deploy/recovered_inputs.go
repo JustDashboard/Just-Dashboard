@@ -203,9 +203,9 @@ func (d *Draft) validateRecoveredInputBindings(configuration PlanConfiguration) 
 	for _, variable := range configuration.Variables {
 		declared[variable.Name] = variable
 	}
-	baselineModes := map[string]string{}
+	baselineVariables := map[string]PlannedVariable{}
 	for _, variable := range d.Data.Adoption.BaselineConfiguration.Variables {
-		baselineModes[variable.Name] = variable.ValueMode
+		baselineVariables[variable.Name] = variable
 	}
 	for _, input := range d.Data.Adoption.Inputs {
 		bound := false
@@ -220,7 +220,9 @@ func (d *Draft) validateRecoveredInputBindings(configuration PlanConfiguration) 
 		}
 		variable, ok := declared[input.StorageKey]
 		_, retained := d.environment[input.StorageKey]
-		if !ok || !retained || variable.Sensitivity != "secret" || (variable.ValueMode != "literal" && !(variable.ValueMode == "" && baselineModes[input.StorageKey] == "")) || variable.Reference != "" || variable.Generate != 0 || !slices.Contains(variable.Scopes, "runtime") {
+		baseline := baselineVariables[input.StorageKey]
+		sameScopes := slices.Equal(slices.Sorted(slices.Values(variable.Scopes)), slices.Sorted(slices.Values(baseline.Scopes)))
+		if !ok || !retained || variable.Sensitivity != baseline.Sensitivity || !sameScopes || (variable.ValueMode != "literal" && !(variable.ValueMode == "" && baseline.ValueMode == "")) || variable.Reference != "" || variable.Generate != 0 {
 			return fmt.Errorf("%w: captured input %s must retain its sealed literal runtime binding", ErrInvalidVariable, input.Name)
 		}
 	}

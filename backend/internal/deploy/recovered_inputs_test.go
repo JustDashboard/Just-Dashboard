@@ -188,6 +188,11 @@ func TestLegacyRecoveredDraftRetainsInferenceMode(t *testing.T) {
 	if err := draft.validateRecoveredInputBindings(PlanConfiguration{Variables: []PlannedVariable{variable}}); err != nil {
 		t.Fatal("shipped draft blocked", err)
 	}
+	variable.Scopes = []string{"runtime", "build"}
+	if err := draft.validateRecoveredInputBindings(PlanConfiguration{Variables: []PlannedVariable{variable}}); !errors.Is(err, ErrInvalidVariable) {
+		t.Fatal("scope expansion accepted", err)
+	}
+	variable.Scopes = []string{"runtime"}
 	variable.ValueMode = "reference"
 	if err := draft.validateRecoveredInputBindings(PlanConfiguration{Variables: []PlannedVariable{variable}}); !errors.Is(err, ErrInvalidVariable) {
 		t.Fatal("reference conversion accepted", err)
