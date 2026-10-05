@@ -1,9 +1,87 @@
 import { expect, test } from "@playwright/test"
 import type { DeploymentDraft } from "../../src/lib/types"
-import { json, mockProject, now } from "./deploy-fixture"
+import { json, mockProject, now, showcaseOperations, showcaseRuntime } from "./deploy-fixture"
 import { betBot, mockWorkloadImport, recoveredWorkloadDraft } from "./workload-import-fixture"
 
 test.use({ video: { mode: "on", size: { width: 1280, height: 900 } } })
+
+test("runtime retains external path routes and exact shared storage owners", async ({
+  page,
+}, testInfo) => {
+  const runtime = structuredClone(showcaseRuntime)
+  const operations = structuredClone(showcaseOperations)
+  operations.runtime = runtime
+  operations.domains = {
+    status: "available",
+    domains: [
+      {
+        id: "external-web",
+        hostname: "import.example.test",
+        path: "/",
+        service: "web",
+        https: true,
+        ownership: "linked",
+        route: "served",
+        certificate: "unavailable",
+        proxyKind: "caddy",
+        servedBy: "Original Caddy",
+        deepLink: "/proxy",
+      },
+      {
+        id: "external-admin",
+        hostname: "import.example.test",
+        path: "/admin",
+        service: "postgres",
+        https: true,
+        ownership: "linked",
+        route: "served",
+        certificate: "unavailable",
+        proxyKind: "caddy",
+        servedBy: "Original Caddy",
+        deepLink: "/proxy",
+      },
+    ],
+  }
+  operations.storage = {
+    status: "available",
+    mounts: runtime.services.map((service) => ({
+      source: "imported-shared-data",
+      target: "/data",
+      service: service.service,
+      containerId: service.containerId,
+      kind: "volume",
+      ownership: "observed",
+      status: "present",
+    })),
+  }
+  await mockProject(page, { showcase: true, runtime, operations })
+  await page.goto("/deploy/7/runtime")
+  const domains = page.getByRole("list", { name: "Deployment domains" })
+  await expect(domains.getByText("import.example.test", { exact: true })).toBeVisible()
+  await expect(domains.getByText("import.example.test/admin", { exact: true })).toBeVisible()
+  await expect(domains).toContainText("Original Caddy")
+  await expect(
+    domains.getByRole("button", { name: "Actions for import.example.test/admin" }),
+  ).toBeVisible()
+  const storage = page.getByRole("list", { name: "Persistent storage" })
+  await expect(storage.getByText("imported-shared-data", { exact: true })).toHaveCount(2)
+  await expect(storage).toContainText("web")
+  await expect(storage).toContainText("postgres")
+  await expect(page.getByText("This release serves no public domain.")).not.toBeVisible()
+  await expect(page.getByText("This release declares no persistent storage.")).not.toBeVisible()
+  await page.screenshot({
+    path: testInfo.outputPath("imported-domains-storage-1280.png"),
+    fullPage: true,
+  })
+  await page.goto("/deploy/7")
+  await expect(
+    page.getByRole("link", { name: "import.example.test/admin", exact: true }),
+  ).toHaveAttribute("href", "https://import.example.test/admin")
+  await page.goto("/deploy/7/settings/domains")
+  await expect(
+    page.getByText("Removed · stops on the next deployment", { exact: true }),
+  ).not.toBeVisible()
+})
 
 function automatedDraft(): DeploymentDraft {
   const draft = recoveredWorkloadDraft()

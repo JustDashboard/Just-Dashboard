@@ -129,7 +129,7 @@ function DomainsForm({
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
   const observed =
     project.operations?.domains.status === "available" ? project.operations.domains : undefined
-  const routes = observed?.domains
+  const routes = observed?.domains.filter((route) => !route.proxyKind && !route.id)
   // Which names the live release carries, read from its own list whether or
   // not Proxy could be asked about them — without Proxy the routes are
   // unknown, but the names are still the release's. A read that failed before
@@ -138,7 +138,11 @@ function DomainsForm({
   const liveKnown = Boolean(
     liveList && (liveList.status === "available" || liveList.domains.length > 0),
   )
-  const liveNames = new Set(liveList?.domains.map((route) => route.hostname.toLowerCase()))
+  const liveNames = new Set(
+    liveList?.domains
+      .filter((route) => !route.proxyKind && !route.id)
+      .map((route) => route.hostname.toLowerCase()),
+  )
 
   const routeFor = (hostname: string) =>
     routes?.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())

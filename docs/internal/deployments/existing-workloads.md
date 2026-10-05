@@ -156,7 +156,10 @@ address update on **Deploy changes** when the exact persisted nginx directive or
 configuration identity; validate/reload failures compensate, and rollback reconciles the restored
 runtime's actual endpoint. Surrounding proxy configuration is preserved. Desired service ports and
 network aliases are checked before stopping the live application, then actual endpoints are verified
-after start. Configuration drift or a conflicting external edit is refused without overwriting it.
+after start. Configuration drift or a detected conflicting external edit is refused without
+overwriting it. Single-file bind mounts retain their inode through bounded in-place writes: file
+descriptor/path identity and before/after byte checks detect conflicts, but cannot atomically exclude
+an external writer racing between those checks. See [the handoff contract](caddy-ingress.md).
 
 Shared, dynamic, imported or otherwise ambiguous upstreams need a verified external handoff. Known
 routes whose manager cannot be inspected remain explicit unverified dependencies and block replacement

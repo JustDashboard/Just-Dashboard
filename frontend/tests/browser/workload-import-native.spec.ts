@@ -211,6 +211,22 @@ test("imports the real selected stack without changing its containers", async ({
   expect(managedContainerIds).toEqual(
     before.map((container: { id: string }) => container.id).sort(),
   )
+  const operationsResponse = await page.request.get(
+    new URL(`/api/v1${projectPath}/operations`, page.url()).toString(),
+  )
+  expect(operationsResponse.ok()).toBe(true)
+  const operations = await operationsResponse.json()
+  expect(operations.storage.status).toBe("available")
+  if (selectedStack.startsWith("jd-import-proof-")) {
+    expect(operations.storage.mounts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ service: "worker", target: "/fixture-data", kind: "volume" }),
+        expect.objectContaining({ service: "web", target: "/www", kind: "bind", readOnly: true }),
+        expect.objectContaining({ service: "web", target: "/data", kind: "volume" }),
+        expect.objectContaining({ service: "web", target: "/config", kind: "volume" }),
+      ]),
+    )
+  }
   const selectedService =
     runtime.services.find(
       (service: { state: string; liveRelease: boolean }) =>
@@ -251,6 +267,13 @@ test("imports the real selected stack without changing its containers", async ({
   const usage = page.locator('[data-slot="panel"]').filter({
     has: page.getByRole("heading", { name: "Usage", exact: true }),
   })
+  if (selectedStack.startsWith("jd-import-proof-")) {
+    const storageList = page.getByRole("list", { name: "Persistent storage" })
+    await expect(storageList).toContainText("/fixture-data")
+    await expect(storageList).toContainText("worker")
+    await expect(storageList).toContainText("/www")
+    await expect(storageList).toContainText("read-only")
+  }
   await expect(usage).toBeVisible()
   await usage.scrollIntoViewIfNeeded()
   await expect
@@ -313,6 +336,15 @@ test("imports the real selected stack without changing its containers", async ({
         configurationsAndStartTimesUnchanged: true,
         processIdentityAndStateUnchanged: true,
         liveCpuAndMemoryReadingsVerified: true,
+        perServiceLiveStorageVerified: true,
+        persistentMounts: operations.storage.mounts.map(
+          (mount: { service?: string; target: string; kind: string; readOnly?: boolean }) => ({
+            service: mount.service,
+            target: mount.target,
+            kind: mount.kind,
+            readOnly: Boolean(mount.readOnly),
+          }),
+        ),
         selectedRuntimeReadingVerified: selectedService.containerId,
         dockerLogTailReadVerified: ready.dockerLogTailRead,
         overviewDockerPreflightVerified: true,

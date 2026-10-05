@@ -3141,6 +3141,12 @@ export type DeploymentDiagnosis = {
 }
 
 export type DeploymentDomainRoute = {
+  id?: string
+  path?: string
+  service?: string
+  proxyKind?: string
+  continuity?: string
+  detail?: string
   hostname: string
   https: boolean
   ownership: DeploymentOwnership
@@ -3162,6 +3168,8 @@ export type DeploymentDomainRoute = {
 }
 
 export type DeploymentStorageMount = {
+  service?: string
+  containerId?: string
   source: string
   target: string
   kind: "volume" | "bind"
