@@ -104,3 +104,64 @@ func TestReleaseRuntimeDownNeedsEveryObservedContainerDown(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeServicesCarryLastRunFacts(t *testing.T) {
+	exit := 137
+	labels := map[string]string{"io.just-dashboard.managed": "true",
+		"io.just-dashboard.environment-id": "7", "io.just-dashboard.release-id": "10"}
+	owner := &runtimeObservationFake{items: []dockerx.Container{
+		{ID: "down", Name: "down", State: "exited", Labels: labels, Restarts: 4, Exited: &exit, WasOOMKilled: true},
+		{ID: "up", Name: "up", State: "running", Labels: labels},
+	}}
+	result := ObserveRuntimeServices(t.Context(), owner, 7, 10)
+	if len(result.Services) != 2 {
+		t.Fatalf("services = %+v", result.Services)
+	}
+	down, up := result.Services[0], result.Services[1]
+	if down.RestartCount != 4 || down.ExitCode == nil || *down.ExitCode != 137 || !down.OOMKilled {
+		t.Fatalf("stopped service = %+v", down)
+	}
+	raw, err := json.Marshal(up)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"restartCount", "exitCode", "oomKilled"} {
+		if strings.Contains(string(raw), field) {
+			t.Fatalf("unknown %s should be omitted: %s", field, raw)
+		}
+	}
+	raw, err = json.Marshal(down)
+	if err != nil || !strings.Contains(string(raw), `"exitCode":137`) || !strings.Contains(string(raw), `"restartCount":4`) {
+		t.Fatalf("stopped service JSON = %s (%v)", raw, err)
+	}
+}
+
+type lastRunObservationFake struct {
+	runtimeObservationFake
+	lastRunCalls int
+}
+
+func (f *lastRunObservationFake) ListContainersWithLastRun(ctx context.Context, labels map[string]string) ([]dockerx.Container, error) {
+	f.lastRunCalls++
+	return f.items, f.err
+}
+
+// The runtime services read is the one place a stopped container's last run is
+// wanted, so it asks a Docker owner that can tell for that listing, and the
+// plain labelled one stays as cleanup and recovery read it.
+func TestRuntimeServicesReadTheLastRunWhereTheOwnerOffersIt(t *testing.T) {
+	exited := 137
+	owner := &lastRunObservationFake{runtimeObservationFake: runtimeObservationFake{items: []dockerx.Container{{
+		ID: "web", Name: "web", State: "exited", Restarts: 4, Exited: &exited, WasOOMKilled: true,
+		Labels: map[string]string{"io.just-dashboard.managed": "true",
+			"io.just-dashboard.environment-id": "7", "io.just-dashboard.release-id": "10"},
+	}}}}
+	got := ObserveRuntimeServices(t.Context(), owner, 7, 10)
+	if owner.lastRunCalls != 1 || owner.calls != 0 {
+		t.Fatalf("last-run listing calls = %d, plain = %d", owner.lastRunCalls, owner.calls)
+	}
+	if len(got.Services) != 1 || got.Services[0].RestartCount != 4 || got.Services[0].ExitCode == nil ||
+		*got.Services[0].ExitCode != 137 || !got.Services[0].OOMKilled {
+		t.Fatalf("services = %+v", got.Services)
+	}
+}

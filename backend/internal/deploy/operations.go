@@ -40,6 +40,12 @@ type RuntimeService struct {
 	// Image is the reference the container was created from, as Docker
 	// reports it, so a service can be drawn as the product it runs.
 	Image string `json:"image,omitempty"`
+	// What Docker recorded about the container's last run, from the
+	// inspection the listing already makes. ExitCode is present only for a
+	// container that is not running; all three are omitted when unknown.
+	RestartCount int  `json:"restartCount,omitempty"`
+	ExitCode     *int `json:"exitCode,omitempty"`
+	OOMKilled    bool `json:"oomKilled,omitempty"`
 }
 
 func ObserveRuntimeServices(ctx context.Context, owner RuntimeObserver, environmentID, liveReleaseID int64) RuntimeServices {
@@ -88,7 +94,15 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 	if onlyReleaseID > 0 {
 		labels["io.just-dashboard.release-id"] = strconv.FormatInt(onlyReleaseID, 10)
 	}
-	containers, err := owner.ListContainersWithLabels(ctx, labels)
+	list := owner.ListContainersWithLabels
+	// The Docker client can also read what a stopped container's last run left
+	// behind. Only this read wants it, so it is asked for here and nowhere else.
+	if lastRun, ok := owner.(interface {
+		ListContainersWithLastRun(context.Context, map[string]string) ([]dockerx.Container, error)
+	}); ok {
+		list = lastRun.ListContainersWithLastRun
+	}
+	containers, err := list(ctx, labels)
 	if err != nil {
 		// Owner errors can contain daemon addresses and credentials; expose only
 		// the availability result, never the transport error.
@@ -119,6 +133,7 @@ func observeRuntimeServices(ctx context.Context, owner RuntimeObserver, environm
 			LiveRelease: releaseID == liveReleaseID, State: item.State,
 			Health: health, ImageID: item.ImageID, Stack: item.ComposeStack,
 			Service: item.ComposeSvc, StartedAt: item.StartedAt, Image: item.Image,
+			RestartCount: item.Restarts, ExitCode: item.Exited, OOMKilled: item.WasOOMKilled,
 		})
 	}
 	sort.Slice(result.Services, func(i, j int) bool {

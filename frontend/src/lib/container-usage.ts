@@ -129,6 +129,64 @@ export function appendLive(
   return kept
 }
 
+/** How wide a Live chart's bucket is: sixty of them across the five-minute window. */
+export const LIVE_BUCKET_MS = 5_000
+
+/** Each mean measurement a row carries, with the column its bucket's peak goes in. */
+const BUCKETED = [
+  ["cpu", "cpuPeak"],
+  ["mem", "memPeak"],
+  ["netRx", "netRxPeak"],
+  ["netTx", "netTxPeak"],
+  ["blockRead", "blockReadPeak"],
+  ["blockWrite", "blockWritePeak"],
+  ["pids", "pidsPeak"],
+] as const
+
+/**
+ * The live window as buckets of `ms`, each the mean of its frames with their
+ * maximum beside it — the shape the recorded ranges already have.
+ *
+ * Docker's frame a second drew a five-minute chart as a saw-tooth: the jitter
+ * of a busy event loop, a second at a time, where the recorded hour beside it
+ * drew a mean inside the envelope of its peaks. Bucketed, Live reads the same
+ * way and loses nothing worth seeing: a one-second spike survives as its
+ * bucket's peak. A bucket holding only breaks stays a break, and a bucket is
+ * stamped with its newest frame so the chart still ends on the last reading.
+ */
+export function bucketLive(rows: ContainerRow[], ms = LIVE_BUCKET_MS): ContainerRow[] {
+  const out: ContainerRow[] = []
+  let bucket: ContainerRow[] = []
+  const flush = () => {
+    if (bucket.length === 0) return
+    const last = bucket[bucket.length - 1]
+    const row: ContainerRow = { ...containerGapRow(last.ts), t: last.t, at: last.at }
+    for (const [key, peak] of BUCKETED) {
+      let sum = 0
+      let count = 0
+      let high: number | null = null
+      for (const one of bucket) {
+        const value = one[key]
+        if (value === null || value === undefined) continue
+        sum += value
+        count++
+        const top = Math.max(value, one[peak] ?? value)
+        if (high === null || top > high) high = top
+      }
+      row[key] = count > 0 ? sum / count : null
+      row[peak] = high
+    }
+    out.push(row)
+    bucket = []
+  }
+  for (const row of rows) {
+    if (bucket.length > 0 && Math.floor(row.ts / ms) !== Math.floor(bucket[0].ts / ms)) flush()
+    bucket.push(row)
+  }
+  flush()
+  return out
+}
+
 /** An axis's extent and the ticks that name it. */
 export type Scale = { domain: [number, number]; ticks: number[] }
 

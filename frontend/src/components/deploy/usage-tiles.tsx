@@ -69,7 +69,7 @@ export function UsageTiles({
   const streamedCpu = stats?.cpuReady ? stats.cpuPercent : undefined
   const cpuShare =
     streamedCpu !== undefined && stats?.cpuLimit ? streamedCpu / stats.cpuLimit : undefined
-  const cpu = streamedCpu ?? recorded?.cpu
+  const cpu = streamedCpu ?? recorded?.cpu ?? undefined
   const memory = stats?.memUsage ?? recorded?.memBytes
   const mib = memory !== undefined ? memory / 1024 / 1024 : 0
   const gib = mib >= 1024
@@ -96,7 +96,7 @@ export function UsageTiles({
       trend:
         cpuShare === undefined &&
         trend(
-          points.map((point) => point.cpuPeak),
+          points.flatMap((point) => (point.cpuPeak === null ? [] : [point.cpuPeak])),
           "CPU",
           "var(--chart-1)",
         ),

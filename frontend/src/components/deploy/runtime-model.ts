@@ -1,7 +1,10 @@
 import type {
   Container,
+  DeploymentEngineRun,
+  DeploymentRelease,
   DeploymentRuntimeService,
   FailureDiagnosis,
+  MetricEvent,
   PortExposure,
   PortScope,
 } from "@/lib/types"
@@ -165,4 +168,59 @@ export function runtimeContainer(
     composeStack: service.stack ?? listed?.composeStack,
     composeService: service.service ?? listed?.composeService,
   }
+}
+
+/**
+ * This project's own moments, as markers for its usage charts: each release
+ * going live and each deployment that failed. The host's event feed marks
+ * every project's runs by name and the start of a run rather than the instant
+ * its release took traffic, so a step in this project's memory was drawn
+ * beside another project's deploy. Read from the releases and runs the page
+ * already holds, so it costs no request.
+ */
+export function releaseEvents(
+  releases: DeploymentRelease[],
+  runs: DeploymentEngineRun[],
+): MetricEvent[] {
+  const events: MetricEvent[] = []
+  for (const release of releases) {
+    if (release.activatedAt)
+      events.push({
+        ts: release.activatedAt,
+        kind: "deploy",
+        title: `Release #${release.number} went live`,
+        severity: "info",
+      })
+  }
+  for (const run of runs) {
+    if ((run.state === "failed" || run.state === "failed_activation") && run.endedAt)
+      events.push({
+        ts: run.endedAt,
+        kind: "deploy",
+        title: `Deployment #${run.runNumber} failed`,
+        detail: run.terminalReason,
+        severity: "error",
+      })
+  }
+  return events.sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
+}
+
+/**
+ * The live services a domain's requests reach. The proxy forwards to a port
+ * the release publishes, so a container publishing one is the answer; failing
+ * that, every live service that is not a database the release keeps beside
+ * it, and failing that the first live one. Nothing names the proxy's target
+ * on a service, so this is read from what each container does.
+ */
+export function publicServices(
+  services: DeploymentRuntimeService[],
+  publishes: (service: DeploymentRuntimeService) => boolean,
+  isDatabase: (service: DeploymentRuntimeService) => boolean,
+): DeploymentRuntimeService[] {
+  const live = services.filter((service) => service.liveRelease)
+  const published = live.filter(publishes)
+  if (published.length > 0) return published
+  const applications = live.filter((service) => !isDatabase(service))
+  if (applications.length > 0) return applications
+  return live.slice(0, 1)
 }

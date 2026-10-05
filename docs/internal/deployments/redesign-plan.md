@@ -439,11 +439,17 @@ redesigned every page of the section, and every sheet, dialog and menu on them, 
   the opened request (now with Copy as curl and Block) and Insights draw a request by the log
   console's colours; Insights opens on a response-time ladder whose marks narrow the rows to
   requests that slow; Events are grouped under hour rules with each event on its product's tile.
-- **Runtime and the consoles.** Services are cards drawn as their image's product with processor,
-  memory and ports joined from Docker, the candidate of a run in flight lit; then Resource usage —
-  five live readings (processor, memory, received, sent, processes) over the container's charts,
-  Live from the stats socket a frame a second and 1h–7d from the recorded history (until 0.7.1 four
-  tiles with a sparkline each, and the charts a separate Usage history block at the foot) — then
+- **Runtime and the consoles.** The page opens on a map of how the live release runs: its
+  domains wired to the containers that answer them, and those to the volumes, folders and
+  databases they keep, every mark a product's. Services are cards drawn as their image's product
+  with processor, memory and ports joined from Docker, restarts and an OOM kill said on the card,
+  the candidate of a run in flight lit; then Usage — a switcher of the services' products over
+  processor, memory, network, disk and processes charts, each headed by its reading now, with the
+  container's totals since it started beside the last, Live from the stats socket in five-second
+  buckets and 1h–7d from the recorded history, marked with this project's releases and failed
+  deployments (until 0.7.1 four tiles with a sparkline each, and the charts a separate Usage
+  history block at the foot; then five tiles over the charts, until the operator asked for them to
+  go) — then
   domains with their issuer and days left, storage beside backups from `xl`, and dependencies
   linking to the backup job or connection they name. Each
   join that fails leaves its block saying so in its header. The Docker console is one strip over a

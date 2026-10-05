@@ -234,14 +234,17 @@ export type ContainerSparkline = {
 export type ContainerHistoryPoint = {
   ts: string
   samples: number
-  cpu: number
-  cpuPeak: number
+  /** Null for a bucket whose samples had no CPU interval: the first after a start. */
+  cpu: number | null
+  cpuPeak: number | null
   mem: number
   memPeak: number
   memBytes: number
   memBytesPeak: number
   memLimit: number
+  /** The bucket's mean process count; `pidsPeak` is its highest. */
   pids: number
+  pidsPeak?: number
   /** Bytes per second, differenced from the cumulative counters Docker reports. */
   netRx: number | null
   netTx: number | null
@@ -2836,6 +2839,12 @@ export type DeploymentRuntimeService = {
   startedAt?: string
   /** The image reference the container was created from, as Docker reports it. */
   image?: string
+  /** How often Docker has restarted it under its restart policy; absent when none. */
+  restartCount?: number
+  /** The last exit status, only for a container that is not running. */
+  exitCode?: number
+  /** The kernel killed it for exceeding its memory. */
+  oomKilled?: boolean
 }
 
 export type DeploymentRuntimeServices = {

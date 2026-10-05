@@ -41,6 +41,12 @@ since a tab was opened, and charts that start empty every visit cannot show last
   return null rates, not zeroes or spikes. Additive nullable availability/limit/counter columns leave old
   rows unknown; positive legacy counters can still establish availability. Only explicitly configured
   memory limits become historical limit lines, rather than Docker's default host RAM ceiling.
+- `cpu_percent` is `NOT NULL`, so a sample with no interval to measure is stored as 0. `ContainerRange`
+  treats those as absent — the first sample after a container starts (no predecessor under its id), a
+  counter reset, or a gap — and `cpu`/`cpuPeak` are `null` for a bucket with no measured interval, so a
+  deploy does not draw an idle dip. Rows from before `container_id` existed keep their stored value. A
+  recorder restart under an unchanged container id is not distinguishable and still stores a 0.
+  Each point also carries `pidsPeak` (the bucket's maximum) beside the mean `pids`.
 - The recorder keeps its **own** `sysinfo.Collector` and `dockerx.StatsSampler`: rates are deltas, and
   sharing with request handlers would let a one-shot `GET /system/metrics` shorten the next interval.
 

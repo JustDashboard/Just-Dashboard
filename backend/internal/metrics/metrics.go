@@ -196,8 +196,10 @@ type ContainerPoint struct {
 	TS      time.Time `json:"ts"`
 	Samples int       `json:"samples"`
 
-	CPU     float64 `json:"cpu"`
-	CPUPeak float64 `json:"cpuPeak"`
+	// Null means no sample in the bucket measured an interval, as for the
+	// first sample after a container starts. Zero is a measured idle.
+	CPU     *float64 `json:"cpu"`
+	CPUPeak *float64 `json:"cpuPeak"`
 
 	Mem     float64 `json:"mem"`
 	MemPeak float64 `json:"memPeak"`
@@ -211,7 +213,8 @@ type ContainerPoint struct {
 	// growth and an average across an hour blunts exactly that.
 	SizeRw uint64 `json:"sizeRw"`
 
-	PIDs float64 `json:"pids"`
+	PIDs     float64 `json:"pids"`
+	PIDsPeak uint64  `json:"pidsPeak"`
 
 	// Bytes per second, differenced before bucketing and weighted by elapsed
 	// time. Null means no valid interval, including first samples and resets.

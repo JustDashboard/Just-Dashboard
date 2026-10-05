@@ -108,8 +108,14 @@ func (s *Server) handleContainerAnomalies(w http.ResponseWriter, r *http.Request
 
 	points := make([]dockerx.MetricPoint, 0, len(series.Points))
 	for _, p := range series.Points {
+		// A bucket with no measured CPU is fed as idle: it can end a run of
+		// sustained load but never extend one.
+		var cpu, cpuPeak float64
+		if p.CPU != nil && p.CPUPeak != nil {
+			cpu, cpuPeak = *p.CPU, *p.CPUPeak
+		}
 		points = append(points, dockerx.MetricPoint{
-			TS: p.TS, CPU: p.CPU, CPUPeak: p.CPUPeak,
+			TS: p.TS, CPU: cpu, CPUPeak: cpuPeak,
 			MemBytes: p.MemBytes, MemLimit: p.MemLimit, MemPeak: p.MemPeak,
 			SizeRw: p.SizeRw,
 		})

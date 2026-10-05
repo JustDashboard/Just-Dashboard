@@ -195,15 +195,32 @@ type StatsSampler struct {
 
 	mu   sync.Mutex
 	prev map[string]cpuCounters
+	// maxAge bounds how far back a previous sample may be and still be
+	// differenced against. Zero means no bound, which suits a recorder that
+	// samples on a steady cadence.
+	maxAge time.Duration
 }
 
 type cpuCounters struct {
 	total  uint64
 	system uint64
+	at     time.Time
 }
 
 func (c *Client) NewStatsSampler() *StatsSampler {
 	return &StatsSampler{client: c, prev: map[string]cpuCounters{}}
+}
+
+// WithMaxAge makes a previous sample older than d count as absent.
+//
+// A sampler shared by whoever happens to call it differences against the
+// previous caller, who may have been an hour ago; the result is an average
+// over that hour presented as the reading now. Past the bound the sample
+// reports no CPU (CPUReady false) and becomes the new baseline, so the next
+// call inside the bound gets a recent interval.
+func (s *StatsSampler) WithMaxAge(d time.Duration) *StatsSampler {
+	s.maxAge = d
+	return s
 }
 
 // applyHostCapacity separates "limited to the whole machine" from "not
@@ -346,10 +363,13 @@ func (s *StatsSampler) fillCPU(id string, st *ContainerStats, cpus float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	prev, ok := s.prev[id]
-	s.prev[id] = cpuCounters{total: st.CPUTotal, system: st.SystemCPU}
+	s.prev[id] = cpuCounters{total: st.CPUTotal, system: st.SystemCPU, at: st.TS}
 	if !ok || st.CPUReady {
 		// Either nothing to difference against, or the sample already carried
 		// its own predecessor because it came from the streaming endpoint.
+		return
+	}
+	if s.maxAge > 0 && st.TS.Sub(prev.at) > s.maxAge {
 		return
 	}
 	st.CPUReady = st.CPUTotal >= prev.total && st.SystemCPU > prev.system && cpus > 0
@@ -364,13 +384,25 @@ func (s *StatsSampler) fillCPU(id string, st *ContainerStats, cpus float64) {
 // containers often does not accumulate their counters for the life of the
 // process. A nil set clears everything, which is what "nothing is running"
 // means.
+//
+// A sampler with no age bound is called with every running container, so one
+// missing from a call has stopped. One with a bound is called by whoever asks,
+// often for a single project's containers, so a missing container is usually
+// another caller's: its baseline is kept until it is too old to difference
+// against, or two pages polling different projects would erase each other's
+// and neither would ever read a CPU figure.
 func (s *StatsSampler) forget(seen map[string]struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id := range s.prev {
-		if _, ok := seen[id]; !ok {
-			delete(s.prev, id)
+	now := time.Now()
+	for id, prev := range s.prev {
+		if _, ok := seen[id]; ok {
+			continue
 		}
+		if s.maxAge > 0 && now.Sub(prev.at) <= s.maxAge {
+			continue
+		}
+		delete(s.prev, id)
 	}
 }
 

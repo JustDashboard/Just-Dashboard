@@ -3,7 +3,9 @@ import {
   failureTone,
   isImageDigest,
   mountTargetProduct,
+  publicServices,
   publishedPorts,
+  releaseEvents,
   runtimeContainer,
   shortDigest,
   wantsFailureReading,
@@ -177,5 +179,80 @@ describe("runtimeContainer", () => {
     const container = runtimeContainer(service, listed)
     expect(container.state).toBe("running")
     expect(container.status).toBe("running")
+  })
+})
+
+describe("this project's chart markers", () => {
+  test("each release going live and each failed deployment, oldest first", () => {
+    const events = releaseEvents(
+      [
+        { number: 3, activatedAt: "2026-09-03T11:00:00Z" },
+        { number: 4 },
+        { number: 2, activatedAt: "2026-09-02T09:00:00Z" },
+      ],
+      [
+        {
+          runNumber: 9,
+          state: "failed",
+          endedAt: "2026-09-03T10:00:00Z",
+          terminalReason: "exit 1",
+        },
+        { runNumber: 8, state: "succeeded", endedAt: "2026-09-03T08:00:00Z" },
+        { runNumber: 7, state: "failed" },
+      ],
+    )
+    expect(events.map((event) => event.title)).toEqual([
+      "Release #2 went live",
+      "Deployment #9 failed",
+      "Release #3 went live",
+    ])
+    expect(events[1]).toMatchObject({ severity: "error", detail: "exit 1", kind: "deploy" })
+  })
+})
+
+describe("which services a domain reaches", () => {
+  const service = (name, overrides = {}) => ({
+    name,
+    containerId: name,
+    liveRelease: true,
+    ...overrides,
+  })
+  const web = service("web")
+  const db = service("postgres")
+  const old = service("web-old", { liveRelease: false })
+
+  test("a live service that publishes a port is the proxy's target", () => {
+    const reached = publicServices(
+      [db, web, old],
+      (one) => one.name.startsWith("web"),
+      (one) => one.name === "postgres",
+    )
+    expect(reached.map((one) => one.name)).toEqual(["web"])
+  })
+
+  test("without a published port, every live service that is not a database", () => {
+    const reached = publicServices(
+      [db, web],
+      () => false,
+      (one) => one.name === "postgres",
+    )
+    expect(reached.map((one) => one.name)).toEqual(["web"])
+  })
+
+  test("a release of only databases still reaches its first live service", () => {
+    expect(
+      publicServices(
+        [old, db],
+        () => false,
+        () => true,
+      ).map((one) => one.name),
+    ).toEqual(["postgres"])
+    expect(
+      publicServices(
+        [old],
+        () => false,
+        () => false,
+      ),
+    ).toEqual([])
   })
 })

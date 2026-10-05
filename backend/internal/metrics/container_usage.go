@@ -18,6 +18,13 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 	}
 	series := &ContainerSeries{Window: window, Name: name, Points: []ContainerPoint{}}
 	gap := int64(3 * r.interval / time.Second)
+	// cpu_percent is NOT NULL, so a sample with no interval to measure is
+	// stored as 0 and only recognisable here: the first sample after a
+	// container starts has no predecessor under its id, and a reset or a long
+	// gap has no usable interval either. Those samples leave the CPU figures
+	// null rather than drawing an idle dip. Rows from before container ids
+	// were recorded (container_id = '') keep their stored value.
+	//
 	// Difference BEFORE bucketing. MAX(counter)-MIN(counter) inside a bucket
 	// loses every boundary interval, turns single-sample buckets into zero,
 	// and treats a counter reset as a spike. The bounded look-behind includes
@@ -48,9 +55,10 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 		  FROM previous WHERE ts >= ?
 		)
 		SELECT (ts / ?) * ? AS bucket, COUNT(*),
-		  AVG(cpu_percent), MAX(cpu_percent), AVG(mem_percent), MAX(mem_percent),
+		  AVG(CASE WHEN dt IS NOT NULL OR container_id = '' THEN cpu_percent END),
+		  MAX(CASE WHEN dt IS NOT NULL OR container_id = '' THEN cpu_percent END), AVG(mem_percent), MAX(mem_percent),
 		  AVG(mem_bytes), MAX(mem_bytes), MAX(CASE WHEN mem_limited = 1 THEN mem_limit ELSE 0 END),
-		  AVG(pids), MAX(size_rw),
+		  AVG(pids), MAX(size_rw), MAX(pids),
 		  1.0 * SUM(CASE WHEN dt IS NOT NULL THEN rx END) / SUM(CASE WHEN rx IS NOT NULL THEN dt END),
 		  1.0 * SUM(CASE WHEN dt IS NOT NULL THEN tx END) / SUM(CASE WHEN tx IS NOT NULL THEN dt END),
 		  1.0 * SUM(CASE WHEN dt IS NOT NULL THEN rd END) / SUM(CASE WHEN rd IS NOT NULL THEN dt END),
@@ -65,17 +73,21 @@ func (r *Recorder) ContainerRange(ctx context.Context, name string, from, to tim
 	for rows.Next() {
 		var bucket int64
 		var p ContainerPoint
-		var memBytes, memPeak, memLimit, sizeRw float64
+		var memBytes, memPeak, memLimit, sizeRw, pidsPeak float64
 		if err := rows.Scan(&bucket, &p.Samples, &p.CPU, &p.CPUPeak, &p.Mem, &p.MemPeak,
-			&memBytes, &memPeak, &memLimit, &p.PIDs, &sizeRw,
+			&memBytes, &memPeak, &memLimit, &p.PIDs, &sizeRw, &pidsPeak,
 			&p.NetRx, &p.NetTx, &p.BlockRead, &p.BlockWrite,
 			&p.NetRxPeak, &p.NetTxPeak, &p.BlockReadPeak, &p.BlockWritePeak); err != nil {
 			return nil, err
 		}
 		p.TS = time.Unix(bucket, 0).UTC()
 		p.MemBytes, p.MemBytesPeak, p.MemLimit = uint64(memBytes), uint64(memPeak), uint64(memLimit)
-		p.SizeRw = uint64(sizeRw)
-		p.CPU, p.CPUPeak = round2(p.CPU), round2(p.CPUPeak)
+		p.SizeRw, p.PIDsPeak = uint64(sizeRw), uint64(pidsPeak)
+		for _, v := range []*float64{p.CPU, p.CPUPeak} {
+			if v != nil {
+				*v = round2(*v)
+			}
+		}
 		p.Mem, p.MemPeak, p.PIDs = round1(p.Mem), round1(p.MemPeak), round1(p.PIDs)
 		series.Points = append(series.Points, p)
 	}
