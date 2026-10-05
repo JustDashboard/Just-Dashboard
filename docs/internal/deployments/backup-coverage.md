@@ -15,6 +15,12 @@ archive roots, exclusions, original destination and SHA-256 digest. The migratio
 with no manifest remain listable/restorable but cannot satisfy the coverage gate. The gate checks both
 the current job and the completed run: editing a job cannot make an old artifact cover new data.
 
+Existing-workload recovery can automatically link an enabled, unfiltered saved job whose latest
+successful archive verifies complete writable bind/local-volume coverage. Matching is bounded to
+15 seconds, 256 MiB and a successful run within 24 hours; import neither creates nor runs a job.
+Unsupported or incomplete evidence leaves the warning in place. The normal gate verifies the linked
+policy again before a later deployment stops the application.
+
 Full persistent-data coverage rejects any exclusion filter. Every requested path must be under a recorded
 source and present in the verified tar archive. Checking actual entries prevents a directory created after
 the backup from being considered covered merely because its parent was backed up. Missing, incomplete,

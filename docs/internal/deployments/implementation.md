@@ -1449,8 +1449,8 @@ only renderer/executor/validation authority for their feature.
   same `<slug>-<hash>` shape a blueprint's own volumes already get (`blueprintVolumePrefix`, keyed on the new
   name and the old literal volume name so two mounts never collide) — committing the duplicate unchanged
   would otherwise hand it the source project's own live volume. Runtime ownership dependencies are
-  omitted and `composeProjectName` is cleared: a duplicate has no authority over the original runtime
-  or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
+  omitted, along with all externally owned imported proxy links, and `composeProjectName` is cleared:
+  a duplicate has no authority over the original runtime, proxy or stack namespace. Shared writable linked/observed storage and writable bind paths are refused
   before a draft is created. Compose sources additionally need inspectable files without fixed
   container names, external/fixed-name networks, inherited runtime namespaces, external links or
   shared writable volumes. Project-scoped Compose volumes remain supported, including declarations

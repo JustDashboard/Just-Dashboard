@@ -140,7 +140,9 @@ configuration plus authoritative active-manager evidence; unsynced Caddy configu
 Discovery never guesses a domain from `APP_URL` or assigns every hostname to every stack service.
 
 A verified host-port upstream stays unchanged. A Docker alias requires exact network membership and
-one verified running owner. A literal container-IP upstream can receive a targeted, reversible
+one verified running owner, or direct identity/network/alias proof for its captured intentionally
+stopped original. Rollback can retain that exact original stopped state; a replacement must be the
+sole running owner and match the verified managed target. A literal container-IP upstream can receive a targeted, reversible
 address update on **Deploy changes** when the exact persisted nginx directive or closed Caddy
 `reverse_proxy` literal can be isolated. A private durable journal binds before/after bytes and
 configuration identity; validate/reload failures compensate, and rollback reconciles the restored
