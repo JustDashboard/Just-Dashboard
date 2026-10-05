@@ -16,12 +16,18 @@ func TestWorkloadIngressCaptureFailurePersistsAnUnverifiedLink(t *testing.T) {
 	if err := os.Mkdir(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "nginx"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(`#!/bin/sh
+case "$1" in
+ ps) printf 'owned-edge\n' ;;
+ inspect) printf '%s\n' '[{"Id":"owned-edge","Name":"/observed-caddy","State":{"Running":true},"Config":{"Cmd":["caddy","run","--config","/etc/caddy/Caddyfile"]},"NetworkSettings":{"Ports":{"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"80"}]}}}]' ;;
+ *) exit 1 ;;
+esac
+`), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin)
 	s := &Server{}
-	s.modules.proxy = proxysvc.New(root, filepath.Join(root, "Caddyfile"))
+	s.modules.proxy = proxysvc.NewWithDockerIngress(root, filepath.Join(root, "Caddyfile"))
 	recovered := &deploy.RecoveredWorkload{Adoption: &deploy.WorkloadAdoption{Key: "systemd:fixture", BaselineDigest: "sha256:original", Snapshot: json.RawMessage(`{"version":1}`)}}
 	result, err := s.attachWorkloadIngress(t.Context(), &deploy.WorkloadCandidate{Kind: "systemd"}, recovered, nil)
 	if err != nil {

@@ -179,9 +179,27 @@ http://neighbor.example.test {
 	if err := svc.VerifyExistingIngress(ctx, stopped); err != nil {
 		t.Fatal("verified stopped baseline rejected during review", err)
 	}
-	if err := svc.ApplyExistingIngress(ctx, 51, 61, stopped, targets); !errors.Is(err, ErrExistingIngressChanged) || string(mustIngressRead(t, source)) != aliasConfig {
-		t.Fatal("stopped final target accepted or proxy changed", err)
+	if err := svc.ApplyExistingIngress(ctx, 51, 61, stopped, targets); err != nil || string(mustIngressRead(t, source)) != aliasConfig {
+		t.Fatal("intentionally stopped original was not preserved during recovery", err)
 	}
+	stoppedCandidate := append([]ExistingIngressTarget(nil), targets...)
+	stoppedCandidate[0].ContainerID = strings.Repeat("f", 64)
+	if err := svc.ApplyExistingIngress(ctx, 51, 62, stopped, stoppedCandidate); !errors.Is(err, ErrExistingIngressChanged) || string(mustIngressRead(t, source)) != aliasConfig {
+		t.Fatal("stopped replacement accepted or proxy changed", err)
+	}
+	stoppedPeer, _ := startApp("stopped-peer", "api", "foreign")
+	stoppedCollision, err := capture()
+	if err != nil {
+		t.Fatal(err)
+	}
+	collisionBlocked := false
+	for _, binding := range stoppedCollision {
+		collisionBlocked = collisionBlocked || (binding.Service == "api" && binding.Status == "blocked")
+	}
+	if !collisionBlocked {
+		t.Fatal("foreign running alias replaced stopped original evidence")
+	}
+	docker("rm", "-f", "-v", stoppedPeer)
 	docker("start", blueID)
 	blueIP = docker("inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", blueID)
 	targets[0].Address, targets[0].Stopped = blueIP, false

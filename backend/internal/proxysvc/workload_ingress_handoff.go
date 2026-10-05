@@ -249,7 +249,16 @@ func (s *Service) ApplyExistingIngress(ctx context.Context, owner, release int64
 			if err != nil {
 				return err
 			}
-			if !matched || mode != "network_alias" || target.Service != binding.Service || target.Stopped || !runningIngressAliasOwned(binding, target.ContainerID, containers) {
+			if !matched || mode != "network_alias" || target.Service != binding.Service {
+				return ErrExistingIngressChanged
+			}
+			if target.Stopped {
+				// Recovery preserves an intentionally stopped original service.
+				// A stopped replacement cannot reuse that baseline exception.
+				if !binding.CapturedStopped || target.ContainerID != binding.TargetContainerID || s.verifyStoppedIngressAlias(ctx, binding, containers) != nil {
+					return ErrExistingIngressChanged
+				}
+			} else if !runningIngressAliasOwned(binding, target.ContainerID, containers) {
 				return ErrExistingIngressChanged
 			}
 		}

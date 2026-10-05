@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExistingCaddyIngressKeepsHostPathUpstreamCorrelation(t *testing.T) {
@@ -293,5 +294,41 @@ func TestExistingIngressStoppedAliasRequiresExactCapturedContainer(t *testing.T)
 	container.State.Running = false
 	if stoppedIngressAlias(binding, container) {
 		t.Fatal("missing captured network was accepted")
+	}
+}
+
+func TestExistingIngressIgnoresInstalledInactiveOrUnassociatedNginx(t *testing.T) {
+	for _, scenario := range []string{"installed", "stopped", "unassociated"} {
+		t.Run(scenario, func(t *testing.T) {
+			root := t.TempDir()
+			bin := filepath.Join(root, "bin")
+			if err := os.Mkdir(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(bin, "nginx"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin)
+			s := New(root, filepath.Join(root, "Caddyfile"))
+			s.pending.processes = func() ([]nginxProcess, error) {
+				if scenario == "unassociated" {
+					return []nginxProcess{{PID: 5, Title: "nginx: master process nginx -c /operator/other/nginx.conf", Ticks: 2}}, nil
+				}
+				return nil, nil
+			}
+			bindings, err := s.CaptureExistingIngress(t.Context(), []ExistingIngressTarget{{Service: "app", Host: "127.0.0.1", Port: 3000}})
+			if err != nil || len(bindings) != 0 {
+				t.Fatal("binary presence became a proxy dependency", bindings, err)
+			}
+		})
+	}
+}
+
+func TestExistingIngressBlocksActiveUninspectableNginx(t *testing.T) {
+	s, root, running := pendingTree(t)
+	running.load(time.Now().Add(-time.Hour), 100)
+	writeFile(t, filepath.Join(root, "broken"), "invalid configuration")
+	if _, err := s.CaptureExistingIngress(t.Context(), []ExistingIngressTarget{{Service: "app", Host: "127.0.0.1", Port: 3000}}); err == nil {
+		t.Fatal("observed active nginx inspection failure became absence")
 	}
 }

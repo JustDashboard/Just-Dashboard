@@ -122,30 +122,31 @@ func (s *Service) CaptureExistingIngress(ctx context.Context, targets []Existing
 		if err != nil {
 			return nil, errors.New("existing nginx configuration cannot be verified")
 		}
-		files, err := s.EffectiveConfig(ctx)
-		if err != nil {
-			return nil, errors.New("existing nginx configuration cannot be inspected")
-		}
-		tree, err := NginxTree(files)
-		if err != nil {
-			return nil, err
-		}
-		ready := pending.Running && pending.Reason == "" && pending.Problem == "" && len(pending.Files) == 0
-		bindings := existingNginxBindings(tree, files, targets, ready)
-		if !pending.Running {
-			bindings = nil
-		}
-		for i := range bindings {
-			resolved, resolveErr := s.allowedPath(bindings[i].SourcePath)
-			if resolveErr != nil {
-				bindings[i].Status, bindings[i].Continuity, bindings[i].PlannedChange = "blocked", "unverified", "The original proxy source is outside its permitted configuration directory."
-				continue
+		// An installed binary, stopped daemon or master reading another
+		// configuration does not establish a route owned by this manager.
+		if pending.Running {
+			files, err := s.EffectiveConfig(ctx)
+			if err != nil {
+				return nil, errors.New("existing nginx configuration cannot be inspected")
 			}
-			bindings[i].SourcePath = resolved
-			bindings[i].SourceIdentity = ingressFileIdentity(resolved)
-			bindings[i].ID = routeDigest("nginx\x00" + resolved + "\x00" + bindings[i].Selector + "\x00" + bindings[i].Hostname + "\x00" + bindings[i].Path + "\x00" + bindings[i].Service)
+			tree, err := NginxTree(files)
+			if err != nil {
+				return nil, err
+			}
+			ready := pending.Running && pending.Reason == "" && pending.Problem == "" && len(pending.Files) == 0
+			bindings := existingNginxBindings(tree, files, targets, ready)
+			for i := range bindings {
+				resolved, resolveErr := s.allowedPath(bindings[i].SourcePath)
+				if resolveErr != nil {
+					bindings[i].Status, bindings[i].Continuity, bindings[i].PlannedChange = "blocked", "unverified", "The original proxy source is outside its permitted configuration directory."
+					continue
+				}
+				bindings[i].SourcePath = resolved
+				bindings[i].SourceIdentity = ingressFileIdentity(resolved)
+				bindings[i].ID = routeDigest("nginx\x00" + resolved + "\x00" + bindings[i].Selector + "\x00" + bindings[i].Hostname + "\x00" + bindings[i].Path + "\x00" + bindings[i].Service)
+			}
+			out = append(out, bindings...)
 		}
-		out = append(out, bindings...)
 	}
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return nil, err
@@ -184,7 +185,7 @@ func (s *Service) CaptureExistingIngress(ctx context.Context, targets []Existing
 		}
 		for i := range bindings {
 			bindings[i].IngressIdentity, bindings[i].ContainerID = edge.Identity, edge.ID
-			if bindings[i].Continuity == "network_alias" && (s.verifyIngressAlias(ctx, bindings[i], containers, true) != nil || (!bindings[i].CapturedStopped && bindings[i].TargetContainerID != "" && !runningIngressAliasOwned(bindings[i], bindings[i].TargetContainerID, containers))) {
+			if bindings[i].Continuity == "network_alias" && ((bindings[i].CapturedStopped && s.verifyStoppedIngressAlias(ctx, bindings[i], containers) != nil) || (!bindings[i].CapturedStopped && !runningIngressAliasOwned(bindings[i], bindings[i].TargetContainerID, containers))) {
 				bindings[i].Status, bindings[i].Continuity, bindings[i].PlannedChange = "blocked", "unverified", "This network alias is shared by another running container; isolate the exact application upstream before Deploy changes."
 			}
 		}
@@ -360,8 +361,15 @@ func (s *Service) verifyIngressAlias(ctx context.Context, b ExistingIngressBindi
 	if exclusiveIngressAlias(b, containers) {
 		return nil
 	}
+	if !allowStopped {
+		return ErrExistingIngressChanged
+	}
+	return s.verifyStoppedIngressAlias(ctx, b, containers)
+}
+
+func (s *Service) verifyStoppedIngressAlias(ctx context.Context, b ExistingIngressBinding, containers []ingressContainer) error {
 	host, _, ok := ingressEndpoint(b.Upstream)
-	if !allowStopped || !ok || !b.CapturedStopped || len(b.TargetContainerID) != 64 {
+	if !ok || !b.CapturedStopped || len(b.TargetContainerID) != 64 {
 		return ErrExistingIngressChanged
 	}
 	for _, r := range b.TargetContainerID {

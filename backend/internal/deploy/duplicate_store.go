@@ -90,11 +90,11 @@ func (s *PlanningStore) Duplicate(
 	if err := validateDuplicateStorageAndCompose(source, plan); err != nil {
 		return nil, err
 	}
-	// Runtime dependencies reserve another project's existing manager. A new
-	// draft must earn its own runtime ownership when its first release starts.
+	// Runtime and external ingress dependencies reserve the source project's
+	// existing authority. A copy earns independent runtime and route ownership.
 	dependencies := make([]PlannedDependency, 0, len(plan.Dependencies))
 	for _, dependency := range plan.Dependencies {
-		if dependency.Kind != "runtime" {
+		if dependency.Kind != "runtime" && dependency.ResourceKind != existingIngressDependency {
 			dependencies = append(dependencies, dependency)
 		}
 	}
