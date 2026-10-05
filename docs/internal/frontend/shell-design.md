@@ -17,6 +17,17 @@ redirect to `/login` is convenience, not a control; every API call behind it is 
 **The scroll container is on the `SidebarInset`, not the document.** That is what lets a page ask for
 the remaining height (`<Page fill>`) instead of growing past the viewport.
 
+**A table comes fully on screen before its rows scroll.** A capped table (`max-h-[calc(100svh-22rem)]`
+and the like) is sized to fit under the page's header, so with the page anywhere but its top the
+wheel would scroll a grid half below the fold. Every `ui/table.tsx` container listens through
+`hooks/use-reveal-on-wheel.ts`: when the wheel would scroll its rows while the shell's scroll (or a
+dialog body's) clips part of it, the page first moves the smallest distance that shows the whole
+container — `lib/scroll-reveal.ts`, 12px clear of the edge, its top when it cannot fit — and holds the
+wheel while it glides, so the rows stay still under the reader. A wheel past the table's end already
+scrolls the page and is left alone, as are a table with nothing to scroll, sideways and Ctrl-zoom
+wheels; reduced motion jumps rather than glides. The database `DataGrid` fills its frame and has no
+page around it to move.
+
 ### The rail drills in
 
 **The sidebar shows one list at a time: the list for where you are.** Opening Docker replaces the list
