@@ -108,7 +108,9 @@ export function RunFailure({
             {step && (
               <p className="numeric text-xs text-muted-foreground">
                 {rolledBack ? "Stopped at " : "Failed at "}
-                <span className="font-medium text-foreground">{stepName(step.key)}</span>
+                <span className="font-medium text-foreground">
+                  {stepName(step.key, run.operation)}
+                </span>
                 {` · step ${reached} of ${steps.length}`}
                 {seconds !== undefined && ` · after ${formatDuration(seconds)}`}
                 {run.endedAt && ` · ${relativeTime(run.endedAt)}`}
@@ -153,7 +155,7 @@ export function RunFailure({
         <div className="space-y-3 px-4 pb-4">
           {tail.length > 0 && (
             <ol
-              aria-label={`Last lines from ${step ? stepName(step.key) : "the run"}`}
+              aria-label={`Last lines from ${step ? stepName(step.key, run.operation) : "the run"}`}
               className="overflow-hidden rounded-md border border-hairline bg-surface-sunken py-1.5 font-mono text-xs leading-6"
             >
               {tail.map((row) => (
@@ -182,21 +184,32 @@ export function RunFailure({
 
 /**
  * How a run that succeeded stands now: the release it made is live, at its
- * address, since when — or another has replaced it, and which.
+ * address, since when — or another has replaced it, and which. A Stop leaves
+ * its release the live one but not serving, until a newer run starts it again.
  */
 export function RunReady({
   live,
+  stopped,
+  startedSince,
+  stoppedAt,
   url,
   release,
   liveRelease,
   projectId,
 }: {
   live: boolean
+  /** The run was a Stop that succeeded. */
+  stopped: boolean
+  /** A newer run has started the stopped release again. */
+  startedSince: boolean
+  /** When the Stop finished. */
+  stoppedAt?: string
   url?: string
   release?: DeploymentRelease
   liveRelease?: DeploymentRelease
   projectId: number
 }) {
+  const serving = live && (!stopped || startedSince)
   return (
     <section
       aria-label="Outcome"
@@ -207,18 +220,29 @@ export function RunReady({
           aria-hidden
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-lg border",
-            live ? "border-rule-success bg-wash-success" : "border-hairline",
+            serving ? "border-rule-success bg-wash-success" : "border-hairline",
           )}
         >
-          {live ? <CheckCircle className="size-5 text-success" /> : <StatusDot tone="stopped" />}
+          {serving ? <CheckCircle className="size-5 text-success" /> : <StatusDot tone="stopped" />}
         </span>
         <div className="min-w-0 space-y-1">
           <p className="text-title leading-tight font-semibold tracking-tight">
-            {live
-              ? "Your release is ready"
-              : `Superseded — release #${liveRelease?.number ?? "—"} is live now`}
+            {!live
+              ? `Superseded — release #${liveRelease?.number ?? "—"} is live now`
+              : !stopped
+                ? "Your release is ready"
+                : startedSince
+                  ? `Started again since — release #${release?.number ?? "—"} is running`
+                  : "Your release is stopped"}
           </p>
-          {live && (
+          {live && stopped && !startedSince && (
+            <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              {release && <span className="numeric">Release #{release.number}</span>}
+              {stoppedAt && <span>stopped {relativeTime(stoppedAt)}</span>}
+              <span>visitors get an error until it is started</span>
+            </p>
+          )}
+          {serving && (
             <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               {url ? (
                 <a

@@ -27,6 +27,7 @@ import {
   formatDuration,
   frameworkLabel,
   groupedState,
+  stageName,
   stepName,
   stepSeconds,
   stepStateLabel,
@@ -156,6 +157,7 @@ export function RunDetails({
   projectId,
   deployment,
   steps,
+  operation,
   now,
   rows,
   lineCounts,
@@ -168,6 +170,8 @@ export function RunDetails({
   /** What the project is, for the marks of the steps that work with its source and build. */
   deployment?: DeploymentSummary
   steps: DeploymentStep[]
+  /** The run's operation, which names a step a Stop or Restart takes against the live release. */
+  operation?: string
   now: number
   /** The transcript's lines, for the last few a step wrote. */
   rows: ConsoleRow[]
@@ -214,7 +218,11 @@ export function RunDetails({
     RELEASE_GROUPS.map((group) => {
       const members = steps.filter((step) => (group.keys as readonly string[]).includes(step.key))
       for (const step of members) grouped.add(step.id)
-      return { label: group.label, state: groupedState(steps, group.keys), steps: members }
+      return {
+        label: stageName(group.label, operation),
+        state: groupedState(steps, group.keys),
+        steps: members,
+      }
     }).filter((stage) => stage.steps.length > 0)
   const rest = steps.filter((step) => !grouped.has(step.id))
   if (rest.length > 0) stages.push({ label: "Other", state: "pending", steps: rest })
@@ -260,6 +268,7 @@ export function RunDetails({
                       key={step.id}
                       step={step}
                       deployment={deployment}
+                      operation={operation}
                       now={now}
                       lines={lineCounts.get(step.id) ?? 0}
                       selected={step.id === current?.id}
@@ -282,6 +291,7 @@ export function RunDetails({
               projectId={projectId}
               deployment={deployment}
               step={current}
+              operation={operation}
               now={now}
               rows={rows}
               lines={lineCounts.get(current.id) ?? 0}
@@ -333,6 +343,7 @@ function StageHead({
 function StepRow({
   step,
   deployment,
+  operation,
   now,
   lines,
   selected,
@@ -344,6 +355,7 @@ function StepRow({
 }: {
   step: DeploymentStep
   deployment?: DeploymentSummary
+  operation?: string
   now: number
   lines: number
   selected: boolean
@@ -399,7 +411,7 @@ function StepRow({
                 step.state === "pending" && "text-muted-foreground",
               )}
             >
-              {stepName(step.key)}
+              {stepName(step.key, operation)}
             </span>
             <span className="numeric shrink-0 text-hint text-muted-foreground">
               {step.attempt > 1 && `attempt ${step.attempt} · `}
@@ -452,6 +464,7 @@ function Inspector({
   projectId,
   deployment,
   step,
+  operation,
   now,
   rows,
   lines,
@@ -460,6 +473,7 @@ function Inspector({
   projectId?: number
   deployment?: DeploymentSummary
   step: DeploymentStep
+  operation?: string
   now: number
   rows: ConsoleRow[]
   lines: number
@@ -470,15 +484,14 @@ function Inspector({
   const preflight = step.key === "analyze_plan" ? preflightOf(evidence) : undefined
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
+  const name = stepName(step.key, operation)
   return (
-    <section aria-label={stepName(step.key)} className="min-w-0 animate-rise space-y-6 p-4 sm:p-5">
+    <section aria-label={name} className="min-w-0 animate-rise space-y-6 p-4 sm:p-5">
       <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <StepTile step={step} state={step.state} deployment={deployment} size="md" />
           <div className="min-w-0 space-y-1">
-            <h3 className="truncate text-title font-semibold tracking-tight">
-              {stepName(step.key)}
-            </h3>
+            <h3 className="truncate text-title font-semibold tracking-tight">{name}</h3>
             <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <Status
                 tone={STEP_TONE[step.state] ?? "stopped"}
@@ -536,10 +549,7 @@ function Inspector({
                 : plural(lines, "line")}
             </span>
           </figcaption>
-          <ol
-            aria-label={`${stepName(step.key)} output`}
-            className="py-1.5 font-mono text-xs leading-6"
-          >
+          <ol aria-label={`${name} output`} className="py-1.5 font-mono text-xs leading-6">
             {tail.map((row) => (
               <TranscriptRow key={row.id} line={row.line} wrap needle="" tokens />
             ))}

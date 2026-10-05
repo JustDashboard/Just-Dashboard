@@ -156,23 +156,37 @@ export function runTone(state: DeploymentRunState | string): DotTone {
 }
 
 /**
+ * A Stop that succeeded leaves its release stopped, so "Ready" — the word for
+ * a release answering — would say the opposite of what the run did.
+ */
+export function runStopped(run: { state: string; operation?: string }) {
+  return run.operation === "stop" && run.state === "succeeded"
+}
+
+export function runLabel(state: DeploymentRunState | string, operation?: string) {
+  if (runStopped({ state, operation })) return "Stopped"
+  return RUN_LABELS[state as DeploymentRunState] ?? humanize(state)
+}
+
+/**
  * The one way a run's state is drawn: a dot and the reader's word for it.
  * `live` is only honest on the run page, where the row is fed by the stream.
  */
 export function RunStatus({
   state,
+  operation,
   live,
   className,
 }: {
   state: DeploymentRunState | string
+  operation?: string
   live?: boolean
   className?: string
 }) {
-  const label = RUN_LABELS[state as DeploymentRunState] ?? humanize(state)
   return (
     <Status
-      tone={runTone(state)}
-      label={label}
+      tone={runStopped({ state, operation }) ? "stopped" : runTone(state)}
+      label={runLabel(state, operation)}
       live={Boolean(live) && isActiveRun(state)}
       className={className}
     />
@@ -1469,8 +1483,25 @@ const STEP_LABELS: Record<string, string> = {
   legacy_pipeline: "Compatibility pipeline",
 }
 
-export function stepName(key: string) {
+// Restart, Stop and Start run `start_candidate` against the live release
+// rather than a new one (`liveReleaseStepLabels` in the same read model), and
+// a Stop read as "Start new release" looked like a deploy had been started.
+const LIVE_RELEASE_STEPS: Record<string, string> = {
+  restart: "Restart live release",
+  stop: "Stop live release",
+  start: "Start live release",
+}
+
+export function stepName(key: string, operation?: string) {
+  if (key === "start_candidate" && operation && LIVE_RELEASE_STEPS[operation]) {
+    return LIVE_RELEASE_STEPS[operation]
+  }
   return STEP_LABELS[key] ?? sentence(key)
+}
+
+/** A release-path stage's name; a Stop's one stage at work stops rather than starts. */
+export function stageName(label: string, operation?: string) {
+  return label === "Start" && operation === "stop" ? "Stop" : label
 }
 
 /**

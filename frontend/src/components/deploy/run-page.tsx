@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   External,
   Link as LinkGlyph,
+  Play,
   RefreshClockwise,
   StopCircle,
   Warning,
@@ -35,7 +36,6 @@ import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
 import {
-  RUN_LABELS,
   deploymentURL,
   hostOf,
   isActiveRun,
@@ -44,7 +44,8 @@ import {
   latestAttempts,
   projectProduct,
   runFailed,
-  sentence,
+  runLabel,
+  runStopped,
   stepName,
   useNow,
 } from "@/components/deploy/vocabulary"
@@ -114,7 +115,9 @@ export function RunPage() {
   // of the transcript.
   const [selectedStepId, setSelectedStepId] = useState<number>()
   const [inspectedStepId, setInspectedStepId] = useState<number>()
-  const [working, setWorking] = useState<"cancel" | "retry" | "redeploy" | "deploy" | "pin">()
+  const [working, setWorking] = useState<
+    "cancel" | "retry" | "redeploy" | "start" | "deploy" | "pin"
+  >()
   const checkedDeploy = useCheckedDeploy(projectId)
   // The transcript line a failure's cause points at, and a count so pressing
   // "Show the line" twice scrolls to it twice.
@@ -223,15 +226,23 @@ export function RunPage() {
 
   // A release that goes live while somebody is watching it build gets a
   // burst of paper. Only that: arriving at a page that already succeeded
-  // is not the moment, and neither is a retry that is still running.
+  // is not the moment, neither is a retry that is still running, and
+  // neither is a Stop, which takes the release down.
   const confetti = useRef<ConfettiRef>(null)
   const runState = snapshot?.run.state
+  const runOperation = snapshot?.run.operation
+  const refreshProject = project.refresh
   const wasActive = useRef(isActiveRun(runState))
   useEffect(() => {
     const activeNow = isActiveRun(runState)
-    if (wasActive.current && !activeNow && runState === "succeeded") confetti.current?.fire()
+    if (wasActive.current && !activeNow) {
+      // The run just changed the project — its live release, or a Stop's
+      // runtime — so it is read now rather than on its next poll.
+      refreshProject()
+      if (runState === "succeeded" && runOperation !== "stop") confetti.current?.fire()
+    }
     wasActive.current = activeNow
-  }, [runState])
+  }, [runState, runOperation, refreshProject])
 
   if (initial.loading && !snapshot) {
     return (
@@ -264,6 +275,11 @@ export function RunPage() {
   const deployment = project.data?.deployment
   const url = deploymentURL(deployment?.endpoint)
   const isLiveRelease = Boolean(run.releaseId) && deployment?.liveReleaseId === run.releaseId
+  // A Stop leaves its release the live one but not serving, until a newer run
+  // starts it again: a project read from before this run ended has no newer
+  // run, and does not say stopped yet.
+  const stopped = runStopped(run)
+  const startedSince = stopped && !deployment?.stopped && (deployment?.lastRun?.id ?? 0) > run.id
   const release = releases.data?.find((candidate) => candidate.id === run.releaseId)
   const liveRelease = releases.data?.find((candidate) => candidate.id === deployment?.liveReleaseId)
   // The release that stayed live when this run rolled back is the one its
@@ -352,17 +368,20 @@ export function RunPage() {
     if (asked) setWorking(undefined)
   }
 
-  const redeploy = async () => {
+  const enqueue = async (operation: "redeploy" | "start") => {
     if (working) return
-    setWorking("redeploy")
+    setWorking(operation)
     try {
       const created = await post<DeploymentEngineRun>(
         `/deploy/${projectId}/environments/${run.environmentId}/runs`,
-        { operation: "redeploy" },
+        { operation },
       )
       router.push(`/deploy/${projectId}/runs/${created.id}`)
     } catch (error) {
-      notify.error("Could not start deployment", error)
+      notify.error(
+        operation === "start" ? "Could not start the application" : "Could not start deployment",
+        error,
+      )
       setWorking(undefined)
     }
   }
@@ -482,13 +501,24 @@ export function RunPage() {
               : "Deploy with current settings"}
         </Button>
       )}
-      {canRun && run.state === "succeeded" && isLiveRelease && (
-        <Button variant="outline" size="sm" pending={working === "redeploy"} onClick={redeploy}>
+      {canRun && run.state === "succeeded" && isLiveRelease && !stopped && (
+        <Button
+          variant="outline"
+          size="sm"
+          pending={working === "redeploy"}
+          onClick={() => void enqueue("redeploy")}
+        >
           <RefreshClockwise className="size-3.5" />
           {working === "redeploy" ? "Redeploying…" : "Redeploy"}
         </Button>
       )}
-      {run.state === "succeeded" && isLiveRelease && url && (
+      {canRun && stopped && isLiveRelease && deployment?.stopped && (
+        <Button size="sm" pending={working === "start"} onClick={() => void enqueue("start")}>
+          <Play className="size-3.5" />
+          {working === "start" ? "Starting…" : "Start"}
+        </Button>
+      )}
+      {run.state === "succeeded" && isLiveRelease && !stopped && url && (
         <Button size="sm" asChild>
           <a href={url} target="_blank" rel="noopener noreferrer">
             <External className="size-3.5" /> Visit
@@ -508,8 +538,8 @@ export function RunPage() {
       <PageContext title={`Deployment #${run.runNumber}`} />
 
       <p className="sr-only" aria-live="polite" aria-atomic="true">
-        Deployment state: {RUN_LABELS[run.state] ?? sentence(run.state)}
-        {current ? `. Current step: ${stepName(current.key)}, ${current.state}` : ""}
+        Deployment state: {runLabel(run.state, run.operation)}
+        {current ? `. Current step: ${stepName(current.key, run.operation)}, ${current.state}` : ""}
       </p>
 
       <RunHeader
@@ -520,7 +550,13 @@ export function RunPage() {
         branch={project.data?.project.branch}
         steps={attempts}
         now={clock}
-        rollsBackTo={targetReleaseId ? releaseNumbers.get(targetReleaseId) : undefined}
+        // Redeploy, Restart, Stop and Start record the live release as their
+        // target too, which they act on rather than roll back to.
+        rollsBackTo={
+          run.operation === "rollback" && targetReleaseId
+            ? releaseNumbers.get(targetReleaseId)
+            : undefined
+        }
         projectId={projectId}
         verbs={verbs}
       />
@@ -529,7 +565,7 @@ export function RunPage() {
         <p className="text-body text-muted-foreground">Compatibility pipeline</p>
       ) : (
         <div className="flex flex-col gap-3">
-          <ReleasePipeline steps={attempts} now={clock} />
+          <ReleasePipeline steps={attempts} operation={run.operation} now={clock} />
           {/* The path lights the stage at work; before there is one, this
               says why nothing has started. */}
           {active && attempts.length === 0 && (
@@ -576,6 +612,9 @@ export function RunPage() {
       {run.state === "succeeded" && project.data && (
         <RunReady
           live={isLiveRelease}
+          stopped={stopped}
+          startedSince={startedSince}
+          stoppedAt={run.endedAt}
           url={url}
           release={release}
           liveRelease={liveRelease}
@@ -604,6 +643,7 @@ export function RunPage() {
             steps={attempts}
             active={active}
             outcome={run.state}
+            operation={run.operation}
             connected={stream.socket === "open"}
             startedAt={run.claimedAt ?? run.requestedAt}
             runNumber={run.runNumber}
@@ -620,6 +660,7 @@ export function RunPage() {
           projectId={projectId}
           deployment={deployment}
           steps={attempts}
+          operation={run.operation}
           now={clock}
           rows={rows}
           lineCounts={transcript.perStep}

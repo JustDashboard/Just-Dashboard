@@ -130,8 +130,12 @@ export function RunHeader({
           <span className={cn("truncate", titleIsLiteral && "font-mono text-body")}>{title}</span>
         </p>
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs max-sm:order-1 max-sm:col-span-3">
-          <RunStatus state={run.state} live />
-          {working && <TextShimmer className="font-medium">{stepName(working.key)}</TextShimmer>}
+          <RunStatus state={run.state} operation={run.operation} live />
+          {working && (
+            <TextShimmer className="font-medium">
+              {stepName(working.key, run.operation)}
+            </TextShimmer>
+          )}
           <span className="inline-flex items-center gap-1.5 text-muted-foreground">
             <Stopwatch aria-hidden className="size-3.5" />
             <span>{unclaimed ? "Queued for" : active ? "Running for" : "Took"}</span>
