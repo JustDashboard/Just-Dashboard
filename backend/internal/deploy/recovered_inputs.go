@@ -27,16 +27,21 @@ type RecoveredInput struct {
 }
 
 func (s *PlanningStore) validateRecoveredInputMutationTx(ctx context.Context, tx *sql.Tx, environmentID int64, name string, request *VariableWriteRequest) error {
-	var original, current string
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT src.config_json FROM deploy_sources src JOIN deploy_releases r ON r.source_id=src.id WHERE r.environment_id=e.id AND r.plan_revision=1 AND json_extract(r.provenance_json,'$.adopted')=1 ORDER BY r.id LIMIT 1),''), COALESCE((SELECT config_json FROM deploy_sources WHERE environment_id=e.id AND revision=e.desired_revision),'') FROM deploy_environments e WHERE e.id=?`, environmentID).Scan(&original, &current); err != nil {
+	var original, current, provenanceRaw string
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE((SELECT src.config_json FROM deploy_sources src JOIN deploy_releases r ON r.source_id=src.id WHERE r.environment_id=e.id AND r.plan_revision=1 AND json_extract(r.provenance_json,'$.adopted')=1 ORDER BY r.id LIMIT 1),''), COALESCE((SELECT config_json FROM deploy_sources WHERE environment_id=e.id AND revision=e.desired_revision),''), COALESCE((SELECT provenance_json FROM deploy_releases WHERE environment_id=e.id AND plan_revision=1 AND json_extract(provenance_json,'$.adopted')=1 ORDER BY id LIMIT 1),'') FROM deploy_environments e WHERE e.id=?`, environmentID).Scan(&original, &current, &provenanceRaw); err != nil {
 		return err
 	}
 	var baseline, desired DraftSourceConfig
 	if json.Unmarshal([]byte(original), &baseline) != nil || json.Unmarshal([]byte(current), &desired) != nil {
 		return nil
 	}
+	var provenance struct {
+		Inputs []RecoveredInput `json:"inputs"`
+	}
+	_ = json.Unmarshal([]byte(provenanceRaw), &provenance)
+	inputs := append(provenance.Inputs, recoveredInputBindings(baseline)...)
 	bound := false
-	for _, input := range recoveredInputBindings(baseline) {
+	for _, input := range inputs {
 		if input.StorageKey == name {
 			bound = true
 			break
@@ -167,30 +172,40 @@ func escapeRecoveredLiterals(value any, bindings map[string]string) {
 		}
 		return strings.ReplaceAll(text, "$", "$$")
 	}
+	transformRecoveredStrings(value, escape)
+}
+
+// Compose config produces a reusable document. Decode its existing escaping
+// before overlaying Engine strings, then encode the complete recovered model once.
+func decodeComposeRenderedLiterals(value any) {
+	transformRecoveredStrings(value, func(text string) string { return strings.ReplaceAll(text, "$$", "$") })
+}
+
+func transformRecoveredStrings(value any, transform func(string) string) {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
 			if text, ok := child.(string); ok {
-				typed[key] = escape(text)
+				typed[key] = transform(text)
 			} else {
-				escapeRecoveredLiterals(child, bindings)
+				transformRecoveredStrings(child, transform)
 			}
 		}
 	case map[string]string:
 		for key, text := range typed {
-			typed[key] = escape(text)
+			typed[key] = transform(text)
 		}
 	case []any:
 		for i, child := range typed {
 			if text, ok := child.(string); ok {
-				typed[i] = escape(text)
+				typed[i] = transform(text)
 			} else {
-				escapeRecoveredLiterals(child, bindings)
+				transformRecoveredStrings(child, transform)
 			}
 		}
 	case []string:
 		for i, text := range typed {
-			typed[i] = escape(text)
+			typed[i] = transform(text)
 		}
 	}
 }

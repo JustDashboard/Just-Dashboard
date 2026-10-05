@@ -252,6 +252,14 @@ func TestNativeSystemdStartupHandoffRetiresExactDirectLinks(t *testing.T) {
 	if err := VerifyCapturedStartup(capture, plan, journal); err != nil {
 		t.Fatal(err)
 	}
+	// Restoring links does not globally reload the manager. A target whose
+	// relationships were refreshed while retired can remain cached without
+	// the selected dependency until its next reload. Exact restored links
+	// still supply the original reboot authority.
+	fresh.StartupEvidence = json.RawMessage(`{}`)
+	if err := VerifyCapturedStartup(&fresh, plan, journal); err != nil {
+		t.Fatal("verified restored links with cached retired relationships rejected", err)
+	}
 }
 
 func TestNativeSystemdStartupHandoffRefusesSharedOrAmbiguousAuthority(t *testing.T) {

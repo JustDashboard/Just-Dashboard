@@ -1,7 +1,10 @@
 package deploy
 
 import (
+	"encoding/json"
 	"errors"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"gopkg.in/yaml.v3"
 	"strings"
 	"testing"
 )
@@ -24,6 +27,9 @@ func TestRecoveredInputsRetainServiceNamesAndLiteralValuesThroughAdoption(t *tes
 	}
 	ids := map[string]string{}
 	for _, input := range recovered.Adoption.Inputs {
+		if input.Kind == "log_option" && input.Service == "web" {
+			ids["web-log"] = input.StorageKey
+		}
 		if input.Name == "TELEGRAM_CHAT_ID" {
 			ids[input.Service] = input.StorageKey
 			if !input.Retained || input.Sensitivity != "plain" {
@@ -70,6 +76,12 @@ func TestRecoveredInputsRetainServiceNamesAndLiteralValuesThroughAdoption(t *tes
 		if view.Reference != nil {
 			t.Fatal("captured literal was treated as reference")
 		}
+	}
+	if ids["web-log"] == "" {
+		t.Fatal("log option display metadata missing")
+	}
+	if _, err := fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, ids["web-log"], 2); !errors.Is(err, ErrInvalidVariable) {
+		t.Fatal("bound runtime option deletion accepted", err)
 	}
 	if _, err := fixture.plans.DeleteVariable(t.Context(), adopted.ProjectID, adopted.EnvironmentID, ids["web"], 2); !errors.Is(err, ErrInvalidVariable) {
 		t.Fatal("bound input deletion accepted", err)
@@ -196,5 +208,40 @@ func TestLegacyRecoveredDraftRetainsInferenceMode(t *testing.T) {
 	variable.ValueMode = "reference"
 	if err := draft.validateRecoveredInputBindings(PlanConfiguration{Variables: []PlannedVariable{variable}}); !errors.Is(err, ErrInvalidVariable) {
 		t.Fatal("reference conversion accepted", err)
+	}
+}
+
+func TestRecoveredComposeRenderedLiteralsDecodeExactlyOnce(t *testing.T) {
+	candidate, reader, paths, root := scopedComposeFixture(t)
+	var model map[string]any
+	if err := json.Unmarshal(reader.compose, &model); err != nil {
+		t.Fatal(err)
+	}
+	rendered := "prefix$$UNSET-$${HOME}-$$$$"
+	object(object(model["services"])["missing"])["environment"] = map[string]any{"LITERAL": rendered}
+	model["x-literal"] = rendered
+	reader.compose = mustJSON(model)
+	originalDigest := digestBytes(mustJSON(model))
+	for _, capture := range reader.captures {
+		reader.images = map[string]*dockerx.ImageDetail{"example/unavailable:latest": capture.Image}
+		break
+	}
+	recovered, err := RecoverDockerWorkloadWithScope(t.Context(), candidate, reader, paths, root, RecoveryAllServices)
+	if err != nil {
+		t.Fatal(err, recovered.Adoption.Blockers)
+	}
+	if recovered.Adoption.OriginalConfigurationDigest != originalDigest {
+		t.Fatal("normalization changed original fresh-capture fence")
+	}
+	key := recoveryVariableName("missing", "env_LITERAL")
+	if got := recovered.Environment[key]; got != "prefix$UNSET-${HOME}-$$" {
+		t.Fatalf("already rendered env was captured as encoded bytes: %q", got)
+	}
+	var final map[string]any
+	if err := yaml.Unmarshal([]byte(recovered.Source.ComposeFiles[0].Content), &final); err != nil {
+		t.Fatal(err)
+	}
+	if final["x-literal"] != rendered {
+		t.Fatalf("rendered literal accumulated escaping: %q", final["x-literal"])
 	}
 }

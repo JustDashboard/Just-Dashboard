@@ -191,7 +191,8 @@ func VerifyCapturedStartup(capture *HostWorkloadCapture, plan *NativeStartupPlan
 		return nil
 	}
 	retired := journal.Phase == "retired"
-	if !retired {
+	restoredSystemd := plan.Manager == "systemd" && journal.Phase == "restored"
+	if !retired && !restoredSystemd {
 		return ErrHostWorkloadChanged
 	}
 	if plan.Manager == "pm2" {

@@ -67,7 +67,9 @@ authority. The additive `value_mode` migration defaults existing rows to the shi
 old drafts, snapshots and release digests retain that meaning. Run snapshots bind the mode alongside
 the value digest, and desired edits cannot change a frozen baseline's mode or values.
 
-Captured runtime strings escape literal dollar signs before Compose rendering. Temporary Compose
+Effective `compose config` output first loses its reusable-document dollar escaping, while its
+original serialized digest stays frozen for fresh inspection. Engine overlays and decoded retained
+fields then escape literal dollar signs once before Compose rendering. Temporary Compose
 interpolation files use Compose-specific literal encoding rather than Go string quoting, preserving
 dollars, quotes, backslashes, line breaks, Unicode and supported control bytes without expanding a
 captured value against the dashboard's process environment. Escaped source literals are distinguished

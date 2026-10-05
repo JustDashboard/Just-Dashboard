@@ -101,6 +101,7 @@ func RecoverDockerWorkloadWithScope(ctx context.Context, candidate WorkloadCandi
 	if candidate.Kind == "stack" && len(r.containers) > 0 {
 		r.readOriginalCompose(ctx, candidate, reader)
 		r.result.Adoption.OriginalConfigurationDigest = digestBytes(mustJSON(r.model))
+		decodeComposeRenderedLiterals(r.model)
 		if scope == RecoveryExistingServices {
 			r.applyExistingServicesScope(candidate)
 		}
