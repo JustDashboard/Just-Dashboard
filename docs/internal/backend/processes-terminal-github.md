@@ -8,9 +8,13 @@ using PID plus creation time as identity. Keyboard inspection and place restorat
 still read while paused. Signal and priority route guards remain the contracts below.
 
 `internal/procs/table.go` is a live inventory rather than a thin `ps` rendering. The kernel's cgroup
-membership identifies systemd services, containers and login sessions; an empty command line identifies a
-kernel worker; PM2's own PID list is overlaid by the handler because a PM2 child otherwise inherits its
-daemon's systemd cgroup. **Names are not used to guess ownership** — the same executable started by a
+membership identifies systemd services, containers and login sessions; an empty command line with
+`PF_KTHREAD` among the task flags in `/proc/<pid>/stat` identifies a kernel thread (an empty command line
+alone is also a zombie's, or a process's caught mid-exit, which stay `unmanaged`; a table whose `stat`
+cannot be read keeps the old reading); PM2's own PID list is overlaid by the handler because a PM2 child
+otherwise inherits its daemon's systemd cgroup. The handler names a container owner by the container's
+name (`managerLabel`, from a Docker listing kept for ten seconds; a Docker that does not answer leaves
+the id). **Names are not used to guess ownership** — the same executable started by a
 service and by a shell has a different remedy. Unknowns stay `unmanaged`, which is information rather than
 a failed detection. `ManagerOf` is the same reading under a given process table, which the ports
 listing uses with `HOST_PROC`; `Systemd.Sockets` is `systemctl list-sockets --all --show-types
@@ -20,6 +24,21 @@ socket-activated service's port.
 - Process disk counters are cumulative in `/proc`, so `Table` keeps one small, mutex-protected previous
   sample per PID and returns rates. The create timestamp participates in the identity because Linux reuses
   PIDs; a replacement starts with an unavailable rate until a new interval is measured, rather than inheriting the old process's apparent I/O spike.
+  The table's scans and the detail route share that sample, on their own clocks, so a read less than a
+  second after the last (`minRateWindow`) reports the last full window's rates and keeps its start
+  rather than measuring a few milliseconds of scheduler rounding. Every measured window also appends a
+  point — CPU, resident memory, read and write rates — to the process's history, at most one every two
+  seconds and the last ninety; the detail route returns it as `history`, so a sheet opens on a shape.
+  Memory is one `statm` read (resident, virtual and shared) with the share computed against the host's
+  total read once per scan, and swap is `VmSwap` from `status`: gopsutil's `MemoryPercent` read
+  `/proc/meminfo` once per process, and its `MemoryInfo` leaves swap at zero on Linux.
+- `/processes/inventory` also returns `groups`: workloads keyed by `GroupKey` — a systemd unit, a PM2
+  application or a container, or `name:<program>` for a session's or an unmanaged process, the program
+  being the first word of the name because Chrome and Node rewrite theirs to the whole argv — each with
+  its count, summed CPU and disk rates, its heaviest PID, and memory as each process's private pages
+  plus the largest shared figure among them, so twenty Postgres backends do not count their shared
+  buffers twenty times. The heaviest eight by CPU and eight by memory are returned, over the whole
+  snapshot like the facets; `group=<key>` filters the rows to one.
 - Concurrent inventory readers share a scan already in progress. Each receives its own row slice for
   sorting and PM2 enrichment, and canceling one reader does not cancel the others. The last reader's
   departure cancels collection; completed scans are not cached, so the next refresh starts fresh.
@@ -33,7 +52,10 @@ socket-activated service's port.
 - A signal or priority request carries the process's create timestamp. The server re-reads the PID and
   returns `process_replaced` if it now names something else, so a row left on screen cannot act on a reused
   PID. Signals remain destructive and confirmed; changing `nice` is reversible, audited, and
-  `system.admin`. PID 1 and the dashboard's own process remain refused in the backend.
+  `system.admin`. PID 1 and the dashboard's own process remain refused in the backend. A signal to a
+  kernel thread is refused as `409 kernel_thread` and a signal or priority to a zombie as
+  `409 process_zombie` naming its parent (`procs.Controllable`): the kernel ignores the first and the
+  second has already exited, and both used to answer a Kill with success.
 - The detail sheet exposes identity, cwd/executable links, resource counters and controls without returning
   environment variables (process environments routinely contain secrets). `Detail` also reads what the
   process listens on and how many connections it holds (`sockets` in `detail.go`, from gopsutil's
@@ -41,8 +63,13 @@ socket-activated service's port.
   than a number; a snapshot leaves those empty because reading every process's sockets on each poll
   costs more than the table. `GET /processes/{pid}/tree` returns the parent chain (outermost first)
   and direct children from one pass over the table, because the remedy for a runaway worker is
-  usually its supervisor. Signals are the existing `POST /processes/{pid}/signal`; the page offers
-  SIGTERM, SIGKILL, SIGSTOP/SIGCONT and SIGHUP as words with a sentence each. PM2 can gracefully reload and
+  usually its supervisor; each link's CPU is the sampler's last measured window for that process
+  (`cpuReady` false where there is none), not gopsutil's average over the process's whole life.
+  Signals are the existing `POST /processes/{pid}/signal`; the page offers SIGTERM, SIGKILL,
+  SIGSTOP/SIGCONT, SIGHUP, SIGINT, SIGUSR1 and SIGUSR2 as words with a sentence each, and none of them
+  to a kernel thread or a zombie, whose menu opens its parent instead. The detail sheet polls every two
+  seconds while open and stops, keeping the last reading, when the PID answers 404 or its creation
+  time changes. PM2 can gracefully reload and
   `pm2 save` persists the current list for an existing startup hook; it does not install or rewrite that
   platform-specific hook. The systemd sheet reads effective runtime properties beside the journal and
   links to the unit file; static units do not get an enable/disable control they cannot use. Its
@@ -445,7 +472,8 @@ unreadable counters cannot masquerade as a measured idle process. CPU counter re
 interval instead of reporting an idle process. Details share the sampler under its
 mutex, while concurrent full snapshots share the expensive read and receive independent rows.
 
-Resident and swapped bytes come from the process memory read. Handle investigation counts descriptors
+Resident and swapped bytes come from the process memory read (`statm`, and `VmSwap` from `status`,
+since gopsutil's Linux memory read leaves swap at zero). Handle investigation counts descriptors
 on at most 4096 processes and returns the top 20 with partial/unavailable evidence. Descriptor counts
 are not equivalent to the host's open-file-description count. The advisor reuses the process detail,
 owner deep links, admin priority route and destructive signal route; selected controls include the
