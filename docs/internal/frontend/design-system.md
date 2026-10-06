@@ -130,9 +130,10 @@ taking a frame:
   Databases section's reading pages — the control center's readings, attention list, fleet and found
   servers, a database's home, its Performance, Advisor, Search and Generate — each a title, a toolbar
   and a hairline, with every database, found server, generator and search hit on them a lit card,
-  and every block on the four Processes pages — the live table, the PM2 applications, the systemd
-  units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
-  a hairline under `StatTile` readings — four, and five on Scheduled (what fires next across cron and
+  and every block on the four Processes pages — the live table under its band of workloads, the
+  PM2 applications, the systemd units, and the cron jobs, timers and system cron files on
+  Scheduled, each a title, a toolbar and a hairline, the last three under `StatTile` readings —
+  four, and five on Scheduled (what fires next across cron and
   the timers together, the account's jobs, the runs cron started in the last day, the timers armed
   and what the packages run), whose Cron log is a plain panel holding the log's `Pane` and whose
   timers open their runs inside the table's own row, framed by nothing but the row — with a detail
@@ -895,8 +896,9 @@ above:
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
   the fleet's live and build-slot figures, the
   Overview's requests, the delivery insights, Automation's
-  revisions awaiting review and alerts firing, the live usage tiles, and the readings on
-  Packages, System users and the audit log. A figure that follows a
+  revisions awaiting review and alerts firing, the live usage tiles, the readings on
+  Packages, System users and the audit log, and every lens's readings (`ReadingTile`) — the logs
+  page's, a service page's and Security's alike. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
   count again on every keystroke; it rises once when it lands instead;
 - *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around anything whose work is in
@@ -1840,6 +1842,27 @@ The passes, in order. Each one is a diff you can review on its own.
    the newest until one is picked, its failing log line washed red, what the archive holds by its
    manifest — where a table of runs had the chosen one's log two screens below it.
 
+   The live Processes page took the exit in 0.7.1, because the operator found it still: four grey
+   figures over a table, and nothing on it that answered *who* was using the machine. Each figure
+   went where it was already said or said better. The process count is a fact in the identity line
+   and beside the table's title; running, sleeping, blocked and zombie are counted chips in the
+   table's head — the two that mean trouble in their tone, drawn only while there is one — which
+   narrow the table as well as count; unmanaged was already an owner chip, and the supervised
+   breakdown the owner chips' counts. What took their place is the question they never answered:
+   `components/procs/workloads.tsx`, the five heaviest workloads by processor and by memory as
+   spans of one bar the size of the machine, each rank a step of its measurement's hue (§10), the
+   rest of what the host reports in use one muted span, every span easing to the next poll and
+   every figure gliding to it. A workload is a supervisor's processes or the copies of one program
+   started by hand, summed by the backend over the whole snapshot with shared pages counted once,
+   so forty Chrome renderers are one row rather than forty; a press narrows the table to it. The
+   line of two buttons that stood above the identity line went into it, as Metrics' shortcuts did.
+   The table took fixed columns — sized to their content, a long command line had pushed Memory
+   and every row's menu past the panel's edge at 1280 — and draws CPU and memory as a figure beside
+   a short bar; a process new since the last poll rises (`useArrivals`). The process sheet lost its
+   two tabs for one scroll that opens on four live readings over the process's recent windows,
+   which the sampler keeps for every process it measures, so a sheet opened from a table that has
+   been open for minutes opens on those minutes.
+
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
    list of the recent messages beside the cards: the day's delivered, failed and retrying are the
@@ -2086,6 +2109,21 @@ pin a moment" caption and the shortcuts button that stood as two lines above the
 gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
 moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
 screen down.
+
+**The logs page took a deployment's Logs page in 0.7.1**, at the operator's request: its one strip
+held the source's name, its facts, an outlined Export box and the view tabs, the box and the
+underline meeting edge to edge at the right end of a 40px row, over a stray line holding nothing but
+the shortcuts button; and nothing on the page counted anything until Insights was opened. It now
+opens on the chosen source's identity line (`SourceIdentity`, the Overview's `HostIdentity` with its
+rule a step closer, since the console under it needs the height) — the source drawn as its product,
+its kind, state, path, size and rotated set as facts, Export and the shortcuts key at its end — and
+under it the lens's readings as `StatButton` tiles, each with its window's shape, counting up as it
+lands and narrowing the lines to what it counts. They hold still across Live, History and Insights,
+so Insights no longer draws its own over the window it picked. The strip is the rail toggle and the
+views from its leading edge, as a deployment's pane is. The tiles stand only where five fit across
+and the live tail keeps its height under them — a window of at least 1280 by 800, where five broke
+three and two at the old 200px tile floor, now 180 — and on a smaller window the same figures are
+the counts on the lens row's chips, the database workbench's answer.
 
 ## 16. Two registers
 

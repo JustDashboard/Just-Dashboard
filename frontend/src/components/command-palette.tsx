@@ -2,14 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import {
-  ArrowLeft,
-  CheckCircle,
-  Logout,
-  MagnifyingGlass,
-  Plus,
-  RefreshClockwise,
-} from "@/components/icons"
+import { CheckCircle, Logout, MagnifyingGlass, Plus, RefreshClockwise } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -31,19 +24,19 @@ import {
 } from "@/components/database/shell/nav-groups"
 import { databaseIdFrom } from "@/components/database/shell/routes"
 import { useSearchInventory } from "@/components/command-search/use-inventory"
-import {
-  COMMAND_ICONS,
-  GROUP_HUES,
-  HueDot,
-  KINDS,
-  PAGE_PRODUCTS,
-  ResultMark,
-  ScopeMark,
-} from "@/components/command-search/marks"
+import { COMMAND_ICONS, KINDS, PAGE_PRODUCTS, ResultMark } from "@/components/command-search/marks"
 import { KEYCAP, Keycaps } from "@/components/command-search/keycaps"
+import {
+  Preview,
+  visited,
+  type Destination,
+  type PreviewItem,
+} from "@/components/command-search/preview"
 import { Status } from "@/components/status-dot"
 import { Spinner } from "@/components/state"
-import { FilterChip } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { useArrivals } from "@/hooks/use-arrivals"
 import {
   highlight,
   localDestination,
@@ -54,7 +47,6 @@ import {
   searchItems,
   SEARCH_SCOPES,
   type RecentDestination,
-  type SearchItem,
   type SearchKind,
   type SearchScope,
 } from "@/components/command-search/model"
@@ -68,15 +60,16 @@ import {
 
 type PaletteValue = { open: () => void; close: () => void; toggle: () => void }
 const PaletteContext = createContext<PaletteValue | null>(null)
-type PaletteItem = SearchItem & {
-  icon?: React.ComponentType<{ className?: string }>
-  /** Overrides the kind's hue: a page takes its rail group's. */
-  hue?: string
-  product?: string
-  state?: string
+type PaletteItem = PreviewItem & {
   run?: () => void
-  keys?: string
   explicit?: boolean
+}
+
+/** What the page's own commands do, for the preview: their labels say only what they are called. */
+const COMMAND_HINTS: Record<string, (page: string) => string> = {
+  find: (page) => `Moves the cursor to the filter on ${page}.`,
+  refresh: (page) => `Reads ${page} from the server again.`,
+  help: (page) => `Lists every keyboard shortcut on ${page}.`,
 }
 
 function locationName(pathname: string, search: URLSearchParams): RecentDestination {
@@ -116,7 +109,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
         ? pending.current
         : locationName(pathname, new URLSearchParams(search.toString()))
     pending.current = null
-    setHistory((previous) => rememberDestination(previous, destination))
+    setHistory((previous) => rememberDestination(previous, { ...destination, at: Date.now() }))
   }, [href, pathname, search, setHistory])
 
   const value = useMemo<PaletteValue>(
@@ -165,7 +158,7 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     <PaletteContext.Provider value={value}>
       {children}
       <PaletteModal
-        className="flex min-h-0 flex-col"
+        className="flex min-h-0 flex-col lg:max-w-4xl"
         open={open}
         onOpenChange={(value) => {
           setQuery("")
@@ -226,15 +219,16 @@ function pagesUnder(
   entry: NavEntry,
   can: (capability: Capability) => boolean,
   trail: string[] = [],
-): { page: NavItem; trail: string[]; aliases: string[] }[] {
+  parent?: NavEntry,
+): { page: NavItem; trail: string[]; aliases: string[]; parent?: NavEntry }[] {
   if (entry.capability && !can(entry.capability)) return []
   const children: NavEntry[] = entry.children ?? []
   const aliases = children.filter((child) => child.href === entry.href).map((child) => child.title)
   return [
-    ...(entry.href === undefined ? [] : [{ page: entry, trail, aliases }]),
+    ...(entry.href === undefined ? [] : [{ page: entry, trail, aliases, parent }]),
     ...children
       .filter((child) => child.href !== entry.href)
-      .flatMap((child) => pagesUnder(child, can, [...trail, entry.title])),
+      .flatMap((child) => pagesUnder(child, can, [...trail, entry.title], entry)),
   ]
 }
 
@@ -291,10 +285,14 @@ function Palette({
         ).sections
       : []
 
+  const shown = (entries: NavEntry[]) =>
+    entries
+      .filter((entry) => !entry.capability || can(entry.capability))
+      .map(({ href, title, icon }) => ({ href, title, icon }))
   const pages: PaletteItem[] = [
     ...NAV.flatMap((group) =>
       group.items.flatMap((entry) =>
-        pagesUnder(entry, can).map(({ page, trail, aliases }) => ({
+        pagesUnder(entry, can).map(({ page, trail, aliases, parent }) => ({
           id: `page:${page.href}`,
           kind: "page" as const,
           title: page.title,
@@ -302,8 +300,10 @@ function Palette({
           keywords: [group.label, ...trail, ...aliases, page.href],
           href: page.href,
           icon: page.icon,
-          hue: GROUP_HUES[group.label],
           product: PAGE_PRODUCTS[page.href],
+          neighbours: parent
+            ? { label: parent.title, pages: shown(parent.children ?? []) }
+            : { label: group.label, pages: shown(group.items) },
         })),
       ),
     ),
@@ -314,8 +314,8 @@ function Palette({
       detail: "Account",
       href: page.href,
       icon: page.icon,
-      hue: GROUP_HUES.Account,
       keywords: ["account", page.href],
+      neighbours: { label: "Account", pages: shown(PERSONAL_NAV) },
     })),
     ...(can("system.admin")
       ? [
@@ -323,6 +323,7 @@ function Palette({
             id: "page:new-project",
             kind: "page" as const,
             title: "New project",
+            detail: "Deployments",
             href: "/deploy/new",
             icon: Plus,
             keywords: ["create", "deploy"],
@@ -334,13 +335,17 @@ function Palette({
     ...NAV.flatMap((group) => group.items.flatMap((entry) => pagesUnder(entry, () => true))),
     ...PERSONAL_NAV.map((page) => ({ page, trail: [] })),
   ]
-  const allowedRecent = recent.filter((entry) => {
-    const path = entry.href.split("?")[0]
-    const owner = allPages
+  /** The rail entry a destination is under: its glyph is the recent row's mark. */
+  const ownerOf = (href: string) => {
+    const path = href.split("?")[0]
+    return allPages
       .filter(
         ({ page }) => page.href === path || (page.href !== "/" && path.startsWith(`${page.href}/`)),
       )
       .sort((a, b) => b.page.href.length - a.page.href.length)[0]?.page
+  }
+  const allowedRecent = recent.filter((entry) => {
+    const owner = ownerOf(entry.href)
     return can("read") && (!owner || pages.some((page) => page.href === owner.href))
   })
   const commands: PaletteItem[] = (workspace?.commands ?? [])
@@ -352,6 +357,7 @@ function Palette({
       detail: workspace?.name,
       keywords: ["this page", workspace?.name ?? ""],
       icon: COMMAND_ICONS[command.id],
+      hint: workspace ? COMMAND_HINTS[command.id]?.(workspace.name) : undefined,
       keys: command.keys,
       run: () => requestAnimationFrame(() => requestAnimationFrame(command.run)),
     }))
@@ -363,6 +369,7 @@ function Palette({
         title: "Reload nginx",
         detail: "Proxy",
         icon: RefreshClockwise,
+        hint: "Tests the config first and refuses a broken one, as the proxy overview's Reload does.",
         keywords: ["proxy"],
         explicit: true,
         run: () => void reloadNginx(),
@@ -373,6 +380,7 @@ function Palette({
         title: "Test nginx config",
         detail: "Proxy",
         icon: CheckCircle,
+        hint: "Runs nginx's own config test and reports what it found. Nothing is reloaded.",
         keywords: ["proxy"],
         explicit: true,
         run: () => void testNginx(),
@@ -385,17 +393,36 @@ function Palette({
     title: "Sign out",
     detail: "Account",
     icon: Logout,
+    hint: "Ends this session in this browser.",
     keywords: ["logout"],
     explicit: true,
     run: () => void logout(),
   })
+  const resources = reads.flatMap((read) => read.items)
+  const byHref = new Map(resources.map((item) => [item.href, item]))
+  const linked = new Map<string, PaletteItem[]>()
+  for (const item of resources) {
+    for (const link of item.links ?? []) linked.set(link, [...(linked.get(link) ?? []), item])
+  }
   const items: PaletteItem[] = [
-    ...allowedRecent.map((entry, i) => ({
-      ...entry,
-      id: `recent:${entry.href}`,
-      kind: "recent" as const,
-      keywords: i === 0 ? ["previous", "back", "last page"] : [],
-    })),
+    ...allowedRecent.map((entry, i) => {
+      const owner = ownerOf(entry.href)
+      // A place opened from search is still that resource: it keeps the
+      // readings its row had, so going back shows what is there now.
+      const resource = byHref.get(entry.href)
+      return {
+        ...entry,
+        id: `recent:${entry.href}`,
+        kind: "recent" as const,
+        keywords: i === 0 ? ["previous", "back", "last page"] : [],
+        icon: owner?.icon,
+        product: entry.product ?? resource?.product ?? (owner && PAGE_PRODUCTS[owner.href]),
+        state: resource?.state,
+        facts: resource?.facts,
+        links: resource?.links,
+        previous: i === 0,
+      }
+    }),
     ...commands,
     ...pages,
     ...currentPages.map((page) => ({
@@ -406,9 +433,9 @@ function Palette({
       keywords: ["database", current?.title ?? ""],
       href: sectionHref(inside!, page.id),
       icon: page.icon,
-      hue: KINDS.database.hue,
+      product: current?.product,
     })),
-    ...reads.flatMap((read) => read.items),
+    ...resources,
   ]
   const parsed = parseSearch(query)
   const searchableIn = (scope: SearchScope) =>
@@ -423,8 +450,8 @@ function Palette({
       return !item.explicit || !!parsed.text || scope === "command"
     })
   const result = searchItems(searchableIn(parsed.scope), query)
-  // What each scope would find for the same words, on its chip: the reader sees
-  // that the three hits are a container, a stack and a repository before
+  // What each scope would find for the same words, beside its name: the reader
+  // sees that the three hits are a container, a stack and a repository before
   // choosing where to look.
   const counts: Partial<Record<SearchScope, number>> = parsed.text
     ? Object.fromEntries(
@@ -439,6 +466,7 @@ function Palette({
   const visible = [...grouped.values()].flat()
   const active =
     visible.find((item) => selected.query === query && item.id === selected.id) ?? visible[0]
+  const arrived = useArrivals(visible.map((item) => item.id))
   const relevant = reads.filter(
     (read) => parsed.scope === "all" || read.source.kind === parsed.scope,
   )
@@ -451,11 +479,15 @@ function Palette({
       ?.scrollIntoView({ block: "nearest", inline: "nearest" })
   }, [parsed.scope])
 
+  const open = (destination: Destination) => {
+    if (!localDestination(destination.href)) return
+    onNavigate(destination)
+    close(false)
+    router.push(destination.href)
+  }
   const choose = (item: PaletteItem) => {
     if (item.href && localDestination(item.href)) {
-      onNavigate({ href: item.href, title: item.title, detail: item.detail })
-      close(false)
-      router.push(item.href)
+      open({ href: item.href, title: item.title, detail: item.detail, product: item.product })
     } else if (item.run) {
       close(false)
       item.run()
@@ -473,8 +505,8 @@ function Palette({
       return
     event.stopPropagation()
   }
-  // One stop in the tab order for fourteen chips: Tab from the input lands on
-  // the current scope and the arrows walk the rest, as in any toolbar.
+  // One stop in the tab order for fourteen scopes: Tab from the input lands on
+  // the current one and the arrows walk the rest, as in any toolbar.
   const roveScopes = (event: React.KeyboardEvent<HTMLDivElement>) => {
     controlKeys(event)
     const chips = [...event.currentTarget.querySelectorAll("button")]
@@ -500,7 +532,7 @@ function Palette({
       vimBindings={false}
       value={active?.id ?? ""}
       onValueChange={(id) => setSelected({ query, id })}
-      className="min-h-0 **:data-[slot=command-input-wrapper]:h-14 **:data-[slot=command-input-wrapper]:gap-3 **:data-[slot=command-input-wrapper]:px-4 [&_[cmdk-group-heading]]:flex [&_[cmdk-group-heading]]:items-center [&_[cmdk-group-heading]]:gap-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:tracking-[0.14em] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group]]:px-2 [&_[cmdk-item]]:min-h-12 [&_[cmdk-item]]:gap-3 [&_[cmdk-item]]:rounded-lg [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]]:text-body [&_[cmdk-item][data-selected=true]]:bg-accent [&_[data-slot=command-input-wrapper]>svg]:size-5 [&_[data-slot=command-input-wrapper]>svg]:text-brand [&_[data-slot=command-input-wrapper]>svg]:opacity-100"
+      className="min-h-0 **:data-[slot=command-input-wrapper]:h-14 **:data-[slot=command-input-wrapper]:gap-3 **:data-[slot=command-input-wrapper]:border-hairline **:data-[slot=command-input-wrapper]:px-4 [&_[data-slot=command-input-wrapper]>svg]:size-5 [&_[data-slot=command-input-wrapper]>svg]:text-brand [&_[data-slot=command-input-wrapper]>svg]:opacity-100"
       onKeyDown={(event) => {
         if (event.key === "Escape" && query) {
           event.preventDefault()
@@ -517,7 +549,7 @@ function Palette({
           onValueChange={changeQuery}
           placeholder="Search pages, domains, containers…"
           aria-label="Search dashboard"
-          className="h-14 text-sm"
+          className="h-14 text-title"
         />
         {/* Ten inventories arrive one by one over a second or two. A sweep
             along the input's own edge says the list is still growing without
@@ -528,103 +560,114 @@ function Palette({
           </span>
         )}
       </div>
-      {/* The scopes as chips rather than a select: fourteen kinds behind a
-          closed menu were fourteen kinds nobody knew they could narrow to, and
-          a chip can say how many of the results are its kind before it is
-          pressed. Typing `db:` presses the same chip. */}
+      {/* The scopes as the Files search's underlined strip of words rather
+          than chips: fourteen chips each led by a glyph in its own hue were a
+          second, louder list above the one being searched. A scope still
+          says how many of the results are its kind before it is pressed, and
+          typing `db:` presses the same one. */}
       <div
         ref={scopes}
         role="group"
         aria-label="Search scope"
         onKeyDown={roveScopes}
-        className="flex shrink-0 [scrollbar-width:none] items-center gap-1 overflow-x-auto border-b [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] py-2 pr-8 pl-3 [&::-webkit-scrollbar]:hidden"
+        className="flex shrink-0 [scrollbar-width:none] items-stretch overflow-x-auto border-b border-hairline [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] pr-8 pl-2 [&::-webkit-scrollbar]:hidden"
       >
         {SEARCH_SCOPES.map(([scope, label]) => {
           const current = scope === parsed.scope
           const count = counts[scope]
           return (
-            <FilterChip
+            <button
               key={scope}
-              selected={current}
+              type="button"
+              aria-pressed={current}
               tabIndex={current ? 0 : -1}
               onClick={() => chooseScope(scope)}
-              className={cn("h-7 gap-1.5", count === 0 && !current && "opacity-55")}
+              className={cn(
+                tabClasses(current, "h-10"),
+                "px-2.5",
+                count === 0 && !current && "opacity-45",
+              )}
             >
-              <ScopeMark scope={scope} />
               {label}
               {!!count && (
-                <span className="numeric text-micro text-muted-foreground">
+                <span className="numeric text-hint text-muted-foreground">
                   {count > 60 ? "60+" : count}
                 </span>
               )}
-            </FilterChip>
+            </button>
           )
         })}
       </div>
-      <CommandList
-        className="max-h-[min(58svh,30rem)] min-h-0 scroll-py-2 pb-2"
-        aria-label="Search results"
-      >
-        {visible.length === 0 && (
-          <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
-            <span className="flex size-10 items-center justify-center rounded-lg bg-plot-neutral text-muted-foreground">
-              {loading.length ? (
-                <Spinner className="size-5" />
-              ) : (
-                <MagnifyingGlass className="size-5" />
-              )}
-            </span>
-            <p className="text-body text-muted-foreground">
-              {loading.length
-                ? "Searching dashboard resources…"
-                : failed.length
-                  ? "No matches in the available results."
-                  : "No matches. Try a name, domain or another scope."}
-            </p>
-            {!loading.length && parsed.scope !== "all" && parsed.text && (
-              <button
-                type="button"
-                onClick={() => chooseScope("all")}
-                onKeyDown={controlKeys}
-                className="min-h-11 rounded-sm text-body text-foreground underline underline-offset-4 focus-ring sm:min-h-8"
-              >
-                Search everything for “{parsed.text}”
-              </button>
-            )}
-          </div>
+      {/* The list beside what is selected in it. The pair holds one height
+          while the words change, so the footer does not ride up and down
+          under the reader's eye as the results grow and shrink. */}
+      <div
+        className={cn(
+          "grid min-h-0 sm:h-[min(56svh,28rem)]",
+          active && "lg:grid-cols-[minmax(0,1fr)_19rem]",
         )}
-        {[...grouped].map(([kind, entries]) => (
-          <CommandGroup
-            key={kind}
-            heading={
-              <>
-                <HueDot hue={KINDS[kind].hue} />
-                {kind === "command" && entries.every((item) => !item.explicit)
-                  ? "This page"
-                  : GROUPS[kind]}
-              </>
-            }
-          >
-            {entries.map((item) => {
-              const previous = item.kind === "recent" && item.href === allowedRecent[0]?.href
-              return (
+      >
+        <CommandList
+          className="max-h-[min(58svh,30rem)] min-h-0 scroll-py-2 py-1.5 sm:max-h-none"
+          aria-label="Search results"
+        >
+          {visible.length === 0 && (
+            <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+              {loading.length ? (
+                <Spinner className="size-5 text-muted-foreground" />
+              ) : (
+                <MagnifyingGlass className="size-5 text-muted-foreground" />
+              )}
+              <p className="text-body text-muted-foreground">
+                {loading.length
+                  ? "Searching dashboard resources…"
+                  : failed.length
+                    ? "No matches in the available results."
+                    : "No matches. Try a name, domain or another scope."}
+              </p>
+              {!loading.length && parsed.scope !== "all" && parsed.text && (
+                <button
+                  type="button"
+                  onClick={() => chooseScope("all")}
+                  onKeyDown={controlKeys}
+                  className="min-h-11 rounded-sm text-body text-foreground underline underline-offset-4 focus-ring sm:min-h-8"
+                >
+                  Search everything for “{parsed.text}”
+                </button>
+              )}
+            </div>
+          )}
+          {[...grouped].map(([kind, entries]) => (
+            <CommandGroup
+              key={kind}
+              className="px-2 py-0 [&_[cmdk-group-heading]]:flex [&_[cmdk-group-heading]]:items-baseline [&_[cmdk-group-heading]]:justify-between [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-hint"
+              heading={
+                <>
+                  {kind === "command" && entries.every((item) => !item.explicit)
+                    ? "This page"
+                    : GROUPS[kind]}
+                  {parsed.text && <span className="numeric">{entries.length}</span>}
+                </>
+              }
+            >
+              {entries.map((item) => (
                 <CommandItem
                   key={item.id}
                   value={item.id}
                   onSelect={() => choose(item)}
-                  className="group/result relative before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-brand before:opacity-0 before:transition-opacity data-[selected=true]:before:opacity-100"
+                  className={cn(
+                    "group/result min-h-11 gap-3 rounded-md px-2.5 py-1 text-body data-[selected=true]:bg-accent sm:min-h-9",
+                    "before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-brand before:opacity-0 before:transition-opacity data-[selected=true]:before:opacity-100",
+                    arrived.has(item.id) && "animate-rise",
+                  )}
                 >
-                  <ResultMark
-                    product={item.product}
-                    icon={previous ? ArrowLeft : (item.icon ?? KINDS[item.kind].icon)}
-                    hue={item.hue ?? KINDS[item.kind].hue}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">
-                      {previous && "Back to "}
+                  <ResultMark product={item.product} icon={item.icon ?? KINDS[item.kind].icon} />
+                  <span className="flex min-w-0 flex-1 items-baseline gap-2">
+                    <span className="max-w-[75%] shrink-0 truncate text-foreground">
+                      {item.previous && "Back to "}
                       {highlight(item.title, query).map((run, i) =>
                         run.hit ? (
-                          <mark key={i} className="bg-transparent text-signal">
+                          <mark key={i} className="bg-transparent font-medium text-signal">
                             {run.text}
                           </mark>
                         ) : (
@@ -633,16 +676,19 @@ function Palette({
                       )}
                     </span>
                     {item.detail && (
-                      <span className="block truncate text-hint text-muted-foreground">
+                      <span className="min-w-0 truncate text-hint text-muted-foreground">
                         {item.detail}
                       </span>
                     )}
                   </span>
-                  {item.state && (
-                    <Status state={item.state} label={item.state} className="text-hint" />
-                  )}
-                  {previous ? (
+                  {item.previous ? (
                     <span className="text-hint text-muted-foreground">Previous</span>
+                  ) : item.at ? (
+                    <span className="numeric text-hint text-muted-foreground">
+                      {visited(item.at)}
+                    </span>
+                  ) : item.state ? (
+                    <Status state={item.state} label={item.state} className="text-hint" />
                   ) : item.href === currentHref ? (
                     <span className="text-hint text-muted-foreground">Current</span>
                   ) : (
@@ -652,19 +698,33 @@ function Palette({
                     aria-hidden="true"
                     className={cn(
                       KEYCAP,
-                      "hidden sm:group-data-[selected=true]/result:inline-flex",
+                      "hidden sm:group-data-[selected=true]/result:inline-flex lg:group-data-[selected=true]/result:hidden",
                     )}
                   >
                     ↵
                   </kbd>
                 </CommandItem>
-              )
-            })}
-          </CommandGroup>
-        ))}
-      </CommandList>
+              ))}
+            </CommandGroup>
+          ))}
+        </CommandList>
+        {active && (
+          <Preview
+            item={{
+              ...active,
+              current: active.href === currentHref,
+              connected: [
+                ...new Set((active.links ?? []).flatMap((link) => linked.get(link) ?? [])),
+              ]
+                .filter((other) => other.href !== active.href)
+                .slice(0, 6),
+            }}
+            onOpen={open}
+          />
+        )}
+      </div>
       <div
-        className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t px-4 py-2.5 text-hint text-muted-foreground"
+        className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground"
         onKeyDown={controlKeys}
       >
         <span className="hidden items-center gap-3 sm:flex">
@@ -688,13 +748,15 @@ function Palette({
         </span>
         <span className="flex min-w-0 items-center gap-3">
           <span role="status" aria-live="polite" aria-atomic="true">
-            {loading.length > 0
-              ? `Loading ${loading.map((read) => read.source.label).join(", ")}…`
-              : failed.length > 0
-                ? `Unavailable: ${failed.map((read) => read.source.label).join(", ")}. Results are incomplete.`
-                : parsed.text || parsed.scope !== "all"
-                  ? `${plural(result.total, "matching result")}${result.total > 60 ? ". Narrow your search to see more" : ""}.`
-                  : "Pages, commands and live resources."}
+            {loading.length > 0 ? (
+              <TextShimmer>{`Loading ${loading.map((read) => read.source.label).join(", ")}…`}</TextShimmer>
+            ) : failed.length > 0 ? (
+              `Unavailable: ${failed.map((read) => read.source.label).join(", ")}. Results are incomplete.`
+            ) : parsed.text || parsed.scope !== "all" ? (
+              `${plural(result.total, "matching result")}${result.total > 60 ? ". Narrow your search to see more" : ""}.`
+            ) : (
+              "Pages, commands and live resources."
+            )}
           </span>
           {failed.length > 0 && (
             <button

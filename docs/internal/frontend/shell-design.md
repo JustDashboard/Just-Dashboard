@@ -178,26 +178,50 @@ scenes are outside this index; URL userinfo, queries and fragments are excluded 
 ranking (exact name/address, prefix, substring, one-edit typo), result limits and recent-history
 logic. `domain:`/`site:`, `db:`/`database:`, `container:`, `stack:`, `project:`, `repo:`, `service:`,
 `pm2:`/`app:`, `backup:`, `board:`, `page:`, `command:` and `recent:` narrow the same input; a
-strip of scope chips under the input (`role="group"`, one tab stop with arrow keys between chips)
-makes the types discoverable, presses the chip a typed prefix names, and counts each kind's
-matches for the words typed. Global searches omit duplicate recent
+strip of scopes under the input — words on the Files search's underlined strip (`tabClasses`), no
+glyphs, `role="group"`, one tab stop with arrow keys between them — makes the types discoverable,
+presses the scope a typed prefix names, and counts each kind's matches for the words typed. Global searches omit duplicate recent
 entries; the Recent scope searches history explicitly. At most 60 results are shown with a
 matching count and a suggestion to narrow when there are more. A narrowed search with no matches
 offers to search everything for the same words. A section's landing page is listed once under the
 section's name and also answers to the name the rail gives it inside the section (Deployments'
 "Projects", Databases' "Control center", Processes' "Live").
 
-Every result is drawn as what it is (`command-search/marks.tsx`). An inventory row carries the
-product it is as a `ProductLogo` key — a container its image's, a database its flavour or driver, a
-site nginx or Caddy, a repository its forge or Git, a service the unit's program, a PM2 app its
-interpreter, a stack Compose's, a project `projectProduct`'s, a B2 backup Backblaze's — and the pages
-that are one product's own (Docker, Stacks, Git, PM2, Terminal) carry theirs. Everything else is its
-glyph on a tile of a fixed hue: a page its rail group's (`GROUP_HUES`), any other row its kind's
-(`KINDS`), from the `--tag-*` lanes that hold no red or amber so no kind reads as a failure. The
-same hue marks the group heading and the scope chip. A container, service or PM2 app shows its
-running state as a `Status`; the words a title matched are drawn in `--signal`, the search-hit
-colour (`highlight` in `model.ts`); page commands show their shortcut as keycaps for the reader's
-platform.
+Every result is one line — its mark, its name, its second line in the hint size after it, and at
+the far end its state, when it was visited, *Previous*, *Current* or its shortcut — so a screen holds
+twice the rows the two-line list did. The mark is drawn as what the result is
+(`command-search/marks.tsx`). An inventory row carries the product it is as a `ProductLogo` key — a
+container its image's, a database its flavour or driver, a site nginx or Caddy, a repository its forge
+or Git, a service the unit's program, a PM2 app its interpreter, a stack Compose's, a project
+`projectProduct`'s, a B2 backup Backblaze's — drawn bare (`ProductGlyph`), and the pages that are one
+product's own (Docker, Stacks, Git, PM2, Terminal) carry theirs. Everything else is its glyph as the
+rail draws it, grey at rest and ink on the selected row. There is no hue per kind: the rows used to
+stand on tiles tinted in seven `--tag-*` lanes, with the same hue on the group heading and the scope
+chip, and a column of faded squares said nothing the heading did not — the icon plate §14 removed
+everywhere else. The colour in the list is now the products' own. A recent destination is drawn as
+the rail entry it is under, or as the resource it was opened as, with how long ago it was visited. A
+container, service or PM2 app shows its running state as a `Status`; the words a title matched are
+drawn in `--signal`, the search-hit colour (`highlight` in `model.ts`); page commands show their
+shortcut as keycaps for the reader's platform.
+
+From `lg` the dialog widens and the selected result is said in full beside the list
+(`command-search/preview.tsx`), following the selection as the arrows move it: its mark on the
+product tile, its kind, its name and state, then what the row had no room for. An inventory row
+projects a few `facts` from the same explicitly chosen fields as the rest of its metadata — a
+container's image, status, health and Compose service; a site's server and every domain; a
+connection's engine, host, database and whether it is protected; a repository's branch and upstream,
+folder, last commit and working tree; a backup's destination, schedule and folders — and never a
+payload's secrets, environment, notes, database users or remote addresses. Each also names its
+`links`: the domains, container names, stacks and folders other resources can know it by. A resource
+sharing one exactly is listed as *Connected* — the site serving a project's domain, the container a
+connection's host names, the stack and repository in one folder and the backup covering it — and a
+relation that would need a guess is not drawn. A page shows the rail list it sits in with itself lit; a command
+says what it does; a recent destination opened from search keeps the readings of the resource it
+was. The pages and resources listed there open on a click and are out of the tab order, because the
+combobox owns the keyboard and each is a result the same words reach. The preview's body takes
+`animate-rise` keyed by the result, and rows that arrive as the words change rise the same way
+(`useArrivals`); the list and the preview hold one height while typing so the footer stays put. A
+phone keeps the whole width for the list.
 
 Each resource result uses its existing detail address. Sites open `/proxy/sites/<name>` for
 inspection rather than the legacy `?site=` editing link. Containers and stacks open their dedicated
@@ -211,7 +235,7 @@ search or the Commands scope, so neither becomes the blank menu's default action
 cmdk keeps combobox focus, arrow movement, Home/End, wraparound and active-option announcements;
 the selected identity survives independently arriving results. Its Ctrl+K vim binding is disabled
 so the global shortcut also closes the menu. Escape first clears a non-empty search through
-`PaletteModal.onEscapeKeyDown`, then dismisses the dialog and restores focus. The scope chips and
+`PaletteModal.onEscapeKeyDown`, then dismisses the dialog and restores focus. The scope strip and
 the retry control own their keys. `PaletteModal` hangs from a fixed line near the top of the window
 rather than centring, so the input does not move as the results grow and shrink. The shortcut ignores composition, repeats and additional modifiers.
 Ctrl/Cmd+K is reserved in window capture so Monaco's chord and the terminal do not consume the

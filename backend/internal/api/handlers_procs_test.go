@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,5 +134,38 @@ func TestProcessDetailReportsSocketsWithoutEnvironment(t *testing.T) {
 	}
 	if got["openFilesLimit"] == nil {
 		t.Fatalf("open files limit missing from %v", got)
+	}
+}
+
+// The kernel ignores a signal sent from user space to one of its threads, so
+// the route says so instead of reporting a Kill that changed nothing.
+func TestSignalRefusesAKernelThread(t *testing.T) {
+	stat, err := os.ReadFile("/proc/2/stat")
+	if err != nil || !strings.Contains(string(stat), "(kthreadd)") {
+		t.Skip("no kthreadd in this PID namespace")
+	}
+	c, _ := newClient(t)
+	w := c.do(http.MethodPost, "/api/v1/processes/2/signal", `{"signal":"SIGCONT"}`, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "kernel_thread") {
+		t.Fatalf("signal to kthreadd = %d %s, want 409 kernel_thread", w.Code, w.Body.String())
+	}
+}
+
+func TestProcessDetailCarriesItsHistory(t *testing.T) {
+	c, _ := newClient(t)
+	path := "/api/v1/processes/" + strconv.Itoa(os.Getpid())
+	var got procs.Process
+	for range 2 {
+		w := c.do(http.MethodGet, path, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET detail: %d: %s", w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(1100 * time.Millisecond)
+	}
+	if !got.CPUReady || len(got.History) != 1 {
+		t.Fatalf("second read: cpuReady %v, %d history points, want a measured window", got.CPUReady, len(got.History))
 	}
 }

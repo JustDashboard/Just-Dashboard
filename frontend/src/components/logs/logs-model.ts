@@ -4,8 +4,7 @@ import { logLineKey } from "@/lib/log-line-key"
 import { READINGS_MINUTES, type ReadingFigure } from "@/lib/log-insights"
 import { eventMeta, lensFor, type LensReading, type LensView, type LogLens } from "@/lib/log-lenses"
 import { journalSource } from "@/lib/log-sources"
-import { TIME_RANGES } from "@/lib/log-filter"
-import type { LogFields, LogFilterState, LogTimeRange } from "@/components/logs/types"
+import type { LogFields, LogFilterState } from "@/components/logs/types"
 
 /*
  * The service logs' decisions that are easy to get subtly wrong — which
@@ -94,54 +93,30 @@ export const READINGS_WINDOWS: Record<NonNullable<LogLens["readingsWindow"]>, Re
 }
 
 /**
- * The window a picked range reads readings over — Insights', whose figures
- * are all of the window on screen, the readings with them — or none where
- * the range has no start: everything on disk has no length to make a rate
- * of, and the lens's own window is the honest figure then.
- */
-export function readingsWindowOf(
-  range: LogTimeRange,
-  since: string,
-  until: string,
-  now = Date.now(),
-): ReadingsWindow | undefined {
-  if (range === "custom") {
-    const from = since ? Date.parse(since) : NaN
-    const to = until ? Date.parse(until) : now
-    if (Number.isNaN(from) || Number.isNaN(to) || to <= from) return undefined
-    return { minutes: (to - from) / 60_000, short: "in range", long: "the chosen range" }
-  }
-  const preset = TIME_RANGES.find((r) => r.id === range)
-  if (!preset?.minutes) return undefined
-  return {
-    minutes: preset.minutes,
-    short: `in ${range}`,
-    long: preset.label.replace(/^Last/, "the last"),
-  }
-}
-
-/**
  * A reading's figure as it is drawn: a per-minute reading as its rate over
- * the window, a distinct count that stopped being exact with a "+".
+ * the window, a distinct count that stopped being exact with a "+". The
+ * places are the ones the rounded figure needs, so a tile counting up to it
+ * lands on the same text: 0.5 a minute, not 0.50.
  */
 export function readingShown(
   reading: LensReading,
   figure: ReadingFigure | undefined,
   window: Pick<ReadingsWindow, "minutes">,
-): { value: number; text: string } {
-  if (!figure) return { value: 0, text: "—" }
+): { value: number; text: string; decimals: number } {
+  if (!figure) return { value: 0, text: "—", decimals: 0 }
   if (reading.figure === "per_minute") {
     const value = figure.value / window.minutes
+    const places = value < 10 ? 2 : value < 100 ? 1 : 0
     return {
       value,
-      text: value.toLocaleString(undefined, {
-        maximumFractionDigits: value < 10 ? 2 : value < 100 ? 1 : 0,
-      }),
+      text: value.toLocaleString(undefined, { maximumFractionDigits: places }),
+      decimals: (String(Number(value.toFixed(places))).split(".")[1] ?? "").length,
     }
   }
   return {
     value: figure.value,
     text: `${figure.value.toLocaleString()}${figure.capped ? "+" : ""}`,
+    decimals: 0,
   }
 }
 

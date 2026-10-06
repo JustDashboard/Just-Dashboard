@@ -80,6 +80,10 @@ type Server struct {
 	// What the connection routes remember between requests: each server's
 	// answer about what it is, its last fleet reading, and the unit it was
 	// last seen running under (handlers_db_connection.go).
+	// Each running container's name by id, for the process table's owners
+	// (handlers_procs.go).
+	procContainers containerNames
+
 	dbConns        dbConnState
 	dbMetricsStop  context.CancelFunc
 	dbMetricsDone  chan struct{}

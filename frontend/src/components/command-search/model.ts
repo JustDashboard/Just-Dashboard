@@ -163,7 +163,15 @@ export function highlight(title: string, query: string): { text: string; hit: bo
   return runs
 }
 
-export type RecentDestination = { href: string; title: string; detail?: string }
+export type RecentDestination = {
+  href: string
+  title: string
+  detail?: string
+  /** When it was arrived at, in epoch milliseconds, for the row's "4m ago". */
+  at?: number
+  /** The product a resource opened from search is, so its row keeps the mark. */
+  product?: string
+}
 
 function destinationKey(href: string) {
   const url = new URL(href, "http://dashboard.invalid")

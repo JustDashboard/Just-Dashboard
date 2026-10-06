@@ -4,7 +4,7 @@ import { useMemo } from "react"
 import { get } from "@/lib/api"
 import type { LogSearchResult } from "@/lib/types"
 import type { LogFilterState } from "@/components/logs/types"
-import { fieldsOf, resolveRange } from "@/lib/log-filter"
+import { fieldsOf } from "@/lib/log-filter"
 import {
   readingFigure,
   readingFilter,
@@ -15,23 +15,26 @@ import type { LensReading, LogLens } from "@/lib/log-lenses"
 import {
   READINGS_WINDOWS,
   readingShown,
-  readingsWindowOf,
   sameQuestion,
   type ReadingsWindow,
 } from "@/components/logs/logs-model"
-import type { LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
 import { TileTrend } from "@/components/metrics/sparkline"
 import { StatButton, StatGrid, StatTile } from "@/components/stat-tile"
+import { NumberTicker } from "@/components/ui/number-ticker"
 
 const NO_READINGS: LensReading[] = []
 
 /** How often the figures are read again: a minute, as the Overview's tiles are. */
 const REFRESH = 60_000
 
-/** The narrowest a reading's tile reads whole: its name, its figure and its line. */
-const TILE_MIN = 200
+/**
+ * The narrowest a reading's tile reads whole: its name, its figure and its
+ * line. Five fit across the logs page's 1280px window, where at 200 they
+ * broke three and two over a console left a third of its height.
+ */
+const TILE_MIN = 180
 
 export type LensReadingTile = {
   reading: LensReading
@@ -58,10 +61,6 @@ export type LensReadingsState = {
  * with `ReadingTile`; `LensReadings` is the grid for a page without one.
  * A page that draws only some of them names those (`only`), and the others
  * are not searched for: each is a scan a minute for a figure nobody sees.
- *
- * Drawn among figures of a window the reader picked — Insights' — they are
- * read over that window (`range`) rather than the lens's own, so one view
- * does not hold two answers to "how many errors" from two stretches of time.
  */
 export function useLensReadings(
   sourceId: string,
@@ -70,7 +69,6 @@ export function useLensReadings(
     forcedLens?: string
     enabled?: boolean
     only?: readonly string[]
-    range?: { range: LogTimeRange; since: string; until: string }
   } = {},
 ): LensReadingsState {
   const onlyKey = options.only?.join(",")
@@ -80,30 +78,20 @@ export function useLensReadings(
     const wanted = onlyKey.split(",")
     return all.filter((reading) => wanted.includes(reading.id))
   }, [lens, onlyKey])
-  const rangeId = options.range?.range
-  const rangeSince = options.range?.since ?? ""
-  const rangeUntil = options.range?.until ?? ""
-  const picked = useMemo(
-    () => (rangeId ? readingsWindowOf(rangeId, rangeSince, rangeUntil) : undefined),
-    [rangeId, rangeSince, rangeUntil],
-  )
-  const window = picked ?? READINGS_WINDOWS[lens?.readingsWindow ?? "1h"]
+  const window = READINGS_WINDOWS[lens?.readingsWindow ?? "1h"]
   const searches = useMemo(() => readingSearches(readings), [readings])
   const forced = options.forcedLens || undefined
 
   const poll = usePoll(
     async (signal) => {
-      const bounds =
-        picked && rangeId
-          ? resolveRange(rangeId, rangeSince, rangeUntil)
-          : { since: new Date(Date.now() - window.minutes * 60_000).toISOString() }
+      const since = new Date(Date.now() - window.minutes * 60_000).toISOString()
       // Settled one by one: a distinct count the server refused should not
       // take the four counts beside it down with it.
       const answers = await Promise.allSettled(
         searches.map((search) =>
           get<LogSearchResult>(
             "/logs/search",
-            { source: sourceId, lens: forced, ...bounds, ...search.params },
+            { source: sourceId, lens: forced, since, ...search.params },
             signal,
           ),
         ),
@@ -117,7 +105,7 @@ export function useLensReadings(
       return figures
     },
     REFRESH,
-    [sourceId, lens?.id, forced, onlyKey, rangeId, rangeSince, rangeUntil],
+    [sourceId, lens?.id, forced, onlyKey],
     { enabled: (options.enabled ?? true) && Boolean(sourceId) && searches.length > 0 },
   )
 
@@ -148,8 +136,8 @@ export function LensReadings({
   const [ref, width] = useColumnWidth()
   if (tiles.length === 0) return null
   // As many to a row as the column they stand in holds, in rows as even as
-  // they can be: five readings beside the logs page's rail are three and two,
-  // where five across cut "Deadlocks & lock waits" to its first word.
+  // they can be: five readings in a 700px column are three and two, where
+  // five across cut "Deadlocks & lock waits" to its first word.
   const fit = width > 0 ? Math.max(2, Math.floor(width / TILE_MIN)) : 5
   const rows = Math.ceil(tiles.length / Math.min(fit, 5))
   const columns = Math.min(Math.max(Math.ceil(tiles.length / rows), 2), 5) as 2 | 3 | 4 | 5
@@ -187,7 +175,8 @@ export function readingPressed(reading: LensReading, filter: LogFilterState) {
  * only once it is above zero, and the window's shape under it in a series
  * colour (§10: a danger reading's line is `--chart-3`, never the status red).
  * A reading the server writes only with a setting on says so when it is zero,
- * rather than reading as good news.
+ * rather than reading as good news. The figure counts up when it lands and
+ * glides to each minute's answer after, as a deployment's readings do.
  */
 export function ReadingTile({
   tile,
@@ -203,7 +192,7 @@ export function ReadingTile({
   const { reading, figure } = tile
   const words = window
   const perMinute = reading.figure === "per_minute"
-  const { value, text: shown } = readingShown(reading, figure, window)
+  const { value, text: shown, decimals } = readingShown(reading, figure, window)
   const hint =
     figure && value === 0 && reading.requires
       ? `Logged only with ${reading.requires} set`
@@ -211,7 +200,16 @@ export function ReadingTile({
   const content = (
     <StatTile
       label={reading.label}
-      value={shown}
+      value={
+        figure ? (
+          <span>
+            <NumberTicker value={value} decimalPlaces={decimals} />
+            {figure.capped && "+"}
+          </span>
+        ) : (
+          shown
+        )
+      }
       trailing={figure ? (perMinute ? "per minute" : words.short) : undefined}
       tone={figure && value > 0 ? (reading.tone ?? "default") : "default"}
       trend={

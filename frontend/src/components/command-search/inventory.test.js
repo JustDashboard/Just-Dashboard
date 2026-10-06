@@ -134,3 +134,80 @@ test("live search projects explicit metadata and encodes identities without inde
     fetch.mockRestore()
   }
 })
+
+test("resources name what they are wired to by exact values and say the rest as facts", async () => {
+  const fixtures = {
+    "/deploy/": {
+      deployments: [{ id: 1, name: "shop", endpoint: "https://Shop.test/app", health: "healthy" }],
+    },
+    "/proxy/vhosts": [
+      { kind: "caddy", name: "shop", path: "/etc/caddy", serverNames: ["shop.test"] },
+    ],
+    "/databases/": [
+      { id: 2, name: "main", driver: "postgres", host: "shop-db", origin: "", readOnly: true },
+    ],
+    "/docker/containers/": [
+      {
+        id: "c1",
+        name: "shop-db",
+        names: ["/shop-db"],
+        image: "postgres:17",
+        state: "running",
+        status: "Up 2 hours",
+        composeStack: "shop",
+      },
+    ],
+    "/docker/stacks/": [{ name: "shop", workingDir: "/srv/shop", declared: ["db"], summary: "Up" }],
+    "/git/": { available: true, repos: [{ name: "shop", path: "/srv/shop", branch: "main" }] },
+    "/systemd/": { available: false, units: [] },
+    "/pm2/": { processes: [] },
+    "/backups/": [
+      { id: 3, name: "nightly", targetKind: "b2", sources: ["/srv/shop/"], schedule: "" },
+    ],
+    "/boards/": [],
+  }
+  const fetch = spyOn(globalThis, "fetch").mockImplementation((url) => {
+    const path = String(url)
+      .replace(/^\/api\/v1/, "")
+      .split("?")[0]
+    return Promise.resolve(
+      new Response(JSON.stringify(fixtures[path]), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+  })
+  try {
+    const items = (
+      await Promise.all(
+        INVENTORY_SOURCES.map((source) => source.read(new AbortController().signal)),
+      )
+    ).flat()
+    const links = Object.fromEntries(items.map((item) => [item.id, item.links]))
+    expect(links["project:1"]).toEqual(["domain:shop.test"])
+    expect(links["site:caddy:/etc/caddy:shop"]).toEqual(["domain:shop.test"])
+    expect(links["database:2"]).toEqual(["container:shop-db"])
+    expect(links["container:c1"]).toEqual(["container:shop-db", "stack:shop"])
+    expect(links["stack:shop"]).toEqual(["stack:shop", "folder:/srv/shop"])
+    expect(links["repo:/srv/shop"]).toEqual(["folder:/srv/shop"])
+    expect(links["backup:3"]).toEqual(["folder:/srv/shop"])
+    const facts = (id) =>
+      Object.fromEntries(items.find((item) => item.id === id).facts.map((f) => [f.label, f.value]))
+    expect(facts("container:c1")).toEqual({
+      Image: "postgres:17",
+      Status: "Up 2 hours",
+      Compose: "shop",
+    })
+    expect(facts("database:2")).toEqual({
+      Engine: "postgres",
+      Host: "shop-db",
+      Access: "Protected — read only",
+    })
+    expect(facts("backup:3")).toEqual({
+      "Writes to": "Backblaze B2",
+      Schedule: "Manual",
+      Covers: "/srv/shop/",
+    })
+  } finally {
+    fetch.mockRestore()
+  }
+})

@@ -613,11 +613,18 @@ logrotate run, which is the question that sent people back to ssh and zgrep.
 
 Frontend `components/logs/`: the page is a workbench like the terminal — one frame, the source rail
 (`source-rail.tsx`, hideable and resizable, remembered through `view-state` and `panel-size`) beside
-`log-workspace.tsx`, a hairline between them. The workspace is one pane, and its chrome is at most three
-rows above the lines: a strip naming the source, with its facts beside the name (`source-facts.tsx`:
-kind, path, rotated set, size and state, giving way by the strip's own width rather than the window's)
-and the views as `tabClasses` buttons with `aria-pressed` — **Live**, **History**, **Insights**, then the
-page's own views — with the page's actions, Export among them, at its end; `filter-bar.tsx` with the one
+`log-workspace.tsx`, a hairline between them. Over the frame the page reads as a deployment's Logs page
+does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
+`HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
+rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same
+line (`RecordIdentity`) — and under it the lens's readings as tiles (`LensReadings`) where five fit
+across and the console keeps its height, a window at least 1280 by 800; on a smaller one they are the
+counts on the lens row's chips instead. The workspace is one pane, and its chrome is at most three
+rows above the lines: a strip of the views as `tabClasses` buttons with `aria-pressed` — **Live**,
+**History**, **Insights**, then the page's own views — which on the logs page (`name={null}`) is the
+rail toggle and the views from its leading edge, and on a service page names the source with its facts
+beside the name (`SourceFacts`, giving way by the strip's own width rather than the window's) and the
+page's actions, Export among them, before the views; `filter-bar.tsx` with the one
 filter, the window and the journal unit inline and the exclusion, context, archives, boot and a
 **Read as** select (Auto, naming the detected lens; each lens; None) behind "More"; and `lens-bar.tsx`
 only when the lens has something to offer or a predicate is on. The histogram sits over History's lines,
@@ -703,11 +710,12 @@ moves to a source in another lens, unless the reader changed them. `insights.tsx
 filter on screen, drawn as the events over time, a `BarList` per key (a press narrows and stays),
 the measure's ladder where it is milliseconds, each group as a ranked table and the log's patterns last.
 `lens-readings.tsx` is the readings: those on one key share a search, those on levels another, and a
-distinct count asks on its own (`lib/log-insights.ts`), read again each minute and independent of the
-filter on screen, over the lens's window — or, in Insights, over the window the reader picked
-(`readingsWindowOf`), so the tiles and the figures under them are of one stretch of time; a page with a
-`StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it draws, and the
-rest are not searched for) and hands them to the pane (`answeredBy`).
+distinct count asks on its own (`lib/log-insights.ts`), read again each minute over the lens's window
+and independent of the filter on screen and of the view, so they hold still while the reader moves
+between Live, History and Insights; each figure counts up as it lands (`NumberTicker`) and glides to the
+next minute's. Insights draws none of its own, which would be a second answer over another window. A
+page with a `StatGrid` of its own takes the tiles from `useLensReadings` (`only` names the ones it
+draws, and the rest are not searched for) and hands them to the pane (`answeredBy`).
 
 **`service-logs.tsx` is the one thing a page that shows a service's log embeds** — a database's server
 log, a container's output, a site's access log, a unit's journal — so no page sends the reader to

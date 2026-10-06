@@ -14,12 +14,15 @@ import (
 // ProcessLink is one process as seen from another's detail view: enough to
 // recognise it and to open it, without the counters a full row carries.
 type ProcessLink struct {
-	PID        int32     `json:"pid"`
-	Name       string    `json:"name"`
-	Cmdline    string    `json:"cmdline"`
-	Username   string    `json:"username"`
-	State      string    `json:"state"`
-	CPUPercent float64   `json:"cpuPercent"`
+	PID        int32   `json:"pid"`
+	Name       string  `json:"name"`
+	Cmdline    string  `json:"cmdline"`
+	Username   string  `json:"username"`
+	State      string  `json:"state"`
+	CPUPercent float64 `json:"cpuPercent"`
+	// CPUReady is false for a process the sampler has not measured yet,
+	// whose CPU is then unknown rather than zero.
+	CPUReady   bool      `json:"cpuReady"`
 	RSS        uint64    `json:"rss"`
 	CreateTime time.Time `json:"createTime"`
 }
@@ -57,7 +60,7 @@ func (t *Table) Tree(ctx context.Context, pid int32) (*ProcessTree, error) {
 	for _, p := range all {
 		byPID[p.Pid] = p
 		if ppid, err := p.PpidWithContext(ctx); err == nil && ppid == pid {
-			if link, ok := linkFor(ctx, p); ok {
+			if link, ok := t.linkFor(ctx, p); ok {
 				children = append(children, link)
 			}
 		}
@@ -82,7 +85,7 @@ func (t *Table) Tree(ctx context.Context, pid int32) (*ProcessTree, error) {
 		if parent == nil {
 			break
 		}
-		if link, ok := linkFor(ctx, parent); ok {
+		if link, ok := t.linkFor(ctx, parent); ok {
 			ancestors = append(ancestors, link)
 		}
 		current = parent
@@ -94,7 +97,7 @@ func (t *Table) Tree(ctx context.Context, pid int32) (*ProcessTree, error) {
 	return &ProcessTree{Ancestors: ancestors, Children: children}, nil
 }
 
-func linkFor(ctx context.Context, p *process.Process) (ProcessLink, bool) {
+func (t *Table) linkFor(ctx context.Context, p *process.Process) (ProcessLink, bool) {
 	link := ProcessLink{PID: p.Pid}
 	link.Name, _ = p.NameWithContext(ctx)
 	if link.Name == "" {
@@ -105,13 +108,12 @@ func linkFor(ctx context.Context, p *process.Process) (ProcessLink, bool) {
 	if st, err := p.StatusWithContext(ctx); err == nil {
 		link.State = processState(strings.Join(st, ","))
 	}
-	link.CPUPercent, _ = p.CPUPercentWithContext(ctx)
-	link.CPUPercent = round2(link.CPUPercent)
 	if mi, err := p.MemoryInfoWithContext(ctx); err == nil && mi != nil {
 		link.RSS = mi.RSS
 	}
 	if ct, err := p.CreateTimeWithContext(ctx); err == nil {
 		link.CreateTime = time.UnixMilli(ct).UTC()
+		link.CPUPercent, link.CPUReady = t.lastCPU(p.Pid, link.CreateTime)
 	}
 	return link, true
 }

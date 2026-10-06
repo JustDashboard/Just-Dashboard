@@ -16,11 +16,12 @@ import {
   readLogWindow,
   resolveRange,
 } from "@/lib/log-filter"
-import { lensFor, withLensDefaults } from "@/lib/log-lenses"
+import { STACK_LENS, lensFor, withLensDefaults } from "@/lib/log-lenses"
 import { journalSource } from "@/lib/log-sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
@@ -30,17 +31,23 @@ import { IconAction } from "@/components/icon-action"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Button } from "@/components/ui/button"
 import { SourceRail, railSources, sourceProduct } from "@/components/logs/source-rail"
-import { SourceFacts } from "@/components/logs/source-facts"
+import { SourceIdentity } from "@/components/logs/source-facts"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import { askOf, withAsk } from "@/components/logs/logs-model"
 import { LogWorkspace } from "@/components/logs/log-workspace"
+import { LensReadings, useLensReadings } from "@/components/logs/lens-readings"
 import type {
   LogWindow,
   ServiceLogSource,
   ServiceLogsContext,
 } from "@/components/logs/service-logs"
 import { serviceViews, useServiceFinds } from "@/components/logs/service-views"
-import { RecordColumn, recordQueryKey, useRequestRecords } from "@/components/logs/request-records"
+import {
+  RecordColumn,
+  RecordIdentity,
+  recordQueryKey,
+  useRequestRecords,
+} from "@/components/logs/request-records"
 import { railSourceFor } from "@/components/logs/service-views-model"
 import { sectionHref } from "@/components/database/engine"
 import type { RequestsView } from "@/components/deploy/requests-workspace"
@@ -95,6 +102,12 @@ function toLocalInput(date: Date) {
  * screen, the sources down the left and the lines on the right, a hairline
  * between them. The rail hides and resizes the way the terminal's session
  * rail does, and remembers both.
+ *
+ * Over the frame, the page reads the way a deployment's Logs page does: the
+ * chosen source as its identity line, with Export and the shortcuts at its
+ * end, then the readings its lens takes — what the log adds up to, each with
+ * its window's shape — which hold still while the reader moves between the
+ * views in the strip beneath them.
  *
  * It is every service page's reading in one place. A source is offered the
  * views its own page has beside Live, History and Insights — a container's
@@ -284,6 +297,23 @@ function LogsScreen() {
   }, [selected, sourceId, unit, units, detectedLens, host?.platform])
   const finds = useServiceFinds(record ? undefined : viewSource, readLens, requests.sites)
 
+  // The lens's readings stand over the frame where five fit across it and
+  // the console keeps its height under them. On a narrower or shorter window
+  // they are the counts on the lens row's chips, as a database's Logs
+  // workbench carries them: tiles over a laptop's 720px left the live tail
+  // nine lines, and on a phone pushed the first line a screen down.
+  const roomy = useMediaQuery("(min-width: 1280px) and (min-height: 800px)")
+  const readings = useLensReadings(
+    sourceId,
+    lensFor(
+      lens === "none"
+        ? undefined
+        : (readLens ?? (selected?.kind === "stack" ? STACK_LENS : undefined)),
+    ),
+    { forcedLens: lens, enabled: !record && !windowError },
+  )
+  const showReadings = roomy && !record && !windowError && readings.tiles.length > 0
+
   // Another log opened on a stretch of time, from a view or a request —
   // History on it, narrowed where the asker knows how. A source the rail
   // does not list is said to be gone, as a link to one is, rather than
@@ -397,6 +427,37 @@ function LogsScreen() {
     windowError,
   ])
 
+  const onFilterChange = (next: LogFilterState) => {
+    beginQuestion()
+    setFilter(next)
+  }
+  const identity = record
+    ? found && <RecordIdentity key={record} record={found} aside={<WorkspaceHelp compact />} />
+    : viewSource &&
+      selected &&
+      !windowError && (
+        <SourceIdentity
+          key={sourceId}
+          source={viewSource}
+          aside={
+            <div className="flex items-center gap-2">
+              {/* A page view with its own export — a site's requests — is not
+                the log's lines, and two Export buttons would be two answers. */}
+              {(!shownView || shownView.filtered) && (
+                <ExportDialog
+                  sourceId={sourceId}
+                  source={selected}
+                  filter={filter}
+                  boot={boot}
+                  lens={lens}
+                />
+              )}
+              <WorkspaceHelp compact />
+            </div>
+          }
+        />
+      )
+
   const railToggle = (
     <IconAction
       label={showRail ? "Hide the sources" : "Show the sources"}
@@ -427,7 +488,21 @@ function LogsScreen() {
       }}
     >
       <Page fill className="gap-4 max-lg:h-auto max-lg:overflow-visible md:gap-5">
-        <PageContext eyebrow="Server" title="Logs" actions={<WorkspaceHelp />} />
+        <PageContext
+          eyebrow="Server"
+          title="Logs"
+          actions={identity ? undefined : <WorkspaceHelp />}
+        />
+        {identity}
+        {showReadings && (
+          <LensReadings
+            key={sourceId}
+            readings={readings}
+            filter={filter}
+            onFilterChange={onFilterChange}
+            className="shrink-0 animate-rise"
+          />
+        )}
 
         {/* One frame around the whole workbench. The rail and the lines are
           separated by a hairline rather than by a gutter and two borders: two
@@ -530,27 +605,9 @@ function LogsScreen() {
               className={COLUMN}
               flush
               leading={railToggle}
-              // A unit's journal is named as the unit: its Runs have no filter
-              // row, which is where the unit is picked, to say whose they are.
-              name={
-                viewSource && viewSource.label !== selected.label ? (
-                  <span className="truncate text-body font-medium">{viewSource.label}</span>
-                ) : undefined
-              }
-              facts={<SourceFacts source={viewSource ?? selected} />}
-              actions={
-                // A page view with its own export — a site's requests — is not
-                // the log's lines, and two Export buttons would be two answers.
-                (!shownView || shownView.filtered) && (
-                  <ExportDialog
-                    sourceId={sourceId}
-                    source={selected}
-                    filter={filter}
-                    boot={boot}
-                    lens={lens}
-                  />
-                )
-              }
+              // The identity line over the frame names it — a unit's journal
+              // as the unit — so the strip is the views alone.
+              name={null}
               source={selected}
               sourceId={sourceId}
               units={sources.data?.units ?? []}
@@ -561,10 +618,7 @@ function LogsScreen() {
                 setMode(next)
               }}
               filter={filter}
-              onFilterChange={(next) => {
-                beginQuestion()
-                setFilter(next)
-              }}
+              onFilterChange={onFilterChange}
               onSubmitQuestion={() => {
                 if (editing.current) commitQuestion()
               }}
@@ -580,7 +634,8 @@ function LogsScreen() {
                 setFilter((f) => ({ ...f, fields: {} }))
               }}
               detectedLens={detectedLens}
-              insightReadings
+              readings={showReadings ? undefined : readings}
+              answered={showReadings ? readings : undefined}
               range={range}
               onRangeChange={setRange}
               since={since}

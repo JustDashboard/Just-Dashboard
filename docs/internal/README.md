@@ -75,6 +75,9 @@ strategy, and feature ownership behind those rules.
   select/menu inventory, single-column option layout, opening behavior and verification coverage.
 
 - [`../audits/2026-10-04-terminal-window-docking/README.md`](../audits/2026-10-04-terminal-window-docking/README.md) — terminal pane detachment, window docking and live overlay recording with native PTY checks.
+- [`../audits/2026-10-06-command-palette-overhaul/README.md`](../audits/2026-10-06-command-palette-overhaul/README.md)
+  — the palette's one-line results without hue tiles, the selected result's preview with its
+  connected resources, and before/after screenshots.
 - [`../audits/2026-10-04-command-search/README.md`](../audits/2026-10-04-command-search/README.md) — global
   command search research, keyboard navigation plan, metadata inventory and recorded workflow.
 - [`operations/terminal-tools.md`](operations/terminal-tools.md) — installer stages and completion guide,
