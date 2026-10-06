@@ -8,6 +8,7 @@ import {
   Bug,
   CheckCircle,
   CloudDownload,
+  Cross,
   Globe,
   Information,
   Router,
@@ -16,14 +17,14 @@ import {
   TerminalWindow,
   Warning,
 } from "@/components/icons"
-import { relativeTime } from "@/lib/format"
 import type { Posture, SecurityFinding } from "@/lib/types"
-import { FormSection } from "@/components/form"
 import { ProductGlyph } from "@/components/product-logo"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { FindingList, type Finding } from "@/components/finding-list"
+import { FilterChip } from "@/components/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
+import { POSTURE_AREAS } from "@/components/security/posture-strip"
 
 /**
  * Whether this machine is in reasonable shape, as a verdict.
@@ -40,16 +41,25 @@ import { Skeleton } from "@/components/ui/skeleton"
  * itself, a button. Rendered through `FindingList`, the same list the health
  * verdict uses, and plain like it: the findings are the first thing to read
  * after the figures, and a frame around them made the page open with a box.
+ *
+ * The split by severity is the head's, as dots and words; which checks ran is
+ * the strip's above it (`posture-strip.tsx`), whose segments narrow this list
+ * to one area — the chip in the head says so and lets it go.
  */
 export function PosturePanel({
   posture,
   loading,
   onFix,
+  area,
+  onClearArea,
   className,
 }: {
   posture: Posture | undefined
   loading: boolean
   onFix?: (finding: SecurityFinding) => void
+  /** The one area the strip narrowed the list to. */
+  area?: SecurityFinding["area"]
+  onClearArea?: () => void
   className?: string
 }) {
   const { can } = useAuth()
@@ -74,16 +84,22 @@ export function PosturePanel({
 
   const count = (level: SecurityFinding["level"]) =>
     posture.findings.filter((finding) => finding.level === level).length
+  const shown = area ? posture.findings.filter((f) => f.area === area) : posture.findings
+  const narrowed = POSTURE_AREAS.find((a) => a.area === area)
 
   return (
-    <FormSection
-      aside
-      title="Findings"
-      className={className}
-      hint={
-        <div className="space-y-4">
-          <p>Checked {relativeTime(posture.checkedAt)}</p>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
+    <Panel plain className={className}>
+      <PanelHeader
+        title="Findings"
+        actions={
+          <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            {narrowed && (
+              <FilterChip selected onClick={onClearArea} aria-label="Show every area">
+                <narrowed.glyph aria-hidden className="size-3 text-brand" />
+                Only {narrowed.name}
+                <Cross aria-hidden className="size-3 text-muted-foreground" />
+              </FilterChip>
+            )}
             <Status
               verdict={count("critical") ? "critical" : "notice"}
               label={`${count("critical")} critical`}
@@ -93,32 +109,29 @@ export function PosturePanel({
               label={`${count("warning")} warning`}
             />
             <Status verdict="notice" label={`${count("notice")} notice`} />
-          </div>
-          {posture.skipped.length > 0 && (
-            <p className="border-t border-hairline pt-3">
-              <span className="font-medium text-foreground">Not checked</span>
-              <br />
-              {posture.skipped.join(", ")}
-            </p>
-          )}
-        </div>
-      }
-    >
-      <FindingList
-        findings={posture.findings.map((finding) =>
-          toFinding(
-            finding,
-            act,
-            securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can).label,
-          ),
-        )}
-        emptyLabel={
-          posture.skipped.length > 0
-            ? `No findings in completed checks. Not checked: ${posture.skipped.join(", ")}.`
-            : "All security checks passed"
+          </span>
         }
       />
-    </FormSection>
+      <PanelBody>
+        {/* Keyed by the area, so narrowing it is an arrival (§11). */}
+        <div key={area ?? "all"} className="animate-rise">
+          <FindingList
+            findings={shown.map((finding) =>
+              toFinding(
+                finding,
+                act,
+                securityRemedy(!onFix ? { ...finding, fix: undefined } : finding, can).label,
+              ),
+            )}
+            emptyLabel={
+              posture.skipped.length > 0
+                ? `No findings in completed checks. Not checked: ${posture.skipped.join(", ")}.`
+                : "All security checks passed"
+            }
+          />
+        </div>
+      </PanelBody>
+    </Panel>
   )
 }
 
