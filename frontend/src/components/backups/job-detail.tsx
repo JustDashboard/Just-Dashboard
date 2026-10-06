@@ -5,11 +5,11 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
+  Archive,
   ArrowLeft,
   CloudDownload,
   Database,
   Download,
-  Eye,
   FolderOpen,
   ShieldCheck,
 } from "@/components/icons"
@@ -22,24 +22,21 @@ import type {
   BackupResourceReport,
   BackupRestoreResult,
   BackupRun,
+  Container,
 } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import {
-  Detail,
-  DetailList,
-  Metric,
-  MetricStrip,
-  Page,
-  PageContext,
-  SearchInput,
-} from "@/components/page"
-import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
+import { Detail, DetailList, Page, PageContext, SearchInput } from "@/components/page"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
 import { StatGrid, StatTile } from "@/components/stat-tile"
+import { TileTrend } from "@/components/metrics/sparkline"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { ProductLogo, ProductLogos } from "@/components/product-logo"
+import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { Field, FormNote } from "@/components/form"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
@@ -54,14 +51,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { retentionLabel, scheduleLabel, targetLabel } from "@/components/backups/shared"
+  contentsLabel,
+  retentionLabel,
+  scheduleLabel,
+  targetLabel,
+} from "@/components/backups/shared"
+import { LastRun } from "@/components/backups/job-card"
+import { RunContents, RunLog, RunRail } from "@/components/backups/job-runs"
+import { destinationProduct, jobProducts } from "@/components/backups/marks"
+import { JobMap } from "@/components/backups/protection-map"
+import { FileIcon } from "@/components/files/file-icon"
 import { useJobVerbs } from "@/components/backups/job-verbs"
 import { JobDialog } from "@/components/backups/job-form"
 import { useQuerySelection } from "@/hooks/use-query-selection"
@@ -81,6 +80,21 @@ type Confirm = ReturnType<typeof useConfirm>["confirm"]
  * because restoring from the wrong run is not recoverable. So a job is its own
  * destination, the dialogs are dialogs over a page, and `/deploy/[id]/runs`
  * already had the shape.
+ *
+ * It opens the way the dashboard's other things open: an identity line — the
+ * products it covers as its mark, its name, what it takes and where it writes
+ * as facts, its last outcome at the far end — then its own picture, the list
+ * page's narrowed to one job (`JobMap`), then four readings, the archive's
+ * size over the runs as the Holding figure's trend.
+ *
+ * Its runs are a rail beside the run they show, the deployment run page's
+ * Details shape: each run its outcome, its archive's size as a bar, and the
+ * inspector of the picked one — its log with the failing line washed, what
+ * the archive holds by its manifest, its recovery check and its files. With
+ * none picked it shows the newest, because a page about a job is opened to
+ * see how last night went. A table of runs with the chosen one's log in a
+ * panel two screens below it was the shape before, and a reader comparing
+ * three runs scrolled between them.
  */
 export function JobPage() {
   const { job: jobId } = useParams<{ job: string }>()
@@ -107,12 +121,19 @@ export function JobPage() {
     5000,
     [jobId],
   )
-  // The edit form suggests what on this server a job could also cover, so it
-  // wants the same coverage report the list page reads.
+  // The edit form suggests what on this server a job could also cover, and
+  // the picture draws what it does cover, from the report the list page reads.
   const resources = usePoll(
     (signal) => get<BackupResourceReport>("/backups/resources", undefined, signal),
     60000,
   )
+  // Only for the marks: a volume is drawn as the image of what mounts it.
+  const docker = usePoll(
+    (signal) => get<Container[]>("/docker/containers/", undefined, signal),
+    60000,
+  )
+  const containers = useMemo(() => docker.data ?? [], [docker.data])
+  const resourceList = useMemo(() => resources.data?.resources ?? [], [resources.data])
   const verbsFor = useJobVerbs({
     confirm,
     refresh: () => {
@@ -125,7 +146,8 @@ export function JobPage() {
     onDeleted: () => router.replace("/backups"),
   })
   const verbs = job ? verbsFor(job) : []
-  const selected = runs.data?.runs.find((run) => run.id === selectedId) ?? null
+  const runList = runs.data?.runs ?? []
+  const shown = runList.find((run) => run.id === selectedId) ?? runList[0]
 
   const verify = async (run: BackupRun) => {
     setVerifying(run.id)
@@ -142,27 +164,14 @@ export function JobPage() {
     }
   }
 
+  const browse = (run: BackupRun) => {
+    setSelectedId(run.id)
+    setBrowsing({ ...run })
+  }
+
   const runVerbs = (run: BackupRun): Verb[] => {
-    const ok = run.status === "success"
-    const out: Verb[] = [
-      {
-        key: "log",
-        label: "Log",
-        icon: Eye,
-        inline: true,
-        run: () => setSelectedId(run.id),
-      },
-    ]
-    if (!ok) return out
-    out.push({
-      key: "browse",
-      label: "Browse files",
-      icon: FolderOpen,
-      run: () => {
-        setSelectedId(run.id)
-        setBrowsing({ ...run })
-      },
-    })
+    if (run.status !== "success") return []
+    const out: Verb[] = []
     if (can("destructive")) {
       out.push({
         key: "restore",
@@ -199,6 +208,14 @@ export function JobPage() {
     return out
   }
 
+  // Oldest first, as a trend reads into the present; failed runs took no archive.
+  const sizes = [...runList]
+    .reverse()
+    .filter((run) => run.status === "success")
+    .map((run) => run.sizeBytes)
+  const failed = runList.filter((run) => run.status === "failed").length
+  const products = job ? jobProducts(job, resourceList, containers) : []
+
   return (
     <Workspace
       name="Backups"
@@ -227,7 +244,6 @@ export function JobPage() {
           actions={
             job && (
               <>
-                {!job.enabled && <Tag>paused</Tag>}
                 <VerbBar verbs={verbs} menuLabel={`More actions for ${job.name}`} />
                 <WorkspaceHelp />
               </>
@@ -240,164 +256,165 @@ export function JobPage() {
 
         {job && (
           <>
-            <MetricStrip className="animate-rise">
-              <Metric label="Job" value={job.name} />
-              <Metric label="Schedule" value={scheduleLabel(job.schedule)} />
-            </MetricStrip>
-            {/*
-              What the job holds and when it next fires, as figures (§15 pass 2).
-              The sheet had all four as clauses inside two `Detail` rows — a
-              reader asking "is this thing actually keeping anything" had to
-              read a sentence to find out, on a page whose entire subject is
-              whether the answer is yes.
-            */}
+            <HostIdentity
+              className="animate-rise"
+              logo={
+                products.length > 1 ? (
+                  <ProductLogos ids={products} size="md" />
+                ) : (
+                  <ProductLogo
+                    id={products[0]}
+                    fallback={Archive}
+                    className="size-12 rounded-xl [&_img]:size-7"
+                  />
+                )
+              }
+              title={job.name}
+              facts={
+                <>
+                  <span>{contentsLabel(job)}</span>
+                  <FactDot />
+                  <HostFact product={destinationProduct(job)}>
+                    <span className={cn(job.targetKind === "local" && "font-mono")}>
+                      {targetLabel(job)}
+                    </span>
+                  </HostFact>
+                  {job.recovery && (
+                    <>
+                      <FactDot />
+                      <span>
+                        recovery check {job.recovery.automatic ? "after every run" : "on request"} ·
+                        schema {job.recovery.schemaVersion}
+                      </span>
+                    </>
+                  )}
+                </>
+              }
+              aside={<LastRun job={job} />}
+            />
+
+            {/* The page's own ground under the dot grid, as the list page's
+                picture stands: the grid gives it a middle without a frame. */}
+            {(resources.data || resources.error) && (
+              <div className="relative animate-rise py-2 lg:py-4">
+                <div
+                  aria-hidden
+                  className="wire-grid pointer-events-none absolute inset-x-0 -inset-y-4"
+                />
+                <JobMap job={job} resources={resourceList} containers={containers} />
+              </div>
+            )}
+
             <StatGrid className="animate-rise">
-              <StatTile label="Stored" value={String(job.stored.runs)} hint="archives kept" />
+              <StatTile
+                label="Archives"
+                value={String(job.stored.runs)}
+                hint={retentionLabel(job)}
+              />
               <StatTile
                 label="Holding"
                 value={bytes(job.stored.bytes)}
-                hint={retentionLabel(job)}
+                trend={<TileTrend values={sizes} label="Archive size, oldest run to newest" />}
+                hint={sizes.length > 0 ? `last archive ${bytes(sizes.at(-1))}` : undefined}
               />
               <StatTile
                 label="Last run"
                 value={job.lastRun ? relativeTime(job.lastRun.startedAt) : "never"}
                 tone={job.lastRun?.status === "failed" ? "danger" : undefined}
-                hint={job.lastRun?.status ?? "no run yet"}
+                hint={
+                  job.lastRun
+                    ? `${job.lastRun.status}${job.lastRun.duration ? ` · took ${job.lastRun.duration}` : ""}`
+                    : "no run yet"
+                }
               />
               <StatTile
                 label="Next run"
                 value={job.enabled && job.nextRun ? relativeTime(job.nextRun) : "—"}
-                tone={!job.enabled ? "warning" : undefined}
-                hint={job.enabled ? scheduleLabel(job.schedule) : "schedule paused"}
+                tone={!job.enabled && job.schedule ? "warning" : undefined}
+                hint={
+                  !job.schedule
+                    ? "runs by hand"
+                    : job.enabled
+                      ? scheduleLabel(job.schedule)
+                      : "schedule paused"
+                }
               />
             </StatGrid>
 
-            <DetailList className="text-body">
-              <Detail label="Sources">
-                <ul className="min-w-0 space-y-0.5 font-mono text-xs">
-                  {job.sources.map((s) => (
-                    <li key={s} className="truncate">
-                      {s}
-                    </li>
-                  ))}
-                </ul>
-              </Detail>
-              {job.excludes.length > 0 && (
-                <Detail label="Excludes" className="font-mono">
-                  {job.excludes.join(", ")}
+            {job.excludes.length > 0 && (
+              <DetailList className="text-body">
+                <Detail label="Excludes">
+                  <ul className="min-w-0 space-y-0.5 font-mono text-xs">
+                    {job.excludes.map((path) => (
+                      <li key={path} className="truncate">
+                        {path}
+                      </li>
+                    ))}
+                  </ul>
                 </Detail>
-              )}
-              <Detail label="Destination" className="font-mono">
-                {targetLabel(job)}
-              </Detail>
-              {job.sqlitePaths?.length ||
-              job.databaseDumps?.length ||
-              job.pauseContainers?.length ? (
-                <Detail label="Consistency">
-                  {[
-                    job.sqlitePaths?.length
-                      ? plural(job.sqlitePaths.length, "SQLite snapshot")
-                      : "",
-                    job.databaseDumps?.length
-                      ? plural(job.databaseDumps.length, "native dump")
-                      : "",
-                    job.pauseContainers?.length ? `pauses ${job.pauseContainers.join(", ")}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </Detail>
-              ) : null}
-              {job.recovery && (
-                <Detail label="Recovery check">
-                  {job.recovery.automatic ? "After every successful run" : "On request"}
-                  <span className="text-muted-foreground">
-                    {" "}
-                    · schema {job.recovery.schemaVersion}
-                  </span>
-                </Detail>
-              )}
-            </DetailList>
+              </DetailList>
+            )}
 
-            <Panel>
+            <Panel plain>
               <PanelHeader
                 title="Runs"
-                actions={runs.data?.running && <Status state="running" label="running now" />}
+                actions={
+                  runs.data?.running ? (
+                    <Status state="running" label={<TextShimmer>running now</TextShimmer>} />
+                  ) : (
+                    runList.length > 0 && (
+                      <span className="numeric text-hint text-muted-foreground">
+                        {plural(runList.length, "run")}
+                        {failed > 0 && (
+                          <>
+                            {" · "}
+                            <span className="text-destructive">{failed} failed</span>
+                          </>
+                        )}
+                      </span>
+                    )
+                  )
+                }
               />
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className="pt-3">
                 {runs.loading && !runs.data ? (
-                  <LoadingRows rows={3} className="px-4" />
-                ) : runs.data?.runs.length === 0 ? (
+                  <LoadingRows rows={3} />
+                ) : runList.length === 0 ? (
                   <EmptyNote>No runs yet. Run now takes the first one.</EmptyNote>
                 ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="w-full">Started</TableHead>
-                        <TableHead>Result</TableHead>
-                        <TableHead className="text-right">Size</TableHead>
-                        <TableHead>Took</TableHead>
-                        <TableHead className="w-px" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {runs.data?.runs.map((run) => (
-                        <TableRow
-                          data-workspace-item={`run:${run.id}`}
-                          data-workspace-name={`Run ${run.id}`}
-                          key={run.id}
-                          data-state={run.id === selectedId ? "selected" : undefined}
-                          onActivate={() => setSelectedId(run.id)}
-                        >
-                          <TableCell>
-                            <div className="text-body">{timestamp(run.startedAt)}</div>
-                            <p className="text-hint text-muted-foreground">
-                              {run.trigger.replaceAll("_", " ")} · run {run.id}
-                            </p>
-                          </TableCell>
-                          <TableCell>
-                            <Status state={run.status} />
-                            {run.restoreVerification && (
-                              <p className="mt-1 text-hint text-muted-foreground">
-                                Restore check: {run.restoreVerification.state.replaceAll("_", " ")}
-                              </p>
-                            )}
-                          </TableCell>
-                          <TableCell className="numeric text-right">
-                            {run.sizeBytes ? bytes(run.sizeBytes) : "—"}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {run.duration ?? "running"}
-                          </TableCell>
-                          <TableCell>
-                            <VerbActions
-                              dim
-                              verbs={runVerbs(run)}
-                              menuLabel={`More actions for run ${run.id}`}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                  // One frame round the rail and the run it shows, the run
+                  // page's Details: the rail decides what the inspector holds.
+                  <div className="grid min-w-0 overflow-hidden rounded-xl border bg-card lg:h-[min(80vh,48rem)] lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+                    <div className="min-h-0 overflow-y-auto p-2 max-lg:max-h-80 max-lg:border-b lg:border-r">
+                      <RunRail
+                        runs={runList}
+                        selectedId={shown?.id}
+                        onSelect={(run) => setSelectedId(run.id)}
+                      />
+                    </div>
+                    <div className="min-h-0 min-w-0 overflow-y-auto">
+                      {shown && (
+                        <RunInspector
+                          key={shown.id}
+                          run={shown}
+                          verbs={runVerbs(shown)}
+                          browsing={browsing}
+                          onBrowse={() => browse(shown)}
+                          onRestorePaths={(paths) => setRestore({ run: shown, paths })}
+                          canRestore={can("destructive") && shown.status === "success"}
+                        />
+                      )}
+                    </div>
+                  </div>
                 )}
               </PanelBody>
             </Panel>
-
-            {selected && (
-              <RunDetail
-                key={selected.id}
-                run={selected}
-                browsing={browsing}
-                onRestorePaths={(paths) => setRestore({ run: selected, paths })}
-                canRestore={can("destructive") && selected.status === "success"}
-              />
-            )}
           </>
         )}
         {editing && (
           <JobDialog
             job={editing}
-            resources={resources.data?.resources ?? []}
+            resources={resourceList}
             onOpenChange={(open: boolean) => !open && setEditing(null)}
             onDone={jobPoll.refresh}
           />
@@ -426,16 +443,23 @@ export function JobPage() {
   )
 }
 
-/** The chosen run: its log, its evidence, and — on request — its contents. */
-function RunDetail({
+/**
+ * The run the rail has picked: what it was, its recovery check, its log, what
+ * the archive holds, where the archive is, and — on request — its files.
+ */
+function RunInspector({
   run,
+  verbs,
   browsing,
   canRestore,
+  onBrowse,
   onRestorePaths,
 }: {
   run: BackupRun
+  verbs: Verb[]
   browsing: BackupRun | null
   canRestore: boolean
+  onBrowse: () => void
   onRestorePaths: (paths: string[]) => void
 }) {
   const [showFiles, setShowFiles] = useSessionState(`backups.run.${run.id}.files.open`, false)
@@ -444,52 +468,84 @@ function RunDetail({
   }, [browsing, run.id, setShowFiles])
   const verification = run.restoreVerification
   return (
-    <div className="animate-rise space-y-4">
-      <Panel plain>
-        <PanelHeader
-          title={`Run ${run.id}`}
-          actions={
-            run.status === "success" && (
-              <Button size="xs" variant="outline" onClick={() => setShowFiles((v) => !v)}>
-                <FolderOpen />
-                {showFiles ? "Hide files" : "Browse files"}
-              </Button>
-            )
-          }
-        />
-        <PanelBody className="space-y-3">
-          <Well className="max-h-72 whitespace-pre-wrap">{run.log || "No output recorded."}</Well>
-          {run.artifact && (
-            <p className="font-mono text-hint break-all text-muted-foreground">{run.artifact}</p>
+    <section aria-label={`Run ${run.id}`} className="min-w-0 animate-rise space-y-5 p-4 sm:p-5">
+      <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <h3 className="flex min-w-0 items-center gap-3 text-title font-semibold tracking-tight">
+            Run {run.id}
+            <Status state={run.status} tone={run.status === "failed" ? "danger" : undefined} />
+          </h3>
+          <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="numeric">{timestamp(run.startedAt)}</span>
+            <FactDot />
+            <span>{run.trigger.replaceAll("_", " ")}</span>
+            <FactDot />
+            <span>
+              took <span className="numeric text-foreground">{run.duration ?? "—"}</span>
+            </span>
+            {run.sizeBytes > 0 && (
+              <>
+                <FactDot />
+                <span className="numeric text-foreground">{bytes(run.sizeBytes)}</span>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {run.status === "success" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (showFiles) setShowFiles(false)
+                else onBrowse()
+              }}
+            >
+              <FolderOpen />
+              {showFiles ? "Hide files" : "Browse files"}
+            </Button>
           )}
-          {run.manifest?.pausedContainers && run.manifest.pausedContainers.length > 0 && (
-            <FormNote>
-              Paused during the archive: {run.manifest.pausedContainers.join(", ")}
-            </FormNote>
+          <VerbActions verbs={verbs} menuLabel={`More actions for run ${run.id}`} />
+        </div>
+      </header>
+
+      {verification && (
+        <div className="space-y-2 text-body">
+          <Status
+            tone={
+              verification.state === "passed"
+                ? "running"
+                : verification.state === "running"
+                  ? "notice"
+                  : "danger"
+            }
+            label={`Restore check: ${verification.state.replaceAll("_", " ")}`}
+          />
+          {verification.detail && <p>{verification.detail}</p>}
+          <DetailList>
+            <Detail label="Recovery check">#{verification.id}</Detail>
+            <Detail label="Schema">{verification.schemaVersion}</Detail>
+            <Detail label="Temporary resources">
+              {verification.cleanupComplete ? "Removed" : "Cleanup pending"}
+            </Detail>
+          </DetailList>
+          {verification.applicationImage && (
+            <p className="font-mono text-hint break-all text-muted-foreground">
+              {verification.applicationImage}
+            </p>
           )}
-          {verification && (
-            <div className="space-y-2 text-body">
-              <p>{verification.detail}</p>
-              <DetailList>
-                <Detail label="Recovery check">#{verification.id}</Detail>
-                <Detail label="Schema">{verification.schemaVersion}</Detail>
-                <Detail label="Temporary resources">
-                  {verification.cleanupComplete ? "Removed" : "Cleanup pending"}
-                </Detail>
-              </DetailList>
-              {verification.applicationImage && (
-                <p className="font-mono text-hint break-all text-muted-foreground">
-                  {verification.applicationImage}
-                </p>
-              )}
-            </div>
-          )}
-        </PanelBody>
-      </Panel>
+        </div>
+      )}
+
+      <RunLog log={run.log} />
+      {run.manifest && <RunContents manifest={run.manifest} />}
+      {run.artifact && (
+        <p className="font-mono text-hint break-all text-muted-foreground">{run.artifact}</p>
+      )}
       {showFiles && (
         <ArchiveBrowser run={run} canRestore={canRestore} onRestorePaths={onRestorePaths} />
       )}
-    </div>
+    </section>
   )
 }
 
@@ -634,6 +690,16 @@ function ArchiveBrowser({
                     aria-label={`Select ${entry.name}`}
                   />
                 ) : null}
+                {/* Drawn as what it is, the file manager's own marks: a folder
+                    as a folder, a config file as its format. */}
+                <FileIcon
+                  entry={{
+                    name: entry.name.split("/").pop() || entry.name,
+                    isDir: entry.isDir,
+                    isSymlink: false,
+                  }}
+                  className="size-4"
+                />
                 <span className="min-w-0 flex-1 truncate">
                   {entry.name}
                   {entry.isDir && "/"}

@@ -46,6 +46,7 @@ export function JobCard({
   verb = job.name,
   note,
   working,
+  index,
 }: {
   job: BackupJob
   /** The products of what the job covers, from the coverage report. */
@@ -64,6 +65,8 @@ export function JobCard({
   note?: React.ReactNode
   /** The job is running now, so a light runs round the card (§11 *live*). */
   working?: boolean
+  /** Position in the list, for the arrival stagger (§11 *arrived*). */
+  index?: number
 }) {
   const fetchRuns = useCallback(
     (signal: AbortSignal) =>
@@ -112,6 +115,7 @@ export function JobCard({
       verb={verb}
       href={`/backups/${job.id}`}
       busy={working}
+      index={index}
       className={cn(!job.enabled && job.schedule && "opacity-80")}
       leading={
         <span ref={mark} className="flex">
@@ -199,7 +203,10 @@ export function LastRun({ job }: { job: BackupJob }) {
   const { status, startedAt } = job.lastRun
   return (
     <Status
+      // A backup that did not land is a failure, not a caution: red, as its
+      // square in the strip beside it and its line in the picture are.
       state={status}
+      tone={status === "failed" ? "danger" : undefined}
       live={status === "running"}
       label={
         status === "running"

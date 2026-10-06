@@ -48,6 +48,32 @@ export const RESOURCE_KIND_LABEL: Record<BackupResourceKind, string> = {
   database: "Database",
 }
 
+/** A kind as a group of things is named: the protection picture's column, a filter chip. */
+export const RESOURCE_KIND_GROUP: Record<BackupResourceKind, string> = {
+  dashboard: "Dashboard",
+  proxy: "Proxy",
+  volume: "Docker volumes",
+  stack: "Compose stacks",
+  deployment: "Deployments",
+  repository: "Repositories",
+  database: "Databases",
+}
+
+/**
+ * The order the kinds are read in: the dashboard's own data, then what holds
+ * state an application cannot rebuild, then what can be checked out again,
+ * then configuration.
+ */
+export const RESOURCE_KIND_ORDER: BackupResourceKind[] = [
+  "dashboard",
+  "database",
+  "volume",
+  "stack",
+  "deployment",
+  "repository",
+  "proxy",
+]
+
 /** The lines of a textarea, trimmed and without blanks. */
 export function lines(value: string): string[] {
   return value
