@@ -1,12 +1,18 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/go-chi/chi/v5"
@@ -325,6 +331,7 @@ func (s *Server) processInventory(r *http.Request) (procs.ProcessList, error) {
 			procs.MarkPM2(rows, managed)
 		}
 	}
+	s.procContainers.label(ctx, s.modules.docker, rows)
 	q := r.URL.Query()
 	limit := atoiDefault(q.Get("limit"), 200)
 	if limit < 50 {
@@ -335,7 +342,7 @@ func (s *Server) processInventory(r *http.Request) (procs.ProcessList, error) {
 	}
 	list := procs.Select(rows, procs.ListOptions{
 		Limit: limit, Order: procs.ParseOrder(q.Get("sort")), Query: q.Get("q"),
-		User: q.Get("user"), State: q.Get("state"), Manager: q.Get("manager"),
+		User: q.Get("user"), State: q.Get("state"), Manager: q.Get("manager"), Group: q.Get("group"),
 	})
 	return list, nil
 }
@@ -349,14 +356,14 @@ func (s *Server) handleProcessDetail(w http.ResponseWriter, r *http.Request) err
 	if err != nil {
 		return httpx.ErrNotFound
 	}
+	rows := []procs.Process{*p}
 	if s.modules.pm2.Available() {
 		if managed, pmErr := s.modules.pm2.List(r.Context()); pmErr == nil {
-			rows := []procs.Process{*p}
 			procs.MarkPM2(rows, managed)
-			*p = rows[0]
 		}
 	}
-	httpx.JSON(w, http.StatusOK, p)
+	s.procContainers.label(r.Context(), s.modules.docker, rows)
+	httpx.JSON(w, http.StatusOK, rows[0])
 	return nil
 }
 
@@ -399,6 +406,9 @@ func (s *Server) handleProcessPriority(w http.ResponseWriter, r *http.Request) e
 	if err := requireSameProcess(p, req.StartedAt); err != nil {
 		return err
 	}
+	if p.State == "zombie" {
+		return refusedControl(p, procs.ErrZombie)
+	}
 	if err := s.modules.table.SetNice(r.Context(), int32(pid64), *req.Nice); err != nil {
 		return httpx.BadRequest("%v", err)
 	}
@@ -433,6 +443,9 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) err
 	if err := requireSameProcess(detail, req.StartedAt); err != nil {
 		return err
 	}
+	if err := procs.Controllable(detail); err != nil {
+		return refusedControl(detail, err)
+	}
 	// No typed phrase: signalling a process is the process table's whole
 	// purpose, and a supervised one comes straight back. The dialog carries the
 	// pid and the command line, which is what identifies the right row.
@@ -443,6 +456,59 @@ func (s *Server) handleProcessSignal(w http.ResponseWriter, r *http.Request) err
 		map[string]any{"pid": pid, "signal": req.Signal, "cmdline": detail.Cmdline})
 	httpx.NoContent(w)
 	return nil
+}
+
+// refusedControl says why a signal or a priority would not reach a process,
+// as a conflict with the process's state rather than a malformed request. A
+// zombie's answer names the parent, which is the process that can clear it.
+func refusedControl(p *procs.Process, err error) error {
+	if errors.Is(err, procs.ErrZombie) {
+		return httpx.Err(http.StatusConflict, "process_zombie",
+			fmt.Sprintf("%s (%d) has already exited; its parent, PID %d, has not collected its exit status. Restarting or ending the parent clears it.", p.Name, p.PID, p.PPID))
+	}
+	return httpx.Err(http.StatusConflict, "kernel_thread",
+		fmt.Sprintf("%s (%d) is a kernel thread, and the kernel does not deliver signals to its own threads.", p.Name, p.PID))
+}
+
+// containerNames is each running container's name by the twelve-character
+// id a process's cgroup carries, read from Docker at most every few seconds:
+// the table polls every two to thirty, and a process row said
+// "Container · 3f9a1c0b7d2e" where the Docker pages say "postgres".
+type containerNames struct {
+	mu    sync.Mutex
+	names map[string]string
+	read  time.Time
+}
+
+const containerNamesFresh = 10 * time.Second
+
+func (c *containerNames) label(ctx context.Context, docker *dockerx.Client, rows []procs.Process) {
+	if docker == nil || !slices.ContainsFunc(rows, func(p procs.Process) bool { return p.Manager == "container" }) {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.names == nil || time.Since(c.read) > containerNamesFresh {
+		listCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		list, err := docker.ListContainers(listCtx, false)
+		cancel()
+		// A Docker that does not answer leaves the ids as they were rather
+		// than taking the process table with it; the next poll asks again.
+		if err == nil {
+			c.names = make(map[string]string, len(list))
+			for _, ct := range list {
+				if len(ct.ID) >= 12 && ct.Name != "" {
+					c.names[ct.ID[:12]] = strings.TrimPrefix(ct.Name, "/")
+				}
+			}
+			c.read = time.Now()
+		}
+	}
+	for i := range rows {
+		if rows[i].Manager == "container" {
+			rows[i].ManagerLabel = c.names[rows[i].ManagerName]
+		}
+	}
 }
 
 // A PID can be reused between a table poll and a click. The create timestamp
