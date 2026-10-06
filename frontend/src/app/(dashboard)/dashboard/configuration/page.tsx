@@ -839,20 +839,34 @@ function Command({
   return (
     <ChoiceCard
       verb={verb}
-      title={<span className="text-sm font-semibold tracking-tight">{title}</span>}
-      logo={<ProductLogo id={product} />}
-      description={description}
-      index={index}
-      trailing={
-        <span className="flex min-w-0 flex-col gap-1 pt-1">
-          <ShellWords command={command} className="truncate text-hint" />
-          <span className="text-hint text-muted-foreground">
-            {mine && run ? <TextShimmer>{configPhaseLabel(run)}</TextShimmer> : cost}
+      // The mark heads the card beside its name and its cost, rather than
+      // through `logo`, which gives the tile a column of its own: beside four
+      // lines of words that column was a 40px tile over 80px of nothing, and
+      // the words it pushed over wrapped twice as often. Here the tile is as
+      // tall as the two lines beside it, and what follows has the full width.
+      title={
+        <span className="flex min-w-0 items-center gap-3">
+          <ProductLogo id={product} size="sm" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold tracking-tight">{title}</span>
+            <span className="block truncate text-hint font-normal text-muted-foreground">
+              {mine && run ? <TextShimmer>{configPhaseLabel(run)}</TextShimmer> : cost}
+            </span>
           </span>
         </span>
       }
+      description={<span className="mt-0.5 block">{description}</span>}
+      index={index}
+      trailing={
+        <Well className="w-full truncate px-2.5 py-1.5">
+          <span aria-hidden className="text-muted-foreground/60 select-none">
+            ${" "}
+          </span>
+          <ShellWords command={command} />
+        </Well>
+      }
       disabled={running}
-      className={mine ? "opacity-100" : undefined}
+      className={cn("gap-2", mine && "opacity-100")}
       onClick={onClick}
     >
       {mine && (
