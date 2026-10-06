@@ -156,7 +156,10 @@ a link. *No sponsors yet — the space is open.*
 recent places come first. Search the live dashboard by a name, domain, container ID or repository
 path, across projects, proxy sites, saved databases, containers, stacks, Git repositories, services,
 PM2 apps, backups and boards, each drawn with its real product logo. Narrow with **domain:**, **db:**,
-**container:** or the scope chips, which count each kind's matches as you type.
+**container:** or the scopes under the input, which count each kind's matches as you type. On a wide
+screen the selected result is previewed beside the list — a container's image and health, a site's
+domains, a repository's branch — with what it is connected to: the site serving a project's domain,
+the stack and backup in a repository's folder.
 Exact names rank first and small typos are tolerated. Arrows choose a result; Escape clears the
 search, then closes it. Inventories refresh each time you open search, and unavailable sources are
 named with a retry control. Search and recent destinations stay in memory and clear on sign-out.
