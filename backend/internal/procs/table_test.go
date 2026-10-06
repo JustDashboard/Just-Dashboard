@@ -1,6 +1,7 @@
 package procs
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -165,6 +166,137 @@ func writeCgroup(t *testing.T, root string, pid int, content string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "cgroup"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The table and an open sheet read the same process on their own clocks. A
+// read landing moments after the last measured the scheduler's rounding; it
+// reports the last full window instead and leaves the base where it was.
+func TestRatesNeedAWholeWindow(t *testing.T) {
+	start := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	created := start.Add(-time.Hour)
+	read := func(cpuSeconds float64, rss uint64) *Process {
+		return &Process{PID: 7, CreateTime: created, RSS: rss, cpuSeconds: cpuSeconds, cpuCounterReady: true}
+	}
+
+	first := applyProcessRates(read(10, 100), ioSample{}, start)
+	row := read(12, 200)
+	second := applyProcessRates(row, first, start.Add(4*time.Second))
+	if !row.CPUReady || row.CPUPercent != 50 {
+		t.Fatalf("4s window: cpu %v ready %v, want 50%%", row.CPUPercent, row.CPUReady)
+	}
+
+	soon := read(12.2, 300)
+	kept := applyProcessRates(soon, second, start.Add(4*time.Second+50*time.Millisecond))
+	if !soon.CPUReady || soon.CPUPercent != 50 {
+		t.Fatalf("50ms after: cpu %v, want the last window's 50%%", soon.CPUPercent)
+	}
+	if !kept.at.Equal(second.at) {
+		t.Fatal("a read too soon to measure moved the window's start")
+	}
+
+	later := read(14, 400)
+	applyProcessRates(later, kept, start.Add(8*time.Second))
+	if later.CPUPercent != 50 {
+		t.Fatalf("next full window: cpu %v, want 50%%", later.CPUPercent)
+	}
+}
+
+// A sheet opens on the process's recent shape, so the sampler keeps a point
+// per measured window — at most one every historyStep, and only so many.
+func TestHistoryKeepsRecentWindows(t *testing.T) {
+	start := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	created := start.Add(-time.Hour)
+	sample := ioSample{}
+	for i := 0; i <= historySize+10; i++ {
+		row := &Process{PID: 7, CreateTime: created, RSS: uint64(i), cpuSeconds: float64(i), cpuCounterReady: true}
+		sample = applyProcessRates(row, sample, start.Add(time.Duration(i)*historyStep))
+	}
+	if len(sample.history) != historySize {
+		t.Fatalf("history = %d points, want %d", len(sample.history), historySize)
+	}
+	if last := sample.history[len(sample.history)-1]; last.RSS != uint64(historySize+10) {
+		t.Fatalf("last point = %+v, want the newest read", last)
+	}
+
+	// A PID reused by another process starts over rather than inheriting.
+	reused := &Process{PID: 7, CreateTime: start, cpuSeconds: 1, cpuCounterReady: true}
+	if fresh := applyProcessRates(reused, sample, start.Add(time.Hour)); len(fresh.history) != 0 {
+		t.Fatalf("a replacement inherited %d points", len(fresh.history))
+	}
+}
+
+func TestGroupsCountSharedMemoryOnce(t *testing.T) {
+	mib := uint64(1 << 20)
+	rows := []Process{
+		{PID: 10, Name: "postgres", Manager: "systemd", ManagerName: "postgresql.service", CPUPercent: 3, RSS: 600 * mib, Shared: 512 * mib},
+		{PID: 11, Name: "postgres", Manager: "systemd", ManagerName: "postgresql.service", CPUPercent: 1, RSS: 560 * mib, Shared: 512 * mib},
+		{PID: 20, Name: "chrome", Manager: "session", ManagerName: "session-4.scope", CPUPercent: 40, RSS: 300 * mib, Shared: 100 * mib},
+		{PID: 21, Name: "chrome --type=renderer --lang=en-US", Manager: "unmanaged", CPUPercent: 20, RSS: 200 * mib, Shared: 100 * mib},
+		{PID: 2, Name: "kthreadd", Manager: "kernel", ManagerName: "kernel"},
+		{PID: 30, Name: "node", Manager: "container", ManagerName: "3f9a1c0b7d2e", ManagerLabel: "api", CPUPercent: 5, RSS: 100 * mib},
+	}
+	got := groups(rows, 8)
+	byKey := map[string]ProcessGroup{}
+	for _, g := range got {
+		byKey[g.Key] = g
+	}
+	pg := byKey["systemd:postgresql.service"]
+	if pg.Count != 2 || pg.Memory != (88+48+512)*mib || pg.Name != "postgresql.service" || pg.PID != 10 {
+		t.Fatalf("postgres group = %+v", pg)
+	}
+	chrome := byKey["name:chrome"]
+	if chrome.Count != 2 || chrome.CPUPercent != 60 || chrome.PID != 20 {
+		t.Fatalf("chrome group = %+v, want both copies whatever started them", chrome)
+	}
+	if byKey["kernel:"].Name != "Kernel threads" {
+		t.Fatalf("kernel group = %+v", byKey["kernel:"])
+	}
+	if byKey["container:3f9a1c0b7d2e"].Label != "api" {
+		t.Fatalf("container group = %+v", byKey["container:3f9a1c0b7d2e"])
+	}
+	if got[0].Key != "name:chrome" {
+		t.Fatalf("first group = %s, want the busiest", got[0].Key)
+	}
+
+	only := Select(rows, ListOptions{Order: ByCPU, Group: "systemd:postgresql.service"})
+	if only.Total != 2 || len(only.Groups) != len(got) {
+		t.Fatalf("group filter = %d rows and %d groups, want 2 rows and every group", only.Total, len(only.Groups))
+	}
+}
+
+// An empty command line is a kernel thread's, a zombie's, or a process's
+// caught mid-exit. The flags in stat say which.
+func TestManagerOfTellsAKernelThreadFromAZombie(t *testing.T) {
+	root := t.TempDir()
+	writeProcFile(t, root, 2, "stat", "2 (kthreadd) S 0 0 0 0 -1 2129984 0 0 0 0 0 0 0 0 20 0 1 0 2 0 0\n")
+	writeProcFile(t, root, 900, "stat", "900 (sleep (1)) Z 899 899 899 0 -1 4228108 0 0 0 0 0 0 0 0 20 0 1 0 2 0 0\n")
+	writeCgroup(t, root, 900, "0::/\n")
+	if manager, _ := ManagerOf(root, 2, ""); manager != "kernel" {
+		t.Fatalf("kthreadd = %s, want kernel", manager)
+	}
+	if manager, _ := ManagerOf(root, 900, ""); manager != "unmanaged" {
+		t.Fatalf("zombie = %s, want unmanaged", manager)
+	}
+	if err := Controllable(&Process{State: "zombie"}); !errors.Is(err, ErrZombie) {
+		t.Fatalf("zombie control = %v", err)
+	}
+	if err := Controllable(&Process{State: "sleeping", Manager: "kernel"}); !errors.Is(err, ErrKernelThread) {
+		t.Fatalf("kernel control = %v", err)
+	}
+	if err := Controllable(&Process{State: "sleeping", Manager: "systemd"}); err != nil {
+		t.Fatalf("service control = %v", err)
+	}
+}
+
+func writeProcFile(t *testing.T, root string, pid int, name, content string) {
+	t.Helper()
+	dir := filepath.Join(root, strconv.Itoa(pid))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

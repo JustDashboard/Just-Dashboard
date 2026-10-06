@@ -2,6 +2,7 @@ package procs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,25 +14,29 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/process"
 )
 
 // Process is one row of the htop-style table.
 type Process struct {
-	PID         int32     `json:"pid"`
-	PPID        int32     `json:"ppid"`
-	Name        string    `json:"name"`
-	Cmdline     string    `json:"cmdline"`
-	Username    string    `json:"username"`
-	Status      string    `json:"status"`
-	CPUPercent  float64   `json:"cpuPercent"`
-	CPUReady    bool      `json:"cpuReady"`
-	CPUWindow   float64   `json:"cpuWindowSeconds"`
-	MemPercent  float64   `json:"memPercent"`
-	RSS         uint64    `json:"rss"`
-	VMS         uint64    `json:"vms"`
-	Swap        uint64    `json:"swap"`
-	MemoryReady bool      `json:"memoryReady"`
+	PID         int32   `json:"pid"`
+	PPID        int32   `json:"ppid"`
+	Name        string  `json:"name"`
+	Cmdline     string  `json:"cmdline"`
+	Username    string  `json:"username"`
+	Status      string  `json:"status"`
+	CPUPercent  float64 `json:"cpuPercent"`
+	CPUReady    bool    `json:"cpuReady"`
+	CPUWindow   float64 `json:"cpuWindowSeconds"`
+	MemPercent  float64 `json:"memPercent"`
+	RSS         uint64  `json:"rss"`
+	VMS         uint64  `json:"vms"`
+	Swap        uint64  `json:"swap"`
+	MemoryReady bool    `json:"memoryReady"`
+	// Shared is the resident memory backed by files and shared mappings —
+	// the part a group of processes holds once between them, not once each.
+	Shared      uint64    `json:"shared,omitempty"`
 	Threads     int32     `json:"threads"`
 	Nice        int32     `json:"nice"`
 	CreateTime  time.Time `json:"createTime"`
@@ -48,17 +53,46 @@ type Process struct {
 	State       string    `json:"state"`
 	Manager     string    `json:"manager"`
 	ManagerName string    `json:"managerName,omitempty"`
+	// ManagerLabel is the supervisor as its owner names it where the
+	// cgroup does not: a container's name for the id its cgroup carries.
+	ManagerLabel string `json:"managerLabel,omitempty"`
 	// Detail-only readings. A snapshot leaves them empty: reading every
 	// process's sockets and limits on each poll would cost more than the
 	// table itself, and the table asks "what is heavy", not "what is on 3000".
-	Listening       []ListeningPort `json:"listening,omitempty"`
-	Connections     int             `json:"connections,omitempty"`
-	OpenFilesLimit  uint64          `json:"openFilesLimit,omitempty"`
+	Listening      []ListeningPort `json:"listening,omitempty"`
+	Connections    int             `json:"connections,omitempty"`
+	OpenFilesLimit uint64          `json:"openFilesLimit,omitempty"`
+	// History is the process's recent readings, oldest first, from every
+	// read the sampler has taken of it — the table's polls and an open
+	// sheet's — so a sheet opens on a shape rather than an empty line.
+	History         []ProcessSample `json:"history,omitempty"`
 	ioRateReady     bool
 	cpuSeconds      float64
 	cpuCounterReady bool
 	ioCounterReady  bool
 }
+
+// ProcessSample is one measured interval of a process: its CPU over the
+// interval, its resident memory at the end of it, and its disk rates.
+type ProcessSample struct {
+	At    time.Time `json:"at"`
+	CPU   float64   `json:"cpu"`
+	RSS   uint64    `json:"rss"`
+	Read  uint64    `json:"read"`
+	Write uint64    `json:"write"`
+}
+
+const (
+	// Two reads closer together than this measure the scheduler's rounding
+	// rather than the process. The table and an open sheet poll on their own
+	// clocks, and a sheet read landing 50ms after a table scan drew a worker
+	// at 0% and then at 180% on alternate polls.
+	minRateWindow = time.Second
+	// The history keeps a point at most this often, and this many of them:
+	// a few minutes at the table's cadence, the span a sheet's trend draws.
+	historyStep = 2 * time.Second
+	historySize = 90
+)
 
 type ioSample struct {
 	read, write uint64
@@ -67,6 +101,27 @@ type ioSample struct {
 	cpu         float64
 	cpuReady    bool
 	ioReady     bool
+	// The rates last measured over a full window, handed back to a read that
+	// lands too soon after the previous one to measure its own.
+	rates   measured
+	history []ProcessSample
+}
+
+type measured struct {
+	cpu         float64
+	window      float64
+	read, write uint64
+	cpuOK, ioOK bool
+}
+
+func (m measured) apply(row *Process) {
+	if m.ioOK {
+		row.IOReadRate, row.IOWriteRate = m.read, m.write
+		row.ioRateReady, row.IOReady = true, true
+	}
+	if m.cpuOK {
+		row.CPUPercent, row.CPUReady, row.CPUWindow = m.cpu, true, m.window
+	}
 }
 
 type Table struct {
@@ -145,6 +200,10 @@ func (t *Table) snapshot(ctx context.Context) ([]Process, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Read once per scan. gopsutil's MemoryPercent reads /proc/meminfo again
+	// for every process it is asked about, which on a host of five hundred
+	// processes was five hundred reads of the same file per poll.
+	total := hostMemoryTotal(ctx)
 	out := make([]Process, 0, len(procs))
 	for _, p := range procs {
 		if ctx.Err() != nil {
@@ -167,13 +226,7 @@ func (t *Table) snapshot(ctx context.Context) ([]Process, error) {
 			row.cpuSeconds = cpu.User + cpu.System
 			row.cpuCounterReady = true
 		}
-		if mp, err := p.MemoryPercentWithContext(ctx); err == nil {
-			row.MemPercent = round2(float64(mp))
-		}
-		if mi, err := p.MemoryInfoWithContext(ctx); err == nil && mi != nil {
-			row.RSS, row.VMS = mi.RSS, mi.VMS
-			row.Swap, row.MemoryReady = mi.Swap, true
-		}
+		readMemory(ctx, p, &row, total)
 		if io, err := p.IOCountersWithContext(ctx); err == nil && io != nil {
 			row.IORead, row.IOWrite = io.ReadBytes, io.WriteBytes
 			row.ioCounterReady = true
@@ -213,21 +266,51 @@ func (t *Table) applyIORates(rows []Process) {
 func applyProcessRates(row *Process, previous ioSample, now time.Time) ioSample {
 	created := row.CreateTime.UnixMilli()
 	current := ioSample{read: row.IORead, write: row.IOWrite, created: created, at: now, cpu: row.cpuSeconds, cpuReady: row.cpuCounterReady, ioReady: row.ioCounterReady}
-	elapsed := now.Sub(previous.at)
-	if previous.created != created || row.CreateTime.IsZero() || previous.at.IsZero() || elapsed <= 0 {
+	if previous.created != created || row.CreateTime.IsZero() || previous.at.IsZero() {
 		return current
 	}
+	elapsed := now.Sub(previous.at)
+	if elapsed < minRateWindow {
+		// Too soon to measure: say what the last full window measured and
+		// keep its start, so the next read measures a whole one.
+		previous.rates.apply(row)
+		return previous
+	}
+	var m measured
 	if previous.ioReady && current.ioReady {
-		row.IOReadRate = counterRate(previous.read, current.read, elapsed)
-		row.IOWriteRate = counterRate(previous.write, current.write, elapsed)
-		row.ioRateReady, row.IOReady = true, true
+		m.read = counterRate(previous.read, current.read, elapsed)
+		m.write = counterRate(previous.write, current.write, elapsed)
+		m.ioOK = true
 	}
 	if previous.cpuReady && current.cpuReady && current.cpu >= previous.cpu {
-		row.CPUPercent = round2((current.cpu - previous.cpu) / elapsed.Seconds() * 100)
-		row.CPUReady = true
-		row.CPUWindow = elapsed.Seconds()
+		m.cpu = round2((current.cpu - previous.cpu) / elapsed.Seconds() * 100)
+		m.window = elapsed.Seconds()
+		m.cpuOK = true
+	}
+	m.apply(row)
+	current.rates = m
+	current.history = previous.history
+	if m.cpuOK && (len(current.history) == 0 || now.Sub(current.history[len(current.history)-1].At) >= historyStep) {
+		current.history = append(current.history, ProcessSample{At: now.UTC(), CPU: m.cpu, RSS: row.RSS, Read: m.read, Write: m.write})
+		if len(current.history) > historySize {
+			current.history = current.history[len(current.history)-historySize:]
+		}
 	}
 	return current
+}
+
+// lastCPU is the CPU the sampler last measured for a process, for a view
+// that lists processes without scanning them itself. A gopsutil handle's own
+// CPUPercent is the average over the process's whole life, which put a
+// worker that had been idle for a day at 0% while it spun.
+func (t *Table) lastCPU(pid int32, created time.Time) (float64, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	sample, ok := t.samples[pid]
+	if !ok || sample.created != created.UnixMilli() || !sample.rates.cpuOK {
+		return 0, false
+	}
+	return sample.rates.cpu, true
 }
 
 func counterRate(previous, current uint64, elapsed time.Duration) uint64 {
@@ -250,16 +333,43 @@ type ListOptions struct {
 	User    string
 	State   string
 	Manager string
+	// Group is a ProcessGroup key: the processes of one workload.
+	Group string
+}
+
+// ProcessGroup is one workload: the processes one supervisor runs, or the
+// copies of one program started by hand. Fifty Chrome renderers or twenty
+// Postgres backends are one answer to "what is using the machine", and the
+// remedy for any of them is the group's, not a single PID's.
+type ProcessGroup struct {
+	Key     string `json:"key"`
+	Manager string `json:"manager"`
+	Name    string `json:"name"`
+	// Label is the supervisor's own name where it has one the key does not
+	// carry: a container's name beside its id.
+	Label      string  `json:"label,omitempty"`
+	Count      int     `json:"count"`
+	CPUPercent float64 `json:"cpuPercent"`
+	// Memory counts each process's private pages and the group's shared ones
+	// once: summed RSS counted Postgres's shared buffers once per backend and
+	// drew a database holding more memory than the machine has.
+	Memory uint64 `json:"memory"`
+	IORate uint64 `json:"ioRate"`
+	// PID is the group's heaviest process, the one a press opens.
+	PID int32 `json:"pid"`
 }
 
 type ProcessList struct {
-	Processes  []Process      `json:"processes"`
-	Total      int            `json:"total"`
-	Available  int            `json:"available"`
-	Truncated  bool           `json:"truncated"`
-	Users      []ProcessFacet `json:"users"`
-	States     []ProcessFacet `json:"states"`
-	Managers   []ProcessFacet `json:"managers"`
+	Processes []Process      `json:"processes"`
+	Total     int            `json:"total"`
+	Available int            `json:"available"`
+	Truncated bool           `json:"truncated"`
+	Users     []ProcessFacet `json:"users"`
+	States    []ProcessFacet `json:"states"`
+	Managers  []ProcessFacet `json:"managers"`
+	// Groups are the workloads heaviest by CPU or by memory, over the whole
+	// snapshot like the facets, so narrowing the table never narrows them.
+	Groups     []ProcessGroup `json:"groups"`
 	RatesReady bool           `json:"ratesReady"`
 }
 
@@ -274,6 +384,7 @@ func Select(rows []Process, opts ListOptions) ProcessList {
 		Managers: facets(rows, func(p Process) (string, string) {
 			return p.Manager, managerLabel(p.Manager)
 		}),
+		Groups: groups(rows, groupsShown),
 	}
 	for _, p := range rows {
 		if p.ioRateReady {
@@ -290,6 +401,9 @@ func Select(rows []Process, opts ListOptions) ProcessList {
 			continue
 		}
 		if opts.Manager != "" && p.Manager != opts.Manager {
+			continue
+		}
+		if opts.Group != "" && GroupKey(p) != opts.Group {
 			continue
 		}
 		if needle != "" && !processMatches(p, needle) {
@@ -314,7 +428,114 @@ func processMatches(p Process, needle string) bool {
 		strings.Contains(strings.ToLower(p.Cmdline), needle) ||
 		strings.Contains(strings.ToLower(p.Username), needle) ||
 		strings.Contains(strings.ToLower(p.ManagerName), needle) ||
+		strings.Contains(strings.ToLower(p.ManagerLabel), needle) ||
 		strings.Contains(strconv.Itoa(int(p.PID)), needle)
+}
+
+// GroupKey names the workload a process belongs to. A supervisor's processes
+// are its own group; anything started by hand — a login session's or nobody's
+// — is grouped by program, because "chrome ×40" is the reading and the
+// session scope it happened to start in is not.
+func GroupKey(p Process) string {
+	switch p.Manager {
+	case "systemd", "pm2", "container":
+		if p.ManagerName != "" {
+			return p.Manager + ":" + p.ManagerName
+		}
+	case "kernel":
+		return "kernel:"
+	}
+	return "name:" + program(p.Name)
+}
+
+// program is the word a process's name starts with. A name is usually the
+// kernel's fifteen-character comm, but gopsutil reads a longer one from the
+// command line, and Chrome and Node rewrite theirs to the whole argv: forty
+// renderers were forty groups of one, each named by its flags.
+func program(name string) string {
+	fields := strings.Fields(name)
+	if len(fields) == 0 {
+		return name
+	}
+	return strings.TrimRight(filepath.Base(fields[0]), ":")
+}
+
+// groupsShown is how many workloads each measure contributes: the heaviest
+// by CPU and the heaviest by memory, which are seldom the same list.
+const groupsShown = 8
+
+func groups(rows []Process, each int) []ProcessGroup {
+	type acc struct {
+		group     ProcessGroup
+		private   uint64
+		shared    uint64
+		heaviest  Process
+		hasLeader bool
+	}
+	byKey := map[string]*acc{}
+	for _, p := range rows {
+		key := GroupKey(p)
+		a := byKey[key]
+		if a == nil {
+			name := program(p.Name)
+			switch {
+			case p.Manager == "kernel":
+				name = "Kernel threads"
+			case strings.HasPrefix(key, p.Manager+":"):
+				name = p.ManagerName
+			}
+			a = &acc{group: ProcessGroup{Key: key, Manager: p.Manager, Name: name}}
+			byKey[key] = a
+		}
+		g := &a.group
+		g.Count++
+		g.CPUPercent += p.CPUPercent
+		g.IORate += p.IOReadRate + p.IOWriteRate
+		if g.Label == "" {
+			g.Label = p.ManagerLabel
+		}
+		shared := min(p.Shared, p.RSS)
+		a.private += p.RSS - shared
+		a.shared = max(a.shared, shared)
+		if !a.hasLeader || p.CPUPercent > a.heaviest.CPUPercent ||
+			(p.CPUPercent == a.heaviest.CPUPercent && p.RSS > a.heaviest.RSS) {
+			a.heaviest, a.hasLeader = p, true
+		}
+	}
+	all := make([]ProcessGroup, 0, len(byKey))
+	for _, a := range byKey {
+		a.group.Memory = a.private + a.shared
+		a.group.CPUPercent = round2(a.group.CPUPercent)
+		a.group.PID = a.heaviest.PID
+		all = append(all, a.group)
+	}
+	byMemory := slices.Clone(all)
+	sort.Slice(byMemory, func(i, j int) bool {
+		if byMemory[i].Memory != byMemory[j].Memory {
+			return byMemory[i].Memory > byMemory[j].Memory
+		}
+		return byMemory[i].Key < byMemory[j].Key
+	})
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].CPUPercent != all[j].CPUPercent {
+			return all[i].CPUPercent > all[j].CPUPercent
+		}
+		if all[i].Memory != all[j].Memory {
+			return all[i].Memory > all[j].Memory
+		}
+		return all[i].Key < all[j].Key
+	})
+	out := make([]ProcessGroup, 0, 2*each)
+	seen := map[string]bool{}
+	for _, list := range [][]ProcessGroup{all[:min(each, len(all))], byMemory[:min(each, len(byMemory))]} {
+		for _, g := range list {
+			if !seen[g.Key] {
+				seen[g.Key] = true
+				out = append(out, g)
+			}
+		}
+	}
+	return out
 }
 
 func facets(rows []Process, value func(Process) (string, string)) []ProcessFacet {
@@ -421,13 +642,7 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 		row.cpuSeconds = cpu.User + cpu.System
 		row.cpuCounterReady = true
 	}
-	if mp, err := p.MemoryPercentWithContext(ctx); err == nil {
-		row.MemPercent = round2(float64(mp))
-	}
-	if mi, err := p.MemoryInfoWithContext(ctx); err == nil && mi != nil {
-		row.RSS, row.VMS = mi.RSS, mi.VMS
-		row.Swap, row.MemoryReady = mi.Swap, true
-	}
+	readMemory(ctx, p, row, hostMemoryTotal(ctx))
 	if io, err := p.IOCountersWithContext(ctx); err == nil && io != nil {
 		row.IORead, row.IOWrite = io.ReadBytes, io.WriteBytes
 		row.ioCounterReady = true
@@ -444,7 +659,9 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 		row.CreateTime = time.UnixMilli(ct).UTC()
 	}
 	t.mu.Lock()
-	t.samples[row.PID] = applyProcessRates(row, t.samples[row.PID], t.now())
+	sample := applyProcessRates(row, t.samples[row.PID], t.now())
+	t.samples[row.PID] = sample
+	row.History = slices.Clone(sample.history)
 	t.mu.Unlock()
 	row.State = processState(row.Status)
 	row.Manager, row.ManagerName = processManager(row.PID, row.Cmdline)
@@ -526,9 +743,87 @@ func ManagerOf(root string, pid int32, cmdline string) (string, string) {
 		}
 	}
 	if cmdline == "" {
-		return "kernel", "kernel"
+		// An empty command line is a kernel thread's, and also a zombie's
+		// and a process's whose memory is gone mid-exit. The task flags say
+		// which; a table whose stat cannot be read keeps the old reading.
+		if kernel, ok := kernelThread(root, pid); !ok || kernel {
+			return "kernel", "kernel"
+		}
 	}
 	return "unmanaged", ""
+}
+
+// pfKthread is PF_KTHREAD among a task's flags (include/linux/sched.h).
+const pfKthread = 0x00200000
+
+// kernelThread reads the ninth field of /proc/<pid>/stat, the task's flags.
+// The name before it is parenthesised and may itself hold spaces and
+// parentheses, so the fields are counted from the last closing one.
+func kernelThread(root string, pid int32) (kernel, ok bool) {
+	b, err := os.ReadFile(filepath.Join(root, strconv.Itoa(int(pid)), "stat"))
+	if err != nil {
+		return false, false
+	}
+	end := strings.LastIndexByte(string(b), ')')
+	if end < 0 {
+		return false, false
+	}
+	fields := strings.Fields(string(b[end+1:]))
+	if len(fields) < 7 {
+		return false, false
+	}
+	flags, err := strconv.ParseUint(fields[6], 10, 64)
+	if err != nil {
+		return false, false
+	}
+	return flags&pfKthread != 0, true
+}
+
+// readMemory fills a row's memory from statm, one read for what gopsutil's
+// MemoryInfo and MemoryPercent read three times, and its swap from status:
+// gopsutil's MemoryInfo leaves Swap at zero on Linux, so every process read
+// as swapping nothing and the advisor's swap ranking ranked nothing.
+func readMemory(ctx context.Context, p *process.Process, row *Process, total uint64) {
+	mi, err := p.MemoryInfoExWithContext(ctx)
+	if err != nil || mi == nil {
+		return
+	}
+	row.RSS, row.VMS, row.Shared, row.MemoryReady = mi.RSS, mi.VMS, mi.Shared, true
+	if total > 0 {
+		row.MemPercent = round2(float64(mi.RSS) / float64(total) * 100)
+	}
+	row.Swap = statusSwap(p.Pid)
+}
+
+func statusSwap(pid int32) uint64 {
+	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(int(pid)), "status"))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		value, ok := strings.CutPrefix(line, "VmSwap:")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			return 0
+		}
+		kb, err := strconv.ParseUint(fields[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return kb * 1024
+	}
+	return 0
+}
+
+func hostMemoryTotal(ctx context.Context) uint64 {
+	vm, err := mem.VirtualMemoryWithContext(ctx)
+	if err != nil {
+		return 0
+	}
+	return vm.Total
 }
 
 func managerFromCgroup(content string) (string, string) {
@@ -608,6 +903,29 @@ func (t *Table) SetNice(ctx context.Context, pid int32, nice int) error {
 	}
 	if err := syscall.Setpriority(syscall.PRIO_PROCESS, int(pid), nice); err != nil {
 		return fmt.Errorf("set priority for pid %d: %w", pid, err)
+	}
+	return nil
+}
+
+var (
+	// ErrKernelThread: the kernel does not deliver a signal sent from user
+	// space to one of its own threads, so a Kill would report success and
+	// change nothing.
+	ErrKernelThread = errors.New("a kernel thread does not take signals")
+	// ErrZombie: the process has already exited. What remains is its exit
+	// status, which only its parent can collect.
+	ErrZombie = errors.New("the process has already exited and is waiting for its parent to reap it")
+)
+
+// Controllable says whether a signal or a priority could reach the process
+// at all, so the route can refuse with the reason rather than report a
+// success the kernel quietly ignored.
+func Controllable(p *Process) error {
+	switch {
+	case p.State == "zombie":
+		return ErrZombie
+	case p.Manager == "kernel":
+		return ErrKernelThread
 	}
 	return nil
 }

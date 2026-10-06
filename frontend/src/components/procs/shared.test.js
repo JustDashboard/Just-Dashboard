@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { authUnit, cronLogSource, managerHref } from "./shared"
+import {
+  authUnit,
+  cores,
+  cronLogSource,
+  groupName,
+  managerHref,
+  processCaption,
+  uncontrollable,
+} from "./shared"
 
 // Where a process row says what is supervising it. Every branch is an address
 // that has to exist: a wrong one is a dead link on a page that otherwise looks
@@ -71,5 +79,50 @@ describe("cronLogSource", () => {
     expect(cronLogSource(undefined)).toBeUndefined()
     // An API that answered with something else is not a list of sources.
     expect(cronLogSource([])).toBeUndefined()
+  })
+})
+
+// An empty command line is three different things, and the row said the same
+// word for all three: a zombie read as a kernel thread on a host with ten.
+describe("processCaption", () => {
+  test("names what an empty command line means", () => {
+    expect(processCaption({ cmdline: "", state: "sleeping", manager: "kernel" })).toBe(
+      "kernel thread",
+    )
+    expect(processCaption({ cmdline: "", state: "zombie", manager: "session" })).toMatch(/reap/)
+    expect(processCaption({ cmdline: "", state: "sleeping", manager: "unmanaged" })).toBe(
+      "command line not readable",
+    )
+    expect(processCaption({ cmdline: "nginx: worker", state: "zombie", manager: "kernel" })).toBe(
+      "nginx: worker",
+    )
+  })
+})
+
+describe("uncontrollable", () => {
+  test("is a zombie or a kernel thread, and nothing else", () => {
+    expect(uncontrollable({ state: "zombie", manager: "session" })).toBe("zombie")
+    expect(uncontrollable({ state: "sleeping", manager: "kernel" })).toBe("kernel")
+    expect(uncontrollable({ state: "running", manager: "systemd" })).toBeNull()
+  })
+})
+
+describe("cores", () => {
+  test("reads a sum of per-core shares as cores", () => {
+    expect(cores(340)).toBe("3.4 cores")
+    expect(cores(1200)).toBe("12 cores")
+    expect(cores(42)).toBe("0.42 cores")
+    expect(cores(0.2)).toBe("idle")
+  })
+})
+
+describe("groupName", () => {
+  test("a container by its name, a unit without its suffix", () => {
+    const base = { key: "", count: 1, cpuPercent: 0, memory: 0, ioRate: 0, pid: 1 }
+    expect(groupName({ ...base, manager: "container", name: "3f9a1c0b7d2e", label: "api" })).toBe(
+      "api",
+    )
+    expect(groupName({ ...base, manager: "container", name: "3f9a1c0b7d2e" })).toBe("3f9a1c0b7d2e")
+    expect(groupName({ ...base, manager: "systemd", name: "nginx.service" })).toBe("nginx")
   })
 })

@@ -130,9 +130,10 @@ taking a frame:
   Databases section's reading pages — the control center's readings, attention list, fleet and found
   servers, a database's home, its Performance, Advisor, Search and Generate — each a title, a toolbar
   and a hairline, with every database, found server, generator and search hit on them a lit card,
-  and every block on the four Processes pages — the live table, the PM2 applications, the systemd
-  units, and the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and
-  a hairline under `StatTile` readings — four, and five on Scheduled (what fires next across cron and
+  and every block on the four Processes pages — the live table under its band of workloads, the
+  PM2 applications, the systemd units, and the cron jobs, timers and system cron files on
+  Scheduled, each a title, a toolbar and a hairline, the last three under `StatTile` readings —
+  four, and five on Scheduled (what fires next across cron and
   the timers together, the account's jobs, the runs cron started in the last day, the timers armed
   and what the packages run), whose Cron log is a plain panel holding the log's `Pane` and whose
   timers open their runs inside the table's own row, framed by nothing but the row — with a detail
@@ -1839,6 +1840,27 @@ The passes, in order. Each one is a diff you can review on its own.
    size over the runs as the Holding figure's trend, and its runs as a rail beside an inspector —
    the newest until one is picked, its failing log line washed red, what the archive holds by its
    manifest — where a table of runs had the chosen one's log two screens below it.
+
+   The live Processes page took the exit in 0.7.1, because the operator found it still: four grey
+   figures over a table, and nothing on it that answered *who* was using the machine. Each figure
+   went where it was already said or said better. The process count is a fact in the identity line
+   and beside the table's title; running, sleeping, blocked and zombie are counted chips in the
+   table's head — the two that mean trouble in their tone, drawn only while there is one — which
+   narrow the table as well as count; unmanaged was already an owner chip, and the supervised
+   breakdown the owner chips' counts. What took their place is the question they never answered:
+   `components/procs/workloads.tsx`, the five heaviest workloads by processor and by memory as
+   spans of one bar the size of the machine, each rank a step of its measurement's hue (§10), the
+   rest of what the host reports in use one muted span, every span easing to the next poll and
+   every figure gliding to it. A workload is a supervisor's processes or the copies of one program
+   started by hand, summed by the backend over the whole snapshot with shared pages counted once,
+   so forty Chrome renderers are one row rather than forty; a press narrows the table to it. The
+   line of two buttons that stood above the identity line went into it, as Metrics' shortcuts did.
+   The table took fixed columns — sized to their content, a long command line had pushed Memory
+   and every row's menu past the panel's edge at 1280 — and draws CPU and memory as a figure beside
+   a short bar; a process new since the last poll rises (`useArrivals`). The process sheet lost its
+   two tabs for one scroll that opens on four live readings over the process's recent windows,
+   which the sampler keeps for every process it measures, so a sheet opened from a table that has
+   been open for minutes opens on those minutes.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a

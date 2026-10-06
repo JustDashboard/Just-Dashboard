@@ -20,7 +20,13 @@ import type { ProcessRow } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
-import { managerHref, managerName, processKey } from "@/components/procs/shared"
+import {
+  managerHref,
+  managerName,
+  ownerName,
+  processKey,
+  uncontrollable,
+} from "@/components/procs/shared"
 
 export type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -82,12 +88,15 @@ export function useProcessVerbs({
   confirm,
   signal,
   onInspect,
+  onOpen,
 }: {
   process: ProcessRow
   confirm: ConfirmFn
   signal: (process: ProcessRow, sig: string, progressive: string, confirm?: string) => Promise<void>
   /** Opens the detail sheet; absent inside the sheet itself. */
   onInspect?: () => void
+  /** Opens another process in the sheet — a zombie's parent, which is its remedy. */
+  onOpen?: (pid: number) => void
 }): Verb[] {
   const { can } = useAuth()
   const router = useRouter()
@@ -100,8 +109,9 @@ export function useProcessVerbs({
     const stopped = process.state === "stopped"
     const label = `${process.name} (${process.pid})`
     const supervisor = process.managerName
-      ? `${managerName(process.manager)} — ${process.managerName}`
+      ? `${managerName(process.manager)} — ${ownerName(process)}`
       : null
+    const unreachable = uncontrollable(process)
 
     if (onInspect) {
       verbs.push({
@@ -112,7 +122,20 @@ export function useProcessVerbs({
       })
     }
 
-    if (can("destructive")) {
+    // A zombie has exited; what is left is its exit status, which only its
+    // parent can collect. The parent is the thing to look at, so it is the
+    // verb, named, where Terminate and Kill would be.
+    if (unreachable === "zombie" && onOpen && process.ppid > 0) {
+      verbs.push({
+        key: "parent",
+        label: `Open parent (${process.ppid})`,
+        icon: ArrowUpRight,
+        inline,
+        run: () => onOpen(process.ppid),
+      })
+    }
+
+    if (can("destructive") && !unreachable) {
       verbs.push({
         key: "term",
         progressive: "Terminating",
@@ -208,13 +231,36 @@ export function useProcessVerbs({
             action: (phrase) => signal(process, "SIGHUP", "Reloading", phrase),
           }),
       })
+      // The signals a program defines for itself. The route has always
+      // accepted them; the page offered no way to send one, so reopening
+      // nginx's logs or asking a worker to dump its state meant a shell.
+      for (const extra of EXTRA_SIGNALS) {
+        verbs.push({
+          key: extra.signal,
+          group: "Signals",
+          progressive: "Signalling",
+          label: extra.label,
+          icon: RefreshClockwise,
+          run: () =>
+            confirm({
+              title: `Send ${extra.signal}`,
+              confirmLabel: "Send",
+              description: (
+                <p>
+                  <b>{label}</b> receives {extra.signal}. {extra.effect}
+                </p>
+              ),
+              action: (phrase) => signal(process, extra.signal, "Signalling", phrase),
+            }),
+        })
+      }
     }
 
     const owner = managerHref(process)
     if (owner) {
       verbs.push({
         key: "owner",
-        label: `Open ${process.managerName}`,
+        label: `Open ${ownerName(process)}`,
         icon: ArrowUpRight,
         run: () => router.push(owner),
       })
@@ -242,5 +288,26 @@ export function useProcessVerbs({
       })
     }
     return verbs
-  }, [process, can, confirm, signal, onInspect, router])
+  }, [process, can, confirm, signal, onInspect, onOpen, router])
 }
+
+const EXTRA_SIGNALS = [
+  {
+    signal: "SIGINT",
+    label: "Interrupt",
+    effect:
+      "It is what Ctrl+C sends: most programs stop the way they would at a terminal, and a shell or a REPL only abandons what it was doing.",
+  },
+  {
+    signal: "SIGUSR1",
+    label: "Send SIGUSR1",
+    effect:
+      "Its meaning is the program's own — nginx reopens its log files, many workers dump their state — and a program that defines none exits.",
+  },
+  {
+    signal: "SIGUSR2",
+    label: "Send SIGUSR2",
+    effect:
+      "Its meaning is the program's own — nginx starts a new binary, some servers reload — and a program that defines none exits.",
+  },
+]
