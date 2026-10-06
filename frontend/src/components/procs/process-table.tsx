@@ -186,7 +186,14 @@ export function LiveProcesses() {
   // addressed `/processes/NaN` and said the process had exited.
   const pid = selectedPid && /^\d+$/.test(selectedPid) ? Number(selectedPid) : null
   const known = !!(host && snapshot?.cpu && snapshot.memory)
-  const chosenGroup = data?.groups?.find((g) => g.key === group)
+  // The workloads are the whole host's, whatever the table is filtered to, so
+  // the band holds its last answer while a new filter's first read is out
+  // rather than vanishing and counting up from nothing on every press.
+  const [held, setHeld] = useState<Pick<ProcessList, "groups" | "ratesReady">>()
+  if (data?.groups && data.groups !== held?.groups) {
+    setHeld({ groups: data.groups, ratesReady: data.ratesReady })
+  }
+  const chosenGroup = held?.groups?.find((g) => g.key === group)
   // A filter change is a new list rather than arrivals into this one, so the
   // rows' arrival memory starts over with it.
   const listKey = [appliedQuery, user, state, manager, group].join("\u0000")
@@ -295,11 +302,11 @@ export function LiveProcesses() {
           />
         )}
 
-        {data?.groups && (
+        {held?.groups && (
           <WorkloadBand
-            groups={data.groups}
+            groups={held.groups}
             snapshot={snapshot}
-            ratesReady={data.ratesReady}
+            ratesReady={held.ratesReady}
             selected={group}
             onSelect={setGroup}
           />
