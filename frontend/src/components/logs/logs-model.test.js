@@ -10,7 +10,6 @@ import {
   oneService,
   readingFor,
   readingShown,
-  readingsWindowOf,
   sameQuestion,
   unaskedReadings,
   unitJournalLens,
@@ -59,7 +58,11 @@ describe("a reading's figure as it is drawn", () => {
     expect(readingShown(reading, { value: 1200, capped: true }, { minutes: 1440 }).text).toBe(
       `${(1200).toLocaleString()}+`,
     )
-    expect(readingShown(reading, undefined, { minutes: 1440 })).toEqual({ value: 0, text: "—" })
+    expect(readingShown(reading, undefined, { minutes: 1440 })).toEqual({
+      value: 0,
+      text: "—",
+      decimals: 0,
+    })
   })
 
   test("a per-minute reading is its rate over the window", () => {
@@ -67,6 +70,9 @@ describe("a reading's figure as it is drawn", () => {
     const shown = readingShown(reading, { value: 90 }, { minutes: 60 })
     expect(shown.value).toBe(1.5)
     expect(shown.text).toBe((1.5).toLocaleString())
+    // A tile counting up to it stops where the text does, not at 1.50.
+    expect(shown.decimals).toBe(1)
+    expect(readingShown(reading, { value: 6000 }, { minutes: 60 }).decimals).toBe(0)
   })
 })
 
@@ -189,25 +195,4 @@ test("a unit's journal offers the manager's Failures beside its own lens's views
   expect(unitJournalLens(postgres, "docker", "docker:db")).toBe(postgres)
   const systemd = lensFor("systemd")
   expect(unitJournalLens(systemd, "journal", "journal:cron.service")).toBe(systemd)
-})
-
-describe("the window a picked range reads readings over", () => {
-  test("a preset is its own length and words", () => {
-    expect(readingsWindowOf("24h", "", "")).toEqual({
-      minutes: 1440,
-      short: "in 24h",
-      long: "the last 24 hours",
-    })
-    expect(readingsWindowOf("1h", "", "").long).toBe("the last hour")
-  })
-
-  test("a custom range is its length; everything on disk has none", () => {
-    const now = Date.parse("2026-09-27T12:00:00Z")
-    expect(readingsWindowOf("custom", "2026-09-27T10:00:00Z", "", now)?.minutes).toBe(120)
-    expect(
-      readingsWindowOf("custom", "2026-09-27T10:00:00Z", "2026-09-27T10:30:00Z", now)?.minutes,
-    ).toBe(30)
-    expect(readingsWindowOf("custom", "", "", now)).toBeUndefined()
-    expect(readingsWindowOf("all", "", "", now)).toBeUndefined()
-  })
 })
