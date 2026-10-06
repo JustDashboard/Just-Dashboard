@@ -434,10 +434,12 @@ keeps its name from that column, and now means a section of the page rather than
 project settings pages (`SettingsPage` centres its strip and readings with it, so they line up with
 the fields), a game server's settings, the account's Security and a database's Settings. A 48rem
 column against the left edge of a wide page left the rest of it an empty band nothing explained. A
-form that is one block among full-width ones keeps their left edge instead — Configuration's
-settings under its stack and last restart, the proxy pages' password files, access lists, backups and
-watched domains, Security's findings and SSH — because centred there its title stood 180px in from
-every title above it.
+form that is one block among full-width ones keeps their left edge instead — the proxy pages'
+password files, access lists, backups and watched domains, Security's findings and SSH — because
+centred there its title stood 180px in from every title above it. Configuration's settings are the
+exception: five short sections under a full-width stack, so from `xl` they run as two columns of
+`FormSection aside`s (`max-w-none`), the certificate across both, rather than one column that left
+two thirds of a wide screen empty.
 
 **Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
 purpose: 32px above and below every section, so 64px and a hairline between one section and the
@@ -923,6 +925,8 @@ well, which would draw one arrival twice.
 
 The dashboard's own restarts and upgrades use the same three and nothing new: `BorderBeam` runs
 around the transcript console and around the Restart or Rebuild card while that run is in flight,
+the request path's wires pulse while this tab's own requests go down them and stand still and
+amber while a restart replaces the containers,
 `TextShimmer` lights the stage it is at (`components/run-phases.tsx`, drawn with the release path's
 own `Segment`), and the transcript's new lines *arrive* — a poll's forty lines are let out a few a
 frame, each taking `animate-rise` once, so a live log reads line by line instead of jumping; scrolled
@@ -1800,7 +1804,20 @@ The passes, in order. Each one is a diff you can review on its own.
    on a page you configure is best drawn beside the control that sets it. Version's Installed,
    Latest and Checked became one identity line and the timeline's marks; Configuration's Answers
    at, Certificate, Port and Two-factor went to the heads of the sections that set them and to
-   the proxy's row in the stack. Both pages' doc comments name where each went.
+   the proxy in the stack. Both pages' doc comments name where each went.
+
+   Configuration took a second pass in 0.7.1, because the operator found it the greyest page in
+   the product: a list of three services, a single 48rem column of fields and nothing on it a
+   reader could find without reading. It opens on the Version page's identity line (the address
+   it answers at as the name, each part of the URL in its own hue, the checkout as the facts), and
+   the stack is drawn as the path a request takes to reach it in the wiring vocabulary
+   (`components/config/request-path.tsx`): this browser as itself, the tailnet as Tailscale, Caddy
+   with its certificate's issuer, and Next.js and Go behind it with their state in the tile's
+   corner. Restart and Rebuild keep their cards and gain the Compose or Docker command each runs,
+   coloured by `ShellWords`. The settings are two columns of sections, the certificate across both
+   and first; the allowlist is a list of the networks it lets in, each drawn as where its addresses
+   are (`components/config/allowlist.tsx`); a section holding a change not yet applied carries
+   *Edited* in `--git-modified`, the colour §3 gives a pending change.
    The account's Security page took it for the same reason — the second factor's state and how many
    sessions are signed in sit in the heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
