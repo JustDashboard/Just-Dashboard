@@ -650,9 +650,30 @@ export function XtermPane({
         )
       }
 
+      const domMeasure = document.createElement("canvas").getContext("2d")
       const fitTerminal = () => {
         if (!visibleRef.current || host.clientWidth <= 0 || host.clientHeight <= 0) return false
         claimWebgl()
+        const proposed = fit.proposeDimensions()
+        if (proposed && host.dataset.terminalRenderer === "dom" && domMeasure && term.element) {
+          // DOM rounds the screen width before deriving its cell width, so the
+          // addon's next fit depends on the previous column count. Measure the
+          // font itself so closing a split restores the same full-width grid.
+          domMeasure.font = `${term.options.fontSize}px ${term.options.fontFamily}`
+          const cellWidth = domMeasure.measureText("W").width
+          const scrollbar = term.element.querySelector<HTMLElement>(".scrollbar.vertical")
+          if (cellWidth > 0 && (scrollbar || term.options.scrollback === 0)) {
+            const style = getComputedStyle(term.element)
+            const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+            const scrollbarWidth = term.options.scrollback === 0 ? 0 : scrollbar!.offsetWidth
+            proposed.cols = Math.max(
+              2,
+              Math.floor((host.clientWidth - padding - scrollbarWidth) / cellWidth),
+            )
+            term.resize(proposed.cols, proposed.rows)
+            return term.rows > 0 && term.cols > 0
+          }
+        }
         fit.fit()
         return term.rows > 0 && term.cols > 0
       }

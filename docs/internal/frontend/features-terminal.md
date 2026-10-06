@@ -531,8 +531,11 @@ In `xterm-pane.tsx` and the page, load-bearing and easy to undo:
   *hidden* pane drops to DOM and claims WebGL again, before fitting, when next shown. Setting
   `jd.terminal.renderer=dom` in local storage is the diagnostic A/B override. The Canvas addon remains
   absent because its stable release targets xterm 5 internals. Font metrics remain fixed at unit line
-  height and zero letter spacing; `@xterm/addon-unicode11` keeps cursor arithmetic aligned with the
-  Unicode-width rules used by modern TUIs.
+  height and zero letter spacing. DOM columns are fitted from the measured font width and the
+  actual scrollbar reservation, because xterm's rounded screen width makes the addon's cell width
+  depend on the previous column count; returning from a split must restore the same grid at the
+  same pane width. WebGL uses the fit addon's renderer metrics. `@xterm/addon-unicode11` keeps
+  cursor arithmetic aligned with the Unicode-width rules used by modern TUIs.
 - **PTY output and input are binary WebSocket frames.** JSON text frames are controls only. Raw PTY chunks
   go straight to `terminal.write(Uint8Array)` (whose streaming decoder preserves a UTF-8 character split
   across chunks); keyboard and paste strings are encoded once with `TextEncoder`. The backend neither
