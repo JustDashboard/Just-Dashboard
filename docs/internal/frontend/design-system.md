@@ -822,7 +822,12 @@ rather than assembling its own recharts tree — adding a measurement should mea
   processor in `--chart-1`, memory in `--chart-4`, received and read in `--chart-2`, sent in
   `--chart-5`, written in `--chart-4` and processes in `--chart-5`, so five charts that were all one
   blue read apart at a glance; a chart's reading now in its head carries the same 2×10 key the
-  legend does.
+  legend does. The host pages take the five readings' hues from one map (`HUE` in
+  `components/overview/readings.tsx`) — processor `--chart-1`, memory `--chart-2`, load
+  `--chart-3`, network `--chart-5`, disks `--chart-4` — and Metrics draws every line of a
+  measurement in it, so Pressure's CPU, memory and I/O lines are the three tiles' colours; a
+  chart's second line takes the hue furthest from its first (out `--chart-2` against in, write
+  `--chart-3` against read).
 - **A reading's last hour in a deployment page's `StatTile` is `TileTrend`** (`sparkline.tsx`), the
   one shape for it: the tile's full width, 36px tall, rising once (§11 *arrived*). Nothing is drawn
   below two points, which is not yet a shape, nor for a series that never moves on a scale of its
@@ -1237,7 +1242,11 @@ reports itself to be — its distribution (`platformProduct`, from `/etc/os-rele
 (`cpuProduct`, from the model string: AMD, Intel, Arm), its hypervisor (`virtualizationProduct`: QEMU for
 a KVM guest) — and a running process as the product it is (`processProduct`: `postgres` is Postgres,
 `dockerd` is Docker, `node` is Node.js) in the top processes the Overview and the Metrics page share
-and in every row of the live process table. The other three Processes pages read their rows the same way: a systemd unit as
+and in every row of the live process table. Metrics draws two more of the machine's parts by
+whose they are: an interface by the name its owner gives it (`interfaceProduct`: `tailscale0` is
+Tailscale's, `docker0`, a `br-` bridge and a `veth` pair Docker's, an `eth0` its kind's glyph), and
+a temperature by the hwmon driver that reads it (`sensorProduct`: `coretemp` is Intel's, `k10temp`,
+`zenpower` and `amdgpu` AMD's, an NVMe drive or an ACPI zone nobody's). The other three Processes pages read their rows the same way: a systemd unit as
 the product it runs (`unitProduct` — `postgresql@16-main.service` is Postgres, `pm2-deploy.service`
 PM2, `certbot.timer` Let's Encrypt's renewal, by the unit's name with its suffix and instance
 dropped, then by its first word), a PM2 application as its interpreter (`pm2Product`: Node unless
@@ -2000,6 +2009,31 @@ of uptime, processes and cores in the header's corner (facts about the machine, 
 line; the cores were on the CPU tile as well) and a "Last hour" panel of four sparklines whose every
 value repeated the tile above it (the sparklines are in the tiles now). The Metrics page opens on the
 same identity line with the processor as its mark.
+
+**Metrics took the Overview's readings in 0.7.1**, at the operator's request, because beside the
+Overview it read as the dead page of the two: ten grey tiles over still meters, and every chart a
+pale line in the same few hues whatever it measured. Its readings are now the Overview's — a
+`Resources` section headed by the window the trends cover and the socket's `Status live`, holding
+five tiles (CPU with a bar per core, memory, load, network, disk I/O), each figure a `LiveFigure`
+gliding to every frame, keyed by its line's colour and carrying the window on screen as its
+`TileTrend`, so picking 24h redraws five shapes before a chart is read. A tile with no line yet
+(load on the live feed, anything while the record is off) keeps a meter against its ceiling. The
+other five tiles each said what a block below says better and went to it, as the Runtime page's
+did (pass 2): storage to the filesystems, pressure to the head of its chart, the processes to
+Load's, sockets and open file handles to Sockets', the hottest sensor to Temperatures. Below them
+the page is one `Section` per resource rather than two long runs of charts with the hardware as a
+third: **Processor** (the utilisation chart beside the cores, each a column filled to its share in
+the processor's colour, and the temperatures under them), **Memory** (where the memory is — what
+programs hold, the cache, what is free, as one bar with the span the kernel calls available drawn
+over it, and swap — beside its chart), **Network** (throughput beside sockets, and the interfaces
+table, each row as its owner's mark and a bar of its in and out against the busiest), **Storage**
+(the Overview's filesystem rows with their scan, beside capacity; throughput, operations, latency
+and inodes), and **Saturation** (pressure beside load). Every series takes its measurement's hue
+(§10). Neighbouring heads share a height so their hairlines meet (pass 9). The "Click a chart to
+pin a moment" caption and the shortcuts button that stood as two lines above the identity line are
+gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
+moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
+screen down.
 
 ## 16. Two registers
 

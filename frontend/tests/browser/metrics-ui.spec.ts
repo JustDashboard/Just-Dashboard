@@ -5,13 +5,14 @@ const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
 test.use({ video: recordWorkspace ? "on" : "off" })
 
 /**
- * The metrics page after its design-system pass, against a mocked host.
+ * The metrics page after its overhaul, against a mocked host.
  *
  * What is checked is the shape the redesign settled on and the features it
  * added, not the chart library: every block on the page is plain but the one
- * holding a table, the ten headline readings are tiles, the moments list can
- * zoom the charts, a zoom is a link, the window exports as a file, and the
- * live feed can be paused.
+ * holding a table, the five moving readings are tiles carrying their window
+ * as a trend, each resource is a section that reads what it is now beside
+ * what it did, the moments list can zoom the charts, a zoom is a link, the
+ * window exports as a file, and the live feed can be paused.
  * The screenshots at 1280 and 1720 are the eyes the assertions do not have.
  */
 
@@ -41,20 +42,26 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   await expect(page.getByRole("heading", { name: "Metrics" })).toHaveClass(/sr-only/)
   await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
 
-  // Ten headline tiles, hairlines between, nothing around: the tenth is the
-  // temperature because this host reports sensors.
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(10)
-  await expect(page.locator("[data-slot=stat-tile]", { hasText: "Temperature" })).toContainText(
-    "62°C",
-  )
+  // The five readings that move, as the Overview draws them: hairlines
+  // between, nothing around, each over its line across the window on screen.
+  const tiles = page.locator("[data-slot=stat-tile]")
+  await expect(tiles).toHaveCount(5)
+  for (const name of ["CPU", "Memory", "Load", "Network", "Disk I/O"]) {
+    await expect(page.getByRole("img", { name: `${name} over the last hour` })).toBeVisible()
+  }
+  await expect(page.getByText("Last hour", { exact: true })).toBeVisible()
+  await expect(page.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
 
   // Nothing draws a frame but the Interfaces table (§2): the readings, the
   // charts and the findings are all on the page's own ground.
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
 
-  // What the machine is made of is the first visible row.
+  // What the machine is made of is the first visible row, and no sentence
+  // stands above it: how to pin a moment is in the shortcuts.
   await expect(page.getByText("AMD EPYC 7B13")).toBeVisible()
   await expect(page.getByText("sampled every 15s, kept 7d")).toBeVisible()
+  await expect(page.getByText("Click a chart to pin a moment")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Metrics shortcuts" })).toBeVisible()
 
   // The verdict's findings are a plain list, and the failed deploy is a moment.
   await expect(page.getByText("/ is filling up")).toBeVisible()
@@ -63,9 +70,60 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   // Top processes from the process table, ordered by CPU by default.
   await expect(page.getByText("postgres", { exact: true })).toBeVisible()
 
-  // Sensors appear under Hardware, hottest first.
+  // One section per resource, in the order a reader asks about them.
+  const sections = await page
+    .locator("[data-slot=page] > section > div:first-child h2")
+    .evaluateAll((heads) => heads.map((h) => h.textContent))
+  expect(sections).toEqual(["Resources", "Processor", "Memory", "Network", "Storage", "Saturation"])
+
+  // Sensors appear beside the cores, hottest first.
   await expect(page.getByRole("heading", { name: "Temperatures" })).toBeVisible()
   await expect(page.getByText("nvme_Composite")).toBeVisible()
+})
+
+test("each resource reads what it is now beside what it did", async ({ page }) => {
+  await page.goto("/metrics")
+  await expect(page.getByText("CPU peaked at 97%")).toBeVisible({ timeout: 20_000 })
+
+  // Every core is a column filled to its share.
+  const cores = page.getByRole("list", { name: "Cores" }).getByRole("meter")
+  await expect(cores).toHaveCount(4)
+  await expect(cores.first()).toHaveAttribute("aria-valuenow", "31")
+  await expect(page.getByText("mean 23% · busiest cpu0 at 31%")).toBeVisible()
+
+  // Memory is split into what programs hold, the cache and what is free.
+  const memory = page.locator("[data-slot=panel]", {
+    has: page.getByRole("heading", { name: "Allocation" }),
+  })
+  await expect(memory.getByRole("img", { name: /^Programs 9\.0 GB, Cache 4\.5 GB/ })).toBeVisible()
+  await expect(memory.getByText("6.5 GB", { exact: true })).toBeVisible()
+  await expect(memory.getByRole("meter", { name: "Swap used" })).toHaveAttribute(
+    "aria-valuenow",
+    "5",
+  )
+
+  // The five tiles that stood under the readings went to the charts they
+  // explain: the stalls to Pressure, the processes to Load, sockets and open
+  // files to Sockets, the disks to Filesystems.
+  const panel = (title: string) =>
+    page.locator("[data-slot=panel]", { has: page.getByRole("heading", { name: title }) })
+  const head = (title: string) => panel(title).locator("[data-slot=panel-header]")
+  await expect(head("Pressure").getByText("2.4%", { exact: true })).toBeVisible()
+  await expect(head("Load average").getByText("184", { exact: true })).toBeVisible()
+  await expect(head("Sockets").getByText("4,640", { exact: true })).toBeVisible()
+  const disks = panel("Filesystems").getByRole("list", { name: "Filesystems" })
+  await expect(disks.locator(":scope > li")).toHaveCount(2)
+  await expect(disks.getByRole("button", { name: "scan" })).toHaveCount(2)
+
+  // A sensor whose driver names the processor's maker carries its mark.
+  await expect(
+    panel("Temperatures").locator("li", { hasText: "k10temp_Tctl" }).locator("img[src$='amd.svg']"),
+  ).toBeVisible()
+
+  // An interface's row draws its in and out against the busiest one.
+  await expect(
+    panel("Interfaces").getByRole("img", { name: "2.3 MB/s in, 420.0 KB/s out" }),
+  ).toBeVisible()
 })
 
 test("a moment zooms the charts and the zoom is a link", async ({ page }) => {

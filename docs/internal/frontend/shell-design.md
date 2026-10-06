@@ -466,7 +466,8 @@ series.
   one, since the maximum of the *means* is exactly what a downsampled window hides.
 - `sparkline.tsx` — a bare SVG path for a table cell, not recharts: forty containers would otherwise mount
   forty responsive containers and resize observers. It also exports `TileTrend`, the one shape a
-  reading's last hour takes in a `StatTile`'s `trend` slot on the deployment pages: the tile's full
+  reading's last hour takes in a `StatTile`'s `trend` slot on the deployment pages (and, on Metrics,
+  the window on screen): the tile's full
   width, 36px, rising once. It draws nothing below two points, or for a series that never moves on a
   scale of its own, and the tile then leaves no band. Its colour is a series colour, never a status
   one, so a failing share is `--chart-3`.

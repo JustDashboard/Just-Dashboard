@@ -3,7 +3,23 @@
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { byteParts } from "@/lib/format"
+import type { ConnectionState } from "@/lib/metrics-store"
+import { Status } from "@/components/status-dot"
 import { NumberTicker } from "@/components/ui/number-ticker"
+
+/**
+ * Each reading's colour, wherever it is drawn: the key before a tile's name,
+ * its hour under it, and the line of the same measurement on every chart. The
+ * Overview and Metrics draw the same five readings, so a CPU that is the pale
+ * line on one page is the pale line on the other.
+ */
+export const HUE = {
+  cpu: "var(--chart-1)",
+  mem: "var(--chart-2)",
+  load: "var(--chart-3)",
+  net: "var(--chart-5)",
+  disk: "var(--chart-4)",
+} as const
 
 /**
  * A figure fed by the metrics socket, gliding to each frame's value rather
@@ -96,4 +112,15 @@ export function SeriesKey({ color }: { color: string }) {
       style={{ background: color }}
     />
   )
+}
+
+/**
+ * Whether the readings are arriving. They are the one block on a page fed by
+ * an open socket, so they are the one block that may say Live; while the
+ * socket is down the figures are the last frame, and the head says so.
+ */
+export function StreamState({ connection }: { connection: ConnectionState }) {
+  if (connection === "open") return <Status live tone="running" label="Live" />
+  if (connection === "connecting") return <Status tone="notice" label="Connecting…" />
+  return <Status tone="warning" label="Reconnecting…" />
 }
