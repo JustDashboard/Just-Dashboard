@@ -98,9 +98,9 @@ export function LanguageList({
       {shown.map((l) => {
         const product = languageProduct(l.name)
         return (
-          <span key={l.name} className="inline-flex min-w-0 shrink items-center gap-1 text-hint">
+          <span key={l.name} className="inline-flex min-w-0 shrink items-center gap-1.5 text-xs">
             {product ? (
-              <ProductGlyph id={product} className="size-3" />
+              <ProductGlyph id={product} className="size-3.5" />
             ) : (
               <span aria-hidden className="size-2 shrink-0 rounded-[2px] bg-(--tag-slate)" />
             )}
@@ -114,7 +114,7 @@ export function LanguageList({
       {rest.length > 0 && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="numeric shrink-0 text-hint text-muted-foreground">+{rest.length}</span>
+            <span className="numeric shrink-0 text-xs text-muted-foreground">+{rest.length}</span>
           </TooltipTrigger>
           <TooltipContent>
             {rest.map((l) => `${l.name} ${languagePercent(l.share)}`).join(" · ")}

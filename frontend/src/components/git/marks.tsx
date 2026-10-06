@@ -305,7 +305,7 @@ export function TreeState({ repo }: { repo: GitRepo }) {
       <WorkingTreeBar repo={repo} />
       <span
         className={cn(
-          "numeric text-hint",
+          "numeric text-xs",
           repo.conflicts > 0
             ? "text-destructive"
             : repo.dirty
