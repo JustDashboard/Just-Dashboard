@@ -12,8 +12,9 @@ test.use({
  *
  * The claims the redesign rests on, each of which a type check cannot make:
  *
- *   the sidebar is a fixed list of places, starred and recent folders that
- *   stays put while the listing walks into folders;
+ *   the sidebar is a fixed list of homes, starred folders, the server's own
+ *   places and recent folders — one line each, named for what they hold —
+ *   that stays put while the listing walks into folders;
  *
  *   there is no page header: the page's commands are in the workbench's
  *   strip, and a folder's colour is picked there and in the inspector, drawn
@@ -130,8 +131,8 @@ async function mockFiles(
         places: [
           { name: "operator", path: home, kind: "home", hint: "Where this dashboard starts" },
           { name: "/", path: "/", kind: "root", hint: "Permitted root" },
-          { name: "/etc", path: "/etc", kind: "notable", hint: "System configuration" },
-          { name: "/var/log", path: "/var/log", kind: "notable", hint: "Log files" },
+          { name: "Configuration", path: "/etc", kind: "notable", hint: "System configuration" },
+          { name: "Logs", path: "/var/log", kind: "notable", hint: "Log files" },
         ],
         bookmarks: [{ path: `${home}/photos`, name: "photos" }],
         colours,
@@ -622,8 +623,25 @@ test("the sidebar is a fixed list of places that stays put while browsing", asyn
   // The places, the starred folder and the system directories are all on the page.
   const sidebar = page.getByRole("navigation", { name: "Places" })
   const homeRow = sidebar.locator(`button[title='${home}']`)
-  await expect(homeRow).toContainText("Home")
+  await expect(homeRow).toHaveText("operator")
   await expect(homeRow).toHaveAttribute("aria-current", "location")
+  // One line a row, named for what it holds: no path or caption under it.
+  await expect(sidebar.locator("button[title='/etc']")).toHaveText("Configuration")
+  await expect(sidebar.locator("button[title='/']")).toHaveText("File system")
+  await expect(sidebar).not.toContainText("System configuration")
+  const heights = await sidebar
+    .locator("li")
+    .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))
+  expect(new Set(heights)).toEqual(new Set([32]))
+  // A section folds under its heading and stays folded.
+  await sidebar.getByRole("button", { name: "This server" }).click()
+  await expect(sidebar.locator("button[title='/etc']")).toHaveCount(0)
+  await page.reload()
+  await expect(sidebar.getByRole("button", { name: "This server" })).toHaveAttribute(
+    "aria-expanded",
+    "false",
+  )
+  await sidebar.getByRole("button", { name: "This server" }).click()
   await expect(sidebar.locator(`button[title='${home}/photos']`)).toBeVisible()
   await expect(sidebar.locator("button[title='/var/log']")).toBeVisible()
   await expect(sidebar.locator("button[title='/etc']")).toBeVisible()
@@ -662,14 +680,28 @@ test("tiles stay compact and toolbar controls share a height", async ({ page }) 
   const box = await tile.boundingBox()
   expect(box!.width).toBeLessThanOrEqual(104)
   expect(box!.height).toBeLessThan(105)
+  // Every control in the strip has a face of one height, alone or in a group.
   const strip = page.locator("[data-slot='pane-header']").first()
+  const controls = [
+    ...["New", "Upload", "Arrange", "Hide the sidebar"].map((name) =>
+      strip.getByRole("button", { name, exact: true }),
+    ),
+    ...["Folder navigation", "Search"].map((name) =>
+      strip.getByRole("group", { name, exact: true }),
+    ),
+    strip.getByRole("radiogroup", { name: "View", exact: true }),
+  ]
   const heights = await Promise.all(
-    ["Find", "New", "Upload", "Refresh", "Arrange"].map(async (name) => {
-      const button = strip.getByRole("button", { name, exact: true })
-      return (await button.boundingBox())!.height
-    }),
+    controls.map(async (control) => (await control.boundingBox())!.height),
   )
-  expect(new Set(heights).size).toBe(1)
+  expect(new Set(heights)).toEqual(new Set([32]))
+  for (const name of ["Back to previous folder", "Refresh"]) {
+    await expect(
+      strip
+        .getByRole("group", { name: "Folder navigation" })
+        .getByRole("button", { name, exact: true }),
+    ).toBeVisible()
+  }
   expect(
     await page
       .getByRole("navigation", { name: "Places" })
@@ -955,9 +987,20 @@ test.describe("fixed search palette", () => {
     const dialog = page.getByRole("dialog", { name: "Find files" })
     const input = dialog.getByRole("combobox")
     const frame = await dialog.boundingBox()
-    await expect(dialog.getByRole("button", { name: "From home" })).toBeInViewport()
-    await dialog.getByRole("button", { name: "From home" }).click()
-    await expect(dialog.getByRole("button", { name: "This folder" })).toBeInViewport()
+    // Home is the home around the folder, or the dashboard's own when /etc is
+    // inside none: a choice of where to search, which stays chosen.
+    const scope = dialog.getByRole("radiogroup", { name: "Search in" })
+    await expect(scope).toBeInViewport()
+    await expect(scope.getByRole("radio", { name: "This folder" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    const footer = dialog.locator('[data-slot="pane-footer"]')
+    await expect(footer).toContainText("/etc")
+    await scope.getByRole("radio", { name: "Home" }).click()
+    await expect(scope.getByRole("radio", { name: "Home" })).toHaveAttribute("aria-checked", "true")
+    await expect(footer).toContainText(home)
+    await expect(scope.getByRole("radio", { name: "Everywhere" })).toBeInViewport()
     await input.fill("missing")
     await expect(dialog.getByRole("listbox")).toHaveAttribute("aria-busy", "false")
     const result = dialog.locator("[data-search-result]")

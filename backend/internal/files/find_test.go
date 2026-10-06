@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -193,6 +194,79 @@ func TestFindReportsMatchPositionsInTheName(t *testing.T) {
 	// takes; the match starts at the sixth.
 	if len(got) != 6 || got[0] != 5 {
 		t.Fatalf("matches = %v, want six positions starting at 5", got)
+	}
+}
+
+// The query a person types is usually a word they can see in the name. A run of
+// it has to beat the same letters scattered across two words of a longer
+// name, which is what the screenshot behind this test showed: four copies of
+// proxy-tls-monitor.spec.ts above the video actually called "...Promo...".
+func TestFindRanksAWordInTheNameAboveScatteredLetters(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{
+		"Downloads/Just-Dashboard-Promo-No-Music.mp4",
+		"checkout/frontend/tests/proxy-tls-monitor.spec.ts",
+	} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.Dir(f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, f), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := find(t, New([]string{root}), "promo")
+	if len(res.Hits) == 0 || res.Hits[0].Name != "Just-Dashboard-Promo-No-Music.mp4" {
+		t.Fatalf("the name holding the word must come first, got %v", relNames(res))
+	}
+	// The highlight is the word, not the letters the tightening pass found.
+	if got := res.Hits[0].Matches; len(got) != 5 || got[0] != 15 || got[4] != 19 {
+		t.Fatalf("matches = %v, want the run at 15..19", got)
+	}
+}
+
+// A walk with a budget answers from what it reached. Depth first, that was the
+// inside of whichever large directory sorted first, and a file one level down
+// in the folder beside it was never looked at.
+func TestFindReachesShallowEntriesBeforeDeepOnes(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "aaa-checkout", "src", "lib")
+	if err := os.MkdirAll(deep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 400; i++ {
+		name := filepath.Join(deep, "file-"+strconv.Itoa(i)+".ts")
+		if err := os.WriteFile(name, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, "zzz-notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "zzz-notes", "invoice.pdf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res := find(t, New([]string{root}), "invoice", func(o *FindOptions) { o.MaxVisit = 100 })
+	if !containsRel(res, "zzz-notes/invoice.pdf") {
+		t.Fatalf("a shallow match past a large sibling was not reached: %v", relNames(res))
+	}
+	if !res.Truncated {
+		t.Fatal("a walk stopped by its visit cap must say it is partial")
+	}
+}
+
+// Keeping the best sixty of two hundred matches is a ranking, not a walk that
+// gave up, and the two are reported apart.
+func TestFindReportsMoreMatchesThanTheLimitWithoutCallingItPartial(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < 12; i++ {
+		if err := os.WriteFile(filepath.Join(root, "report-"+strconv.Itoa(i)+".txt"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	res := find(t, New([]string{root}), "report", func(o *FindOptions) { o.Limit = 5 })
+	if len(res.Hits) != 5 || res.Total != 12 || res.Truncated {
+		t.Fatalf("hits=%d total=%d truncated=%v, want 5 of 12 and a complete walk",
+			len(res.Hits), res.Total, res.Truncated)
 	}
 }
 

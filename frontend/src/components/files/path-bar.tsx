@@ -5,7 +5,7 @@ import { ChevronRight, CornerDownLeft, FolderClosed, Home, Pencil } from "@/comp
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
-import { Input } from "@/components/ui/input"
+import { InputGroupInput } from "@/components/ui/input-group"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
@@ -108,7 +108,7 @@ export function PathBar({
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground"
             onClick={() => onNavigate(home ?? "/")}
           >
             <Home className="size-3.5" />
@@ -140,7 +140,7 @@ export function PathBar({
           <Button
             size="icon-xs"
             variant="ghost"
-            className={cn("shrink-0 text-muted-foreground", rowReveal("path"))}
+            className={cn("size-7 shrink-0 text-muted-foreground", rowReveal("path"))}
             onClick={() => setEditing(true)}
             aria-label="Type a path"
           >
@@ -175,8 +175,8 @@ function Crumb({
       type="button"
       {...drop.handlers}
       className={cn(
-        "rounded-md px-1.5 py-0.5 text-body transition-colors hover:bg-accent hover:text-accent-foreground",
-        last && "font-medium",
+        "rounded-md px-1.5 py-0.5 text-body text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground",
+        last && "font-medium text-foreground",
         drop.over && "bg-wash-brand",
       )}
       onClick={() => onNavigate(href)}
@@ -209,7 +209,7 @@ function SiblingMenu({ dir, onNavigate }: { dir: string; onNavigate: (path: stri
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground"
           aria-label={`Folders in ${dir}`}
         >
           <ChevronRight className="size-3.5" />
@@ -325,7 +325,7 @@ function PathInput({
 
   return (
     <div className={cn("relative min-w-0 flex-1", className)}>
-      <Input
+      <InputGroupInput
         aria-label="Folder path"
         ref={inputRef}
         value={value}
@@ -338,7 +338,7 @@ function PathInput({
         spellCheck={false}
         autoComplete="off"
         placeholder="/var/www"
-        className="h-7 pr-16 font-mono text-xs"
+        className="h-7 pr-24 pl-1.5 font-mono text-xs sm:h-7"
       />
       <span className="pointer-events-none absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 text-micro text-muted-foreground">
         Tab completes

@@ -1713,7 +1713,10 @@ export type FileFindHit = {
 export type FileFindResult = {
   root: string
   hits: FileFindHit[]
+  /** The walk stopped early, on its budget or a cap. */
   truncated: boolean
+  /** How many matched before the best `limit` were kept. */
+  total?: number
   visited: number
   elapsedMs: number
 }

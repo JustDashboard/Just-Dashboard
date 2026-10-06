@@ -78,6 +78,7 @@ import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
+import { homeFor } from "@/components/files/search"
 import {
   archiveHref,
   colourVerb,
@@ -1067,7 +1068,11 @@ export default function FilesPage() {
     }
   }
 
-  useEffect(() => {
+  // A layout effect, so the listener that answers a key is always the one for
+  // the folder on screen: as a passive effect it was swapped in after paint,
+  // and an Alt+→ pressed the moment Alt+← had drawn the previous folder still
+  // read the old history position and went nowhere.
+  useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (!filesOwnKeyboard(event) || isTypingTarget(event.target)) return
       const target = event.target as HTMLElement | null
@@ -1292,38 +1297,15 @@ export default function FilesPage() {
           }
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
         >
-          <PaneHeader className="flex-wrap gap-x-1 gap-y-1.5 px-2 py-1.5">
-            <div
-              role="group"
-              aria-label="Folder navigation"
-              className="flex shrink-0 items-center gap-0.5"
-            >
-              <IconAction
-                label="Back to previous folder"
-                className="size-8"
-                disabled={!navigation.canBack}
-                onClick={navigation.back}
-              >
-                <ArrowLeft />
-              </IconAction>
-              <IconAction
-                label="Forward to next folder"
-                className="size-8"
-                disabled={!navigation.canForward}
-                onClick={navigation.forward}
-              >
-                <ArrowRight />
-              </IconAction>
-              <IconAction
-                label="Go to parent folder"
-                className="size-8"
-                disabled={!parentReachable}
-                onClick={() => parent && navigate(parent)}
-              >
-                <ArrowUp />
-              </IconAction>
-            </div>
+          {/* Every control in the strip has a face, and the faces come in
+              groups: the way back and forward, where you are, finding, how
+              the folder is drawn, and what you can make here. It used to be
+              a row of bare glyphs with three boxed controls dropped among
+              them, so nothing said which buttons belonged together and the
+              boxed ones read as the only ones that were buttons. */}
+          <PaneHeader className="flex-wrap gap-x-2 gap-y-1.5 px-2 py-1.5">
             <IconAction
+              variant="outline"
               label={showSidebar ? "Hide the sidebar" : "Show the sidebar"}
               aria-pressed={showSidebar}
               className="hidden size-8 lg:inline-flex"
@@ -1340,20 +1322,46 @@ export default function FilesPage() {
                 current={path ?? "/"}
                 onPick={navigate}
               >
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Places"
-                  className="size-8 text-muted-foreground"
-                >
+                <Button size="icon-sm" variant="outline" aria-label="Places">
                   <Location className="size-3.5" />
                 </Button>
               </PlacesMenu>
             </div>
 
-            {/* The strip's folder controls the colour of every folder; the
-                inspector and folder menus still label one folder at a time. */}
-            <div className="flex min-w-0 flex-1 basis-56 items-center gap-1">
+            <StripGroup aria-label="Folder navigation">
+              <IconAction
+                label="Back to previous folder"
+                className={STRIP_SEGMENT}
+                disabled={!navigation.canBack}
+                onClick={navigation.back}
+              >
+                <ArrowLeft />
+              </IconAction>
+              <IconAction
+                label="Forward to next folder"
+                className={STRIP_SEGMENT}
+                disabled={!navigation.canForward}
+                onClick={navigation.forward}
+              >
+                <ArrowRight />
+              </IconAction>
+              <IconAction
+                label="Go to parent folder"
+                className={STRIP_SEGMENT}
+                disabled={!parentReachable}
+                onClick={() => parent && navigate(parent)}
+              >
+                <ArrowUp />
+              </IconAction>
+              <IconAction label="Refresh" className={STRIP_SEGMENT} onClick={reload}>
+                <RefreshClockwise />
+              </IconAction>
+            </StripGroup>
+
+            {/* Where you are, drawn as the field it turns into on Ctrl+L: the
+                folder's colour at its head, the crumbs, and the star at its
+                end, because starring is a fact about this path. */}
+            <div className="flex h-8 min-w-0 flex-1 basis-64 items-center gap-0.5 rounded-md border border-input bg-input/30 pr-0.5 pl-0.5 focus-ring-within">
               {here &&
                 (canWrite ? (
                   <FolderColourMenu
@@ -1364,17 +1372,19 @@ export default function FilesPage() {
                     <button
                       type="button"
                       aria-label="Colour all folders"
-                      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md focus-ring transition-colors hover:bg-row-hover"
+                      className="inline-flex size-7 shrink-0 items-center justify-center rounded-md focus-ring-inset transition-colors hover:bg-accent"
                     >
                       <FolderSwatch colour={defaultColour ?? "blue"} className="size-4" />
                     </button>
                   </FolderColourMenu>
                 ) : (
-                  <FolderIcon name={here.name} path={here.path} className="size-4" />
+                  <span className="inline-flex size-7 shrink-0 items-center justify-center">
+                    <FolderIcon name={here.name} path={here.path} className="size-4" />
+                  </span>
                 ))}
               <PathBar
                 path={path ?? "/"}
-                home={places.data?.home}
+                home={homeFor(path ?? "/", places.data)}
                 onNavigate={navigate}
                 onDropPaths={dropInto}
                 onDropFiles={dropFilesInto}
@@ -1383,7 +1393,8 @@ export default function FilesPage() {
               {canWrite && here && (
                 <IconAction
                   label={starred ? "Unstar this folder" : "Star this folder"}
-                  className="size-8"
+                  aria-pressed={starred}
+                  className="size-7 focus-ring-inset"
                   onClick={() => toggleStar(here.path, here.name)}
                 >
                   {starred ? <StarFill className="text-warning" /> : <Star />}
@@ -1391,32 +1402,30 @@ export default function FilesPage() {
               )}
             </div>
 
-            {/* What you can do here: find, look, arrange, then make. */}
-            <div className="ml-auto flex shrink-0 items-center gap-1">
+            <StripGroup aria-label="Search" className="bg-input/30">
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
+                  <button
+                    type="button"
                     aria-label="Find"
-                    className="text-muted-foreground hover:text-foreground md:w-40 md:justify-start"
+                    className="flex items-center gap-2 px-2.5 text-body text-muted-foreground focus-ring-inset transition-colors hover:bg-accent hover:text-foreground md:w-44"
                     onClick={() => {
                       setQuickMode("names")
                       setQuickOpen(true)
                     }}
                   >
-                    <MagnifyingGlass className="size-4" />
-                    <span className="hidden md:inline">Find</span>
-                    <kbd className="ml-auto hidden rounded-sm border border-hairline px-1 text-micro md:inline">
-                      ⌃P
+                    <MagnifyingGlass className="size-4 shrink-0" />
+                    <span className="hidden flex-1 text-left md:inline">Find files</span>
+                    <kbd className="hidden rounded-sm border border-hairline px-1 font-mono text-micro md:inline">
+                      Ctrl P
                     </kbd>
-                  </Button>
+                  </button>
                 </TooltipTrigger>
-                <TooltipContent>Find files · Ctrl+P / ⌘P</TooltipContent>
+                <TooltipContent>Find files by name · Ctrl+P / ⌘P</TooltipContent>
               </Tooltip>
               <IconAction
                 label="Search inside files"
-                className="size-8"
+                className={STRIP_SEGMENT}
                 onClick={() => {
                   setQuickMode("content")
                   setQuickOpen(true)
@@ -1424,9 +1433,9 @@ export default function FilesPage() {
               >
                 <PreviewDocument />
               </IconAction>
-              <IconAction label="Refresh" className="size-8" onClick={reload}>
-                <RefreshClockwise />
-              </IconAction>
+            </StripGroup>
+
+            <div className="flex shrink-0 items-center gap-2">
               <ToggleGroup
                 type="single"
                 size="sm"
@@ -1436,10 +1445,10 @@ export default function FilesPage() {
                 aria-label="View"
                 className="h-8"
               >
-                <ToggleGroupItem value="list" aria-label="Details" className="h-8 min-w-8 px-1.5">
+                <ToggleGroupItem value="list" aria-label="Details" className="h-8 min-w-8 px-0">
                   <ListUnordered className="size-3.5" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-8 min-w-8 px-1.5">
+                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-8 min-w-8 px-0">
                   <GridSquare className="size-3.5" />
                 </ToggleGroupItem>
               </ToggleGroup>
@@ -1452,7 +1461,9 @@ export default function FilesPage() {
                 setTile={setTile}
                 grid={view === "grid"}
               />
-              <span aria-hidden className="mx-1 hidden h-5 w-px bg-hairline md:block" />
+            </div>
+
+            <div className="ml-auto flex shrink-0 items-center gap-2">
               {/* Edits made here are committed somewhere else, so the account
                   those commits will carry belongs on this page too. */}
               <div className="hidden md:contents">
@@ -1487,6 +1498,7 @@ export default function FilesPage() {
                 </>
               )}
               <IconAction
+                variant="outline"
                 label={showInspector ? "Hide the details" : "Show the details"}
                 aria-pressed={showInspector}
                 className="hidden size-8 xl:inline-flex"
@@ -1862,7 +1874,7 @@ export default function FilesPage() {
         open={quickOpen}
         onOpenChange={setQuickOpen}
         root={path ?? "/"}
-        home={places.data?.home}
+        places={places.data}
         entries={listing.data?.entries}
         initialMode={quickMode}
         onOpenPath={(p, isDir, line) => {
@@ -1946,6 +1958,27 @@ function EmptyFolder({ canWrite, onUpload }: { canWrite: boolean; onUpload: () =
   )
 }
 
+/** One segment of a `StripGroup`: the group draws the edge, the segment only its hover. */
+const STRIP_SEGMENT = "h-full w-8 min-w-8 rounded-none px-0 focus-ring-inset"
+
+/**
+ * Controls that are one idea, inside one edge — the same shape as the Git
+ * workspace's fetch, pull and push. Each segment is a ghost the full height of
+ * the box, and the hairline between two is the group's, never the segment's.
+ */
+function StripGroup({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      role="group"
+      className={cn(
+        "flex h-8 shrink-0 items-stretch overflow-hidden rounded-md border border-input bg-control [&>*+*]:border-l [&>*+*]:border-input",
+        className,
+      )}
+      {...props}
+    />
+  )
+}
+
 /**
  * Sorting, hidden files and tile size in one menu.
  *
@@ -1982,12 +2015,7 @@ function ArrangeMenu({
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="size-8 text-muted-foreground"
-              aria-label="Arrange"
-            >
+            <Button variant="outline" size="icon-sm" aria-label="Arrange">
               <SettingsSliders className="size-3.5" />
             </Button>
           </DropdownMenuTrigger>

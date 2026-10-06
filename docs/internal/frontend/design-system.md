@@ -1682,15 +1682,32 @@ clipboard commands float above the listing's foot, with a four-pixel arrival/exi
 160ms (instant with reduced motion), so selecting never inserts a row or shifts the workbench.
 Selection washes and drag-source opacity ease; the marquee follows the pointer immediately.
 The sidebar's active wash and
-`aria-current` identify its folder without another dot. Page commands share a 32px height and the
-same primary/secondary hierarchy. Name and content search share a compact keyboard palette with
+`aria-current` identify its folder without another dot. Its rows are one line — the folder drawn as
+what it is and the name of what it holds (an account's name for a home, *File system* for `/`,
+*Configuration* or *Logs* for the server's own folders, named by `files/places.go`) — under four
+headings that fold and stay folded: Home, Starred, This server, Recent. A second line carrying each
+place's path or a caption such as "Locally installed software" doubled the column and read as small
+print; the path is the row's tooltip. Every control in the strip has a face and a 32px height, and the
+faces come in groups rather than as a row of bare glyphs with three boxed buttons among them: the
+sidebar toggle; Back, Forward, Parent and Refresh as one box (`StripGroup`, the Git workspace's fetch,
+pull and push shape: the group draws the edge, each segment only its hover); where you are as a
+field — the colour button, the crumbs and the star inside one `bg-input/30` edge, which is what it
+becomes on Ctrl+L; Find and content search as a second field-shaped box; the view toggle and Arrange;
+then the account, New, Upload and the details toggle. Upload keeps the brand face as the page's one
+command. Name and content search share a compact keyboard palette with
 file identities, paths and highlighted matching lines. Quick editors keep these same controls when
 opened in the full workspace beside a collapsible tree.
 
 The Files search palette reserves its viewport-bounded height before results arrive. The input is
 borderless even while focused, with the caret and active result carrying its keyboard state; other
-controls retain their focus rings. Only the results scroll. Header controls and footer notices reserve
-space so typing, loading and partial results do not move the frame. Result arrivals and departures
+controls retain their focus rings. Only the results scroll. Its footer is one line on a wide screen and
+two on a phone, the same lines in every state: where to search (*This folder*, *Home*, *Everywhere* —
+a segmented choice, with two that are the same folder offered once), the folder that means, hidden
+files, the count and the unreadable-entry warning as text inside the status cell. It used to reserve a
+whole empty row under the rest for that warning, which read as a strip of dead space at the foot of
+every search. A hit's second line is the folder it is in, said from the scope (`ubuntu/Downloads`),
+never its own path again under its name. Header controls and footer cells are fixed so typing, loading
+and partial results do not move the frame. Result arrivals and departures
 fade, with departing rows immediately inert; reduced motion renders the next state immediately. The
 search body stays mounted through the dialog's closing animation so dismissal does not collapse it.
 
