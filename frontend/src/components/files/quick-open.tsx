@@ -1,20 +1,28 @@
 "use client"
 
-import { forwardRef, useEffect, useId, useMemo, useRef, useState } from "react"
+import { forwardRef, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
 import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { FileEntry, FileFindResult } from "@/lib/types"
+import type { FileEntry, FileFindResult, FilePlaces } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorState, Spinner } from "@/components/state"
 import { FileIcon } from "@/components/files/file-icon"
 import { PaletteModal } from "@/components/modal"
 import { PaneFooter } from "@/components/panel"
 import { tabClasses } from "@/components/tabs"
-import { localFileMatches, mergeFileMatches, type FileSearchHit } from "./search"
+import {
+  hitLocation,
+  localFileMatches,
+  mergeFileMatches,
+  searchScopes,
+  type FileSearchHit,
+  type SearchScope,
+} from "./search"
 
 export type FileSearchMode = "names" | "content"
 
@@ -22,7 +30,7 @@ export function QuickOpen({
   open,
   onOpenChange,
   root,
-  home,
+  places,
   entries = [],
   initialMode = "names",
   onOpenPath,
@@ -30,7 +38,7 @@ export function QuickOpen({
   open: boolean
   onOpenChange: (open: boolean) => void
   root: string
-  home?: string
+  places?: FilePlaces
   entries?: FileEntry[]
   initialMode?: FileSearchMode
   onOpenPath: (path: string, isDir: boolean, line?: number) => void
@@ -45,7 +53,7 @@ export function QuickOpen({
     >
       <SearchBody
         root={root}
-        home={home}
+        places={places}
         entries={entries}
         initialMode={initialMode}
         onChoose={(hit) => {
@@ -59,13 +67,13 @@ export function QuickOpen({
 
 function SearchBody({
   root,
-  home,
+  places,
   entries,
   initialMode,
   onChoose,
 }: {
   root: string
-  home?: string
+  places?: FilePlaces
   entries: FileEntry[]
   initialMode: FileSearchMode
   onChoose: (hit: FileSearchHit) => void
@@ -73,7 +81,7 @@ function SearchBody({
   const [query, setQuery] = useState("")
   const [mode, setMode] = useState(initialMode)
   const [hidden, setHidden] = useState(false)
-  const [wide, setWide] = useState(false)
+  const [scopeKey, setScopeKey] = useState<SearchScope["key"]>("folder")
   const [regex, setRegex] = useState(false)
   const [matchCase, setMatchCase] = useState(false)
   const [run, setRun] = useState(0)
@@ -83,6 +91,7 @@ function SearchBody({
     key: string
     hits: FileSearchHit[]
     truncated?: boolean
+    total?: number
     elapsedMs?: number
     unreadable?: number
     error?: Error
@@ -93,22 +102,21 @@ function SearchBody({
   const reduced = useReducedMotion()
   const hitId = (hit: FileSearchHit) =>
     id + "-" + encodeURIComponent(hit.path + ":" + (hit.line ?? 0))
-  const scope = wide && home ? home : root
+  const scopes = searchScopes(root, places)
+  const chosen = scopes.find((s) => s.key === scopeKey) ?? scopes[0]
+  const scope = chosen.path
   const trimmed = query.trim()
   const ready = trimmed.length >= (mode === "names" ? 2 : 1)
   const key = JSON.stringify([scope, trimmed, mode, hidden, regex, matchCase, run])
   const current = answer?.key === key ? answer : undefined
   const busy = ready && (!current || pending === key)
-  const local = useMemo(
-    () =>
-      mode === "names" && scope === root
-        ? localFileMatches(
-            entries.filter((e) => hidden || !e.name.startsWith(".")),
-            query,
-          )
-        : [],
-    [entries, hidden, mode, query, root, scope],
-  )
+  const local =
+    mode === "names" && scope === root
+      ? localFileMatches(
+          entries.filter((e) => hidden || !e.name.startsWith(".")),
+          query,
+        )
+      : []
   const hits =
     mode === "names" ? mergeFileMatches(local, current?.hits ?? []) : (current?.hits ?? [])
   const cursor = Math.max(
@@ -315,11 +323,11 @@ function SearchBody({
                     <span className="block truncate text-body">
                       <Highlighted text={hit.name} matches={hit.matches} />
                     </span>
-                    <span className="block truncate font-mono text-hint text-muted-foreground">
-                      {hit.path.startsWith(scope + "/")
-                        ? hit.path.slice(scope.length + 1)
-                        : hit.path}
-                      {hit.line ? ":" + hit.line : ""}
+                    <span
+                      className="block truncate font-mono text-hint text-muted-foreground"
+                      title={hit.path}
+                    >
+                      {hitLocation(hit.path, scope)}
                     </span>
                     {hit.snippet && (
                       <span className="mt-1 block truncate font-mono text-body text-muted-foreground">
@@ -334,7 +342,13 @@ function SearchBody({
                     )}
                   </span>
                   <span className="numeric shrink-0 pt-0.5 text-hint text-muted-foreground">
-                    {hit.isDir ? "Folder" : hit.size === undefined ? "" : bytes(hit.size)}
+                    {hit.line
+                      ? `Line ${hit.line}`
+                      : hit.isDir
+                        ? "Folder"
+                        : hit.size === undefined
+                          ? ""
+                          : bytes(hit.size)}
                   </span>
                 </button>
               </ResultTransition>
@@ -349,14 +363,16 @@ function SearchBody({
                   {busy ? (
                     <>
                       <Spinner className="size-5" />
-                      <span>Searching this folder…</span>
+                      <span>Searching {chosen.label.toLowerCase()}…</span>
                     </>
                   ) : ready ? (
                     <>
                       <span className="font-medium text-foreground">
                         No matches for “{trimmed}”
                       </span>
-                      <span>Try fewer words, include hidden files, or search from home.</span>
+                      <span>
+                        Try fewer words, include hidden files, or search a wider place below.
+                      </span>
                     </>
                   ) : (
                     <>
@@ -377,52 +393,83 @@ function SearchBody({
         </div>
       </div>
 
-      <PaneFooter className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
-        <div className="flex min-w-0 items-center gap-1.5">
-          <FolderOpen aria-hidden className="size-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate font-mono" title={scope}>
-            {scope}
-          </span>
-          {home && home !== root && (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => {
-                setWide((v) => !v)
+      {/* One line on a wide screen, two on a phone, and the same lines in
+          every state: what changes as results arrive is text inside a cell,
+          never a row appearing under the others. */}
+      <PaneFooter className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+        <div className="col-span-full flex min-w-0 items-center gap-2 sm:col-span-1">
+          {scopes.length > 1 && (
+            <ToggleGroup
+              type="single"
+              size="sm"
+              variant="outline"
+              value={chosen.key}
+              onValueChange={(value) => {
+                if (!value) return
+                setScopeKey(value as SearchScope["key"])
                 setRun(0)
+                input.current?.focus()
               }}
+              aria-label="Search in"
+              className="h-6 shrink-0"
             >
-              {wide ? "This folder" : "From home"}
-            </Button>
+              {scopes.map((option) => (
+                <ToggleGroupItem
+                  key={option.key}
+                  value={option.key}
+                  title={option.path}
+                  className="h-6 min-w-0 px-2 text-hint"
+                >
+                  {option.label}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
           )}
+          <span className="flex min-w-0 items-center gap-1.5">
+            <FolderOpen aria-hidden className="size-3 shrink-0" />
+            <span className="min-w-0 truncate font-mono" title={scope}>
+              {scope}
+            </span>
+          </span>
         </div>
-        <label className="flex items-center gap-1.5">
-          <Checkbox checked={hidden} onCheckedChange={(v) => setHidden(v === true)} />
-          Hidden files
-        </label>
-        <span
-          role="status"
-          aria-live="polite"
-          className={cn("truncate", current?.truncated && "text-warning")}
-          title={current?.truncated ? "Partial results · narrow your search" : undefined}
-        >
-          {current?.truncated
-            ? "Partial results · narrow your search"
-            : busy
-              ? "Searching…"
-              : hits.length + (mode === "content" ? " matches" : " files")}
-        </span>
-        <span className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <label className="flex shrink-0 items-center gap-1.5">
+            <Checkbox checked={hidden} onCheckedChange={(v) => setHidden(v === true)} />
+            Hidden files
+          </label>
+          <span
+            role="status"
+            aria-live="polite"
+            className="flex min-w-0 items-center gap-1.5"
+            title={
+              current?.unreadable ? `${current.unreadable} entries could not be read.` : undefined
+            }
+          >
+            <span className={cn("truncate", current?.truncated && "text-warning")}>
+              {current?.truncated
+                ? "Partial results"
+                : busy
+                  ? "Searching…"
+                  : current?.total && current.total > hits.length
+                    ? `Best ${hits.length} of ${current.total.toLocaleString()}`
+                    : trimmed
+                      ? plural(
+                          hits.length,
+                          mode === "content" ? "match" : "result",
+                          mode === "content" ? "matches" : undefined,
+                        )
+                      : ""}
+            </span>
+            {!!current?.unreadable && (
+              <span className="truncate text-warning">
+                · {current.unreadable} entries could not be read
+              </span>
+            )}
+          </span>
+        </div>
+        <span className="flex items-center gap-1 justify-self-end">
           <CornerDownLeft aria-hidden className="size-3" />
           Open
-        </span>
-        <span
-          className="col-span-full min-h-5 truncate text-warning"
-          title={
-            current?.unreadable ? `${current.unreadable} entries could not be read.` : undefined
-          }
-        >
-          {!!current?.unreadable && `${current.unreadable} entries could not be read.`}
         </span>
       </PaneFooter>
     </div>

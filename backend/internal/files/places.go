@@ -33,14 +33,19 @@ type Place struct {
 // notablePlaces is deliberately short and deliberately server-shaped. These
 // are the directories somebody administering one Linux box actually opens;
 // a longer list would be a menu to read rather than a row of shortcuts.
-var notablePlaces = []struct{ path, hint string }{
-	{"/etc", "System configuration"},
-	{"/var/www", "Web roots"},
-	{"/var/log", "Log files"},
-	{"/opt", "Optional software"},
-	{"/srv", "Served data"},
-	{"/usr/local", "Locally installed software"},
-	{"/tmp", "Temporary files"},
+//
+// Each is named for what is in it rather than by its path. "/usr/local" is a
+// word to somebody who already knows the filesystem hierarchy and a riddle to
+// everybody else, and the path is still one hover away and in the strip the
+// moment the place is opened.
+var notablePlaces = []struct{ path, name, hint string }{
+	{"/etc", "Configuration", "System configuration"},
+	{"/var/www", "Websites", "Web roots"},
+	{"/var/log", "Logs", "Log files"},
+	{"/opt", "Apps", "Optional software"},
+	{"/srv", "Served files", "Served data"},
+	{"/usr/local", "Local software", "Locally installed software"},
+	{"/tmp", "Temporary", "Temporary files"},
 }
 
 // Home is where the page opens when nothing else says otherwise.
@@ -127,7 +132,7 @@ func (s *Service) Places() []Place {
 		if st, err := os.Stat(full); err != nil || !st.IsDir() {
 			continue
 		}
-		add(Place{Name: n.path, Path: full, Kind: "notable", Hint: n.hint})
+		add(Place{Name: n.name, Path: full, Kind: "notable", Hint: n.hint})
 	}
 	return out
 }

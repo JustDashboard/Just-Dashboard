@@ -3,13 +3,26 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ArrowUpRight,
+  Box,
   Calculator,
-  Clipboard,
+  Check,
+  ChevronRight,
+  Clock,
+  CodeBracket,
+  Copy,
+  Crop,
   Download,
   Eye,
+  File,
   Fingerprint,
+  FolderClosed,
   FolderOpen,
+  Linked,
+  ListOrdered,
+  Minus,
   Pencil,
+  Users,
+  type Icon,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { downloadUrl, get } from "@/lib/api"
@@ -17,19 +30,21 @@ import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileChecksum, FileEntry, FilePreview, FileUsage } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Detail, DetailList } from "@/components/page"
 import { Well } from "@/components/panel"
 import { ErrorState, LoadingRows } from "@/components/state"
+import { IconAction } from "@/components/icon-action"
+import { BarList } from "@/components/bar-list"
 import {
   FileIcon,
+  fileKind,
   kindOfEntry,
   useFolderColour,
   type FolderColour,
 } from "@/components/files/file-icon"
 import { FolderColourSwatches } from "@/components/files/folder-colour"
-import { Meter } from "@/components/meter"
 import { copyText } from "@/lib/clipboard"
-import { rawUrl } from "@/components/files/media"
+import { baseOf, parentOf, rawUrl } from "@/components/files/media"
+import { accessRows, accessSummary, type Access } from "@/components/files/access"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 
 export { rawUrl } from "@/components/files/media"
@@ -45,11 +60,15 @@ export { rawUrl } from "@/components/files/media"
  * the directory. Opening it — the viewer, the editor, the image editor, the
  * download — is the deliberate second action.
  *
- * It opens on the thing itself, large — the picture, the video, or the folder
- * or page it is drawn as — with its name and kind under it, the way a desktop's
- * preview column does; a folder carries its colour there too. With nothing
- * chosen it describes the folder being browsed rather than asking to be
- * clicked: that column was a sentence of instructions on every visit.
+ * It opens on the thing itself, large, on a stage a step darker than the
+ * column — the picture, the video, or the folder or page it is drawn as — with
+ * its name, its format in the format's own colour, and the verbs that apply to
+ * it under that: the one most people want, named, and the rest as a row of
+ * glyphs. Below it the facts are grouped and read as sentences rather than as
+ * a column of bare values: when it changed and the date, who can do what with
+ * it (the mode as a grid, and in words), and where it lives as a path you can
+ * walk up. With nothing chosen it describes the folder being browsed rather
+ * than asking to be clicked.
  *
  * Nothing here loads a whole file. The text is a head the server trimmed, the
  * image is a URL the browser fetches itself, and the recursive size of a
@@ -106,17 +125,7 @@ export function PreviewPanel({
   )
 }
 
-function Preview({
-  entry,
-  current,
-  canWrite,
-  onColour,
-  onOpen,
-  onView,
-  onEditImage,
-  onNavigate,
-  className,
-}: {
+type PreviewProps = {
   entry: FileEntry
   /** The folder being browsed, rather than a row in it. */
   current: boolean
@@ -127,7 +136,10 @@ function Preview({
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
   className?: string
-}) {
+}
+
+function Preview({ className, ...props }: PreviewProps) {
+  const { entry } = props
   const [preview, setPreview] = useState<FilePreview>()
   const [error, setError] = useState<Error>()
   const path = entry.path
@@ -144,48 +156,27 @@ function Preview({
   }, [path, modified])
 
   return (
-    <div className={cn("flex min-h-0 flex-col overflow-auto", className)}>
-      <Hero
-        entry={entry}
-        preview={preview}
-        current={current}
-        canWrite={canWrite}
-        onColour={onColour}
-        onView={onView}
-      />
-      <div className="space-y-4 p-4">
-        {error && <ErrorState error={error} />}
-        {!preview && !error && <LoadingRows rows={3} />}
-        {preview && (
-          <>
-            <PreviewBody
-              entry={entry}
-              preview={preview}
-              current={current}
-              canWrite={canWrite}
-              onOpen={onOpen}
-              onEditImage={onEditImage}
-              onNavigate={onNavigate}
-            />
-            <Actions
-              entry={entry}
-              preview={preview}
-              canWrite={canWrite}
-              onOpen={onOpen}
-              onView={onView}
-            />
-            <Facts entry={entry} preview={preview} />
-          </>
-        )}
-      </div>
+    <div data-files-inspector className={cn("flex min-h-0 flex-col overflow-auto", className)}>
+      <Hero {...props} preview={preview} />
+      {error && <ErrorState error={error} className="m-4" />}
+      {!preview && !error && <LoadingRows rows={4} className="p-4" />}
+      {preview && (
+        <>
+          <Contents {...props} preview={preview} />
+          <Details entry={entry} preview={preview} />
+          <AccessSection preview={preview} isDir={entry.isDir} />
+          <Location {...props} />
+        </>
+      )}
     </div>
   )
 }
 
 /**
- * The thing, large, and what it is called. A picture or a video is itself;
- * everything else is the folder or the page the listing draws it as, at a
- * size where the page can carry its extension.
+ * The thing, large, what it is called and what it is, and what can be done
+ * with it. A picture or a video is itself; everything else is the folder or
+ * the page the listing draws it as, at a size where the page can carry its
+ * extension.
  */
 function Hero({
   entry,
@@ -193,20 +184,15 @@ function Hero({
   current,
   canWrite,
   onColour,
+  onOpen,
   onView,
-}: {
-  entry: FileEntry
-  preview: FilePreview | undefined
-  current: boolean
-  canWrite: boolean
-  onColour: (entry: FileEntry, colour: FolderColour) => void
-  onView: (entry: FileEntry) => void
-}) {
+  onEditImage,
+  onNavigate,
+}: PreviewProps & { preview: FilePreview | undefined }) {
   const colour = useFolderColour(entry.path, entry.name)
-  const kind = kindOfEntry(entry)
+  const kind = entry.isDir ? null : fileKind(entry.name)
   const facts = [
-    current ? "This folder" : kind.label,
-    preview?.width ? `${preview.width}×${preview.height}` : null,
+    current ? "This folder" : kindOfEntry(entry).label,
     preview?.kind === "dir"
       ? plural(preview.childCount ?? 0, "item")
       : preview && !entry.isDir
@@ -215,11 +201,11 @@ function Hero({
   ].filter(Boolean)
 
   return (
-    <div className="flex flex-col items-center gap-3 border-b border-hairline px-4 pt-6 pb-4 text-center">
+    <div className="flex flex-col gap-3 border-b border-hairline p-4">
       {preview?.kind === "image" ? (
         <button
           type="button"
-          className="flex max-h-56 w-full items-center justify-center overflow-hidden rounded-lg border border-hairline checkerboard p-2 focus-ring"
+          className="flex h-44 items-center justify-center overflow-hidden rounded-lg border border-hairline checkerboard p-2 focus-ring"
           onClick={() => onView(entry)}
           title="View full screen"
         >
@@ -227,7 +213,7 @@ function Hero({
           <img
             src={rawUrl(entry.path, preview.modified)}
             alt={entry.name}
-            className="max-h-52 max-w-full object-contain"
+            className="max-h-full max-w-full object-contain"
           />
         </button>
       ) : preview?.kind === "video" ? (
@@ -235,19 +221,31 @@ function Hero({
           src={rawUrl(entry.path, preview.modified)}
           controls
           preload="metadata"
-          className="max-h-56 w-full rounded-lg border border-hairline bg-black"
+          className="h-44 w-full rounded-lg border border-hairline bg-black object-contain"
         />
       ) : (
-        <FileIcon entry={entry} detail className="size-24" />
+        <FileIcon entry={entry} detail className="mx-auto mt-2 size-24" />
       )}
-      <div className="w-full min-w-0 space-y-1">
+      <div className="min-w-0 space-y-1 text-center">
         <h2
           className="line-clamp-2 text-title leading-snug font-semibold break-all"
           title={entry.name}
         >
           {entry.name}
         </h2>
-        <p className="numeric truncate text-hint text-muted-foreground">{facts.join(" · ")}</p>
+        <p className="numeric flex items-center justify-center gap-1.5 truncate text-hint text-muted-foreground">
+          {kind?.ext && (
+            <span className="font-mono font-semibold uppercase" style={{ color: kind.tone }}>
+              {kind.ext}
+            </span>
+          )}
+          <span className="truncate">{facts.join(" · ")}</span>
+          {preview?.width ? (
+            <span>
+              · {preview.width}×{preview.height}
+            </span>
+          ) : null}
+        </p>
       </div>
       {entry.isDir && canWrite && (
         <FolderColourSwatches
@@ -256,87 +254,226 @@ function Hero({
           className="justify-center"
         />
       )}
+      {preview && (
+        <Verbs
+          entry={entry}
+          preview={preview}
+          current={current}
+          canWrite={canWrite}
+          onOpen={onOpen}
+          onView={onView}
+          onEditImage={onEditImage}
+          onNavigate={onNavigate}
+        />
+      )}
     </div>
   )
 }
 
-function PreviewBody({
+/**
+ * What can be done with it: the verb most people want, named and wide, and
+ * the rest as glyphs beside it, each with its name in a tooltip. They had been
+ * five outlined words wrapping onto two lines, all the same weight, so the
+ * one that mattered had to be read for.
+ */
+function Verbs({
   entry,
   preview,
   current,
   canWrite,
   onOpen,
+  onView,
   onEditImage,
   onNavigate,
-}: {
-  entry: FileEntry
-  preview: FilePreview
-  current: boolean
-  canWrite: boolean
-  onOpen: (path: string) => void
-  onEditImage: (path: string) => void
-  onNavigate: (path: string) => void
-}) {
-  switch (preview.kind) {
-    case "image":
-      return canWrite ? (
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-full"
-          onClick={() => onEditImage(entry.path)}
+}: Omit<PreviewProps, "onColour" | "className"> & { preview: FilePreview }) {
+  const [sum, setSum] = useState<FileChecksum>()
+  const [hashing, setHashing] = useState(false)
+  const abort = useRef<AbortController>(null)
+
+  // Nothing resets `sum` on a new selection because nothing has to: the whole
+  // panel is keyed on the path, so a different entry is a different component.
+  // This only abandons a hash still running when the panel goes away.
+  useEffect(() => () => abort.current?.abort(), [])
+
+  if (preview.kind === "dir") {
+    if (current) return null
+    return (
+      <Button size="sm" variant="outline" onClick={() => onNavigate(entry.path)}>
+        <FolderOpen className="size-3.5" />
+        Open folder
+      </Button>
+    )
+  }
+
+  const checksum = async () => {
+    setHashing(true)
+    abort.current = new AbortController()
+    try {
+      setSum(await get<FileChecksum>("/files/checksum", { path: entry.path }, abort.current.signal))
+    } catch (err) {
+      if (!abort.current.signal.aborted) notify.error("Could not hash this file", err)
+    } finally {
+      setHashing(false)
+    }
+  }
+
+  const download = downloadUrl("/files/download", { path: entry.path })
+  const opaque = preview.kind === "binary" || preview.kind === "archive"
+  const main = preview.editable
+    ? { label: canWrite ? "Edit" : "Open", icon: Pencil, run: () => onOpen(entry.path) }
+    : opaque
+      ? null
+      : { label: "View", icon: Eye, run: () => onView(entry) }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5">
+        {main ? (
+          <Button size="sm" variant="outline" className="flex-1" onClick={main.run}>
+            <main.icon className="size-3.5" />
+            {main.label}
+          </Button>
+        ) : (
+          <Button size="sm" variant="outline" className="flex-1" asChild>
+            <a href={download} download>
+              <Download className="size-3.5" />
+              Download
+            </a>
+          </Button>
+        )}
+        {preview.editable && (
+          <IconAction variant="outline" label="View" onClick={() => onView(entry)}>
+            <Eye />
+          </IconAction>
+        )}
+        {preview.kind === "image" && canWrite && (
+          <IconAction
+            variant="outline"
+            label="Crop, rotate, resize"
+            onClick={() => onEditImage(entry.path)}
+          >
+            <Crop />
+          </IconAction>
+        )}
+        {main && (
+          <IconAction variant="outline" label="Download" asChild>
+            <a href={download} download>
+              <Download />
+            </a>
+          </IconAction>
+        )}
+        <IconAction variant="outline" label="Checksum" onClick={checksum} pending={hashing}>
+          <Fingerprint />
+        </IconAction>
+      </div>
+      {sum && (
+        <button
+          className="w-full rounded-md border border-hairline bg-surface-sunken p-2 text-left font-mono text-micro break-all transition-colors hover:border-border-strong"
+          onClick={() => void copyText(sum.sum, "Checksum copied")}
+          title="Copy the checksum"
         >
-          <Pencil className="size-3.5" />
-          Crop, rotate, resize
-        </Button>
-      ) : null
-    case "video":
-      return null
+          <span className="mr-1 text-muted-foreground uppercase">{sum.algo}</span>
+          {sum.sum}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** One group of the inspector: an eyebrow, an optional control at its end, and its body. */
+function Section({
+  title,
+  aside,
+  children,
+}: {
+  title: string
+  aside?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <section className="space-y-2.5 border-b border-hairline px-4 py-3.5 last:border-b-0">
+      <div className="flex min-h-6 items-center justify-between gap-2">
+        <h3 className="eyebrow">{title}</h3>
+        {aside}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+/** What is inside: the head of a text, the pages of a PDF, an archive's entries, a folder's. */
+function Contents({
+  entry,
+  preview,
+  current,
+  canWrite,
+  onOpen,
+  onNavigate,
+}: PreviewProps & { preview: FilePreview }) {
+  switch (preview.kind) {
     case "audio":
-      return <audio src={rawUrl(entry.path, preview.modified)} controls className="w-full" />
+      return (
+        <Section title="Listen">
+          <audio src={rawUrl(entry.path, preview.modified)} controls className="w-full" />
+        </Section>
+      )
     case "pdf":
-      return <PdfPreview path={entry.path} modified={preview.modified} />
+      return (
+        <Section title="Pages">
+          <PdfPreview path={entry.path} modified={preview.modified} />
+        </Section>
+      )
     case "text":
       return (
-        <div className="space-y-2">
-          <Well className="max-h-72 p-0 whitespace-pre">
-            <TextHead text={preview.text ?? ""} />
-          </Well>
-          <div className="flex items-center justify-between text-hint text-muted-foreground">
-            <span>
-              {preview.truncated
-                ? `First ${preview.lines} lines of ${bytes(preview.size)}`
-                : `${preview.lines} line${preview.lines === 1 ? "" : "s"}`}
-            </span>
+        <Section
+          title={
+            preview.truncated
+              ? `First ${plural(preview.lines ?? 0, "line")}`
+              : plural(preview.lines ?? 0, "line")
+          }
+          aside={
             <Button size="xs" variant="ghost" onClick={() => onOpen(entry.path)}>
               {preview.editable && canWrite ? "Open in editor" : "Open"}
               <ArrowUpRight className="size-3" />
             </Button>
-          </div>
-        </div>
+          }
+        >
+          <Well className="max-h-72 p-0 whitespace-pre">
+            <TextHead text={preview.text ?? ""} />
+          </Well>
+        </Section>
       )
     case "archive":
-      return <ArchiveListing preview={preview} />
+      return (
+        <Section title="Inside the archive">
+          <ArchiveListing preview={preview} />
+        </Section>
+      )
     case "dir":
       return (
-        <DirectoryPreview
+        <DirectoryContents
           entry={entry}
           preview={preview}
           current={current}
           onNavigate={onNavigate}
         />
       )
-    default:
+    case "binary":
       return (
-        <div className="rounded-lg border border-dashed border-hairline p-4 text-center text-xs text-muted-foreground">
-          {bytes(preview.size)} of binary data. Download it to open it locally.
-        </div>
+        <Section title="Contents">
+          <p className="text-hint text-muted-foreground">
+            Binary data — download it to open it on your computer, and compare its checksum with the
+            one you were given rather than trusting the size.
+          </p>
+        </Section>
       )
+    default:
+      return null
   }
 }
 
 /** A folder's own row says "—" for size. This is the button that answers it. */
-function DirectoryPreview({
+function DirectoryContents({
   entry,
   preview,
   current,
@@ -344,7 +481,6 @@ function DirectoryPreview({
 }: {
   entry: FileEntry
   preview: FilePreview
-  /** The folder being browsed, which there is no opening. */
   current: boolean
   onNavigate: (path: string) => void
 }) {
@@ -362,37 +498,31 @@ function DirectoryPreview({
     }
   }, [entry.path])
 
+  const largest = usage?.largest ?? []
+  const top = Math.max(1, ...largest.map((item) => item.bytes))
+
   return (
-    <div className="space-y-2">
-      <div className="flex gap-2">
-        {!current && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="flex-1"
-            onClick={() => onNavigate(entry.path)}
-          >
-            <FolderOpen className="size-3.5" />
-            Open
+    <Section
+      title={current ? "In this folder" : "Inside"}
+      aside={
+        !usage && (
+          <Button size="xs" variant="ghost" onClick={measure} pending={busy}>
+            <Calculator className="size-3" />
+            Measure size
           </Button>
-        )}
-        <Button size="sm" variant="outline" className="flex-1" onClick={measure} pending={busy}>
-          <Calculator className="size-3.5" />
-          Measure
-        </Button>
+        )
+      }
+    >
+      <div className="grid grid-cols-2 gap-2">
+        <Count icon={FolderClosed} value={preview.dirCount ?? 0} label="folder" />
+        <Count icon={File} value={preview.fileCount ?? 0} label="file" />
       </div>
-      <p className="text-hint text-muted-foreground">
-        {preview.childCount ?? 0} item{preview.childCount === 1 ? "" : "s"} directly inside —{" "}
-        {preview.dirCount ?? 0} folder{preview.dirCount === 1 ? "" : "s"}, {preview.fileCount ?? 0}{" "}
-        file
-        {preview.fileCount === 1 ? "" : "s"}
-      </p>
       {usage && (
-        <div className="space-y-1.5 rounded-lg border border-hairline p-2">
+        <div className="space-y-2">
           <p className="text-xs">
-            <b className="numeric">{bytes(usage.bytes)}</b>{" "}
+            <b className="numeric text-body">{bytes(usage.bytes)}</b>{" "}
             <span className="text-muted-foreground">
-              over {usage.files.toLocaleString()} files in {usage.dirs.toLocaleString()} folders
+              in {plural(usage.files, "file")} and {plural(usage.dirs, "folder")}
             </span>
           </p>
           {usage.truncated && (
@@ -400,155 +530,214 @@ function DirectoryPreview({
               The walk stopped at its budget, so this is a floor rather than the total.
             </p>
           )}
-          {usage.largest?.map((item) => (
-            <button
-              key={item.path}
-              className="flex w-full items-center gap-2 rounded-sm px-1 py-0.5 text-left text-hint hover:bg-accent"
-              onClick={() => item.isDir && onNavigate(item.path)}
-            >
-              <span className="w-24 shrink-0 truncate" title={item.name}>
-                {item.name}
-              </span>
-              <Meter
-                value={usage.bytes > 0 ? Math.max(2, (item.bytes / usage.bytes) * 100) : 0}
-                label={`${item.name} share of the total`}
-                className="flex-1"
-              />
-              <span className="numeric w-14 shrink-0 text-right text-muted-foreground">
-                {bytes(item.bytes)}
-              </span>
-            </button>
-          ))}
+          <BarList
+            className="-mx-2"
+            items={largest.map((item) => ({
+              key: item.path,
+              label: item.name,
+              mark: (
+                <FileIcon
+                  entry={{ name: item.name, isDir: item.isDir, isSymlink: false, path: item.path }}
+                  className="size-3.5"
+                />
+              ),
+              value: bytes(item.bytes),
+              share: item.bytes / top,
+              title: item.isDir ? `Open ${item.name}` : item.name,
+              onClick: item.isDir ? () => onNavigate(item.path) : undefined,
+            }))}
+          />
         </div>
       )}
-    </div>
+    </Section>
   )
 }
 
-function Facts({ entry, preview }: { entry: FileEntry; preview: FilePreview }) {
+function Count({ icon: Glyph, value, label }: { icon: Icon; value: number; label: string }) {
   return (
-    <DetailList>
-      <Detail label="Size">
-        <span className="numeric">
-          {preview.kind === "dir" ? `${preview.childCount ?? 0} items` : bytes(preview.size)}
+    <div className="flex items-center gap-2.5 rounded-md bg-background px-2.5 py-2">
+      <Glyph aria-hidden className="size-4 text-muted-foreground" />
+      <span className="min-w-0">
+        <span className="numeric block text-body leading-tight font-semibold">
+          {value.toLocaleString()}
         </span>
-      </Detail>
-      <Detail label="Modified">
-        <span title={timestamp(preview.modified)}>{relativeTime(preview.modified)}</span>
-      </Detail>
-      <Detail label="Owner">
-        {preview.owner}:{preview.group}
-      </Detail>
-      <Detail label="Mode" className="font-mono">
-        {preview.modeOctal}
-      </Detail>
-      {preview.language && preview.language !== "plaintext" && (
-        <Detail label="Language">{preview.language}</Detail>
-      )}
-      {preview.isSymlink && (
-        <Detail label="Links to" className="font-mono break-all">
-          {preview.symlinkTarget}
-          {preview.linkBroken && <span className="ml-1 text-destructive">broken</span>}
-        </Detail>
-      )}
-      <Detail label="Path" className="font-mono text-hint break-all">
-        {entry.path}
-      </Detail>
-    </DetailList>
+        <span className="block text-hint text-muted-foreground">
+          {value === 1 ? label : label + "s"}
+        </span>
+      </span>
+    </div>
   )
 }
 
-function Actions({
-  entry,
-  preview,
-  canWrite,
-  onOpen,
-  onView,
-}: {
-  entry: FileEntry
-  preview: FilePreview
-  canWrite: boolean
-  onOpen: (path: string) => void
-  onView: (entry: FileEntry) => void
-}) {
-  const [sum, setSum] = useState<FileChecksum>()
-  const [hashing, setHashing] = useState(false)
-  const abort = useRef<AbortController>(null)
-
-  // Nothing resets `sum` on a new selection because nothing has to: the whole
-  // panel is keyed on the path, so a different entry is a different component.
-  // This only abandons a hash still running when the panel goes away.
-  useEffect(() => () => abort.current?.abort(), [])
-
-  const checksum = async () => {
-    setHashing(true)
-    abort.current = new AbortController()
-    try {
-      setSum(await get<FileChecksum>("/files/checksum", { path: entry.path }, abort.current.signal))
-    } catch (err) {
-      if (!abort.current.signal.aborted) notify.error("Could not hash this file", err)
-    } finally {
-      setHashing(false)
-    }
-  }
-
-  const copy = (text: string, what: string) => void copyText(text, `${what} copied`)
-
-  if (preview.kind === "dir") {
-    return (
-      <div className="flex flex-wrap gap-1.5">
-        <Button size="xs" variant="outline" onClick={() => copy(entry.path, "Path")}>
-          <Clipboard className="size-3" />
-          Copy path
-        </Button>
-      </div>
-    )
-  }
-
+/** The facts, each beside a glyph for what kind of fact it is. */
+function Details({ entry, preview }: { entry: FileEntry; preview: FilePreview }) {
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5">
-        <Button size="xs" variant="outline" onClick={() => onView(entry)}>
-          <Eye className="size-3" />
-          View
-        </Button>
-        {preview.editable && (
-          <Button size="xs" variant="outline" onClick={() => onOpen(entry.path)}>
-            <Pencil className="size-3" />
-            {canWrite ? "Edit" : "Open"}
-          </Button>
+    <Section title="Details">
+      <dl className="space-y-2.5">
+        <Fact icon={Clock} label="Modified">
+          {relativeTime(preview.modified)}
+          <span className="block text-hint text-muted-foreground">
+            {timestamp(preview.modified)}
+          </span>
+        </Fact>
+        {preview.kind !== "dir" && (
+          <Fact icon={Box} label="Size">
+            {bytes(preview.size)}
+            {preview.size >= 1024 && (
+              <span className="block text-hint text-muted-foreground">
+                {preview.size.toLocaleString()} bytes
+              </span>
+            )}
+          </Fact>
         )}
-        <Button size="xs" variant="outline" asChild>
-          <a href={downloadUrl("/files/download", { path: entry.path })} download>
-            <Download className="size-3" />
-            Download
-          </a>
-        </Button>
-        <Button size="xs" variant="outline" onClick={() => copy(entry.path, "Path")}>
-          <Clipboard className="size-3" />
-          Copy path
-        </Button>
-        <Button size="xs" variant="outline" onClick={checksum} pending={hashing}>
-          <Fingerprint className="size-3" />
-          Checksum
-        </Button>
-      </div>
-      {sum && (
-        <button
-          className="w-full rounded-md border border-hairline bg-surface-sunken p-2 text-left font-mono text-micro break-all hover:border-primary"
-          onClick={() => copy(sum.sum, "Checksum")}
-          title="Copy the checksum"
-        >
-          <span className="mr-1 text-muted-foreground">{sum.algo}</span>
-          {sum.sum}
-        </button>
-      )}
-      {preview.kind === "binary" && (
-        <p className="flex items-center gap-1 text-hint text-muted-foreground">
-          <Fingerprint className="size-3" />
-          Compare the checksum against the one you were given, rather than trusting the size.
-        </p>
-      )}
+        {preview.kind === "text" && preview.lines !== undefined && !preview.truncated && (
+          <Fact icon={ListOrdered} label="Lines">
+            {preview.lines.toLocaleString()}
+          </Fact>
+        )}
+        {preview.language && preview.language !== "plaintext" && (
+          <Fact icon={CodeBracket} label="Language">
+            <span className="capitalize">{preview.language}</span>
+          </Fact>
+        )}
+        <Fact icon={Users} label="Owner">
+          {preview.owner ?? entry.owner}
+          <span className="block text-hint text-muted-foreground">
+            group {preview.group ?? entry.group}
+          </span>
+        </Fact>
+        {preview.isSymlink && (
+          <Fact icon={Linked} label="Links to">
+            <span className="font-mono text-xs break-all">{preview.symlinkTarget}</span>
+            {preview.linkBroken && <span className="ml-1 text-destructive">broken</span>}
+          </Fact>
+        )}
+      </dl>
+    </Section>
+  )
+}
+
+function Fact({
+  icon: Glyph,
+  label,
+  children,
+}: {
+  icon: Icon
+  label: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[1rem_5.5rem_minmax(0,1fr)] items-start gap-x-2 text-body">
+      <Glyph aria-hidden className="mt-0.5 size-3.5 text-muted-foreground" />
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="numeric min-w-0">{children}</dd>
     </div>
+  )
+}
+
+/**
+ * Who can do what with it: the mode as the grid it encodes, and the same in
+ * one sentence for the reader who does not think in octal.
+ */
+function AccessSection({ preview, isDir }: { preview: FilePreview; isDir: boolean }) {
+  const rows = accessRows(preview.modeOctal, preview.owner, preview.group)
+  const columns: { key: keyof Access; label: string }[] = [
+    { key: "read", label: isDir ? "List" : "Read" },
+    { key: "write", label: isDir ? "Change" : "Write" },
+    { key: "run", label: isDir ? "Enter" : "Run" },
+  ]
+  return (
+    <Section
+      title="Access"
+      aside={<span className="font-mono text-hint text-muted-foreground">{preview.modeOctal}</span>}
+    >
+      <p className="text-body">{accessSummary(rows, isDir)}</p>
+      <table className="w-full text-hint">
+        <thead>
+          <tr className="text-muted-foreground">
+            <th className="pb-1 text-left font-normal">
+              <span className="sr-only">Who</span>
+            </th>
+            {columns.map((column) => (
+              <th key={column.key} className="w-14 pb-1 text-center font-normal">
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.who} className="border-t border-hairline">
+              <th scope="row" className="py-1.5 text-left font-normal">
+                <span className="text-foreground">{row.who}</span>
+                {row.name && <span className="ml-1.5 text-muted-foreground">{row.name}</span>}
+              </th>
+              {columns.map((column) => (
+                <td key={column.key} className="py-1.5 text-center">
+                  {row.access[column.key] ? (
+                    <Check aria-label="Yes" className="mx-auto size-3.5 text-foreground" />
+                  ) : (
+                    <Minus aria-label="No" className="mx-auto size-3.5 text-muted-foreground/50" />
+                  )}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Section>
+  )
+}
+
+/** Where it lives, as the folders above it — each one a click away — and its path to copy. */
+function Location({ entry, current, onNavigate }: PreviewProps) {
+  const dir = current ? entry.path : parentOf(entry.path)
+  const parts = dir.split("/").filter(Boolean)
+  const crumbs = [
+    { label: "/", path: "/" },
+    ...parts.map((part, i) => ({ label: part, path: "/" + parts.slice(0, i + 1).join("/") })),
+  ]
+  return (
+    <Section
+      title={current ? "Path" : "Location"}
+      aside={
+        <IconAction
+          label="Copy path"
+          className="size-6"
+          onClick={() => void copyText(entry.path, "Path copied")}
+        >
+          <Copy />
+        </IconAction>
+      }
+    >
+      <nav aria-label="Location" className="flex flex-wrap items-center gap-0.5 text-body">
+        {crumbs.map((crumb, i) => (
+          <span key={crumb.path} className="flex min-w-0 items-center gap-0.5">
+            {i > 1 && <ChevronRight aria-hidden className="size-3 text-muted-foreground/60" />}
+            <button
+              type="button"
+              disabled={current && crumb.path === dir}
+              onClick={() => onNavigate(crumb.path)}
+              className={cn(
+                "max-w-40 truncate rounded-sm px-1 py-0.5 font-mono text-xs focus-ring transition-colors hover:bg-accent disabled:pointer-events-none",
+                crumb.path === dir ? "text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {crumb.label}
+            </button>
+          </span>
+        ))}
+        {!current && (
+          <span className="flex min-w-0 items-center gap-0.5">
+            {parts.length > 0 && (
+              <ChevronRight aria-hidden className="size-3 text-muted-foreground/60" />
+            )}
+            <span className="truncate px-1 font-mono text-xs font-medium">
+              {baseOf(entry.path)}
+            </span>
+          </span>
+        )}
+      </nav>
+    </Section>
   )
 }

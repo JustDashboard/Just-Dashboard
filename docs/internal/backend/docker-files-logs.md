@@ -258,8 +258,13 @@ two-gigabyte log.
 - **`find.go`** is the fuzzy finder (`search.go` is the literal/regex one, optionally grepping contents).
   Subsequence matching scored so the basename beats directories, a run beats scattered characters, a
   boundary beats mid-word and a shallow path beats a deep one; terms ANDed; positions as **UTF-16
-  offsets**. Bounded three ways (time, visits, matches) and it *says* when it stopped early — a fuzzy
-  search that quietly answers from a third of the disk is worse than one that admits it.
+  offsets**. Where the typed term occurs as a run in the name, that run is scored too and the better
+  kept, with a bonus, so `promo` finds `…-Promo.mp4` above `proxy-tls-monitor.spec.ts`. The walk is
+  **breadth first**: depth first spent its budget inside the first large directory it met and never
+  reached a shallow match beside it. Bounded three ways (time, visits, matches) and it *says* when it
+  stopped early (`truncated`) — a fuzzy search that quietly answers from a third of the disk is worse
+  than one that admits it — while `total` counts the matches before the best `limit` were kept, which
+  is a ranking rather than a partial walk.
 - **`search.go`** pins the search directory inside an allowed `os.Root`, walks without following
   symlinks, and opens only regular files with a nonblocking flag and an opened-file stat. Content
   scans are limited to 4 MiB per file, 100,000 visits, twelve directory levels and the requested hit
@@ -270,7 +275,9 @@ two-gigabyte log.
   Callers without `detailed=true` retain the hit array and first matching line per file.
 - **`places.go`**: `Home` prefers `$HOME`, then `/root`, then a single account under `/home`, then the
   first configured root — every candidate checked through `Resolve`, because a shortcut landing outside
-  the roots is worse than no shortcut. `Complete` treats a trailing separator as "inside this directory"
+  the roots is worse than no shortcut. A notable place's `name` is what it holds (*Configuration*,
+  *Websites*, *Logs*, *Apps*, *Served files*, *Local software*, *Temporary*); its `hint` keeps the
+  longer description. `Complete` treats a trailing separator as "inside this directory"
   and anything else as a component being typed; dotfiles appear only once a dot is typed.
 - **`Usage`** accumulates per-child totals in the *same* bounded walk (forty children would otherwise be
   forty-one walks) and reports `Truncated` rather than quoting a partial total. A symlink counts as the
@@ -301,15 +308,23 @@ after the filesystem operation has succeeded.
 Frontend `components/files/`: the page is **one framed workbench** with no page header above it — a
 strip across the top carrying where you are (a compact folder button for the global colour, the
 path and its star) and every page command (Find, content search, refresh, the view, arrange, the GitHub
-account, New, Upload, and the toggles for the two side columns), then a sidebar, the listing and an
+account, New, Upload, and the toggles for the two side columns), grouped into outlined boxes
+(design-system §14), then a sidebar, the listing and an
 inspector as three flush columns with a hairline between each, resizable through `panel-size.ts`. The
 sidebar (`files-sidebar.tsx`) has no header of its own and is a fixed list the way a desktop file
-manager's is, not a folder tree:
-the server's places (home, the roots, the accounts, the notable directories), then the starred folders,
-then the recent ones, each a drop target, with the browsed folder marked when it is one of them. It does
-not change as the listing walks into folders — the walking happens in the listing. `destinations` in
-`places-menu.tsx` builds that list once for the sidebar and for the phone's menu alike, and draws each
-place as what it is (`PlaceMark`: `/` as the host's distribution, a home as a folder with a house in it).
+manager's is, not a folder tree, in four sections that fold and stay folded (`files.sidebar.folded`):
+**Home** (the dashboard's home and the accounts), **Starred**, **This server** (`/` as *File system*,
+then the notable directories) and **Recent**, each row one line and a drop target, with the browsed
+folder marked when it is one of them. It does not change as the listing walks into folders — the
+walking happens in the listing. `placeSections` in `places-menu.tsx` builds that list once for the
+sidebar and for the phone's menu alike, and draws each place as what it is (`PlaceMark`: `/` as the
+host's distribution, a home as a folder with a house in it).
+
+The search palette (`quick-open.tsx`) searches *This folder*, *Home* or *Everywhere*. Home is
+`homeFor` the folder (`search.ts`): the account home it is inside, else the one account's home on a
+one-account server, else the dashboard's own — the same home the strip's house button goes to. It used
+to be the dashboard's `$HOME` alone, so on the usual install "From home" searched `/root` while the
+operator was browsing `/home/ubuntu`.
 
 Folder navigation uses native browser history (`use-folder-navigation.ts`, `navigation.ts`). Each
 visit pushes a `?path=` address, so browser Back/Forward and mouse history buttons traverse folders;
@@ -342,8 +357,15 @@ is large enough. `folder-colour.tsx` is the picker — swatches in the inspector
 behind the strip's small folder button for all folders — and `file-actions.tsx` offers the individual
 choice as a submenu on every folder's menu and on the
 background menu for the folder being browsed. The inspector (`preview-panel.tsx`) opens on the thing
-large — the picture, the video, or its folder or page — with its name, kind and colour under it, and
-describes the folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
+large — the picture or video on a stage, or its folder or page — with its name, its extension in the
+format's colour, its kind and size, a folder's colour swatches, and its verbs: the one most people
+want named and wide (Edit, View, Open folder, or Download for a binary or archive) beside glyphs for
+the rest (View, Crop, Download, Checksum). Under that, grouped sections: what is inside (the text
+head, the PDF, the archive, a folder's folder and file counts with Measure size and its largest
+entries as a `BarList`), Details (modified with the date, size with the byte count, lines, language,
+owner and group, a link's target), Access (the mode as an owner/group/everyone grid and in one
+sentence, `access.ts`), and Location (the path as crumbs to walk up, with Copy path). It describes the
+folder being browsed while nothing in it is chosen. `thumbnail.tsx` draws a picture as itself and a video as its first frame on a
 row and a tile alike (images lazily, a video only once it scrolls into view, and playing muted under the
 pointer on a tile). `file-actions.tsx` declares every verb **once, as data**, and renders it into the
 listing's context menu (`ui/context-menu.tsx`, one root over the
