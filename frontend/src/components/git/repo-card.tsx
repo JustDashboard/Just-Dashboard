@@ -12,16 +12,17 @@ import {
   Trash,
 } from "@/components/icons"
 import { post } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { forgeRepository, type RepoPulls } from "@/lib/git-repos"
 import { canTest, cleanupFailed, previewHeld, previewOutOfDate } from "@/lib/pull-requests"
 import { notify } from "@/lib/toast"
 import type { DeploymentEngineRun, DeploymentPreview, GitPullRequest, GitRepo } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { AheadBehind } from "@/components/git/ahead-behind"
 import { SourceFork, SourceMerge, SourcePull } from "@/components/git/glyphs"
 import { LanguageBar, LanguageList, RepoMark } from "@/components/git/languages"
-import { BranchChip, CommitLine, TreeState } from "@/components/git/marks"
+import { AuthorMark, BranchChip, ShortSha, TreeState } from "@/components/git/marks"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { PullRequestRow } from "@/components/git/pull-request-row"
 import { TestPullDialog } from "@/components/git/test-pull-dialog"
@@ -270,25 +271,25 @@ export function RepoCard({
                       event.stopPropagation()
                       onOpen(repo.path)
                     }}
-                    className="min-w-0 truncate rounded-sm text-left text-title leading-tight font-semibold focus-ring"
+                    className="min-w-0 truncate rounded-sm text-left text-title leading-5 font-semibold focus-ring"
                   >
                     {repo.name}
                   </button>
                   <span className="flex-1" />
                   <AheadBehind ahead={repo.ahead} behind={repo.behind} />
                 </div>
-                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                   {forge && forgeMark ? (
                     <>
                       <ProductGlyph id={forgeMark} className="size-3.5" />
-                      <span className="truncate text-foreground/75">{forge.slug}</span>
+                      <span className="truncate">{forge.slug}</span>
                     </>
                   ) : (
                     <span className="truncate">no remote — only on this server</span>
                   )}
                 </p>
                 <p
-                  className="mt-0.5 truncate font-mono text-micro text-muted-foreground/80"
+                  className="mt-0.5 truncate font-mono text-hint text-muted-foreground/70"
                   title={repo.path}
                 >
                   {repo.path}
@@ -314,7 +315,7 @@ export function RepoCard({
               ) : (
                 <>
                   <span aria-hidden className="block h-1.5 rounded-full bg-meter-track" />
-                  <p className="h-4 text-hint leading-4 text-muted-foreground">
+                  <p className="h-4 text-xs leading-4 text-muted-foreground">
                     {repo.empty ? "no commits yet" : "no source files to measure"}
                   </p>
                 </>
@@ -323,11 +324,12 @@ export function RepoCard({
 
             {/* Where HEAD is, the shape of the tree on it, and what last
                 happened there. */}
-            <div className="mt-3 space-y-2 border-t border-hairline px-3.5 pt-2.5">
+            <div className="mt-3 border-t border-hairline px-3.5 py-2.5">
               <div className="flex min-w-0 items-center gap-2">
                 {/* One line: a long branch name gives way before a card grows. */}
                 <span className="flex min-w-0 flex-1 items-center gap-2">
                   <BranchChip
+                    className="text-xs"
                     branch={repo.branch}
                     detached={repo.detached}
                     title={
@@ -362,7 +364,7 @@ export function RepoCard({
                       document.getElementById(WORKTREES_SECTION)?.scrollIntoView({ block: "start" })
                     }
                     title="Listed under Worktrees, below the repositories"
-                    className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-hint text-muted-foreground focus-ring hover:bg-accent hover:text-foreground"
+                    className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground focus-ring hover:bg-accent hover:text-foreground"
                   >
                     <SourceFork aria-hidden className="size-3.5" />
                     {plural(worktrees, "worktree")}
@@ -370,16 +372,40 @@ export function RepoCard({
                 )}
                 <TreeState repo={repo} />
               </div>
-              {/* At the height of a commit with its marks, which "no commits
-                  yet" alone is not. */}
-              <CommitLine
-                className="min-h-4.5 min-w-0"
-                sha={repo.head}
-                subject={repo.subject}
-                author={repo.author}
-                at={repo.commitAt}
-                empty={repo.empty}
-              />
+              {/* The subject on a line of its own, at the size of what is
+                  read: squeezed between the sha and the attribution it kept
+                  thirty characters of a card four hundred pixels wide. Who
+                  and when go under it, quieter, and the sha to the right
+                  under the tree's state. Both lines keep their height when
+                  there is nothing to say, so every card is one shape. */}
+              <p
+                className={cn(
+                  "mt-2 h-5 truncate text-body leading-5",
+                  repo.subject && !repo.empty
+                    ? "text-foreground/90"
+                    : "text-muted-foreground italic",
+                )}
+                title={repo.subject}
+              >
+                {repo.empty ? "no commits yet" : repo.subject || "—"}
+              </p>
+              <p className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                {repo.subject && !repo.empty && (
+                  <>
+                    <AuthorMark name={repo.author} />
+                    <span className="truncate">{repo.author}</span>
+                    {repo.commitAt && (
+                      <>
+                        <span aria-hidden>·</span>
+                        <span className="shrink-0 whitespace-nowrap">
+                          {relativeTime(repo.commitAt)}
+                        </span>
+                      </>
+                    )}
+                    <ShortSha sha={repo.head} className="ml-auto text-hint leading-4" />
+                  </>
+                )}
+              </p>
             </div>
 
             {/* What is waiting to be merged, on one line of one height
@@ -418,7 +444,7 @@ export function RepoCard({
                 </div>
               ) : (
                 <p
-                  className="flex h-[2.875rem] min-w-0 items-center gap-1.5 px-1.5 text-hint text-muted-foreground"
+                  className="flex h-[2.875rem] min-w-0 items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
                   // gh could not answer for this checkout — not signed in as
                   // its owner, most often: its own sentence is a hover away.
                   title={pulls?.error}
