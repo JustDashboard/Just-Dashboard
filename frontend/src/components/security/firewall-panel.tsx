@@ -33,6 +33,7 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
+import { FirewallPicture } from "@/components/security/firewall-picture"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,
@@ -157,11 +158,14 @@ export function FirewallPanel({
       ? rules.find((r) => r.number === handoffEdit.number && r.port === handoffEdit.port)
       : undefined
 
-  const header = <PageContext eyebrow="Security" title="Firewall" actions={<WorkspaceHelp />} />
+  const header = <PageContext eyebrow="Security" title="Firewall" />
   // Whether the firewall is enforcing, and the switch that decides it, at the
   // right end of the identity line: the control beside the fact it changes.
+  // The page's shortcuts sit there too, rather than on a line of their own
+  // above the page with nothing else on it.
   const enforcing = status?.available && (
     <span className="flex flex-wrap items-center gap-3">
+      <WorkspaceHelp compact />
       <Status
         verdict={status.enabled ? "ok" : "warning"}
         label={status.enabled ? "Active" : "Inactive"}
@@ -298,7 +302,8 @@ export function FirewallPanel({
             )}
             <FactDot />
             <span className="numeric">
-              {allows} allow · {rules.length - allows} deny
+              <span style={{ color: ACTION_HUE.ALLOW }}>{allows} allow</span> ·{" "}
+              <span style={{ color: ACTION_HUE.DENY }}>{rules.length - allows} deny</span>
             </span>
             {hidden > 0 && (
               <>
@@ -312,6 +317,16 @@ export function FirewallPanel({
         }
         aside={enforcing}
       />
+
+      {/* The rules folded by where they lead, before the rules in the order
+          the firewall reads them: what can reach this machine is the
+          question the page is opened with. */}
+      <Panel plain>
+        <PanelHeader title="Inbound" />
+        <PanelBody>
+          <FirewallPicture status={status} />
+        </PanelBody>
+      </Panel>
 
       {caps.readOnlyReason && (
         <Notice icon={LockClosed} title={`${status.backend} can be read here, not changed`}>
@@ -491,9 +506,18 @@ export function FirewallPanel({
                         tabIndex={0}
                         className="group focus-ring-inset"
                       >
-                        <TableCell className="py-4">
+                        <TableCell className="relative py-4">
+                          {/* The action's hue down the row's edge, so a
+                              column of thirty rules reads as where the
+                              fence opens and where it shuts before a word
+                              of it is. */}
+                          <span
+                            aria-hidden
+                            className="absolute inset-y-3 left-0 w-0.5 rounded-full"
+                            style={{ background: actionHue(rule.action) }}
+                          />
                           <div className="space-y-1.5">
-                            <Tag tone={rule.danger ? "danger" : "default"}>{rule.action}</Tag>
+                            <Tag style={{ color: actionHue(rule.action) }}>{rule.action}</Tag>
                             <span className="block font-mono text-hint text-muted-foreground">
                               #{rule.number ?? i + 1} · {rule.direction || "IN"}
                             </span>
@@ -509,11 +533,11 @@ export function FirewallPanel({
                             />
                             <div className="min-w-0 space-y-1">
                               <span className="block text-body font-medium">
-                                {rule.service || rule.to || "Any destination"}
+                                {rule.service || <Destination to={rule.to} />}
                               </span>
                               {(rule.service || rule.comment) && (
                                 <span className="block font-mono text-hint break-words text-muted-foreground">
-                                  {rule.service ? rule.to : rule.comment}
+                                  {rule.service ? <Destination to={rule.to} /> : rule.comment}
                                 </span>
                               )}
                               {rule.service && rule.comment && (
@@ -570,6 +594,47 @@ export function FirewallPanel({
                         </TableCell>
                       </TableRow>
                     ))}
+                    {/* Where a connection goes that no rule above matched:
+                        the end of the list the firewall reads, so it is the
+                        list's last row rather than a tile a screen away. */}
+                    {!query.trim() && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell className="relative py-4">
+                          <span
+                            aria-hidden
+                            className="absolute inset-y-3 left-0 w-0.5 rounded-full border-l border-dashed border-border-strong"
+                          />
+                          <div className="space-y-1.5">
+                            <Tag style={{ color: actionHue(inbound) }}>{inbound}</Tag>
+                            <span className="block font-mono text-hint text-muted-foreground">
+                              default · IN
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-normal">
+                          <div className="flex items-center gap-3">
+                            <ProductLogo fallback={Shield} size="sm" className="hidden sm:flex" />
+                            <div className="min-w-0 space-y-1">
+                              <span className="block text-body font-medium">Everything else</span>
+                              <span
+                                className={cn(
+                                  "block text-hint",
+                                  inbound === "allow" ? "text-warning" : "text-muted-foreground",
+                                )}
+                              >
+                                {inbound === "allow"
+                                  ? "let in: the deny rules above are a blocklist, not a fence"
+                                  : "a connection no rule above matched"}
+                              </span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-muted-foreground">Anyone</span>
+                        </TableCell>
+                        <TableCell />
+                      </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -718,6 +783,40 @@ export function FirewallPanel({
 }
 
 const FIREWALL_LENS = lensFor("firewall")
+
+/**
+ * An action's hue: a kind of rule, named by colour the way a Redis key's type
+ * is (§15) — admitted in green, rate-limited in amber, turned away in red,
+ * refused with an answer in pink. The three backends spell the same four
+ * actions three ways.
+ */
+const ACTION_HUE = {
+  ALLOW: "var(--tag-green)",
+  LIMIT: "var(--tag-amber)",
+  DENY: "var(--tag-red)",
+  REJECT: "var(--tag-pink)",
+} as const
+
+function actionHue(action: string) {
+  const a = action.toUpperCase()
+  if (a === "ALLOW" || a === "ACCEPT") return ACTION_HUE.ALLOW
+  if (a === "LIMIT") return ACTION_HUE.LIMIT
+  if (a === "DENY" || a === "DROP") return ACTION_HUE.DENY
+  if (a === "REJECT") return ACTION_HUE.REJECT
+  return "var(--tag-slate)"
+}
+
+/** A rule's destination, its port in the port hue: `22/tcp`, `Anywhere`, `10.0.0.5 443`. */
+function Destination({ to }: { to: string }) {
+  const match = /^(\d+(?::\d+)?)(\/\w+)?$/.exec(to)
+  if (!match) return <>{to || "Any destination"}</>
+  return (
+    <span className="numeric font-mono">
+      <span className="text-[var(--tag-pink)]">{match[1]}</span>
+      {match[2] && <span className="text-muted-foreground">{match[2]}</span>}
+    </span>
+  )
+}
 
 /** The lines a deny answers: a connection a limit rule turned away. */
 const RATE_LIMITED = ["limit"]
