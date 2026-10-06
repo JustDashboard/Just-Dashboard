@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { Bug, DesktopDevice, Globe, Terminal, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { bytes, clock, plural } from "@/lib/format"
@@ -16,6 +17,7 @@ import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { LatencyLadder } from "@/components/deploy/latency-ladder"
+import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import {
   Address,
   MethodWord,
@@ -66,7 +68,9 @@ export function TrafficFacets({
   onFilterStatus,
   onFilterSlow,
   onBlock,
-  blocking,
+  blockState,
+  blockUnavailable,
+  dockerIngress,
 }: {
   summary: RequestSummary
   slowest?: RequestEntry[]
@@ -84,7 +88,9 @@ export function TrafficFacets({
   onFilterSlow: (ms: number) => void
   /** Deny an address at the firewall. Absent for a role that may not. */
   onBlock?: (ip: string) => void
-  blocking?: string | null
+  blockState?: (ip: string) => RequestBlockState
+  blockUnavailable?: string
+  dockerIngress?: boolean
 }) {
   const agents = summary.agents.map((facet) => ({ facet, agent: agentProduct(facet.value) }))
   const counted = agents.reduce((n, { facet }) => n + facet.count, 0)
@@ -104,6 +110,9 @@ export function TrafficFacets({
     .sort((a, b) => (b.bytes ?? 0) - (a.bytes ?? 0))
     .slice(0, 5)
   const scanners = new Set(summary.scanners.map((scanner) => scanner.value))
+  const actionableScanners = summary.scanners.filter(
+    (scanner) => blockState?.(scanner.value) !== "saved",
+  )
   // One trailing column down the right-hand lists — the Block verb's, a bot's
   // tag, nothing — so Clients, Agents and Status codes end their bars on one
   // line and the figures stay the last column. As wide as Block where the
@@ -113,9 +122,15 @@ export function TrafficFacets({
 
   return (
     <div className="flex flex-col gap-8 px-5 py-5">
-      {summary.scanners.length > 0 && (
+      {actionableScanners.length > 0 && (
         <BlurFade>
-          <Scanners summary={summary} onBlock={onBlock} blocking={blocking} />
+          <Scanners
+            summary={{ ...summary, scanners: actionableScanners }}
+            onBlock={onBlock}
+            blockState={blockState}
+            blockUnavailable={blockUnavailable}
+            dockerIngress={dockerIngress}
+          />
         </BlurFade>
       )}
 
@@ -269,17 +284,26 @@ export function TrafficFacets({
                     // row is under the pointer (§6): an address worth a deny
                     // rule gets the verb, one inside the network gets the
                     // same width of nothing so the figures still line up.
-                    <DimActions className={cn(slot, "justify-end")}>
-                      {!isPrivate(c.value) && (
+                    <DimActions
+                      className={cn(slot, "justify-end", blockState?.(c.value) && "opacity-100")}
+                    >
+                      {blockState?.(c.value) === "saved" ? (
+                        <span className="text-xs whitespace-nowrap text-muted-foreground">
+                          Deny saved
+                        </span>
+                      ) : !isPrivate(c.value) ? (
                         <Button
                           size="xs"
                           variant="ghost"
-                          disabled={blocking === c.value}
+                          disabled={
+                            Boolean(blockUnavailable) || blockState?.(c.value) === "blocking"
+                          }
+                          title={blockUnavailable || undefined}
                           onClick={() => onBlock(c.value)}
                         >
-                          {blocking === c.value ? "Blocking…" : "Block"}
+                          {blockState?.(c.value) === "blocking" ? "Blocking…" : "Block"}
                         </Button>
-                      )}
+                      ) : null}
                     </DimActions>
                   ) : (
                     <span aria-hidden className={cn(slot, "shrink-0")} />
@@ -508,19 +532,23 @@ function SlowRow({
 function Scanners({
   summary,
   onBlock,
-  blocking,
+  blockState,
+  blockUnavailable,
+  dockerIngress,
 }: {
   summary: RequestSummary
   onBlock?: (ip: string) => void
-  blocking?: string | null
+  blockState?: (ip: string) => RequestBlockState
+  blockUnavailable?: string
+  dockerIngress?: boolean
 }) {
   const probes = summary.probes.slice(0, 4)
   const more = summary.probes.length - probes.length
   return (
     <Notice tone="warning" icon={Warning} title="Scanners">
       <p>
-        {plural(summary.scanners.length, "client")} tried the paths a script tries on every host,
-        refused every time.
+        {plural(summary.scanners.length, "client")} probed paths commonly tried by scripts. These
+        probes were refused.
       </p>
       <p className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs">
         {probes.map((probe, i) => (
@@ -550,16 +578,26 @@ function Scanners({
                 <Button
                   size="xs"
                   variant="destructive"
-                  disabled={blocking === scanner.value}
+                  disabled={Boolean(blockUnavailable) || blockState?.(scanner.value) === "blocking"}
+                  title={blockUnavailable || undefined}
                   onClick={() => onBlock(scanner.value)}
                 >
-                  {blocking === scanner.value ? "Blocking…" : "Block"}
+                  {blockState?.(scanner.value) === "blocking" ? "Blocking…" : "Block"}
                 </Button>
               )}
             </li>
           )
         })}
       </ul>
+      {onBlock && (blockUnavailable || dockerIngress) && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {blockUnavailable ||
+            "Block saves a host firewall deny. Docker-published ingress ports can bypass it."}{" "}
+          <Link href="/security/firewall" className="text-link hover:underline">
+            Open Firewall
+          </Link>
+        </p>
+      )}
     </Notice>
   )
 }
