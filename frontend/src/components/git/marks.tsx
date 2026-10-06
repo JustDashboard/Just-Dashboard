@@ -1,6 +1,6 @@
 "use client"
 
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { workingTreeCounts, workingTreeSquares, type WorkingTreePart } from "@/lib/git-status"
 import type { GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -291,5 +291,34 @@ export function CommitLine({
         {at ? relativeTime(at) : null}
       </span>
     </p>
+  )
+}
+
+/**
+ * How a working tree stands, as the card and the worktree list both say it:
+ * the bar of squares and the count — conflicts in red, changes in amber — or
+ * "clean".
+ */
+export function TreeState({ repo }: { repo: GitRepo }) {
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 leading-[1.6]">
+      <WorkingTreeBar repo={repo} />
+      <span
+        className={cn(
+          "numeric text-hint",
+          repo.conflicts > 0
+            ? "text-destructive"
+            : repo.dirty
+              ? "text-warning"
+              : "text-muted-foreground",
+        )}
+      >
+        {repo.conflicts > 0
+          ? plural(repo.conflicts, "conflict")
+          : repo.dirty
+            ? plural(repo.changes, "change")
+            : "clean"}
+      </span>
+    </span>
   )
 }

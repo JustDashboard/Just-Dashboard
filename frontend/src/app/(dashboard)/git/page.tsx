@@ -6,7 +6,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useSessionState } from "@/lib/view-state"
 import { CloudDownload, GitHubMark, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
-import { assignPulls, cardUrgency, nestWorktrees, shelve, type RepoShelf } from "@/lib/git-repos"
+import { assignPulls, byUrgency, shelve, splitWorktrees, type RepoShelf } from "@/lib/git-repos"
 import type { GitPullRequest, GitPullRequestSummary, GitRepo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -22,6 +22,7 @@ import { ForgeFace } from "@/components/git/marks"
 import { REPO_GRID, RepoCard } from "@/components/git/repo-card"
 import { RepoWorkspace } from "@/components/git/repo-workspace"
 import { useCheckoutRemoval } from "@/components/git/remove-checkout"
+import { WorktreeSection } from "@/components/git/worktree-list"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -86,13 +87,15 @@ function ShelfMark({ shelf }: { shelf: RepoShelf }) {
  * each pull request is drawn once, on the checkout that is on its branch.
  * The shelves stay under a filter: they say *where*, which a chip does not.
  *
- * A linked worktree is not a shelf-mate of the checkout it belongs to: it
- * is drawn inside that checkout's card (`nestWorktrees`), so a repository
- * worked on in three worktrees is one card with three rows rather than
- * three cards with one name. A card ranks by the worst checkout in it, and a
- * filter keeps it while any of them matches. Taking a checkout off the
- * server — a worktree, or a repository's folder for good — goes through
- * `remove-checkout.tsx`, whose one dialog the page holds.
+ * Linked worktrees are not shelf-mates of the checkout they belong to, nor
+ * rows inside its card: they are one section under the shelves
+ * (`splitWorktrees`, `worktree-list.tsx`), each naming its repository, and a
+ * card counts its own. Inside the card a long list made every card in the
+ * row as tall as the one with the most worktrees. The filters and the search
+ * narrow the section as they narrow the shelves, and the Worktrees chip shows
+ * it alone. Taking a checkout off the server — a worktree, or a
+ * repository's folder for good — goes through `remove-checkout.tsx`, whose
+ * one dialog the page holds.
  *
  * The cards are choices, not readings — every one is a checkout to enter —
  * so they carry the lit edge §16 gives to things you pick.
@@ -129,8 +132,9 @@ export default function GitPage() {
   )
 
   const list = useMemo(() => repos.data?.repos ?? [], [repos.data])
-  // A linked worktree is drawn inside its main checkout's card.
-  const { cards, worktrees } = useMemo(() => nestWorktrees(list), [list])
+  // Linked worktrees are listed in a section of their own, not as cards.
+  const { cards, worktrees, counts: worktreeCounts } = useMemo(() => splitWorktrees(list), [list])
+  const mains = useMemo(() => Object.fromEntries(cards.map((r) => [r.path, r])), [cards])
   // What each card draws: the summary with every request on one card only.
   const pullsByPath = useMemo(() => assignPulls(list, summary.data?.repos), [list, summary.data])
   const counts = useMemo(
@@ -168,17 +172,14 @@ export default function GitPage() {
         openPulls(r).some((p) => matchesPull(p, needle))
       )
     }
-    // A card stays while it or any worktree inside it answers the filter, so
-    // "Uncommitted" finds the repository whose worktree has the work.
-    const rank = (r: GitRepo) => cardUrgency(r, worktrees[r.path])
-    return cards
-      .filter((r) => matches(r) || (worktrees[r.path] ?? []).some(matches))
-      .sort((a, b) => rank(a) - rank(b) || (b.commitAt ?? "").localeCompare(a.commitAt ?? ""))
+    // The worktrees chip is the one state no repository card is in: it shows
+    // the worktree section alone.
+    return {
+      cards: state === "worktrees" ? [] : cards.filter(matches).sort(byUrgency),
+      worktrees: worktrees.filter(matches),
+    }
   }, [cards, worktrees, filter, state, pullsByPath])
-  const shelves = useMemo(
-    () => shelve(visible, (r) => cardUrgency(r, worktrees[r.path])),
-    [visible, worktrees],
-  )
+  const shelves = useMemo(() => shelve(visible.cards), [visible])
 
   // A selected repository takes the whole page: the working copy is a place to
   // work, not a panel to peek at, and it needs the room for the tree, the
@@ -319,7 +320,7 @@ export default function GitPage() {
                 {controls}
               </Toolbar>
 
-              {visible.length === 0 ? (
+              {visible.cards.length === 0 && visible.worktrees.length === 0 ? (
                 <EmptyState
                   icon={GitHubMark}
                   title="No repository matches"
@@ -361,18 +362,26 @@ export default function GitPage() {
                           index={index}
                           repo={repo}
                           pulls={pullsByPath[repo.path]}
-                          worktrees={worktrees[repo.path]}
-                          worktreePulls={pullsByPath}
+                          worktrees={worktreeCounts[repo.path]}
                           onOpen={select}
                           onOpenPull={openRepoPull}
                           onPullsChanged={summary.refresh}
                           onDelete={removal.deleteCheckout}
-                          onRemoveWorktree={removal.removeWorktree}
                         />
                       ))}
                     </ul>
                   </section>
                 ))
+              )}
+              {visible.worktrees.length > 0 && (
+                <WorktreeSection
+                  worktrees={visible.worktrees}
+                  mains={mains}
+                  pulls={pullsByPath}
+                  onOpen={select}
+                  onOpenPull={openRepoPull}
+                  onRemove={removal.removeWorktree}
+                />
               )}
             </div>
           ))}

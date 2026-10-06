@@ -120,9 +120,8 @@ export function byUrgency(a: GitRepo, b: GitRepo): number {
  * wrong in it comes first; between two that are equally wrong, the names
  * decide, with the shelf of remote-less checkouts last — a repository nobody
  * pushes anywhere is the one the reader is least likely to be looking for.
- * `rankOf` is how wrong one card is, which counts the worktrees inside it.
  */
-export function shelve(repos: GitRepo[], rankOf: (repo: GitRepo) => number = urgency): RepoShelf[] {
+export function shelve(repos: GitRepo[]): RepoShelf[] {
   const shelves = new Map<string, RepoShelf>()
   for (const repo of repos) {
     const head = shelfOf(repo)
@@ -134,7 +133,7 @@ export function shelve(repos: GitRepo[], rankOf: (repo: GitRepo) => number = urg
     shelf.repos.push(repo)
   }
   return [...shelves.values()].sort((a, b) => {
-    const rank = (s: RepoShelf) => Math.min(...s.repos.map(rankOf))
+    const rank = (s: RepoShelf) => Math.min(...s.repos.map(urgency))
     if (rank(a) !== rank(b)) return rank(a) - rank(b)
     if (!a.key !== !b.key) return a.key ? -1 : 1
     return a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
@@ -183,41 +182,39 @@ export function assignPulls(
 }
 
 /**
- * The checkouts the page draws as cards, and the linked worktrees each card
- * carries inside it.
+ * The checkouts the page draws as repository cards, and the linked worktrees
+ * it lists in a section of their own.
  *
  * A worktree is a second working directory of one repository — the same
- * history, another branch checked out — and drawn as a card of its own beside
- * its main checkout it read as a second repository with the first one's name
- * and owner. So it is drawn inside the main checkout's card, the way `git
- * worktree list` prints it, and a card is as urgent as the worst checkout in
- * it. A worktree whose main checkout the list does not have (outside the
- * roots, or deleted from under it) has nowhere to sit and keeps a card of its
- * own, which says whose worktree it is.
+ * history, another branch checked out. Drawn as a card of its own on the
+ * shelf it read as a second repository with the first one's name; drawn
+ * inside its repository's card it made that card, and through the grid's
+ * equal rows every card beside it, as tall as its longest list. So the cards
+ * are repositories, each counting its worktrees, and the worktrees are one
+ * list under the shelves, each naming the repository it belongs to — one with
+ * no main checkout listed (outside the roots, deleted from under it) included.
  */
-export function nestWorktrees(repos: GitRepo[]): {
+export function splitWorktrees(repos: GitRepo[]): {
   cards: GitRepo[]
-  worktrees: Record<string, GitRepo[]>
+  worktrees: GitRepo[]
+  /** How many worktrees each main checkout has, by its path. */
+  counts: Record<string, number>
 } {
-  const paths = new Set(repos.map((r) => r.path))
-  const worktrees: Record<string, GitRepo[]> = {}
   const cards: GitRepo[] = []
+  const worktrees: GitRepo[] = []
+  const counts: Record<string, number> = {}
   for (const repo of repos) {
-    if (repo.worktree && repo.main && repo.main !== repo.path && paths.has(repo.main)) {
-      ;(worktrees[repo.main] ??= []).push(repo)
+    if (repo.worktree && repo.main !== repo.path) {
+      worktrees.push(repo)
+      if (repo.main) counts[repo.main] = (counts[repo.main] ?? 0) + 1
     } else {
       cards.push(repo)
     }
   }
-  for (const list of Object.values(worktrees)) {
-    list.sort((a, b) => a.path.localeCompare(b.path))
-  }
-  return { cards, worktrees }
-}
-
-/** A card's urgency: the worst of its own checkout and every worktree inside it. */
-export function cardUrgency(repo: GitRepo, worktrees: GitRepo[] = []): number {
-  return Math.min(urgency(repo), ...worktrees.map(urgency))
+  worktrees.sort(
+    (a, b) => (a.main ?? "").localeCompare(b.main ?? "") || a.path.localeCompare(b.path),
+  )
+  return { cards, worktrees, counts }
 }
 
 /** Where a worktree sits, said from its main checkout: `.worktrees/fix-x`, not the whole path. */

@@ -242,13 +242,12 @@ test("the list answers what is waiting before the rows are read", async ({ page 
  *
  * The pull requests used to live one click and a tab away, inside the
  * workspace, where the question the list page is opened with — is anything
- * waiting — could not see them. Now a card carries the first two of them,
- * each in its state's colour and a choice of its own that opens the checkout
- * *on* that request in one history entry, and counts the rest. The foot must
- * not disturb what the card already promised: the repository's name is still
- * the only button called that, and the cards on one shelf are one height —
- * the row stretches to the tallest, so a card with requests does not leave
- * its neighbour short.
+ * waiting — could not see them. Now a card carries the first of them, in its
+ * state's colour and a choice of its own that opens the checkout *on* that
+ * request in one history entry, and counts the rest. The foot must not
+ * disturb what the card already promised: the repository's name is still the
+ * only button called that, and the card is the height of every other card —
+ * a list of requests or worktrees inside one stretched its whole row.
  */
 test("open pull requests sit on the card and open the checkout on them", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -286,24 +285,22 @@ test("open pull requests sit on the card and open the checkout on them", async (
   await page.goto("/git")
   await expect(page.getByRole("button", { name: "Pull requests 2" })).toBeVisible()
 
-  // The first two on the card, and a count for the rest.
+  // The first on the card, and a count for the rest.
   await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open pull request #13" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Open pull request #14" })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "2 more pull requests" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Open pull request #13" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "3 more pull requests" })).toBeVisible()
   // A checkout gh could not answer for says so in one quiet word.
   await expect(page.getByText("pull requests unavailable")).toBeVisible()
   // The foot adds no button named like a repository.
   await expect(page.getByRole("button", { name: /^(app|lib|web)$/ })).toHaveCount(3)
 
-  // Four requests or one: the cards on a shelf are one height.
-  await expect(
-    page.locator("ul[aria-label='acme'] > li, ul[aria-label='No remote'] > li"),
-  ).toHaveCount(3)
-  const heights = await page
-    .locator("ul[aria-label='acme'] > li")
-    .evaluateAll((lis) => lis.map((li) => Math.round(li.getBoundingClientRect().height)))
-  expect(heights).toHaveLength(2)
+  // Four requests, one, or a word for none: every card is one height, on
+  // either shelf.
+  const cards = page.locator("ul[aria-label='acme'] > li, ul[aria-label='No remote'] > li")
+  await expect(cards).toHaveCount(3)
+  const heights = await cards.evaluateAll((lis) =>
+    lis.map((li) => Math.round(li.getBoundingClientRect().height)),
+  )
   expect(new Set(heights).size).toBe(1)
 
   // The foot's verbs follow the Overview's rule: a request whose preview is
@@ -338,16 +335,17 @@ test("open pull requests sit on the card and open the checkout on them", async (
 })
 
 /**
- * A worktree is drawn inside the repository it belongs to, and taking a
- * checkout off the server says what is lost before it asks for the name.
+ * Worktrees are a section of their own, and taking a checkout off the
+ * server says what is lost before it asks for the name.
  *
  * Worktrees were cards of their own beside their main checkout, reading as a
- * second repository with the first one's name, and removing one was three
- * screens away. Deleting a repository's folder is the one act on this page
+ * second repository with the first one's name; inside the card, a long list
+ * stretched every card in its row. The card counts them and the section lists
+ * them, each naming its repository, each with its removal. Deleting a repository's folder is the one act on this page
  * that cannot be undone, so the dialog counts what exists only on this disk
  * from the server's own answer and the request carries the typed name.
  */
-test("worktrees sit inside their repository and checkouts are removed knowingly", async ({
+test("worktrees are listed apart from the cards and checkouts are removed knowingly", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -433,14 +431,28 @@ test("worktrees sit inside their repository and checkouts are removed knowingly"
   })
   await page.goto("/git")
 
-  // One card for the repository, its worktree a row inside it; the chip
-  // counts the worktrees, and the language strip says what it is made of.
+  // One card for the repository, counting its worktree; the worktree is a
+  // row of the Worktrees section naming the repository, and the cards keep
+  // one height. The language strip says what the repository is made of.
   await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(1)
   await expect(page.getByRole("button", { name: "fix-login", exact: true })).toHaveCount(0)
-  const trees = page.getByRole("list", { name: "Worktrees of app" })
-  await expect(trees.getByRole("button", { name: "fix/login", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Worktrees 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "1 worktree" })).toBeVisible()
+  const trees = page.getByRole("list", { name: "Worktrees" })
+  await expect(
+    trees.getByRole("button", { name: "Open the worktree on fix/login", exact: true }),
+  ).toBeVisible()
+  await expect(trees).toContainText("app")
+  await expect(trees).toContainText(".worktrees/fix-login")
   await expect(page.getByRole("img", { name: "Go 60%, TypeScript 40%" })).toBeVisible()
+  const heights = await page
+    .locator("[data-workspace-item='/srv/app'], [data-workspace-item='/srv/lib']")
+    .evaluateAll((lis) => lis.map((li) => Math.round(li.getBoundingClientRect().height)))
+  expect(new Set(heights).size).toBe(1)
+  // The chip shows the section alone.
+  await page.getByRole("button", { name: "Worktrees 1" }).click()
+  await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(0)
+  await expect(trees).toBeVisible()
+  await page.getByRole("button", { name: /^All/ }).click()
 
   // A clean worktree is removed with an ordinary confirmation, against the
   // repository it belongs to.

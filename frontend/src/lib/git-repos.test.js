@@ -1,11 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import {
   assignPulls,
-  cardUrgency,
   forgeRepository,
-  nestWorktrees,
   parseRemote,
   shelve,
+  splitWorktrees,
   worktreePlace,
 } from "./git-repos"
 
@@ -169,26 +168,17 @@ describe("assigning pull requests to cards", () => {
   })
 })
 
-describe("worktrees inside their main checkout", () => {
-  test("a linked worktree is drawn inside the card of the checkout it belongs to", () => {
+describe("worktrees in a section of their own", () => {
+  test("a linked worktree leaves the cards and is counted on its repository", () => {
     const main = repo({ path: "/srv/app" })
     const linked = repo({ path: "/srv/app/.worktrees/fix", worktree: true, main: "/srv/app" })
     const other = repo({ path: "/srv/api" })
-    const { cards, worktrees } = nestWorktrees([main, linked, other])
+    const lost = repo({ path: "/srv/fix", worktree: true, main: "/elsewhere/app" })
+    const { cards, worktrees, counts } = splitWorktrees([main, linked, other, lost])
     expect(cards.map((r) => r.path)).toEqual(["/srv/app", "/srv/api"])
-    expect(worktrees["/srv/app"].map((r) => r.path)).toEqual(["/srv/app/.worktrees/fix"])
-  })
-
-  test("a worktree whose main checkout is not listed keeps a card of its own", () => {
-    const linked = repo({ path: "/srv/fix", worktree: true, main: "/elsewhere/app" })
-    expect(nestWorktrees([linked]).cards).toEqual([linked])
-  })
-
-  test("a card is as urgent as the worst checkout in it", () => {
-    const clean = repo({})
-    const dirty = repo({ dirty: true, changes: 2 })
-    expect(cardUrgency(clean, [dirty])).toBe(2)
-    expect(cardUrgency(clean)).toBe(5)
+    // Grouped by the repository they belong to.
+    expect(worktrees.map((r) => r.path)).toEqual(["/srv/fix", "/srv/app/.worktrees/fix"])
+    expect(counts).toEqual({ "/srv/app": 1, "/elsewhere/app": 1 })
   })
 
   test("a worktree's place is said from its main checkout", () => {
