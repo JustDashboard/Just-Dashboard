@@ -488,12 +488,14 @@ func (c *containerNames) label(ctx context.Context, docker *dockerx.Client, rows
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.names == nil || time.Since(c.read) > containerNamesFresh {
+	if time.Since(c.read) > containerNamesFresh {
 		listCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		list, err := docker.ListContainers(listCtx, false)
 		cancel()
-		// A Docker that does not answer leaves the ids as they were rather
-		// than taking the process table with it; the next poll asks again.
+		// A Docker that does not answer keeps the names it last gave and is
+		// not asked again until they would have gone stale, so a hung socket
+		// costs one poll its two seconds rather than every poll.
+		c.read = time.Now()
 		if err == nil {
 			c.names = make(map[string]string, len(list))
 			for _, ct := range list {
@@ -501,7 +503,6 @@ func (c *containerNames) label(ctx context.Context, docker *dockerx.Client, rows
 					c.names[ct.ID[:12]] = strings.TrimPrefix(ct.Name, "/")
 				}
 			}
-			c.read = time.Now()
 		}
 	}
 	for i := range rows {
