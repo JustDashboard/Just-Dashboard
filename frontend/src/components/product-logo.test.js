@@ -13,6 +13,7 @@ import {
   hasProductLogo,
   hostProduct,
   imageProduct,
+  interfaceProduct,
   issuerProduct,
   packageManagerProduct,
   platformProduct,
@@ -21,6 +22,7 @@ import {
   processProduct,
   programProduct,
   recipeProduct,
+  sensorProduct,
   unitProduct,
   variableProduct,
   webhookProduct,
@@ -610,6 +612,26 @@ describe("the database engines", () => {
       expect(seen(programProduct(command))).toBe(id)
     }
   })
+})
+
+test("an interface is its owner's and a sensor its silicon's, by the name each is given", () => {
+  expect(seen(interfaceProduct("tailscale0"))).toBe("tailscale")
+  expect(seen(interfaceProduct("docker0"))).toBe("docker")
+  expect(interfaceProduct("br-3f2a9c81d0e4")).toBe("docker")
+  expect(interfaceProduct("veth4f14332")).toBe("docker")
+  // The machine's own devices, a WireGuard tunnel and a bridge somebody
+  // named by hand are nobody's product.
+  for (const name of ["eth0", "ens3", "lo", "wg0", "br0", "bridge-lan"]) {
+    expect({ name, product: interfaceProduct(name) }).toEqual({ name, product: undefined })
+  }
+
+  expect(seen(sensorProduct("coretemp_package_id_0"))).toBe("intel")
+  expect(seen(sensorProduct("k10temp_Tctl"))).toBe("amd")
+  expect(sensorProduct("zenpower_Tdie")).toBe("amd")
+  expect(sensorProduct("amdgpu_edge")).toBe("amd")
+  for (const name of ["nvme_Composite", "acpitz", "cpu_thermal", "iwlwifi_1"]) {
+    expect({ name, product: sensorProduct(name) }).toEqual({ name, product: undefined })
+  }
 })
 
 test("hasProductLogo", () => {

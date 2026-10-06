@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react"
 import { Download, Pause, Play } from "@/components/icons"
 import { bytes, duration, percent, rate } from "@/lib/format"
-import type { MetricEvent, MountStats, Snapshot } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import type { MetricEvent, Snapshot } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
 import {
@@ -36,22 +37,32 @@ import {
 import { Page, PageContext, PageState, Section } from "@/components/page"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
+import type { Tone } from "@/components/tone"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
-import { RangePicker } from "@/components/metrics/range-picker"
+import { RangePicker, windowSpanNote } from "@/components/metrics/range-picker"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { MomentInspector } from "@/components/metrics/moment-inspector"
 import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
 import { NotableMoments } from "@/components/metrics/notable-moments"
 import { TopProcesses } from "@/components/metrics/top-processes"
+import { TileTrend } from "@/components/metrics/sparkline"
 import {
   InterfacesPanel,
+  MemoryPanel,
   MountsPanel,
   PerCorePanel,
   SensorsPanel,
-  sensorTone,
 } from "@/components/metrics/hardware-panels"
 import type { Series } from "@/components/metrics/metric-chart"
+import {
+  CoreBars,
+  HUE,
+  LiveBytes,
+  LiveFigure,
+  SeriesKey,
+  StreamState,
+} from "@/components/overview/readings"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
@@ -61,11 +72,24 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 
+/*
+ * A series' hue is the measurement's, never its position on a chart (§10).
+ * The five readings at the top take the Overview's five (`HUE`), and every
+ * line of the same measurement below takes the same one: the processor is the
+ * pale line, memory the blue, load the pink, the network green and the disks
+ * violet, in the tiles, in the charts and in the Pressure chart that draws
+ * three of them at once. A second line on a chart takes the colour that
+ * stands furthest from its first — out is blue against in's green, write is
+ * pink against read's violet.
+ */
+const OUT = "var(--chart-2)"
+const WRITE = "var(--chart-3)"
+
 // Peaks share their series' colour: they are the same measurement seen at a
 // finer resolution, not a different quantity, and giving them a colour of
 // their own would read as four unrelated lines instead of two pairs.
 const cpuSeries: Series[] = [
-  { key: "cpu", label: "CPU", color: "var(--chart-1)", kind: "area", peakKey: "cpuPeak" },
+  { key: "cpu", label: "CPU", color: HUE.cpu, kind: "area", peakKey: "cpuPeak" },
 ]
 
 /**
@@ -78,70 +102,52 @@ const cpuSeries: Series[] = [
  * are shares of one whole rather than four independent measurements.
  */
 const cpuModeSeries: Series[] = [
-  { key: "cpuUser", label: "User", color: "var(--chart-1)", stack: "cpu" },
+  { key: "cpuUser", label: "User", color: HUE.cpu, stack: "cpu" },
   { key: "cpuSystem", label: "System", color: "var(--chart-2)", stack: "cpu" },
-  { key: "cpuIowait", label: "I/O wait", color: "var(--chart-4)", stack: "cpu" },
+  { key: "cpuIowait", label: "I/O wait", color: HUE.disk, stack: "cpu" },
   { key: "cpuSteal", label: "Steal", color: "var(--destructive)", stack: "cpu" },
 ]
 
 const memSeries: Series[] = [
-  { key: "mem", label: "Memory", color: "var(--chart-2)", peakKey: "memPeak" },
-  { key: "swap", label: "Swap", color: "var(--chart-4)" },
+  { key: "mem", label: "Memory", color: HUE.mem, peakKey: "memPeak" },
+  { key: "swap", label: "Swap", color: HUE.disk },
 ]
 
 const netSeries: Series[] = [
-  { key: "rx", label: "In", color: "var(--chart-2)", kind: "area", peakKey: "rxPeak" },
-  { key: "tx", label: "Out", color: "var(--chart-5)", kind: "area", peakKey: "txPeak" },
+  { key: "rx", label: "In", color: HUE.net, kind: "area", peakKey: "rxPeak" },
+  { key: "tx", label: "Out", color: OUT, kind: "area", peakKey: "txPeak" },
 ]
 
 const ioSeries: Series[] = [
-  {
-    key: "diskRead",
-    label: "Read",
-    color: "var(--chart-2)",
-    kind: "area",
-    peakKey: "diskReadPeak",
-  },
-  {
-    key: "diskWrite",
-    label: "Write",
-    color: "var(--chart-5)",
-    kind: "area",
-    peakKey: "diskWritePeak",
-  },
+  { key: "diskRead", label: "Read", color: HUE.disk, kind: "area", peakKey: "diskReadPeak" },
+  { key: "diskWrite", label: "Write", color: WRITE, kind: "area", peakKey: "diskWritePeak" },
 ]
 
 const iopsSeries: Series[] = [
-  { key: "diskReads", label: "Reads/s", color: "var(--chart-2)", peakKey: "diskReadsPeak" },
-  { key: "diskWrites", label: "Writes/s", color: "var(--chart-5)", peakKey: "diskWritesPeak" },
+  { key: "diskReads", label: "Reads/s", color: HUE.disk, peakKey: "diskReadsPeak" },
+  { key: "diskWrites", label: "Writes/s", color: WRITE, peakKey: "diskWritesPeak" },
 ]
 
 const latencySeries: Series[] = [
-  {
-    key: "diskAwait",
-    label: "Latency",
-    color: "var(--chart-4)",
-    kind: "area",
-    peakKey: "diskAwaitPeak",
-  },
-  { key: "diskBusy", label: "Busy", color: "var(--chart-3)" },
+  { key: "diskAwait", label: "Latency", color: HUE.disk, kind: "area", peakKey: "diskAwaitPeak" },
+  { key: "diskBusy", label: "Busy", color: WRITE },
 ]
 
 const pressureSeries: Series[] = [
-  { key: "psiCpu", label: "CPU", color: "var(--chart-1)", peakKey: "psiCpuPeak" },
-  { key: "psiMem", label: "Memory", color: "var(--chart-2)", peakKey: "psiMemPeak" },
-  { key: "psiIo", label: "I/O", color: "var(--chart-4)", peakKey: "psiIoPeak" },
+  { key: "psiCpu", label: "CPU", color: HUE.cpu, peakKey: "psiCpuPeak" },
+  { key: "psiMem", label: "Memory", color: HUE.mem, peakKey: "psiMemPeak" },
+  { key: "psiIo", label: "I/O", color: HUE.disk, peakKey: "psiIoPeak" },
 ]
 
 const loadSeries: Series[] = [
-  { key: "load1", label: "1 min", color: "var(--chart-1)", peakKey: "load1Peak" },
-  { key: "load5", label: "5 min", color: "var(--chart-2)" },
-  { key: "load15", label: "15 min", color: "var(--chart-3)" },
+  { key: "load1", label: "1 min", color: HUE.load, peakKey: "load1Peak" },
+  { key: "load5", label: "5 min", color: HUE.disk },
+  { key: "load15", label: "15 min", color: OUT },
 ]
 
 const socketSeries: Series[] = [
-  { key: "tcp", label: "TCP in use", color: "var(--chart-1)", kind: "area", peakKey: "tcpPeak" },
-  { key: "tcpTimeWait", label: "TIME_WAIT", color: "var(--chart-4)" },
+  { key: "tcp", label: "TCP in use", color: HUE.net, kind: "area", peakKey: "tcpPeak" },
+  { key: "tcpTimeWait", label: "TIME_WAIT", color: OUT },
 ]
 
 /*
@@ -191,7 +197,7 @@ export default function MetricsPage() {
   // dashboard shell and is only ever a view of "since this tab opened"; the
   // recorded series comes from the backend, which has been sampling on its own
   // timer whether or not anyone was watching.
-  const { host, snapshot, history, error } = useMetrics()
+  const { host, snapshot, history, error, connection } = useMetrics()
   const controls = useMetricsWindow()
   const win = controls.window
   const recorded = useMetricsHistory(win)
@@ -255,6 +261,7 @@ export default function MetricsPage() {
 
   const stats = useMemo(() => summarise(rows), [rows])
   const priorStats = useMemo(() => (prior ? summarise(priorRows) : null), [prior, priorRows])
+  const trends = useMemo(() => trendsOf(rows), [rows])
 
   if (!snapshot || !host || (error && !snapshot)) {
     return (
@@ -266,7 +273,7 @@ export default function MetricsPage() {
           <>
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5 [&>*]:min-w-0">
               {Array.from({ length: 5 }).map((_, i) => (
-                <Skeleton key={i} className="h-24 rounded-xl" />
+                <Skeleton key={i} className="h-30 rounded-xl" />
               ))}
             </div>
             <Skeleton className="h-64 rounded-xl" />
@@ -283,6 +290,7 @@ export default function MetricsPage() {
   const zoom = controls.zoomTo
   const loadThreshold = coreThreshold(cores)
   const sensors = snapshot.sensors ?? []
+  const span = spanPhrase(win, live)
 
   const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
@@ -302,12 +310,14 @@ export default function MetricsPage() {
       }}
     >
       <Page className="animate-rise">
-        <PageContext title="Metrics" actions={<WorkspaceHelp />} />
-        <MomentInspector samples={rows} />
+        <PageContext title="Metrics" />
 
         {/* What this machine is made of. The Overview's line says what it
           runs; this one says what it runs on, drawn as the processor itself,
-          because every figure below is a share of something named here. */}
+          because every figure below is a share of something named here. The
+          window's controls sit at its end because they change every chart
+          under it; the shortcuts are the key beside them, where they had been
+          a line of their own above the page. */}
         <HostIdentity
           mark={cpuProduct(host.cpuModel, host.kernelArch)}
           title={host.cpuModel || "Unknown processor"}
@@ -351,7 +361,7 @@ export default function MetricsPage() {
                 <HealthVerdict
                   partial={!!health.silences?.length}
                   status={health.status}
-                  className="text-body"
+                  className="mr-2 text-body"
                 />
               )}
               {live && (
@@ -370,17 +380,40 @@ export default function MetricsPage() {
                 Export CSV
               </Button>
               <RangePicker controls={controls} />
+              <WorkspaceHelp compact />
             </div>
           }
         />
 
-        <Readings
-          snapshot={snapshot}
-          cores={cores}
-          stats={stats}
-          prior={priorStats}
-          priorLabel={prior ? rangeSpec(win.key).label : null}
-        />
+        <MomentInspector samples={rows} />
+
+        {/* The readings that move, drawn as the Overview draws them: each
+          figure glides to every frame of the socket, keyed by the colour of
+          its line, with the window on screen as its trend — so picking 24h
+          redraws five shapes here before the charts below have been read.
+          The five tiles that stood under these said what a section below
+          says better, and went to it: storage to Filesystems, pressure to its
+          chart, sockets and open files to Sockets, processes to Load, the
+          hottest sensor to Temperatures. */}
+        <Section
+          title="Resources"
+          actions={
+            <div className="flex items-center gap-4">
+              <span className="numeric text-hint text-muted-foreground">{span.head}</span>
+              <StreamState connection={connection} />
+            </div>
+          }
+        >
+          <Readings
+            snapshot={snapshot}
+            cores={cores}
+            stats={stats}
+            prior={priorStats}
+            priorLabel={prior ? rangeSpec(win.key).label : null}
+            trends={trends}
+            over={span.over}
+          />
+        </Section>
 
         {/* The verdict is already in the facts row, and on the page made
           entirely of the numbers it was computed from, "Warning" with no way
@@ -390,15 +423,23 @@ export default function MetricsPage() {
           <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
         )}
 
-        <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
           <NotableMoments rows={rows} events={events} cores={cores} onZoom={zoom} />
           <TopProcesses />
         </div>
 
-        <Section title="Utilisation">
-          {recorded.error && <ErrorState error={recorded.error} />}
+        {recorded.error && <ErrorState error={recorded.error} />}
 
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
+        {/*
+          One section per resource, each reading what it is now beside what it
+          did over the window: the processor's chart beside its cores, memory's
+          split beside its line, the disks beside their capacity. The page was
+          two long runs of charts — utilisation, then saturation — under which
+          the cores, temperatures, disks and interfaces sat as a third, so the
+          memory chart and how that memory is held were a screen apart.
+        */}
+        <Section title="Processor">
+          <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
             <ProcessorPanel
               rows={rows}
               events={events}
@@ -407,7 +448,21 @@ export default function MetricsPage() {
               note={note}
               now={snapshot}
             />
+            <div className="flex min-w-0 flex-col gap-8">
+              <PerCorePanel cores={snapshot.cpu.perCore} color={HUE.cpu} />
+              <SensorsPanel sensors={sensors} />
+            </div>
+          </div>
+        </Section>
 
+        <Section title="Memory">
+          <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+            <MemoryPanel
+              memory={snapshot.memory}
+              swap={snapshot.swap}
+              color={HUE.mem}
+              swapColor={HUE.disk}
+            />
             <ChartPanel
               plain
               title="Memory and swap"
@@ -422,26 +477,47 @@ export default function MetricsPage() {
               height={190}
             />
           </div>
+        </Section>
 
-          <ChartPanel
-            plain
-            title="Network throughput"
-            rows={rows}
-            series={netSeries}
-            format={fmtRate}
-            axisFormat={axisBytes}
-            events={events}
-            onZoom={zoom}
-            showPeaks={showPeaks}
-            note={note}
-            height={180}
-          />
+        <Section title="Network">
+          <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+            <ChartPanel
+              plain
+              title="Throughput"
+              rows={rows}
+              series={netSeries}
+              format={fmtRate}
+              axisFormat={axisBytes}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              note={note}
+              height={180}
+            />
+            <ChartPanel
+              plain
+              title="Sockets"
+              actions={<SocketReading snapshot={snapshot} />}
+              rows={rows}
+              series={socketSeries}
+              format={fmtCount}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={180}
+              note={note}
+            />
+          </div>
+          <InterfacesPanel snapshot={snapshot} colors={{ in: HUE.net, out: OUT }} />
+        </Section>
 
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            {/* Two charts rather than one with two axes. A capacity percentage
-              and a byte rate share no scale, and overlaying them on twin axes
-              invites the reader to infer a relationship between two lines that
-              have nothing to do with each other. */}
+        <Section title="Storage">
+          <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+            <MountsPanel snapshot={snapshot} />
+            {/* Its own chart rather than a second axis on throughput. A
+              capacity percentage and a byte rate share no scale, and twin
+              axes invite the reader to relate two lines that have nothing to
+              do with each other. */}
             <ChartPanel
               plain
               title="Capacity"
@@ -470,52 +546,6 @@ export default function MetricsPage() {
               note={note}
               height={165}
             />
-          </div>
-        </Section>
-
-        {/*
-        Saturation is a separate question from utilisation, and the reason most
-        one-server dashboards leave people stuck. "The CPU is 40% busy" and
-        "requests are queueing" are both true at once far more often than they
-        look like they should be, and only the charts below can say so.
-      */}
-        <Section title="Saturation">
-          <div className="grid gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            <ChartPanel
-              plain
-              title="Pressure"
-              rows={rows}
-              series={pressureSeries}
-              unit="%"
-              domain={FROM_ZERO}
-              events={events}
-              onZoom={zoom}
-              showPeaks={showPeaks}
-              height={165}
-              thresholds={PRESSURE_THRESHOLD}
-              note={
-                snapshot.pressure?.supported === false
-                  ? "This kernel does not expose /proc/pressure. Pressure needs Linux 4.20 or newer with PSI enabled."
-                  : note
-              }
-            />
-            <ChartPanel
-              plain
-              title="Load average"
-              rows={rows}
-              series={loadSeries}
-              format={fmtLoad}
-              events={events}
-              onZoom={zoom}
-              showPeaks={showPeaks}
-              height={165}
-              thresholds={loadThreshold}
-              note={
-                live
-                  ? "Load averages are read from the recorded series — pick a range above."
-                  : note
-              }
-            />
             <ChartPanel
               plain
               title="Disk operations"
@@ -540,18 +570,6 @@ export default function MetricsPage() {
               height={165}
               note={note}
             />
-            <ChartPanel
-              plain
-              title="Sockets"
-              rows={rows}
-              series={socketSeries}
-              format={fmtCount}
-              events={events}
-              onZoom={zoom}
-              showPeaks={showPeaks}
-              height={165}
-              note={note}
-            />
             <InodePanel
               rows={storage.rows as { ts: number }[]}
               series={inodeSeries}
@@ -564,12 +582,53 @@ export default function MetricsPage() {
           </div>
         </Section>
 
-        <Section title="Hardware">
-          <PerCorePanel cores={snapshot.cpu.perCore} />
-          <SensorsPanel sensors={sensors} />
-          <div className="grid items-start gap-6 lg:grid-cols-2 [&>*]:min-w-0">
-            <MountsPanel snapshot={snapshot} />
-            <InterfacesPanel snapshot={snapshot} />
+        {/*
+          Saturation is a separate question from utilisation, and the reason most
+          one-server dashboards leave people stuck. "The CPU is 40% busy" and
+          "requests are queueing" are both true at once far more often than they
+          look like they should be, and only these two charts can say so. Each
+          head reads what it is now: the three stalls, and the processes the
+          load average counts.
+        */}
+        <Section title="Saturation">
+          <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+            <ChartPanel
+              plain
+              title="Pressure"
+              actions={<PressureReading snapshot={snapshot} />}
+              rows={rows}
+              series={pressureSeries}
+              unit="%"
+              domain={FROM_ZERO}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              thresholds={PRESSURE_THRESHOLD}
+              note={
+                snapshot.pressure?.supported === false
+                  ? "This kernel does not expose /proc/pressure. Pressure needs Linux 4.20 or newer with PSI enabled."
+                  : note
+              }
+            />
+            <ChartPanel
+              plain
+              title="Load average"
+              actions={<ProcessReading snapshot={snapshot} />}
+              rows={rows}
+              series={loadSeries}
+              format={fmtLoad}
+              events={events}
+              onZoom={zoom}
+              showPeaks={showPeaks}
+              height={165}
+              thresholds={loadThreshold}
+              note={
+                live
+                  ? "Load averages are read from the recorded series — pick a range above."
+                  : note
+              }
+            />
           </div>
         </Section>
       </Page>
@@ -584,7 +643,6 @@ type Summary = {
   load: WindowStat | null
   net: WindowStat | null
   disk: WindowStat | null
-  tcp: WindowStat | null
 }
 
 function summarise(rows: ChartRow[]): Summary {
@@ -594,8 +652,48 @@ function summarise(rows: ChartRow[]): Summary {
     load: windowStat(rows, "load1"),
     net: windowStatSum(rows, ["rx", "tx"]),
     disk: windowStatSum(rows, ["diskRead", "diskWrite"]),
-    tcp: windowStat(rows, "tcp", "tcpPeak"),
   }
+}
+
+type Trends = Record<keyof Summary, number[]>
+
+/**
+ * Each tile's line, read from the rows the charts draw, so a tile's trend and
+ * the chart of the same measurement are one window at one resolution. A gap
+ * in the record is left out rather than drawn as a drop to zero.
+ */
+function trendsOf(rows: ChartRow[]): Trends {
+  const out: Trends = { cpu: [], mem: [], load: [], net: [], disk: [] }
+  for (const row of rows) {
+    if (row.cpu !== null) out.cpu.push(row.cpu)
+    if (row.mem !== null) out.mem.push(row.mem)
+    if (row.load1 !== null) out.load.push(row.load1)
+    if (row.rx !== null || row.tx !== null) out.net.push((row.rx ?? 0) + (row.tx ?? 0))
+    if (row.diskRead !== null || row.diskWrite !== null) {
+      out.disk.push((row.diskRead ?? 0) + (row.diskWrite ?? 0))
+    }
+  }
+  return out
+}
+
+/**
+ * The window on screen as the tiles' trends cover it: "Last hour" in the
+ * head, "the last hour" in each trend's name. A dragged span is its two ends,
+ * since the range picker beside the identity line already says how wide it is.
+ */
+function spanPhrase(win: MetricsWindow, live: boolean): { head: string; over: string } {
+  const zoomed = windowSpanNote(win)
+  if (!live && zoomed) return { head: zoomed, over: "the window on screen" }
+  const head = live
+    ? "Last 5 minutes"
+    : {
+        live: "Last 5 minutes",
+        "1h": "Last hour",
+        "6h": "Last 6 hours",
+        "24h": "Last 24 hours",
+        "7d": "Last 7 days",
+      }[win.key]
+  return { head, over: `the ${head.toLowerCase()}` }
 }
 
 /**
@@ -620,33 +718,40 @@ function priorWindow(win: MetricsWindow, live: boolean, anchor: string | undefin
 }
 
 /**
- * The delta beside a headline figure: this window's mean against the prior
- * window's, as "+12%". Uncoloured on purpose — more network is not bad and
- * less CPU is not good, and a hue would claim to know which.
+ * A tile's unit word with, on a recorded range, how its mean compares with
+ * the window before — "free · +12%". The change is uncoloured on purpose:
+ * more network is not bad and less CPU is not good, and a hue would claim to
+ * know which.
  */
-function Delta({
+function Trailing({
+  unit,
   now,
   before,
   label,
 }: {
+  unit?: React.ReactNode
   now: WindowStat | null | undefined
   before: WindowStat | null | undefined
   label: string | null
 }) {
-  if (!now || !before || !label) return null
-  const delta = formatDelta(relativeChange(now.mean, before.mean))
-  if (!delta) return null
+  const delta = now && before && label ? formatDelta(relativeChange(now.mean, before.mean)) : null
+  if (!delta) return unit ?? null
   return (
-    <span className="numeric" title={`this ${label} against the ${label} before it, by mean`}>
-      {delta}
+    <span className="numeric">
+      {unit}
+      {unit && " · "}
+      <span title={`this ${label} against the ${label} before it, by mean`}>{delta}</span>
     </span>
   )
 }
 
 /**
- * The headline readings: ten figures from the newest frame, each with the
- * detail the figure hides and, on a recorded range, how it compares with the
- * previous window. A run of tiles rather than a run of cards, per §15.
+ * The readings that move: five figures from the newest frame, each gliding to
+ * the next, keyed by and drawn over its line across the window on screen —
+ * the Overview's four and its Disk I/O, in the same colours. A reading the
+ * window has no line for yet — load on the live feed, anything while the
+ * record is off or the feed has one frame — keeps a meter where its trend
+ * would be, against its ceiling where it has one.
  */
 function Readings({
   snapshot,
@@ -654,12 +759,17 @@ function Readings({
   stats,
   prior,
   priorLabel,
+  trends,
+  over,
 }: {
   snapshot: Snapshot
   cores: number
   stats: Summary
   prior: Summary | null
   priorLabel: string | null
+  trends: Trends
+  /** The window as the trends' names say it: "the last hour". */
+  over: string
 }) {
   const modes = snapshot.cpu.modes
   const rx = snapshot.net.reduce((sum, n) => sum + n.recvRate, 0)
@@ -679,189 +789,235 @@ function Readings({
   )
   const availPercent =
     snapshot.memory.total > 0 ? (snapshot.memory.available / snapshot.memory.total) * 100 : 0
-  const fullest = snapshot.mounts.reduce<MountStats | undefined>(
-    (worst, m) => (!worst || m.usedPercent > worst.usedPercent ? m : worst),
-    undefined,
-  )
-  const psi = snapshot.pressure
-  const worstPressure = psi?.supported
-    ? [
-        { name: "CPU", value: psi.cpuSome },
-        { name: "memory", value: psi.memSome },
-        { name: "I/O", value: psi.ioSome },
-      ].reduce((worst, p) => (p.value > worst.value ? p : worst))
-    : null
-  const sockets = snapshot.sockets
-  const procs = snapshot.procs
-  const files = snapshot.files
-  const hottest = snapshot.sensors?.[0]
-  const filePercent = files && files.max > 0 ? (files.open / files.max) * 100 : null
+  const memTone: Tone = availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"
+
+  const trend = (values: number[], label: string, color: string, max?: number) =>
+    values.length < 2 ? undefined : (
+      <TileTrend values={values} max={max} color={color} label={`${label} over ${over}`} />
+    )
+  const cpuTrend = trend(trends.cpu, "CPU", HUE.cpu, 100)
+  const memTrend = trend(trends.mem, "Memory", HUE.mem, 100)
+  const loadTrend = trend(trends.load, "Load", HUE.load, cores)
+  const diskTrend = trend(trends.disk, "Disk I/O", HUE.disk)
 
   return (
     <StatGrid columns={5}>
       <StatTile
-        label="CPU"
-        value={percent(snapshot.cpu.totalPercent)}
-        meter={snapshot.cpu.totalPercent}
+        label={
+          <>
+            <SeriesKey color={HUE.cpu} />
+            CPU
+          </>
+        }
+        meterLabel="CPU"
+        value={<LiveFigure value={snapshot.cpu.totalPercent} decimals={1} unit="%" />}
         tone={utilisationTone(snapshot.cpu.totalPercent)}
+        trend={cpuTrend}
+        meter={cpuTrend ? undefined : snapshot.cpu.totalPercent}
         hint={
           modes
             ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
             : `${cores} cores`
         }
         trailing={
-          modes && modes.steal >= 1 ? (
-            <span className="numeric font-medium text-destructive">
-              {percent(modes.steal, 0)} steal
-            </span>
-          ) : (
-            (prior && <Delta now={stats.cpu} before={prior.cpu} label={priorLabel} />) ||
-            `${cores} cores`
-          )
+          <span className="inline-flex items-center gap-2">
+            <CoreBars cores={snapshot.cpu.perCore} color={HUE.cpu} />
+            {modes && modes.steal >= 1 ? (
+              <span className="numeric font-medium text-destructive">
+                {percent(modes.steal, 0)} steal
+              </span>
+            ) : (
+              prior && <Trailing now={stats.cpu} before={prior.cpu} label={priorLabel} />
+            )}
+          </span>
         }
       />
       <StatTile
-        label="Memory"
-        value={bytes(snapshot.memory.available)}
-        meter={100 - availPercent}
-        tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
-        hint={`available · ${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
-        trailing={
-          (prior && <Delta now={stats.mem} before={prior.mem} label={priorLabel} />) || "available"
+        label={
+          <>
+            <SeriesKey color={HUE.mem} />
+            Memory
+          </>
         }
+        meterLabel="Memory"
+        value={<LiveBytes value={snapshot.memory.available} />}
+        tone={memTone}
+        trend={memTrend}
+        meter={memTrend ? undefined : 100 - availPercent}
+        hint={`${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
+        trailing={<Trailing unit="free" now={stats.mem} before={prior?.mem} label={priorLabel} />}
       />
       <StatTile
-        label="Load"
-        value={snapshot.cpu.loadAvg1.toFixed(2)}
-        meter={(snapshot.cpu.loadAvg1 / cores) * 100}
+        label={
+          <>
+            <SeriesKey color={HUE.load} />
+            Load
+          </>
+        }
+        meterLabel="Load"
+        value={<LiveFigure value={snapshot.cpu.loadAvg1} decimals={2} />}
         tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
+        trend={loadTrend}
+        meter={loadTrend ? undefined : (snapshot.cpu.loadAvg1 / cores) * 100}
         hint={`${snapshot.cpu.loadAvg5.toFixed(2)} · ${snapshot.cpu.loadAvg15.toFixed(2)} over 5 and 15 min`}
         trailing={
-          (prior && <Delta now={stats.load} before={prior.load} label={priorLabel} />) ||
-          `${(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core`
-        }
-      />
-      {/* Pressure is the figure utilisation cannot give: a host at 40% CPU
-          with 30% pressure is one where tasks spend a third of their time
-          waiting for a core. The worst of the three is the headline. */}
-      <StatTile
-        label="Pressure"
-        value={worstPressure ? percent(worstPressure.value, 1) : "—"}
-        meter={worstPressure ? Math.min(worstPressure.value, 100) : undefined}
-        tone={
-          !worstPressure
-            ? "default"
-            : worstPressure.value >= 30
-              ? "danger"
-              : worstPressure.value >= 10
-                ? "warning"
-                : "default"
-        }
-        hint={
-          psi?.supported
-            ? `cpu ${percent(psi.cpuSome, 1)} · mem ${percent(psi.memSome, 1)} · io ${percent(psi.ioSome, 1)}`
-            : "Kernel does not expose /proc/pressure"
-        }
-        trailing={worstPressure ? `${worstPressure.name} stalled` : "no PSI"}
-      />
-      <StatTile
-        label="Network"
-        value={rate(rx)}
-        hint={`in · ${rate(tx)} out · ${up} of ${snapshot.net.length} interface${snapshot.net.length === 1 ? "" : "s"} up`}
-        trailing={
-          (prior && <Delta now={stats.net} before={prior.net} label={priorLabel} />) || "in"
+          <Trailing
+            unit={`${(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core`}
+            now={stats.load}
+            before={prior?.load}
+            label={priorLabel}
+          />
         }
       />
       <StatTile
-        label="Disk I/O"
-        value={rate(disk.rate)}
-        meter={disk.busy}
+        label={
+          <>
+            <SeriesKey color={HUE.net} />
+            Network
+          </>
+        }
+        value={<LiveBytes value={rx} suffix="/s" />}
+        trend={trend(trends.net, "Network", HUE.net)}
+        hint={`${rate(tx)} out · ${up} of ${snapshot.net.length} interface${snapshot.net.length === 1 ? "" : "s"} up`}
+        trailing={<Trailing unit="in" now={stats.net} before={prior?.net} label={priorLabel} />}
+      />
+      <StatTile
+        label={
+          <>
+            <SeriesKey color={HUE.disk} />
+            Disk I/O
+          </>
+        }
+        value={<LiveBytes value={disk.rate} suffix="/s" />}
         tone={utilisationTone(disk.busy)}
+        trend={diskTrend}
+        meter={diskTrend ? undefined : disk.busy}
         hint={`${Math.round(disk.reads)}/s reads · ${Math.round(disk.writes)}/s writes · ${disk.await.toFixed(1)} ms`}
         trailing={
-          (prior && <Delta now={stats.disk} before={prior.disk} label={priorLabel} />) ||
-          `${disk.busy.toFixed(0)}% busy`
+          <Trailing
+            unit={`${disk.busy.toFixed(0)}% busy`}
+            now={stats.disk}
+            before={prior?.disk}
+            label={priorLabel}
+          />
         }
       />
-      {/* The fullest real filesystem, because that is the one that stops the
-          machine. */}
-      <StatTile
-        label="Storage"
-        value={fullest ? bytes(fullest.free) : "—"}
-        meter={fullest?.usedPercent}
-        tone={fullest ? utilisationTone(fullest.usedPercent) : "default"}
-        hint={
-          fullest
-            ? `${percent(fullest.usedPercent, 0)} used of ${bytes(fullest.total)} · ${snapshot.mounts.length} filesystem${snapshot.mounts.length === 1 ? "" : "s"}`
-            : "No filesystems reported"
-        }
-        trailing={fullest && <span className="truncate">free on {fullest.mountpoint}</span>}
-      />
-      <StatTile
-        label="Sockets"
-        value={(sockets?.tcpInUse ?? 0).toLocaleString()}
-        tone={(sockets?.tcpTimeWait ?? 0) >= 12_000 ? "warning" : "default"}
-        hint={`${(sockets?.tcpTimeWait ?? 0).toLocaleString()} TIME_WAIT · ${(sockets?.udpInUse ?? 0).toLocaleString()} UDP · ${(sockets?.tcpOrphan ?? 0).toLocaleString()} orphaned`}
-        trailing={
-          (prior && <Delta now={stats.tcp} before={prior.tcp} label={priorLabel} />) || "TCP"
-        }
-      />
-      {/* Blocked is the half of the story that turns high iowait from a
-          curiosity into a cause: processes queued behind a device. */}
-      <StatTile
-        label="Processes"
-        value={(procs?.total ?? 0).toLocaleString()}
-        tone={(procs?.blocked ?? 0) > 0 ? "warning" : "default"}
-        hint={`${procs?.running ?? 0} running · ${procs?.blocked ?? 0} blocked on I/O`}
-        trailing="total"
-      />
-      {/* The tenth tile is whichever of the two live-only hardware readings
-          this host can give: a temperature where the board reports one, and
-          the file handle count everywhere else. Neither exists on a chart. */}
-      {hottest ? (
-        <StatTile
-          label="Temperature"
-          value={`${hottest.tempC.toFixed(0)}°C`}
-          meter={
-            hottest.critical > 0
-              ? (hottest.tempC / hottest.critical) * 100
-              : hottest.high > 0
-                ? (hottest.tempC / hottest.high) * 100
-                : undefined
-          }
-          tone={sensorTone(hottest)}
-          hint={
-            hottest.critical > 0
-              ? `critical at ${hottest.critical.toFixed(0)}°C · ${snapshot.sensors?.length} sensor${snapshot.sensors?.length === 1 ? "" : "s"}`
-              : `${snapshot.sensors?.length} sensor${snapshot.sensors?.length === 1 ? "" : "s"} · no limit reported`
-          }
-          trailing={<span className="truncate">{hottest.name}</span>}
-        />
-      ) : (
-        <StatTile
-          label="Open files"
-          value={files ? files.open.toLocaleString() : "—"}
-          meter={filePercent ?? undefined}
-          tone={
-            filePercent === null
-              ? "default"
-              : filePercent >= 90
-                ? "danger"
-                : filePercent >= 80
-                  ? "warning"
-                  : "default"
-          }
-          hint={
-            !files
-              ? "Not reported by this backend"
-              : files.max > 0
-                ? `${percent(filePercent ?? 0, 0)} of ${files.max.toLocaleString()} the kernel will allocate`
-                : "Kernel reports no ceiling"
-          }
-          trailing="handles"
-        />
-      )}
     </StatGrid>
+  )
+}
+
+/**
+ * What a chart's measurement is now, in its head: each figure keyed by its
+ * line's colour, the way a project's Runtime heads its charts, so the head
+ * and the legend's Now column are read as one.
+ */
+function HeadReading({
+  items,
+}: {
+  items: { label: string; value: string; color?: string; tone?: Tone }[]
+}) {
+  return (
+    <span className="numeric flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1 text-hint text-muted-foreground">
+      {items.map((item) => (
+        <span key={item.label} className="whitespace-nowrap">
+          {item.color && <SeriesKey color={item.color} />}
+          <span
+            className={cn(
+              "font-medium text-foreground",
+              item.tone === "warning" && "text-warning",
+              item.tone === "danger" && "text-destructive",
+            )}
+          >
+            {item.value}
+          </span>{" "}
+          {item.label}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+/** The three stalls now. The worst of them is the one past the chart's warning line. */
+function PressureReading({ snapshot }: { snapshot: Snapshot }) {
+  const psi = snapshot.pressure
+  if (!psi?.supported) return null
+  const tone = (value: number): Tone =>
+    value >= 30 ? "danger" : value >= 10 ? "warning" : "default"
+  return (
+    <HeadReading
+      items={[
+        { label: "CPU", value: percent(psi.cpuSome, 1), color: HUE.cpu, tone: tone(psi.cpuSome) },
+        {
+          label: "memory",
+          value: percent(psi.memSome, 1),
+          color: HUE.mem,
+          tone: tone(psi.memSome),
+        },
+        { label: "I/O", value: percent(psi.ioSome, 1), color: HUE.disk, tone: tone(psi.ioSome) },
+      ]}
+    />
+  )
+}
+
+/**
+ * The processes the load average counts: the ones running and the ones
+ * blocked on I/O, which is the half that turns high iowait from a curiosity
+ * into a cause.
+ */
+function ProcessReading({ snapshot }: { snapshot: Snapshot }) {
+  const procs = snapshot.procs
+  if (!procs) return null
+  return (
+    <HeadReading
+      items={[
+        { label: "processes", value: procs.total.toLocaleString() },
+        { label: "running", value: procs.running.toLocaleString() },
+        {
+          label: "blocked",
+          value: procs.blocked.toLocaleString(),
+          tone: procs.blocked > 0 ? "warning" : "default",
+        },
+      ]}
+    />
+  )
+}
+
+/**
+ * Sockets and the handles they are made of, now: TCP in use, TIME_WAIT past
+ * the point where ephemeral ports start to run short, and the kernel's open
+ * file handles against its ceiling where it has one.
+ */
+function SocketReading({ snapshot }: { snapshot: Snapshot }) {
+  const sockets = snapshot.sockets
+  const files = snapshot.files
+  const filePercent = files && files.max > 0 ? (files.open / files.max) * 100 : null
+  return (
+    <HeadReading
+      items={[
+        { label: "TCP", value: (sockets?.tcpInUse ?? 0).toLocaleString(), color: HUE.net },
+        {
+          label: "TIME_WAIT",
+          value: (sockets?.tcpTimeWait ?? 0).toLocaleString(),
+          color: OUT,
+          tone: (sockets?.tcpTimeWait ?? 0) >= 12_000 ? "warning" : "default",
+        },
+        ...(files
+          ? [
+              {
+                label: "open files",
+                value: files.open.toLocaleString(),
+                tone: (filePercent === null
+                  ? "default"
+                  : filePercent >= 90
+                    ? "danger"
+                    : filePercent >= 80
+                      ? "warning"
+                      : "default") as Tone,
+              },
+            ]
+          : []),
+      ]}
+    />
   )
 }
 
@@ -895,7 +1051,7 @@ function ProcessorPanel({
   return (
     <ChartPanel
       plain
-      title="Processor"
+      title="Utilisation"
       rows={rows}
       series={breakdown ? cpuModeSeries : cpuSeries}
       unit="%"
@@ -907,8 +1063,17 @@ function ProcessorPanel({
       note={note}
       height={190}
       actions={
-        <div className="flex items-center gap-2">
-          <span className="numeric text-sm font-medium">{percent(now.cpu.totalPercent)}</span>
+        <div className="flex items-center gap-3">
+          <HeadReading
+            items={[
+              {
+                label: "busy",
+                value: percent(now.cpu.totalPercent),
+                color: HUE.cpu,
+                tone: utilisationTone(now.cpu.totalPercent),
+              },
+            ]}
+          />
           <ToggleGroup
             type="single"
             value={view}

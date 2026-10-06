@@ -35,11 +35,9 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
-import type { ConnectionState } from "@/lib/metrics-store"
 import { Page, PageContext, PageState, Section } from "@/components/page"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
-import { Status } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 import { EmptyState } from "@/components/state"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -53,7 +51,14 @@ import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { serverAttention, verdictWith } from "@/components/overview/attention"
 import { ActivityPanel } from "@/components/overview/activity"
-import { CoreBars, LiveBytes, LiveFigure, SeriesKey } from "@/components/overview/readings"
+import {
+  CoreBars,
+  HUE,
+  LiveBytes,
+  LiveFigure,
+  SeriesKey,
+  StreamState,
+} from "@/components/overview/readings"
 import { StorageBand } from "@/components/overview/storage"
 import {
   ProductGlyphs,
@@ -80,13 +85,7 @@ const DAY: MetricsWindow = { key: "24h" }
 const SHOWN_PROJECTS = 6
 
 /** Each reading's line, and the key before its name that says which line is whose. */
-const SERIES = {
-  cpu: "var(--chart-1)",
-  mem: "var(--chart-2)",
-  load: "var(--chart-3)",
-  net: "var(--chart-5)",
-  disk: "var(--chart-4)",
-}
+const SERIES = HUE
 
 export default function OverviewPage() {
   const { host, snapshot, error, connection } = useMetrics()
@@ -512,17 +511,6 @@ function SectionLink({ href, children }: { href: string; children: React.ReactNo
       {children} <ArrowRight className="size-3" />
     </Link>
   )
-}
-
-/**
- * Whether the readings are arriving. They are the one block on the page fed by
- * an open socket, so they are the one block that may say Live; while the
- * socket is down the figures are the last frame, and the head says so.
- */
-function StreamState({ connection }: { connection: ConnectionState }) {
-  if (connection === "open") return <Status live tone="running" label="Live" />
-  if (connection === "connecting") return <Status tone="notice" label="Connecting…" />
-  return <Status tone="warning" label="Reconnecting…" />
 }
 
 /** The fleet's own grid, one column short of it at the widest: two rows of three. */

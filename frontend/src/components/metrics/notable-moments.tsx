@@ -8,6 +8,7 @@ import { windowStat, type WindowStat } from "@/lib/metrics-summary"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { eventColor, type ChartRowLike } from "@/components/metrics/metric-chart"
+import { HUE } from "@/components/overview/readings"
 
 /**
  * What stood out in the window, as a list you can zoom from.
@@ -70,9 +71,10 @@ export function NotableMoments({
       <PanelHeader
         title="Notable moments"
         actions={
-          moments.length > 0 && (
-            <span className="numeric text-hint text-muted-foreground">{moments.length}</span>
-          )
+          // The processes panel's control height, so the two hairlines meet.
+          <span className="numeric flex h-8 items-center text-hint text-muted-foreground">
+            {moments.length > 0 && moments.length}
+          </span>
         }
       />
       <PanelBody
@@ -89,10 +91,12 @@ export function NotableMoments({
               <Row
                 key={m.id}
                 onClick={() => zoomTo(m.ts)}
+                // The key the legends draw, in the colour of the chart the
+                // row zooms, so a moment and its line are found by one hue.
                 leading={
                   <span
                     aria-hidden
-                    className="size-1.5 rounded-full"
+                    className="h-2.5 w-0.5 rounded-full"
                     style={{ background: m.color }}
                   />
                 }
@@ -138,7 +142,7 @@ function collect(
   add(
     "cpu",
     windowStat(rows, "cpu", "cpuPeak"),
-    "var(--chart-1)",
+    HUE.cpu,
     (s) => s.peak >= 70,
     (s) => `CPU peaked at ${pct0(s.peak)}`,
     (s) => `mean ${pct0(s.mean)} over the window`,
@@ -154,7 +158,7 @@ function collect(
   add(
     "mem",
     windowStat(rows, "mem", "memPeak"),
-    "var(--chart-2)",
+    HUE.mem,
     (s) => s.peak >= 85,
     (s) => `Memory peaked at ${pct0(s.peak)} used`,
     (s) => `mean ${pct0(s.mean)} over the window`,
@@ -162,7 +166,7 @@ function collect(
   add(
     "load",
     windowStat(rows, "load1"),
-    "var(--chart-1)",
+    HUE.load,
     (s) => s.peak >= Math.max(cores, 1),
     (s) => `Load reached ${s.peak.toFixed(2)}`,
     (s) => `above the ${cores} cores this host has · mean ${s.mean.toFixed(2)}`,
@@ -170,7 +174,7 @@ function collect(
   add(
     "rx",
     windowStat(rows, "rx", "rxPeak"),
-    "var(--chart-2)",
+    HUE.net,
     (s) => s.peak >= Math.max(s.mean * 3, MIB),
     (s) => `Inbound traffic peaked at ${rate(s.peak)}`,
     (s) => `mean ${rate(s.mean)} over the window`,
@@ -178,7 +182,7 @@ function collect(
   add(
     "tx",
     windowStat(rows, "tx", "txPeak"),
-    "var(--chart-5)",
+    "var(--chart-2)",
     (s) => s.peak >= Math.max(s.mean * 3, MIB),
     (s) => `Outbound traffic peaked at ${rate(s.peak)}`,
     (s) => `mean ${rate(s.mean)} over the window`,
@@ -186,7 +190,7 @@ function collect(
   add(
     "await",
     windowStat(rows, "diskAwait", "diskAwaitPeak"),
-    "var(--chart-4)",
+    HUE.disk,
     (s) => s.peak >= 20,
     (s) => `Disk latency reached ${s.peak.toFixed(0)} ms`,
     (s) => `mean ${s.mean.toFixed(1)} ms per request · the slowest device`,
@@ -202,7 +206,7 @@ function collect(
   add(
     "psi-cpu",
     windowStat(rows, "psiCpu", "psiCpuPeak"),
-    "var(--chart-1)",
+    HUE.cpu,
     (s) => s.peak >= 10,
     (s) => `CPU pressure reached ${pct0(s.peak)}`,
     (s) => `tasks waited for a core ${pct0(s.peak)} of the time`,
@@ -210,7 +214,7 @@ function collect(
   add(
     "psi-mem",
     windowStat(rows, "psiMem", "psiMemPeak"),
-    "var(--chart-2)",
+    HUE.mem,
     (s) => s.peak >= 10,
     (s) => `Memory pressure reached ${pct0(s.peak)}`,
     (s) => `work stalled on reclaim ${pct0(s.peak)} of the time`,
@@ -218,7 +222,7 @@ function collect(
   add(
     "psi-io",
     windowStat(rows, "psiIo", "psiIoPeak"),
-    "var(--chart-4)",
+    HUE.disk,
     (s) => s.peak >= 10,
     (s) => `I/O pressure reached ${pct0(s.peak)}`,
     (s) => `work stalled on storage ${pct0(s.peak)} of the time`,
@@ -226,7 +230,7 @@ function collect(
   add(
     "tcp",
     windowStat(rows, "tcp", "tcpPeak"),
-    "var(--chart-1)",
+    HUE.net,
     (s) => s.peak >= Math.max(s.mean * 2, 1000),
     (s) => `TCP sockets peaked at ${Math.round(s.peak).toLocaleString()}`,
     (s) => `mean ${Math.round(s.mean).toLocaleString()} in use`,
@@ -234,7 +238,7 @@ function collect(
   add(
     "timewait",
     windowStat(rows, "tcpTimeWait"),
-    "var(--chart-4)",
+    "var(--chart-2)",
     (s) => s.peak >= 12_000,
     (s) => `TIME_WAIT reached ${Math.round(s.peak).toLocaleString()} sockets`,
     () => "each holds an ephemeral port for about a minute",
@@ -242,7 +246,7 @@ function collect(
   add(
     "swap",
     windowStat(rows, "swap"),
-    "var(--chart-4)",
+    HUE.disk,
     (s) => s.peak >= 50,
     (s) => `Swap reached ${pct0(s.peak)}`,
     () => "the working set stopped fitting in RAM",

@@ -101,8 +101,19 @@ export function StorageBand({
  * One disk in the order the question is asked: which one and how much is
  * left, the bar, then what it is and what it is doing. The free space takes
  * the bar's tone, because past the warning line that figure is the finding.
+ *
+ * Metrics draws its filesystems with this row too, with its scan as the
+ * `action` beside the name and the scan's answer as `children` under it.
  */
-function Filesystem({ mount }: { mount: MountStats }) {
+export function Filesystem({
+  mount,
+  action,
+  children,
+}: {
+  mount: MountStats
+  action?: React.ReactNode
+  children?: React.ReactNode
+}) {
   const tone = utilisationTone(mount.usedPercent)
   return (
     <li className="min-w-0 space-y-2">
@@ -110,6 +121,7 @@ function Filesystem({ mount }: { mount: MountStats }) {
         <span className="flex min-w-0 items-baseline gap-2">
           <span className="truncate text-body font-medium">{mount.mountpoint}</span>
           <Tag>{mount.fstype}</Tag>
+          {action}
         </span>
         <span className="numeric shrink-0 text-hint text-muted-foreground">
           <span
@@ -138,6 +150,7 @@ function Filesystem({ mount }: { mount: MountStats }) {
           {rate(mount.readRate)} read · {rate(mount.writeRate)} write
         </span>
       </div>
+      {children}
     </li>
   )
 }

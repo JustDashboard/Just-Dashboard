@@ -653,6 +653,31 @@ export function virtualizationProduct(virtualization: string | undefined) {
 }
 
 /**
+ * Whose a network interface is, by the name its owner gives it: Tailscale
+ * makes `tailscale0`, Docker makes `docker0`, a `br-` bridge per network and a
+ * `veth` pair per container. An `eth0` or an `ens3` is the machine's own and
+ * names no product.
+ */
+export function interfaceProduct(name: string) {
+  if (/^tailscale\d*$/.test(name)) return "tailscale"
+  if (name === "docker0" || /^(br-[0-9a-f]{12}|veth[0-9a-f]+)$/.test(name)) return "docker"
+  return undefined
+}
+
+/**
+ * The silicon a temperature is read from, by the hwmon driver that reports it:
+ * `coretemp` is Intel's package sensor, `k10temp` and `zenpower` AMD's, and
+ * `amdgpu` an AMD graphics card. An NVMe drive or an ACPI thermal zone is no
+ * vendor's mark.
+ */
+export function sensorProduct(name: string) {
+  const driver = name.toLowerCase().split(/[_\s]/)[0]
+  if (driver === "coretemp") return "intel"
+  if (driver === "k10temp" || driver === "zenpower" || driver === "amdgpu") return "amd"
+  return undefined
+}
+
+/**
  * The hosts that are one product's, matched with every name under them:
  * `api.github.com` and `ghcr.io` are GitHub's, a registry at
  * `123.dkr.ecr.eu-west-1.amazonaws.com` is Amazon's, `europe-docker.pkg.dev`

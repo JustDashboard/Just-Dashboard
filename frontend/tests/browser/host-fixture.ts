@@ -178,7 +178,7 @@ export const snapshot = {
   procs: { running: 3, blocked: 0, total: 184 },
   files: { open: 4_640, max: 9_223_372 },
   sensors: [
-    { name: "coretemp_Package id 0", tempC: 62, high: 95, critical: 100 },
+    { name: "k10temp_Tctl", tempC: 62, high: 95, critical: 100 },
     { name: "nvme_Composite", tempC: 41, high: 70, critical: 85 },
   ],
 }
