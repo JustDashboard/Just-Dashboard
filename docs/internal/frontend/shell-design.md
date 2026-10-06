@@ -28,6 +28,11 @@ scrolls the page and is left alone, as are a table with nothing to scroll, sidew
 wheels; reduced motion jumps rather than glides. The database `DataGrid` fills its frame and has no
 page around it to move.
 
+The navigation sidebar is always expanded on desktop: the shell disables desktop collapse in
+`SidebarProvider` and does not read the old `shell.sidebar` preference. Desktop has no toggle
+and Ctrl/Cmd+B does not collapse it. Below `md`, the header opens the mobile sheet and the
+sidebar header closes it; Ctrl/Cmd+B still toggles that sheet.
+
 ### The rail drills in
 
 **The sidebar shows one list at a time: the list for where you are.** Opening Docker replaces the list
@@ -128,9 +133,8 @@ Deployments open the second group because shipping something is the reason most 
 `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
 the rail's foot. Its button is a neutral control with a circular picture, display name and role,
-with no chevron, while the collapsed rail shows only the picture. Above the expanded card the menu is
-exactly the card's width (Radix's trigger width), so it reads as the card opening rather than a panel
-overhanging the rail; beside the collapsed rail it is 240px and bottom-aligned with the picture. It
+with no chevron. Above the card the menu is exactly the card's width (Radix's trigger width),
+so it reads as the card opening rather than a panel overhanging the rail. It
 opens with a small picture, display name, sign-in name and a role `Tag`, then the five pages
 (Security carries a `Status` for two-factor) and a separate neutral Sign out row. It grows out of the
 card on the product's ease, and its rows `rise` in an 18ms stagger starting from the row nearest the
@@ -349,9 +353,9 @@ entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
 The mark *is* the "Just", so the word is not also set in type next to it; it carries that word in
 `aria-label` instead, and the sidebar's home link still announces "Just Dashboard". The glyph is an
 inline `<svg>` on `currentColor` — two straight-edged subpaths, no raster, no second colour — so it
-tints with the palette and stays crisp in the 3rem rail and on a retina sign-in alike. This is the
+tints with the palette and stays crisp in the sidebar and on a retina sign-in alike. This is the
 only rendering of the product's name, so sidebar, sign-in and splash agree and a rename is one file.
-`LogoMark` is the glyph alone, which is what the collapsed rail falls back to.
+`LogoMark` is the glyph alone.
 
 The same two paths are the browser icons: `app/icon.svg` (and `favicon.ico` / `apple-icon.png`
 rasterised from it at 16–180px) put the mark in the tab, on the dashboard's dark ground rather than
@@ -370,7 +374,7 @@ the Heroicons vocabulary in `components/icons.tsx`. Compose these shared primiti
 product-wide control changes belong in the primitives. Select triggers compose `Button`, while
 select, dropdown and context-menu rows share `ui/menu-styles.ts`. `ui/menu-item-text.tsx` keeps
 option names and metadata in one text column. The shared select replaces native selectors for
-search scope and database activity history. Every side-panel toggle — the navigation rail's trigger,
+search scope and database activity history. Every side-panel toggle — the mobile navigation sheet's trigger,
 the terminal's rail and Files/Diff, the Files sidebar and details, the logs sources, the ER diagram's inspector — draws its panel's side and
 state with `SidebarLeftOpen`/`Close` or `SidebarRightOpen`/`Close` (drawn inline in `icons.tsx`,
 since Heroicons has no sidebar): a rounded window with a bar inset on the panel's side, solid while

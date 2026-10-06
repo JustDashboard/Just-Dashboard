@@ -158,8 +158,9 @@ PM2 apps, backups and boards. Narrow with **domain:**, **db:**, **container:** o
 Exact names rank first and small typos are tolerated. Arrows choose a result; Escape clears the
 search, then closes it. Inventories refresh each time you open search, and unavailable sources are
 named with a retry control. Search and recent destinations stay in memory and clear on sign-out.
-The sidebar drills into a section — Docker, Databases, Security, one
-deployment — and every page comes back the way you left it. Processes, Git, Logs, Docker containers,
+The sidebar stays expanded on desktop and opens as a drawer on mobile. It drills into a section —
+Docker, Databases, Security, one deployment — and every page comes back the way you left it.
+Processes, Git, Logs, Docker containers,
 Packages, Backups, deployment setup and Audit/Security lists add page shortcuts, focus restoration
 and browser history where you change the question. Press **?** for the page's commands; **Ctrl/⌘F**
 finds locally and **F5** refreshes its data. Walk lists with arrows or type a name. Keep a Git commit

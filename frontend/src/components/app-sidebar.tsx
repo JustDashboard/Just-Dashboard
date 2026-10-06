@@ -311,7 +311,7 @@ export function AppSidebar() {
             <Logo className="group-data-[collapsible=icon]:hidden" />
             <LogoMark className="hidden group-data-[collapsible=icon]:block" />
           </Link>
-          <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
+          <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
         </div>
 
         {/* The palette is the fastest route to any of fifty pages, and the one

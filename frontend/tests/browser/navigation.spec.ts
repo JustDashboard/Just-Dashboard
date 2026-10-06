@@ -147,7 +147,34 @@ test("uploaded account pictures stay circular in the button and menu", async ({ 
   }
 })
 
-for (const layout of ["expanded", "collapsed", "mobile"] as const) {
+test("desktop navigation stays expanded despite old preferences and sidebar shortcuts", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("jd.view.state", JSON.stringify({ "shell.sidebar": false }))
+    document.cookie = "sidebar_state=false; path=/"
+  })
+  await mockShell(page)
+  await page.goto("/account")
+  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
+  await expect(sidebar).toHaveAttribute("data-state", "expanded")
+  await expect(page.getByRole("button", { name: "Toggle the sidebar", exact: true })).toHaveCount(0)
+  for (const key of ["Control+b", "Meta+b"]) {
+    await page.keyboard.press(key)
+    await expect(sidebar).toHaveAttribute("data-state", "expanded")
+  }
+  await page.reload()
+  await expect(sidebar).toHaveAttribute("data-state", "expanded")
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole("button", { name: "Toggle the sidebar", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Sidebar", exact: true })
+  await expect(drawer).toBeVisible()
+  await drawer.getByRole("button", { name: "Toggle the sidebar", exact: true }).click()
+  await expect(drawer).toHaveCount(0)
+})
+
+for (const layout of ["expanded", "mobile"] as const) {
   test(`the ${layout} account menu fits the viewport with circular avatar fallbacks`, async ({
     page,
   }) => {
@@ -155,7 +182,7 @@ for (const layout of ["expanded", "collapsed", "mobile"] as const) {
     await mockShell(page, { ...user, user: { ...user.user, avatarVersion: 1 } })
     await page.route("**/api/v1/account/avatar?*", (route) => route.fulfill({ status: 404 }))
     await page.goto("/account")
-    if (layout !== "expanded") {
+    if (layout === "mobile") {
       await page.getByRole("button", { name: "Toggle the sidebar", exact: true }).click()
     }
     const trigger = page.getByRole("button", {
@@ -183,13 +210,11 @@ for (const layout of ["expanded", "collapsed", "mobile"] as const) {
     }
     const box = await menu.boundingBox()
     const viewport = page.viewportSize()!
-    if (layout !== "collapsed") {
-      // Above the card the menu is the card's own width, edge to edge.
-      const card = (await trigger.boundingBox())!
-      expect(Math.abs(box!.x - card.x)).toBeLessThan(1)
-      expect(Math.abs(box!.width - card.width)).toBeLessThan(1)
-      await expect(trigger.locator("svg")).toHaveCount(0)
-    }
+    // Above the card the menu is the card's own width, edge to edge.
+    const card = (await trigger.boundingBox())!
+    expect(Math.abs(box!.x - card.x)).toBeLessThan(1)
+    expect(Math.abs(box!.width - card.width)).toBeLessThan(1)
+    await expect(trigger.locator("svg")).toHaveCount(0)
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.y).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
