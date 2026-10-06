@@ -1298,6 +1298,8 @@ export type ProcessRow = {
   vms: number
   swap?: number
   memoryReady?: boolean
+  /** Resident memory backed by files and shared mappings. */
+  shared?: number
   threads: number
   nice: number
   createTime: string
@@ -1314,10 +1316,40 @@ export type ProcessRow = {
   state: "running" | "sleeping" | "blocked" | "stopped" | "zombie" | "other"
   manager: "pm2" | "systemd" | "container" | "session" | "kernel" | "unmanaged"
   managerName?: string
+  /** The supervisor as its owner names it: a container's name beside its id. */
+  managerLabel?: string
   /** Detail only: what it listens on and how many connections it holds. */
   listening?: ListeningPort[]
   connections?: number
   openFilesLimit?: number
+  /** Detail only: its measured windows, oldest first. */
+  history?: ProcessSample[]
+}
+
+/** One measured interval of a process. */
+export type ProcessSample = {
+  at: string
+  cpu: number
+  rss: number
+  read: number
+  write: number
+}
+
+/**
+ * One workload: a supervisor's processes, or the copies of one program
+ * started by hand, with shared pages counted once.
+ */
+export type ProcessGroup = {
+  key: string
+  manager: ProcessRow["manager"]
+  name: string
+  label?: string
+  count: number
+  cpuPercent: number
+  memory: number
+  ioRate: number
+  /** The group's heaviest process. */
+  pid: number
 }
 
 export type ListeningPort = {
@@ -1334,6 +1366,8 @@ export type ProcessLink = {
   username: string
   state: ProcessRow["state"]
   cpuPercent: number
+  /** False until the sampler has measured it; its CPU is then unknown. */
+  cpuReady?: boolean
   rss: number
   createTime: string
 }
@@ -1362,6 +1396,8 @@ export type ProcessList = {
   users: ProcessFacet[]
   states: ProcessFacet[]
   managers: ProcessFacet[]
+  /** The heaviest workloads by CPU and by memory, over the whole host. */
+  groups?: ProcessGroup[]
 }
 
 export type SystemdUnitDetail = {

@@ -134,7 +134,49 @@ const inventory = {
     { value: "container", label: "Container", count: 9 },
     { value: "pm2", label: "PM2", count: 4 },
   ],
+  groups: [
+    {
+      key: "pm2:api",
+      manager: "pm2",
+      name: "api",
+      count: 4,
+      cpuPercent: 61.3,
+      memory: 1073741824,
+      ioRate: 0,
+      pid: 4021,
+    },
+    {
+      key: "systemd:nginx.service",
+      manager: "systemd",
+      name: "nginx.service",
+      count: 5,
+      cpuPercent: 2.4,
+      memory: 46137344,
+      ioRate: 0,
+      pid: 812,
+    },
+    {
+      key: "container:c13e58c8f7b4",
+      manager: "container",
+      name: "c13e58c8f7b4",
+      label: "postgres",
+      count: 18,
+      cpuPercent: 9.1,
+      memory: 2147483648,
+      ioRate: 0,
+      pid: 2211,
+    },
+  ],
 }
+
+/** A process's recent windows, as the sampler keeps them. */
+const history = Array.from({ length: 30 }, (_, i) => ({
+  at: new Date(Date.now() - (30 - i) * 4000).toISOString(),
+  cpu: 30 + (i % 5) * 4,
+  rss: 268435456 + i * 1048576,
+  read: 0,
+  write: 4096 * i,
+}))
 
 const pm2 = {
   available: true,
@@ -412,10 +454,13 @@ async function mockHost(page: Page): Promise<LogMocks> {
         exe: "/usr/bin/node",
         cwd: "/srv/api",
         fileDescriptors: 1020,
+        fdReady: true,
         openFilesLimit: 1024,
+        ioReady: true,
         children: 2,
         listening: [{ proto: "tcp", address: "0.0.0.0", port: 3000 }],
         connections: 7,
+        history,
       })
     }
     if (path === "/pm2/") return json(route, pm2)
@@ -485,24 +530,33 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(page.getByRole("heading", { name: "Live" })).toBeVisible()
 
   // The machine first, as the identity line the Overview opens on, with the
-  // table's cadence and cap at its right end.
+  // table's cadence, Pause and the shortcuts at its right end — the line of
+  // two buttons that stood above it is gone.
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity).toContainText("srv-1")
   await expect(identity).toContainText("Ubuntu 24.04")
+  await expect(identity).toContainText("143 processes")
   await expect(identity.getByRole("button", { name: /Every 4s/ })).toBeVisible()
+  await expect(identity.getByRole("button", { name: "Pause updates" })).toBeVisible()
+  await expect(page.locator("[data-slot='page-context']")).toHaveCount(0)
 
-  // Figures over the whole host, not over the filtered rows — and the
-  // products the listed processes are, after the figure.
-  await expect(page.locator("[data-slot='stat-tile']").first()).toContainText("143")
-  await expect(
-    page.locator("[data-slot='stat-tile']").first().locator("img[src='/logos/nginx.svg']"),
-  ).toBeVisible()
+  // No tiles: who is using the machine is the band of workloads, and the
+  // counts the tiles held are the state chips in the table's head.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const band = page.locator("[data-slot='workloads']")
+  await expect(band.getByRole("button", { name: "Only api's processes" }).first()).toBeVisible()
+  await expect(band.getByRole("button", { name: "Only postgres's processes" })).toHaveCount(2)
+  const states = page.locator("[aria-label='State']")
+  await expect(states.getByRole("button", { name: /Zombie/ })).toContainText("1")
+  await expect(states.getByRole("button", { name: /Blocked/ })).toContainText("1")
+
   // A row is its product: nginx's mark on the nginx row, Node's on node, and
-  // a glyph rather than a guess on a kernel worker.
+  // a glyph rather than a guess on a kernel thread — which says what it is
+  // rather than borrowing a command line it does not have.
   await expect(page.locator("td img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(page.locator("td img[src='/logos/nodejs.svg']").first()).toBeVisible()
-  await expect(page.getByText("exited, but the parent has not reaped them")).toBeVisible()
-  await expect(page.getByText("waiting on a disk or a lock")).toBeVisible()
+  await expect(page.getByRole("row", { name: /kworker/ })).toContainText("kernel thread")
+  await expect(page.getByRole("row", { name: /defunct/ })).toContainText("waiting for its parent")
 
   // The process table frames itself because it is a table (§2); nothing else
   // on the page may.
@@ -516,22 +570,98 @@ test("the live table reads the host and every process verb is a word", async ({ 
       "Kill",
       "Pause",
       "Hang up",
+      "Interrupt",
+      "Send SIGUSR1",
       "Open api",
       "Copy PID",
     ]),
   )
 
-  // The sheet: sockets, the parent chain, and named buttons for the two
-  // verbs that matter.
+  // The sheet: the readings over their recent shape, the sockets, the parent
+  // chain as a path, and named buttons for the two verbs that matter.
   await page.getByRole("button", { name: "node", exact: true }).first().click()
-  await expect(page.getByText("tcp 0.0.0.0:3000")).toBeVisible()
-  await expect(page.getByText("7 open connections")).toBeVisible()
-  await expect(page.getByText("1020 of 1024")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Terminate" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Kill" })).toBeVisible()
-  await page.getByRole("tab", { name: "Tree" }).click()
-  await expect(page.getByRole("button", { name: /PM2 v6.0.5: God Daemon/ })).toBeVisible()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(4)
+  await expect(
+    sheet.locator("[data-slot='stat-tile']", { hasText: "CPU" }).locator("svg"),
+  ).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']", { hasText: "Open files" })).toContainText(
+    "of 1024",
+  )
+  await expect(sheet.getByText(":3000")).toBeVisible()
+  await expect(sheet.getByText("every interface")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Terminate" })).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Kill" })).toBeVisible()
+  await expect(sheet.getByRole("button", { name: /PM2 v6.0.5: God Daemon/ })).toBeVisible()
   await expect(page).toHaveURL(/pid=4021/)
+})
+
+// A kernel thread ignores a signal from user space and a zombie has already
+// exited: both used to offer a Kill that reported success and changed nothing.
+test("a kernel thread and a zombie are not offered signals they cannot take", async ({ page }) => {
+  await mockHost(page)
+  await page.goto("/processes")
+  const kernel = await menuLabels(page, "kworker")
+  expect(kernel).not.toContain("Terminate")
+  expect(kernel).not.toContain("Kill")
+  const zombie = await menuLabels(page, "defunct")
+  expect(zombie).not.toContain("Kill")
+  expect(zombie).toContain("Open parent (1)")
+
+  await page.goto("/processes?pid=6000")
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText("Exited, and not yet reaped")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Kill" })).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Open parent (1)" }).click()
+  await expect(page).toHaveURL(/pid=1\b/)
+})
+
+// The band answers who; a press narrows the table to that workload, and the
+// chip it leaves in the toolbar is how it is let go.
+test("a workload narrows the table to its processes", async ({ page }) => {
+  await mockHost(page)
+  const groups: string[] = []
+  page.on("request", (request) => {
+    const url = new URL(request.url())
+    if (url.pathname.endsWith("/processes/inventory"))
+      groups.push(url.searchParams.get("group") ?? "")
+  })
+  await page.goto("/processes")
+  const api = page
+    .locator("[data-slot='workloads']")
+    .getByRole("button", { name: "Only api's processes" })
+    .first()
+  await api.click()
+  await expect(api).toHaveAttribute("aria-pressed", "true")
+  await expect.poll(() => groups.at(-1)).toBe("pm2:api")
+  const chip = page.getByRole("button", { name: /Showing api's processes/ })
+  await expect(chip).toBeVisible()
+  await chip.click()
+  await expect.poll(() => groups.at(-1)).toBe("")
+  await expect(api).toHaveAttribute("aria-pressed", "false")
+})
+
+// A sheet open on a process that exits used to keep its last reading under
+// live verbs, polled into a 404 nobody saw.
+test("a process that exits while its sheet is open says so and stops", async ({ page }) => {
+  await mockHost(page)
+  let gone = false
+  await page.route("**/api/v1/processes/4021", (route) =>
+    gone
+      ? route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: '{"error":"not_found"}',
+        })
+      : route.fallback(),
+  )
+  await page.goto("/processes?pid=4021")
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("button", { name: "Kill" })).toBeVisible()
+  gone = true
+  await expect(sheet.getByText("This process has exited")).toBeVisible({ timeout: 6000 })
+  await expect(sheet.getByRole("button", { name: "Kill" })).toHaveCount(0)
+  await expect(sheet.locator("[data-slot='stat-tile']", { hasText: "Memory" })).toBeVisible()
 })
 
 /**
