@@ -37,6 +37,52 @@ test("each moving reading carries its last hour in its tile", async ({ page }) =
   await expect(page.getByRole("img", { name: "Network over the last hour" })).toBeVisible()
   // The panel of sparklines that repeated the tiles is gone.
   await expect(page.getByRole("heading", { name: "Last hour" })).toHaveCount(0)
+  // Every core from the same frame, beside the figure they add up to.
+  await expect(cpu.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
+})
+
+test("the readings say they are live and lead on to Metrics", async ({ page }) => {
+  await page.goto("/")
+  const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity.getByText("Critical")).toBeVisible()
+  // The identity line describes the machine and carries its verdict, nothing to press.
+  await expect(identity.getByRole("link")).toHaveCount(0)
+
+  const resources = page.locator("section", {
+    has: page.getByRole("heading", { name: "Resources" }),
+  })
+  await expect(resources.getByText("Live", { exact: true })).toBeVisible()
+  const readings = resources.locator("[data-slot=stat-grid] > [data-slot=stat-tile]")
+  await expect(readings).toHaveCount(4)
+  await expect(readings.filter({ hasText: "Storage" })).toHaveCount(0)
+  await resources.getByRole("link", { name: "All metrics" }).click()
+  await expect(page).toHaveURL(/\/metrics$/)
+})
+
+test("every filesystem is a bar of its own under the readings", async ({ page }) => {
+  await page.goto("/")
+  const band = page.locator("[data-slot=storage-band]")
+  const disks = band.getByRole("list", { name: "Filesystems" }).locator(":scope > li")
+  await expect(disks).toHaveCount(2)
+  await expect(disks.first()).toContainText("/")
+  await expect(disks.first()).toContainText("10.4 GB free")
+  await expect(disks.first()).toContainText("87% of 80.0 GB · /dev/vda1")
+  await expect(disks.first()).toContainText("1.2 MB/s read · 3.4 MB/s write")
+  await expect(disks.nth(1)).toContainText("/srv")
+  await expect(band.getByRole("meter", { name: "/ used" })).toHaveAttribute("aria-valuenow", "87")
+  // Past the warning line the free space takes the bar's tone.
+  await expect(disks.first().getByText("10.4 GB", { exact: true })).toHaveClass(/text-warning/)
+  // What the disks are doing is a reading of its own, with its hour.
+  const io = band.locator("[data-slot=stat-tile]", { hasText: "Disk I/O" })
+  await expect(io).toContainText("1.2 MB/s read · 3.9 MB/s write")
+  await expect(io.getByRole("img", { name: "Disk I/O over the last hour" })).toBeVisible()
+
+  // Two disks share a row as two equal bars.
+  const [root, srv] = await Promise.all(
+    ["/ used", "/srv used"].map((name) => band.getByRole("meter", { name }).boundingBox()),
+  )
+  expect(root?.y).toBe(srv?.y)
+  expect(root?.width).toBe(srv?.width)
 })
 
 test("what every module found is one Health list, worst first", async ({ page }) => {

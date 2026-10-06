@@ -115,7 +115,7 @@ export function EngineStatus({
  * facts a person opens the page to check — whether it is running, the
  * directory it reads, the ingress it serves through, whether certbot is here
  * and who renews. The service commands sit at the line's right end, where
- * the Overview keeps its verdict and Metrics link.
+ * the Overview keeps its verdict.
  *
  * It was a row of grey words. The engine is the one product this section is
  * about, and a page about nginx that never draws nginx opened on less than
