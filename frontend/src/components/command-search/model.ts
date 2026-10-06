@@ -122,6 +122,47 @@ export function searchItems<T extends SearchItem>(items: T[], query: string, lim
   return { items: ranked.slice(0, limit).map(({ item }) => item), total: ranked.length }
 }
 
+/**
+ * The title cut into the runs the query matched and the runs it did not, so
+ * the row says *why* it is a result. Case and accents are ignored as the
+ * ranking ignores them. A token is marked where it starts a word, which is
+ * how it ranked; failing that, its first occurrence only — `s` lit in every
+ * letter of "shop-stacks" marks nothing anybody needed to see. A row that
+ * matched on its detail or by a typo marks nothing in its title.
+ */
+export function highlight(title: string, query: string): { text: string; hit: boolean }[] {
+  const tokens = words(normalise(parseSearch(query).text))
+  const chars = [...title]
+  const owner: number[] = []
+  let folded = ""
+  chars.forEach((char, index) => {
+    const part = char
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+    folded += part
+    for (let i = 0; i < part.length; i++) owner.push(index)
+  })
+  const lit = chars.map(() => false)
+  for (const token of tokens) {
+    const found: number[] = []
+    for (let at = folded.indexOf(token); at !== -1; at = folded.indexOf(token, at + 1)) {
+      found.push(at)
+    }
+    const starts = found.filter((at) => at === 0 || !/[\p{L}\p{N}]/u.test(folded[at - 1]))
+    for (const at of starts.length ? starts : found.slice(0, 1)) {
+      for (let i = at; i < at + token.length; i++) lit[owner[i]] = true
+    }
+  }
+  const runs: { text: string; hit: boolean }[] = []
+  chars.forEach((char, i) => {
+    const last = runs.at(-1)
+    if (last && last.hit === lit[i]) last.text += char
+    else runs.push({ text: char, hit: lit[i] })
+  })
+  return runs
+}
+
 export type RecentDestination = { href: string; title: string; detail?: string }
 
 function destinationKey(href: string) {

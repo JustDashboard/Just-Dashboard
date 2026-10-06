@@ -6,6 +6,9 @@ const palette = (page: Page) => page.getByRole("dialog", { name: "Command palett
 const input = (page: Page) => palette(page).getByRole("combobox", { name: "Search dashboard" })
 const selected = (page: Page) =>
   palette(page).getByRole("listbox").getByRole("option", { selected: true })
+const scopes = (page: Page) => palette(page).getByRole("group", { name: "Search scope" })
+const scope = (page: Page, name: string) =>
+  scopes(page).getByRole("button", { name: new RegExp(`^${name}`) })
 
 async function open(page: Page, key = "Control+k") {
   const trigger =
@@ -68,7 +71,7 @@ test("arrows, Home/End, Escape and shortcut toggle retain focus ownership", asyn
   await expect(palette(page)).toHaveCount(0)
   await expect(trigger).toBeFocused()
   await open(page)
-  await palette(page).getByRole("combobox", { name: "Search scope" }).focus()
+  await scopes(page).getByRole("button", { pressed: true }).focus()
   await page.keyboard.press("Control+k")
   await expect(palette(page)).toHaveCount(0)
   await page.keyboard.down("Control")
@@ -108,13 +111,49 @@ test("all live inventories are scoped and duplicate PM2 names keep their daemon 
   await input(page).press("ArrowDown")
   await expect(selected(page)).toContainText("ubuntu")
   await expect(selected(page)).toHaveAttribute("data-value", "app:ubuntu:0")
-  await palette(page).getByRole("combobox", { name: "Search scope" }).click()
-  await page.getByRole("option", { name: "Databases", exact: true }).click()
+  await scope(page, "Databases").click()
   await expect(input(page)).toBeFocused()
   await expect(input(page)).toHaveValue("database: shop-worker")
   await expect(
     palette(page).getByText("No matches. Try a name, domain or another scope."),
   ).toBeVisible()
+  await palette(page).getByRole("button", { name: "Search everything for “shop-worker”" }).click()
+  await expect(input(page)).toHaveValue("shop-worker")
+  await expect(palette(page).getByRole("listbox").getByRole("option")).toHaveCount(2)
+})
+
+test("scope chips count each kind's matches and the dialog holds still while results change", async ({
+  page,
+}) => {
+  await mockCommandSearch(page)
+  await page.goto("/account")
+  await open(page)
+  await input(page).fill("shop-web")
+  await expect(scope(page, "Containers")).toContainText("1")
+  await expect(scope(page, "Boards")).not.toContainText(/\d/)
+  await expect(scope(page, "Everything")).toHaveAttribute("aria-pressed", "true")
+  const before = (await input(page).boundingBox())!
+  await input(page).fill("nothing-matches-this")
+  await expect(
+    palette(page).getByText("No matches. Try a name, domain or another scope."),
+  ).toBeVisible()
+  expect((await input(page).boundingBox())!.y).toBe(before.y)
+})
+
+test("a section's landing page is found by the name the rail gives it inside the section", async ({
+  page,
+}) => {
+  await mockCommandSearch(page)
+  await page.goto("/account")
+  await open(page)
+  for (const [query, page_] of [
+    ["page: control center", "Databases"],
+    ["page: projects", "Deployments"],
+    ["page: live", "Processes"],
+  ]) {
+    await input(page).fill(query)
+    await expect(selected(page)).toContainText(page_)
+  }
 })
 
 test("a failed source reports incomplete search and can recover without reopening", async ({
@@ -266,7 +305,9 @@ test("mobile results and controls fit inside the viewport", async ({ page }) => 
   await page.setViewportSize({ width: 390, height: 844 })
   await mockCommandSearch(page)
   await page.goto("/account")
-  await open(page)
+  // A phone has no shortcut, so the strip across the top carries the way in.
+  await page.getByRole("button", { name: "Search", exact: true }).click()
+  await expect(input(page)).toBeFocused()
   await input(page).fill("shop")
   await expect(
     palette(page).getByRole("listbox").getByRole("option").filter({ hasText: "shop-web" }),
@@ -281,18 +322,25 @@ test("mobile results and controls fit inside the viewport", async ({ page }) => 
   }
 })
 
-test("Escape closes the scope picker without changing the search or closing the palette", async ({
+test("Tab reaches the scope chips, arrows walk them and Escape still clears before closing", async ({
   page,
 }) => {
   await mockCommandSearch(page)
   await page.goto("/account")
   await open(page)
   await input(page).fill("domain: shop")
-  await palette(page).getByRole("combobox", { name: "Search scope" }).click()
-  await expect(page.locator("[data-slot=select-content]")).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(page.locator("[data-slot=select-content]")).toHaveCount(0)
-  await expect(palette(page)).toBeVisible()
+  await input(page).press("Tab")
+  await expect(scope(page, "Domains & sites")).toBeFocused()
+  await expect(scope(page, "Domains & sites")).toHaveAttribute("aria-pressed", "true")
+  await page.keyboard.press("ArrowRight")
+  await expect(scope(page, "Databases")).toBeFocused()
   await expect(input(page)).toHaveValue("domain: shop")
+  await page.keyboard.press("Enter")
   await expect(input(page)).toBeFocused()
+  await expect(input(page)).toHaveValue("database: shop")
+  await expect(selected(page)).toContainText("shop-main")
+  await scope(page, "Databases").focus()
+  await page.keyboard.press("Escape")
+  await expect(input(page)).toHaveValue("")
+  await expect(palette(page)).toBeVisible()
 })
