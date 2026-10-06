@@ -6,7 +6,6 @@ import {
   Archive,
   ArrowRight,
   Box,
-  ChartActivity,
   Database,
   GitHubMark,
   Globe,
@@ -27,7 +26,6 @@ import type {
   DeploymentFleet,
   Exposure,
   GitRepo,
-  MountStats,
   TrafficPulse,
   UpdateReport,
 } from "@/lib/types"
@@ -37,22 +35,26 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useHealth, useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
 import type { MetricsWindow } from "@/lib/metrics-range"
+import type { ConnectionState } from "@/lib/metrics-store"
 import { Page, PageContext, PageState, Section } from "@/components/page"
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
+import { Status } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 import { EmptyState } from "@/components/state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { HealthPanel, HealthVerdict } from "@/components/metrics/health-panel"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/metrics/sparkline"
 import { engineFor } from "@/components/database/engine"
 import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { serverAttention, verdictWith } from "@/components/overview/attention"
 import { ActivityPanel } from "@/components/overview/activity"
+import { CoreBars, LiveBytes, LiveFigure, SeriesKey } from "@/components/overview/readings"
+import { StorageBand } from "@/components/overview/storage"
 import {
   ProductGlyphs,
   ProductLogos,
@@ -77,8 +79,17 @@ const DAY: MetricsWindow = { key: "24h" }
 /** Two rows of three: the projects that need the reader most, then the way to the rest. */
 const SHOWN_PROJECTS = 6
 
+/** Each reading's line, and the key before its name that says which line is whose. */
+const SERIES = {
+  cpu: "var(--chart-1)",
+  mem: "var(--chart-2)",
+  load: "var(--chart-3)",
+  net: "var(--chart-5)",
+  disk: "var(--chart-4)",
+}
+
 export default function OverviewPage() {
-  const { host, snapshot, error } = useMetrics()
+  const { host, snapshot, error, connection } = useMetrics()
   const recorded = useMetricsHistory(HOUR)
   const events = useMetricEvents(DAY)
   const { health, loading: healthLoading, error: healthError } = useHealth()
@@ -114,6 +125,7 @@ export default function OverviewPage() {
       mem: points.map((p) => p.mem),
       load: points.map((p) => p.load1),
       net: points.map((p) => p.rx + p.tx),
+      disk: points.map((p) => p.diskRead + p.diskWrite),
     }
   }, [recorded.history])
 
@@ -144,28 +156,15 @@ export default function OverviewPage() {
     rx: snapshot.net.reduce((sum, n) => sum + n.recvRate, 0),
     tx: snapshot.net.reduce((sum, n) => sum + n.sendRate, 0),
   }
-  const diskRate = snapshot.mounts.reduce((s, m) => s + m.readRate + m.writeRate, 0)
   const availPercent =
     snapshot.memory.total > 0 ? (snapshot.memory.available / snapshot.memory.total) * 100 : 0
   const cores = snapshot.cpu.cores || 1
-  const fullest = snapshot.mounts.reduce<MountStats | undefined>(
-    (worst, m) => (!worst || m.usedPercent > worst.usedPercent ? m : worst),
-    undefined,
-  )
 
+  // `TileTrend` leaves out a line that never moves on a scale of its own, which
+  // would otherwise fill the band and read as a full meter.
   const trend = (values: number[], label: string, color: string, max?: number) =>
-    recorded.disabled || values.length < 2 ? undefined : (
-      <div className="h-full animate-rise">
-        <Sparkline
-          values={values}
-          max={max}
-          color={color}
-          width={240}
-          height={36}
-          className="h-9 w-full"
-          label={`${label} over the last hour`}
-        />
-      </div>
+    recorded.disabled ? undefined : (
+      <TileTrend values={values} max={max} color={color} label={`${label} over the last hour`} />
     )
 
   return (
@@ -211,91 +210,117 @@ export default function OverviewPage() {
           </>
         }
         aside={
-          <div className="flex flex-wrap items-center gap-2">
-            {health && (
-              <HealthVerdict
-                partial={!!health.silences?.length}
-                status={verdictWith(health.status, attention)}
-                className="text-body"
-              />
-            )}
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/metrics">
-                <ChartActivity />
-                Metrics
-              </Link>
-            </Button>
-          </div>
+          health && (
+            <HealthVerdict
+              partial={!!health.silences?.length}
+              status={verdictWith(health.status, attention)}
+              className="text-body"
+            />
+          )
         }
       />
 
-      {/* Each reading carries its last hour where a meter would be, for the
-          four that move. They were a panel of four sparklines further down,
-          each under a figure that repeated the tile above it; the fullest
-          filesystem fills rather than moves, and keeps its meter. */}
-      <StatGrid columns={5}>
-        <StatTile
-          label="CPU"
-          value={percent(snapshot.cpu.totalPercent)}
-          tone={utilisationTone(snapshot.cpu.totalPercent)}
-          trend={trend(trends.cpu, "CPU", "var(--chart-1)", 100)}
-          meter={recorded.disabled ? snapshot.cpu.totalPercent : undefined}
-          hint={
-            modes
-              ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
-              : `load ${snapshot.cpu.loadAvg1.toFixed(2)}`
-          }
-          trailing={
-            modes && modes.steal >= 1 ? (
-              <span className="numeric text-hint font-medium text-destructive">
-                {percent(modes.steal, 0)} steal
-              </span>
-            ) : undefined
-          }
-        />
-        <StatTile
-          label="Memory"
-          value={bytes(snapshot.memory.available)}
-          tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
-          trend={trend(trends.mem, "Memory", "var(--chart-2)", 100)}
-          meter={recorded.disabled ? 100 - availPercent : undefined}
-          hint={`${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
-          trailing="free"
-        />
-        <StatTile
-          label="Load"
-          value={snapshot.cpu.loadAvg1.toFixed(2)}
-          tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
-          trend={trend(trends.load, "Load", "var(--chart-3)", cores)}
-          meter={recorded.disabled ? (snapshot.cpu.loadAvg1 / cores) * 100 : undefined}
-          hint={`${snapshot.cpu.loadAvg5.toFixed(2)} · ${snapshot.cpu.loadAvg15.toFixed(2)} over 5 and 15 min`}
-          trailing={
-            <span className="numeric">{(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core</span>
-          }
-        />
-        <StatTile
-          label="Network"
-          value={rate(throughput.rx)}
-          trend={trend(trends.net, "Network", "var(--chart-5)")}
-          hint={`${rate(throughput.tx)} out · ${snapshot.sockets?.tcpInUse ?? 0} TCP sockets`}
-          trailing="in"
-        />
-        {/* The fullest real filesystem, because that is the one that stops the
-            machine — the recorder has no disk rule, so this tile is the only
-            place a root partition at 96% is said out loud before it fails. */}
-        <StatTile
-          label="Storage"
-          value={fullest ? bytes(fullest.free) : "—"}
-          meter={fullest?.usedPercent}
-          tone={fullest ? utilisationTone(fullest.usedPercent) : "default"}
-          hint={
-            fullest
-              ? `${percent(fullest.usedPercent, 0)} of ${bytes(fullest.total)} · ${rate(diskRate)} I/O`
-              : "No filesystems reported"
-          }
-          trailing={fullest && <span className="truncate">free on {fullest.mountpoint}</span>}
-        />
-      </StatGrid>
+      {/* The machine's readings, under a head that says they are arriving
+          and leads to the page that records them. The way to Metrics stood
+          at the identity line's end as a button, a second control beside the
+          verdict on a line that otherwise only describes; it is a section's
+          way onward now, worded and drawn as Deployments' is. */}
+      <Section
+        title="Resources"
+        actions={
+          <div className="flex items-center gap-4">
+            <StreamState connection={connection} />
+            <SectionLink href="/metrics">All metrics</SectionLink>
+          </div>
+        }
+      >
+        <div>
+          {/* Each reading carries its last hour where a meter would be, keyed
+              by the colour of its line, and its figure glides to each frame
+              of the socket rather than jumping. The fullest filesystem was a
+              fifth tile here that filled rather than moved; the disks are a
+              band of their own under the four now. */}
+          <StatGrid columns={4}>
+            <StatTile
+              label={
+                <>
+                  <SeriesKey color={SERIES.cpu} />
+                  CPU
+                </>
+              }
+              meterLabel="CPU"
+              value={<LiveFigure value={snapshot.cpu.totalPercent} decimals={1} unit="%" />}
+              tone={utilisationTone(snapshot.cpu.totalPercent)}
+              trend={trend(trends.cpu, "CPU", SERIES.cpu, 100)}
+              meter={recorded.disabled ? snapshot.cpu.totalPercent : undefined}
+              hint={
+                modes
+                  ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
+                  : `load ${snapshot.cpu.loadAvg1.toFixed(2)}`
+              }
+              trailing={
+                <span className="inline-flex items-center gap-2">
+                  <CoreBars cores={snapshot.cpu.perCore} color={SERIES.cpu} />
+                  {modes && modes.steal >= 1 && (
+                    <span className="numeric font-medium text-destructive">
+                      {percent(modes.steal, 0)} steal
+                    </span>
+                  )}
+                </span>
+              }
+            />
+            <StatTile
+              label={
+                <>
+                  <SeriesKey color={SERIES.mem} />
+                  Memory
+                </>
+              }
+              meterLabel="Memory"
+              value={<LiveBytes value={snapshot.memory.available} />}
+              tone={availPercent <= 5 ? "danger" : availPercent <= 10 ? "warning" : "default"}
+              trend={trend(trends.mem, "Memory", SERIES.mem, 100)}
+              meter={recorded.disabled ? 100 - availPercent : undefined}
+              hint={`${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
+              trailing="free"
+            />
+            <StatTile
+              label={
+                <>
+                  <SeriesKey color={SERIES.load} />
+                  Load
+                </>
+              }
+              meterLabel="Load"
+              value={<LiveFigure value={snapshot.cpu.loadAvg1} decimals={2} />}
+              tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
+              trend={trend(trends.load, "Load", SERIES.load, cores)}
+              meter={recorded.disabled ? (snapshot.cpu.loadAvg1 / cores) * 100 : undefined}
+              hint={`${snapshot.cpu.loadAvg5.toFixed(2)} · ${snapshot.cpu.loadAvg15.toFixed(2)} over 5 and 15 min`}
+              trailing={
+                <span className="numeric">{(snapshot.cpu.loadAvg1 / cores).toFixed(2)}/core</span>
+              }
+            />
+            <StatTile
+              label={
+                <>
+                  <SeriesKey color={SERIES.net} />
+                  Network
+                </>
+              }
+              value={<LiveBytes value={throughput.rx} suffix="/s" />}
+              trend={trend(trends.net, "Network", SERIES.net)}
+              hint={`${rate(throughput.tx)} out · ${snapshot.sockets?.tcpInUse ?? 0} TCP sockets`}
+              trailing="in"
+            />
+          </StatGrid>
+          <StorageBand
+            mounts={snapshot.mounts}
+            trend={trend(trends.disk, "Disk I/O", SERIES.disk)}
+            color={SERIES.disk}
+          />
+        </div>
+      </Section>
 
       {/* What needs the reader, from the machine and from every module on
           it, as one list: the recorder's findings and a failed deploy, a
@@ -431,12 +456,7 @@ function DeploymentsSection({
               </Link>
             </Button>
           )}
-          <Link
-            href="/deploy"
-            className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-          >
-            All projects <ArrowRight className="size-3" />
-          </Link>
+          <SectionLink href="/deploy">All projects</SectionLink>
         </div>
       }
     >
@@ -480,6 +500,29 @@ function DeploymentsSection({
       )}
     </Section>
   )
+}
+
+/** The way on to the page a section stands for, at the end of its head. */
+function SectionLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
+    >
+      {children} <ArrowRight className="size-3" />
+    </Link>
+  )
+}
+
+/**
+ * Whether the readings are arriving. They are the one block on the page fed by
+ * an open socket, so they are the one block that may say Live; while the
+ * socket is down the figures are the last frame, and the head says so.
+ */
+function StreamState({ connection }: { connection: ConnectionState }) {
+  if (connection === "open") return <Status live tone="running" label="Live" />
+  if (connection === "connecting") return <Status tone="notice" label="Connecting…" />
+  return <Status tone="warning" label="Reconnecting…" />
 }
 
 /** The fleet's own grid, one column short of it at the widest: two rows of three. */

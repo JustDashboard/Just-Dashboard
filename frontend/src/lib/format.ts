@@ -1,10 +1,25 @@
+const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
+
 export function bytes(value: number | undefined | null, precision = 1): string {
   if (value === undefined || value === null || Number.isNaN(value)) return "—"
   if (value === 0) return "0 B"
-  const units = ["B", "KB", "MB", "GB", "TB", "PB"]
-  const exp = Math.min(Math.floor(Math.log(Math.abs(value)) / Math.log(1024)), units.length - 1)
+  const exp = Math.min(
+    Math.floor(Math.log(Math.abs(value)) / Math.log(1024)),
+    BYTE_UNITS.length - 1,
+  )
   const scaled = value / Math.pow(1024, exp)
-  return `${scaled.toFixed(exp === 0 ? 0 : precision)} ${units[exp]}`
+  return `${scaled.toFixed(exp === 0 ? 0 : precision)} ${BYTE_UNITS[exp]}`
+}
+
+/**
+ * `bytes` as a number and its unit, for a figure that animates the number and
+ * not the unit. Below one byte it stays in bytes rather than reaching for a
+ * unit smaller than the ladder has.
+ */
+export function byteParts(value: number): { value: number; unit: string; decimals: number } {
+  if (value < 1) return { value: Math.max(value, 0), unit: "B", decimals: 0 }
+  const exp = Math.min(Math.floor(Math.log(value) / Math.log(1024)), BYTE_UNITS.length - 1)
+  return { value: value / Math.pow(1024, exp), unit: BYTE_UNITS[exp], decimals: exp === 0 ? 0 : 1 }
 }
 
 export function rate(bytesPerSecond: number | undefined | null): string {

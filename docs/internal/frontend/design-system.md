@@ -1879,10 +1879,11 @@ The passes, in order. Each one is a diff you can review on its own.
 
 **What the Overview looks like after these passes**, as a checklist for the page you are on: the
 machine's identity line first (`HostIdentity` — its distribution drawn as itself, the processor and
-hypervisor as bare marks among its facts, the verdict and Metrics link at the right end); a five-tile
-`StatGrid` of readings, the four that move carrying their last hour in
-the tile's `trend` slot where a meter would be and the one that fills keeping its meter; a plain
-`Health` list across the full width; the Deployments section; a plain top-processes list beside a
+hypervisor as bare marks among its facts, the verdict at the right end); a Resources `Section`
+whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
+`StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
+meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
+the Storage band, a capacity bar per filesystem; a plain `Health` list across the full width; the Deployments section; a plain top-processes list beside a
 plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
 each naming what it counts with the products themselves. No frame anywhere on the page — the project
 cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
@@ -1938,6 +1939,27 @@ a statement's verb; `hueFor(name, LANES)` for an account, a schema or a namespac
 pending change; `--chart-1..5` for a series), the lit edge on what is taken, and work in flight said
 as it happens (a `BorderBeam` round a server being started, the participle in its row). Flow pages
 keep their visible question as the `h1`, since the question is the work on that screen (§16).
+
+The top was taken apart once more in 0.7.1, at the operator's request, because it read as a still
+row of five numbers under a line with a button stuck to its end. The Metrics button had been the one
+control on a line that otherwise only describes, beside the verdict, wearing the rising-trend glyph
+where the sidebar draws Metrics as a chart: it is now the readings' own `Section` head, worded and
+drawn as Deployments' "All projects" is, beside a `Status live` that is the truth about the socket
+(*Live* while it is open, *Reconnecting…* while it is not, because the figures are then the last
+frame). The fifth tile — the fullest filesystem's free space over a thin meter — was the one figure
+in the row that fills rather than moves, and the one that could name only one disk, so storage is a
+band under the four (`components/overview/storage.tsx`): every real filesystem, up to the four
+fullest and two to a row from `lg`, as its name and free space over a wide bar over its size, device
+and read and write, the free space in the bar's tone — beside a Disk I/O reading under Network, live
+and with its hour like the four, so the band keeps the tiles' columns. The hours now draw through
+`TileTrend`, which leaves out a line that never moves on a scale of its own; the page's own copy of
+it had drawn a steady network as a band filled to the top.
+What made the four "alive" is the sanctioned motion and nothing new: each figure is a `NumberTicker`
+(`LiveFigure` in `components/overview/readings.tsx`) that counts up once on arrival and then glides
+to each two-second frame, its unit held outside the count so 980 KB/s becoming 1.0 MB/s swaps
+rather than counting down; the CPU figure carries a bar per core from the same frame (the busiest of
+neighbours when there are more than 32), which says whether 90% is every core or one pinned; and
+each tile's name is keyed by the 2×10 bar a chart legend draws, in its sparkline's series colour.
 
 The 0.7.0 pass took two things off it that had been saying the same figure twice: a `MetricStrip`
 of uptime, processes and cores in the header's corner (facts about the machine, now in its identity
