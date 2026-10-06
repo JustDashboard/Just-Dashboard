@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Box, type Icon } from "@/components/icons"
+import { Box } from "@/components/icons"
 import { hostOf, productOfHost, wordsProduct } from "@/lib/clients"
 import type { NotificationChannelKind } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -1078,7 +1078,7 @@ export function ProductLogo({
    * The glyph for a thing that is no product — a volume, a network — so it
    * still takes the tile and lines up with the rows that have a logo.
    */
-  fallback?: Icon
+  fallback?: React.ComponentType<{ className?: string }>
   className?: string
 }) {
   // Which file failed, rather than whether one did: the settings panel's mark

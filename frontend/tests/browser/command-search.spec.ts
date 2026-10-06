@@ -6,6 +6,8 @@ const palette = (page: Page) => page.getByRole("dialog", { name: "Command palett
 const input = (page: Page) => palette(page).getByRole("combobox", { name: "Search dashboard" })
 const selected = (page: Page) =>
   palette(page).getByRole("listbox").getByRole("option", { selected: true })
+const preview = (page: Page) =>
+  palette(page).getByRole("complementary", { name: "Selected result" })
 const scopes = (page: Page) => palette(page).getByRole("group", { name: "Search scope" })
 const scope = (page: Page, name: string) =>
   scopes(page).getByRole("button", { name: new RegExp(`^${name}`) })
@@ -320,6 +322,38 @@ test("mobile results and controls fit inside the viewport", async ({ page }) => 
   for (const option of await palette(page).getByRole("listbox").getByRole("option").all()) {
     expect((await option.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   }
+  // The preview needs the width a desk has; a phone keeps the whole width for the list.
+  await expect(preview(page)).toBeHidden()
+})
+
+test("the preview follows the selection and opens what the result is wired to", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const traffic = await mockCommandSearch(page)
+  await page.goto("/account")
+  await open(page)
+  await input(page).fill("container: shop-web")
+  await expect(preview(page)).toContainText("Container")
+  await expect(preview(page)).toContainText("nginx:alpine")
+  await expect(preview(page)).toContainText("Up 2 hours")
+  await expect(preview(page)).toContainText("running")
+  // A folder is a link only where two resources name the same one exactly.
+  await input(page).fill("repo: shop")
+  await expect(selected(page)).toContainText("shop")
+  await expect(preview(page)).toContainText("/srv/shop")
+  const connected = preview(page).getByRole("button", { name: /shop-stack/ })
+  await expect(connected).toBeVisible()
+  await expect(preview(page).getByRole("button", { name: /shop-nightly/ })).toBeVisible()
+  await expect(connected).toHaveAttribute("tabindex", "-1")
+  await connected.click()
+  await expect(page).toHaveURL(/\/docker\/stacks\/shop-stack$/)
+  await expect(palette(page)).toHaveCount(0)
+  await open(page)
+  await expect(selected(page)).toContainText("Back to Profile")
+  await input(page).fill("proc")
+  await expect(preview(page)).toContainText("In Monitoring")
+  expect(traffic.mutations).toEqual([])
 })
 
 test("Tab reaches the scope chips, arrows walk them and Escape still clears before closing", async ({

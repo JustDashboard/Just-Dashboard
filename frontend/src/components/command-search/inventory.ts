@@ -19,6 +19,7 @@ import {
   unitProduct,
 } from "@/components/product-logo"
 import { projectProduct } from "@/components/deploy/vocabulary"
+import { plural, relativeTime } from "@/lib/format"
 import { addressIdentity, type SearchItem, type SearchKind } from "./model"
 
 export type InventorySource = {
@@ -26,6 +27,9 @@ export type InventorySource = {
   label: string
   read: (signal: AbortSignal) => Promise<InventoryItem[]>
 }
+
+/** One line of what the preview says about a resource: a label and its value. */
+export type Fact = { label: string; value: string; mono?: boolean }
 
 export type InventoryItem = SearchItem & {
   connection?: Pick<DbConnection, "driver" | "broken">
@@ -37,6 +41,20 @@ export type InventoryItem = SearchItem & {
   product?: string
   /** A running state in Docker's, systemd's or PM2's own word, for `Status`. */
   state?: string
+  /**
+   * What the preview lists under the name, from the same explicitly chosen
+   * fields as the rest of the row — never a payload's secrets, environment,
+   * notes or remote addresses.
+   */
+  facts?: Fact[]
+  /**
+   * The names other resources can know this one by — a domain, a container
+   * name, a folder — so the preview can say what it is wired to: the site
+   * serving a project's domain, the stack and repository in one folder, the
+   * backup covering it. Exact values only; a guess at a relation would be the
+   * one fact in the preview that is not true.
+   */
+  links?: string[]
 }
 
 function resource(
@@ -57,6 +75,15 @@ function resource(
   }
 }
 
+/** The facts that have a value: a fixture or an older backend may leave any of them out. */
+function facts(...lines: (Fact | false | undefined)[]): Fact[] {
+  return lines.filter((line): line is Fact => !!line && !!line.value)
+}
+
+function domainLinks(names: string[]) {
+  return names.filter(Boolean).map((name) => `domain:${name.toLowerCase()}`)
+}
+
 /** A product only when there is a mark to draw: a key with no file is a guess. */
 function product(id: string | undefined) {
   return hasProductLogo(id) ? id : undefined
@@ -64,6 +91,11 @@ function product(id: string | undefined) {
 
 /** Where a backup is written, when that is somebody's service and not this disk. */
 const BACKUP_TARGETS: Partial<Record<BackupJob["targetKind"], string>> = { b2: "backblaze" }
+const BACKUP_TARGET_NAMES: Record<BackupJob["targetKind"], string> = {
+  local: "This server",
+  s3: "S3 bucket",
+  b2: "Backblaze B2",
+}
 
 // Only explicit metadata enters the index. API payloads can contain credentials,
 // scripts and arbitrary content, none of which helps someone find a destination.
@@ -83,6 +115,12 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           [String(project.id), project.environmentName, project.environmentKind, project.health],
         ),
         product: product(projectProduct(project)),
+        facts: facts(
+          { label: "Address", value: addressIdentity(project.endpoint), mono: true },
+          { label: "Environment", value: project.environmentName },
+          { label: "Health", value: project.health },
+        ),
+        links: domainLinks([addressIdentity(project.endpoint).split("/")[0]]),
       }))
     },
   },
@@ -100,6 +138,12 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           [...site.serverNames, site.kind, "domain", "proxy"],
         ),
         product: product(site.kind),
+        facts: facts(
+          { label: "Served by", value: site.kind === "caddy" ? "Caddy" : "nginx" },
+          { label: "Domains", value: site.serverNames.join("\n"), mono: true },
+          site.enabled === false && { label: "State", value: "Disabled" },
+        ),
+        links: domainLinks(site.serverNames),
       })),
   },
   {
@@ -117,6 +161,19 @@ export const INVENTORY_SOURCES: InventorySource[] = [
         ),
         connection: { driver: conn.driver, broken: conn.broken },
         product: product(conn.flavor) ?? product(conn.driver),
+        facts: facts(
+          { label: "Engine", value: conn.driver },
+          { label: "Host", value: [conn.host, conn.port].filter(Boolean).join(":"), mono: true },
+          { label: "Database", value: conn.database, mono: true },
+          { label: "Environment", value: conn.environment },
+          conn.readOnly && { label: "Access", value: "Protected — read only" },
+          conn.broken && { label: "Problem", value: "Cannot be opened" },
+        ),
+        // A connection made from a container names it; one typed by hand reaches
+        // a container on the Docker network by its name, which is its host.
+        links: [conn.origin?.match(/^docker:(.+)$/)?.[1], conn.host]
+          .filter(Boolean)
+          .map((name) => `container:${name}`),
       })),
   },
   {
@@ -140,6 +197,19 @@ export const INVENTORY_SOURCES: InventorySource[] = [
         ),
         product: containerProduct(container),
         state: container.state,
+        facts: facts(
+          { label: "Image", value: container.image, mono: true },
+          { label: "Status", value: container.status },
+          { label: "Health", value: container.health ?? "" },
+          {
+            label: "Compose",
+            value: [container.composeStack, container.composeService].filter(Boolean).join(" · "),
+          },
+        ),
+        links: [
+          ...container.names.map((name) => `container:${name.replace(/^\//, "")}`),
+          ...(container.composeStack ? [`stack:${container.composeStack}`] : []),
+        ],
       })),
   },
   {
@@ -156,6 +226,12 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           [stack.workingDir, ...stack.declared],
         ),
         product: "docker-compose",
+        facts: facts(
+          { label: "Status", value: stack.summary },
+          { label: "Folder", value: stack.workingDir, mono: true },
+          { label: "Services", value: stack.declared.join(", ") },
+        ),
+        links: [`stack:${stack.name}`, `folder:${stack.workingDir}`],
       })),
   },
   {
@@ -178,6 +254,20 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           [repo.branch, repo.path],
         ),
         product: hostProduct(repo.remote) ?? "git",
+        facts: facts(
+          {
+            label: "Branch",
+            value: repo.upstream ? `${repo.branch} → ${repo.upstream}` : repo.branch,
+            mono: true,
+          },
+          { label: "Folder", value: repo.path, mono: true },
+          { label: "Last commit", value: repo.subject ?? "" },
+          typeof repo.changes === "number" && {
+            label: "Working tree",
+            value: repo.changes ? plural(repo.changes, "change") : "Clean",
+          },
+        ),
+        links: [`folder:${repo.path}`],
       }))
     },
   },
@@ -202,6 +292,11 @@ export const INVENTORY_SOURCES: InventorySource[] = [
         ),
         product: unitProduct(unit.name),
         state: unit.activeState,
+        facts: facts(
+          { label: "State", value: [unit.activeState, unit.subState].filter(Boolean).join(" · ") },
+          { label: "At boot", value: unit.unitFileState },
+          { label: "Restarts", value: unit.restarts ? String(unit.restarts) : "" },
+        ),
       }))
     },
   },
@@ -221,6 +316,12 @@ export const INVENTORY_SOURCES: InventorySource[] = [
         ),
         product: pm2Product(app.interpreter) ?? "pm2",
         state: app.status,
+        facts: facts(
+          { label: "Runs as", value: app.user },
+          { label: "Namespace", value: app.namespace },
+          { label: "Mode", value: app.execMode },
+          { label: "Restarts", value: app.restarts ? String(app.restarts) : "" },
+        ),
       }))
     },
   },
@@ -238,16 +339,30 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           [String(job.id), ...job.sources],
         ),
         product: BACKUP_TARGETS[job.targetKind],
+        facts: facts(
+          { label: "Writes to", value: BACKUP_TARGET_NAMES[job.targetKind] },
+          { label: "Schedule", value: job.schedule || "Manual", mono: !!job.schedule },
+          { label: "Covers", value: job.sources.join("\n"), mono: true },
+          {
+            label: "Last success",
+            value: job.lastSuccessAt ? relativeTime(job.lastSuccessAt) : "",
+          },
+        ),
+        links: job.sources.map((source) => `folder:${source.replace(/\/+$/, "")}`),
       })),
   },
   {
     kind: "board",
     label: "Boards",
     read: async (signal) =>
-      (await get<BoardSummary[]>("/boards/", undefined, signal)).map((board) =>
-        resource("board", board.id, board.name, `/boards/${board.id}`, undefined, [
+      (await get<BoardSummary[]>("/boards/", undefined, signal)).map((board) => ({
+        ...resource("board", board.id, board.name, `/boards/${board.id}`, undefined, [
           String(board.id),
         ]),
-      ),
+        facts: facts({
+          label: "Edited",
+          value: board.updatedAt ? relativeTime(board.updatedAt) : "",
+        }),
+      })),
   },
 ]
