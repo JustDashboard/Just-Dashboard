@@ -896,8 +896,9 @@ above:
   `index`, a beat each and uncapped. `NumberTicker` counts a figure up to its value once it lands:
   the fleet's live and build-slot figures, the
   Overview's requests, the delivery insights, Automation's
-  revisions awaiting review and alerts firing, the live usage tiles, and the readings on
-  Packages, System users and the audit log. A figure that follows a
+  revisions awaiting review and alerts firing, the live usage tiles, the readings on
+  Packages, System users and the audit log, and every lens's readings (`ReadingTile`) — the logs
+  page's, a service page's and Security's alike. A figure that follows a
   draft as it is typed — Build's and Runtime's settings readings — does not count, because it would
   count again on every keystroke; it rises once when it lands instead;
 - *live* — `AnimatedBeam`'s pulse on a line, `BorderBeam` running around anything whose work is in
@@ -2108,6 +2109,21 @@ pin a moment" caption and the shortcuts button that stood as two lines above the
 gone: the shortcuts are its last control, and the pinned moment's strip appears only while a
 moment is pinned, held at the top of the scroll because the chart it was pinned from is usually a
 screen down.
+
+**The logs page took a deployment's Logs page in 0.7.1**, at the operator's request: its one strip
+held the source's name, its facts, an outlined Export box and the view tabs, the box and the
+underline meeting edge to edge at the right end of a 40px row, over a stray line holding nothing but
+the shortcuts button; and nothing on the page counted anything until Insights was opened. It now
+opens on the chosen source's identity line (`SourceIdentity`, the Overview's `HostIdentity` with its
+rule a step closer, since the console under it needs the height) — the source drawn as its product,
+its kind, state, path, size and rotated set as facts, Export and the shortcuts key at its end — and
+under it the lens's readings as `StatButton` tiles, each with its window's shape, counting up as it
+lands and narrowing the lines to what it counts. They hold still across Live, History and Insights,
+so Insights no longer draws its own over the window it picked. The strip is the rail toggle and the
+views from its leading edge, as a deployment's pane is. The tiles stand only where five fit across
+and the live tail keeps its height under them — a window of at least 1280 by 800, where five broke
+three and two at the old 200px tile floor, now 180 — and on a smaller window the same figures are
+the counts on the lens row's chips, the database workbench's answer.
 
 ## 16. Two registers
 

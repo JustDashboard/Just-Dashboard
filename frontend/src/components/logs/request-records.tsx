@@ -14,6 +14,8 @@ import type {
   VHost,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { CloudUpload, Globe } from "@/components/icons"
+import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import type { LogWindow } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
 import { tabClasses } from "@/components/tabs"
@@ -87,10 +89,10 @@ const VIEW_LABEL: Record<RequestsView, string> = { requests: "Requests", insight
 
 /**
  * A request record as a column of the logs workbench: the strip the log
- * sources have — its name, what it is, the readings it offers — and under it
- * the record read the way its owner's page reads it, Requests and Insights
- * over one window, so a deployment's traffic is not a second kind of page
- * bolted onto this one.
+ * sources have — the views it offers, its name and facts in the page's
+ * identity line above (`RecordIdentity`) — and under it the record read the
+ * way its owner's page reads it, Requests and Insights over one window, so a
+ * deployment's traffic is not a second kind of page bolted onto this one.
  */
 export function RecordColumn({
   record,
@@ -115,12 +117,8 @@ export function RecordColumn({
   return (
     <Pane flush className={cn("min-h-0 flex-1", className)}>
       <div className="flex min-h-10 shrink-0 items-stretch border-b border-hairline pr-1 pl-2">
-        <div className="@container flex min-w-0 flex-1 items-center gap-2 py-1.5">
-          {leading}
-          <span className="truncate text-body font-medium">{record.label}</span>
-          <RecordFacts record={record} />
-        </div>
-        <nav aria-label="Log mode" className="flex shrink-0 items-stretch overflow-x-auto">
+        <div className="flex shrink-0 items-center pr-1">{leading}</div>
+        <nav aria-label="Log mode" className="flex min-w-0 flex-1 items-stretch overflow-x-auto">
           {(["requests", "insights"] as const).map((id) => (
             <button
               key={id}
@@ -146,31 +144,53 @@ export function RecordColumn({
 }
 
 /**
- * What the record is, beside its name, giving way by the strip's own width
- * as a source's facts do: what owns it, where it answers, its last hour.
+ * The record being read, as the line the logs page opens on — a source's
+ * shape (`SourceIdentity`): the deployment as its product or the site as its
+ * engine, its name, and what owns it, where it answers and its last hour.
  */
-function RecordFacts({ record }: { record: RequestRecord }) {
+export function RecordIdentity({
+  record,
+  aside,
+}: {
+  record: RequestRecord
+  aside?: React.ReactNode
+}) {
   return (
-    <span className="hidden min-w-0 shrink-[1000] items-center gap-x-3 overflow-hidden text-hint text-muted-foreground @sm:flex">
-      <Tag>{record.deployment ? "deployment" : "nginx site"}</Tag>
-      {record.detail && (
-        <span className="hidden min-w-0 truncate font-mono @md:block" title={record.detail}>
-          {record.detail}
-        </span>
-      )}
-      {record.figure && (
-        <span
-          className={cn(
-            "numeric shrink-0 whitespace-nowrap",
-            record.tone === "danger" && "text-destructive",
-            record.tone === "warning" && "text-warning",
+    <HostIdentity
+      className="animate-rise pb-4"
+      mark={record.product}
+      fallback={record.deployment ? CloudUpload : Globe}
+      title={record.label}
+      facts={
+        <>
+          <Tag>{record.deployment ? "deployment" : "nginx site"}</Tag>
+          {record.detail && (
+            <>
+              <FactDot />
+              <span className="min-w-0 truncate font-mono" title={record.detail}>
+                {record.detail}
+              </span>
+            </>
           )}
-          title="Requests a minute over the last hour"
-        >
-          {record.figure}
-        </span>
-      )}
-    </span>
+          {record.figure && (
+            <>
+              <FactDot />
+              <span
+                className={cn(
+                  "numeric whitespace-nowrap",
+                  record.tone === "danger" && "text-destructive",
+                  record.tone === "warning" && "text-warning",
+                )}
+                title="Requests a minute over the last hour"
+              >
+                {record.figure}
+              </span>
+            </>
+          )}
+        </>
+      }
+      aside={aside}
+    />
   )
 }
 
