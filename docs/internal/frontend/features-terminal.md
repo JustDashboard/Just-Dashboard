@@ -149,25 +149,34 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
-The security section has eight reading pages (§15–16), all retaining their headline
-`StatGrid` readings. The overview adds a picture of the observed browser → access scope → dashboard
-path using the deployment section's `SettingPicture`, `WireNode` and still `AnimatedBeam` vocabulary.
-It describes access to the dashboard, not exposure of every port on the host. The finding severity
-counts and unavailable checks sit under the Findings head, over the findings.
+The security section has eight reading pages (§15–16). The overview opens on the exposure identity
+line, then the posture's seven checks as a coloured strip (`posture-strip.tsx`; a dashed segment is
+a check that could not run, and a segment narrows the findings to its area), then five area
+readings, then the ways onto the machine as a wiring picture (`perimeter.tsx`: the internet through
+the firewall, fail2ban and sshd, and this browser through the allowlist to the dashboard) in the
+deployment section's `WireNode` and `AnimatedBeam` vocabulary. It describes the layers and their
+states, not the reach of every port on the host. The finding severity counts sit in the Findings
+head.
 
-- **Firewall:** the rules are the working column, with default-policy and logging controls beside
-  them on wide screens. Each row groups its destination service, port and comment; actions stay
-  visible. The rule dialog groups policy, destination and source, using source choice cards
+- **Firewall:** the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
+  rules through `firewall-reading.ts`): each port the rules admit, drawn as the product that answers
+  there with who may reach it, and the default for everything else. The rules are the working
+  column, with default-policy and logging controls beside them on wide screens. Each row carries its
+  action in a `--tag-*` hue down its edge and groups its destination service, port and comment;
+  actions stay visible, and the table ends on the default as a row of its own. The rule dialog groups policy, destination and source, using source choice cards
   (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
   Address-only deny/reject rules can be edited without inventing a destination port. Existing
   ordinary confirmations for toggle, reset and inbound-deny policy remain. The page ends on the Firewall
   log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
   firewalld says logging is off, the section says so and its button brings the logging control
   beside the rules into view instead of drawing an empty pane.
-- **SSH:** authentication, access, session limits and other directives are `FormSection aside`
-  groups. Every control occupies the same column; recommendations sit with the setting, explanatory
-  detail is available beside its label, and a sticky pending footer applies the changed values
-  together. Reverting a draft to its effective value removes it from the change set. The apply
+- **SSH:** the page opens on sshd's doors as a picture (`ssh-picture.tsx`) — the port, public keys
+  with the keyed accounts' faces, passwords and root — drawn from the draft, so a staged change
+  shows its effect before it is applied. Authentication, access, session limits and other
+  directives are `FormSection aside` groups, two to a row from `xl`, each marked *Edited* while it
+  holds a staged change. Every control occupies the same column; recommendations sit with the
+  setting, explanatory detail is available beside its label, and a sticky apply bar naming what
+  changed applies the values together. Reverting a draft to its effective value removes it from the change set. The apply
   dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
   administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
   su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
