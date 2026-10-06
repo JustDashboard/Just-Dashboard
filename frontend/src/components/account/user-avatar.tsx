@@ -104,14 +104,18 @@ export function UserAvatar({
 export function InitialsMark({
   name,
   size = "sm",
+  slot,
   className,
 }: {
   name: string
   size?: keyof typeof SIZES
+  /** `user-avatar` where the name is an account signed in here, drawn round. */
+  slot?: "user-avatar"
   className?: string
 }) {
   return (
     <Initials
+      slot={slot}
       name={name}
       hue={hueFor(name.toLowerCase(), LANES)}
       size={size}

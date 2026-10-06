@@ -5,16 +5,23 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
+  ArrowRight,
+  CheckCircle,
+  Clock,
+  CrossCircle,
   External,
+  Globe,
+  LockClosed,
   PaperAirplane,
   Play,
   Plus,
   RotateCounterClockwise,
+  Slash,
   StopCircle,
 } from "@/components/icons"
 import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { plural, relativeTime } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import {
   canTest,
   cleanupFailed,
@@ -35,10 +42,12 @@ import type {
   GitPullRequest as PR,
   GitPullRequestSummary,
 } from "@/lib/types"
-import { usePoll } from "@/hooks/use-poll"
+import { usePoll, type PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { CommentDialog } from "@/components/git/comment-dialog"
-import { SourceBranch, SourceMerge, SourcePull } from "@/components/git/glyphs"
+import { IssueMark, SourceBranch, SourceMerge, SourcePull } from "@/components/git/glyphs"
+import { BranchChip, ForgeFace, ShortSha } from "@/components/git/marks"
+import { ChecksMark, CommentCount, PullStateMark, ReviewMark } from "@/components/git/pull-state"
 import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { openPreview } from "@/components/git/pull-request-row"
@@ -90,6 +99,7 @@ export function GitHubPanel({
   repoPath,
   branch,
   github,
+  summary,
   busy,
   canControl,
   canAdmin,
@@ -103,6 +113,8 @@ export function GitHubPanel({
   repoPath: string
   branch: string
   github?: GitHubStatus
+  /** The checkout's open requests joined to their previews, read by the workspace. */
+  summary: PollState<GitPullRequestSummary>
   busy?: string
   canControl: boolean
   canAdmin: boolean
@@ -148,12 +160,6 @@ export function GitHubPanel({
     60_000,
     [repoPath, branch],
     { enabled: signedIn && Boolean(branch) },
-  )
-  const summary = usePoll(
-    (signal) => get<GitPullRequestSummary>("/git/pull-requests", { path: repoPath }, signal),
-    60_000,
-    [repoPath],
-    { enabled: signedIn },
   )
   const issues = usePoll(
     (signal) =>
@@ -344,23 +350,38 @@ export function GitHubPanel({
     return verbs
   }
 
+  const owner = repo.data?.nameWithOwner.split("/")[0]
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* The repository on GitHub, as GitHub heads it: its owner's face and
+          its name, whether the world can see it, what it merges into, and
+          what this account may do there. */}
       {repo.data && (
-        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline px-3 py-1.5 text-hint text-muted-foreground">
+        <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline px-3 py-2 text-hint text-muted-foreground">
+          <ForgeFace login={owner} provider="github" size="xs" />
           <a
             href={repo.data.url}
             target="_blank"
             rel="noreferrer"
-            className="min-w-0 truncate font-mono text-foreground hover:underline"
+            className="min-w-0 truncate text-body font-medium text-foreground hover:underline"
           >
             {repo.data.nameWithOwner}
           </a>
-          <Tag>{repo.data.private ? "private" : "public"}</Tag>
-          <span className="truncate">
-            default <span className="font-mono">{repo.data.defaultBranch}</span>
+          <span className="inline-flex items-center gap-1">
+            {repo.data.private ? (
+              <LockClosed aria-hidden className="size-3" />
+            ) : (
+              <Globe aria-hidden className="size-3" />
+            )}
+            {repo.data.private ? "private" : "public"}
           </span>
           {repo.data.permission && <Tag>{repo.data.permission.toLowerCase()}</Tag>}
+          <span className="basis-full" />
+          <span className="inline-flex min-w-0 items-center gap-1">
+            default
+            <BranchChip branch={repo.data.defaultBranch} />
+          </span>
           {/* The projects built from this repository, as the way across to
               them: the Overview links back here the same way. */}
           {deployments.map((d) => (
@@ -373,9 +394,13 @@ export function GitHubPanel({
         </div>
       )}
 
-      <div className="flex shrink-0 items-center gap-1 border-b border-hairline px-2 py-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hairline px-2 py-1.5">
         {(["open", "merged", "closed"] as const).map((key) => (
           <FilterChip key={key} selected={state === key} onClick={() => setState(key)}>
+            <PullStateMark
+              pull={{ state: key, draft: false, merged: key === "merged" }}
+              className="size-3.5"
+            />
             {key === "open" ? "Open" : key === "merged" ? "Merged" : "Closed"}
             {key === state && pulls.data && <ChipCount>{pulls.data.length}</ChipCount>}
           </FilterChip>
@@ -423,58 +448,51 @@ export function GitHubPanel({
           <ul ref={listRef} className="animate-rise divide-y divide-hairline">
             {list.map((p) => {
               const reading = previewStatus(previewOf(p.number))
+              const selected = active === `pull:${p.number}`
+              const when = p.updatedAt ?? p.createdAt
               return (
                 <li
                   key={p.number}
                   data-pull={p.number}
                   className={cn(
-                    "group flex min-w-0 items-start gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
-                    active === `pull:${p.number}` && "bg-accent",
+                    "group flex min-w-0 items-start gap-2.5 py-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+                    selected && "bg-accent",
                   )}
                 >
+                  <PullStateMark pull={p} className="mt-px" />
                   <button
                     type="button"
-                    aria-pressed={active === `pull:${p.number}`}
+                    aria-pressed={selected}
                     onClick={() => onSelect({ kind: "pull", number: p.number, title: p.title })}
-                    className="min-w-0 flex-1 text-left focus-ring-inset"
+                    className="min-w-0 flex-1 space-y-1 text-left focus-ring-inset"
                   >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="truncate text-body">{p.title}</span>
-                      {p.draft && <Tag>draft</Tag>}
-                      {p.head === branch && <Tag tone="warning">this branch</Tag>}
-                    </span>
-                    <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-hint text-muted-foreground">
-                      <span className="truncate">
-                        #{p.number} · <span className="font-mono">{p.head}</span> →{" "}
-                        <span className="font-mono">{p.base}</span>
-                        {p.author ? ` · ${p.author}` : ""}
-                        {p.createdAt ? ` · ${relativeTime(p.createdAt)}` : ""}
+                    <span className="flex min-w-0 items-start gap-1.5">
+                      <span className="line-clamp-2 text-body leading-snug font-medium">
+                        {p.title}
                       </span>
-                      {p.checks && (
-                        <Status
-                          className="text-hint"
-                          tone={
-                            p.checks === "success"
-                              ? "running"
-                              : p.checks === "failure"
-                                ? "danger"
-                                : "warning"
-                          }
-                          label={
-                            p.checks === "success"
-                              ? "checks passed"
-                              : p.checks === "failure"
-                                ? "checks failed"
-                                : "checks running"
-                          }
-                        />
+                      {p.head === branch && (
+                        <Tag tone="warning" className="mt-0.5">
+                          this branch
+                        </Tag>
                       )}
-                      {p.review === "approved" && (
-                        <Status className="text-hint" tone="running" label="approved" />
+                    </span>
+                    <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
+                      <span className="numeric shrink-0">#{p.number}</span>
+                      <BranchChip branch={p.head} className="max-w-[45%]" />
+                      <ArrowRight aria-hidden className="size-3 shrink-0" />
+                      <BranchChip branch={p.base} className="max-w-[35%]" />
+                    </span>
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-hint text-muted-foreground">
+                      {p.author && (
+                        <span className="inline-flex min-w-0 items-center gap-1">
+                          <ForgeFace login={p.author} provider="github" size="xs" />
+                          <span className="truncate">{p.author}</span>
+                        </span>
                       )}
-                      {p.review === "changes_requested" && (
-                        <Status className="text-hint" tone="danger" label="changes requested" />
-                      )}
+                      {when && <span className="shrink-0">{relativeTime(when)}</span>}
+                      <ChecksMark checks={p.checks} label />
+                      <ReviewMark review={p.review} />
+                      <CommentCount count={p.comments} />
                       {reading && (
                         <Status
                           className="text-hint"
@@ -482,6 +500,9 @@ export function GitHubPanel({
                           label={`preview ${reading.label.toLowerCase()}`}
                         />
                       )}
+                      {p.labels?.slice(0, 3).map((label) => (
+                        <Tag key={label}>{label}</Tag>
+                      ))}
                     </span>
                   </button>
                   <VerbActions verbs={verbsFor(p)} reveal className="mt-0.5" />
@@ -494,12 +515,11 @@ export function GitHubPanel({
         {/* What is open against the repository besides the pull requests.
             A reading with two verbs, not a choice: there is no issue preview
             to open, and its page on GitHub is one press away. */}
-        <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-y border-hairline bg-card px-3">
-          <span className="eyebrow">Issues</span>
-          {issues.data && (
-            <span className="numeric text-hint text-muted-foreground">{issues.data.length}</span>
-          )}
-        </div>
+        <SectionStrip
+          icon={<IssueMark className="size-3.5 text-(--pull-open)" />}
+          label="Issues"
+          count={issues.data?.length}
+        />
         {issues.error && (
           <p className="px-3 py-2 text-hint text-muted-foreground">
             Could not list issues: {errorMessage(issues.error)}
@@ -514,20 +534,26 @@ export function GitHubPanel({
             {issues.data.map((issue) => (
               <li
                 key={issue.number}
-                className="group flex min-w-0 items-start gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
+                className="group flex min-w-0 items-start gap-2.5 py-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
               >
-                <div className="min-w-0 flex-1">
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-body">{issue.title}</span>
+                <IssueMark aria-hidden className="mt-px size-4 shrink-0 text-(--pull-open)" />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <span className="line-clamp-2 text-body leading-snug font-medium">
+                    {issue.title}
+                  </span>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-hint text-muted-foreground">
+                    <span className="numeric">#{issue.number}</span>
+                    {issue.author && (
+                      <span className="inline-flex min-w-0 items-center gap-1">
+                        <ForgeFace login={issue.author} provider="github" size="xs" />
+                        <span className="truncate">{issue.author}</span>
+                      </span>
+                    )}
+                    {issue.updatedAt && <span>{relativeTime(issue.updatedAt)}</span>}
+                    <CommentCount count={issue.comments} />
                     {issue.labels?.slice(0, 3).map((label) => (
                       <Tag key={label}>{label}</Tag>
                     ))}
-                  </span>
-                  <span className="mt-0.5 block truncate text-hint text-muted-foreground">
-                    #{issue.number}
-                    {issue.author ? ` · ${issue.author}` : ""}
-                    {issue.updatedAt ? ` · ${relativeTime(issue.updatedAt)}` : ""}
-                    {issue.comments > 0 ? ` · ${plural(issue.comments, "comment")}` : ""}
                   </span>
                 </div>
                 <VerbActions
@@ -561,10 +587,11 @@ export function GitHubPanel({
 
         {branch && (
           <>
-            <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-y border-hairline bg-card px-3">
-              <span className="eyebrow">Workflow runs</span>
-              <span className="truncate font-mono text-hint text-muted-foreground">{branch}</span>
-            </div>
+            <SectionStrip
+              icon={<Play className="size-3.5 text-muted-foreground" />}
+              label="Workflow runs"
+              detail={<BranchChip branch={branch} className="max-w-[60%]" />}
+            />
             {runs.error && (
               <p className="px-3 py-2 text-hint text-muted-foreground">
                 Could not list workflow runs: {errorMessage(runs.error)}
@@ -584,28 +611,27 @@ export function GitHubPanel({
                       type="button"
                       onClick={() => onSelect({ kind: "workflow", id: r.id })}
                       aria-pressed={active === `workflow:${r.id}`}
-                      className="group flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left focus-ring-inset transition-colors hover:bg-row-hover"
+                      className={cn(
+                        "group flex w-full min-w-0 items-center gap-2.5 px-3 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover",
+                        active === `workflow:${r.id}` && "bg-accent",
+                      )}
                     >
-                      <Status
-                        tone={
-                          r.status !== "completed"
-                            ? "warning"
-                            : r.conclusion === "success"
-                              ? "running"
-                              : r.conclusion === "failure" || r.conclusion === "timed_out"
-                                ? "danger"
-                                : "stopped"
-                        }
-                        label=""
-                        className="gap-0"
-                      />
+                      <RunMark run={r} />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs">{r.workflow || r.name}</span>
-                        <span className="block truncate text-micro text-muted-foreground">
-                          {r.status !== "completed" ? r.status.replace("_", " ") : r.conclusion}
-                          {r.event ? ` · ${r.event}` : ""}
-                          {r.sha ? ` · ${r.sha.slice(0, 7)}` : ""}
-                          {r.createdAt ? ` · ${relativeTime(r.createdAt)}` : ""}
+                        <span className="block truncate text-xs font-medium">
+                          {r.workflow || r.name}
+                        </span>
+                        <span className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
+                          <span className="truncate">
+                            {r.status !== "completed"
+                              ? r.status.replace("_", " ")
+                              : r.conclusion || "completed"}
+                            {r.event ? ` · ${r.event}` : ""}
+                          </span>
+                          <ShortSha sha={r.sha} />
+                          {r.createdAt && (
+                            <span className="shrink-0">{relativeTime(r.createdAt)}</span>
+                          )}
                         </span>
                       </span>
                       <External
@@ -904,4 +930,66 @@ function CreatePullDialog({
       </div>
     </Modal>
   )
+}
+
+/** A sticky strip naming a section of the tab, with its glyph and its count. */
+function SectionStrip({
+  icon,
+  label,
+  count,
+  detail,
+}: {
+  icon: React.ReactNode
+  label: string
+  count?: number
+  detail?: React.ReactNode
+}) {
+  return (
+    <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-y border-hairline bg-card px-3">
+      {icon}
+      <span className="eyebrow">{label}</span>
+      {count !== undefined && (
+        <span className="numeric text-hint text-muted-foreground">{count}</span>
+      )}
+      {detail}
+    </div>
+  )
+}
+
+/**
+ * How an Actions run stands, as the mark GitHub draws for it: a tick, a
+ * cross, a clock while it runs, and a slashed circle for one that was
+ * cancelled or skipped — in the status hues, because a run's outcome is a
+ * reading of state.
+ */
+function RunMark({ run }: { run: GitHubWorkflowRun }) {
+  if (run.status !== "completed") {
+    return (
+      <Clock
+        role="img"
+        aria-label="running"
+        className="size-4 shrink-0 animate-pulse text-warning"
+      />
+    )
+  }
+  switch (run.conclusion) {
+    case "success":
+      return (
+        <CheckCircle role="img" aria-label="succeeded" className="size-4 shrink-0 text-success" />
+      )
+    case "failure":
+    case "timed_out":
+    case "startup_failure":
+      return (
+        <CrossCircle role="img" aria-label="failed" className="size-4 shrink-0 text-destructive" />
+      )
+    default:
+      return (
+        <Slash
+          role="img"
+          aria-label={run.conclusion || "completed"}
+          className="size-4 shrink-0 text-muted-foreground"
+        />
+      )
+  }
 }

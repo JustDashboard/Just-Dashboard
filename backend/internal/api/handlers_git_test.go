@@ -230,3 +230,69 @@ func TestGitWriteRoutesRoundTrip(t *testing.T) {
 		t.Fatalf("the new repository is not in the list: %s", w.Body.String())
 	}
 }
+
+// Deleting a checkout is one of the typed-phrase routes: the phrase is its
+// directory name, a refusal (a root, worktrees attached) is answered before
+// any phrase is asked for, and the preview says what would be lost.
+func TestGitRepositoryDeleteTakesItsNameAndRefusesProtectedCheckouts(t *testing.T) {
+	c, s, root, repo := gitFixture(t)
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("edited\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w := c.do(http.MethodGet, gitPath("/api/v1/git/removal", repo), "", nil)
+	var rm gitx.Removal
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &rm) != nil {
+		t.Fatalf("removal = %d %s", w.Code, w.Body.String())
+	}
+	if rm.Name != "project" || rm.Changes != 1 || rm.Unpushed != 1 || rm.Protected != "" {
+		t.Fatalf("removal preview = %+v", rm)
+	}
+
+	body := `{"path":"` + repo + `"}`
+	limited := &client{t: t, h: c.h, cookie: signInAs(t, s, "limited", auth.RoleLimited)}
+	if w := limited.do(http.MethodPost, "/api/v1/git/repository/delete", body, nil); w.Code != http.StatusForbidden {
+		t.Errorf("limited delete = %d, want 403", w.Code)
+	}
+	if w := c.do(http.MethodPost, "/api/v1/git/repository/delete", body, nil); w.Code != http.StatusPreconditionRequired {
+		t.Errorf("delete without the phrase = %d %s, want 428", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPost, "/api/v1/git/repository/delete", body,
+		map[string]string{"X-Confirm": "other"}); w.Code != http.StatusPreconditionFailed {
+		t.Errorf("delete with the wrong phrase = %d %s, want 412", w.Code, w.Body.String())
+	}
+
+	// A repository with a worktree attached is refused before the phrase.
+	tree := filepath.Join(repo, ".worktrees", "task")
+	cmd := exec.Command("git", "worktree", "add", "-q", "-b", "task", tree)
+	cmd.Dir = repo
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("worktree add: %v %s", err, out)
+	}
+	w = c.do(http.MethodPost, "/api/v1/git/repository/delete", body, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "protected") {
+		t.Fatalf("delete with a worktree attached = %d %s, want 409", w.Code, w.Body.String())
+	}
+	// The worktree goes on its own name, through the repository.
+	w = c.do(http.MethodPost, "/api/v1/git/repository/delete", `{"path":"`+tree+`"}`,
+		map[string]string{"X-Confirm": "task"})
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"removed":true`) {
+		t.Fatalf("delete worktree = %d %s", w.Code, w.Body.String())
+	}
+	w = c.do(http.MethodPost, "/api/v1/git/repository/delete", body,
+		map[string]string{"X-Confirm": "project"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete with the phrase = %d %s", w.Code, w.Body.String())
+	}
+	if _, err := os.Stat(repo); !os.IsNotExist(err) {
+		t.Errorf("the checkout is still on disk: %v", err)
+	}
+	// A root is never a checkout to delete.
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w = c.do(http.MethodPost, "/api/v1/git/repository/delete", `{"path":"`+root+`"}`,
+		map[string]string{"X-Confirm": filepath.Base(root)})
+	if w.Code != http.StatusConflict {
+		t.Errorf("delete a root = %d %s, want 409", w.Code, w.Body.String())
+	}
+}

@@ -68,6 +68,11 @@ No CI workflows, release changes, commits or pushes are part of this request.
 - `/worktrees` lists attached checkouts and their accessibility under the roots. Creation chooses an
   existing branch or a new branch and writes only into a new folder under a resolved parent. Removal
   uses the destructive tier but no typed phrase; main/current/locked/dirty checkouts are refused.
+  Discovery lists linked worktrees wherever under the roots they sit, hidden directories included,
+  and marks each with `worktree` and its `main` checkout. A dirty worktree, which this route refuses,
+  is deleted through `POST /git/repository/delete` instead: `git worktree remove --force` in its
+  repository, behind the worktree's directory name as a typed phrase, with what is uncommitted in it
+  counted first by `GET /git/removal` (see [Git working copies](git-backups-users.md#git-working-copies)).
 - Remote URL edits and set/unset upstream use validated explicit argv. Clone optionally selects a
   branch/tag, shallow depth (1–100,000) and up to 100 sparse directories. Sparse setup failure leaves
   the new clone in place and reports its path. Graph pages contain up to 500 commits and reach 5,000 deep, with
@@ -98,7 +103,9 @@ Patches import changes, not email authorship or a commit series.
 
 GitHub retains its existing per-owner `gh` authentication. Its preview adds changed-file patches,
 conversation pages, comment/approve/request-changes reviews tied to the viewed head, and Actions job/step
-logs. Review publication uses the normal confirmation dialog. No workflow creation or modification is
+logs. Comments and reviews are written in the box under a request's conversation: a comment posts
+straight to the conversation, and an approval or a request for changes uses the normal confirmation
+dialog, naming the commit it is published against. No workflow creation or modification is
 performed. See [`processes-terminal-github.md`](processes-terminal-github.md#github-sign-in).
 
 The More menu's **GitLab and Gitea** opens `forgex` request management. A `system.admin` account connects

@@ -15,14 +15,26 @@ import {
   CornerUpLeft,
   ClockRewind,
   FolderOpen,
+  GitHubMark,
   Link as LinkIcon,
+  MoreHorizontal,
+  Pencil,
   RefreshClockwise,
   Terminal,
+  Trash,
   UserSettings,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
+import { forgeRepository } from "@/lib/git-repos"
 import { cn } from "@/lib/utils"
-import type { GitFileChange, GitRepo, GitResult, GitStash, GitStatus } from "@/lib/types"
+import type {
+  GitFileChange,
+  GitPullRequestSummary,
+  GitRepo,
+  GitResult,
+  GitStash,
+  GitStatus,
+} from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePanelSize } from "@/lib/panel-size"
 import { usePoll } from "@/hooks/use-poll"
@@ -31,7 +43,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { workspaceTab } from "@/hooks/use-query-selection"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FileTree, type ConfirmRequest as TreeConfirmRequest } from "@/components/files/file-tree"
-import { SourceBranch, SourceFork } from "@/components/git/glyphs"
+import { SourceBranch, SourceCommit, SourceFork, SourcePull } from "@/components/git/glyphs"
 import { branchLabel } from "@/components/git/marks"
 import { AheadBehind } from "@/components/git/ahead-behind"
 import { GitHelp } from "@/components/git/help"
@@ -41,11 +53,14 @@ import { BranchesPanel } from "@/components/git/branches-panel"
 import { GraphPanel } from "@/components/git/graph-panel"
 import { GitHubAccountControl } from "@/components/git/github-account"
 import { GitHubPanel } from "@/components/git/github-panel"
+import { RepoMark } from "@/components/git/languages"
+import { useCheckoutRemoval } from "@/components/git/remove-checkout"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import { PreviewPanel, type GitPreview, type PreviewContext } from "@/components/git/preview-panel"
 import { RemotesDialog } from "@/components/git/remotes-dialog"
 import { WorktreesDialog } from "@/components/git/worktrees-dialog"
 import { useGitRun } from "@/components/git/run"
+import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
 import { IconAction } from "@/components/icon-action"
@@ -105,10 +120,13 @@ export function RepoWorkspace({
   repo,
   onBack,
   onRepoChanged,
+  onRepoRemoved,
 }: {
   repo: GitRepo
   onBack: () => void
   onRepoChanged: () => void
+  /** The checkout was deleted from the server or removed as a worktree. */
+  onRepoRemoved: () => void
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -175,6 +193,9 @@ export function RepoWorkspace({
   const workPx = fitPanel(workWidth, WORK, TREE.min)
   const treePx = fitPanel(treeWidth, TREE, workPx)
 
+  const forge = forgeRepository(repo.remote)
+  const forgeMark = forge ? (hostProduct(forge.host) ?? "git") : undefined
+  const removal = useCheckoutRemoval(onRepoRemoved)
   const canControl = can("service.control")
   const canDestruct = can("destructive")
   const canWrite = can("file.write")
@@ -197,6 +218,17 @@ export function RepoWorkspace({
   // One poll for the whole workspace: the header chip, the identity the commit
   // box shows, and the GitHub tab are three views of the same answer.
   const github = useGitHubAccount(repo.path)
+  const signedIn = Boolean(github.data?.available && github.data.account?.loggedIn)
+  // The open requests and the projects deploying this checkout: the GitHub
+  // tab draws them, and the tab's own label counts them, so it is read once
+  // here for both.
+  const pullSummary = usePoll(
+    (signal) => get<GitPullRequestSummary>("/git/pull-requests", { path: repo.path }, signal),
+    60_000,
+    [repo.path],
+    { enabled: signedIn },
+  )
+  const openPulls = pullSummary.data?.repos?.[0]?.pulls.length ?? 0
 
   const onChanged = useCallback(() => {
     status.refresh()
@@ -255,10 +287,14 @@ export function RepoWorkspace({
       setHistoryFile(path)
       pick("history")
     },
+    githubLogin: signedIn ? github.data?.account?.login : undefined,
   }
 
   const stashCount = status.data?.stashes ?? 0
   const clean = Boolean(status.data?.clean)
+  // The menu reads in groups — the working tree, the remote, the repository
+  // itself, what else it is wired to — with the one act that cannot be taken
+  // back alone at the end, behind its rule.
   const more: Verb[] = []
   if (canControl) {
     more.push(
@@ -266,6 +302,7 @@ export function RepoWorkspace({
         key: "stash",
         label: "Stash changes",
         icon: Archive,
+        group: "Working tree",
         disabled: clean || !!busy,
         run: () =>
           void run("Stashed", () => post<GitResult>("/git/stash", {}, { query: q })).catch(
@@ -276,6 +313,7 @@ export function RepoWorkspace({
         key: "pop",
         label: "Pop the latest stash",
         icon: CornerUpLeft,
+        group: "Working tree",
         disabled: stashCount === 0 || !!busy,
         run: () =>
           void run("Stash popped", () =>
@@ -286,17 +324,12 @@ export function RepoWorkspace({
         key: "tags",
         label: "Push all tags",
         icon: CloudUpload,
+        group: "Remote",
         disabled: !!busy,
         run: () =>
           void run("Pushed tags", () => post<GitResult>("/git/push/tags", {}, { query: q })).catch(
             () => undefined,
           ),
-      },
-      {
-        key: "identity",
-        label: "Who commits here",
-        icon: UserSettings,
-        run: () => setIdentityOpen(true),
       },
     )
   }
@@ -304,18 +337,30 @@ export function RepoWorkspace({
     key: "remotes",
     label: "Remotes",
     icon: LinkIcon,
+    group: "Remote",
     run: () => setRemotesOpen(true),
   })
   more.push({
     key: "worktrees",
     label: "Worktrees",
     icon: SourceBranch,
+    group: "Repository",
     run: () => setWorktreesOpen(true),
   })
+  if (canControl) {
+    more.push({
+      key: "identity",
+      label: "Who commits here",
+      icon: UserSettings,
+      group: "Repository",
+      run: () => setIdentityOpen(true),
+    })
+  }
   more.push({
     key: "recovery",
     label: "Recovery timeline",
     icon: ClockRewind,
+    group: "Repository",
     run: () => setPreview({ kind: "recovery" }),
   })
   if (canControl)
@@ -323,6 +368,7 @@ export function RepoWorkspace({
       key: "rebase",
       label: "Edit local history",
       icon: ClockRewind,
+      group: "Repository",
       disabled: !!busy || !!status.data?.operation,
       run: () => setPreview({ kind: "rebase" }),
     })
@@ -330,8 +376,18 @@ export function RepoWorkspace({
     key: "files",
     label: "Open in Files",
     icon: FolderOpen,
+    group: "Repository",
     run: () => router.push(`/files?path=${encodeURIComponent(repo.path)}`),
   })
+  if (can("terminal")) {
+    more.push({
+      key: "shell",
+      label: "Open a shell here",
+      icon: Terminal,
+      group: "Repository",
+      run: () => router.push(`/terminal?cwd=${encodeURIComponent(repo.path)}`),
+    })
+  }
   for (const item of [
     {
       kind: "forge" as const,
@@ -354,14 +410,28 @@ export function RepoWorkspace({
       key: item.kind,
       label: item.label,
       icon: SourceBranch,
+      group: "Wired to",
       run: () => setPreview({ kind: item.kind }),
     })
-  if (can("terminal")) {
+  if (canDestruct) {
+    if (repo.worktree && repo.main) {
+      const main = repo.main
+      more.push({
+        key: "remove-worktree",
+        label: "Remove this worktree",
+        icon: SourceBranch,
+        group: "Remove",
+        danger: true,
+        run: () => removal.removeWorktree({ ...repo, ...head }, main),
+      })
+    }
     more.push({
-      key: "shell",
-      label: "Open a shell here",
-      icon: Terminal,
-      run: () => router.push(`/terminal?cwd=${encodeURIComponent(repo.path)}`),
+      key: "delete",
+      label: "Delete from server…",
+      icon: Trash,
+      group: "Remove",
+      danger: true,
+      run: () => removal.deleteCheckout({ ...repo, ...head }),
     })
   }
 
@@ -472,13 +542,20 @@ export function RepoWorkspace({
           style={{ "--jd-tree": `${treePx}px`, "--jd-work": `${workPx}px` } as React.CSSProperties}
           className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border bg-card"
         >
-          <PaneHeader className="gap-2 px-2">
+          {/* The strip, left to right in the order it is read: which
+            repository, then where HEAD is, then the three verbs pressed every
+            hour as one group, then the menu of everything else in the same
+            face, and — across a rule — who those verbs act as. The menu and
+            the account were ghosts between outlined buttons, and with nothing
+            lifting any more they read as loose labels in the middle of the
+            strip; every control here now shares one height and one face. */}
+          <PaneHeader className="h-auto min-h-12 flex-wrap gap-x-2 gap-y-1.5 px-2 py-1.5">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  size="sm"
+                  size="icon-sm"
                   variant="ghost"
-                  className="size-7 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
                   aria-label="Back to repositories"
                   onClick={onBack}
                 >
@@ -487,135 +564,191 @@ export function RepoWorkspace({
               </TooltipTrigger>
               <TooltipContent>Back to all repositories</TooltipContent>
             </Tooltip>
-            <div className="min-w-0">
-              <p className="truncate text-body font-medium" title={repo.path}>
-                {repo.name}
+            <RepoMark repo={repo} size="sm" />
+            <div className="min-w-0 shrink">
+              <p className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-body font-semibold" title={repo.path}>
+                  {repo.name}
+                </span>
+                {repo.worktree && <Tag className="shrink-0">worktree</Tag>}
               </p>
-              <p className="truncate font-mono text-micro text-muted-foreground" title={repo.path}>
-                {repo.path}
+              <p className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
+                {forge && forgeMark && (
+                  <>
+                    <ProductGlyph id={forgeMark} className="size-3" />
+                    {forge.url ? (
+                      <a
+                        href={forge.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="max-w-[14rem] truncate text-foreground/75 hover:text-foreground hover:underline"
+                      >
+                        {forge.slug}
+                      </a>
+                    ) : (
+                      <span className="max-w-[14rem] truncate">{forge.slug}</span>
+                    )}
+                    <span aria-hidden>·</span>
+                  </>
+                )}
+                {repo.worktree && repo.main ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
+                    className="truncate font-mono hover:text-foreground hover:underline"
+                    title={`Open the main checkout at ${repo.main}`}
+                  >
+                    worktree of {repo.main}
+                  </button>
+                ) : (
+                  <span className="truncate font-mono" title={repo.path}>
+                    {repo.path}
+                  </span>
+                )}
               </p>
             </div>
 
-            <span className="flex-1" />
+            <span className="min-w-2 flex-1" />
 
-            {/* Where HEAD is. The branch is a button into the Branches tab; the
-              line under it says what it tracks, because "will this push go
-              where I think" is decided by that and nowhere else. */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => pick("branches")}
-                  className="flex min-w-0 shrink items-center gap-1.5 text-left focus-ring-inset"
-                >
-                  <SourceBranch
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+              {/* Where HEAD is: a button into Branches, carrying how far it has
+                drifted. What it tracks is the tooltip, because "will this push
+                go where I think" is decided there and nowhere else. */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => pick("branches")}
                     className={cn(
-                      "size-3.5 shrink-0",
-                      head.detached ? "text-destructive" : "text-muted-foreground",
+                      "max-w-[18rem] min-w-0 gap-1.5 px-2.5",
+                      head.detached && "text-destructive",
                     )}
-                  />
-                  <span className="min-w-0">
-                    <span
+                  >
+                    <SourceBranch
                       className={cn(
-                        "block max-w-[14rem] truncate font-mono text-xs font-medium",
-                        head.detached && "text-destructive",
+                        "size-3.5",
+                        head.detached ? "text-destructive" : "text-muted-foreground",
                       )}
-                    >
+                    />
+                    <span className="min-w-0 truncate font-mono text-xs">
                       {branchLabel(head.branch, head.detached)}
                     </span>
-                    <span className="hidden max-w-[14rem] truncate text-micro text-muted-foreground sm:block">
-                      {head.empty
-                        ? "no commits yet"
-                        : head.detached
-                          ? "detached HEAD"
-                          : head.gone
-                            ? `${head.upstream} is gone`
-                            : head.upstream
-                              ? `tracks ${head.upstream}`
-                              : "no upstream — push publishes it"}
-                    </span>
-                  </span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {head.detached
-                  ? "HEAD is detached — switch or manage branches"
-                  : "Switch or manage branches"}
-              </TooltipContent>
-            </Tooltip>
-            {head.detached && <Tag tone="danger">detached</Tag>}
-            {head.gone && <Tag tone="danger">upstream gone</Tag>}
-            <AheadBehind ahead={head.ahead} behind={head.behind} />
+                    {head.detached && <Tag tone="danger">detached</Tag>}
+                    {head.gone && <Tag tone="danger">gone</Tag>}
+                    <AheadBehind ahead={head.ahead} behind={head.behind} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {head.empty
+                    ? "No commits yet"
+                    : head.detached
+                      ? "HEAD is detached — switch or manage branches"
+                      : head.gone
+                        ? `${head.upstream} is gone — switch or manage branches`
+                        : head.upstream
+                          ? `Tracks ${head.upstream} — switch or manage branches`
+                          : "No upstream yet — push publishes it"}
+                </TooltipContent>
+              </Tooltip>
 
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!!busy}
-                  pending={busy === "Fetched"}
-                  onClick={() =>
-                    void run("Fetched", () =>
-                      post<GitResult>("/git/fetch", undefined, { query: { ...q, prune: true } }),
-                    ).catch(() => undefined)
-                  }
-                >
-                  <RefreshClockwise className="size-4" />
-                  <span className="hidden md:inline">Fetch</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                Check the remote for new commits without changing your files
-              </TooltipContent>
-            </Tooltip>
-            {canControl && (
-              <>
+              {/* Fetch, pull and push as one control: three verbs on one
+                remote, read as a set. Push keeps the command face — it is
+                the one that sends anything anywhere. */}
+              <div
+                role="group"
+                aria-label="Sync with the remote"
+                className="flex h-8 items-stretch overflow-hidden rounded-md border border-input bg-control"
+              >
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       size="sm"
-                      variant="outline"
+                      variant="ghost"
+                      className="h-full rounded-none px-2.5"
                       disabled={!!busy}
-                      pending={busy === "Pulled"}
+                      pending={busy === "Fetched"}
                       onClick={() =>
-                        void run("Pulled", () =>
-                          post<GitResult>("/git/pull", undefined, { query: q }),
+                        void run("Fetched", () =>
+                          post<GitResult>("/git/fetch", undefined, {
+                            query: { ...q, prune: true },
+                          }),
                         ).catch(() => undefined)
                       }
                     >
-                      <ChevronDoubleDown className="size-4" />
-                      <span className="hidden md:inline">Pull</span>
-                      {head.behind > 0 && <ChipCount>{head.behind}</ChipCount>}
+                      <RefreshClockwise className="size-4" />
+                      <span className="hidden md:inline">Fetch</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent>
-                    Bring the latest committed changes down from the remote (fast-forward only)
+                    Check the remote for new commits without changing your files
                   </TooltipContent>
                 </Tooltip>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      size="sm"
-                      disabled={!!busy}
-                      pending={busy === "Pushed"}
-                      onClick={() =>
-                        void run("Pushed", () =>
-                          post<GitResult>("/git/push", undefined, { query: q }),
-                        ).catch(() => undefined)
-                      }
-                    >
-                      <ChevronDoubleUp className="size-4" />
-                      <span className="hidden md:inline">Push</span>
-                      {head.ahead > 0 && <ChipCount>{head.ahead}</ChipCount>}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Send your committed changes up to the remote</TooltipContent>
-                </Tooltip>
-              </>
-            )}
-            <VerbMenu verbs={more} label="More git actions" />
-            <GitHubAccountControl repoPath={repo.path} status={github} compact />
-            <GitHelp />
+                {canControl && (
+                  <>
+                    <span aria-hidden className="w-px bg-input" />
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-full rounded-none px-2.5"
+                          disabled={!!busy}
+                          pending={busy === "Pulled"}
+                          onClick={() =>
+                            void run("Pulled", () =>
+                              post<GitResult>("/git/pull", undefined, { query: q }),
+                            ).catch(() => undefined)
+                          }
+                        >
+                          <ChevronDoubleDown className="size-4" />
+                          <span className="hidden md:inline">Pull</span>
+                          {head.behind > 0 && <ChipCount>{head.behind}</ChipCount>}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        Bring the latest committed changes down from the remote (fast-forward only)
+                      </TooltipContent>
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="sm"
+                          className="h-full rounded-none px-2.5"
+                          disabled={!!busy}
+                          pending={busy === "Pushed"}
+                          onClick={() =>
+                            void run("Pushed", () =>
+                              post<GitResult>("/git/push", undefined, { query: q }),
+                            ).catch(() => undefined)
+                          }
+                        >
+                          <ChevronDoubleUp className="size-4" />
+                          <span className="hidden md:inline">Push</span>
+                          {head.ahead > 0 && <ChipCount>{head.ahead}</ChipCount>}
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Send your committed changes up to the remote</TooltipContent>
+                    </Tooltip>
+                  </>
+                )}
+              </div>
+
+              <VerbMenu
+                verbs={more}
+                label="More git actions"
+                trigger={
+                  <Button size="icon-sm" variant="outline" aria-label="More git actions">
+                    <MoreHorizontal className="size-4" />
+                  </Button>
+                }
+              />
+
+              <span aria-hidden className="mx-0.5 hidden h-5 w-px bg-hairline sm:block" />
+
+              <GitHubAccountControl repoPath={repo.path} status={github} compact />
+              <GitHelp compact />
+            </div>
           </PaneHeader>
 
           {/* The three columns. Side by side they share the frame's height and
@@ -658,18 +791,44 @@ export function RepoWorkspace({
 
             <div className="relative flex h-[30rem] shrink-0 flex-col border-b border-hairline lg:h-auto lg:min-h-0 lg:w-(--jd-work) lg:border-r lg:border-b-0">
               <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1">
-                <TabButton active={shown === "changes"} onClick={() => pick("changes")}>
+                <TabButton
+                  active={shown === "changes"}
+                  onClick={() => pick("changes")}
+                  icon={<Pencil />}
+                >
                   Changes
-                  {changeCount > 0 && <ChipCount>{changeCount}</ChipCount>}
+                  {changeCount > 0 && (
+                    <ChipCount className="text-(--git-modified) opacity-100">
+                      {changeCount}
+                    </ChipCount>
+                  )}
                 </TabButton>
-                <TabButton active={shown === "history"} onClick={() => pick("history")}>
+                <TabButton
+                  active={shown === "history"}
+                  onClick={() => pick("history")}
+                  icon={<SourceCommit />}
+                >
                   History
                 </TabButton>
-                <TabButton active={shown === "branches"} onClick={() => pick("branches")}>
+                <TabButton
+                  active={shown === "branches"}
+                  onClick={() => pick("branches")}
+                  icon={<SourceBranch />}
+                >
                   Branches
                 </TabButton>
-                <TabButton active={shown === "github"} onClick={() => pick("github")}>
+                <TabButton
+                  active={shown === "github"}
+                  onClick={() => pick("github")}
+                  icon={<GitHubMark />}
+                >
                   GitHub
+                  {openPulls > 0 && (
+                    <ChipCount className="inline-flex items-center gap-0.5 text-(--pull-open) opacity-100">
+                      <SourcePull aria-hidden className="size-3" />
+                      {openPulls}
+                    </ChipCount>
+                  )}
                 </TabButton>
                 <span className="flex-1" />
                 {shown === "changes" && (
@@ -757,6 +916,7 @@ export function RepoWorkspace({
                   repoPath={repo.path}
                   branch={branch}
                   github={github.data}
+                  summary={pullSummary}
                   busy={busy}
                   canControl={canControl}
                   canAdmin={can("system.admin")}
@@ -805,6 +965,23 @@ export function RepoWorkspace({
           canTerminal={can("terminal")}
           confirm={confirm}
           onChanged={onChanged}
+          onDelete={(tree) =>
+            removal.deleteCheckout({
+              path: tree.path,
+              name: tree.path.split("/").pop() ?? tree.path,
+              branch: tree.branch,
+              dirty: false,
+              changes: 0,
+              staged: 0,
+              untracked: 0,
+              conflicts: 0,
+              ahead: 0,
+              behind: 0,
+              detached: !tree.branch,
+              worktree: true,
+              main: repo.path,
+            })
+          }
         />
         <RemotesDialog
           open={remotesOpen}
@@ -823,6 +1000,7 @@ export function RepoWorkspace({
           onSaved={onChanged}
         />
         {dialog}
+        {removal.dialog}
       </Page>
     </Workspace>
   )
@@ -851,13 +1029,21 @@ function previewKey(p: GitPreview | null): string | undefined {
   }
 }
 
+/**
+ * A tab of the middle column, with the glyph of what it holds — the edit
+ * pencil, the commit on its line, the branch, GitHub's own mark — in the
+ * location blue while it is the one open (§3), so four words in one grey are
+ * found by their marks before they are read.
+ */
 function TabButton({
   active,
   onClick,
+  icon,
   children,
 }: {
   active: boolean
   onClick: () => void
+  icon: React.ReactNode
   children: React.ReactNode
 }) {
   return (
@@ -866,8 +1052,14 @@ function TabButton({
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={tabClasses(active, "h-9")}
+      className={tabClasses(active, "h-9 gap-1.5")}
     >
+      <span
+        aria-hidden
+        className={cn("flex [&_svg]:size-3.5", active ? "text-brand" : "text-muted-foreground")}
+      >
+        {icon}
+      </span>
       {children}
     </button>
   )

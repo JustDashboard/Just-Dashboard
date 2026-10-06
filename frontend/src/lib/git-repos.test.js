@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { assignPulls, parseRemote, shelve } from "./git-repos"
+import {
+  assignPulls,
+  forgeRepository,
+  parseRemote,
+  shelve,
+  splitWorktrees,
+  worktreePlace,
+} from "./git-repos"
 
 const repo = (over) => ({
   path: "/srv/app",
@@ -65,7 +72,12 @@ describe("shelving checkouts", () => {
       repo({ path: "/srv/lib", name: "lib", remote: "git@github.com:acme/lib.git" }),
       repo({ path: "/srv/site", name: "site", remote: "https://github.com/wayy01/site.git" }),
       repo({ path: "/srv/local", name: "local" }),
-      repo({ path: "/srv/app", name: "app", remote: "https://github.com/acme/app.git", dirty: true }),
+      repo({
+        path: "/srv/app",
+        name: "app",
+        remote: "https://github.com/acme/app.git",
+        dirty: true,
+      }),
     ])
     expect(shelves.map((s) => [s.label, s.repos.map((r) => r.name)])).toEqual([
       ["acme", ["lib", "app"]],
@@ -99,10 +111,13 @@ describe("assigning pull requests to cards", () => {
   test("each request is drawn once: on the checkout on its branch, else the first by path", () => {
     const clone = repo({ path: "/srv/app", branch: "main" })
     const worktree = repo({ path: "/srv/app-docs", branch: "docs/two" })
-    const drawn = assignPulls([worktree, clone], [
-      { path: "/srv/app", repository: "acme/app", pulls, deployments: [] },
-      { path: "/srv/app-docs", repository: "acme/app", pulls, deployments: [] },
-    ])
+    const drawn = assignPulls(
+      [worktree, clone],
+      [
+        { path: "/srv/app", repository: "acme/app", pulls, deployments: [] },
+        { path: "/srv/app-docs", repository: "acme/app", pulls, deployments: [] },
+      ],
+    )
     expect(drawn["/srv/app"].pulls.map((p) => p.number)).toEqual([1])
     expect(drawn["/srv/app-docs"].pulls.map((p) => p.number)).toEqual([2])
   })
@@ -110,10 +125,13 @@ describe("assigning pull requests to cards", () => {
   test("a detached checkout on the branch's commit does not claim it", () => {
     const clone = repo({ path: "/srv/app", branch: "main" })
     const pinned = repo({ path: "/srv/app-pin", branch: "feature/one", detached: true })
-    const drawn = assignPulls([clone, pinned], [
-      { path: "/srv/app", repository: "acme/app", pulls, deployments: [] },
-      { path: "/srv/app-pin", repository: "acme/app", pulls, deployments: [] },
-    ])
+    const drawn = assignPulls(
+      [clone, pinned],
+      [
+        { path: "/srv/app", repository: "acme/app", pulls, deployments: [] },
+        { path: "/srv/app-pin", repository: "acme/app", pulls, deployments: [] },
+      ],
+    )
     expect(drawn["/srv/app"].pulls.map((p) => p.number)).toEqual([1, 2])
     expect(drawn["/srv/app-pin"].pulls).toEqual([])
   })
@@ -121,19 +139,68 @@ describe("assigning pull requests to cards", () => {
   test("a fork is another repository and keeps its own", () => {
     const upstream = repo({ path: "/srv/app" })
     const fork = repo({ path: "/srv/fork" })
-    const drawn = assignPulls([upstream, fork], [
-      { path: "/srv/app", repository: "acme/app", pulls, deployments: [] },
-      { path: "/srv/fork", repository: "wayy01/app", pulls: [pull(9, "x")], deployments: [] },
-    ])
+    const drawn = assignPulls(
+      [upstream, fork],
+      [
+        { path: "/srv/app", repository: "acme/app", pulls, deployments: [] },
+        { path: "/srv/fork", repository: "wayy01/app", pulls: [pull(9, "x")], deployments: [] },
+      ],
+    )
     expect(drawn["/srv/app"].pulls).toHaveLength(2)
     expect(drawn["/srv/fork"].pulls.map((p) => p.number)).toEqual([9])
   })
 
   test("what gh said about a checkout stays with it", () => {
-    const drawn = assignPulls([repo({})], [
-      { path: "/srv/app", repository: "acme/app", pulls: [], deployments: [], error: "not signed in" },
-    ])
+    const drawn = assignPulls(
+      [repo({})],
+      [
+        {
+          path: "/srv/app",
+          repository: "acme/app",
+          pulls: [],
+          deployments: [],
+          error: "not signed in",
+        },
+      ],
+    )
     expect(drawn["/srv/app"].error).toBe("not signed in")
     expect(assignPulls([repo({})], undefined)).toEqual({})
+  })
+})
+
+describe("worktrees in a section of their own", () => {
+  test("a linked worktree leaves the cards and is counted on its repository", () => {
+    const main = repo({ path: "/srv/app" })
+    const linked = repo({ path: "/srv/app/.worktrees/fix", worktree: true, main: "/srv/app" })
+    const other = repo({ path: "/srv/api" })
+    const lost = repo({ path: "/srv/fix", worktree: true, main: "/elsewhere/app" })
+    const { cards, worktrees, counts } = splitWorktrees([main, linked, other, lost])
+    expect(cards.map((r) => r.path)).toEqual(["/srv/app", "/srv/api"])
+    // Grouped by the repository they belong to.
+    expect(worktrees.map((r) => r.path)).toEqual(["/srv/fix", "/srv/app/.worktrees/fix"])
+    expect(counts).toEqual({ "/srv/app": 1, "/elsewhere/app": 1 })
+  })
+
+  test("a worktree's place is said from its main checkout", () => {
+    expect(worktreePlace(repo({ path: "/srv/app/.worktrees/fix" }), "/srv/app")).toBe(
+      ".worktrees/fix",
+    )
+    expect(worktreePlace(repo({ path: "/srv/fix" }), "/srv/app")).toBe("/srv/fix")
+  })
+})
+
+describe("the repository on its forge", () => {
+  test("a known forge has a page, an unknown one has a name", () => {
+    expect(forgeRepository("git@github.com:Wayy01/api.git")).toEqual({
+      host: "github.com",
+      slug: "Wayy01/api",
+      url: "https://github.com/Wayy01/api",
+    })
+    expect(forgeRepository("https://git.example.com/team/api.git")).toEqual({
+      host: "git.example.com",
+      slug: "team/api",
+      url: undefined,
+    })
+    expect(forgeRepository("/srv/bare.git")).toBeUndefined()
   })
 })

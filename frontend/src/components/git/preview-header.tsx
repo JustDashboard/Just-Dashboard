@@ -9,18 +9,22 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 export function PreviewHeader({
   title,
   subtitle,
+  leading,
   trailing,
   mono = true,
   onClose,
 }: {
   title: string
   subtitle?: React.ReactNode
+  /** A mark before the title: a pull request's state, in its colour. */
+  leading?: React.ReactNode
   trailing?: React.ReactNode
   mono?: boolean
   onClose: () => void
 }) {
   return (
     <PaneHeader className="gap-2 px-3">
+      {leading}
       <div className="min-w-0 flex-1">
         <p className={cn("truncate text-body font-medium", mono && "font-mono")} title={title}>
           {title}

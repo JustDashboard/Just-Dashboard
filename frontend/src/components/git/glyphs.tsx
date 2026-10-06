@@ -2,6 +2,7 @@
 
 import { forwardRef, type Ref } from "react"
 import {
+  mdiRecordCircleOutline,
   mdiSourceBranch,
   mdiSourceCommit,
   mdiSourceFork,
@@ -12,7 +13,7 @@ import {
 import type { Icon, IconProps } from "@/components/icons"
 
 /**
- * The six glyphs git has and a general UI set does not.
+ * The glyphs git and its forges have and a general UI set does not.
  *
  * `icons.tsx` says it plainly: Heroicons "has no floppy disk, no git branch,
  * no sidebar", so `GitBranch` there is the share glyph, `GitCommit` is a hash
@@ -56,3 +57,5 @@ export const SourcePull: Icon = mdi(mdiSourcePull, "SourcePull")
 export const SourceRepository: Icon = mdi(mdiSourceRepository, "SourceRepository")
 /** A fork: the topology view of every branch at once. */
 export const SourceFork: Icon = mdi(mdiSourceFork, "SourceFork")
+/** An open issue: the ringed dot a forge prints in front of one. */
+export const IssueMark: Icon = mdi(mdiRecordCircleOutline, "IssueMark")

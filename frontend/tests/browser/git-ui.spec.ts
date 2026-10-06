@@ -242,12 +242,12 @@ test("the list answers what is waiting before the rows are read", async ({ page 
  *
  * The pull requests used to live one click and a tab away, inside the
  * workspace, where the question the list page is opened with — is anything
- * waiting — could not see them. Now a card carries the first of them, a choice
- * of its own that opens the checkout *on* that request in one history entry,
- * and counts the rest. The foot must not disturb what the card already
- * promised: the repository's name is still the only button called that, and
- * the card is the height of every other card — three requests stacked on one
- * used to stretch its whole shelf into empty space.
+ * waiting — could not see them. Now a card carries the first of them, in its
+ * state's colour and a choice of its own that opens the checkout *on* that
+ * request in one history entry, and counts the rest. The foot must not
+ * disturb what the card already promised: the repository's name is still the
+ * only button called that, and the card is the height of every other card —
+ * a list of requests or worktrees inside one stretched its whole row.
  */
 test("open pull requests sit on the card and open the checkout on them", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -332,6 +332,160 @@ test("open pull requests sit on the card and open the checkout on them", async (
   await page.goBack()
   await expect(page).toHaveURL(/\/git$/)
   await expect(page.getByRole("button", { name: "Open pull request #12" })).toBeVisible()
+})
+
+/**
+ * Worktrees are a section of their own, and taking a checkout off the
+ * server says what is lost before it asks for the name.
+ *
+ * Worktrees were cards of their own beside their main checkout, reading as a
+ * second repository with the first one's name; inside the card, a long list
+ * stretched every card in its row. The card counts them and the section lists
+ * them, each naming its repository, each with its removal. Deleting a repository's folder is the one act on this page
+ * that cannot be undone, so the dialog counts what exists only on this disk
+ * from the server's own answer and the request carries the typed name.
+ */
+test("worktrees are listed apart from the cards and checkouts are removed knowingly", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const tree = {
+    ...app,
+    path: "/srv/app/.worktrees/fix-login",
+    name: "fix-login",
+    branch: "fix/login",
+    dirty: false,
+    changes: 0,
+    staged: 0,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    worktree: true,
+    main: "/srv/app",
+    languages: [{ name: "Go", share: 0.7 }],
+  }
+  const withLanguages = {
+    ...app,
+    languages: [
+      { name: "Go", share: 0.6 },
+      { name: "TypeScript", share: 0.4 },
+    ],
+  }
+  const posted: { path: string; query: string; body: unknown; confirm?: string }[] = []
+  await page.route("**/api/v1/**", async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
+    if (req.method() === "POST") {
+      posted.push({
+        path,
+        query: url.searchParams.toString(),
+        body: req.postDataJSON(),
+        confirm: req.headers()["x-confirm"],
+      })
+      return json(route, { command: "git", output: "", ok: true, path: "/srv/lib", removed: true })
+    }
+    switch (path) {
+      case "/auth/session":
+        return json(route, user)
+      case "/git/":
+        return json(route, { available: true, repos: [withLanguages, tree, lib] })
+      case "/git/pull-requests":
+        return json(route, { available: true, repos: [] })
+      case "/git/github/":
+        return json(route, { available: true, account: { loggedIn: false, gitConfigured: false } })
+      case "/git/removal":
+        return json(
+          route,
+          url.searchParams.get("path") === "/srv/lib"
+            ? {
+                path: "/srv/lib",
+                name: "lib",
+                worktrees: [],
+                nested: [],
+                changes: 2,
+                untracked: 1,
+                conflicts: 0,
+                stashes: 1,
+                unpushed: 3,
+                localBranches: [{ name: "spike", unpushed: 3 }],
+                remotes: 0,
+              }
+            : {
+                path: "/srv/app",
+                name: "app",
+                worktrees: [{ path: tree.path, branch: "fix/login", dirty: false }],
+                nested: [],
+                changes: 0,
+                untracked: 0,
+                conflicts: 0,
+                stashes: 0,
+                unpushed: 0,
+                localBranches: [],
+                remotes: 1,
+                protected: "1 worktree is still attached: /srv/app/.worktrees/fix-login",
+              },
+        )
+    }
+    return json(route, [])
+  })
+  await page.goto("/git")
+
+  // One card for the repository, counting its worktree; the worktree is a
+  // row of the Worktrees section naming the repository, and the cards keep
+  // one height. The language strip says what the repository is made of.
+  await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "fix-login", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "1 worktree" })).toBeVisible()
+  const trees = page.getByRole("list", { name: "Worktrees" })
+  await expect(
+    trees.getByRole("button", { name: "Open the worktree on fix/login", exact: true }),
+  ).toBeVisible()
+  await expect(trees).toContainText("app")
+  await expect(trees).toContainText(".worktrees/fix-login")
+  await expect(page.getByRole("img", { name: "Go 60%, TypeScript 40%" })).toBeVisible()
+  const heights = await page
+    .locator("[data-workspace-item='/srv/app'], [data-workspace-item='/srv/lib']")
+    .evaluateAll((lis) => lis.map((li) => Math.round(li.getBoundingClientRect().height)))
+  expect(new Set(heights).size).toBe(1)
+  // The chip shows the section alone.
+  await page.getByRole("button", { name: "Worktrees 1" }).click()
+  await expect(page.getByRole("button", { name: "app", exact: true })).toHaveCount(0)
+  await expect(trees).toBeVisible()
+  await page.getByRole("button", { name: /^All/ }).click()
+
+  // A clean worktree is removed with an ordinary confirmation, against the
+  // repository it belongs to.
+  await trees.getByRole("button", { name: "Remove the worktree on fix/login" }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Remove worktree" }).click()
+  await expect
+    .poll(() => posted.find((p) => p.path === "/git/worktree/remove"))
+    .toMatchObject({ query: "path=%2Fsrv%2Fapp", body: { path: tree.path } })
+
+  // A repository with a worktree attached cannot be deleted under it: the
+  // dialog offers to remove the worktree first instead of asking for a name.
+  await page.getByRole("button", { name: "More for app" }).click()
+  await page.getByRole("menuitem", { name: /Delete from server/ }).click()
+  const blocked = page.getByRole("dialog")
+  await expect(blocked).toContainText("app cannot be deleted yet")
+  await expect(blocked).toContainText(tree.path)
+  await blocked.getByRole("button", { name: "Close" }).first().click()
+
+  // Deleting says what exists only here, and the button waits for the name.
+  await page.getByRole("button", { name: "More for lib" }).click()
+  await page.getByRole("menuitem", { name: /Delete from server/ }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog).toContainText("No remote")
+  await expect(dialog).toContainText("2 uncommitted changes")
+  await expect(dialog).toContainText("3 commits pushed nowhere")
+  await expect(dialog).toContainText("1 stash")
+  const go = dialog.getByRole("button", { name: "Delete forever" })
+  await expect(go).toBeDisabled()
+  await dialog.getByRole("textbox").fill("lib")
+  await go.click()
+  await expect
+    .poll(() => posted.find((p) => p.path === "/git/repository/delete"))
+    .toMatchObject({ body: { path: "/srv/lib" }, confirm: "lib" })
 })
 
 test("a file staged and edited again is listed on both sides", async ({ page }) => {

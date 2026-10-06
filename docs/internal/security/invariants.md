@@ -127,7 +127,7 @@ setting off would strand everyone who was mid-flow with a session that can never
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for four deletion operations:
+Typed confirmation is reserved for five deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -137,6 +137,12 @@ Typed confirmation is reserved for four deletion operations:
 - Removing a managed Compose stack from an archived deployment's removal plan requires that stack's
   name. The same plan presents volumes, paths, containers, and other managed resources with ordinary
   confirmation.
+- Deleting a Git checkout from the server (`POST /git/repository/delete`) requires the checkout's
+  directory name, because the uncommitted files, stashes and unpushed branches it holds exist nowhere
+  else. Its preview (`GET /git/removal`) counts them first, and a root, the dashboard's own install,
+  a repository with worktrees or other checkouts inside it, and a locked worktree are refused before
+  the phrase is asked for. Removing a clean linked worktree through `/git/worktree/remove`, deleting a
+  branch, and every other Git deletion keep ordinary confirmation.
 
 These are the only places the UI asks the operator to type a phrase. Other destructive operations,
 including table and collection deletion, data restores, Docker volume removal and pruning, account and
@@ -154,7 +160,7 @@ beside `total`, which is what its confirmation has to show. The Redis console's 
 like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
 is where an operator types the statement itself.
 
-The server enforces the four phrases inside their handlers. The browser sends an
+The server enforces the five phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers

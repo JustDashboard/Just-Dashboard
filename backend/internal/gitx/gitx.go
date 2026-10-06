@@ -86,6 +86,9 @@ func validatePath(file string) error {
 type Service struct {
 	roots     []string
 	mutations sync.Map
+	// languages caches each checkout's language shares by the HEAD they were
+	// measured at (languageCache).
+	languages sync.Map
 }
 
 // Lock serializes dashboard mutations of one checkout. Git's own index locks
@@ -198,6 +201,15 @@ type Repo struct {
 	// Empty is a repository with no commits yet: HEAD names a branch that has
 	// nothing on it.
 	Empty bool `json:"empty,omitempty"`
+	// Worktree is a linked worktree: a second checkout of another
+	// repository, sharing its objects and refs. Main is that repository's
+	// main checkout, when it has one (a bare repository's worktrees do not).
+	Worktree bool   `json:"worktree,omitempty"`
+	Main     string `json:"main,omitempty"`
+	// Languages is what the tracked files are written in, largest share
+	// first. Only the list reads it (Discover); a single checkout's status
+	// does not pay for it.
+	Languages []Language `json:"languages,omitempty"`
 }
 
 // Discover walks the configured roots looking for working trees.
@@ -207,6 +219,11 @@ type Repo struct {
 // walk unusably slow on a real server. A `.git` *file* counts as much as a
 // `.git` directory: that is what a linked worktree and a submodule checkout
 // carry, and both are repositories an operator works in.
+//
+// Hidden directories are skipped, and that is where worktrees usually live —
+// `.worktrees/<task>`, `.claude/worktrees/<task>` — so every checkout found
+// also contributes the linked worktrees its repository records
+// (attachedWorktrees), wherever under the roots they are.
 func (s *Service) Discover(ctx context.Context) ([]Repo, error) {
 	if !s.Available() {
 		return nil, ErrNotInstalled
@@ -253,6 +270,25 @@ func (s *Service) Discover(ctx context.Context) ([]Repo, error) {
 			return nil
 		})
 	}
+	// A worktree the walk also reached under another spelling of the same
+	// directory (a symlinked root) is the same checkout, so the linked ones
+	// are compared by their resolved paths.
+	resolved := map[string]bool{}
+	for _, repo := range found {
+		if real, err := filepath.EvalSymlinks(repo); err == nil {
+			resolved[real] = true
+		}
+	}
+	for _, repo := range append([]string(nil), found...) {
+		for _, linked := range attachedWorktrees(repo) {
+			real, err := filepath.EvalSymlinks(linked)
+			if err != nil || resolved[real] || !s.within(real) {
+				continue
+			}
+			resolved[real] = true
+			record(linked)
+		}
+	}
 	sort.Strings(found)
 
 	// A summary uses several git invocations, and a server with thirty
@@ -269,6 +305,7 @@ func (s *Service) Discover(ctx context.Context) ([]Repo, error) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			if r, err := s.Summary(ctx, path); err == nil {
+				r.Languages = s.Languages(ctx, path, r.Head)
 				repos[i] = r
 			}
 		}(i, path)
@@ -306,6 +343,7 @@ func (s *Service) Toplevel(ctx context.Context, path string) (string, error) {
 // Summary reads the cheap facts about one repository.
 func (s *Service) Summary(ctx context.Context, path string) (*Repo, error) {
 	r := &Repo{Path: path, Name: filepath.Base(path)}
+	r.Worktree, r.Main, _ = linkedWorktree(path)
 
 	// symbolic-ref answers with the branch HEAD is on even before the first
 	// commit exists, where rev-parse has nothing to abbreviate; it fails only

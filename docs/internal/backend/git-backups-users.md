@@ -8,8 +8,26 @@ navigation interactions are specified in [workspace interactions](../frontend/wo
 
 `internal/gitx` discovers repositories at most five levels below `JD_GIT_ROOTS`, skips generated and
 hidden trees, and stops descending once it finds `.git` — a `.git` *file* counts as much as a directory,
-because that is what a linked worktree and a submodule checkout carry. Summaries are read four at a time,
-so a server with thirty checkouts answers the list inside its poll interval. `Resolve` cleans and
+because that is what a linked worktree and a submodule checkout carry. Hidden directories are where
+worktrees usually live (`.worktrees/<task>`, `.claude/worktrees/<task>`), so every checkout found also
+contributes the linked worktrees its repository records, read from `.git/worktrees/*/gitdir` without a
+git process: those whose checkout still exists and resolves inside the roots are added, compared by
+resolved path so a symlinked root does not list one twice, and a worktree whose directory is gone (what
+`git worktree prune` would clear) is left out. Summaries are read four at a time, so a server with
+thirty checkouts answers the list inside its poll interval.
+
+A summary says whether the checkout is a linked worktree (`worktree`) and, when it is, the main
+checkout it belongs to (`main`), from the files git keeps: a `.git` file whose git directory holds a
+`commondir` is a worktree, while a submodule's `.git/modules/<name>` has none; the main checkout is the
+directory holding the common `.git` (a bare repository's worktrees have none). The list alone also
+carries `languages` — at most six `{name, share}` pairs, largest first, measured by the bytes of tracked
+files (`git ls-files` and a stat each, the first 50,000 files) in the languages the page has a mark
+for, by extension and by `Dockerfile`'s name. Vendored and generated paths (`node_modules/`,
+`vendor/`, `third_party/`, `dist/`, `build/`, minified `.js` and `.css`) and prose, data and
+configuration (Markdown, JSON, YAML, lockfiles, images) are left out as Linguist leaves them out of a
+repository's language bar; a language under one per cent is dropped unless it is the only one, and
+shares are rounded down so they never add up past the whole. The answer is cached per checkout against
+the HEAD it was measured at, so the minute's poll re-reads it only after HEAD moves. `Resolve` cleans and
 symlink-resolves every repository path, checks the configured roots, and verifies either a normal `.git`
 directory or worktree file; `ResolveDir` is the containment half alone, for a clone's parent or an
 `init` target that is not a repository yet. Remote URLs are scrubbed before they are returned because
@@ -66,11 +84,30 @@ deletes an untracked one (`clean -fd`); a hard reset may also clean untracked fi
 written into the repository's own config; a clone lands only in a new directory under a root, as the
 root's owner, and `init` starts an existing directory on `main`.
 
+Deleting a checkout from the server starts with `GET /git/removal` (read tier), which answers what the
+delete would lose: `changes`, `untracked`, `conflicts`, `stashes`, `unpushed` (commits on local
+branches no remote-tracking ref reaches — with no remote, every commit), `localBranches` (each branch
+holding such commits, its count and upstream, at most 50), `remotes`, the main checkout's linked
+`worktrees` (path, branch, dirty), `nested` checkouts inside its directory (an independent repository
+or another repository's worktree; its own submodules and worktrees are part of it), and `protected` —
+the sentence saying why the delete would be refused. A linked worktree's stashes and branches belong to
+its repository and survive it, so for one only the uncommitted counts are filled. `POST
+/git/repository/delete` (`{path}`, inside `s.destructive`) re-reads the same answer and refuses with
+`409 protected` a configured root itself, the checkout this dashboard was installed from
+(`JD_UPDATE_DIR`) or any directory holding it, a main checkout with linked worktrees still attached
+(they are named), a checkout with other checkouts inside it, and a locked worktree — before it asks for
+the phrase, so nobody types a name for a delete that would not happen. It then requires the typed
+phrase of the checkout's directory name (`428`/`412` without or with the wrong one; invariant 3). A
+linked worktree is removed through its repository — `git worktree remove --force` in the main
+checkout, then `git worktree prune` — so no record of it is left; anything else is deleted from disk.
+It is audited as `git.repository.delete`.
+
 Route capabilities reflect recoverability: reads require `read`; fetch/pull/push (and pushing tags),
 checkout, branch create/rename, merge, revert, cherry-pick, tag create, stash push/pop/apply,
 stage/unstage/commit, identity, adding a remote, clone and init require `service.control`; discard, reset,
-stash drop, and deleting a branch, a remote branch, a tag or a remote pass through `s.destructive`.
-Discard, hard reset, stash drop, and Git deletions use ordinary confirmation. Every mutation lands in
+stash drop, deleting a branch, a remote branch, a tag or a remote, and deleting a checkout pass through
+`s.destructive`. Discard, hard reset, stash drop, and Git deletions use ordinary confirmation; deleting
+a whole checkout is the one Git route that takes a typed phrase. Every mutation lands in
 the audit log as `git.<verb>` with the repository it touched.
 `api/handlers_git_test.go` drives the routes against a real repository and pins the confirmation policy and the
 capability tiers. GitHub authentication, pull requests and workflow runs are detailed in

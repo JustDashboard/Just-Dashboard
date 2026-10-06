@@ -1,7 +1,16 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { ArrowLeftRight, CloudUpload, Cross, GitTag, Pencil, Plus, Trash } from "@/components/icons"
+import {
+  ArrowLeftRight,
+  CloudDownload,
+  CloudUpload,
+  Cross,
+  GitTag,
+  Pencil,
+  Plus,
+  Trash,
+} from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -381,12 +390,33 @@ export function BranchesPanel({
               key={b.name}
               className="group flex min-w-0 items-center gap-2 py-1.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
             >
+              {/* The branch's mark says what it is before its name is read:
+                  the one checked out in the success hue, one whose work is
+                  merged as the merge in the merged hue, one whose upstream is
+                  gone in red. */}
+              {!b.current && b.merged && !b.gone ? (
+                <SourceMerge aria-hidden className="size-4 shrink-0 text-(--pull-merged)" />
+              ) : (
+                <SourceBranch
+                  aria-hidden
+                  className={cn(
+                    "size-4 shrink-0",
+                    b.current
+                      ? "text-success"
+                      : b.gone
+                        ? "text-destructive"
+                        : b.worktree
+                          ? "text-warning"
+                          : "text-muted-foreground",
+                  )}
+                />
+              )}
               <div className="min-w-0 flex-1">
                 <p className="flex min-w-0 items-center gap-1.5">
                   <span
                     className={cn(
                       "truncate font-mono text-xs",
-                      b.current ? "font-medium" : "text-foreground/90",
+                      b.current ? "font-semibold" : "text-foreground/90",
                     )}
                   >
                     {b.name}
@@ -397,14 +427,27 @@ export function BranchesPanel({
                   {b.worktree && <Tag tone="warning">in use</Tag>}
                 </p>
                 <p
-                  className="truncate text-micro text-muted-foreground"
+                  className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground"
                   title={b.worktree ?? b.subject}
                 >
-                  {b.worktree
-                    ? `checked out in ${b.worktree}`
-                    : b.upstream
-                      ? `tracks ${b.upstream}${b.at ? ` · ${relativeTime(b.at)}` : ""}`
-                      : (b.subject ?? "")}
+                  {b.worktree ? (
+                    <span className="truncate">checked out in {b.worktree}</span>
+                  ) : (
+                    <>
+                      {/* Tracking the same name on origin is the normal case
+                          and says nothing; an upstream under another name is
+                          worth the room. */}
+                      {b.upstream && b.upstream !== `origin/${b.name}` && (
+                        <span className="max-w-[50%] min-w-0 truncate font-mono text-foreground/60">
+                          {b.upstream}
+                        </span>
+                      )}
+                      <span className="min-w-0 flex-1 truncate">{b.subject}</span>
+                      {b.at && (
+                        <span className="shrink-0 whitespace-nowrap">{relativeTime(b.at)}</span>
+                      )}
+                    </>
+                  )}
                 </p>
               </div>
               <AheadBehind ahead={b.ahead} behind={b.behind} />
@@ -441,6 +484,7 @@ export function BranchesPanel({
                   key={b.name}
                   className="group flex min-w-0 items-center gap-2 py-1.5 pr-1.5 pl-3 text-muted-foreground transition-colors hover:bg-row-hover"
                 >
+                  <CloudDownload aria-hidden className="size-4 shrink-0 opacity-60" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-mono text-xs">{b.name}</p>
                     {b.subject && (
