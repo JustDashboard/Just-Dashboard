@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect } from "react"
-import { useViewState } from "@/lib/view-state"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream } from "@/hooks/use-metrics"
@@ -17,7 +16,6 @@ import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { status, loading } = useAuth()
   const router = useRouter()
-  const [sidebarOpen, setSidebarOpen] = useViewState("shell.sidebar", true)
 
   // Redirecting here is a convenience, not a security control: every API call
   // behind this shell is independently authenticated by the server.
@@ -35,18 +33,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           provider is also what keeps the poll alive across the moment the
           backend restarts itself during an upgrade. */}
         <SelfUpdateProvider>
-          {/* The rail's collapsed state is controlled from here rather than left
-            to the provider's own `useState`, which starts expanded on every
-            load: a rail collapsed for the width it gives back is collapsed for
-            the same reason on the next visit. */}
           {/* A section whose pages the route cannot name on its own — the
             databases, one deployment — hands the rail its own panel through
             here, so the rail never fetches a thing to draw a list the page
             below it already holds. */}
           <NavScopeProvider>
             <SidebarProvider
-              open={sidebarOpen}
-              onOpenChange={setSidebarOpen}
+              desktopCollapsible={false}
               style={{ "--sidebar-width": "15.5rem" } as React.CSSProperties}
             >
               {/* Owns the metrics socket for the whole shell, so the Overview and
@@ -58,8 +51,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {/* The bar that used to run across the top of every page is gone —
               `components/top-bar.tsx` is still there if it has to come back.
               It carried a breadcrumb every page already states in its own
-              header, and the rail's collapse switch, which now lives in the
-              rail. Below `md` the rail is a sheet with nothing left to open
+              header. Below `md` the rail is a sheet with nothing left to open
               it, so this one strip stays: the trigger, and the name of the
               product it belongs to. */}
                 <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">

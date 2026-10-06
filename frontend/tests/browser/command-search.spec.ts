@@ -8,7 +8,11 @@ const selected = (page: Page) =>
   palette(page).getByRole("listbox").getByRole("option", { selected: true })
 
 async function open(page: Page, key = "Control+k") {
-  await page.getByRole("button", { name: "Toggle the sidebar", exact: true }).focus()
+  const trigger =
+    page.viewportSize()!.width < 768
+      ? page.getByRole("button", { name: "Toggle the sidebar", exact: true })
+      : page.locator('[data-slot="sidebar-header"]').getByRole("button", { name: /Search/ })
+  await trigger.focus()
   await page.keyboard.press(key)
   await expect(input(page)).toBeFocused()
 }
