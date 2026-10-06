@@ -534,7 +534,15 @@ test("the overview reads as readings, findings and how the panel is reached", as
   await expect(identity.getByText("Tailscale only")).toBeVisible()
   await expect(identity.getByText("100.110.34.9", { exact: true })).toBeVisible()
   await expect(identity.getByText("Needs attention")).toBeVisible()
-  await expect(identity).toContainText("7 checks")
+  await expect(identity).toContainText("100.64.0.0/10")
+
+  // The seven checks the verdict is made of: a warning on SSH, a notice on
+  // the firewall, security updates not run, and the rest passed.
+  const checks = page.getByRole("region", { name: "Checks" })
+  await expect(checks).toContainText("4 of 7 checks passed")
+  await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toBeEnabled()
+  await expect(checks.getByRole("button", { name: "Updates: Not checked" })).toBeDisabled()
+  await expect(checks.getByRole("button", { name: "Exposure: Passed" })).toBeDisabled()
 
   // Five tiles, each a destination with a figure read from its own poll.
   // Scoped to the grid: the sidebar and the section strip link to the same
@@ -562,6 +570,29 @@ test("the overview reads as readings, findings and how the panel is reached", as
     /1\s*from the internet/,
   )
   await expect(grid.getByRole("link", { name: "Logins", exact: true })).toContainText("1 session")
+
+  // The ways onto the machine: the internet's through the firewall, fail2ban
+  // and sshd, and this browser's through the allowlist.
+  const ways = page.getByRole("list", { name: "The ways onto this machine" })
+  await expect(ways).toContainText("ufw")
+  await expect(ways).toContainText("deny inbound")
+  await expect(ways).toContainText(":22")
+  await expect(ways).toContainText(":443")
+  await expect(ways).toContainText("2 banned now")
+  await expect(ways).toContainText("SSH accepts passwords")
+  await expect(ways).toContainText("Tailscale only")
+  await expect(ways.locator('img[src="/logos/fail2ban.webp"]')).toHaveCount(1)
+
+  // A check's segment narrows the findings to its area, and lets it go.
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
+  await checks.getByRole("button", { name: "SSH: 1 warning" }).click()
+  await expect(checks.getByRole("button", { name: "SSH: 1 warning" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toHaveCount(0)
+  await page.getByRole("button", { name: "Show every area" }).click()
+  await expect(page.getByRole("button", { name: /The firewall is not logging/ })).toBeVisible()
 
   // The findings, with the remedy the dashboard can carry out as a button.
   // The finding's row, not the SSH tile's hint, which quotes the same title.
@@ -616,6 +647,18 @@ test("the firewall page opens on its defaults and offers the controls that set t
   await expect(page.getByRole("button", { name: "Add rule" })).toBeVisible()
   await expect(page.getByRole("switch", { name: "Firewall enabled" })).toBeChecked()
   await expect(page.getByRole("row").filter({ hasText: "repeat offender" })).toBeVisible()
+
+  // The rules folded by where they lead: each port admitted, and the default
+  // for everything else. The rule list ends on that default as well.
+  const inbound = page.getByRole("list", { name: "How a connection from outside is answered" })
+  await expect(inbound).toContainText("SSH")
+  await expect(inbound).toContainText(":22")
+  await expect(inbound).toContainText("HTTPS")
+  await expect(inbound).toContainText("1 address denied by name")
+  await expect(inbound).toContainText("deny by default")
+  await expect(page.getByRole("row").last()).toContainText("Everything else")
+  await page.getByRole("textbox", { name: "Filter rules" }).fill("offender")
+  await expect(page.getByRole("row").filter({ hasText: "Everything else" })).toHaveCount(0)
 })
 
 test("ssh changes are staged as a page state and applied together", async ({ page }) => {
@@ -623,7 +666,12 @@ test("ssh changes are staged as a page state and applied together", async ({ pag
   await page.goto("/security/ssh")
   await page.waitForLoadState("networkidle")
 
-  await expect(page.locator("[data-slot=stat-grid]")).toContainText("Passwords")
+  // The doors a login can take, drawn from the draft.
+  const doors = page.getByRole("list", { name: "How a login reaches a shell" })
+  await expect(doors).toContainText(":22")
+  await expect(doors).toContainText("accepted — a guessed one is a shell")
+  await expect(doors).toContainText("keys only")
+  await expect(doors).toContainText("2 keys")
   await expect(page.getByText("held by ssh.socket")).toBeVisible()
   await expect(page.getByRole("button", { name: "Test and apply" })).toHaveCount(0)
 
@@ -631,10 +679,18 @@ test("ssh changes are staged as a page state and applied together", async ({ pag
     .getByRole("radiogroup", { name: "Password authentication" })
     .getByRole("radio", { name: "no" })
     .click()
-  await expect(page.getByText("pending", { exact: true })).toBeVisible()
+  await expect(page.getByText("edited", { exact: true })).toBeVisible()
+  await expect(doors.getByText("accepted — a guessed one is a shell")).toHaveCount(0)
+  // The section holding it says so, and the apply bar names what changed.
+  await expect(page.getByText("Edited", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("1 unsaved change", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: /^Edited/ }).click()
+  await expect(page.getByRole("radiogroup", { name: "Password authentication" })).toBeVisible()
+  await expect(page.getByLabel("Attempts per connection")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Test and apply" })).toBeVisible()
   await page.getByRole("button", { name: "Discard" }).click()
   await expect(page.getByRole("button", { name: "Test and apply" })).toHaveCount(0)
+  await expect(doors).toContainText("accepted — a guessed one is a shell")
 })
 
 test("a jail's sheet bans an address by hand and the tuning offers the caller's own", async ({
@@ -768,10 +824,13 @@ test("the ssh page reads its auth log through the lens, the day's counts in its 
   await page.goto("/security/ssh")
   await page.waitForLoadState("networkidle")
 
-  // One grid (§15): the settings' four facts, then what the log says the
-  // last day made of them.
+  // One grid (§15): what the log says the last day made of the doors drawn
+  // above it, whose first line carries the same day's failures.
   await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(1)
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(8)
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(4)
+  await expect(page.getByRole("list", { name: "How a login reaches a shell" })).toContainText(
+    "8 failed attempts today",
+  )
   await expect(tile(page, "Accepted logins")).toContainText("2")
   // Wrong passwords, unknown accounts and a connection that ran out of tries.
   await expect(tile(page, "Failed attempts")).toContainText("8")
