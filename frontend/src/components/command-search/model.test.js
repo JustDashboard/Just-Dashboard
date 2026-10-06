@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   addressIdentity,
+  highlight,
   localDestination,
   parseSearch,
   recentDestinations,
@@ -97,5 +98,21 @@ describe("recent destinations", () => {
       expect(localDestination(href)).toBe(false)
     }
     expect(localDestination("/docker/containers/a%2Fb")).toBe(true)
+  })
+
+  test("highlighting marks word starts, folds accents and ignores the scope prefix", () => {
+    const lit = (title, query) =>
+      highlight(title, query)
+        .filter((run) => run.hit)
+        .map((run) => run.text)
+    expect(lit("shop-stack", "s")).toEqual(["s", "s"])
+    expect(lit("Rösti café", "db: cafe ro")).toEqual(["Rö", "café"])
+    expect(lit("mainshop", "shop")).toEqual(["shop"])
+    expect(lit("api", "zzz")).toEqual([])
+    expect(
+      highlight("api-worker", "work")
+        .map((run) => run.text)
+        .join(""),
+    ).toBe("api-worker")
   })
 })

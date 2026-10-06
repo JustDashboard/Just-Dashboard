@@ -9,7 +9,9 @@ import { SelfUpdateProvider } from "@/hooks/use-self-update"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Logo } from "@/components/logo"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { CommandPaletteProvider } from "@/components/command-palette"
+import { CommandPaletteProvider, useCommandPalette } from "@/components/command-palette"
+import { MagnifyingGlass } from "@/components/icons"
+import { Button } from "@/components/ui/button"
 import { NavScopeProvider } from "@/components/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
@@ -65,6 +67,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
                   <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
                   <Logo />
+                  {/* A phone has no ⌘K and the rail's search field is inside
+                      a closed sheet, so search had no way in at all here. */}
+                  <MobileSearch />
                 </header>
                 {/* The scroll lives here rather than on the document, which lets a
               page ask for the remaining height (`<Page fill>`) instead of
@@ -83,6 +88,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </SelfUpdateProvider>
       </CommandPaletteProvider>
     </WorkspaceCommandsProvider>
+  )
+}
+
+function MobileSearch() {
+  const palette = useCommandPalette()
+  return (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label="Search"
+      className="ml-auto text-muted-foreground"
+      onClick={palette.open}
+    >
+      <MagnifyingGlass className="size-4" />
+    </Button>
   )
 }
 

@@ -137,8 +137,8 @@ export function Modal({
 }
 
 /**
- * The other centred surface: a search overlay whose own input *is* its header —
- * the command palette, the file quick-open.
+ * The other dialog surface: a search overlay whose own input *is* its header —
+ * the command palette.
  *
  * It has no title strip because the box you type into is the title, and no
  * close button because Escape and a click outside are the only ways anyone
@@ -169,8 +169,15 @@ export function PaletteModal({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
+      {/* Hung from a fixed line near the top rather than centred: centred, the
+          dialog re-centred on every keystroke as the results grew and shrank,
+          and the input being typed into jumped up and down the screen. On a
+          phone the line is the top, clear of the keyboard that rises under it. */}
       <DialogContent
-        className={cn("gap-0 overflow-hidden rounded-xl p-0 sm:max-w-2xl", className)}
+        className={cn(
+          "top-4 max-h-[calc(100svh-2rem)] translate-y-0 gap-0 overflow-hidden rounded-xl p-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 sm:top-[12svh] sm:max-h-[calc(88svh-2rem)] sm:max-w-2xl",
+          className,
+        )}
         showCloseButton={false}
         onEscapeKeyDown={onEscapeKeyDown}
         onCloseAutoFocus={onCloseAutoFocus}

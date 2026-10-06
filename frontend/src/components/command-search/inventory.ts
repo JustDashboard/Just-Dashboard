@@ -11,6 +11,14 @@ import type {
   SystemdUnit,
   VHost,
 } from "@/lib/types"
+import {
+  containerProduct,
+  hasProductLogo,
+  hostProduct,
+  pm2Product,
+  unitProduct,
+} from "@/components/product-logo"
+import { projectProduct } from "@/components/deploy/vocabulary"
 import { addressIdentity, type SearchItem, type SearchKind } from "./model"
 
 export type InventorySource = {
@@ -21,6 +29,14 @@ export type InventorySource = {
 
 export type InventoryItem = SearchItem & {
   connection?: Pick<DbConnection, "driver" | "broken">
+  /**
+   * The product the resource is, as a key into `public/logos/`: forty rows of
+   * one grey glyph are found by reading, and Postgres, nginx and n8n are found
+   * by their marks before their names are read.
+   */
+  product?: string
+  /** A running state in Docker's, systemd's or PM2's own word, for `Status`. */
+  state?: string
 }
 
 function resource(
@@ -41,6 +57,14 @@ function resource(
   }
 }
 
+/** A product only when there is a mark to draw: a key with no file is a guess. */
+function product(id: string | undefined) {
+  return hasProductLogo(id) ? id : undefined
+}
+
+/** Where a backup is written, when that is somebody's service and not this disk. */
+const BACKUP_TARGETS: Partial<Record<BackupJob["targetKind"], string>> = { b2: "backblaze" }
+
 // Only explicit metadata enters the index. API payloads can contain credentials,
 // scripts and arbitrary content, none of which helps someone find a destination.
 export const INVENTORY_SOURCES: InventorySource[] = [
@@ -49,8 +73,8 @@ export const INVENTORY_SOURCES: InventorySource[] = [
     label: "Projects",
     read: async (signal) => {
       const fleet = await get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal)
-      return (fleet.deployments ?? []).map((project) =>
-        resource(
+      return (fleet.deployments ?? []).map((project) => ({
+        ...resource(
           "project",
           project.id,
           project.name,
@@ -58,15 +82,16 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           addressIdentity(project.endpoint) || project.environmentName,
           [String(project.id), project.environmentName, project.environmentKind, project.health],
         ),
-      )
+        product: product(projectProduct(project)),
+      }))
     },
   },
   {
     kind: "site",
     label: "Domains & sites",
     read: async (signal) =>
-      (await get<VHost[]>("/proxy/vhosts", undefined, signal)).map((site) =>
-        resource(
+      (await get<VHost[]>("/proxy/vhosts", undefined, signal)).map((site) => ({
+        ...resource(
           "site",
           `${site.kind}:${site.path}:${site.name}`,
           site.name,
@@ -74,7 +99,8 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           site.serverNames.join(" · "),
           [...site.serverNames, site.kind, "domain", "proxy"],
         ),
-      ),
+        product: product(site.kind),
+      })),
   },
   {
     kind: "database",
@@ -90,34 +116,38 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           ["open", String(conn.id), conn.host, conn.database, conn.driver, conn.environment],
         ),
         connection: { driver: conn.driver, broken: conn.broken },
+        product: product(conn.flavor) ?? product(conn.driver),
       })),
   },
   {
     kind: "container",
     label: "Containers",
     read: async (signal) =>
-      (await get<Container[]>("/docker/containers/", undefined, signal)).map((container) =>
-        resource(
+      (await get<Container[]>("/docker/containers/", undefined, signal)).map((container) => ({
+        ...resource(
           "container",
           container.id,
           container.name,
           `/docker/containers/${encodeURIComponent(container.id)}`,
-          `${container.state} · ${container.image}`,
+          container.image,
           [
             container.id,
+            container.state,
             container.composeStack ?? "",
             container.composeService ?? "",
             ...container.names,
           ],
         ),
-      ),
+        product: containerProduct(container),
+        state: container.state,
+      })),
   },
   {
     kind: "stack",
     label: "Stacks",
     read: async (signal) =>
-      (await get<ComposeStack[]>("/docker/stacks/", undefined, signal)).map((stack) =>
-        resource(
+      (await get<ComposeStack[]>("/docker/stacks/", undefined, signal)).map((stack) => ({
+        ...resource(
           "stack",
           stack.name,
           stack.name,
@@ -125,7 +155,8 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           stack.summary,
           [stack.workingDir, ...stack.declared],
         ),
-      ),
+        product: "docker-compose",
+      })),
   },
   {
     kind: "repo",
@@ -137,8 +168,8 @@ export const INVENTORY_SOURCES: InventorySource[] = [
         signal,
       )
       if (!inventory.available) return []
-      return inventory.repos.map((repo) =>
-        resource(
+      return inventory.repos.map((repo) => ({
+        ...resource(
           "repo",
           repo.path,
           repo.name,
@@ -146,7 +177,8 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           `${repo.branch} · ${repo.path}`,
           [repo.branch, repo.path],
         ),
-      )
+        product: hostProduct(repo.remote) ?? "git",
+      }))
     },
   },
   {
@@ -159,15 +191,18 @@ export const INVENTORY_SOURCES: InventorySource[] = [
         signal,
       )
       if (!inventory.available) return []
-      return inventory.units.map((unit) =>
-        resource(
+      return inventory.units.map((unit) => ({
+        ...resource(
           "service",
           unit.name,
           unit.name,
           `/processes/services?unit=${encodeURIComponent(unit.name)}`,
-          `${unit.activeState} · ${unit.description}`,
+          unit.description,
+          [unit.activeState],
         ),
-      )
+        product: unitProduct(unit.name),
+        state: unit.activeState,
+      }))
     },
   },
   {
@@ -175,24 +210,26 @@ export const INVENTORY_SOURCES: InventorySource[] = [
     label: "PM2 apps",
     read: async (signal) => {
       const inventory = await get<PM2Inventory>("/pm2/", undefined, signal)
-      return (inventory.processes ?? []).map((app) =>
-        resource(
+      return (inventory.processes ?? []).map((app) => ({
+        ...resource(
           "app",
           `${app.daemonId}:${app.id}`,
           app.name,
           `/processes/pm2?app=${encodeURIComponent(`${app.daemonId}:${app.id}`)}`,
-          `${app.user} · ${app.namespace} · ${app.status}`,
-          [app.daemonId, String(app.id)],
+          `${app.user} · ${app.namespace}`,
+          [app.daemonId, String(app.id), app.status],
         ),
-      )
+        product: pm2Product(app.interpreter) ?? "pm2",
+        state: app.status,
+      }))
     },
   },
   {
     kind: "backup",
     label: "Backups",
     read: async (signal) =>
-      (await get<BackupJob[]>("/backups/", undefined, signal)).map((job) =>
-        resource(
+      (await get<BackupJob[]>("/backups/", undefined, signal)).map((job) => ({
+        ...resource(
           "backup",
           job.id,
           job.name,
@@ -200,7 +237,8 @@ export const INVENTORY_SOURCES: InventorySource[] = [
           `${job.targetKind} · ${job.schedule || "Manual"}`,
           [String(job.id), ...job.sources],
         ),
-      ),
+        product: BACKUP_TARGETS[job.targetKind],
+      })),
   },
   {
     kind: "board",

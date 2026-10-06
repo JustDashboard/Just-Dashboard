@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useCommandPalette } from "@/components/command-palette"
+import { KEYCAP, useLauncherKeys } from "@/components/command-search/keycaps"
 import { Logo, LogoMark } from "@/components/logo"
 import { UpdateNotice } from "@/components/update/update-notice"
 import { Status } from "@/components/status-dot"
@@ -314,26 +315,7 @@ export function AppSidebar() {
           <SidebarTrigger className="size-8 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
         </div>
 
-        {/* The palette is the fastest route to any of fifty pages, and the one
-            thing that still sees them all at once now that the rail shows one
-            section at a time, so it gets a permanent affordance rather than
-            only a shortcut nobody discovers. Collapsed, it keeps its place in
-            the rail as an icon. */}
-        <button
-          type="button"
-          onClick={palette.open}
-          // A row in the rail, not a box in it: the rail is a list of places
-          // and the palette is the fastest way to any of them, so it is drawn
-          // like the entries under it rather than as an input sitting above
-          // them.
-          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        >
-          <MagnifyingGlass className="size-3.5 shrink-0" />
-          <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search</span>
-          <kbd className="pointer-events-none rounded-sm border border-sidebar-border bg-sidebar px-1 font-mono text-micro group-data-[collapsible=icon]:hidden">
-            ⌘K
-          </kbd>
-        </button>
+        <SearchButton onOpen={palette.open} />
       </SidebarHeader>
 
       {/* `overflow-x-hidden` is what makes the slide a slide: the panel arrives
@@ -415,6 +397,38 @@ export function AppSidebar() {
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  )
+}
+
+/**
+ * The palette's permanent affordance. It is the fastest route to any of fifty
+ * pages and every container, site and database on the box, and the one thing
+ * that still sees them all at once now that the rail shows one section at a
+ * time — so it is drawn as the search field it opens rather than as one more
+ * grey row: a framed well with the mark's blue glass and the shortcut in caps,
+ * which is what the eye looks for when it wants to type. Collapsed, it keeps
+ * its place in the icon rail as the glass alone.
+ */
+function SearchButton({ onOpen }: { onOpen: () => void }) {
+  const keys = useLauncherKeys()
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label="Search"
+      aria-keyshortcuts={keys.replace("⌘", "Meta")}
+      className="group/search flex h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-card pr-1.5 pl-2.5 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:border-rule-brand hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+    >
+      <MagnifyingGlass className="size-4 shrink-0 text-brand" />
+      <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search…</span>
+      <span className="flex gap-0.5 group-data-[collapsible=icon]:hidden">
+        {keys.split("+").map((key) => (
+          <kbd key={key} className={cn(KEYCAP, "group-hover/search:text-foreground")}>
+            {key}
+          </kbd>
+        ))}
+      </span>
+    </button>
   )
 }
 

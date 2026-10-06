@@ -3,26 +3,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
-  Archive,
   ArrowLeft,
-  ArrowRight,
-  Box,
   CheckCircle,
-  Clock,
-  CloudUpload,
-  Database,
-  GitBranch,
-  Globe,
-  Layers,
   Logout,
-  Pencil,
+  MagnifyingGlass,
   Plus,
   RefreshClockwise,
-  Servers,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
+import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { useWorkspaceCommands } from "@/components/workspace/commands"
 import type { Capability, DbDriverInfo, ProxyReloadResult, ProxyValidation } from "@/lib/types"
@@ -41,6 +32,20 @@ import {
 import { databaseIdFrom } from "@/components/database/shell/routes"
 import { useSearchInventory } from "@/components/command-search/use-inventory"
 import {
+  COMMAND_ICONS,
+  GROUP_HUES,
+  HueDot,
+  KINDS,
+  PAGE_PRODUCTS,
+  ResultMark,
+  ScopeMark,
+} from "@/components/command-search/marks"
+import { KEYCAP, Keycaps } from "@/components/command-search/keycaps"
+import { Status } from "@/components/status-dot"
+import { Spinner } from "@/components/state"
+import { FilterChip } from "@/components/tabs"
+import {
+  highlight,
   localDestination,
   parseSearch,
   recentDestinations,
@@ -61,18 +66,14 @@ import {
   CommandList,
 } from "@/components/ui/command"
 
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-
 type PaletteValue = { open: () => void; close: () => void; toggle: () => void }
 const PaletteContext = createContext<PaletteValue | null>(null)
 type PaletteItem = SearchItem & {
   icon?: React.ComponentType<{ className?: string }>
+  /** Overrides the kind's hue: a page takes its rail group's. */
+  hue?: string
+  product?: string
+  state?: string
   run?: () => void
   keys?: string
   explicit?: boolean
@@ -212,34 +213,31 @@ export function useCommandPalette() {
   return ctx
 }
 
+/**
+ * Every page under a rail entry the role can open, with the trail of sections
+ * above it.
+ *
+ * A section's landing page is listed once, under the section's name — but the
+ * rail calls the same page something else inside the section (Deployments'
+ * "Projects", Databases' "Control center", Processes' "Live"), and a search
+ * for the word on screen found nothing. Those names are the page's aliases.
+ */
 function pagesUnder(
   entry: NavEntry,
   can: (capability: Capability) => boolean,
   trail: string[] = [],
-): { page: NavItem; trail: string[] }[] {
+): { page: NavItem; trail: string[]; aliases: string[] }[] {
   if (entry.capability && !can(entry.capability)) return []
   const children: NavEntry[] = entry.children ?? []
+  const aliases = children.filter((child) => child.href === entry.href).map((child) => child.title)
   return [
-    ...(entry.href === undefined ? [] : [{ page: entry, trail }]),
+    ...(entry.href === undefined ? [] : [{ page: entry, trail, aliases }]),
     ...children
       .filter((child) => child.href !== entry.href)
       .flatMap((child) => pagesUnder(child, can, [...trail, entry.title])),
   ]
 }
 
-const ICONS: Partial<Record<SearchKind, PaletteItem["icon"]>> = {
-  recent: Clock,
-  project: CloudUpload,
-  site: Globe,
-  database: Database,
-  container: Box,
-  stack: Layers,
-  repo: GitBranch,
-  service: Servers,
-  app: Servers,
-  backup: Archive,
-  board: Pencil,
-}
 const GROUPS = Object.fromEntries(SEARCH_SCOPES) as Record<SearchScope, string>
 
 function Palette({
@@ -263,6 +261,7 @@ function Palette({
   const { can, logout } = useAuth()
   const [selected, setSelected] = useState({ query: "", id: "" })
   const input = useRef<HTMLInputElement>(null)
+  const scopes = useRef<HTMLDivElement>(null)
   const { reads, retry } = useSearchInventory(can("read"))
   const inside = databaseIdFrom(pathname)
   const drivers = usePoll(
@@ -295,14 +294,16 @@ function Palette({
   const pages: PaletteItem[] = [
     ...NAV.flatMap((group) =>
       group.items.flatMap((entry) =>
-        pagesUnder(entry, can).map(({ page, trail }) => ({
+        pagesUnder(entry, can).map(({ page, trail, aliases }) => ({
           id: `page:${page.href}`,
           kind: "page" as const,
           title: page.title,
           detail: trail.join(" · ") || group.label,
-          keywords: [group.label, ...trail, page.href],
+          keywords: [group.label, ...trail, ...aliases, page.href],
           href: page.href,
           icon: page.icon,
+          hue: GROUP_HUES[group.label],
+          product: PAGE_PRODUCTS[page.href],
         })),
       ),
     ),
@@ -313,6 +314,7 @@ function Palette({
       detail: "Account",
       href: page.href,
       icon: page.icon,
+      hue: GROUP_HUES.Account,
       keywords: ["account", page.href],
     })),
     ...(can("system.admin")
@@ -349,6 +351,7 @@ function Palette({
       title: command.label,
       detail: workspace?.name,
       keywords: ["this page", workspace?.name ?? ""],
+      icon: COMMAND_ICONS[command.id],
       keys: command.keys,
       run: () => requestAnimationFrame(() => requestAnimationFrame(command.run)),
     }))
@@ -403,21 +406,34 @@ function Palette({
       keywords: ["database", current?.title ?? ""],
       href: sectionHref(inside!, page.id),
       icon: page.icon,
+      hue: KINDS.database.hue,
     })),
     ...reads.flatMap((read) => read.items),
   ]
   const parsed = parseSearch(query)
-  const searchable = items.filter((item) => {
-    if (
-      parsed.text &&
-      parsed.scope === "all" &&
-      item.kind === "recent" &&
-      !/^(back|previous|last page)$/i.test(parsed.text)
-    )
-      return false
-    return !item.explicit || !!parsed.text || parsed.scope === "command"
-  })
-  const result = searchItems(searchable, query)
+  const searchableIn = (scope: SearchScope) =>
+    items.filter((item) => {
+      if (
+        parsed.text &&
+        scope === "all" &&
+        item.kind === "recent" &&
+        !/^(back|previous|last page)$/i.test(parsed.text)
+      )
+        return false
+      return !item.explicit || !!parsed.text || scope === "command"
+    })
+  const result = searchItems(searchableIn(parsed.scope), query)
+  // What each scope would find for the same words, on its chip: the reader sees
+  // that the three hits are a container, a stack and a repository before
+  // choosing where to look.
+  const counts: Partial<Record<SearchScope, number>> = parsed.text
+    ? Object.fromEntries(
+        SEARCH_SCOPES.map(([scope]) => [
+          scope,
+          searchItems(searchableIn(scope), scopeQuery(query, scope)).total,
+        ]),
+      )
+    : {}
   const grouped = new Map<SearchKind, PaletteItem[]>()
   for (const item of result.items) grouped.set(item.kind, [...(grouped.get(item.kind) ?? []), item])
   const visible = [...grouped.values()].flat()
@@ -428,6 +444,12 @@ function Palette({
   )
   const loading = relevant.filter((read) => read.loading)
   const failed = relevant.filter((read) => read.error)
+
+  useEffect(() => {
+    scopes.current
+      ?.querySelector("[aria-pressed=true]")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [parsed.scope])
 
   const choose = (item: PaletteItem) => {
     if (item.href && localDestination(item.href)) {
@@ -451,6 +473,23 @@ function Palette({
       return
     event.stopPropagation()
   }
+  // One stop in the tab order for fourteen chips: Tab from the input lands on
+  // the current scope and the arrows walk the rest, as in any toolbar.
+  const roveScopes = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    controlKeys(event)
+    const chips = [...event.currentTarget.querySelectorAll("button")]
+    const at = chips.findIndex((chip) => chip === document.activeElement)
+    const next = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: chips.length - 1 }[
+      event.key
+    ]
+    if (at === -1 || next === undefined) return
+    event.preventDefault()
+    chips[(next + chips.length) % chips.length].focus()
+  }
+  const chooseScope = (scope: SearchScope) => {
+    changeQuery(scopeQuery(query, scope))
+    input.current?.focus()
+  }
 
   return (
     <Command
@@ -461,7 +500,7 @@ function Palette({
       vimBindings={false}
       value={active?.id ?? ""}
       onValueChange={(id) => setSelected({ query, id })}
-      className="min-h-0 **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:tracking-[0.14em] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group]]:px-2 [&_[cmdk-item]]:min-h-11 [&_[cmdk-item]]:gap-3 [&_[cmdk-item]]:rounded-md [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-2 [&_[cmdk-item]]:text-body [&_[cmdk-item][data-selected=true]]:bg-accent"
+      className="min-h-0 **:data-[slot=command-input-wrapper]:h-14 **:data-[slot=command-input-wrapper]:gap-3 **:data-[slot=command-input-wrapper]:px-4 [&_[cmdk-group-heading]]:flex [&_[cmdk-group-heading]]:items-center [&_[cmdk-group-heading]]:gap-2 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:text-micro [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:tracking-[0.14em] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group]]:px-2 [&_[cmdk-item]]:min-h-12 [&_[cmdk-item]]:gap-3 [&_[cmdk-item]]:rounded-lg [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-1.5 [&_[cmdk-item]]:text-body [&_[cmdk-item][data-selected=true]]:bg-accent [&_[data-slot=command-input-wrapper]>svg]:size-5 [&_[data-slot=command-input-wrapper]>svg]:text-brand [&_[data-slot=command-input-wrapper]>svg]:opacity-100"
       onKeyDown={(event) => {
         if (event.key === "Escape" && query) {
           event.preventDefault()
@@ -471,85 +510,127 @@ function Palette({
         }
       }}
     >
-      <CommandInput
-        ref={input}
-        value={query}
-        onValueChange={changeQuery}
-        placeholder="Search pages, domains, containers…"
-        aria-label="Search dashboard"
-        className="h-12 text-body"
-      />
-      <div
-        className="flex min-h-10 shrink-0 items-center justify-between gap-2 border-b px-4 py-1.5"
-        onKeyDown={controlKeys}
-      >
-        <div className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-          <span aria-hidden>Search in</span>
-          <Select
-            value={parsed.scope}
-            onValueChange={(value) => {
-              changeQuery(scopeQuery(query, value as SearchScope))
-            }}
-          >
-            <SelectTrigger aria-label="Search scope" size="sm" className="max-sm:text-body">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent
-              onEscapeKeyDown={(event) => event.stopPropagation()}
-              onCloseAutoFocus={(event) => {
-                event.preventDefault()
-                input.current?.focus()
-              }}
-              onKeyDown={controlKeys}
-            >
-              {SEARCH_SCOPES.map(([scope, label]) => (
-                <SelectItem key={scope} value={scope}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <span className="shrink-0 text-hint text-muted-foreground">
-          {parsed.text || parsed.scope !== "all"
-            ? result.total > 60
-              ? "60+ results"
-              : plural(result.total, "result")
-            : "Recent & pages"}
-        </span>
+      <div className="relative">
+        <CommandInput
+          ref={input}
+          value={query}
+          onValueChange={changeQuery}
+          placeholder="Search pages, domains, containers…"
+          aria-label="Search dashboard"
+          className="h-14 text-sm"
+        />
+        {/* Ten inventories arrive one by one over a second or two. A sweep
+            along the input's own edge says the list is still growing without
+            a spinner competing with the results for the eye. */}
+        {loading.length > 0 && (
+          <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-px overflow-hidden">
+            <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
+          </span>
+        )}
       </div>
-      <CommandList className="max-h-[min(55svh,28rem)] min-h-0" aria-label="Search results">
+      {/* The scopes as chips rather than a select: fourteen kinds behind a
+          closed menu were fourteen kinds nobody knew they could narrow to, and
+          a chip can say how many of the results are its kind before it is
+          pressed. Typing `db:` presses the same chip. */}
+      <div
+        ref={scopes}
+        role="group"
+        aria-label="Search scope"
+        onKeyDown={roveScopes}
+        className="flex shrink-0 [scrollbar-width:none] items-center gap-1 overflow-x-auto border-b [mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)] py-2 pr-8 pl-3 [&::-webkit-scrollbar]:hidden"
+      >
+        {SEARCH_SCOPES.map(([scope, label]) => {
+          const current = scope === parsed.scope
+          const count = counts[scope]
+          return (
+            <FilterChip
+              key={scope}
+              selected={current}
+              tabIndex={current ? 0 : -1}
+              onClick={() => chooseScope(scope)}
+              className={cn("h-7 gap-1.5", count === 0 && !current && "opacity-55")}
+            >
+              <ScopeMark scope={scope} />
+              {label}
+              {!!count && (
+                <span className="numeric text-micro text-muted-foreground">
+                  {count > 60 ? "60+" : count}
+                </span>
+              )}
+            </FilterChip>
+          )
+        })}
+      </div>
+      <CommandList
+        className="max-h-[min(58svh,30rem)] min-h-0 scroll-py-2 pb-2"
+        aria-label="Search results"
+      >
         {visible.length === 0 && (
-          <div className="px-4 py-8 text-center text-body text-muted-foreground">
-            {loading.length
-              ? "Searching dashboard resources…"
-              : failed.length
-                ? "No matches in the available results."
-                : "No matches. Try a name, domain or another scope."}
+          <div className="flex flex-col items-center gap-3 px-6 py-10 text-center">
+            <span className="flex size-10 items-center justify-center rounded-lg bg-plot-neutral text-muted-foreground">
+              {loading.length ? (
+                <Spinner className="size-5" />
+              ) : (
+                <MagnifyingGlass className="size-5" />
+              )}
+            </span>
+            <p className="text-body text-muted-foreground">
+              {loading.length
+                ? "Searching dashboard resources…"
+                : failed.length
+                  ? "No matches in the available results."
+                  : "No matches. Try a name, domain or another scope."}
+            </p>
+            {!loading.length && parsed.scope !== "all" && parsed.text && (
+              <button
+                type="button"
+                onClick={() => chooseScope("all")}
+                onKeyDown={controlKeys}
+                className="min-h-11 rounded-sm text-body text-foreground underline underline-offset-4 focus-ring sm:min-h-8"
+              >
+                Search everything for “{parsed.text}”
+              </button>
+            )}
           </div>
         )}
         {[...grouped].map(([kind, entries]) => (
           <CommandGroup
             key={kind}
             heading={
-              kind === "command" && entries.every((item) => !item.explicit)
-                ? "This page"
-                : GROUPS[kind]
+              <>
+                <HueDot hue={KINDS[kind].hue} />
+                {kind === "command" && entries.every((item) => !item.explicit)
+                  ? "This page"
+                  : GROUPS[kind]}
+              </>
             }
           >
             {entries.map((item) => {
               const previous = item.kind === "recent" && item.href === allowedRecent[0]?.href
-              const Icon = item.icon ?? ICONS[item.kind]
               return (
-                <CommandItem key={item.id} value={item.id} onSelect={() => choose(item)}>
-                  {previous ? (
-                    <ArrowLeft className="size-4" />
-                  ) : (
-                    Icon && <Icon className="size-4" />
-                  )}
+                <CommandItem
+                  key={item.id}
+                  value={item.id}
+                  onSelect={() => choose(item)}
+                  className="group/result relative before:absolute before:inset-y-3 before:left-0 before:w-0.5 before:rounded-full before:bg-brand before:opacity-0 before:transition-opacity data-[selected=true]:before:opacity-100"
+                >
+                  <ResultMark
+                    product={item.product}
+                    icon={previous ? ArrowLeft : (item.icon ?? KINDS[item.kind].icon)}
+                    hue={item.hue ?? KINDS[item.kind].hue}
+                  />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate">
-                      {previous ? `Back to ${item.title}` : item.title}
+                    <span className="block truncate font-medium">
+                      {previous && "Back to "}
+                      {highlight(item.title, query).map((run, i) =>
+                        run.hit ? (
+                          <mark key={i} className="bg-transparent text-signal">
+                            {run.text}
+                          </mark>
+                        ) : (
+                          run.text
+                        ),
+                      )}
                     </span>
                     {item.detail && (
                       <span className="block truncate text-hint text-muted-foreground">
@@ -557,15 +638,25 @@ function Palette({
                       </span>
                     )}
                   </span>
+                  {item.state && (
+                    <Status state={item.state} label={item.state} className="text-hint" />
+                  )}
                   {previous ? (
                     <span className="text-hint text-muted-foreground">Previous</span>
                   ) : item.href === currentHref ? (
                     <span className="text-hint text-muted-foreground">Current</span>
-                  ) : item.keys ? (
-                    <kbd className="text-hint text-muted-foreground">{item.keys}</kbd>
                   ) : (
-                    <ArrowRight className="size-3 text-muted-foreground" />
+                    item.keys && <Keycaps keys={item.keys} className="max-sm:hidden" />
                   )}
+                  <kbd
+                    aria-hidden="true"
+                    className={cn(
+                      KEYCAP,
+                      "hidden sm:group-data-[selected=true]/result:inline-flex",
+                    )}
+                  >
+                    ↵
+                  </kbd>
                 </CommandItem>
               )
             })}
@@ -573,36 +664,48 @@ function Palette({
         ))}
       </CommandList>
       <div
-        className="shrink-0 space-y-1.5 border-t px-4 py-2.5 text-hint text-muted-foreground"
+        className="flex shrink-0 flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-t px-4 py-2.5 text-hint text-muted-foreground"
         onKeyDown={controlKeys}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span>
-            <kbd>↑↓</kbd> choose · <kbd>Enter</kbd> open · <kbd>Esc</kbd>{" "}
+        <span className="hidden items-center gap-3 sm:flex">
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className={KEYCAP}>↑</kbd>
+            <kbd className={KEYCAP}>↓</kbd>
+            choose
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className={KEYCAP}>↵</kbd>
+            open
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className={KEYCAP}>Tab</kbd>
+            scope
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <kbd className={KEYCAP}>Esc</kbd>
             {query ? "clear" : "close"}
           </span>
-          <span className="hidden sm:inline">
-            Try <kbd>domain:</kbd> or <kbd>db:</kbd>
+        </span>
+        <span className="flex min-w-0 items-center gap-3">
+          <span role="status" aria-live="polite" aria-atomic="true">
+            {loading.length > 0
+              ? `Loading ${loading.map((read) => read.source.label).join(", ")}…`
+              : failed.length > 0
+                ? `Unavailable: ${failed.map((read) => read.source.label).join(", ")}. Results are incomplete.`
+                : parsed.text || parsed.scope !== "all"
+                  ? `${plural(result.total, "matching result")}${result.total > 60 ? ". Narrow your search to see more" : ""}.`
+                  : "Pages, commands and live resources."}
           </span>
-        </div>
-        <div role="status" aria-live="polite" aria-atomic="true">
-          {loading.length > 0
-            ? `Loading ${loading.map((read) => read.source.label).join(", ")}…`
-            : failed.length > 0
-              ? `Unavailable: ${failed.map((read) => read.source.label).join(", ")}. Results are incomplete.`
-              : parsed.text
-                ? `${plural(result.total, "matching result")}${result.total > 60 ? ". Narrow your search to see more" : ""}.`
-                : "Search live dashboard resources by name or address."}
-        </div>
-        {failed.length > 0 && (
-          <button
-            type="button"
-            onClick={retry}
-            className="min-h-11 rounded-sm text-body text-foreground underline underline-offset-4 focus-ring sm:min-h-8"
-          >
-            Retry unavailable sources
-          </button>
-        )}
+          {failed.length > 0 && (
+            <button
+              type="button"
+              onClick={retry}
+              className="min-h-11 shrink-0 rounded-sm text-body text-foreground underline underline-offset-4 focus-ring sm:min-h-8"
+            >
+              Retry unavailable sources
+            </button>
+          )}
+        </span>
       </div>
     </Command>
   )
