@@ -149,11 +149,15 @@ taking a frame:
   `RowList`, beside Restart and Rebuild as two `ChoiceCard`s), the restart record, and the settings
   as `FormSection aside`s, each head over its fields — the framed things on those two pages are the
   transcript console, which is a `Pane`, and the cards you pick; the Backups page —
-  an attention list of the jobs that failed or went quiet, the jobs as destination cards (a
+  a picture of where the server's data goes, on the page's own ground over `wire-grid` (what it
+  has by kind, wired through this server to every directory and bucket a job writes to), an
+  attention list of the jobs that failed or went quiet, the jobs as destination cards (a
   `ChoiceList`, each drawn as the products it covers, with its destination's mark and its last
-  fourteen runs as a strip) and the coverage list under its filter chips and a meter of how much is
-  covered, every thing on it drawn as its product, with a job's own page built from a fact list and
-  plain panels; the five account pages — the profile's identity line, readings and capability rows,
+  fourteen runs as a strip) and the coverage as lit cards under its filter chips and a meter of how
+  much is covered — every thing on it is taken, opening the job that covers it or the form written
+  for it — with a job's own page opening on an identity line and its own picture over its
+  readings, and its runs one frame around a rail of the runs and an inspector of the picked one,
+  the run page's Details shape; the five account pages — the profile's identity line, readings and capability rows,
   sessions and keys as rows under plain panels where a framed table used to be, the users as cards
   in a `ChoiceList`, and Security as `FormSection aside`s; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
@@ -903,7 +907,8 @@ above:
   fleet's in-progress rows carry the sweeping release path and the lit stage instead); the
   in-flight card on the Overview; a channel while its test is out and a
   credential while its probe runs; a candidate service during a release, a backup job taking a
-  backup, a game command waiting on its reply; a webhook whose delivery's run is building, a
+  backup (on /backups as well as on a deployment's pages, with the protection picture's wires
+  pulsing and its middle naming the job), a game command waiting on its reply; a webhook whose delivery's run is building, a
   schedule firing, a preview environment building; a variable being rotated, a linked database
   being tested, an engine being started from quick setup; and, on `/deploy/new`, a repository or
   an image being inspected. The shimmer lights the stage a release is at and the present
@@ -1236,7 +1241,12 @@ a repository as git, a volume as the product of the container that keeps its dat
 through the container list, since the report names containers rather than images; a database
 container run from a bare image id is its connection's engine), a stack as its services overlapping,
 the dashboard as its own mark — and a job as the products of what it covers, with Backblaze drawn as
-itself where it writes (S3 is a protocol a dozen providers speak, and keeps a glyph). The terminal
+itself where it writes. S3 is a protocol a dozen providers speak, so the protocol alone is no one
+company's, but a bucket is the provider its endpoint names — Amazon's when it names none, because
+that is where the SDK sends it, Cloudflare's on `r2.cloudflarestorage.com`, MinIO's on a host
+carrying the word (`destinationProduct` in `backups/marks.tsx`) — and keeps a cloud glyph when the
+host names nothing; a directory on this server is a server glyph. A run's database dump is drawn as
+its driver's engine, and an entry in a run's archive as its file (`FileIcon`). The terminal
 draws the program in each window's foreground the same way. A thing none of these can name keeps its
 kind's glyph on the same tile.
 
@@ -1811,6 +1821,24 @@ The passes, in order. Each one is a diff you can review on its own.
    Backups took it too: its four readings (jobs, last backup, next backup, stored) each said what
    one job's card says, so the counts went to the Jobs header and the rest to the cards, ordered
    worst first under an attention list of the jobs that failed or went quiet.
+
+   It took a second pass in 0.7.1, because the operator found it dead: three grey cards over a
+   long list of grey rows, nothing on it a reader could find without reading. It opens now on a
+   picture of where the data goes (`components/backups/protection-map.tsx`), the Notifications
+   picture's shape: what the server has, one node per kind drawn as the products it holds, wired
+   into this server and out to each directory and bucket a job writes to, drawn as its service.
+   The wires are the readings the tiles were: a kind's is green when an enabled job covers all of
+   it, amber when part of it, dashed when nothing does; a destination's is green, red, amber or
+   still by how its jobs last ran; both pulse while a backup is being taken, which is also when the
+   card carries its beam and the picture's middle names the job. The job count, the total stored
+   and the next backup are the middle's words. A server whose every archive is on its own disk gets
+   a dashed ring where an off-site copy would go. Pressing a kind narrows the coverage below to it,
+   and the coverage became lit cards, two to a row, because every one of them is taken (§16). A
+   job's page took the same line: the products it covers as its identity line's mark, its own
+   picture (each path as the thing it is, each dump as its engine), four readings with the archive
+   size over the runs as the Holding figure's trend, and its runs as a rail beside an inspector —
+   the newest until one is picked, its failing log line washed red, what the archive holds by its
+   manifest — where a table of runs had the chosen one's log two screens below it.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a

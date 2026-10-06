@@ -4,12 +4,18 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 
 import { useEffect, useMemo, useRef } from "react"
 import { useRouter } from "next/navigation"
-import { forgetMemoryState, useMemoryState } from "@/lib/view-state"
+import { forgetMemoryState, useMemoryState, useSessionState } from "@/lib/view-state"
 import { useSearchParams } from "next/navigation"
 import { Archive, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
-import type { BackupJob, BackupResource, BackupResourceReport, Container } from "@/lib/types"
+import type {
+  BackupJob,
+  BackupResource,
+  BackupResourceKind,
+  BackupResourceReport,
+  Container,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -20,26 +26,36 @@ import { FindingList, type Finding } from "@/components/finding-list"
 import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { JobDialog, type JobPrefill } from "@/components/backups/job-form"
-import { CoveragePanel } from "@/components/backups/coverage"
+import { CoveragePanel, type CoverageFilter } from "@/components/backups/coverage"
 import { JobCard } from "@/components/backups/job-card"
-import { resourceProducts } from "@/components/backups/marks"
+import { ProtectionMap } from "@/components/backups/protection-map"
+import { jobProducts } from "@/components/backups/marks"
 import { scheduleLabel } from "@/components/backups/shared"
 import { runJobNow, useJobVerbs } from "@/components/backups/job-verbs"
 
 /**
- * Backups: what needs doing, the jobs, and what on this server is and is not
- * covered. A job is its own page; a new one starts from the form, or from a
- * thing on the server that has no backup yet.
+ * Backups: where this server's data goes, what needs doing, the jobs, and what
+ * on this server is and is not covered. A job is its own page; a new one
+ * starts from the form, or from a thing on the server that has no backup yet.
+ *
+ * It opens on **a picture of where the data goes** (`backups/protection-map`):
+ * what the server has, by kind and drawn as its products, wired into this
+ * server and out to every directory and bucket a job writes to, with the
+ * lines in the colour of how covered each kind is and how each destination's
+ * last run went, and a pulse along them while a backup is being taken. It is
+ * the Notifications picture's shape, and it replaced a page that opened on a
+ * list of grey rows with nothing a reader could find without reading.
  *
  * **Four readings used to open the page** — Jobs, Last backup, Next backup,
  * Stored — and took the top third of it to say what every job's own row says
  * again, so §15 pass 2 is dropped here the way `/git` drops it, by naming
- * where each went. The job count and the total stored are the Jobs header's.
- * The last backup is on each job's card beside its name, in the colour of how
- * it went, and the run before it and the thirteen before that are its strip.
- * The next backup and what a job keeps are under its name. What the tiles did
- * beyond the numbers — put a failure first — the Attention list does, and the
- * cards are ordered worst first under it.
+ * where each went. The job count and the total stored are the Jobs header's
+ * and the picture's middle. The last backup is on each job's card beside its
+ * name, in the colour of how it went, and on its destination in the picture;
+ * the run before it and the thirteen before that are its strip. The next
+ * backup is under the picture's middle and under each job's name. What the
+ * tiles did beyond the numbers — put a failure first — the Attention list
+ * does, and the cards are ordered worst first under it.
  *
  * The things on the server are drawn as the products they are, and so are the
  * jobs (by what they cover) and where they write, which is why the page polls
@@ -99,6 +115,21 @@ export default function BackupsPage() {
   const resources = useMemo(() => coverage.data?.resources ?? [], [coverage.data])
   const admin = can("system.admin")
   const list = useMemo(() => jobs.data ?? [], [jobs.data])
+  // On the page rather than in the coverage list, because the picture above
+  // narrows the list to a kind when one of its marks is pressed.
+  const [filter, setFilter] = useSessionState<CoverageFilter>(
+    "backups.coverage.filter",
+    "unprotected",
+  )
+  const [kind, setKind] = useSessionState<BackupResourceKind | "all">(
+    "backups.coverage.kind",
+    "all",
+  )
+  const showKind = (next: BackupResourceKind) => {
+    setFilter("all")
+    setKind(next)
+    document.getElementById("coverage")?.scrollIntoView({ block: "start" })
+  }
 
   // The coverage report is what knows how to back a database up — its paths,
   // its native dump, the containers to freeze — so the form waits for it
@@ -142,26 +173,32 @@ export default function BackupsPage() {
     [list],
   )
   const ordered = useMemo(() => [...list].sort((a, b) => rank(a) - rank(b)), [list])
-  // What each job covers, as products: the resources whose coverage names it,
-  // and the saved databases it dumps — a dump covers a connection, not a path.
-  const productsFor = (job: BackupJob) => [
-    ...new Set(
-      resources
-        .filter(
-          (r) =>
-            r.coveredBy.some((c) => c.jobId === job.id) ||
-            (r.connectionId !== undefined && job.databaseDumps?.includes(r.connectionId)),
-        )
-        .flatMap((r) => resourceProducts(r, containers, resources)),
-    ),
-  ]
   const stored = list.reduce((sum, j) => sum + j.stored.bytes, 0)
   const archives = list.reduce((sum, j) => sum + j.stored.runs, 0)
 
   return (
     <Workspace name="Backup jobs" refresh={refresh} search={false}>
       <Page className="animate-rise">
-        <PageContext eyebrow="Protection" title="Backups" actions={<WorkspaceHelp />} />
+        <PageContext eyebrow="Protection" title="Backups" />
+
+        {/* On the page's own ground rather than in a frame: the dot grid a
+            wiring picture is drawn on fades out towards its edges, so the
+            picture has a middle and needs no border to read as one thing. */}
+        {jobs.data && coverage.data && (
+          <div className="relative animate-rise py-2 lg:py-6">
+            <div
+              aria-hidden
+              className="wire-grid pointer-events-none absolute inset-x-0 -inset-y-4"
+            />
+            <ProtectionMap
+              jobs={ordered}
+              resources={resources}
+              containers={containers}
+              onKind={showKind}
+              onAdd={admin ? () => setForm({}) : undefined}
+            />
+          </div>
+        )}
 
         {/* Only what somebody has to act on: a run that failed, a job that has
           gone quiet. What is not covered is the Coverage list's to say — a
@@ -202,6 +239,7 @@ export default function BackupsPage() {
                     {plural(list.length, "job")}
                     {archives > 0 && ` · ${bytes(stored)} in ${plural(archives, "archive")}`}
                   </span>
+                  <WorkspaceHelp compact />
                   {admin && (
                     <Button size="sm" onClick={() => setForm({})}>
                       <Plus className="size-4" />
@@ -212,13 +250,15 @@ export default function BackupsPage() {
               }
             />
             <PanelBody flush className="pt-3">
-              <ChoiceList className="animate-rise">
-                {ordered.map((job) => (
+              <ChoiceList>
+                {ordered.map((job, index) => (
                   <JobCard
                     key={job.id}
                     job={job}
-                    products={productsFor(job)}
+                    index={index}
+                    products={jobProducts(job, resources, containers)}
                     verbs={verbsFor(job)}
+                    working={job.lastRun?.status === "running"}
                   />
                 ))}
               </ChoiceList>
@@ -233,8 +273,11 @@ export default function BackupsPage() {
           containers={containers}
           loading={coverage.loading}
           canCreate={admin && !coverage.error}
+          filter={filter}
+          onFilter={setFilter}
+          kind={kind}
+          onKind={setKind}
           onProtect={(res) => openFor(prefillFor(res))}
-          onOpenJob={(id) => router.push(`/backups/${id}`)}
         />
 
         {form && admin && (

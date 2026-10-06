@@ -35,7 +35,7 @@ const user = {
     createdAt: iso(now),
   },
 }
-const run = (id: number, jobId: number, ago: number, status: string, size: number) => ({
+export const run = (id: number, jobId: number, ago: number, status: string, size: number) => ({
   id,
   jobId,
   startedAt: iso(now - ago),
@@ -50,7 +50,7 @@ const run = (id: number, jobId: number, ago: number, status: string, size: numbe
   trigger: "schedule",
   duration: "48s",
 })
-const jobs = [
+export const jobs = [
   {
     id: 1,
     name: "Nginx configuration",
@@ -153,8 +153,20 @@ const resources = {
       lastBackupAt: iso(now - 3.9 * H),
     }),
     res("proxy", "caddy", "Caddy configuration", "/etc/caddy", { paths: ["/etc/caddy"] }),
-    res("database", "LOL", "LOL", "postgres · LOL", { connectionId: 1 }),
-    res("database", "Main", "Main", "postgres · app", { connectionId: 2 }),
+    // A native dump covers a saved connection, so the nightly job's two
+    // dumps protect these two the way a path protects a volume.
+    res("database", "LOL", "LOL", "postgres · LOL", {
+      connectionId: 1,
+      protected: true,
+      coveredBy: [{ jobId: 2, jobName: "Databases nightly", enabled: true }],
+      lastBackupAt: iso(now - 29 * H),
+    }),
+    res("database", "Main", "Main", "postgres · app", {
+      connectionId: 2,
+      protected: true,
+      coveredBy: [{ jobId: 2, jobName: "Databases nightly", enabled: true }],
+      lastBackupAt: iso(now - 29 * H),
+    }),
     res("database", "cache", "cache", "redis · 127.0.0.1", { connectionId: 3 }),
     res("volume", "n8n_data", "n8n_data", "Mounted by n8n", {
       paths: ["/var/lib/docker/volumes/n8n_data/_data"],
@@ -450,6 +462,12 @@ export async function mockWorkbench(page: Page, tab = "git") {
     if (path === "/backups/resources") return json(route, resources)
     const m = path.match(/^\/backups\/(\d+)\/runs$/)
     if (m) return json(route, { runs: runsFor(Number(m[1])), running: false })
+    const one = path.match(/^\/backups\/(\d+)$/)
+    if (one)
+      return json(
+        route,
+        jobs.find((job) => job.id === Number(one[1])),
+      )
     if (path === "/docker/containers/") return json(route, containers)
     if (path === "/terminal/")
       return json(route, {
