@@ -2039,7 +2039,7 @@ Each of these is bought against a specific failure, and each is the smallest thi
   never have is what the Git tab shipped with: a primary action wearing `variant="outline"` while
   nothing else on the page carries the brand either.
 
-  **One, not two.** The Git and Docker-image tabs each pair a list with a fallback field — paste a
+  **One, not two.** The Git and Docker tabs each pair a list with a fallback field — paste a
   URL, name a registry image — and the fallback carries a button. While the list has rows in it the
   rows are the advance, so that button is `outline`: a brand face there is the only blue on the
   screen pointing at the secondary path. When the list is *empty* there is nothing to choose, the

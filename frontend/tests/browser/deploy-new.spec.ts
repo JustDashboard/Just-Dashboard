@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { blueprintCatalogue, gotoStep, json, mockNewProject, now } from "./deploy-fixture"
 
 /**
@@ -39,8 +39,8 @@ test("the source strip switches the active source and is the only way in", async
   await page.getByRole("button", { name: "Database", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Engines" })).toBeVisible()
 
-  await page.getByRole("button", { name: "Docker image", exact: true }).click()
-  await expect(page.getByRole("heading", { name: "Choose an image" })).toBeVisible()
+  await page.getByRole("button", { name: "Docker", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Choose from this server" })).toBeVisible()
 
   await page.getByRole("button", { name: "Git repository", exact: true }).click()
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
@@ -63,7 +63,7 @@ test("every source and every configure step fits the window without the page scr
       }
     })
 
-  for (const source of ["Git repository", "Docker image", "Template", "Database"]) {
+  for (const source of ["Git repository", "Docker", "Template", "Database"]) {
     await page.getByRole("button", { name: source, exact: true }).click()
     await expect.poll(overflow, { message: source }).toEqual({ down: 0, across: 0 })
   }
@@ -602,6 +602,151 @@ test("a private image reference sends the chosen registry credential", async ({ 
     mode: "image_reference",
     image: "ghcr.io/acme/private:1.0",
     credentialId: 9,
+  })
+})
+
+/** Two containers of one Compose project, the images they run, and a third image no one runs. */
+async function mockServerDocker(page: Page) {
+  const tracker = (service: string, imageId: string) => ({
+    id: service,
+    names: [service],
+    name: service,
+    image: `bet-bot-${service}:latest`,
+    imageId,
+    command: "python main.py",
+    state: "running",
+    status: "Up 2 hours",
+    createdAt: now,
+    uptimeSeconds: 7200,
+    ports: [],
+    labels: {
+      "com.docker.compose.project": "bet-bot",
+      "com.docker.compose.service": service,
+    },
+    networks: ["host"],
+    composeStack: "bet-bot",
+    composeService: service,
+    exposure: [],
+    hasHealthcheck: false,
+    inspected: true,
+  })
+  const image = (tag: string, id: string, containers: number) => ({
+    id,
+    repoTags: [tag],
+    repoDigests: [],
+    size: 210_000_000,
+    created: now,
+    containers,
+    labels: {},
+    dangling: false,
+  })
+  await page.route("**/api/v1/docker/images", (route) =>
+    json(route, [
+      image("bet-bot-high-market-tracker:latest", "sha256:high", 1),
+      image("bet-bot-doubles-games-tracker:latest", "sha256:doubles", 1),
+      image("postgres:16-alpine", "sha256:postgres", 0),
+    ]),
+  )
+  await page.route("**/api/v1/docker/containers/", (route) =>
+    json(route, [
+      tracker("high-market-tracker", "sha256:high"),
+      tracker("doubles-games-tracker", "sha256:doubles"),
+    ]),
+  )
+  await page.route("**/api/v1/docker/stacks/", (route) =>
+    json(route, [
+      {
+        name: "bet-bot",
+        workingDir: "/home/ubuntu/bet-bot",
+        configFiles: ["/home/ubuntu/bet-bot/docker-compose.yml"],
+        services: [],
+        running: 2,
+        total: 2,
+        managed: true,
+        declared: ["high-market-tracker", "doubles-games-tracker"],
+        containers: 2,
+        deployed: true,
+        orphans: [],
+        state: "running",
+        summary: "Running · 2/2 services",
+      },
+    ]),
+  )
+}
+
+function savedSource(page: Page) {
+  let source: unknown
+  page.on("request", (request) => {
+    if (request.method() !== "PUT" || !request.url().endsWith("/deploy/drafts/journey-draft"))
+      return
+    const body = request.postDataJSON()
+    if (body.step === "source") source = body.source
+  })
+  return () => source
+}
+
+test("a Compose stack running here is deployed from its own file", async ({ page }) => {
+  await mockNewProject(page)
+  await mockServerDocker(page)
+  const source = savedSource(page)
+
+  await page.goto("/deploy/new?source=image")
+  const stacks = page.getByRole("list", { name: "Compose stacks on this server" })
+  await expect(stacks.getByText("/home/ubuntu/bet-bot/docker-compose.yml")).toBeVisible()
+  // Each image says which container runs it — the name the reader knows it by.
+  await expect(page.getByText("Used by high-market-tracker", { exact: true })).toBeVisible()
+  await stacks.getByRole("button", { name: "Deploy the bet-bot stack" }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
+
+  expect(source()).toEqual({
+    kind: "compose",
+    mode: "compose_local",
+    localPath: "/home/ubuntu/bet-bot",
+    composeFiles: [{ path: "docker-compose.yml", content: "", order: 0 }],
+  })
+})
+
+test("images ticked together are deployed as one stack", async ({ page }) => {
+  const journey = await mockNewProject(page)
+  await mockServerDocker(page)
+  const source = savedSource(page)
+
+  await page.goto("/deploy/new?source=image")
+  const images = page.getByRole("list", { name: "Images on this server" })
+  await expect(images.getByRole("listitem")).toHaveCount(3)
+  // Nothing ticked, nothing to command: the rows are the advance.
+  await expect(page.getByRole("button", { name: /images together/ })).toHaveCount(0)
+
+  await images.getByRole("checkbox", { name: "Select bet-bot-high-market-tracker:latest" }).click()
+  await expect(page.getByRole("button", { name: "Deploy this image" })).toBeVisible()
+  await images
+    .getByRole("checkbox", { name: "Select bet-bot-doubles-games-tracker:latest" })
+    .click()
+  // Ticking is not choosing: no draft was started by either box.
+  expect(journey.started()).toBe(0)
+  await page.getByRole("button", { name: "Deploy 2 images together" }).click()
+  await expect(page.getByRole("heading", { level: 1, name: "Ready to deploy?" })).toBeVisible()
+
+  expect(journey.intent()).toMatchObject({ name: "bet-bot", profile: "compose" })
+  expect(source()).toEqual({
+    kind: "compose",
+    mode: "compose_paste",
+    composeFiles: [
+      {
+        path: "compose.yaml",
+        order: 0,
+        content: [
+          "services:",
+          "  high-market-tracker:",
+          '    image: "bet-bot-high-market-tracker:latest"',
+          "    restart: unless-stopped",
+          "  doubles-games-tracker:",
+          '    image: "bet-bot-doubles-games-tracker:latest"',
+          "    restart: unless-stopped",
+          "",
+        ].join("\n"),
+      },
+    ],
   })
 })
 

@@ -50,16 +50,28 @@ only renderer/executor/validation authority for their feature.
   release materializes through a second mirror that is neither: the run workspace is built by fetching the
   recorded object id into a fresh repository, because `git clone --local` ignores its local copy when the
   source is shallow and would silently produce an empty checkout. Registry inspection resolves a digest
-  without pulling. Planning-time Compose validation uses private temporary files, an explicit empty env
+  without pulling. An image no registry can name but this server holds — a Compose project's own build,
+  a tag made by hand — is identified by its local image id instead (`SourceIdentity.local`, the registry
+  lookup tried first), and its release tags that id under the release's own tag rather than pulling, so
+  retention owns it like a built image; a Compose service image the registry cannot resolve at build time
+  is taken from this server the same way (`source: "local"` on the resolved service). Planning-time Compose validation uses private temporary files, an explicit empty env
   file and inert placeholders for detected variable names, so the backend environment and a checkout
   `.env` cannot influence the result.
 - `/deploy/new` is one page, held to the window at `xl`. Unfinished setups (`GET /deploy/drafts`) are
   offered for resumption behind a counted button beside the question; a source strip offers a Git
-  repository (connected GitHub list or a pasted URL), a Docker image (images already on the server or
-  a reference), a reviewed template (shelved client-side by topic, with the server's `category` as the
-  fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has no
-  tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
-  Project step's *Deploy as a Compose stack*) or resumed as an unfinished setup.
+  repository (connected GitHub list or a pasted URL), Docker (what this server already has, or a
+  registry reference), a reviewed template (shelved client-side by topic, with the server's `category`
+  as the fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has
+  no tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
+  Project step's *Deploy as a Compose stack*), from its files on this server through the Docker tab, or
+  resumed as an unfinished setup. The Docker tab (`new-project/source-image.tsx` over
+  `server-sources.ts`) lists the Compose stacks whose files are still on disk — not the dashboard's own,
+  nor one a deployment already runs — each deployed from those files as a `compose_local` source, so
+  the stack's variables, volumes and network come with it; and every image tag, each saying which
+  containers run it. A row deploys its image alone; images ticked together become one project, a
+  generated `compose_paste` stack with a service per image (named after the container's Compose service
+  where it has one, restarting unless stopped). A deployment runs its own copy: a stack that fixes
+  `container_name` or host ports collides with the copy already running until that one is stopped.
   Choosing a source creates a draft, saves the intent and source, and runs detection in one action; when
   detection finds more than one candidate they are offered ranked, each saying why it ranks where it
   does (an example, a docs site, not a service), as a choice that re-runs detection with

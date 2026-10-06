@@ -37,6 +37,10 @@ func (placeholderBases) PullImage(context.Context, string, string, func(BuildLog
 	return ResolvedImage{}, ErrBuilderUnavailable
 }
 
+func (placeholderBases) TagImage(context.Context, string, string) (ResolvedImage, error) {
+	return ResolvedImage{}, ErrBuilderUnavailable
+}
+
 func (placeholderBases) InspectImage(context.Context, string) (ResolvedImage, error) {
 	return ResolvedImage{}, ErrBuilderUnavailable
 }

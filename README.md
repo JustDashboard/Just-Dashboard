@@ -35,7 +35,8 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
 
 ## What it does
 
-- **Deploys from a repository, an image, a template or a Compose file.** Detection fills the
+- **Deploys from a repository, an image, a template or a Compose file** — including the images and
+  Compose stacks already on the server, several images at once as one stack. Detection fills the
   form in for Node, Bun and Deno, Python, PHP, Go, Rust, Java and Kotlin, .NET, Ruby, Elixir, Scala,
   Clojure, Dart, Gleam and static site generators: it picks the application out of a repository's
   examples, docs and tooling, reads lockfiles to choose the package manager and runtime, plans a

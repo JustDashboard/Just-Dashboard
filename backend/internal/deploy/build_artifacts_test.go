@@ -20,10 +20,18 @@ type artifactBackendFake struct {
 	inspectErr error
 	// printed are lines the build prints after its first secret.
 	printed []string
+	// local are the images this server holds, by id or tag, and the only
+	// ones TagImage can name; unregistered are references no registry has.
+	local        map[string]string
+	unregistered map[string]bool
+	tags         [][2]string
 }
 
 func (f *artifactBackendFake) ResolveImage(_ context.Context, reference, _ string) (ResolvedImage, error) {
 	f.resolves = append(f.resolves, reference)
+	if f.unregistered[reference] {
+		return ResolvedImage{}, errors.New("manifest unknown")
+	}
 	return ResolvedImage{
 		Reference: reference, Digest: fakeContentDigest(reference),
 		OS: "linux", Architecture: "amd64", Platforms: []string{"linux/amd64"},
@@ -63,6 +71,18 @@ func (f *artifactBackendFake) PullImage(_ context.Context, reference, _ string, 
 		return ResolvedImage{}, errors.New("mutable pull")
 	}
 	return ResolvedImage{Reference: name, Digest: digest, OS: "linux", Architecture: "amd64"}, nil
+}
+
+func (f *artifactBackendFake) TagImage(_ context.Context, source, target string) (ResolvedImage, error) {
+	id, ok := f.local[source]
+	if !ok {
+		return ResolvedImage{}, errors.New("No such image: " + source)
+	}
+	f.tags = append(f.tags, [2]string{source, target})
+	return ResolvedImage{
+		Reference: target, Digest: id, ConfigDigest: id,
+		OS: "linux", Architecture: "amd64", Platforms: []string{"linux/amd64"},
+	}, nil
 }
 
 func (f *artifactBackendFake) InspectImage(_ context.Context, reference string) (ResolvedImage, error) {
@@ -287,6 +307,88 @@ func TestImageAndComposeAdaptersPinResolvedDigests(t *testing.T) {
 		if !strings.Contains(pull, "@sha256:") {
 			t.Fatalf("Compose pull was mutable: %s", pull)
 		}
+	}
+}
+
+// An image built on this server — a Compose project's own build — is in no
+// registry, so pulling it by digest could only fail. The release takes the
+// image the daemon holds, by the id detection read, under its own tag.
+func TestLocalImageReleaseTagsTheImageOnThisServer(t *testing.T) {
+	t.Parallel()
+	id := fakeContentDigest("local-build")
+	backend := &artifactBackendFake{local: map[string]string{id: id}}
+	result, err := NewArtifactBuilder(backend).Build(
+		context.Background(), t.TempDir(), "just-dashboard/deployment-7:run-3", BuildPlanConfig{Method: BuildImage},
+		PreparedBuild{Method: BuildImage}, nil, nil, "",
+		SourceIdentity{Kind: SourceImage, Repository: "docker.io/library/bet-bot-tracker:latest", Digest: id, Local: true},
+		nil, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.pulls) != 0 {
+		t.Fatalf("a local image was pulled: %#v", backend.pulls)
+	}
+	if len(backend.tags) != 1 || backend.tags[0] != [2]string{id, "just-dashboard/deployment-7:run-3"} {
+		t.Fatalf("local image tags = %#v, want its id under the release tag", backend.tags)
+	}
+	if result.Image.ConfigDigest != id || len(result.Artifacts) != 1 ||
+		result.Artifacts[0].Reference != "just-dashboard/deployment-7:run-3" {
+		t.Fatalf("local image release = %#v", result)
+	}
+
+	_, err = NewArtifactBuilder(&artifactBackendFake{}).Build(
+		context.Background(), t.TempDir(), "just-dashboard/deployment-7:run-4", BuildPlanConfig{Method: BuildImage},
+		PreparedBuild{Method: BuildImage}, nil, nil, "",
+		SourceIdentity{Kind: SourceImage, Repository: "docker.io/library/bet-bot-tracker:latest", Digest: id, Local: true},
+		nil, nil,
+	)
+	if !errors.Is(err, ErrArtifactMissing) {
+		t.Fatalf("a local image removed since detection: error = %v", err)
+	}
+}
+
+// Two images picked together become one generated stack, and neither of a
+// Compose project's own builds is in any registry: each service the registry
+// cannot name is taken from this server, the rest are still pulled by digest.
+func TestComposeServiceImagesOnlyThisServerHoldsAreTagged(t *testing.T) {
+	t.Parallel()
+	backend := &artifactBackendFake{
+		local:        map[string]string{"bet-bot-tracker:latest": fakeContentDigest("tracker")},
+		unregistered: map[string]bool{"bet-bot-tracker:latest": true, "bet-bot-missing:latest": true},
+	}
+	compose := &ComposeAnalysis{
+		Digest: fakeContentDigest("compose"), Files: []string{"compose.yaml"},
+		Services: []ComposeServicePlan{
+			{Name: "tracker", Image: "bet-bot-tracker:latest"},
+			{Name: "db", Image: "postgres:16"},
+		},
+	}
+	result, err := NewArtifactBuilder(backend).Build(
+		context.Background(), t.TempDir(), "just-dashboard/deployment-7:run-3", BuildPlanConfig{Method: BuildCompose},
+		PreparedBuild{Method: BuildCompose}, nil, nil, "", SourceIdentity{Kind: SourceCompose}, compose, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backend.tags) != 1 || backend.tags[0] != [2]string{"bet-bot-tracker:latest", "just-dashboard/deployment-7:run-3-tracker"} {
+		t.Fatalf("Compose local tags = %#v", backend.tags)
+	}
+	if len(backend.pulls) != 1 || !strings.HasPrefix(backend.pulls[0], "postgres:16@sha256:") {
+		t.Fatalf("Compose pulls = %#v, want only the registry image", backend.pulls)
+	}
+	if result.Compose == nil || len(result.Compose.Services) != 2 || result.Compose.Services[0].Source != "local" ||
+		result.Compose.Services[0].ConfigDigest != fakeContentDigest("tracker") {
+		t.Fatalf("Compose services = %#v", result.Compose)
+	}
+
+	compose.Services[0].Image = "bet-bot-missing:latest"
+	_, err = NewArtifactBuilder(backend).Build(
+		context.Background(), t.TempDir(), "just-dashboard/deployment-7:run-4", BuildPlanConfig{Method: BuildCompose},
+		PreparedBuild{Method: BuildCompose}, nil, nil, "", SourceIdentity{Kind: SourceCompose}, compose, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "resolve Compose service tracker image: manifest unknown") {
+		t.Fatalf("an image in neither place: error = %v, want the registry's answer", err)
 	}
 }
 

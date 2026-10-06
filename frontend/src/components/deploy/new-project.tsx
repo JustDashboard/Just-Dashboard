@@ -52,7 +52,7 @@ const TABS: {
   icon: React.ComponentType<{ className?: string }>
 }[] = [
   { key: "git", label: "Git repository", icon: GitHubMark },
-  { key: "image", label: "Docker image", icon: Box },
+  { key: "image", label: "Docker", icon: Box },
   { key: "template", label: "Template", icon: GridMasonry },
   { key: "database", label: "Database", icon: Database },
 ]

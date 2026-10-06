@@ -162,6 +162,11 @@ type SourceIdentity struct {
 	Services          []string        `json:"services,omitempty"`
 	CredentialID      int64           `json:"credentialId,omitempty"`
 	Observed          json.RawMessage `json:"observed,omitempty"`
+	// Local marks an image that exists only on this server — a Compose
+	// project's own build, a tag made by hand — so Digest is its local image
+	// id rather than a registry manifest, and a release takes it from the
+	// daemon instead of pulling it.
+	Local bool `json:"local,omitempty"`
 }
 
 type DetectionConfidence string
