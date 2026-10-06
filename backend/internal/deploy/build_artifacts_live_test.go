@@ -100,6 +100,56 @@ func TestLiveC4ArtifactAdapters(t *testing.T) {
 		pulled = result.Image
 	})
 
+	t.Run("image built on this server", func(t *testing.T) {
+		root := t.TempDir()
+		writeBuildFixture(t, root, "Dockerfile", "FROM alpine:3.22\nLABEL fixture="+stamp+"\nCMD [\"true\"]\n")
+		local := "just-dashboard-c4-local-" + stamp + ":latest"
+		createdTags = append(createdTags, local)
+		if _, err := liveDockerOutput(context.Background(), "build", "--quiet", "--tag", local, root); err != nil {
+			t.Fatal(err)
+		}
+		id, err := liveDockerOutput(context.Background(), "image", "inspect", "--format", "{{.Id}}", local)
+		if err != nil {
+			t.Fatal(err)
+		}
+		detection, err := NewHostSourceAnalyzer(nil, nil, t.TempDir(), client, nil).Analyze(context.Background(),
+			DraftSourceConfig{Kind: SourceImage, Mode: SourceModeImageReference, Image: local})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !detection.Source.Local || detection.Source.Digest != strings.TrimSpace(string(id)) {
+			t.Fatalf("local image identity = %#v, want id %s", detection.Source, id)
+		}
+		tag := "just-dashboard-c4:" + stamp + "-local"
+		createdTags = append(createdTags, tag)
+		result, err := builder.Build(context.Background(), t.TempDir(), tag, BuildPlanConfig{Method: BuildImage},
+			PreparedBuild{Method: BuildImage}, nil, nil, "", detection.Source, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertLiveImageResult(t, result)
+		if result.Image.ConfigDigest != detection.Source.Digest || result.Image.Reference != tag {
+			t.Fatalf("local image release = %#v", result.Image)
+		}
+
+		content := "services:\n  local:\n    image: " + local + "\n"
+		analysis, err := analyzeComposeDocuments([]ComposeDocument{{Path: "compose.yaml", Content: content}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		composeTag := "just-dashboard-c4:" + stamp + "-local-stack"
+		createdTags = append(createdTags, composeServiceImageTag(composeTag, "local"))
+		stack, err := builder.Build(context.Background(), t.TempDir(), composeTag, BuildPlanConfig{Method: BuildCompose},
+			PreparedBuild{Method: BuildCompose}, nil, nil, "", SourceIdentity{Kind: SourceCompose}, &analysis, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stack.Compose == nil || len(stack.Compose.Services) != 1 || stack.Compose.Services[0].Source != "local" ||
+			stack.Compose.Services[0].ConfigDigest != detection.Source.Digest {
+			t.Fatalf("local Compose service = %#v", stack.Compose)
+		}
+	})
+
 	t.Run("mixed Compose", func(t *testing.T) {
 		root := t.TempDir()
 		content := "services:\n  built:\n    build: service\n  pulled:\n    image: alpine:3.22\n"

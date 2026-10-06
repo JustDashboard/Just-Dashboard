@@ -419,6 +419,13 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 	defer cancel()
 	resolved, err := a.docker.ResolveDistributionImage(resolveCtx, reference, auth)
 	if err != nil {
+		// An image built on this server — a Compose project's own build, a tag
+		// made by hand — is in no registry to look up, and the copy the daemon
+		// holds is the one the reader picked from the list of them. Only an
+		// image this server does not have either is a lookup that failed.
+		if local, ok := a.localImageIdentity(ctx, identity); ok {
+			return a.imageDetection(ctx, local, "image on this server "+local.Digest), nil
+		}
 		return DetectionResult{}, fmt.Errorf("%w: %w: registry manifest lookup failed: %v", ErrSourceUnavailable, ErrDockerUnavailable, err)
 	}
 	if resolved == nil || !contentDigestRE.MatchString(resolved.Digest) {
@@ -451,12 +458,40 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 			identity.Architecture = parts[1]
 		}
 	}
+	return a.imageDetection(ctx, identity, "registry digest "+resolved.Digest), nil
+}
+
+// localImageIdentity names an image by the id the daemon on this server holds
+// it under. The id is as immutable as a registry digest — it is a digest — and
+// the platform is the one it was built or pulled for, which is this host's.
+func (a *HostSourceAnalyzer) localImageIdentity(ctx context.Context, identity SourceIdentity) (SourceIdentity, bool) {
+	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	detail, err := a.docker.InspectImage(inspectCtx, identity.Repository)
+	if err != nil || detail == nil || !contentDigestRE.MatchString(detail.ID) {
+		return identity, false
+	}
+	system, architecture := strings.ToLower(detail.OS), strings.ToLower(detail.Architecture)
+	if !validPlatform(system + "/" + architecture) {
+		return identity, false
+	}
+	identity.Local = true
+	identity.Digest = detail.ID
+	identity.OS, identity.Architecture = system, architecture
+	identity.Platforms = []string{system + "/" + architecture}
+	return identity, true
+}
+
+// imageDetection is the one candidate an image is: what it serves on and
+// keeps, read from its own configuration, beside where its identity came from.
+func (a *HostSourceAnalyzer) imageDetection(ctx context.Context, identity SourceIdentity, origin string) DetectionResult {
+	reference := identity.Repository
 	// The registry manifest names platforms and nothing else, so the port the
 	// image serves on has to come from the image's own configuration — which
 	// only exists locally, for an image this host has already pulled. When it
 	// is there the plan starts with the right port instead of zero; when it is
 	// not, the decision below still says so and the form asks.
-	evidence := []DetectionEvidence{{Path: reference, Reason: "registry digest " + resolved.Digest}}
+	evidence := []DetectionEvidence{{Path: reference, Reason: origin}}
 	port, portReason := a.imageExposedPort(ctx, reference)
 	decisions := []string{"confirm runtime command, ports, storage, and readiness"}
 	if port > 0 {
@@ -474,7 +509,7 @@ func (a *HostSourceAnalyzer) analyzeImage(ctx context.Context, source DraftSourc
 		Port: port, Evidence: evidence, NeedsDecision: decisions,
 		PersistentPaths: imagePersistentPaths(reference, a.imageDeclaredVolumes(ctx, reference)),
 	})
-	return DetectionResult{Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID}, nil
+	return DetectionResult{Source: identity, Candidates: []DetectedCandidate{candidate}, SelectedID: candidate.ID}
 }
 
 // imageExposedPort is the lowest TCP port a locally present image declares.

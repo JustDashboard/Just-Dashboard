@@ -128,6 +128,10 @@ type BuildBackend interface {
 	ResolveImage(context.Context, string, string) (ResolvedImage, error)
 	BuildImage(context.Context, BuildInvocation, func(BuildLog) error) (ResolvedImage, error)
 	PullImage(context.Context, string, string, func(BuildLog) error) (ResolvedImage, error)
+	// TagImage names an image already on this server — by id or by tag — under
+	// a release's own tag and reads it back, so a local image is held by the
+	// release exactly as an image it built would be.
+	TagImage(context.Context, string, string) (ResolvedImage, error)
 	InspectImage(context.Context, string) (ResolvedImage, error)
 	RemoveImage(context.Context, string) error
 }
@@ -522,16 +526,28 @@ func (b *ArtifactBuilder) Build(
 		if source.Digest == "" || source.Repository == "" {
 			return result, fmt.Errorf("%w: image source has no immutable digest", ErrArtifactMissing)
 		}
-		exact := source.Repository + "@" + source.Digest
-		image, err := b.backend.PullImage(ctx, exact, registryAuth, redactBuildEmitter(redacted, emit))
-		if err != nil {
-			return result, err
-		}
-		if image.Digest == "" {
-			image.Digest = source.Digest
-		}
-		if err := validateResolvedImage(image); err != nil {
-			return result, err
+		var image ResolvedImage
+		if source.Local {
+			// Tagged by its id, so the release holds exactly the image
+			// detection read even if its own tag has moved since.
+			local, err := b.localImage(ctx, source.Digest, tag, emit)
+			if err != nil {
+				return result, err
+			}
+			image = local
+		} else {
+			exact := source.Repository + "@" + source.Digest
+			pulled, err := b.backend.PullImage(ctx, exact, registryAuth, redactBuildEmitter(redacted, emit))
+			if err != nil {
+				return result, err
+			}
+			if pulled.Digest == "" {
+				pulled.Digest = source.Digest
+			}
+			if err := validateResolvedImage(pulled); err != nil {
+				return result, err
+			}
+			image = pulled
 		}
 		result.Image = image
 		result.Artifacts = append(result.Artifacts, imageArtifact(image, prepared))
@@ -617,7 +633,15 @@ func (b *ArtifactBuilder) Build(
 			}
 			image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
 			if err != nil {
-				return result, fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
+				// The same answer an image source gets: a service image no
+				// registry has is the one this server built or was given.
+				local, localErr := b.localImage(ctx, service.Image, composeServiceImageTag(tag, service.Name), emit)
+				if localErr != nil {
+					return result, fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
+				}
+				resolved.Services = append(resolved.Services, composeResolvedService(service, local, "local"))
+				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, local, prepared, "local"))
+				continue
 			}
 			if err := validateResolvedImage(image); err != nil {
 				return result, err
@@ -1071,6 +1095,25 @@ func resolveCatalogueImage(images []ResolvedImage, reference string) (ResolvedIm
 		}
 	}
 	return ResolvedImage{}, fmt.Errorf("%w: reviewed base %s was not resolved", ErrBuilderUnavailable, reference)
+}
+
+// localImage takes an image the daemon already holds instead of pulling one,
+// under the release's tag so retention owns it like a build's output.
+func (b *ArtifactBuilder) localImage(ctx context.Context, reference, tag string, emit func(BuildLog) error) (ResolvedImage, error) {
+	if err := emit(BuildLog{Stream: "status", Text: "Using the image on this server: " + reference}); err != nil {
+		return ResolvedImage{}, err
+	}
+	image, err := b.backend.TagImage(ctx, reference, tag)
+	if err != nil {
+		return ResolvedImage{}, fmt.Errorf("%w: image %s is not on this server: %v", ErrArtifactMissing, reference, err)
+	}
+	if err := validateResolvedImage(image); err != nil {
+		return ResolvedImage{}, err
+	}
+	if !contentDigestRE.MatchString(image.ConfigDigest) {
+		return ResolvedImage{}, fmt.Errorf("%w: image %s has no local id", ErrArtifactMissing, reference)
+	}
+	return image, nil
 }
 
 func validateResolvedImage(image ResolvedImage) error {
