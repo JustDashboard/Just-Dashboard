@@ -112,8 +112,11 @@ taking a frame:
   one line under them) took the same ground in 0.7.1 at the operator's request: its frame was the
   one box on a page of hairlines, and the decision's sentence had sat in the section head's status
   slot at the page's 16px, louder than the head itself. Runtime's, Databases' and Automation's
-  followed with the rest of the settings pages, through `SettingPicture`; Security's exposure path
-  draws through the same component and keeps its frame, as a block among framed readings. The
+  followed with the rest of the settings pages, through `SettingPicture`; Security's pictures — the
+  overview's ways onto the machine (`security/perimeter.tsx`), the firewall's inbound path
+  (`security/firewall-picture.tsx`) and sshd's doors (`security/ssh-picture.tsx`) — stand on the
+  same ground since 0.7.1, the overview's having lost the frame it kept as a block among framed
+  readings. The
   preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s, the run page's Details is one frame
@@ -439,7 +442,7 @@ password files, access lists, backups and watched domains, Security's findings a
 centred there its title stood 180px in from every title above it. Configuration's settings are the
 exception: five short sections under a full-width stack, so from `xl` they run as two columns of
 `FormSection aside`s (`max-w-none`), the certificate across both, rather than one column that left
-two thirds of a wide screen empty.
+two thirds of a wide screen empty. SSH's four directive groups took the same two columns in 0.7.1.
 
 **Spacing does what the rail was for, and type keeps the ranks apart.** The space is asymmetric on
 purpose: 32px above and below every section, so 64px and a hairline between one section and the
@@ -1278,14 +1281,26 @@ one. A game server's three pages add one line under that header (`GameIdentity`)
 the game can say — the address a player types, the edition, how full it is — and draw neither the
 game nor its name again.
 
-**The Security section draws what it watches.** All eight pages use the reading register and
-retain their `StatGrid` figures. Beneath them, the overview's observed browser-to-dashboard path is
-one framed picture, using the same `SettingPicture`, `WireNode` and still `AnimatedBeam` as deployment
-settings. The picture names the access scope and this browser's address; it never claims that every
-host port has that scope. Findings carry their severity counts and skipped checks under their
-head, over the list. Firewall's policy controls sit beside its bounded rule table; SSH groups its
-directives into form sections, each head over its fields, with controls aligned and the pending
-apply action following a dirty form. Intrusion's jail choices carry their watched service's mark,
+**The Security section draws what it watches.** All eight pages use the reading register, and
+since 0.7.1 the overview, Firewall and SSH each draw a wiring picture on the page's own ground over
+`wire-grid`, in the `WireNode`/`AnimatedBeam` vocabulary the deployment and Configuration pictures
+speak, with the line as the state (dashed where a layer is missing, red where one is off, amber
+where it works but should not be relied on, moving where it carries). The overview's
+(`perimeter.tsx`) is the two ways onto the machine — the internet's through the firewall, fail2ban
+and sshd, and this browser's through the allowlist to the dashboard — and it describes the layers
+and their states, not the reach of every port. Above it the posture is a strip of its seven checks
+(`posture-strip.tsx`), a segment each in the colour of what that check found and dashed where it
+could not run, and a segment narrows the findings to its area. Findings carry their severity counts
+in their head. Firewall's (`firewall-picture.tsx`) folds the rules by where they lead — in from the
+internet, through the firewall, out to each admitted port drawn as the product that answers there,
+or into the default (`firewall-reading.ts`, unit-tested) — and its rule table names each action in
+a `--tag-*` hue down the row's edge, ending on the default as its last row. SSH's
+(`ssh-picture.tsx`) draws the port, password authentication, root login and the keyed accounts as
+the doors a login can take, following the draft as it is edited; it replaced four tiles that said
+the same facts one at a time. Firewall's policy controls sit beside its bounded rule table; SSH
+lays its directive groups out two to a row from `xl`, as Configuration does, each head over its
+fields with *Edited* in `--git-modified` while it holds a staged change, and its apply bar follows
+the reader and names what changed. Intrusion's jail choices carry their watched service's mark,
 state and comparable readings. SSH, Firewall and
 Intrusion each end on their own log — the auth log, the firewall's log, fail2ban's Activity — read
 through its lens in one `Pane` under a title across the page, since a log needs the width a rail or a
@@ -1821,6 +1836,15 @@ The passes, in order. Each one is a diff you can review on its own.
    The account's Security page took it for the same reason — the second factor's state and how many
    sessions are signed in sit in the heads of the sections that change them — and Sessions opens on
    the session it is read through, with the count of the rest on their header.
+
+   The Security section took a second pass in 0.7.1, because the operator found its pages grey and
+   still. The overview's figures count up as they land (`NumberTicker`) and Intrusion's carries the
+   bans per day as its `TileTrend`; over them, the posture is its seven checks as a coloured strip;
+   under them, the ways onto the machine are a wiring picture. SSH took the exit for four of its
+   eight tiles — the port, passwords, root login and the keyed accounts went into the picture of
+   sshd's doors, which reads them as one answer — and kept the auth log's four. Firewall kept its
+   tiles and gained the picture of its inbound path over them. The three pictures are described
+   under *The Security section draws what it watches*.
 
    System users kept its four and changed one: the Locked count became a filter chip over the
    cards beside who can sign in and who administers the host, where it also narrows the list, and
