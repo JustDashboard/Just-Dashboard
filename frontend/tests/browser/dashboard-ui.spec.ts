@@ -212,7 +212,7 @@ test("the configuration page edits in place and says where it lives", async ({ p
   await page.goto("/dashboard/configuration")
   await expect(page.getByRole("heading", { name: "Configuration" })).toBeVisible()
 
-  // The paths are a row of facts under the title, relative to the checkout.
+  // The paths are the identity line's facts, relative to the checkout.
   await expect(page.getByText(dir, { exact: true })).toBeVisible()
   await expect(page.getByText("docker-compose.yml", { exact: true })).toBeVisible()
   await expect(page.getByText("Last restart")).toBeVisible()
@@ -239,6 +239,54 @@ test("the configuration page edits in place and says where it lives", async ({ p
   await expect(page.getByText("unsaved change")).toHaveCount(0)
 
   expect(await framedPanels(page)).toEqual([])
+})
+
+test("the stack is the path a request takes, and the allowlist is its networks", async ({
+  page,
+}) => {
+  await mockApi(page)
+  await page.goto("/dashboard/configuration")
+
+  // Browser → tailnet → Caddy → the two loopback services, each as its product.
+  const path = page.getByRole("list", { name: "How a request reaches the dashboard" })
+  await expect(path.getByText("Tailnet", { exact: true })).toBeVisible()
+  await expect(path.getByText("atlas.tail1234.ts.net", { exact: true })).toBeVisible()
+  await expect(path.getByText(":8443")).toBeVisible()
+  await expect(path.getByText("Let's Encrypt")).toBeVisible()
+  await expect(path.getByText(":3000")).toBeVisible()
+  await expect(path.getByText(":8080")).toBeVisible()
+
+  // Each command says what it runs.
+  await expect(page.getByText("docker compose up -d --force-recreate")).toBeVisible()
+  await expect(page.getByText("docker compose build", { exact: true })).toBeVisible()
+
+  // Durations are said as a person says them, beside the field.
+  await expect(page.getByText("12 hours from signing in")).toBeVisible()
+  await page.getByLabel("Idle timeout").fill("soon")
+  await expect(page.getByText("Not a duration — try 60m or 2h.")).toBeVisible()
+  await page.getByRole("button", { name: "Discard" }).click()
+
+  // The networks are rows; the only loopback entry cannot be removed, since
+  // the server refuses a list without it.
+  const networks = page.getByRole("list", { name: "Allowed networks" })
+  await expect(networks.getByRole("listitem")).toHaveCount(2)
+  await expect(networks.getByText("your tailnet")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Remove 127.0.0.1/32" })).toHaveCount(0)
+
+  const access = page.locator("section", { hasText: "Network allowlist" }).last()
+  await expect(access.getByText("Edited")).toHaveCount(0)
+  await page.getByLabel("Network allowlist").fill("192.168.1.0/24")
+  await page.getByRole("button", { name: "Add", exact: true }).click()
+  await expect(networks.getByRole("listitem")).toHaveCount(3)
+  await expect(networks.getByText("local network")).toBeVisible()
+  await expect(access.getByText("Edited")).toBeVisible()
+  await expect(page.getByText("1 unsaved change")).toBeVisible()
+
+  await page.getByRole("button", { name: "Remove 100.64.0.0/10" }).click()
+  await expect(networks.getByRole("listitem")).toHaveCount(2)
+  await page.getByRole("button", { name: "Discard" }).click()
+  await expect(networks.getByRole("listitem")).toHaveCount(2)
+  await expect(networks.getByText("your tailnet")).toBeVisible()
 })
 
 for (const path of ["/dashboard", "/dashboard/configuration"] as const) {
