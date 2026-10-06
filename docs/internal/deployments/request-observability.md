@@ -285,9 +285,27 @@ tick at the line; its form speaks the rule back before it is saved, and removing
 
 The Insights view's Clients list names scanners and, for `system.admin`, offers **Block** on each
 address — `POST /firewall/rules` with a source-only deny, exactly what the Security pages' address
-verbs do, so a scanner seen here is stopped at the firewall without changing pages. Loopback and
+verbs do. This saves a persistent **host firewall rule**, rather than proving an ingress block:
+Docker-published ingress ports can bypass the host's inbound firewall. The scanner notice and the
+success toast state that limitation for Docker Caddy records. Loopback and
 private addresses never get the verb: a deny rule against something already inside the network the
 firewall stands at the edge of does nothing.
+
+The workspace reads `/firewall/` on mount and every 20 seconds for administrators, including while
+request traffic is live. A saved full-source inbound deny or reject (including a matching CIDR) removes
+that address from the scanner action notice; Clients keeps the historical traffic with **Deny saved**,
+and the opened request's block action reads **Deny rule saved** and is disabled. It does not delete
+requests or change the window's counts. A reload reads the saved rule again; removing it in Firewall
+restores the action on the next successful read. Port-, protocol-, destination- and direction-limited
+rules do not stand for a full-source deny.
+
+Pending blocks are tracked per address and guarded before React paints, so concurrent blocks cannot
+re-enable each other's actions. A successful write updates all three surfaces immediately, then
+refreshes the rule list. A refused duplicate is treated as already saved only after a fresh firewall
+read confirms the source deny. Other failures show the API's message and keep the action retryable.
+An unreadable, unavailable, disabled or read-only firewall disables Block with a reason and a link to
+Firewall; the workspace does not enable a firewall on the operator's behalf. The scanner sentence
+describes refused **probes**, without claiming that all traffic from a scanner was refused.
 
 "Private" is read from the actual reservations rather than from a prefix. The first version tested
 `172.` and so hid the verb for the whole of `172.32`–`172.255`, which is public space — 172.217 is
@@ -604,7 +622,18 @@ Took narrowings, the query surviving a reload, the alert's moment, chip narrowin
 absent-record sentence,
 the Events toolbar (kind chips, search, the no-match sentence, the socket), the audit and run links
 on a correlated row, the restart-empty sentence, `?view=`/`?moment=` surviving a reload, which
-addresses are offered a Block, and that the page fits at 390 and 1280 — and that a code, a latency
+addresses are offered a Block, saved denies clearing only the action notice, saved state surviving
+reloads and view changes, per-address concurrency, duplicate verification, readable refusal messages
+and disabled/read-only firewall feedback. `components/deploy/request-blocks.test.js` covers the scope
+and address-family matching of saved source denies and the firewall availability gate. The
+[before](../../audits/2026-10-06-deploy-logs/scanner-before.png),
+[after](../../audits/2026-10-06-deploy-logs/scanner-after.png) and
+[recording](../../audits/2026-10-06-deploy-logs/scanner-block.webm) show the scanner action clearing while
+the historical client stays in the list.
+The saved-deny journey and the multi-width screenshot walkthrough use `test.slow()` for their page
+changes, reloads and captures; assertion timeouts remain unchanged.
+
+The browser spec also holds that the page fits at 390 and 1280 — and that a code, a latency
 and a client on Insights each narrow the window through the API's own filters, that a chosen method
 keeps its chip as the way back, that a row opens from the keyboard, that a clean exit reads as a
 stop rather than a failure, and that a role which cannot add an alert rule is pointed at Automation
