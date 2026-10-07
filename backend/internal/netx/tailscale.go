@@ -365,10 +365,64 @@ func (s *Service) TailscaleNeedsForwarding(ctx context.Context) (exitNode, subne
 	}
 	p, err := tsReadPrefs(ctx)
 	if err != nil {
+		// What it offers is unknown, and this answer is what lets forwarding
+		// be turned off, so while the daemon is up a guess has to be the
+		// cautious one. A daemon that is down or logged out offers nothing.
+		if out, serr := run(ctx, "tailscale", "status", "--json"); serr == nil {
+			var st struct{ BackendState string }
+			if json.Unmarshal([]byte(out), &st) == nil && (st.BackendState == "Running" || st.BackendState == "Starting") {
+				return true, true
+			}
+			if json.Unmarshal([]byte(out), &st) != nil {
+				return true, true
+			}
+		}
 		return false, false
 	}
 	routes, exit := tsSplitAdvertised(p.AdvertiseRoutes)
 	return exit, len(routes) > 0
+}
+
+// TailscaleWithdraws reports whether a change takes away something this server
+// offers the tailnet: the exit node, or a subnet route it advertises now. The
+// handler asks for the destructive capability on that content, since the same
+// route also adds offers. A request that cannot be read against the current
+// preferences counts as withdrawing; one that is malformed is refused later
+// and changes nothing, so it does not.
+func (s *Service) TailscaleWithdraws(ctx context.Context, req TailscaleSetRequest) bool {
+	if req.AdvertiseExitNode == nil && req.AdvertiseRoutes == nil {
+		return false
+	}
+	var next []netip.Prefix
+	if req.AdvertiseRoutes != nil {
+		var err error
+		if next, err = tsParseAdvertiseRoutes(*req.AdvertiseRoutes); err != nil {
+			return false
+		}
+	}
+	if !has("tailscale") {
+		return false
+	}
+	p, err := tsReadPrefs(ctx)
+	if err != nil {
+		return true
+	}
+	cur, curExit := tsSplitAdvertised(p.AdvertiseRoutes)
+	if req.AdvertiseExitNode != nil && !*req.AdvertiseExitNode && curExit {
+		return true
+	}
+	if req.AdvertiseRoutes != nil {
+		keep := map[netip.Prefix]bool{}
+		for _, n := range next {
+			keep[n] = true
+		}
+		for _, c := range cur {
+			if pc, err := ParsePrefix(c); err != nil || !keep[pc.Masked()] {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TailscaleSetRequest changes what this server offers. A nil field is left
