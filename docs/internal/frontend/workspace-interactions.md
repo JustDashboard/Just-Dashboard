@@ -44,11 +44,15 @@ may already have replaced. A long container inventory verifies both scroll and r
 
 `useFilterHistory` owns only its named URL parameters and leaves other handoffs intact. Native
 history writes pass application state rather than copying Next's private history markers, so
-`useSearchParams` stays synchronized. `useHeldList` keeps only identities in React state; it never
-stores audit, connection or login responses. The shared crosshair remains an external store;
+`useSearchParams` stays synchronized. Files also preserves its own folder marker when Next rewrites
+the same entry, so a router update cannot reset the Back/Forward trail; a different address or
+an explicitly supplied marker keeps its own state. `useHeldList` keeps only identities in React state;
+it never stores audit, connection or login responses. The shared crosshair remains an external store;
 only its overlays subscribe to moving instants, while charts subscribe to pin status.
 
 Verification lives in the existing page browser specs (tests prefixed `workspace:`) and pure tests
-for row navigation, held ordering, range selection, log identity and pinning. Run
+for row navigation, held ordering, range selection, log identity and pinning. The Files history
+spec waits for each destination address before the next traversal, because retained listing rows
+can still describe the previous folder while native history is moving. Run
 `scripts/test-changed.sh <base>` against a production frontend built from the task worktree;
 `JD_BROWSER_BASE_URL` selects that worktree's loopback server.
