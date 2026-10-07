@@ -805,10 +805,10 @@ func TestRoutingAddRuleRefusals(t *testing.T) {
 	}{
 		{"a rule that selects every packet", RuleRequest{Table: 200}, "no selector"},
 		{"a blackhole of everything", RuleRequest{Action: "blackhole"}, "no selector"},
-		{"a prohibit of the client's address", RuleRequest{To: "100.110.34.9/32", Action: "prohibit"}, "discard the replies to your browser"},
-		{"an unreachable of the client's network", RuleRequest{To: "100.64.0.0/10", Action: "unreachable"}, "discard the replies to your browser"},
-		{"a blackhole of the server's own source", RuleRequest{From: "100.110.34.31/32", Action: "blackhole"}, "discard the replies to your browser"},
-		{"a blackhole of the device the replies leave by", RuleRequest{OIF: "tailscale0", Action: "blackhole"}, "discard the replies to your browser"},
+		{"a prohibit of the client's address", RuleRequest{To: "100.110.34.9/32", Action: "prohibit"}, "discard the replies to your connection"},
+		{"an unreachable of the client's network", RuleRequest{To: "100.64.0.0/10", Action: "unreachable"}, "discard the replies to your connection"},
+		{"a blackhole of the server's own source", RuleRequest{From: "100.110.34.31/32", Action: "blackhole"}, "discard the replies to your connection"},
+		{"a blackhole of the device the replies leave by", RuleRequest{OIF: "tailscale0", Action: "blackhole"}, "discard the replies to your connection"},
 		{"table 52", RuleRequest{From: "10.9.0.0/24", Table: 52}, "Tailscale"},
 		{"table 255", RuleRequest{From: "10.9.0.0/24", Table: 255}, "local"},
 	}
@@ -956,5 +956,46 @@ func TestRoutingCanonicalFWMark(t *testing.T) {
 		if _, err := canonicalFWMark(bad); err == nil {
 			t.Errorf("canonicalFWMark(%q) accepted", bad)
 		}
+	}
+}
+
+// A request that arrives over an SSH tunnel to loopback carries the SSH
+// peer's address as its client, so the sentences must read right for a client
+// that is not a browser, and a client that really is loopback has no path to
+// protect.
+func TestRoutingRefusalsReadWellForAnSSHPeerClient(t *testing.T) {
+	const peer = "198.51.100.77"
+	rec := rtHost(t)
+	rec.replies = append([]reply{{prefix: "ip -j route get 198.51.100.77", out: `[{"dst":"198.51.100.77","gateway":"203.0.113.1","dev":"eth0","prefsrc":"203.0.113.20","flags":[]}]`}}, rec.replies...)
+	s := testService(t)
+	_, err := s.AddRule(context.Background(), RuleRequest{To: peer + "/32", Action: "prohibit"}, peer, "ion")
+	g := rtGuarded(t, err)
+	if strings.Contains(strings.ToLower(g.Reason), "browser") || !strings.Contains(g.Reason, peer) {
+		t.Fatalf("reason = %q", g.Reason)
+	}
+	_, err = s.RemoveAddress(context.Background(), "eth0", "203.0.113.20/24", peer, "ion")
+	if !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("an address nobody added: err = %v", err)
+	}
+	sp := emptySpec()
+	sp.Addresses = []AddressSpec{{ID: 1, Link: "eth0", CIDR: "203.0.113.20/24"}}
+	rtSaveSpec(t, s, sp)
+	_, err = s.RemoveAddress(context.Background(), "eth0", "203.0.113.20/24", peer, "ion")
+	if g := rtGuarded(t, err); strings.Contains(strings.ToLower(g.Reason), "browser") {
+		t.Fatalf("reason = %q", g.Reason)
+	}
+	if len(rtMutations(rec)) != 0 {
+		t.Fatalf("a refused change ran %v", rtMutations(rec))
+	}
+}
+
+func TestRoutingALoopbackClientHasNoPathToProtect(t *testing.T) {
+	rec := rtHost(t).on("ip rule add", "")
+	s := testService(t)
+	if _, err := s.AddRule(context.Background(), RuleRequest{To: "100.110.34.9/32", Action: "blackhole"}, "127.0.0.1", "ion"); err != nil {
+		t.Fatal(err)
+	}
+	if got := rtMutations(rec); len(got) != 1 {
+		t.Fatalf("mutations = %v", got)
 	}
 }
