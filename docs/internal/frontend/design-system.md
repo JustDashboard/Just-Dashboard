@@ -133,13 +133,12 @@ taking a frame:
   and every block on the four Processes pages — the live table under its band of workloads, the
   PM2 applications under their band of what PM2 takes of the machine, the systemd units
   under their band of busy services and recent changes, and the cron jobs, timers and
-  system cron files on Scheduled, each a title, a toolbar and a hairline, Scheduled
-  under five `StatTile` readings (what fires next across cron and
-  the timers together, the account's jobs, the runs cron started in the last day, the timers armed
-  and what the packages run), whose Cron log is a plain panel holding the log's `Pane` and whose
-  timers open their runs inside the table's own row, framed by nothing but the row — with a detail
-  sheet built from plain panels that opens on the thing's own mark, the unit's journal and a PM2
-  application's logs a `Pane` in their sheets — and the
+  system cron files on Scheduled, each a title, a toolbar and a hairline, Scheduled's
+  under its next day drawn as one plain band of lanes (what fires next counting down
+  at the end of its identity line), whose Cron log is a plain panel holding the log's
+  `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
+  from plain panels that opens on the thing's own mark, the unit's journal, a PM2
+  application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
   two System pages follow the same shape: on System users four readings (accounts, administrators,
   who can sign in, the last sign-in) over the accounts as lit cards in a plain list, because each
   opens its keys, with its SSH-keys sheet a plain list of rows and a plain form, and on the audit
@@ -1924,6 +1923,35 @@ The passes, in order. Each one is a diff you can review on its own.
    file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
    and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
    their frame and gain fixed responsive columns and a measured size bar per installed row.
+
+   Scheduled took the same exit in 0.7.1 and for the same reason: five grey figures over three
+   tables, and nothing on the page that showed *when* anything ran without reading row by row.
+   Each figure went where it is said better. Next run is the countdown at the end of the
+   machine's identity line, to the second, and the one dot on the band that breathes; the account's
+   jobs and how many are disabled are the counted chips in the Cron jobs head and a fact in the
+   identity line; the runs cron started in the last day, and those whose output went nowhere, are
+   the cron log's chips (`ServiceLogs readings="chips"`), the database workbench's answer, which
+   narrow the log to what they count; timers armed is the timers' head, armed, running now and
+   stopped as chips with how many start on boot beside them; the package files' lines are a fact
+   and their section's count. What took the tiles' place is the question they answered one figure
+   at a time: `components/procs/schedule-band.tsx`, the next 24 hours of all three on one axis
+   that starts now, a lane per schedule soonest first, each drawn as the program it runs. A lane's
+   next run is a dot in its kind's `--tag-*` hue (blue for the account's crontab, violet for the
+   timers, cyan for the package files — none red or amber, so no lane reads as one that failed),
+   the runs after it ticks, and a schedule that fires more often than the axis can draw a band; the
+   kinds are chips that count and narrow, and what the axis cannot draw — weekly work past it, what
+   runs only at boot, what is switched off — is a line under it. A cron line's runs are its
+   expression's (`lib/schedule.ts`); a timer's is the one systemd reports, since the packages'
+   timers add a random delay to their calendars and every later run drawn from the calendar would
+   be a time they do not fire at. Every countdown ticks, which is the page's motion, and nothing
+   else moves. A lane, a job's command and a timer's name open sheets addressed by `?job=` and
+   `?timer=`: a job's opens on its next run and its runs in the next day and week, the week as seven
+   lines of a day with a tick per run, the command coloured as a command, and the cron log narrowed
+   to that command; a timer's on its next and last run and how long that took, its calendar in
+   words beside the expression with the random delay said, the command its service runs, and the
+   service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
+   as well, its frequency a row of toggles rather than a select, drawing the week the schedule
+   being written makes as the fields change.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a

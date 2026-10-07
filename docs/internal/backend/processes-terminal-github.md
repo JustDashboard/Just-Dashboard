@@ -165,8 +165,11 @@ socket-activated service's port.
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
   What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's
   unit journal (`cron`, `crond` or `cronie`), else a cron file, else the journal's `CRON`/`crond` lines
-  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a timer's row
-  opens the activated service's runs.
+  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a job's sheet
+  reads the same log narrowed to its command (`command:` is a field of the cron lens). A timer's
+  sheet reads `GET /systemd/{timer}` for its `TimersCalendar`, `TimersMonotonic` and
+  `RandomizedDelayUSec`, and `GET /systemd/{service}` for the command, result and monotonic run
+  times of the service it fires, beside that service's runs; no route was added for either.
 
 ## The terminal
 
