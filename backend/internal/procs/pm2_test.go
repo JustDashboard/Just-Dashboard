@@ -128,3 +128,63 @@ func TestPM2EnvSelectsDaemon(t *testing.T) {
 		t.Fatalf("PATH = %q, want prefix %q", path, want)
 	}
 }
+
+func TestParseSavedAppsNamesEachApplicationOnce(t *testing.T) {
+	// A cluster is saved as one entry per instance; the secrets in env are
+	// the reason only the names come out.
+	doc := `[{"name":"api","pm_id":0,"env":{"TOKEN":"s3cret"}},{"name":"api","pm_id":1},` +
+		`{"name":"worker","pm_id":2},{"pm_id":3}]`
+	got, err := parseSavedApps([]byte(doc))
+	if err != nil {
+		t.Fatalf("parse = %v", err)
+	}
+	if len(got) != 2 || got[0] != "api" || got[1] != "worker" {
+		t.Fatalf("names = %v, want [api worker]", got)
+	}
+	empty, err := parseSavedApps([]byte(`[]`))
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("an empty list = %v, %v; want a saved list with nothing in it", empty, err)
+	}
+	if _, err := parseSavedApps([]byte(`{"oops":1}`)); err == nil {
+		t.Fatal("a dump that is not a list was accepted")
+	}
+}
+
+func TestSavedAppsRereadsOnlyWhenTheListIsSavedAgain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dump.pm2")
+	if err := os.WriteFile(path, []byte(`[{"name":"api"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := NewPM2()
+	st, _ := os.Stat(path)
+	if got := p.savedApps(path, st); len(got) != 1 || got[0] != "api" {
+		t.Fatalf("first read = %v", got)
+	}
+	// Same size and time: the cached names stand.
+	p.dumps[path] = savedList{modTime: st.ModTime(), size: st.Size(), names: []string{"cached"}}
+	if got := p.savedApps(path, st); len(got) != 1 || got[0] != "cached" {
+		t.Fatalf("unchanged list re-read: %v", got)
+	}
+	// `pm2 save` again, with one more application.
+	later := st.ModTime().Add(time.Second)
+	if err := os.WriteFile(path, []byte(`[{"name":"api"},{"name":"queue"}]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, later, later); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = os.Stat(path)
+	if got := p.savedApps(path, st); len(got) != 2 || got[1] != "queue" {
+		t.Fatalf("after a new save = %v", got)
+	}
+	if err := os.WriteFile(path, []byte(`not json`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, later.Add(time.Second), later.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = os.Stat(path)
+	if got := p.savedApps(path, st); got != nil {
+		t.Fatalf("unreadable list = %v, want nil (unknown)", got)
+	}
+}
