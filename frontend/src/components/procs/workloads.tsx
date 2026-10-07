@@ -22,7 +22,7 @@ const SHOWN = 5
  */
 const STEPS = [100, 74, 54, 40, 30]
 
-function shade(color: string, rank: number) {
+export function shade(color: string, rank: number) {
   return `color-mix(in oklab, ${color} ${STEPS[rank] ?? 24}%, transparent)`
 }
 
@@ -188,9 +188,10 @@ function sum<T>(list: T[], value: (item: T) => number) {
 /**
  * One bar as wide as the machine: a span per workload, heaviest first, then
  * everything else the host reports in use, muted, then the track for what is
- * free. Each span eases to its next width rather than jumping.
+ * free. Each span eases to its next width rather than jumping. PM2 and Services
+ * share this scale for their applications and units.
  */
-function ShareBar({
+export function ShareBar({
   label,
   capacity,
   rest,

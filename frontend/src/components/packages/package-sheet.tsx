@@ -1,7 +1,6 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import Link from "next/link"
 import {
   ArrowCircleUp,
   Copy,
@@ -11,23 +10,23 @@ import {
   Terminal,
   Trash,
 } from "@/components/icons"
-import { get, post } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { Job, PackageDetail, PackageUsage } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { PackageMark } from "@/components/packages/marks"
+import { LiveBytes, HUE } from "@/components/overview/readings"
+import { ShellWords } from "@/components/deploy/run-evidence"
+import { PackageMark, OriginFact, VersionTo } from "@/components/packages/marks"
 import { Detail, DetailList } from "@/components/page"
-import { Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { SidePanel } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ROW_REVEAL } from "@/components/icon-action"
 import { cn } from "@/lib/utils"
 import { copyText } from "@/lib/clipboard"
@@ -38,7 +37,7 @@ import { copyText } from "@/lib/clipboard"
  * A version, a size and a dependency list describe a package; they do not tell
  * you that installing `postgresql-client-16` gave you a command called `psql`,
  * that it registered no service, and that its manual is one keystroke away.
- * That is what the second tab is, and it is read from the package's own file
+ * That is what the readout opens on, and it is read from the package's own file
  * list — nothing here is a hand-written table of blurbs that goes stale, and
  * nothing here runs the package's binaries to find out (see internal/updates/
  * usage.go for why that is a rule rather than an omission).
@@ -48,6 +47,7 @@ export function PackageSheet({
   onOpenChange,
   onJob,
   canPurge,
+  onInspect,
 }: {
   /** The package to show, or null when the sheet is closed. */
   name: string | null
@@ -55,11 +55,11 @@ export function PackageSheet({
   /** Hands a started install or removal to the page's console. */
   onJob: (job: Job) => void
   canPurge: boolean
+  onInspect: (name: string) => void
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState(false)
-  const [tab, setTab] = useViewState("packages.sheet.tab", "about")
 
   // The two reads are fired together rather than the usage one waiting for the
   // detail: they are independent on the server and the manual is the slower of
@@ -75,7 +75,12 @@ export function PackageSheet({
       if (d.status === "rejected") throw d.reason
       // A package that is not installed owns no files, so an unreadable usage
       // is the normal case rather than a failure worth reporting.
-      return { name: target, detail: d.value, usage: u.status === "fulfilled" ? u.value : null }
+      return {
+        name: target,
+        detail: d.value,
+        usage: u.status === "fulfilled" ? u.value : null,
+        usageError: u.status === "rejected" ? errorMessage(u.reason) : undefined,
+      }
     },
     [name],
   )
@@ -152,16 +157,32 @@ export function PackageSheet({
         open={Boolean(name)}
         onOpenChange={onOpenChange}
         width="md"
+        initialFocus="body"
         // The sheet opens on the thing itself: its mark, then its name.
         title={
           <>
             {name && <PackageMark name={name} section={detail?.section} />}
             <span className="min-w-0 truncate font-mono">{name}</span>
-            {detail?.installed && <Status verdict="ok" label="Installed" />}
-            {upgradable && <Status verdict="warning" label={`${upgradable} available`} />}
           </>
         }
         description={detail?.summary || undefined}
+        actions={
+          detail && (
+            <>
+              <Status
+                verdict={detail.installed ? "ok" : "notice"}
+                label={detail.installed ? "Installed" : "Not installed"}
+              />
+              {upgradable && <Status verdict="notice" label="Update available" />}
+              {detail.section && (
+                <span className="text-hint text-muted-foreground">{detail.section}</span>
+              )}
+              {detail.arch && (
+                <span className="font-mono text-hint text-muted-foreground">{detail.arch}</span>
+              )}
+            </>
+          )
+        }
         footer={
           detail &&
           canManage && (
@@ -210,40 +231,85 @@ export function PackageSheet({
         {loading && <LoadingRows rows={6} />}
 
         {detail && (
-          <Tabs value={tab} onValueChange={setTab} className="gap-3">
-            <TabsList>
-              <TabsTrigger value="about">About</TabsTrigger>
-              <TabsTrigger value="usage">How to use it</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="about" className="space-y-4">
-              {detail.description && (
+          <div data-slot="package-readout" className="animate-rise space-y-6">
+            <div className="grid min-w-0 grid-cols-2 gap-4 border-b border-hairline pb-5 sm:grid-cols-3">
+              <div className="min-w-0 space-y-1.5">
+                <p className="eyebrow">
+                  {detail.installed ? "Installed version" : "Available version"}
+                </p>
+                <p
+                  className="truncate font-mono text-title"
+                  title={detail.installedVersion ?? detail.version}
+                >
+                  {detail.installedVersion ?? detail.version ?? "—"}
+                </p>
+              </div>
+              {upgradable && (
+                <div className="min-w-0 space-y-1.5">
+                  <p className="eyebrow">Update to</p>
+                  <VersionTo
+                    from={detail.installedVersion}
+                    to={upgradable}
+                    className="block truncate text-title"
+                  />
+                </div>
+              )}
+              <div className="min-w-0 space-y-1.5">
+                <p className="eyebrow">{detail.installed ? "On disk" : "Installed size"}</p>
+                <p className="numeric text-2xl font-semibold" style={{ color: HUE.disk }}>
+                  {detail.size ? <LiveBytes value={detail.size} /> : "—"}
+                </p>
+              </div>
+            </div>
+            {detail.protected && (
+              <Notice title="This one cannot be removed from here">{detail.protected}</Notice>
+            )}
+            <UsageView
+              usage={usage}
+              installed={detail.installed}
+              error={current?.usageError}
+              onRetry={poll.refresh}
+            />
+            {detail.dependencies && detail.dependencies.length > 0 && (
+              <UsageSection title="Depends on">
+                <div className="flex flex-wrap gap-1.5">
+                  {detail.dependencies.slice(0, 40).map((dep) => (
+                    <button
+                      key={dep}
+                      type="button"
+                      onClick={() => onInspect(dep.split(/[ (|<>=]/)[0])}
+                      disabled={busy}
+                      aria-label={`Inspect dependency ${dep}`}
+                      className="inline-flex min-h-8 max-w-full min-w-0 items-center gap-1.5 rounded-md border border-hairline bg-control px-2 text-left font-mono text-hint focus-ring transition-colors hover:border-border-strong"
+                    >
+                      <PackageMark name={dep} className="size-4" />
+                      <span className="truncate">{dep}</span>
+                    </button>
+                  ))}
+                  {detail.dependencies.length > 40 && (
+                    <span className="numeric self-center text-hint text-muted-foreground">
+                      +{detail.dependencies.length - 40} more
+                    </span>
+                  )}
+                </div>
+              </UsageSection>
+            )}
+            <UsageSection title="About this package">
+              {(detail.description || detail.summary) && (
                 <p className="text-body leading-relaxed whitespace-pre-line text-muted-foreground">
-                  {detail.description}
+                  {detail.description || detail.summary}
                 </p>
               )}
-
               <DetailList>
-                <Detail label="Version">
-                  <span className="font-mono">
-                    {detail.installedVersion ?? detail.version ?? "—"}
-                  </span>
-                </Detail>
-                {detail.installedVersion &&
-                  detail.version &&
-                  detail.version !== detail.installedVersion && (
-                    <Detail label="In the repository">
-                      <span className="font-mono">{detail.version}</span>
-                    </Detail>
-                  )}
-                {detail.repository && <Detail label="Repository">{detail.repository}</Detail>}
-                {detail.section && <Detail label="Section">{detail.section}</Detail>}
-                {detail.arch && <Detail label="Architecture">{detail.arch}</Detail>}
-                {detail.size ? <Detail label="Size">{bytes(detail.size)}</Detail> : null}
+                {detail.repository && (
+                  <Detail label="Repository">
+                    <OriginFact origin={detail.repository} />
+                  </Detail>
+                )}
                 {detail.license && <Detail label="Licence">{detail.license}</Detail>}
                 {detail.maintainer && (
-                  <Detail label="Maintainer" className="truncate">
-                    {detail.maintainer}
+                  <Detail label="Maintainer">
+                    <span className="break-all">{detail.maintainer}</span>
                   </Detail>
                 )}
                 {detail.homepage && (
@@ -252,7 +318,7 @@ export function PackageSheet({
                       href={detail.homepage}
                       target="_blank"
                       rel="noreferrer noopener"
-                      className="inline-flex min-w-0 items-center gap-1 truncate text-primary hover:underline"
+                      className="inline-flex max-w-full min-w-0 items-center gap-1 text-primary hover:underline"
                     >
                       <span className="truncate">{detail.homepage}</span>
                       <External className="size-3 shrink-0" />
@@ -260,34 +326,8 @@ export function PackageSheet({
                   </Detail>
                 )}
               </DetailList>
-
-              {detail.protected && (
-                <Notice title="This one cannot be removed from here">{detail.protected}</Notice>
-              )}
-
-              {detail.dependencies && detail.dependencies.length > 0 && (
-                <div className="space-y-1.5">
-                  <p className="eyebrow">Depends on</p>
-                  <div className="flex flex-wrap gap-1">
-                    {detail.dependencies.slice(0, 40).map((dep) => (
-                      <Tag key={dep} mono>
-                        {dep}
-                      </Tag>
-                    ))}
-                    {detail.dependencies.length > 40 && (
-                      <span className="numeric self-center text-hint text-muted-foreground">
-                        +{detail.dependencies.length - 40} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="usage">
-              <UsageView usage={usage} installed={detail.installed} />
-            </TabsContent>
-          </Tabs>
+            </UsageSection>
+          </div>
         )}
       </SidePanel>
     </>
@@ -301,49 +341,56 @@ function CommandChip({ command }: { command: string }) {
       type="button"
       aria-label={`Copy ${command}`}
       onClick={() => void copyText(command, `Copied ${command}`)}
-      className="group inline-flex items-center gap-1.5 rounded-md border border-hairline bg-control px-2 py-1 font-mono text-xs transition-colors hover:bg-control-hover active:bg-control-active"
+      className="group inline-flex min-h-9 max-w-full min-w-0 items-center gap-1.5 rounded-md border border-hairline bg-control px-2 py-1 font-mono text-body focus-ring transition-colors hover:bg-control-hover active:bg-control-active"
     >
       <Terminal className="size-3 text-muted-foreground" />
-      {command}
+      <span className="min-w-0 truncate">
+        <ShellWords command={command} />
+      </span>
       <Copy className={cn("size-3 text-muted-foreground", ROW_REVEAL)} />
     </button>
   )
 }
 
 /**
- * One part of the answer, opened by its eyebrow alone. Each used to carry a
- * glyph in front of the word — a terminal before "Commands", a book before
- * "Manual" — which was the label twice (design-system §14).
+ * Usage and metadata share the page’s section heads and hairlines.
  */
-function UsageSection({
-  title,
-  hint,
-  children,
-}: {
-  title: string
-  hint?: string
-  children: React.ReactNode
-}) {
+function UsageSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="space-y-1.5">
-      <p className="eyebrow">{title}</p>
-      {hint && <p className="text-hint leading-relaxed text-muted-foreground">{hint}</p>}
-      {children}
-    </section>
+    <Panel plain>
+      <PanelHeader title={title} />
+      <PanelBody className="space-y-3">{children}</PanelBody>
+    </Panel>
   )
 }
 
-function UsageView({ usage, installed }: { usage: PackageUsage | null; installed: boolean }) {
+function UsageView({
+  usage,
+  installed,
+  error,
+  onRetry,
+}: {
+  usage: PackageUsage | null
+  installed: boolean
+  error?: string
+  onRetry: () => void
+}) {
   if (!installed) {
     return (
       <EmptyState
         icon={Puzzle}
         title="Not installed yet"
-        description="Install it and this tab will say which commands it gave you, which service it registered and what its manual says."
+        description="Install it to see the commands, services, configuration files and manual it provides."
       />
     )
   }
-  if (!usage) return <LoadingRows rows={4} />
+  if (!usage)
+    return (
+      <ErrorState
+        error={new Error(error || "Could not read this package’s commands and files")}
+        onRetry={onRetry}
+      />
+    )
   if (usage.empty) {
     return (
       <EmptyState
@@ -357,10 +404,7 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
   return (
     <div className="space-y-5">
       {usage.commands && usage.commands.length > 0 && (
-        <UsageSection
-          title="Commands"
-          hint="What this package actually put on your path — which is very often not its own name."
-        >
+        <UsageSection title="Commands">
           <div className="flex flex-wrap gap-1.5">
             {usage.commands.map((command) => (
               <CommandChip key={command} command={command} />
@@ -370,55 +414,50 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
       )}
 
       {usage.services && usage.services.length > 0 && (
-        <UsageSection
-          title="Services"
-          hint="Installing a package rarely starts it. These are the units it registered."
-        >
-          <div className="space-y-1">
+        <UsageSection title="Services">
+          <ChoiceList>
             {usage.services.map((service) => (
-              <div key={service} className="flex flex-wrap items-center gap-2">
-                <span className="font-mono text-xs">{service}</span>
+              <ChoiceRow
+                key={service}
+                leading={<PackageMark name={service} />}
+                title={<span className="font-mono">{service}</span>}
+                verb={`Open ${service}`}
+                href={`/processes/services?unit=${encodeURIComponent(service)}`}
+              >
                 <CommandChip command={`systemctl start ${service}`} />
-              </div>
+              </ChoiceRow>
             ))}
-          </div>
+          </ChoiceList>
         </UsageSection>
       )}
 
       {usage.configFiles && usage.configFiles.length > 0 && (
-        <UsageSection
-          title="Configuration"
-          hint="What it put in /etc. Each opens in the file manager."
-        >
-          <ul className="space-y-0.5">
+        <UsageSection title="Configuration">
+          <ChoiceList>
             {usage.configFiles.map((file) => (
-              <li key={file}>
-                <Link
-                  href={`/files?path=${encodeURIComponent(file)}`}
-                  className="font-mono text-xs text-primary hover:underline"
-                >
-                  {file}
-                </Link>
-              </li>
+              <ChoiceRow
+                key={file}
+                title={<span className="font-mono">{file}</span>}
+                verb={`Open ${file}`}
+                href={`/files?path=${encodeURIComponent(file)}`}
+              />
             ))}
-          </ul>
+          </ChoiceList>
         </UsageSection>
       )}
 
       {usage.docs && usage.docs.length > 0 && (
         <UsageSection title="Documentation on this machine">
-          <ul className="space-y-0.5">
+          <ChoiceList>
             {usage.docs.map((file) => (
-              <li key={file}>
-                <Link
-                  href={`/files?path=${encodeURIComponent(file)}`}
-                  className="font-mono text-xs text-primary hover:underline"
-                >
-                  {file}
-                </Link>
-              </li>
+              <ChoiceRow
+                key={file}
+                title={<span className="font-mono">{file}</span>}
+                verb={`Open ${file}`}
+                href={`/files?path=${encodeURIComponent(file)}`}
+              />
             ))}
-          </ul>
+          </ChoiceList>
         </UsageSection>
       )}
 
@@ -427,10 +466,7 @@ function UsageView({ usage, installed }: { usage: PackageUsage | null; installed
       )}
 
       {usage.manual && (
-        <UsageSection
-          title={`Manual — ${usage.manualFor}`}
-          hint={`The same page as \`man ${usage.manualFor}\`, rendered here so you do not have to open a shell to read it.`}
-        >
+        <UsageSection title={`Manual — ${usage.manualFor}`}>
           {/* whitespace-pre, not pre-wrap: a man page's two columns are made
               of spaces, and wrapping them folds the description under the flag
               it belongs to. It scrolls sideways inside the well instead, which

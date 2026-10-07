@@ -231,10 +231,11 @@ func (s *Server) handleUnitList(w http.ResponseWriter, r *http.Request) error {
 		httpx.JSON(w, http.StatusOK, map[string]any{"available": false, "units": []any{}})
 		return nil
 	}
-	units, err := s.modules.systemd.List(r.Context())
+	inventory, err := s.modules.systemd.Inventory(r.Context())
 	if err != nil {
 		return mapProcsError(err)
 	}
+	units := inventory.Units
 	if state := r.URL.Query().Get("state"); state != "" {
 		filtered := units[:0]
 		for _, u := range units {
@@ -244,7 +245,12 @@ func (s *Server) handleUnitList(w http.ResponseWriter, r *http.Request) error {
 		}
 		units = filtered
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"available": true, "units": units})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"available":  true,
+		"units":      units,
+		"manager":    inventory.Manager,
+		"ratesReady": inventory.RatesReady,
+	})
 	return nil
 }
 
@@ -272,7 +278,7 @@ func (s *Server) handleDaemonReload(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleUnitShow(w http.ResponseWriter, r *http.Request) error {
-	unit, props, err := s.modules.systemd.Show(r.Context(), chi.URLParam(r, "name"))
+	unit, props, err := s.modules.systemd.Detail(r.Context(), chi.URLParam(r, "name"))
 	if err != nil {
 		return mapProcsError(err)
 	}

@@ -185,6 +185,7 @@ const pm2 = {
       account: "deploy",
       home: "/home/deploy",
       dumpSavedAt: earlier,
+      savedApps: ["api", "worker"],
       startupUnit: "pm2-deploy.service",
     },
   ],
@@ -199,6 +200,34 @@ const pm2 = {
       pid: 4021,
       cpu: 12.5,
       memory: 268435456,
+      restarts: 3,
+      unstableRestarts: 0,
+      uptimeMs: 3 * 3600_000,
+      execMode: "cluster_mode",
+      instances: 2,
+      scriptPath: "/srv/api/server.js",
+      cwd: "/srv/api",
+      outLogPath: "/home/deploy/.pm2/logs/api-out.log",
+      errLogPath: "/home/deploy/.pm2/logs/api-err.log",
+      nodeVersion: "24.0.0",
+      user: "deploy",
+      watching: false,
+      interpreter: "node",
+      autorestart: true,
+      maxMemoryRestart: 314572800,
+      createdAtMs: Date.now() - 86400_000,
+      logTimes: true,
+    },
+    {
+      id: 2,
+      daemonId: "deploy",
+      logsAvailable: true,
+      name: "api",
+      namespace: "default",
+      status: "online",
+      pid: 4022,
+      cpu: 3.5,
+      memory: 201326592,
       restarts: 3,
       unstableRestarts: 0,
       uptimeMs: 3 * 3600_000,
@@ -777,10 +806,36 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   await expect(identity.locator("img[src='/logos/pm2.svg']")).toBeVisible()
   await expect(identity).toContainText("deploy")
   await expect(identity).toContainText("Node 24.0.0")
+  await expect(identity).toContainText("2 applications")
   await expect(identity.getByText("Resurrects on boot")).toBeVisible()
-  await expect(page.getByText("15 unstable — crashing soon after start")).toBeVisible()
-  // Each application as what runs it.
-  await expect(page.locator("td img[src='/logos/nodejs.svg']")).toHaveCount(2)
+  await expect(identity.getByRole("button", { name: "Save list" })).toHaveCount(0)
+
+  // No tiles: what PM2 takes of the machine is the band, the counts are the
+  // state chips in the table's head, and the crashing worker is the first row.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const band = page.locator("[data-slot='pm2-band']")
+  await expect(band.getByRole("button", { name: "Only api" })).toHaveCount(2)
+  await expect(band.getByRole("button", { name: "Only api" }).first()).toContainText("×2")
+  const states = page.locator("[aria-label='State']")
+  await expect(states.getByRole("button", { name: /Online/ })).toContainText("2")
+  await expect(states.getByRole("button", { name: /Errored/ })).toContainText("1")
+  const rows = page.locator("tbody tr")
+  await expect(rows.first()).toContainText("worker")
+  await expect(rows.first()).toContainText("15 unstable")
+  await expect(rows.first()).toContainText("PM2 stopped retrying")
+  // Each application as what runs it, memory against its restart limit.
+  await expect(page.locator("td img[src='/logos/nodejs.svg']")).toHaveCount(3)
+  await expect(page.getByRole("row", { name: /api #0/ })).toContainText("of 300 MB")
+
+  // A press on the band narrows the table to the application, and its chip
+  // lets it go.
+  await band.getByRole("button", { name: "Only api" }).first().click()
+  await expect(rows).toHaveCount(2)
+  await page.getByRole("button", { name: /Showing api only/ }).click()
+  await expect(rows).toHaveCount(3)
+  await states.getByRole("button", { name: /Errored/ }).click()
+  await expect(rows).toHaveCount(1)
+  await states.getByRole("button", { name: /Errored/ }).click()
 
   const labels = await menuLabels(page, "worker")
   expect(labels).toEqual(
@@ -789,10 +844,22 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   const api = await menuLabels(page, "api")
   expect(api).toContain("Scale…")
 
+  // Starting one: what runs it and how many are cards, and the command is
+  // the one that will run.
   await page.getByRole("button", { name: "Start application" }).click()
+  const start = page.getByRole("dialog")
   await page.getByLabel("Script or ecosystem file").fill("/srv/api/server.js")
-  await page.getByLabel("Name").fill("api2")
-  await expect(page.getByText("pm2 start /srv/api/server.js --name api2")).toBeVisible()
+  await page.getByLabel("Name", { exact: true }).fill("api2")
+  await expect(start).toContainText("pm2 start /srv/api/server.js --name api2")
+  await start.getByRole("button", { name: /Python/ }).click()
+  await start.getByRole("button", { name: /One per core/ }).click()
+  await expect(start).toContainText(
+    "pm2 start /srv/api/server.js --name api2 --interpreter python3 -i max",
+  )
+  // An ecosystem file is handed over whole.
+  await page.getByLabel("Script or ecosystem file").fill("/srv/ecosystem.config.js")
+  await expect(start.getByRole("button", { name: /Python/ })).toHaveCount(0)
+  await expect(start).toContainText("pm2 start /srv/ecosystem.config.js --only api2")
   await page.keyboard.press("Escape")
 
   await page.getByRole("button", { name: "Startup and bulk" }).click()
@@ -800,23 +867,104 @@ test("PM2 says whether it survives a reboot and offers the housekeeping verbs", 
   expect(bulk).toEqual(["Save startup list", "Reload all", "Restart all", "Stop all"])
 })
 
+test("PM2's verdict reads the saved list, and saving it again is one press", async ({ page }) => {
+  await mockHost(page)
+  const saved: string[] = []
+  await page.route("**/api/v1/pm2/**", (route) => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith("/pm2/save")) {
+      saved.push(path)
+      return json(route, { exitCode: 0 })
+    }
+    return json(route, {
+      ...pm2,
+      daemons: [{ ...pm2.daemons[0], savedApps: ["api", "old-cron"] }],
+    })
+  })
+  await page.goto("/processes/pm2")
+  // The worker was started after the save: a reboot would not bring it back,
+  // and the row says so.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("worker is not in the saved list")).toBeVisible()
+  await expect(page.getByRole("row", { name: /worker/ })).toContainText("not saved")
+  await identity.getByRole("button", { name: "Save list" }).click()
+  await expect.poll(() => saved.length).toBe(1)
+})
+
+test("a PM2 application's sheet reads its process live and scales its cluster", async ({
+  page,
+}) => {
+  await mockHost(page)
+  const scaled: unknown[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().includes("/pm2/api/scale")) {
+      scaled.push(request.postDataJSON())
+    }
+  })
+  // A bare name is what the live table's owner link carries; a cluster's
+  // name is every instance, and it opens the first one running.
+  await page.goto("/processes/pm2?app=api")
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByRole("heading", { name: /api/ })).toContainText("#0")
+  // Four readings from the process table's read of its PID, over its history.
+  const tiles = sheet.locator("[data-slot='stat-tile']")
+  await expect(tiles).toHaveCount(4)
+  await expect(tiles.nth(1)).toContainText("of 300 MB")
+  await expect(tiles.nth(3)).toContainText("3")
+  await expect(sheet.locator("[data-slot='stat-tile'] svg").first()).toBeVisible()
+  await expect(sheet.getByText(":3000")).toBeVisible()
+  await expect(sheet.getByText("every interface")).toBeVisible()
+  await expect(sheet.getByText("cluster instance 1 of 2")).toBeVisible()
+
+  // Its other instance opens in the same sheet.
+  const instances = sheet.locator("section, [data-slot=panel]").filter({
+    has: page.getByRole("heading", { name: "Instances" }),
+  })
+  await instances.getByRole("button", { name: /#2/ }).click()
+  await expect(page).toHaveURL(/app=deploy%3A2|app=deploy:2/)
+  await expect(sheet.getByText("cluster instance 2 of 2")).toBeVisible()
+
+  // Scaling is a stepper over the workers, said before it is done.
+  await sheet.getByRole("button", { name: "Scale…" }).first().click()
+  const scale = page.getByRole("dialog", { name: /Scale api/ })
+  await expect(scale.getByRole("button", { name: "Scale to 2" })).toBeDisabled()
+  await scale.getByRole("button", { name: "One worker more" }).click()
+  await expect(scale).toContainText("Starts 1 worker")
+  await scale.getByRole("button", { name: "Scale to 3" }).click()
+  await expect.poll(() => scaled).toEqual([{ instances: 3 }])
+
+  // The worker PM2 gave up on says so, and the press reads its log.
+  await page.goto("/processes/pm2?app=deploy:1")
+  await expect(sheet.getByText("PM2 stopped restarting it")).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await sheet.getByRole("button", { name: "Read the log" }).first().click()
+  await expect(sheet.getByRole("tab", { name: "Logs", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+})
+
 test("services list failed units first and the sheet offers reload where it applies", async ({
   page,
 }) => {
   await mockHost(page)
   await page.goto("/processes/services")
-  await expect(page.getByText("listed first below")).toBeVisible()
+  // No tiles: what they counted is the state chips in the table's head, the
+  // failed one in its tone, and the verdict at the end of the identity line.
+  // This host's backend predates the readings, and the page still opens.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await expect(
+    page.locator("[aria-label='State']").getByRole("button", { name: /Failed/ }),
+  ).toContainText("1")
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("1 service failed")
+  expect(await framedNonTables(page)).toEqual([])
   const names = await page
     .locator("[data-slot='table-row'] [data-slot='table-cell']:first-child button")
     .allInnerTexts()
   expect(names[0]).toBe("postgresql.service")
-  // A unit is the product it runs, and the Failed tile says what failed
-  // before the table does.
+  // A unit is the product it runs.
   await expect(page.locator("td img[src='/logos/postgresql.svg']")).toBeVisible()
   await expect(page.locator("td img[src='/logos/nginx.svg']")).toBeVisible()
-  await expect(
-    page.locator("[data-slot='stat-tile']").nth(1).locator("img[src='/logos/postgresql.svg']"),
-  ).toBeVisible()
 
   const failed = await menuLabels(page, "postgresql")
   expect(failed).toEqual(
@@ -833,20 +981,43 @@ test("services list failed units first and the sheet offers reload where it appl
 test("scheduled says what each schedule means and builds a new one in words", async ({ page }) => {
   await mockHost(page)
   await page.goto("/processes/scheduled")
-  await expect(page.getByText("Every day at 03:00")).toBeVisible()
-  await expect(page.getByText("Every hour at :17")).toBeVisible()
+  const jobs = page.getByRole("table").first()
+  await expect(jobs.getByText("Every day at 03:00")).toBeVisible()
   await expect(page.getByText("runs certbot.service")).toBeVisible()
 
-  // Five readings over the three lists and cron's log: what fires next
-  // across cron and the timers together, and the counts none of the lists
-  // says alone — among them what cron actually started in the last day.
-  const tiles = page.locator("[data-slot='stat-tile']")
-  await expect(tiles).toHaveCount(5)
-  await expect(tiles.nth(0)).toContainText("Next run")
-  await expect(tiles.nth(1)).toContainText("1 disabled · root")
-  await expect(tiles.nth(2)).toContainText("Cron runs")
-  await expect(tiles.nth(3)).toContainText("of 2 · 1 enabled on boot")
-  await expect(tiles.nth(4)).toContainText("1 file owned by packages")
+  // No tiles: the machine's identity line counts the three places schedules
+  // live, and what fires next counts down at its end.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("1 cron job for root, 1 disabled")
+  await expect(identity).toContainText("1 of 2 timers armed")
+  await expect(identity).toContainText("1 package cron line")
+  const next = page.locator("[data-slot='next-up']")
+  await expect(next).toContainText("Next run")
+  await expect(next).toContainText(/\d+[smhd]/)
+
+  // The next day of all three on one axis: a lane per schedule that fires in
+  // it, soonest first, each kind a chip that counts and narrows.
+  const band = page.getByRole("list", { name: "Schedules" })
+  await expect(band.locator(":scope > li")).toHaveCount(3)
+  await expect(
+    band.getByRole("img", { name: "run-parts: 24 runs in the next 24 hours" }),
+  ).toBeVisible()
+  const kinds = page.locator("[aria-label='Kind']")
+  await kinds.getByRole("button", { name: /Timers/ }).click()
+  await expect(band.locator(":scope > li")).toHaveCount(1)
+  await expect(band).toContainText("certbot")
+  await kinds.getByRole("button", { name: /Timers/ }).click()
+  // What the axis does not draw is said under it.
+  await expect(page.getByText("2 switched off")).toBeVisible()
+
+  // The crontab's head counts its jobs as chips that narrow the table.
+  const states = page.locator("[aria-label='Job state']")
+  await states.getByRole("button", { name: /Disabled/ }).click()
+  await expect(jobs.getByRole("row", { name: /prune/ })).toBeVisible()
+  await expect(jobs.getByRole("row", { name: /backup/ })).toHaveCount(0)
+  await states.getByRole("button", { name: /All/ }).click()
+
   // certbot's timer is Let's Encrypt's renewal; a script of the operator's
   // own keeps the clock.
   await expect(page.locator("td img[src='/logos/lets-encrypt.svg']")).toBeVisible()
@@ -861,13 +1032,30 @@ test("scheduled says what each schedule means and builds a new one in words", as
     page.getByRole("row", { name: /prune/ }).first().getByRole("button", { name: "Enable" }),
   ).toBeVisible()
 
+  // The editor is a sheet that draws the week the schedule makes as it is
+  // written.
   await page.getByRole("button", { name: "Add job" }).click()
-  await page.getByLabel("Command").fill("/usr/local/bin/report")
-  const dialog = page.getByRole("dialog")
-  await expect(dialog.getByText("0 3 * * *", { exact: true })).toBeVisible()
-  await expect(dialog.getByText("Every day at 03:00")).toBeVisible()
-  await expect(dialog.getByText(/^Next: /)).toBeVisible()
+  const editor = page.getByRole("dialog", { name: "Add cron job" })
+  await editor.getByLabel("Command").fill("/usr/local/bin/report")
+  const preview = editor.locator("[data-slot='schedule-preview']")
+  await expect(preview.getByText("0 3 * * *", { exact: true })).toBeVisible()
+  await expect(preview.getByText("Every day at 03:00")).toBeVisible()
+  await expect(preview.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(preview.getByText(/^Next: /)).toBeVisible()
+  await editor.getByRole("radio", { name: "Hourly" }).click()
+  await expect(preview.getByText("0 * * * *", { exact: true })).toBeVisible()
+  await expect(editor.getByRole("button", { name: "Add job" })).toBeEnabled()
   await page.keyboard.press("Escape")
+
+  // A job opens on its week, its command and the runs cron logged for it.
+  await jobs.getByRole("button", { name: "/usr/local/bin/backup" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/job=cron(%3A|:)3/)
+  await expect(sheet.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  await expect(sheet.getByRole("button", { name: "Disable" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/job=/)
 })
 
 const RUN_PREDICATES = [
@@ -1053,7 +1241,7 @@ test("a PM2 application's logs are its own lensed stream, beside PM2's count of 
   await expect(sheet.getByRole("button", { name: "Around the last start" })).toHaveCount(0)
   await page.keyboard.press("Escape")
 
-  await page.getByRole("button", { name: "api", exact: true }).click()
+  await page.getByRole("button", { name: "api", exact: true }).first().click()
   await sheet.getByRole("tab", { name: "Logs", exact: true }).click()
   await expect.poll(() => logs.sockets.at(-1)?.get("source")).toBe("pm2:deploy/0/api")
   const around = sheet.getByRole("button", { name: "Around the last start" })
@@ -1088,16 +1276,17 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
     .filter({ has: page.getByRole("heading", { name: "Cron log", exact: true }) })
   await expect(cronLog.getByLabel("Log lines").getByText(/usr\/local\/bin\/backup/)).toBeVisible()
   await expect(cronLog.getByText("output lost", { exact: true })).toBeVisible()
-  // What cron started in the last day, and the runs whose output went nowhere.
-  const tile = page.locator("[data-slot='stat-tile']").filter({ hasText: "Cron runs" })
-  await expect(tile).toContainText("143")
-  await expect(tile).toContainText("2 runs with their output discarded")
+  // What cron started in the last day, and the runs whose output went
+  // nowhere: the lens's readings are counts on its chips, where a tile stood.
+  await expect(cronLog.getByRole("button", { name: /^Runs/ })).toContainText("143")
+  await expect(cronLog.getByRole("button", { name: /^Output discarded/ })).toContainText("2")
 
-  // A timer opens in place on the runs of the service it fires.
-  const certbot = page.getByRole("button", { name: "certbot.timer", exact: true })
-  await certbot.click()
-  await expect(certbot).toHaveAttribute("aria-expanded", "true")
-  const runs = page.getByRole("list", { name: "Runs" })
+  // A timer opens its sheet on the runs of the service it fires.
+  await page.getByRole("button", { name: "certbot.timer", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/timer=certbot\.timer/)
+  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  const runs = sheet.getByRole("list", { name: "Runs" })
   const rows = runs.locator(":scope > li")
   await expect(rows).toHaveCount(3)
   const asked = logs.searches.find((s) => s.get("lens") === "systemd")!
@@ -1109,7 +1298,8 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
   await expect(rows.nth(1)).toContainText("failed")
   await expect(rows.nth(1)).toContainText("exit 1")
   await expect(rows.nth(1)).toContainText("2.11s CPU")
-  await certbot.click()
+  await expect(sheet.getByRole("button", { name: "Run now" })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(runs).toHaveCount(0)
 })
 
@@ -1118,7 +1308,12 @@ test.describe("with no hover available", () => {
 
   test("every row's verbs are reachable on a phone", async ({ page }) => {
     await mockHost(page)
-    for (const path of ["/processes", "/processes/pm2", "/processes/services"]) {
+    for (const path of [
+      "/processes",
+      "/processes/pm2",
+      "/processes/services",
+      "/processes/scheduled",
+    ]) {
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       const hidden = await page.evaluate(() => {

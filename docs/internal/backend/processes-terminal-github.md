@@ -83,9 +83,13 @@ socket-activated service's port.
   invocation and would read as a run, and the manager's `code=dumped` exit already says the run
   dumped core. sshd's unit is refused to anyone but `system.admin` by the log routes (see
   [Logs](docker-files-logs.md#logs)), and the sheet says so rather than opening a socket.
-- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written and whether a
-  `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page states
-  both, because a daemon with three online applications and no saved list restores nothing. The
+- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written, the
+  application names it holds (`savedApps`, each once, read only when the file's time or size changes
+  and capped at 16 MiB; `null` when there is no list or it cannot be parsed, `[]` for an empty one —
+  only the names leave the server, because the dump also holds every application's environment), and
+  whether a `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page
+  states all three, because a daemon with three online applications and no saved list restores
+  nothing, and one saved before the last start restores everything but that. The
   per-process verbs grew `reset` (restart counters, `service.control`) and `flush` (truncates the log
   files, destructive); `POST /pm2/{name}/scale` (`{instances}`) runs `pm2 scale <name> <n>` and
   refuses a fork-mode application; `POST /pm2/daemons/{user}/{start|reload}` and, destructive,
@@ -126,6 +130,24 @@ socket-activated service's port.
   `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
   (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
   `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
+- `GET /systemd/` carries each unit's live readings and the manager (`Systemd.Inventory`, additive:
+  `units` keeps its shape). One `systemctl show -p … --` over every loaded unit reads its type, main
+  PID, cgroup memory (page cache included) and tasks, automatic restarts (`NRestarts`), result and
+  how its main process last ended (`ExecMainCode`/`ExecMainStatus` as `exitCode`/`exitStatus`), when
+  it became active and when it last changed state (`changedAt`), and its unit file, so a list row
+  offers Open unit file. CPU is `CPUUsageNSec` turned into a share of one core over the window
+  since the unit's last reading, on the process sampler's rules: a window shorter than a second
+  reports the last whole one, a new `InvocationID` or a counter that went backwards starts a new
+  window, `ratesReady` is false until some unit has two readings, and each window appends a point to
+  the unit's history, at most one every two seconds and the last ninety. `GET /systemd/{name}`
+  (`Systemd.Detail`) measures the same way and returns that `history`. An inactive unit's last read
+  is reused for a minute while it stays inactive; a unit that is not loaded is listed but not
+  asked about. The manager is `Version` and `SystemState` (`running`, `degraded`…) with the boot
+  time from the host's uptime — not `FinishTimestamp`, which a job that never finishes holds open.
+  `list-unit-files`, most of a second on a host with two hundred units, is kept thirty seconds and
+  forgotten after enable, disable and daemon-reload run here; the same commands run in a shell are
+  at most that late on the page. Readings are best-effort: a `show` that fails leaves the list
+  without figures rather than failing it.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
   and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as
@@ -143,8 +165,11 @@ socket-activated service's port.
   stdin (`crontab -u <user> -`), so a container-only temporary file or spool cannot receive a host job.
   What cron ran is read from its own log on the Scheduled page, through the `cron` lens: the daemon's
   unit journal (`cron`, `crond` or `cronie`), else a cron file, else the journal's `CRON`/`crond` lines
-  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a timer's row
-  opens the activated service's runs.
+  (`journal-id:`), chosen from `GET /logs/sources` and asked again when that read fails; a job's sheet
+  reads the same log narrowed to its command (`command:` is a field of the cron lens). A timer's
+  sheet reads `GET /systemd/{timer}` for its `TimersCalendar`, `TimersMonotonic` and
+  `RandomizedDelayUSec`, and `GET /systemd/{service}` for the command, result and monotonic run
+  times of the service it fires, beside that service's runs; no route was added for either.
 
 ## The terminal
 

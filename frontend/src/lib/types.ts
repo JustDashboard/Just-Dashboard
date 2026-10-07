@@ -1232,6 +1232,8 @@ export type PM2Daemon = {
   home: string
   /** When `pm2 save` last wrote the resurrection list; absent when it never has. */
   dumpSavedAt?: string
+  /** The application names that list holds; null when there is none or it could not be read. */
+  savedApps?: string[] | null
   /** The systemd unit `pm2 startup` installed for this account, if any. */
   startupUnit?: string
 }
@@ -1281,6 +1283,36 @@ export type SystemdUnit = {
   fragmentPath?: string
   result?: string
   restarts?: number
+  /** simple, notify, forking, oneshot… */
+  type?: string
+  /** When it last started, stopped, finished or failed (unix seconds). */
+  changedAt?: number
+  /** A share of one core over the last measured window; 200 is two cores. */
+  cpuPercent?: number
+  /** False until the unit has been read twice a window apart. */
+  cpuReady?: boolean
+  /** How its main process last ended: exited, killed or dumped. */
+  exitCode?: string
+  /** The exit status, or the signal's number when killed or dumped. */
+  exitStatus?: number
+  /** Its recent measured windows, oldest first; only the detail route returns them. */
+  history?: SystemdPoint[]
+}
+
+export type SystemdPoint = { t: number; cpu: number; memory: number }
+
+export type SystemdManager = {
+  version: string
+  /** running, degraded, starting, stopping, maintenance… */
+  state: string
+  bootedAt?: number
+}
+
+export type SystemdList = {
+  available: boolean
+  units: SystemdUnit[]
+  manager?: SystemdManager
+  ratesReady?: boolean
 }
 
 export type ProcessRow = {
