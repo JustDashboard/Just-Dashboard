@@ -6719,6 +6719,8 @@ export type NetworkOverview = {
   connections: { total: number; peers: number; fromInternet: number; listening: number }
   forwarding: { ipv4: boolean; ipv6: boolean }
   persistence: NetworkPersistence
+  vpn: VPNSummary
+  dns?: DNSSummary
   made: {
     links: number
     routes: number
@@ -6839,4 +6841,421 @@ export type BGPView = {
       description?: string
     }[]
   }[]
+}
+
+export type VPNSummary = {
+  wireguard: {
+    installed: boolean
+    interfaces: number
+    peers: number
+    online: number
+    rx: number
+    tx: number
+  }
+  tailscale: {
+    installed: boolean
+    running: boolean
+    peers: number
+    online: number
+    exitNode: boolean
+    subnetRoutes: number
+    selfIps: string[]
+  }
+}
+
+export type WGPeer = {
+  /** Zero for a peer the dashboard did not make, which is read-only. */
+  id: number
+  name: string
+  kind: "device" | "site" | "peer"
+  publicKey: string
+  address: string
+  allowedIps: string[]
+  endpoint: string
+  /** Unix seconds; zero is never. */
+  latestHandshake: number
+  /** A handshake within the last three minutes. */
+  online: boolean
+  rxBytes: number
+  txBytes: number
+  keepalive: number
+  /** The client's configuration is kept, sealed, and can be shown again. */
+  hasConfig: boolean
+  createdAt?: string
+}
+
+export type WGInterface = {
+  name: string
+  /** The dashboard wrote this tunnel's file; a hand-written one is read-only. */
+  managed: boolean
+  configured: boolean
+  up: boolean
+  enabled: boolean
+  active: boolean
+  publicKey: string
+  listenPort: number
+  addresses: string[]
+  mtu: number
+  dns: string[]
+  endpoint: string
+  exitNode: boolean
+  subnet: string
+  peers: WGPeer[]
+}
+
+export type WireGuardView = {
+  installed: boolean
+  tools: { wg: boolean; wgQuick: boolean }
+  package: string
+  kernel: boolean
+  systemd: boolean
+  interfaces: WGInterface[]
+  error?: string
+}
+
+export type TailscalePeer = {
+  id: string
+  hostName: string
+  dnsName: string
+  os: string
+  tailscaleIps: string[]
+  online: boolean
+  active: boolean
+  exitNode: boolean
+  exitNodeOption: boolean
+  relay: string
+  direct: boolean
+  curAddr: string
+  rxBytes: number
+  txBytes: number
+  lastSeen?: string
+  lastHandshake?: string
+  primaryRoutes?: string[]
+  tags?: string[]
+  userLoginName?: string
+  expired?: boolean
+}
+
+export type TailscaleView = {
+  installed: boolean
+  running: boolean
+  backendState: string
+  version: string
+  authUrl?: string
+  self: {
+    hostName: string
+    dnsName: string
+    tailscaleIps: string[]
+    os: string
+    online: boolean
+    exitNodeOption: boolean
+    primaryRoutes?: string[]
+    relay: string
+  } | null
+  magicDnsSuffix: string
+  tailnet: string
+  health: string[]
+  peers: TailscalePeer[]
+  prefs: {
+    advertiseRoutes: string[]
+    advertisingExitNode: boolean
+    usingExitNode: boolean
+    exitNodeId?: string
+    routeAll: boolean
+    corpDns: boolean
+    shieldsUp: boolean
+  }
+  controlServer: "tailscale" | "self-hosted"
+  controlUrl: string
+  clientOnTailnet: boolean
+  forwarding: { ipv4: boolean; ipv6: boolean }
+  warnings: string[]
+  error?: string
+}
+
+export type HeadscaleView = {
+  installed: boolean
+  container?: string
+  nodes: {
+    id: string
+    name: string
+    givenName: string
+    ipAddresses: string[]
+    online: boolean
+    lastSeen?: string
+    user: string
+    forcedTags?: string[]
+  }[]
+  users: { id: string; name: string; nodes: number }[]
+  error?: string
+}
+
+export type VPNView = { wireguard: WireGuardView; tailscale: TailscaleView; headscale: HeadscaleView }
+
+export type WGPeerCreated = {
+  peer: WGPeer
+  config: string
+  /** A PNG data URL. */
+  qr: string
+  reloaded: boolean
+  warnings: string[]
+}
+
+export type DNSScope = {
+  protocols: string[]
+  dnsOverTLS: "yes" | "opportunistic" | "no"
+  dnssec: string
+  dnssecSupported: boolean
+  currentServer?: string
+  servers: string[]
+  fallbackServers: string[]
+  domains: string[]
+}
+
+export type DNSPreset = {
+  id: string
+  name: string
+  product: string
+  servers: string[]
+  tlsName: string
+  tlsServers: string[]
+  blocksAds: boolean
+  blocksMalware: boolean
+}
+
+export type DNSView = {
+  resolvConf: {
+    path: string
+    mode: "stub" | "uplink" | "static" | "link" | "missing"
+    target?: string
+    managedBy?: string
+    nameservers: string[]
+    search: string[]
+    options: string[]
+  }
+  resolved: {
+    installed: boolean
+    active: boolean
+    global: DNSScope & { resolvConfMode?: string }
+    links: (DNSScope & { name: string; index: number; scopes: string[]; defaultRoute: boolean })[]
+    linksTotal: number
+    statistics?: {
+      cacheSize: number
+      cacheHits: number
+      cacheMisses: number
+      hitPercent: number
+      transactions: number
+      currentTransactions: number
+      timeouts: number
+      failures: number
+      dnssecSecure: number
+      dnssecInsecure: number
+      dnssecBogus: number
+      dnssecIndeterminate: number
+    }
+    statisticsError?: string
+    error?: string
+  }
+  listeners: {
+    address: string
+    protocol: string
+    process?: string
+    pid?: number
+    container?: string
+    loopback: boolean
+    kind:
+      | "resolved-stub"
+      | "dnsmasq"
+      | "unbound"
+      | "named"
+      | "adguardhome"
+      | "pihole"
+      | "docker-proxy"
+      | "other"
+  }[]
+  adblock: {
+    kind: "adguardhome" | "pihole"
+    name: string
+    runsAs: "container" | "process"
+    container?: string
+    image?: string
+    answering: boolean
+    webPort?: number
+  }[]
+  managed: {
+    path: string
+    exists: boolean
+    servers: string[]
+    fallback: string[]
+    domains: string[]
+    dnssec: string
+    dnsOverTLS: string
+    cache: string
+  }
+  presets: DNSPreset[]
+}
+
+export type DNSSummary = {
+  resolver: string
+  mode: string
+  upstreams: string[]
+  dnsOverTLS: string
+  dnssec: string
+  adblock: boolean
+  custom: boolean
+}
+
+export type DNSApplied = {
+  verified: boolean
+  via?: string
+  millis?: number
+  warning?: string
+}
+
+export type HostRecords = {
+  path: string
+  managed: { address: string; names: string[] }[]
+  other: { address: string; names: string[]; line: number }[]
+  problem?: string
+}
+
+export type DNSLookup = {
+  name: string
+  type: string
+  results: { server: string; label: string; answers: string[]; latencyMs: number; error?: string }[]
+}
+
+export type ProcessTraffic = {
+  at: string
+  intervalSeconds: number
+  warming: boolean
+  truncated: boolean
+  note: string
+  programs: {
+    name: string
+    pids: number[]
+    connections: number
+    rxRate: number
+    txRate: number
+    rxTotal: number
+    txTotal: number
+    peers: { address: string; port: number; connections: number; rxBytes: number; txBytes: number }[]
+  }[]
+}
+
+export type ContainerTraffic = {
+  windowSeconds: number
+  recording: boolean
+  containers: {
+    name: string
+    rxBytes: number
+    txBytes: number
+    rxRate: number
+    txRate: number
+    lastSeen: string
+    series: { t: number; rx: number; tx: number }[]
+  }[]
+}
+
+export type EBPFView = {
+  installed: boolean
+  package?: string
+  bpfStatsEnabled: boolean
+  total: number
+  programs: {
+    id: number
+    type: string
+    name?: string
+    tag?: string
+    loadedAt?: string
+    uid: number
+    bytesXlated: number
+    bytesJited: number
+    memlock: number
+    mapIds: number[]
+    runTimeNs?: number
+    runCount?: number
+    pinned?: string[]
+    owners?: string[]
+  }[]
+  byType: { type: string; count: number }[]
+  attachments: {
+    device: string
+    ifindex: number
+    kind: "xdp" | "tc ingress" | "tc egress"
+    programId: number
+    name?: string
+    mode?: string
+  }[]
+  error?: string
+}
+
+export type CrowdSecView = {
+  installed: boolean
+  active: boolean
+  decisions: {
+    id: number
+    origin: string
+    scenario: string
+    scope: string
+    value: string
+    type: string
+    duration: string
+    until?: string
+    alertId: number
+    country?: string
+    as?: string
+  }[]
+  alerts: {
+    id: number
+    scenario: string
+    source: { ip?: string; scope?: string; value?: string; country?: string; asName?: string }
+    eventsCount: number
+    createdAt: string
+    decisions: number
+  }[]
+  bouncers: {
+    name: string
+    ipAddress?: string
+    valid: boolean
+    lastPull?: string
+    type?: string
+    version?: string
+  }[]
+  error?: string
+}
+
+export type SuricataView = {
+  installed: boolean
+  active: boolean
+  version?: string
+  mode: "ids" | "ips"
+  modeSource?: string
+  alerts: {
+    time: string
+    srcIp: string
+    srcPort?: number
+    destIp: string
+    destPort?: number
+    proto?: string
+    appProto?: string
+    signature: string
+    signatureId: number
+    category?: string
+    severity: number
+    action?: "allowed" | "blocked"
+  }[]
+  scanned: number
+  bySeverity: { severity: number; label: string; count: number }[]
+  topSignatures: {
+    signature: string
+    signatureId: number
+    category?: string
+    severity: number
+    count: number
+  }[]
+  rulesLoaded?: number
+  logPath: string
+  logRefused?: string
+  logError?: string
 }

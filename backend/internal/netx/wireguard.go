@@ -482,7 +482,7 @@ type TSSummary struct {
 	// ExitNode is this server advertising itself as an exit node.
 	ExitNode     bool     `json:"exitNode"`
 	SubnetRoutes int      `json:"subnetRoutes"`
-	SelfIPs      []string `json:"selfIPs"`
+	SelfIPs      []string `json:"selfIps"`
 }
 
 // VPNSummary reads both VPNs for the Overview. A part that cannot be read

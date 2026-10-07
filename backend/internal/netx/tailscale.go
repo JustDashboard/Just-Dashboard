@@ -49,7 +49,7 @@ type TailscaleView struct {
 	ControlURL     string   `json:"controlUrl"`
 	// ClientOnTailnet is the dashboard's reader arriving through the tailnet,
 	// which is what makes everything here something that must not be broken.
-	ClientOnTailnet bool         `json:"tsClientOnTailnet"`
+	ClientOnTailnet bool         `json:"clientOnTailnet"`
 	Forwarding      TSForwarding `json:"forwarding"`
 	Warnings        []string     `json:"warnings"`
 	Error           string       `json:"error,omitempty"`
