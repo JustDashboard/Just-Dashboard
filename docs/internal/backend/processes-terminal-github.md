@@ -83,9 +83,13 @@ socket-activated service's port.
   invocation and would read as a run, and the manager's `code=dumped` exit already says the run
   dumped core. sshd's unit is refused to anyone but `system.admin` by the log routes (see
   [Logs](docker-files-logs.md#logs)), and the sheet says so rather than opening a socket.
-- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written and whether a
-  `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page states
-  both, because a daemon with three online applications and no saved list restores nothing. The
+- `GET /pm2/` also carries `daemons`: per account, when `~/.pm2/dump.pm2` was last written, the
+  application names it holds (`savedApps`, each once, read only when the file's time or size changes
+  and capped at 16 MiB; `null` when there is no list or it cannot be parsed, `[]` for an empty one —
+  only the names leave the server, because the dump also holds every application's environment), and
+  whether a `pm2-<user>.service` boot hook exists (a stat under the host's `/etc` and `/lib`); the page
+  states all three, because a daemon with three online applications and no saved list restores
+  nothing, and one saved before the last start restores everything but that. The
   per-process verbs grew `reset` (restart counters, `service.control`) and `flush` (truncates the log
   files, destructive); `POST /pm2/{name}/scale` (`{instances}`) runs `pm2 scale <name> <n>` and
   refuses a fork-mode application; `POST /pm2/daemons/{user}/{start|reload}` and, destructive,
