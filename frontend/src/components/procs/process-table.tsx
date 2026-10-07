@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Cpu, Cross, Pause, Play, SettingsSliders } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
@@ -73,6 +73,7 @@ import {
   processStateTone,
 } from "@/components/procs/shared"
 import { WorkloadBand } from "@/components/procs/workloads"
+import { useInspectionOrder } from "@/components/procs/inspection-order"
 
 type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
 
@@ -133,7 +134,6 @@ function automaticFocus(snapshot: Snapshot | undefined): {
  */
 export function LiveProcesses() {
   const [paused, setPaused] = useState(false)
-  const [order, setOrder] = useState<string[]>([])
   const { confirm, dialog } = useConfirm()
   const [query, setQuery] = useSessionState("processes.live.query", "")
   const [user, setUser] = useSessionState("processes.live.user", "")
@@ -149,8 +149,8 @@ export function LiveProcesses() {
   const automatic = automaticFocus(snapshot)
   const effectiveSort = sort === "auto" ? automatic.sort : sort
   const processList = usePoll(
-    (signal) =>
-      get<ProcessList>(
+    async (signal) => ({
+      ...(await get<ProcessList>(
         "/processes/inventory",
         {
           limit,
@@ -162,21 +162,30 @@ export function LiveProcesses() {
           group: group || undefined,
         },
         signal,
-      ),
+      )),
+      focus: { sort: effectiveSort, reason: sort === "auto" ? automatic.reason : undefined },
+    }),
     paused ? 0 : refreshSeconds * 1000,
-    [appliedQuery, effectiveSort, user, state, manager, group, limit],
+    [appliedQuery, user, state, manager, group],
   )
+  // Ranking and row count describe the same inventory. Clearing it here
+  // remounted the table and reset its scroll whenever Automatic focus changed.
+  const refreshInventory = processList.refresh
+  const requested = useRef({ sort: effectiveSort, limit })
+  useEffect(() => {
+    if (requested.current.sort === effectiveSort && requested.current.limit === limit) return
+    requested.current = { sort: effectiveSort, limit }
+    refreshInventory()
+  }, [effectiveSort, limit, refreshInventory])
   const { pending, signal } = useProcessControl(processList.refresh)
 
   const data = processList.data
-  const rows = useMemo(() => {
-    const rank = new Map(order.map((id, index) => [id, index]))
-    return [...(data?.processes ?? [])].sort(
-      (a, b) => (rank.get(processKey(a)) ?? Infinity) - (rank.get(processKey(b)) ?? Infinity),
-    )
-  }, [data?.processes, order])
+  // A filter change starts new arrival memory; a changed ranking does not.
+  const listKey = [appliedQuery, user, state, manager, group].join("\u0000")
+  const inspection = useInspectionOrder(data?.processes ?? [], processKey, `${listKey}:${sort}`)
+  const rows = inspection.rows
   const refresh = () => {
-    setOrder([])
+    inspection.release()
     processList.refresh()
   }
   const memTotal = snapshot?.memory?.total ?? 0
@@ -194,10 +203,6 @@ export function LiveProcesses() {
     setHeld({ groups: data.groups, ratesReady: data.ratesReady })
   }
   const chosenGroup = held?.groups?.find((g) => g.key === group)
-  // A filter change is a new list rather than arrivals into this one, so the
-  // rows' arrival memory starts over with it.
-  const listKey = [appliedQuery, user, state, manager, group].join("\u0000")
-
   const settings = (
     <ProcessTableSettings
       limit={limit}
@@ -237,8 +242,8 @@ export function LiveProcesses() {
           setGroup("")
           return true
         }
-        if (order.length) {
-          setOrder([])
+        if (inspection.held) {
+          inspection.release()
           return true
         }
         return false
@@ -251,18 +256,7 @@ export function LiveProcesses() {
         },
       ]}
     >
-      <Page
-        className="animate-rise"
-        onFocusCapture={(event) => {
-          if ((event.target as HTMLElement).closest("[data-workspace-item]") && !order.length)
-            setOrder((data?.processes ?? []).map(processKey))
-        }}
-        onBlurCapture={(event) => {
-          const next = event.relatedTarget as HTMLElement | null
-          if (next && !next.closest("[data-workspace-item], [role='dialog'], [role='menu']"))
-            setOrder([])
-        }}
-      >
+      <Page className="animate-rise" {...inspection.bindings}>
         <PageContext eyebrow="Processes" title="Live" />
 
         {known && (
@@ -463,10 +457,10 @@ export function LiveProcesses() {
               </span>
               <span className="text-muted-foreground/40">·</span>
               <span>
-                sorted by {SORT_LABEL[effectiveSort]}
-                {sort === "auto" && ` because ${automatic.reason}`}
+                sorted by {SORT_LABEL[data.focus.sort]}
+                {data.focus.reason && ` because ${data.focus.reason}`}
               </span>
-              {(paused || order.length > 0) && (
+              {(paused || inspection.held) && (
                 <span role="status">
                   {paused ? "Updates paused" : "Row order held while inspecting"}
                 </span>

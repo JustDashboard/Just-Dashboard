@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
 import { answerLogs, mockLogSockets, type LogMocks } from "./processes-logs-fixture"
 
 /**
@@ -1429,3 +1429,299 @@ test("workspace: changing process rankings keep focused rows steady and Pause st
   await page.keyboard.press("F5")
   await expect.poll(() => reads).toBeGreaterThan(pausedReads)
 })
+
+test("automatic focus retains the table, scroll and readings while its next ranking is slow", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let stream: WebSocketRoute | undefined
+  await page.routeWebSocket("**/api/v1/system/stream**", (socket) => {
+    stream = socket
+  })
+  const many = Array.from({ length: 80 }, (_, i) =>
+    process({ pid: 2000 + i, name: `worker-${i}`, cpuPercent: 80 - i / 2 }),
+  )
+  let release: (() => void) | undefined
+  await page.route("**/api/v1/processes/inventory*", async (route) => {
+    const sort = new URL(route.request().url()).searchParams.get("sort")
+    if (sort === "memory") await new Promise<void>((resolve) => (release = resolve))
+    return json(route, { ...inventory, processes: many, total: many.length })
+  })
+  await page.setViewportSize({ width: 1720, height: 1000 })
+  await page.goto("/processes")
+  await expect(page.getByText(/sorted by highest disk I\/O/)).toBeVisible()
+  await expect.poll(() => stream).toBeTruthy()
+  const table = page.locator("[data-slot=table-container]:visible")
+  const node = (await table.elementHandle())!
+  await table.evaluate((element) => (element.scrollTop = 250))
+  const scroll = await table.evaluate((element) => element.scrollTop)
+  expect(scroll).toBeGreaterThan(0)
+  stream!.send(
+    JSON.stringify({
+      type: "metrics",
+      ts: Date.now(),
+      data: {
+        ts: new Date().toISOString(),
+        cpu: { totalPercent: 25, cores: 2, loadAvg1: 0.4 },
+        memory: { total: 8589934592, available: 3221225472, usedPercent: 50 },
+        swap: { total: 0, used: 0, usedPercent: 0 },
+        pressure: { supported: true, cpuSome: 0, memSome: 10, ioSome: 0 },
+        procs: { blocked: 0, running: 11, total: 143 },
+        uptimeSeconds: 86400,
+        mounts: [],
+        net: [],
+      },
+    }),
+  )
+  await expect.poll(() => release).toBeTruthy()
+  expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+  expect(await table.evaluate((element) => element.scrollTop)).toBe(scroll)
+  await expect(page.getByText(/sorted by highest disk I\/O/)).toBeVisible()
+  release!()
+  await expect(page.getByText(/sorted by highest memory/)).toBeVisible()
+  expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+  expect(await table.evaluate((element) => element.scrollTop)).toBe(scroll)
+})
+
+for (const [surface, width] of (["live", "pm2", "services", "timers"] as const).flatMap((surface) =>
+  [390, 1720].map((width) => [surface, width] as const),
+)) {
+  test(`${surface} at ${width}: a background state change preserves hovered rows and their open menu`, async ({
+    page,
+  }) => {
+    await page.clock.install()
+    await mockHost(page)
+    await page.setViewportSize({ width, height: 1000 })
+    if (width === 390) await page.emulateMedia({ reducedMotion: "reduce" })
+    const fixtures = {
+      live: {
+        path: "/processes",
+        endpoint: "**/api/v1/processes/inventory*",
+        selector: "[data-workspace-item]:visible",
+        data: inventory,
+        changed: {
+          ...inventory,
+          processes: [...processes].reverse().map((p) => ({ ...p, state: "stopped" })),
+        },
+        reading: "stopped",
+      },
+      pm2: {
+        path: "/processes/pm2",
+        endpoint: "**/api/v1/pm2/",
+        selector: "[data-process-row]:visible, [data-workspace-item]:visible",
+        data: pm2,
+        changed: {
+          ...pm2,
+          processes: [...pm2.processes].reverse().map((p) => ({ ...p, status: "stopped" })),
+        },
+        reading: "stopped",
+      },
+      services: {
+        path: "/processes/services",
+        endpoint: "**/api/v1/systemd/",
+        selector: "[data-process-row]:visible, [data-workspace-item]:visible",
+        data: units,
+        changed: {
+          ...units,
+          units: [...units.units].reverse().map((u) => ({ ...u, activeState: "inactive" })),
+        },
+        reading: "inactive",
+      },
+      timers: {
+        path: "/processes/scheduled",
+        endpoint: "**/api/v1/systemd/timers",
+        selector: "[data-process-row]:visible",
+        data: timers,
+        changed: {
+          ...timers,
+          timers: [...timers.timers].reverse().map((t) => ({ ...t, activeState: "inactive" })),
+        },
+        reading: "stopped",
+      },
+    }
+    const fixture = fixtures[surface]
+    let changed = false
+    let failed = false
+    let reads = 0
+    await page.route(fixture.endpoint, (route) => {
+      reads++
+      if (failed)
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "Temporary read failure" },
+          }),
+        })
+      return json(route, changed ? fixture.changed : fixture.data)
+    })
+    await page.goto(fixture.path)
+    const rows = page.locator(fixture.selector)
+    await expect(rows.first()).toBeVisible()
+    const names = () =>
+      rows.evaluateAll((elements) =>
+        elements.map(
+          (element) =>
+            element.getAttribute("data-process-row") ?? element.getAttribute("data-workspace-item"),
+        ),
+      )
+    const before = await names()
+    const first = (await rows.first().elementHandle())!
+    await rows.first().hover()
+    // Hold starts on hover, before pressing a control gives the row focus.
+    changed = true
+    const initialReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(initialReads)
+    await expect(rows.first()).toContainText(fixture.reading)
+    expect(await names()).toEqual(before)
+    expect(await first.evaluate((element) => element.isConnected)).toBe(true)
+    expect(
+      await rows.evaluateAll((elements) =>
+        elements.some((row) => row.classList.contains("animate-rise")),
+      ),
+    ).toBe(false)
+    await rows.first().getByRole("button", { name: "More actions" }).click()
+    const menu = page.getByRole("menu")
+    await expect(menu).toBeVisible()
+    const menuNode = (await menu.elementHandle())!
+    changed = false
+    const menuReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(menuReads)
+    await expect(menu).toBeVisible()
+    expect(await menuNode.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await names()).toEqual(before)
+    failed = true
+    const failedReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(failedReads)
+    await expect(menu).toBeVisible()
+    expect(await first.evaluate((element) => element.isConnected)).toBe(true)
+    failed = false
+    changed = true
+    const finalReads = reads
+    await page.clock.fastForward(31000)
+    await expect.poll(() => reads).toBeGreaterThan(finalReads)
+    await expect(rows.first()).toContainText(fixture.reading)
+    await page.keyboard.press("Escape")
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+    await page.mouse.move(0, 0)
+    await expect
+      .poll(names)
+      .toEqual(surface === "pm2" ? ["deploy:0", "deploy:2", "deploy:1"] : [...before].reverse())
+  })
+}
+
+test("cron disable updates its existing row and keeps keyboard focus on the toggle", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let disabled = false
+  await page.route("**/api/v1/cron/user/root", (route) => {
+    if (route.request().method() === "PUT") {
+      disabled = true
+      return json(route, { exitCode: 0 })
+    }
+    return json(route, {
+      ...crontab,
+      jobs: crontab.jobs.map((job, index) =>
+        index === 0 && disabled ? { ...job, disabled: true, raw: `# ${job.raw}` } : job,
+      ),
+    })
+  })
+  await page.goto("/processes/scheduled")
+  const row = page.getByRole("row", { name: /backup/ }).first()
+  const node = (await row.elementHandle())!
+  const button = (await row.getByRole("button", { name: "Disable", exact: true }).elementHandle())!
+  await row.getByRole("button", { name: "Disable", exact: true }).click()
+  await expect(row.getByRole("button", { name: "Enable", exact: true })).toBeFocused()
+  expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+  expect(await button.evaluate((element) => element.isConnected)).toBe(true)
+})
+
+test("a timer opened by deep link holds the list's first loaded order while its sheet is open", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await mockHost(page)
+  let reversed = false
+  let reads = 0
+  await page.route("**/api/v1/systemd/timers", (route) => {
+    reads++
+    return json(route, {
+      ...timers,
+      timers: reversed ? [...timers.timers].reverse() : timers.timers,
+    })
+  })
+  await page.goto("/processes/scheduled?timer=certbot.timer")
+  await expect(page.getByRole("dialog")).toBeVisible()
+  const names = () =>
+    page
+      .locator("[data-process-row]")
+      .evaluateAll((elements) =>
+        elements.map((element) => element.getAttribute("data-process-row")),
+      )
+  await expect.poll(names).toEqual(["certbot.timer", "fstrim.timer"])
+  reversed = true
+  const initialReads = reads
+  await page.clock.fastForward(31000)
+  await expect.poll(() => reads).toBeGreaterThan(initialReads)
+  expect(await names()).toEqual(["certbot.timer", "fstrim.timer"])
+  await expect(page.getByRole("dialog")).toBeVisible()
+})
+
+for (const surface of ["pm2", "services"] as const) {
+  test(`${surface}: start and stop refresh the existing table in place`, async ({ page }) => {
+    await mockHost(page)
+    await page.setViewportSize({ width: 1720, height: 1000 })
+    const isPM2 = surface === "pm2"
+    let started = false
+    await page.route(`**/api/v1/${isPM2 ? "pm2" : "systemd"}/**`, (route) => {
+      const path = new URL(route.request().url()).pathname
+      if (route.request().method() === "POST" && /\/(start|stop)$/.test(path)) {
+        started = path.endsWith("/start")
+        return json(route, { exitCode: 0 })
+      }
+      if (path.endsWith(isPM2 ? "/pm2/" : "/systemd/")) {
+        return json(
+          route,
+          isPM2
+            ? {
+                ...pm2,
+                processes: pm2.processes.map((p) =>
+                  p.id === 1 ? { ...p, status: started ? "online" : "stopped" } : p,
+                ),
+              }
+            : {
+                ...units,
+                units: units.units.map((u) =>
+                  u.name === "apt-daily.service"
+                    ? {
+                        ...u,
+                        activeState: started ? "active" : "inactive",
+                        subState: started ? "running" : "dead",
+                      }
+                    : u,
+                ),
+              },
+        )
+      }
+      return route.fallback()
+    })
+    await page.goto(`/processes/${surface}`)
+    const row = page.getByRole("row", { name: isPM2 ? /worker/ : /apt-daily/ })
+    await expect(row).toBeVisible()
+    const node = (await row.elementHandle())!
+    const table = (await page.locator("[data-slot=table-container]:visible").elementHandle())!
+    await row.getByRole("button", { name: "Start", exact: true }).click()
+    await expect(row).toContainText(isPM2 ? "online" : "running")
+    expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await table.evaluate((element) => element.isConnected)).toBe(true)
+    await row.getByRole("button", { name: "Stop", exact: true }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "Stop", exact: true }).click()
+    await expect(row).toContainText(isPM2 ? "stopped" : "inactive")
+    expect(await node.evaluate((element) => element.isConnected)).toBe(true)
+    expect(await table.evaluate((element) => element.isConnected)).toBe(true)
+  })
+}

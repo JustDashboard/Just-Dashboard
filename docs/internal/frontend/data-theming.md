@@ -18,6 +18,11 @@
   requests on hidden tabs. Its fixed-length dependency list identifies the resource: changing it
   immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
   retain the same resource's data. Cleanup aborts the request and ignores late responses.
+  Live Processes treats its search and filters as resource identity, and ranking/row-count
+  changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
+  mounted while fetching its new ranking; response-local focus metadata keeps the footer truthful
+  during that read. `components/procs/inspection-order.ts` holds row order during pointer or focus
+  inspection across the Processes lists without freezing values or retaining exited processes.
 - Database activity (`components/database/home/use-samples.ts`) reads retained snapshots from
   `GET /databases/{id}/stats/history` every 30 seconds, independently of the live snapshot read.
   The selected 1h, 6h, 24h or 7d range is view state per connection; the samples live in the backend

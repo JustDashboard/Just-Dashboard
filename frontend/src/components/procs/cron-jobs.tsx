@@ -55,6 +55,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { CronJobSheet, WeekStrip } from "@/components/procs/cron-job-sheet"
 import { Countdown } from "@/components/procs/schedule-band"
+import { cronRowKeys } from "@/components/procs/row-identity"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -129,7 +130,9 @@ export function CronJobsPanel({
   const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
   const disabled = jobs.filter((job) => job.disabled).length
   const listed = shown ? jobs.filter((job) => job.disabled === (shown === "disabled")) : jobs
-  const arrived = useArrivals(jobs.map((job) => `${job.line}:${job.raw}`))
+  const identities = cronRowKeys(jobs)
+  const rowKeys = new Map(jobs.map((job, index) => [job, identities[index]]))
+  const arrived = useArrivals(identities)
   const opened = open ? jobs.find((job) => `cron:${job.line}` === open) : undefined
   const admin = can("system.admin")
 
@@ -238,9 +241,9 @@ export function CronJobsPanel({
                   <TableBody>
                     {listed.map((job) => (
                       <CronJobRow
-                        key={`${job.line}:${job.raw}`}
+                        key={`${user}:${rowKeys.get(job)}`}
                         job={job}
-                        arrived={arrived.has(`${job.line}:${job.raw}`)}
+                        arrived={arrived.has(rowKeys.get(job)!)}
                         admin={admin}
                         confirm={confirm}
                         onOpen={() => onOpen(`cron:${job.line}`)}
@@ -366,8 +369,8 @@ export function cronJobVerbs({
   if (admin) {
     list.push(
       job.disabled
-        ? { key: "enable", label: "Enable", icon: Play, inline: true, run: onToggle }
-        : { key: "disable", label: "Disable", icon: Pause, inline: true, run: onToggle },
+        ? { key: "toggle", label: "Enable", icon: Play, inline: true, run: onToggle }
+        : { key: "toggle", label: "Disable", icon: Pause, inline: true, run: onToggle },
     )
     list.push({ key: "edit", label: "Edit", icon: Pencil, inline: true, run: onEdit })
   }

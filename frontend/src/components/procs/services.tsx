@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { MiniBar } from "@/components/procs/process-table"
 import { ServiceBand } from "@/components/procs/service-band"
+import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { cpuTone } from "@/components/procs/shared"
 import { UnitJournalSheet } from "@/components/procs/unit-journal"
 import {
@@ -116,8 +117,8 @@ function startupOf(unit: SystemdUnit): string {
  * Then the table, every unit as the product it runs (§14), its state with how
  * long it has been in it — up for, failed since and why, the restarts it has
  * taken — and its processor and memory as a figure beside a short bar, read
- * from its cgroup. A unit whose state changed since the last read rises into
- * place, because its row is new news.
+ * from its cgroup. New units rise into place; an existing unit changes state
+ * in place so starting or stopping it does not replay its arrival.
  */
 export function Services() {
   const { can } = useAuth()
@@ -162,7 +163,7 @@ export function Services() {
   const changingLabel = changing.every((u) => u.activeState === "activating")
     ? "Starting"
     : "Changing"
-  const visible = useMemo(() => {
+  const matching = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return installed.filter((u) => {
       if (state && unitBucket(u) !== state) return false
@@ -171,6 +172,12 @@ export function Services() {
       return u.name.toLowerCase().includes(needle) || u.description.toLowerCase().includes(needle)
     })
   }, [installed, query, state, startup])
+  const inspection = useInspectionOrder(
+    matching,
+    (unit) => unit.name,
+    JSON.stringify([query, state, startup]),
+  )
+  const visible = inspection.rows
   // A filter change is a new list rather than arrivals into this one.
   const listKey = [query, state, startup].join("\u0000")
 
@@ -252,7 +259,7 @@ export function Services() {
         },
       ]}
     >
-      <Page className="animate-rise">
+      <Page className="animate-rise" {...inspection.bindings}>
         {header}
 
         <HostIdentity
@@ -502,9 +509,8 @@ type RowsProps = {
  * down instead of across, with nothing dropped.
  */
 function UnitRows({ rows, ...rest }: RowsProps & { rows: SystemdUnit[] }) {
-  // Keyed on the state as well as the name: a unit that failed or came back
-  // since the last read is news, and rises like a row that arrived.
-  const key = (u: SystemdUnit) => `${u.name}\u0000${unitBucket(u)}`
+  // A state change updates the existing row; only a new unit arrives.
+  const key = (u: SystemdUnit) => u.name
   const arrived = useArrivals(rows.map(key))
   // Against the heaviest listed, as the process table's bars are: against
   // the host, a column of 1% services is a column of empty tracks.

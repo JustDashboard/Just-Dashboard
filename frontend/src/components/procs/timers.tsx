@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/table"
 import { useUnitControl } from "@/components/procs/unit-actions"
 import { Countdown } from "@/components/procs/schedule-band"
+import { useInspectionOrder } from "@/components/procs/inspection-order"
 
 type ConfirmFn = (request: ConfirmRequest) => void
 
@@ -64,10 +65,12 @@ export function TimersPanel({
   timers,
   confirm,
   onOpen,
+  detailOpen = false,
 }: {
   timers: PollState<TimerList>
   confirm: ConfirmFn
   onOpen: (unit: string) => void
+  detailOpen?: boolean
 }) {
   const { pending, act } = useUnitControl(timers.refresh)
   const list = useMemo(() => timers.data?.timers ?? [], [timers.data])
@@ -78,11 +81,13 @@ export function TimersPanel({
     return out
   }, [list])
   const onBoot = list.filter((timer) => timer.enabled).length
-  const shown = state ? list.filter((timer) => stateOf(timer) === state) : list
+  const matching = state ? list.filter((timer) => stateOf(timer) === state) : list
+  const inspection = useInspectionOrder(matching, (timer) => timer.unit, state, detailOpen)
+  const shown = inspection.rows
   const arrived = useArrivals(list.map((timer) => timer.unit))
 
   return (
-    <Panel>
+    <Panel {...inspection.bindings}>
       <PanelHeader
         title="systemd timers"
         advanced
@@ -319,7 +324,11 @@ function TimerRow({
   const verbs = useTimerVerbs({ timer, confirm, act, onChanged })
 
   return (
-    <TableRow className={cn("group", arrived && "animate-rise")} onActivate={onOpen}>
+    <TableRow
+      data-process-row={timer.unit}
+      className={cn("group", arrived && "animate-rise")}
+      onActivate={onOpen}
+    >
       <TableCell>
         <div className="flex max-w-[26rem] min-w-0 items-center gap-3">
           <ProductLogo id={unitProduct(timer.unit)} size="sm" fallback={Stopwatch} />
