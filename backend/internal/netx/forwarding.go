@@ -135,38 +135,6 @@ func (s *Service) Forwarding(ctx context.Context, needs ForwardingNeeds) Forward
 	return forwardingFrom(sp, needs)
 }
 
-// ensureForwarding records in a spec that a family's forwarding is on. A change
-// that creates something forwarding carries — a NAT entry, a port forward, a
-// tunnel's exit — calls it on the copy of the spec it is about to commit, so
-// the boot file turns forwarding on before the gateway table is loaded.
-// Turning it on in the running kernel is enableForwarding's job, run in the
-// change's apply; this only writes the spec.
-func ensureForwarding(next *Spec, family string) {
-	key, _, err := forwardingKey(family)
-	if err != nil {
-		return
-	}
-	if next.Sysctls == nil {
-		next.Sysctls = map[string]string{}
-	}
-	next.Sysctls[key] = "1"
-}
-
-// enableForwarding turns a family's forwarding on in the running kernel. It is
-// not guarded the way SetForwarding is, because it only ever adds: whoever
-// calls it is creating something that has to work.
-func enableForwarding(ctx context.Context, family string) error {
-	key, _, err := forwardingKey(family)
-	if err != nil {
-		return err
-	}
-	if v, err := readSysctl(key); err == nil && v == "1" {
-		return nil
-	}
-	_, err = run(ctx, "sysctl", "-w", key+"=1")
-	return err
-}
-
 // SetForwarding turns a family's forwarding on or off. Off is refused while
 // anything needs it, naming what.
 func (s *Service) SetForwarding(ctx context.Context, family string, on bool, needs ForwardingNeeds, actor string) (*ForwardingView, error) {
@@ -191,21 +159,8 @@ func (s *Service) SetForwarding(ctx context.Context, family string, on bool, nee
 		}
 	}
 	if on && canon == "ipv6" {
-		// With forwarding on the kernel stops acting on router advertisements
-		// unless accept_ra is 2, and a host whose IPv6 default route came from
-		// one loses it when its lifetime runs out.
-		out, err := run(ctx, "ip", "-j", "-6", "route", "show", "default")
-		if err != nil {
+		if err := raForwardingGuard(ctx); err != nil {
 			return nil, err
-		}
-		routes, err := parseIPRoutes(out)
-		if err != nil {
-			return nil, err
-		}
-		for _, r := range routes {
-			if r.Protocol == "ra" {
-				return nil, guarded("This server's IPv6 default route was learned from a router advertisement, which the kernel stops honouring once IPv6 forwarding is on; the route would expire and IPv6 connectivity with it. Set accept_ra to 2 on the uplink first.")
-			}
 		}
 	}
 	val := "0"
@@ -252,4 +207,35 @@ func forwardingFrom(sp *Spec, needs ForwardingNeeds) ForwardingView {
 		return st
 	}
 	return ForwardingView{IPv4: state(sysctlForwardV4, "ipv4"), IPv6: state(sysctlForwardV6, "ipv6")}
+}
+
+// raForwardingGuard refuses turning IPv6 forwarding on for a host whose IPv6
+// default route was learned from a router advertisement on a device that does
+// not keep honouring them under forwarding. With forwarding on the kernel
+// ignores advertisements on a device unless its accept_ra is 2, so the route
+// expires at the end of its lifetime and IPv6 goes with it. A device whose
+// accept_ra is already 2 keeps its route, and is not refused.
+func raForwardingGuard(ctx context.Context) error {
+	out, err := run(ctx, "ip", "-j", "-6", "route", "show", "default")
+	if err != nil {
+		return err
+	}
+	routes, err := parseIPRoutes(out)
+	if err != nil {
+		return err
+	}
+	for _, r := range routes {
+		if r.Protocol != "ra" || ValidIfName(r.Dev) != nil {
+			continue
+		}
+		// The device's name goes into the path as a path element, not through
+		// sysctl's dot-for-slash key form, which a VLAN's "eth0.100" would
+		// break.
+		b, err := os.ReadFile(filepath.Join(procSysRoot, "net", "ipv6", "conf", r.Dev, "accept_ra"))
+		if err == nil && strings.TrimSpace(string(b)) == "2" {
+			continue
+		}
+		return guarded("This server's IPv6 default route on %s was learned from a router advertisement, and with IPv6 forwarding on the kernel ignores advertisements on a device unless its accept_ra is 2; the route would expire and IPv6 connectivity with it. Set net.ipv6.conf.%s.accept_ra to 2 first.", r.Dev, r.Dev)
+	}
+	return nil
 }

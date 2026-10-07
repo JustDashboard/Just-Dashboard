@@ -1085,3 +1085,130 @@ func TestLinksRemoveAddress(t *testing.T) {
 		}
 	})
 }
+
+// rtUnderlay is a host whose way out runs on devices that are not themselves
+// the uplink: the IPv4 default route leaves through the VLAN eth1.50 (parent
+// eth1), and the IPv6 one through eth3, a port of the bridge br8. dummy9 and
+// br9 carry nothing.
+func rtUnderlay(t *testing.T) *recorder {
+	t.Helper()
+	const up = `"flags":["BROADCAST","MULTICAST","UP","LOWER_UP"],"mtu":1500,"operstate":"UP","link_type":"ether"`
+	links := `[{"ifindex":1,"ifname":"lo","flags":["LOOPBACK","UP","LOWER_UP"],"mtu":65536,"operstate":"UNKNOWN","link_type":"loopback"},
+{"ifindex":2,"ifname":"eth1",` + up + `},
+{"ifindex":3,"ifname":"eth1.50","link":"eth1",` + up + `,"linkinfo":{"info_kind":"vlan","info_data":{"id":50}}},
+{"ifindex":4,"ifname":"br8",` + up + `,"linkinfo":{"info_kind":"bridge","info_data":{}}},
+{"ifindex":5,"ifname":"eth3","master":"br8",` + up + `},
+{"ifindex":6,"ifname":"dummy9",` + up + `,"linkinfo":{"info_kind":"dummy"}},
+{"ifindex":7,"ifname":"br9",` + up + `,"linkinfo":{"info_kind":"bridge","info_data":{}}}]`
+	addrs := `[{"ifindex":3,"ifname":"eth1.50","addr_info":[{"family":"inet","local":"203.0.113.9","prefixlen":24,"scope":"global"}]},
+{"ifindex":4,"ifname":"br8","addr_info":[{"family":"inet6","local":"2001:db8::9","prefixlen":64,"scope":"global"}]}]`
+	return record(t).
+		on("ip -j -d link show", links).
+		on("ip -j addr show", addrs).
+		on("ip -j route show default", `[{"dst":"default","gateway":"203.0.113.1","dev":"eth1.50","protocol":"static"}]`).
+		on("ip -j -6 route show default", `[{"dst":"default","gateway":"2001:db8::1","dev":"eth3","protocol":"static"}]`).
+		on("ip -j route get", fixture(t, "routing-route-get.json")).
+		on("ip -j rule show", "[]").
+		on("nft -c -f", "").on("systemctl daemon-reload", "").on("systemctl is-enabled", "disabled").on("systemctl enable", "").
+		on("ip link set", "").on("ip link del", "").on("ip -batch -", "")
+}
+
+func TestLinksGuardWhatTheUplinkRunsOn(t *testing.T) {
+	ctx := context.Background()
+	t.Run("the parent of the uplink cannot be set down", func(t *testing.T) {
+		rec := rtUnderlay(t)
+		s := testService(t)
+		for _, name := range []string{"eth1", "br8"} {
+			_, err := s.SetLinkState(ctx, name, false, rtClient, "ion")
+			if g := rtGuarded(t, err); !strings.Contains(g.Reason, "carries") {
+				t.Fatalf("%s: reason = %q", name, g.Reason)
+			}
+		}
+		if len(rtMutations(rec)) != 0 {
+			t.Fatalf("a refused change ran %v", rtMutations(rec))
+		}
+	})
+	t.Run("a device that carries nothing can still be set down", func(t *testing.T) {
+		rec := rtUnderlay(t)
+		s := testService(t)
+		if _, err := s.SetLinkState(ctx, "dummy9", false, rtClient, "ion"); err != nil {
+			t.Fatal(err)
+		}
+		if got := rtMutations(rec); strings.Join(got, "|") != "ip link set dummy9 down" {
+			t.Fatalf("mutations = %v", got)
+		}
+	})
+	t.Run("the parent of the uplink cannot be deleted", func(t *testing.T) {
+		rec := rtUnderlay(t)
+		s := testService(t)
+		sp := emptySpec()
+		sp.Links = []LinkSpec{{Name: "eth1", Kind: "dummy"}, {Name: "br8", Kind: "bridge"}}
+		rtSaveSpec(t, s, sp)
+		for _, name := range []string{"eth1", "br8"} {
+			rtGuarded(t, s.DeleteLink(ctx, name, rtClient, "ion"))
+		}
+		if len(rtMutations(rec)) != 0 {
+			t.Fatalf("a refused change ran %v", rtMutations(rec))
+		}
+	})
+	t.Run("the parent of the uplink keeps an MTU of 1280", func(t *testing.T) {
+		rec := rtUnderlay(t)
+		s := testService(t)
+		for _, name := range []string{"eth1", "br8", "eth1.50"} {
+			_, err := s.SetLinkMTU(ctx, name, 1200, rtClient, "ion")
+			if g := rtGuarded(t, err); !strings.Contains(g.Reason, "1280") {
+				t.Fatalf("%s: reason = %q", name, g.Reason)
+			}
+		}
+		if len(rtMutations(rec)) != 0 {
+			t.Fatalf("a refused change ran %v", rtMutations(rec))
+		}
+		if _, err := s.SetLinkMTU(ctx, "eth1", 1400, rtClient, "ion"); err != nil {
+			t.Fatalf("a sane MTU on the parent: %v", err)
+		}
+		if _, err := s.SetLinkMTU(ctx, "dummy9", 1200, rtClient, "ion"); err != nil {
+			t.Fatalf("a small MTU on a device that carries nothing: %v", err)
+		}
+	})
+	t.Run("the parent of the uplink cannot be made a bridge port", func(t *testing.T) {
+		rec := rtUnderlay(t)
+		s := testService(t)
+		_, err := s.SetLinkMaster(ctx, "eth1", "br9", rtClient, "ion")
+		if g := rtGuarded(t, err); !strings.Contains(g.Reason, "eth1 carries eth1.50") {
+			t.Fatalf("reason = %q", g.Reason)
+		}
+		if len(rtMutations(rec)) != 0 {
+			t.Fatalf("a refused change ran %v", rtMutations(rec))
+		}
+	})
+}
+
+func TestLinksRefusePassthruMacvlanOnWhatTheUplinkRunsOn(t *testing.T) {
+	ctx := context.Background()
+	for _, parent := range []string{"eth1.50", "eth1", "br8", "eth3"} {
+		t.Run(parent, func(t *testing.T) {
+			rec := rtUnderlay(t)
+			s := testService(t)
+			_, err := s.CreateLink(ctx, LinkRequest{Name: "mv0", Kind: "macvlan", Parent: parent, Mode: "passthru", Up: true}, rtClient, "ion")
+			if g := rtGuarded(t, err); !strings.Contains(g.Reason, "passthru") {
+				t.Fatalf("reason = %q", g.Reason)
+			}
+			if len(rtMutations(rec)) != 0 {
+				t.Fatalf("a refused change ran %v", rtMutations(rec))
+			}
+		})
+	}
+	t.Run("other modes on the same parent, and passthru elsewhere, are allowed", func(t *testing.T) {
+		rec := rtUnderlay(t)
+		s := testService(t)
+		if _, err := s.CreateLink(ctx, LinkRequest{Name: "mv0", Kind: "macvlan", Parent: "eth1", Mode: "bridge"}, rtClient, "ion"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.CreateLink(ctx, LinkRequest{Name: "mv1", Kind: "macvlan", Parent: "dummy9", Mode: "passthru"}, rtClient, "ion"); err != nil {
+			t.Fatal(err)
+		}
+		if got := rtMutations(rec); len(got) != 2 {
+			t.Fatalf("mutations = %v", got)
+		}
+	})
+}

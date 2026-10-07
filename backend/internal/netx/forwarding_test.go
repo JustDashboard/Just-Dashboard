@@ -199,17 +199,56 @@ func TestForwardingOnWritesTheKey(t *testing.T) {
 	}
 }
 
-func TestForwardingIPv6OnIsRefusedWhenTheDefaultRouteCameFromARouterAdvertisement(t *testing.T) {
-	rec := rtCommit(record(t)).on("ip -j -6 route show default", `[{"dst":"default","gateway":"fe80::1","dev":"eth0","protocol":"ra"}]`)
+// rtAcceptRA stands the uplink's accept_ra setting behind /proc/sys.
+func rtAcceptRA(t *testing.T, dev, val string) {
+	t.Helper()
+	path := filepath.Join(procSysRoot, "net", "ipv6", "conf", dev, "accept_ra")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(val+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestForwardingIPv6OnIsRefusedWhenTheRouteCameFromAnAdvertisementTheKernelWouldStopHonouring(t *testing.T) {
+	for _, accept := range []string{"1", "0", ""} {
+		t.Run("accept_ra="+accept, func(t *testing.T) {
+			rec := rtCommit(record(t)).on("ip -j -6 route show default", `[{"dst":"default","gateway":"fe80::1","dev":"eth0.100","protocol":"ra"}]`)
+			rtProc(t, rec, "1", "0")
+			if accept != "" {
+				rtAcceptRA(t, "eth0.100", accept)
+			}
+			s := testService(t)
+			_, err := s.SetForwarding(context.Background(), "ipv6", true, ForwardingNeeds{}, "ion")
+			g := rtGuarded(t, err)
+			if !strings.Contains(g.Reason, "router advertisement") || !strings.Contains(g.Reason, "net.ipv6.conf.eth0.100.accept_ra to 2") {
+				t.Fatalf("reason = %q", g.Reason)
+			}
+			if len(rtMutations(rec)) != 0 {
+				t.Fatalf("a refused change ran %v", rtMutations(rec))
+			}
+		})
+	}
+}
+
+func TestForwardingIPv6OnIsAllowedWhereAcceptRAIsAlreadyTwo(t *testing.T) {
+	rec := rtCommit(record(t)).on("sysctl -w", "").on("ip -j -6 route show default", `[{"dst":"default","gateway":"fe80::1","dev":"eth0","protocol":"ra"}]`)
+	rtProc(t, rec, "1", "0")
+	rtAcceptRA(t, "eth0", "2")
+	s := testService(t)
+	v, err := s.SetForwarding(context.Background(), "ipv6", true, ForwardingNeeds{}, "ion")
+	if err != nil || !v.IPv6.Enabled {
+		t.Fatalf("view = %+v, %v", v, err)
+	}
+}
+
+func TestForwardingIPv6OnIgnoresARouteThatWasNotAdvertised(t *testing.T) {
+	rec := rtCommit(record(t)).on("sysctl -w", "").on("ip -j -6 route show default", `[{"dst":"default","gateway":"2001:db8::1","dev":"eth0","protocol":"static"}]`)
 	rtProc(t, rec, "1", "0")
 	s := testService(t)
-	_, err := s.SetForwarding(context.Background(), "ipv6", true, ForwardingNeeds{}, "ion")
-	g := rtGuarded(t, err)
-	if !strings.Contains(g.Reason, "router advertisement") {
-		t.Fatalf("reason = %q", g.Reason)
-	}
-	if len(rtMutations(rec)) != 0 {
-		t.Fatalf("a refused change ran %v", rtMutations(rec))
+	if _, err := s.SetForwarding(context.Background(), "ipv6", true, ForwardingNeeds{}, "ion"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -257,33 +296,5 @@ func TestForwardingFamilyAndAvailability(t *testing.T) {
 		if _, canon, err := forwardingKey(in); err != nil || canon != want {
 			t.Errorf("forwardingKey(%q) = %q, %v", in, canon, err)
 		}
-	}
-}
-
-func TestForwardingEnsureWritesTheSpecForOtherSlices(t *testing.T) {
-	sp := emptySpec()
-	sp.Sysctls = nil
-	ensureForwarding(sp, "ipv4")
-	ensureForwarding(sp, "ipv6")
-	ensureForwarding(sp, "nonsense")
-	if len(sp.Sysctls) != 2 || sp.Sysctls[sysctlForwardV4] != "1" || sp.Sysctls[sysctlForwardV6] != "1" {
-		t.Fatalf("sysctls = %v", sp.Sysctls)
-	}
-	if got := renderSysctl(sp); !strings.Contains(got, "net.ipv4.ip_forward = 1\n") || !strings.Contains(got, "net.ipv6.conf.all.forwarding = 1\n") {
-		t.Fatalf("boot file = %q", got)
-	}
-}
-
-func TestForwardingEnableRuntimeOnlyWhenOff(t *testing.T) {
-	rec := record(t).on("sysctl -w", "")
-	rtProc(t, rec, "0", "1")
-	if err := enableForwarding(context.Background(), "ipv4"); err != nil {
-		t.Fatal(err)
-	}
-	if err := enableForwarding(context.Background(), "ipv6"); err != nil {
-		t.Fatal(err)
-	}
-	if got := rtMutations(rec); strings.Join(got, "|") != "sysctl -w net.ipv4.ip_forward=1" {
-		t.Fatalf("mutations = %v", got)
 	}
 }

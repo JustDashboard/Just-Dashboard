@@ -530,6 +530,9 @@ type linkState struct {
 	links []Link
 	by    map[string]*Link
 	path  Path
+	// under maps a device to what it carries by being the parent or the
+	// bridge of a device that is itself guarded.
+	under map[string]string
 }
 
 func (s *Service) readLinkState(ctx context.Context, sp *Spec, client string) (*linkState, error) {
@@ -554,7 +557,56 @@ func (s *Service) readLinkState(ctx context.Context, sp *Spec, client string) (*
 	for i := range st.links {
 		st.by[st.links[i].Name] = &st.links[i]
 	}
+	st.guardUnderlying()
 	return st, nil
+}
+
+// guardUnderlying extends the guard to what a guarded device runs on. A VLAN
+// that carries the uplink is only as alive as its parent, and a bridge whose
+// port carries it is only as alive as the bridge; setting the parent down,
+// deleting it, shrinking its MTU or putting it in a bridge takes the child
+// with it while the routing table, and so verifyPath, reads exactly as before.
+func (st *linkState) guardUnderlying() {
+	st.under = map[string]string{}
+	for i := range st.links {
+		child := &st.links[i]
+		if !child.Uplink && !child.ClientPath {
+			continue
+		}
+		purpose := pathPurpose(child)
+		seen := map[string]bool{child.Name: true}
+		for cur := child; cur != nil; {
+			var next *Link
+			for _, name := range []string{cur.Parent, cur.Master} {
+				if name == "" || seen[name] {
+					continue
+				}
+				under, ok := st.by[name]
+				if !ok {
+					continue
+				}
+				seen[name] = true
+				if _, taken := st.under[name]; !taken {
+					st.under[name] = purpose
+				}
+				if under.Guard == "" {
+					under.Guard = fmt.Sprintf("%s carries %s, which carries %s.", name, child.Name, purpose)
+				}
+				next = under
+			}
+			cur = next
+		}
+	}
+}
+
+// carries says what a device must keep for the dashboard: its own path or
+// uplink role, or the one of a device that runs on it.
+func (st *linkState) carries(l *Link) string {
+	switch {
+	case l.ClientPath || l.Uplink:
+		return pathPurpose(l)
+	}
+	return st.under[l.Name]
 }
 
 // need returns a device that must exist.
@@ -719,8 +771,15 @@ func (s *Service) CreateLink(ctx context.Context, req LinkRequest, client, actor
 		}
 	}
 	if l.Parent != "" {
-		if _, err := st.need(l.Parent); err != nil {
+		parent, err := st.need(l.Parent)
+		if err != nil {
 			return nil, err
+		}
+		// Passthru hands every frame the parent receives to the one macvlan,
+		// and the parent's own stack sees none: the host stops answering
+		// while every route, and so every check made after it, is unchanged.
+		if l.Kind == "macvlan" && l.Mode == "passthru" && st.carries(parent) != "" {
+			return nil, guarded("a passthru macvlan on %s would take every frame %s receives, and %s carries %s", parent.Name, parent.Name, parent.Name, st.carries(parent))
 		}
 	}
 	if l.Master != "" {
@@ -969,8 +1028,8 @@ func (s *Service) SetLinkMTU(ctx context.Context, name string, mtu int, client, 
 		return nil, guarded("%s's MTU is not changed here: %s", name, dev.Guard)
 	}
 	if mtu < 1280 {
-		if dev.ClientPath || dev.Uplink {
-			return nil, guarded("%s carries %s, and an MTU under 1280 is below what IPv6 needs on it", name, pathPurpose(dev))
+		if what := st.carries(dev); what != "" {
+			return nil, guarded("%s carries %s, and an MTU under 1280 is below what IPv6 needs on it", name, what)
 		}
 		for _, a := range dev.Addresses {
 			if a.Family == "inet6" && a.Scope != "link" {
@@ -1202,7 +1261,7 @@ func (s *Service) RemoveAddress(ctx context.Context, name, cidr, client, actor s
 		return nil, fmt.Errorf("%s on %s: %w", want, name, ErrNotManaged)
 	}
 	if st.path.Source != "" && p.Addr().String() == st.path.Source {
-		return nil, guarded("%s is the address your browser is answered from; removing it would cut you off", p.Addr())
+		return nil, guarded("%s is the address your connection to the dashboard is answered from; removing it would cut you off", p.Addr())
 	}
 	err = s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {

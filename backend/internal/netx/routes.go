@@ -843,7 +843,7 @@ func verifyRouting(before Path) func(ctx context.Context) error {
 		}
 		out, err := run(ctx, "ip", append(args, "route", "get", before.Address, "from", before.Source)...)
 		if err != nil {
-			return guarded("with this change the kernel has no route for the replies to your browser (%s) from %s, so it was put back",
+			return guarded("with this change the kernel has no route for the replies to your connection to the dashboard (%s) from %s, so it was put back",
 				before.Address, before.Source)
 		}
 		after, err := parseRouteGet(out, Path{Address: before.Address})
@@ -851,7 +851,7 @@ func verifyRouting(before Path) func(ctx context.Context) error {
 			return err
 		}
 		if !samePath(before, after) {
-			return guarded("this would send the replies to your browser (%s) %s instead of %s when they come from %s, so it was put back",
+			return guarded("this would send the replies to your connection to the dashboard (%s) %s instead of %s when they come from %s, so it was put back",
 				before.Address, describePath(after), describePath(before), before.Source)
 		}
 		return nil
@@ -1208,7 +1208,7 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 		return nil, err
 	}
 	if shadowsReplies(r, path) {
-		return nil, guarded("This rule would discard the replies to your browser (%s), so it was not applied.", path.Address)
+		return nil, guarded("This rule would discard the replies to your connection to the dashboard (%s), so it was not applied.", path.Address)
 	}
 	args, err := ruleArgs(r)
 	if err != nil {
