@@ -181,7 +181,7 @@ func (d protectionDef) weaker(v, current string) bool {
 // readSysctl reads a kernel setting from /proc/sys. Absent means the host
 // does not have it: a conntrack module that is not loaded, or IPv6 turned
 // off.
-func readSysctl(key string) (string, bool) {
+func gatewayReadSysctl(key string) (string, bool) {
 	b, err := os.ReadFile(filepath.Join(gatewaySysRoot, strings.ReplaceAll(key, ".", "/")))
 	if err != nil {
 		return "", false
@@ -214,7 +214,7 @@ type ProtectionSetting struct {
 func protectionSettings(sp *Spec) []ProtectionSetting {
 	out := make([]ProtectionSetting, 0, len(protectionDefs))
 	for _, d := range protectionDefs {
-		cur, ok := readSysctl(d.Key)
+		cur, ok := gatewayReadSysctl(d.Key)
 		v, set := sp.Sysctls[d.Key]
 		rec := d.recommended(cur)
 		s := ProtectionSetting{
@@ -254,7 +254,7 @@ func (s *Service) SetProtections(ctx context.Context, values map[string]string, 
 		if err != nil {
 			return err
 		}
-		if _, ok := readSysctl(k); !ok {
+		if _, ok := gatewayReadSysctl(k); !ok {
 			return fmt.Errorf("%s is not available on this host", d.Label)
 		}
 		clean[k] = v
@@ -273,7 +273,7 @@ func (s *Service) SetProtections(ctx context.Context, values map[string]string, 
 	prev := map[string]string{}
 	for _, k := range keys {
 		next.Sysctls[k] = clean[k]
-		if cur, _ := readSysctl(k); cur != clean[k] {
+		if cur, _ := gatewayReadSysctl(k); cur != clean[k] {
 			changed = append(changed, k)
 			prev[k] = cur
 		}
@@ -332,7 +332,7 @@ func (s *Service) WeakensProtection(values map[string]string) bool {
 		if err != nil {
 			return true
 		}
-		cur, _ := readSysctl(k)
+		cur, _ := gatewayReadSysctl(k)
 		if d.weaker(clean, cur) {
 			return true
 		}

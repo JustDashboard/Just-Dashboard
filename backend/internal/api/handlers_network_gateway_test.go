@@ -220,8 +220,8 @@ func TestMapGatewayError(t *testing.T) {
 		status int
 		code   string
 	}{
-		{"forwarding off", &netx.ForwardingOffError{Family: "4"}, 409, "forwarding_off"},
-		{"forwarding off, wrapped", errors.Join(errors.New("x"), &netx.ForwardingOffError{Family: "6"}), 409, "forwarding_off"},
+		{"forwarding off", &netx.ForwardingRequiredError{Family: "4"}, 409, "forwarding_off"},
+		{"forwarding off, wrapped", errors.Join(errors.New("x"), &netx.ForwardingRequiredError{Family: "6"}), 409, "forwarding_off"},
 		{"a guard", &netx.GuardError{Reason: "no"}, 409, "would_lock_you_out"},
 		{"read-only", &netx.ReadOnlyError{Reason: "firewalld"}, 501, "network_read_only"},
 		{"a missing tool", &netx.UnavailableError{Tool: "nft", Package: "nftables"}, 503, "tool_unavailable"},
@@ -237,7 +237,7 @@ func TestMapGatewayError(t *testing.T) {
 		}
 	}
 	var api *httpx.APIError
-	if err := mapGatewayError(&netx.ForwardingOffError{Family: "4"}); !errors.As(err, &api) || !strings.Contains(api.Message, "Routing page") {
+	if err := mapGatewayError(&netx.ForwardingRequiredError{Family: "4"}); !errors.As(err, &api) || !strings.Contains(api.Message, "Routing page") {
 		t.Errorf("forwarding_off must say where to fix it: %v", err)
 	}
 }

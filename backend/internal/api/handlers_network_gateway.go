@@ -59,7 +59,7 @@ func (s *Server) mountNetworkGatewayRoutes(r chi.Router) {
 // shared mapping: forwarding being off is not a bad request, it is a state of
 // the host with a page that fixes it.
 func mapGatewayError(err error) error {
-	var off *netx.ForwardingOffError
+	var off *netx.ForwardingRequiredError
 	if errors.As(err, &off) {
 		return httpx.Err(http.StatusConflict, "forwarding_off", off.Error())
 	}

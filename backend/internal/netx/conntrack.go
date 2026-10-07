@@ -28,8 +28,8 @@ type Conntrack struct {
 // readConntrack reads the table's count and maximum.
 func readConntrack() Conntrack {
 	c := Conntrack{Level: "ok"}
-	count, ok1 := readSysctl("net.netfilter.nf_conntrack_count")
-	limit, ok2 := readSysctl("net.netfilter.nf_conntrack_max")
+	count, ok1 := gatewayReadSysctl("net.netfilter.nf_conntrack_count")
+	limit, ok2 := gatewayReadSysctl("net.netfilter.nf_conntrack_max")
 	if !ok1 || !ok2 {
 		return c
 	}

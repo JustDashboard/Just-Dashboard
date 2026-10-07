@@ -52,7 +52,7 @@ func newGwHost(t *testing.T, allowlist ...string) *gwHost {
 		h.writeSys(path, v)
 	}
 	for _, d := range protectionDefs {
-		if _, ok := readSysctl(d.Key); !ok {
+		if _, ok := gatewayReadSysctl(d.Key); !ok {
 			h.writeSys(strings.ReplaceAll(d.Key, ".", "/"), "0")
 		}
 	}
@@ -420,7 +420,7 @@ func TestForwardingMustBeOnForTheEntryToCarryTraffic(t *testing.T) {
 	ctx := context.Background()
 	h.writeSys("net/ipv4/ip_forward", "0")
 	_, err := h.AddForward(ctx, gwWebForward(), gwClient, "ops", gwProtected)
-	var off *ForwardingOffError
+	var off *ForwardingRequiredError
 	if !errors.As(err, &off) || off.Family != "4" || !strings.Contains(err.Error(), "Routing page") {
 		t.Fatalf("err = %v", err)
 	}

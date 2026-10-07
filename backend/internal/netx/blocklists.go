@@ -24,8 +24,8 @@ const (
 	maxListEntries  = 500_000
 	maxManualList   = 10_000
 	maxCountries    = 30
-	staleAfter      = 24 * time.Hour
-	refreshInterval = time.Hour
+	blocklistStaleAfter      = 24 * time.Hour
+	blocklistRefreshInterval = time.Hour
 )
 
 // httpClient fetches feeds and country zones. A variable so tests point it at
@@ -563,7 +563,7 @@ func (s *Service) recordBlocklistError(ctx context.Context, id int, cause error)
 // a minute after start, so a host that was down for days catches up without
 // the dashboard's own start-up waiting on the network.
 func (s *Service) StartBlocklistRefresh(ctx context.Context) {
-	go s.refreshLoop(ctx, time.Minute, refreshInterval)
+	go s.refreshLoop(ctx, time.Minute, blocklistRefreshInterval)
 }
 
 // refreshLoop checks after first and then every interval, and returns when ctx
@@ -598,7 +598,7 @@ func (s *Service) refreshStale(ctx context.Context, now time.Time) {
 		if !bl.Enabled || bl.Kind == "manual" {
 			continue
 		}
-		if !bl.Refreshed.IsZero() && now.Sub(bl.Refreshed) < staleAfter {
+		if !bl.Refreshed.IsZero() && now.Sub(bl.Refreshed) < blocklistStaleAfter {
 			continue
 		}
 		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)

@@ -12,15 +12,15 @@ import (
 	"strings"
 )
 
-// ForwardingOffError is a forward or NAT entry that was refused because the
+// ForwardingRequiredError is a forward or NAT entry that was refused because the
 // kernel is not forwarding. It is its own type because the handler answers it
 // with a code the page turns into a link to the Routing page, not a sentence.
-type ForwardingOffError struct {
+type ForwardingRequiredError struct {
 	// Family is "4" or "6".
 	Family string
 }
 
-func (e *ForwardingOffError) Error() string {
+func (e *ForwardingRequiredError) Error() string {
 	return fmt.Sprintf("IPv%s forwarding is off, so nothing could pass through this server to the address. Turn it on on the Routing page first.", e.Family)
 }
 
@@ -229,7 +229,7 @@ func checkNewForwarding(old, next *Spec) error {
 	}
 	for _, fam := range []string{"4", "6"} {
 		if need[fam] && !gatewayForwardingOn(fam) {
-			return &ForwardingOffError{Family: fam}
+			return &ForwardingRequiredError{Family: fam}
 		}
 	}
 	return nil
@@ -820,8 +820,8 @@ func gatewayCounters(ctx context.Context) (counters map[string]RuleCounter, load
 	return c, true
 }
 
-// ForwardingState is the kernel's forwarding switches.
-type ForwardingState struct {
+// GatewayForwarding is the kernel's forwarding switches.
+type GatewayForwarding struct {
 	IPv4 bool `json:"ipv4"`
 	IPv6 bool `json:"ipv6"`
 }
@@ -901,7 +901,7 @@ type GatewayView struct {
 	// entries in the spec means they are not in force: the host was booted
 	// without the unit, or something deleted the table.
 	Loaded     bool            `json:"loaded"`
-	Forwarding ForwardingState `json:"forwarding"`
+	Forwarding GatewayForwarding `json:"forwarding"`
 	Admission  AdmissionState  `json:"admission"`
 	Forwards   []ForwardView   `json:"forwards"`
 	NAT        []NATView       `json:"nat"`
@@ -917,7 +917,7 @@ func (s *Service) Gateway(ctx context.Context) (*GatewayView, error) {
 	v := &GatewayView{
 		Capability: s.GatewayCapability(ctx),
 		Loaded:     loaded,
-		Forwarding: ForwardingState{IPv4: gatewayForwardingOn("4"), IPv6: gatewayForwardingOn("6")},
+		Forwarding: GatewayForwarding{IPv4: gatewayForwardingOn("4"), IPv6: gatewayForwardingOn("6")},
 		Admission:  s.admissionState(ctx, sp),
 		Forwards:   make([]ForwardView, 0, len(sp.Forwards)),
 		NAT:        make([]NATView, 0, len(sp.NAT)),

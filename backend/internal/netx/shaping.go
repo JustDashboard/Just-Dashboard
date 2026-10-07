@@ -476,9 +476,9 @@ func (s *Service) Shaping(ctx context.Context, client string) (*ShapingView, err
 
 func readBBR(sp *Spec) BBRState {
 	st := BBRState{Algorithms: []string{}}
-	st.Congestion, _ = readSysctl("net.ipv4.tcp_congestion_control")
-	st.DefaultQdisc, _ = readSysctl("net.core.default_qdisc")
-	if avail, ok := readSysctl("net.ipv4.tcp_available_congestion_control"); ok {
+	st.Congestion, _ = gatewayReadSysctl("net.ipv4.tcp_congestion_control")
+	st.DefaultQdisc, _ = gatewayReadSysctl("net.core.default_qdisc")
+	if avail, ok := gatewayReadSysctl("net.ipv4.tcp_available_congestion_control"); ok {
 		st.Algorithms = strings.Fields(avail)
 	}
 	for _, a := range st.Algorithms {
@@ -506,7 +506,7 @@ func (s *Service) SetBBR(ctx context.Context, on bool, actor string) error {
 	want := map[string]string{bbrCongestionKey: "cubic", bbrQdiscKey: "fq_codel"}
 	if on {
 		want = map[string]string{bbrCongestionKey: "bbr", bbrQdiscKey: "fq"}
-		avail, _ := readSysctl("net.ipv4.tcp_available_congestion_control")
+		avail, _ := gatewayReadSysctl("net.ipv4.tcp_available_congestion_control")
 		if !strings.Contains(" "+avail+" ", " bbr ") {
 			return errors.New("this kernel does not have BBR loaded (the available algorithms are " + strings.TrimSpace(avail) + "). Load it on the host with `modprobe tcp_bbr`, then try again")
 		}
@@ -522,7 +522,7 @@ func (s *Service) SetBBR(ctx context.Context, on bool, actor string) error {
 	next := old.clone()
 	prev := map[string]string{}
 	for _, k := range keys {
-		prev[k], _ = readSysctl(k)
+		prev[k], _ = gatewayReadSysctl(k)
 		if on {
 			next.Sysctls[k] = want[k]
 		} else {
