@@ -21,8 +21,14 @@ choice, is [`docs/audits/2026-10-07-network-section/`](../../audits/2026-10-07-n
   request came from (`path.go`, `ip -j route get`): the device the reply leaves through, its gateway
   and its source. A route or rule is applied, the path is resolved again (`verifyPath`, and
   `verifyRouting`, which also asks `route get CLIENT from SOURCE` so a rule selecting on the server's own
-  address is caught), and the change is taken back if the answer moved. Guards answer
-  `409 would_lock_you_out` with the sentence saying why.
+  address is caught), and the change is taken back if the answer moved. Three anchors are read with
+  it and compared the same way — the route to 1.1.1.1, the same with Tailscale's packet mark 0x80000,
+  and to 2606:4700:4700::1111 (only asked of the kernel, never contacted) — because the operator's
+  way in rides on this server's own way out: tailscaled's packets, a WireGuard endpoint, the SSH
+  session behind a tunnel. A request on loopback is followed to the SSH session carrying it
+  (`OperatorAddress`, `operator.go`: an sshd process holding a loopback-to-loopback connection and
+  one from elsewhere on a listening port), so an `ssh -L` browser is guarded as the address it
+  really comes from. Guards answer `409 would_lock_you_out` with the sentence saying why.
 - **Only what was made here is removed.** Docker's bridges and veths, Tailscale's device, table 52 and
   rules, the provider's DHCP routes, the kernel's own routes and its fallback tunnel devices (`gre0`,
   `ip6tnl0`, …) are read and named with their owner, never edited. A change to a device the dashboard
@@ -54,15 +60,20 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   an owner and, where it may not be changed, a guard sentence.
 - Create covers bridge, VLAN, VXLAN, GRE/GRETAP/IP6GRE, dummy, macvlan and veth (into a namespace the
   dashboard made). The uplink, the client-path device, loopback, Docker's and Tailscale's devices and
-  any device holding an address cannot be set down, deleted or enslaved to a bridge; an MTU under 1280
-  is refused on the client path and on any device with a global IPv6 address.
+  any device holding an address cannot be set down, deleted or enslaved to a bridge, and neither can
+  the parent or bridge such a device rides on; a passthru macvlan on a device that carries one is
+  refused (it takes every frame the parent receives). An MTU under 1280 is refused on the client path
+  and on any device with a global IPv6 address.
 - Routing reads every table in both families with `rt_tables` names (the local table is counted, not
   listed), the policy rules with their owners, and the client path. Added rules take priorities in
   10000–19999, which no distribution or Tailscale uses; a rule with no selector, a second default route
   in main, and tables 52, 253 (for routes) and 255 are refused.
 - Forwarding is per family. Turning it off is refused while Docker networks, an enabled forward or NAT
   entry, a WireGuard exit or Tailscale's exit node or subnet routes need it; the api layer supplies the
-  Docker count and Tailscale's state (`TailscaleNeedsForwarding`).
+  Docker count and Tailscale's state (`TailscaleNeedsForwarding`, which answers "needed" when
+  Tailscale cannot be read). Turning IPv6 forwarding on is refused while the IPv6 default route was
+  learned from a router advertisement on a device whose `accept_ra` is not 2: with forwarding on, the
+  kernel ignores those advertisements and the route would expire.
 - BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only.
 
 ## Traffic
@@ -81,12 +92,17 @@ which `/network/traffic/containers` differences per sample in SQL. Per-program t
 
 Files: `gateway*.go`, `blocklists.go`, `protection.go`, `conntrack.go`.
 
-`inet jd_gateway` only ever drops or translates. Chains: `pre` (raw priority: trusted returns, then
-each blocklist set drops, counted), `input` and `forward` (−10: established and trusted return, then
-the rate and connection limits; the forward chain also marks a NAT entry's new connections), `nat_pre`
-(each port forward: `ct mark set` then `dnat`) and `nat_post` (masquerade or SNAT per NAT entry, and per
-forward whose source NAT resolves to masquerade). Every rule carries a comment its counters are read
-back by.
+`inet jd_gateway` only ever drops or translates, and a chain exists only while it holds a rule (an
+idle hooked chain still costs every packet a traversal). Chains: `pre` (prerouting at mangle priority,
+after conntrack: established and related return, then loopback and the trusted sets, then each
+blocklist set drops new connections, counted — so a list taking an address never cuts a session
+already open, nor the replies to this server's own outbound connections), `input` and `forward` (−10:
+established and trusted return, then the rate and connection limits; a limit in the forward chain
+counts only translated flows, `ct status dnat`, and the forward chain also marks a NAT entry's new
+connections), `nat_pre` (each port forward: `fib daddr type local`, so a connection passing through to
+another host's same port is not captured, then `ct mark set` and `dnat`) and `nat_post` (masquerade or
+SNAT per NAT entry, and per forward whose source NAT resolves to masquerade). Every rule carries a
+comment its counters are read back by; the capability and counter reads use `nft -t -j`.
 
 **A port forward admits its own traffic.** One table's `accept` cannot override another's `drop`, and
 ufw and Docker drop forwarded traffic by default, so translated connections carry the mark
@@ -94,16 +110,20 @@ ufw and Docker drop forwarded traffic by default, so translated connections carr
 them: `-m connmark --mark … -j ACCEPT` at the top of iptables' and ip6tables' `FORWARD`, `INPUT` and
 `DOCKER-USER`. They are re-asserted on every gateway change (a `ufw reload` or a Docker restart can
 remove them), restored at boot by the unit (delete then insert, so idempotent), and removed when
-nothing translates. Writes are refused (`409 network_read_only`) where firewalld is active or another
+nothing translates (each `-D` repeats until the kernel has none left, at most eight times). Writes are refused (`409 network_read_only`) where firewalld is active or another
 nftables table drops forwarded traffic, naming the chain and the accept to add there. A forward or NAT
 entry that needs forwarding while it is off is refused with `409 forwarding_off`; the page offers the
 switch.
 
 Blocklists are manual, country (ipdeny.com aggregated zones, v4 and v6) or feed (Spamhaus DROP,
-FireHOL level 1 or any http(s) URL); fetches are bounded (30 s, 16 MB), parsed with `netip`, stripped of
-private and reserved ranges (FireHOL level 1 holds them, and dropping them would cut off every
-container and tailnet peer), merged, cached to `lists/<id>.txt` and refreshed daily by
-`StartBlocklistRefresh`, which `Server.Start` runs. Every drop is preceded by the `trusted` sets:
+FireHOL level 1 or any https URL — http, and a redirect down to it, is refused, since anyone on the way
+could answer with a list of your own networks); fetches are bounded (30 s, 16 MB), parsed with `netip`,
+stripped of private and reserved ranges (FireHOL level 1 holds them, and dropping them would cut off
+every container and tailnet peer) and of multicast and the reserved blocks, merged, cached to
+`lists/<id>.txt` and refreshed daily by `StartBlocklistRefresh`, which `Server.Start` runs. A feed's
+entries shorter than /8 (v4) or /19 (v6) are dropped and a feed covering more than 2^28 IPv4 addresses
+is refused: that is a region, not a blocklist. Parsed lists are memoised by path, modification time and
+size, so a poll does not re-read them. Every drop is preceded by the `trusted` sets:
 loopback, the allowlist ranges narrower than /8 (v4) and /16 (v6), and the addresses the spec keeps
 (the requester's, added on their first protection entry). A manual entry holding the requester's
 address is refused; a fetched list that holds it is reported (`containsYou`).
@@ -119,7 +139,9 @@ Files: `shaping.go`.
 
 Per device a root discipline (fq_codel, cake, fq) and upload and download limits (htb with fq_codel
 egress, ingress policing), and BBR as a switch (`tcp_congestion_control=bbr`, `default_qdisc=fq`).
-A limit under 1 Mbit/s on the uplink or the client-path device is refused.
+A limit under 1 Mbit/s on the uplink or the client-path device is refused. The ingress queue is only
+ever replaced or, at runtime, deleted when it is the plain one; a `clsact` queue (tc-BPF programs) is
+never touched, and a download limit on a device that has one is refused.
 
 ## VPN
 
@@ -138,7 +160,8 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
   `network_vpn_clients` so an administrator can show it again or forget it. An exit node is a NAT entry
   owned by the tunnel (`Owner: "wireguard:<name>"`), applied through the gateway like any other. A
   removed tunnel's file is moved to `.just-dashboard-removed/`, never deleted: the server key exists only
-  there.
+  there; the firewall rule its creation opened is removed with it, and `DELETE` answers
+  `{firewall: {removed, reason}}` so the page can say when it was not.
 - **Tailscale** is read from `tailscale status --json` and `debug prefs`. The only changes offered are
   what this server offers the tailnet — an exit node and subnet routes — through `tailscale set`; using
   another node as an exit, shields up, down and logout are never run, because each can cut off the
@@ -162,8 +185,9 @@ the name typed is sent to those public resolvers.
 All under `/api/v1/network` (`handlers_network*.go`). Reads are `read`, except `/vpn/*` and
 `/traffic/processes`, which name who connects and are `system.admin`. Every mutation is `system.admin`;
 removals, setting a device down, turning forwarding off, disabling a forward, NAT entry, limit or
-blocklist, weakening a kernel protection and changing the resolver are inside `s.destructive` (by path,
-or by content in the handler for the PUTs and the settings post). No route takes a typed phrase.
+blocklist, weakening a kernel protection, turning a WireGuard exit off, withdrawing what this server
+offers the tailnet and changing the resolver are inside `s.destructive` (by path, or by content in the
+handler for the PUTs and posts). No route takes a typed phrase.
 
 | Area | Routes |
 | --- | --- |

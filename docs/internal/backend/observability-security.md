@@ -112,7 +112,10 @@ from the allowlist and the host's interfaces. The setting lives in an env file n
 install day, which is exactly why it belongs on screen. The handler adds `Client`, the address the
 request arrived from — `DescribeExposure` stays pure — because every lockout guard on the Security
 pages compares against that address and the pages should say what it is; the jail tuning offers it to
-fail2ban's allowlist by name.
+fail2ban's allowlist by name. The firewall-rule and ban guards are handed `networkClient(r)` instead,
+which for a request on loopback is the address of the SSH session carrying the tunnel
+([`OperatorAddress`](network.md#three-rules)): a rule that refuses that address cuts the tunnel, and
+the browser with it.
 
 `BanHistory` reads at most the last `banLogTailBytes` (8 MB) of each fail2ban log and drops the line
 the seek tears in half. fail2ban writes a "Found" line per failed attempt, so a host under a campaign
@@ -256,7 +259,10 @@ restore on failure → reload only then.
   `maxsessions` are `AlwaysAcceptable` — a jump host exists to forward TCP, so grading "yes" as insecure
   would put a permanent warning on a legitimate bastion — with the recommendation ("no, unless this
   server is a jump host") carried as text. The other three are graded against "no". The posture reads
-  none of them, and `guardSSHLockout` does not either: forwarding cannot cost access to SSH itself.
+  none of them, and `guardSSHLockout` does not either: forwarding cannot cost access to SSH itself. It
+  can cost access to the dashboard, though: a request arriving on loopback came through an SSH tunnel,
+  which rides on TCP forwarding, so `handleSSHApply` refuses `allowtcpforwarding no` or `remote` from
+  one with `409 would_lock_you_out` (the current tunnel would stay up and the next would be refused).
 - `permitrootlogin` folds `without-password` onto `prohibit-password`, because `sshd -T` still prints the
   deprecated spelling distributions ship as default and a dropdown missing it renders empty.
 - `reloadSSH` tries systemd units, then `rc-service`, then `service`.

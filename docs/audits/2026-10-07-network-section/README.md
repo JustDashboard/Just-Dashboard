@@ -283,3 +283,30 @@ happens (a beam that carries while bytes flow, a `BorderBeam` while an apply run
   design system's structural rules; `security-ui.spec.ts` and `navigation.spec.ts` updated.
 - `scripts/test-changed.sh`, a production build, and screenshots at 1440 and 390 of every page,
   in this directory.
+
+## 8. Where the build departed from the plan
+
+Review of each slice moved a few decisions; [`backend/network.md`](../../internal/backend/network.md)
+describes what was built.
+
+- **Blocklists drop after conntrack, not at raw priority.** At −300 a list that takes an address also
+  cuts the sessions already open from it and the replies to this server's own connections there. The
+  `pre` chain is a mangle-priority filter that returns established and related traffic first, so a list
+  refuses new connections only.
+- **Forwards and their limits touch only what is addressed here.** Each DNAT matches
+  `fib daddr type local`, so traffic routed through the gateway to another host's same port is not
+  captured; a limit in the forward chain counts only translated flows (`ct status dnat`).
+- **Feeds are https only and bounded by what they cover.** A feed entry shorter than /8 (/19 in IPv6) is
+  dropped and a feed covering more than 2^28 IPv4 addresses is refused, so a broken or tampered feed
+  cannot take the server off the internet.
+- **The guards protect the way out as well as the way back.** A route to the client can stay put while
+  this server's own default route moves — and tailscaled's packets, a WireGuard endpoint and an SSH
+  tunnel's session ride on that. Three anchor lookups are compared with the client path, and a browser
+  on loopback is followed to the SSH session carrying its tunnel.
+- **Shaping leaves `clsact` alone.** Deleting "ingress" removes a tc-BPF program's queue with it, so the
+  ingress queue is replaced only when it is the plain one, and a download limit over `clsact` is refused.
+- **What is read and not written**, as planned: BGP (FRR's summary), eBPF (an inventory of what is
+  loaded, not a probe the dashboard attaches), Headscale, Suricata's rules. IPv6 policy rules are not
+  offered (`ip -batch` cannot carry `-6`). Reverse proxy, TCP/UDP proxy, load balancing and automatic TLS
+  stay on Proxy & TLS, which the Gateway page hands off to; ad-blocking DNS is a resolver preset or an
+  AdGuard Home / Pi-hole the page finds.
