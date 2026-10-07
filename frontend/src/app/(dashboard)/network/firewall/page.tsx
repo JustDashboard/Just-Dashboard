@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Page } from "@/components/page"
-import { FirewallPanel } from "@/components/security/firewall-panel"
+import { FirewallPanel } from "@/components/network/firewall-panel"
 import { handoffFromParams } from "@/components/security/rule-form"
 import { useSecurity } from "@/components/security/security-context"
 
-export default function SecurityFirewallPage() {
+export default function NetworkFirewallPage() {
   const {
     firewall,
     firewallLoading,

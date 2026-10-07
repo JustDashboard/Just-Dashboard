@@ -33,7 +33,7 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
-import { FirewallPicture } from "@/components/security/firewall-picture"
+import { FirewallPicture } from "@/components/network/firewall-picture"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,

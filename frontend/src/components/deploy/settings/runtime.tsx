@@ -627,7 +627,7 @@ function RuntimeForm({
                 <FormNote tone="warning" className="animate-rise">
                   Open on every interface — reachable without the proxy. Close it at the{" "}
                   <Link
-                    href="/security/firewall"
+                    href="/network/firewall"
                     className="rounded-sm underline underline-offset-2 focus-ring hover:text-foreground"
                   >
                     firewall

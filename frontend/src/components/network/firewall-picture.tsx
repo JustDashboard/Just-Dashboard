@@ -14,7 +14,7 @@ import {
   openings,
   refusesByDefault,
   type Opening,
-} from "@/components/security/firewall-reading"
+} from "@/components/network/firewall-reading"
 
 /** More openings than this and the rest are one line under the last. */
 const MOST = 5

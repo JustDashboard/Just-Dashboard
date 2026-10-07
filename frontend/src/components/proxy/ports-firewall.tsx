@@ -104,7 +104,7 @@ function firewallHref(params: Record<string, string | number | undefined>) {
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== "") search.set(key, String(value))
   }
-  return `/security/firewall?${search}`
+  return `/network/firewall?${search}`
 }
 
 /**

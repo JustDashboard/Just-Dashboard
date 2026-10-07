@@ -382,7 +382,7 @@ function PortsView() {
         key: "firewall",
         label: "Firewall",
         icon: Shield,
-        run: () => router.push("/security/firewall"),
+        run: () => router.push("/network/firewall"),
       })
     }
     if (admin) verbs.push(...firewallHandoffs(l, firewall.data, (href) => router.push(href)))
