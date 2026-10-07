@@ -101,16 +101,16 @@ func (v *VPNStore) Get(ctx context.Context, iface string, id int64) (VPNClient, 
 func (v *VPNStore) Forget(ctx context.Context, iface string, id int64) error {
 	res, err := v.db.ExecContext(ctx,
 		`UPDATE network_vpn_clients SET config_sealed = '' WHERE iface = ? AND id = ?`, iface, id)
-	return affectedOne(res, err, iface, id)
+	return vpnAffectedOne(res, err, iface, id)
 }
 
 // Delete removes a client's row.
 func (v *VPNStore) Delete(ctx context.Context, iface string, id int64) error {
 	res, err := v.db.ExecContext(ctx, `DELETE FROM network_vpn_clients WHERE iface = ? AND id = ?`, iface, id)
-	return affectedOne(res, err, iface, id)
+	return vpnAffectedOne(res, err, iface, id)
 }
 
-func affectedOne(res sql.Result, err error, iface string, id int64) error {
+func vpnAffectedOne(res sql.Result, err error, iface string, id int64) error {
 	if err != nil {
 		return fmt.Errorf("updating the client: %w", err)
 	}

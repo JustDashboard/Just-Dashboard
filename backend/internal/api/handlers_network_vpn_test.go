@@ -72,9 +72,9 @@ func TestVPNRoutesAreAdminOnlyAndRemovalsAreDestructive(t *testing.T) {
 	}
 }
 
-// fakeBin puts stand-ins for the VPN tools first on PATH, printing recorded
+// vpnFakeBin puts stand-ins for the VPN tools first on PATH, printing recorded
 // output, so the page is read end to end without touching this host's network.
-func fakeBin(t *testing.T, scripts map[string]string) {
+func vpnFakeBin(t *testing.T, scripts map[string]string) {
 	t.Helper()
 	dir := t.TempDir()
 	for name, body := range scripts {
@@ -85,7 +85,7 @@ func fakeBin(t *testing.T, scripts map[string]string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func netxFixture(t *testing.T, name string) string {
+func vpnNetxFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "netx", "testdata", name))
 	if err != nil {
@@ -97,11 +97,11 @@ func netxFixture(t *testing.T, name string) string {
 func TestVPNPageReadsEachPartOnItsOwn(t *testing.T) {
 	dir := t.TempDir()
 	for _, f := range []string{"wg-dump.txt", "tailscale-status.json", "tailscale-prefs-exit.json"} {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte(netxFixture(t, f)), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(vpnNetxFixture(t, f)), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	fakeBin(t, map[string]string{
+	vpnFakeBin(t, map[string]string{
 		"wg":        `[ "$1 $2 $3" = "show all dump" ] && cat ` + dir + `/wg-dump.txt`,
 		"wg-quick":  `exit 0`,
 		"tailscale": `case "$1 $2" in "status --json") cat ` + dir + `/tailscale-status.json;; "debug prefs") cat ` + dir + `/tailscale-prefs-exit.json;; *) exit 9;; esac`,
@@ -157,7 +157,7 @@ func TestVPNPageReadsEachPartOnItsOwn(t *testing.T) {
 			t.Errorf("a key is in the response: %s", secret)
 		}
 	}
-	for _, line := range strings.Split(netxFixture(t, "wg-dump.txt"), "\n") {
+	for _, line := range strings.Split(vpnNetxFixture(t, "wg-dump.txt"), "\n") {
 		f := strings.Split(line, "\t")
 		if len(f) == 5 && strings.Contains(body, f[1]) {
 			t.Errorf("an interface's private key is in the response")
@@ -189,7 +189,7 @@ func TestVPNPageSurvivesAHostWithoutTheTools(t *testing.T) {
 }
 
 func TestTailscaleSetRefusesWhatCannotBeAnExitNodeRoute(t *testing.T) {
-	fakeBin(t, map[string]string{"tailscale": `exit 9`})
+	vpnFakeBin(t, map[string]string{"tailscale": `exit 9`})
 	c, _ := newClient(t)
 	for name, body := range map[string]string{
 		"the default route": `{"advertiseRoutes":["0.0.0.0/0"]}`,

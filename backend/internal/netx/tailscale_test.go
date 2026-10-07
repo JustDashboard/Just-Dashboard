@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// tailscaleHost answers the two reads a view takes.
-func tailscaleHost(t *testing.T, status, prefs string) (*Service, *recorder) {
+// tsHost answers the two reads a view takes.
+func tsHost(t *testing.T, status, prefs string) (*Service, *recorder) {
 	t.Helper()
 	s := vpnService(t)
 	rec := record(t)
@@ -17,7 +17,7 @@ func tailscaleHost(t *testing.T, status, prefs string) (*Service, *recorder) {
 	return s, rec
 }
 
-func peerByHost(t *testing.T, v *TailscaleView, host string) TSPeer {
+func tsPeerByHost(t *testing.T, v *TailscaleView, host string) TSPeer {
 	t.Helper()
 	for _, p := range v.Peers {
 		if p.HostName == host {
@@ -29,7 +29,7 @@ func peerByHost(t *testing.T, v *TailscaleView, host string) TSPeer {
 }
 
 func TestTailscaleViewOfAnExitNodeAndSubnetRouter(t *testing.T) {
-	s, _ := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
+	s, _ := tsHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
 	v, err := s.Tailscale(context.Background(), "198.51.100.7")
 	if err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestTailscaleViewOfAnExitNodeAndSubnetRouter(t *testing.T) {
 		t.Errorf("control = %q %q", v.ControlServer, v.ControlURL)
 	}
 	if !v.Forwarding.IPv4 || !v.Forwarding.IPv6 || len(v.Warnings) != 0 || v.ClientOnTailnet {
-		t.Errorf("forwarding %+v warnings %v clientOnTailnet %v", v.Forwarding, v.Warnings, v.ClientOnTailnet)
+		t.Errorf("forwarding %+v warnings %v tsClientOnTailnet %v", v.Forwarding, v.Warnings, v.ClientOnTailnet)
 	}
 
 	// Online first, then by name.
@@ -65,27 +65,27 @@ func TestTailscaleViewOfAnExitNodeAndSubnetRouter(t *testing.T) {
 	if strings.Join(order, ",") != "laptop,phone,nas,old-tablet" {
 		t.Fatalf("order = %v", order)
 	}
-	laptop := peerByHost(t, v, "laptop")
+	laptop := tsPeerByHost(t, v, "laptop")
 	if !laptop.Online || !laptop.Active || !laptop.Direct || laptop.CurAddr != "198.51.100.9:41641" || laptop.Relay != "fra" ||
 		laptop.RxBytes != 123456 || laptop.TxBytes != 654321 || laptop.UserLoginName != "alice@example.com" ||
 		laptop.LastSeen == 0 || laptop.LastHandshake == 0 || laptop.OS != "macOS" {
 		t.Errorf("laptop = %+v", laptop)
 	}
-	phone := peerByHost(t, v, "phone")
+	phone := tsPeerByHost(t, v, "phone")
 	if phone.Direct || phone.Relay != "ams" || phone.UserLoginName != "bob@example.com" || phone.LastHandshake != 0 {
 		t.Errorf("phone (relayed, never shook hands) = %+v", phone)
 	}
-	nas := peerByHost(t, v, "nas")
+	nas := tsPeerByHost(t, v, "nas")
 	if nas.Online || strings.Join(nas.Tags, ",") != "tag:server" || strings.Join(nas.PrimaryRoutes, ",") != "203.0.113.128/25" || !nas.ExitNodeOption {
 		t.Errorf("nas = %+v", nas)
 	}
-	if tab := peerByHost(t, v, "old-tablet"); !tab.Expired || tab.Tags == nil || tab.PrimaryRoutes == nil {
+	if tab := tsPeerByHost(t, v, "old-tablet"); !tab.Expired || tab.Tags == nil || tab.PrimaryRoutes == nil {
 		t.Errorf("tablet = %+v", tab)
 	}
 
 	// `debug prefs` prints the node key and the network-lock key; neither is
 	// a field of anything returned.
-	raw := mustString(t, v)
+	raw := wgMustString(t, v)
 	for _, secret := range []string{"privkey:", "nlpriv:", "PrivateNodeKey"} {
 		if strings.Contains(raw, secret) {
 			t.Errorf("a key leaked into the view: %s", secret)
@@ -97,7 +97,7 @@ func TestTailscaleViewOfAnExitNodeAndSubnetRouter(t *testing.T) {
 }
 
 func TestTailscaleViewOfAHeadscaleNodeUsingAnExitNode(t *testing.T) {
-	s, _ := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-headscale.json")
+	s, _ := tsHost(t, "tailscale-status.json", "tailscale-prefs-headscale.json")
 	v, err := s.Tailscale(context.Background(), "100.64.10.2")
 	if err != nil {
 		t.Fatal(err)
@@ -129,14 +129,14 @@ func TestControlServerOf(t *testing.T) {
 		"https://nottailscale.com":           "self-hosted",
 		"::not a url":                        "self-hosted",
 	} {
-		if got := controlServerOf(in); got != want {
-			t.Errorf("controlServerOf(%q) = %s, want %s", in, got, want)
+		if got := tsControlServerOf(in); got != want {
+			t.Errorf("tsControlServerOf(%q) = %s, want %s", in, got, want)
 		}
 	}
 }
 
 func TestClientOnTailnet(t *testing.T) {
-	s, _ := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
+	s, _ := tsHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
 	v, err := s.Tailscale(context.Background(), "")
 	if err != nil {
 		t.Fatal(err)
@@ -153,8 +153,8 @@ func TestClientOnTailnet(t *testing.T) {
 		"fd7a:115c:a1e0::1":  true, // this server's own
 		"2001:db8::1":        false,
 	} {
-		if got := clientOnTailnet(client, v); got != want {
-			t.Errorf("clientOnTailnet(%q) = %v, want %v", client, got, want)
+		if got := tsClientOnTailnet(client, v); got != want {
+			t.Errorf("tsClientOnTailnet(%q) = %v, want %v", client, got, want)
 		}
 	}
 }
@@ -191,19 +191,19 @@ func TestTailscaleNotInstalledAndStatusFailing(t *testing.T) {
 }
 
 func TestTailscaleNeedsForwarding(t *testing.T) {
-	s, _ := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
+	s, _ := tsHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
 	if exit, routes := s.TailscaleNeedsForwarding(context.Background()); !exit || !routes {
 		t.Errorf("exit=%v routes=%v", exit, routes)
 	}
-	s, _ = tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
+	s, _ = tsHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
 	if exit, routes := s.TailscaleNeedsForwarding(context.Background()); exit || routes {
 		t.Errorf("exit=%v routes=%v", exit, routes)
 	}
 }
 
-func bptr(b bool) *bool { return &b }
+func tsBptr(b bool) *bool { return &b }
 
-func sptr(s ...string) *[]string {
+func tsSptr(s ...string) *[]string {
 	if s == nil {
 		s = []string{}
 	}
@@ -219,22 +219,22 @@ func TestSetTailscaleArgv(t *testing.T) {
 		req   TailscaleSetRequest
 		want  string
 	}{
-		{"exit node on", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: bptr(true)},
+		{"exit node on", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)},
 			"tailscale set --advertise-exit-node=true --advertise-routes="},
-		{"exit node off keeps the routes", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseExitNode: bptr(false)},
+		{"exit node off keeps the routes", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(false)},
 			"tailscale set --advertise-exit-node=false --advertise-routes=192.0.2.0/24"},
-		{"routes keep the exit node", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: sptr("198.51.100.0/24", "192.0.2.77/24", "198.51.100.0/24", "203.0.113.9")},
+		{"routes keep the exit node", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("198.51.100.0/24", "192.0.2.77/24", "198.51.100.0/24", "203.0.113.9")},
 			"tailscale set --advertise-exit-node=true --advertise-routes=192.0.2.0/24,198.51.100.0/24,203.0.113.9/32"},
-		{"empty list withdraws every route", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: sptr()},
+		{"empty list withdraws every route", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr()},
 			"tailscale set --advertise-exit-node=true --advertise-routes="},
-		{"both at once", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: bptr(true), AdvertiseRoutes: sptr("192.0.2.0/24")},
+		{"both at once", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(true), AdvertiseRoutes: tsSptr("192.0.2.0/24")},
 			"tailscale set --advertise-exit-node=true --advertise-routes=192.0.2.0/24"},
-		{"a v6 route", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseRoutes: sptr("2001:db8:5::/48", "192.0.2.0/24")},
+		{"a v6 route", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("2001:db8:5::/48", "192.0.2.0/24")},
 			"tailscale set --advertise-exit-node=false --advertise-routes=192.0.2.0/24,2001:db8:5::/48"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s, rec := tailscaleHost(t, "tailscale-status.json", tc.prefs)
+			s, rec := tsHost(t, "tailscale-status.json", tc.prefs)
 			rec.on("tailscale set ", "")
 			res, err := s.SetTailscale(context.Background(), tc.req, "198.51.100.7")
 			if err != nil {
@@ -257,15 +257,15 @@ func TestSetTailscaleArgv(t *testing.T) {
 			if res.Tailscale == nil || !strings.Contains(res.Note, "approve") {
 				t.Errorf("result = %+v", res)
 			}
-			assertOrder(t, rec.commands(), "tailscale debug prefs", "tailscale set", "tailscale status --json")
+			wgAssertOrder(t, rec.commands(), "tailscale debug prefs", "tailscale set", "tailscale status --json")
 		})
 	}
 }
 
 func TestSetTailscaleNoteForASelfHostedControlServer(t *testing.T) {
-	s, rec := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-headscale.json")
+	s, rec := tsHost(t, "tailscale-status.json", "tailscale-prefs-headscale.json")
 	rec.on("tailscale set ", "")
-	res, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseRoutes: sptr("192.0.2.0/24")}, "")
+	res, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24")}, "")
 	if err != nil || !strings.Contains(res.Note, "Headscale") {
 		t.Fatalf("res = %+v err = %v", res, err)
 	}
@@ -280,21 +280,21 @@ func TestSetTailscaleRefusals(t *testing.T) {
 		fwdOff  bool
 	}{
 		{"nothing asked", TailscaleSetRequest{}, true, "nothing to change", false},
-		{"v4 default route", TailscaleSetRequest{AdvertiseRoutes: sptr("0.0.0.0/0")}, true, "exit node", false},
-		{"v6 default route", TailscaleSetRequest{AdvertiseRoutes: sptr("::/0")}, true, "exit node", false},
-		{"the CGNAT range", TailscaleSetRequest{AdvertiseRoutes: sptr("100.64.0.0/10")}, true, "tailnet", false},
-		{"inside the CGNAT range", TailscaleSetRequest{AdvertiseRoutes: sptr("100.100.0.0/16")}, true, "tailnet", false},
-		{"containing the CGNAT range", TailscaleSetRequest{AdvertiseRoutes: sptr("100.0.0.0/8")}, true, "tailnet", false},
-		{"inside the tailnet's v6 range", TailscaleSetRequest{AdvertiseRoutes: sptr("fd7a:115c:a1e0:ab12::/64")}, true, "tailnet", false},
-		{"not a network", TailscaleSetRequest{AdvertiseRoutes: sptr("lan")}, true, "advertiseRoutes", false},
-		{"one bad among good", TailscaleSetRequest{AdvertiseRoutes: sptr("192.0.2.0/24", "192.0.2.0/99")}, true, "advertiseRoutes", false},
-		{"exit node with forwarding off", TailscaleSetRequest{AdvertiseExitNode: bptr(true)}, false, "forwarding is off", true},
-		{"routes with forwarding off", TailscaleSetRequest{AdvertiseRoutes: sptr("192.0.2.0/24")}, false, "forwarding is off", true},
+		{"v4 default route", TailscaleSetRequest{AdvertiseRoutes: tsSptr("0.0.0.0/0")}, true, "exit node", false},
+		{"v6 default route", TailscaleSetRequest{AdvertiseRoutes: tsSptr("::/0")}, true, "exit node", false},
+		{"the CGNAT range", TailscaleSetRequest{AdvertiseRoutes: tsSptr("100.64.0.0/10")}, true, "tailnet", false},
+		{"inside the CGNAT range", TailscaleSetRequest{AdvertiseRoutes: tsSptr("100.100.0.0/16")}, true, "tailnet", false},
+		{"containing the CGNAT range", TailscaleSetRequest{AdvertiseRoutes: tsSptr("100.0.0.0/8")}, true, "tailnet", false},
+		{"inside the tailnet's v6 range", TailscaleSetRequest{AdvertiseRoutes: tsSptr("fd7a:115c:a1e0:ab12::/64")}, true, "tailnet", false},
+		{"not a network", TailscaleSetRequest{AdvertiseRoutes: tsSptr("lan")}, true, "advertiseRoutes", false},
+		{"one bad among good", TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24", "192.0.2.0/99")}, true, "advertiseRoutes", false},
+		{"exit node with forwarding off", TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, false, "forwarding is off", true},
+		{"routes with forwarding off", TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24")}, false, "forwarding is off", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s, rec := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
-			setForwarding(t, tc.forward)
+			s, rec := tsHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
+			wgSetForwarding(t, tc.forward)
 			_, err := s.SetTailscale(context.Background(), tc.req, "")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to mention %q", err, tc.want)
@@ -310,10 +310,10 @@ func TestSetTailscaleRefusals(t *testing.T) {
 }
 
 func TestSetTailscaleWithdrawingNeedsNoForwarding(t *testing.T) {
-	s, rec := tailscaleHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
+	s, rec := tsHost(t, "tailscale-status.json", "tailscale-prefs-exit.json")
 	rec.on("tailscale set ", "")
-	setForwarding(t, false)
-	if _, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: bptr(false), AdvertiseRoutes: sptr()}, ""); err != nil {
+	wgSetForwarding(t, false)
+	if _, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: tsBptr(false), AdvertiseRoutes: tsSptr()}, ""); err != nil {
 		t.Fatalf("taking an offer back must always be possible: %v", err)
 	}
 	if !rec.ran("tailscale set --advertise-exit-node=false --advertise-routes= ") && !rec.ran("tailscale set --advertise-exit-node=false --advertise-routes=") {
@@ -325,7 +325,7 @@ func TestSetTailscaleWhenPrefsCannotBeReadChangesNothing(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
 	rec.fail("tailscale debug prefs", "denied")
-	if _, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: bptr(true)}, ""); err == nil {
+	if _, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, ""); err == nil {
 		t.Fatal("want an error")
 	}
 	if rec.ran("tailscale set") {
@@ -336,7 +336,7 @@ func TestSetTailscaleWhenPrefsCannotBeReadChangesNothing(t *testing.T) {
 func TestSetTailscaleNotInstalled(t *testing.T) {
 	s := vpnService(t)
 	record(t, "tailscale")
-	_, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: bptr(true)}, "")
+	_, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, "")
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
 	}

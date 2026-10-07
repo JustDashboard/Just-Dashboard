@@ -20,10 +20,10 @@ import (
 // from here, and nothing here sets `--exit-node` (using one would send this
 // server's own replies, including to the browser, through somebody else).
 
-// tailnetV4 and tailnetV6 are the ranges Tailscale hands out addresses from.
+// tsTailnetV4 and tsTailnetV6 are the ranges Tailscale hands out addresses from.
 var (
-	tailnetV4 = netip.MustParsePrefix("100.64.0.0/10")
-	tailnetV6 = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
+	tsTailnetV4 = netip.MustParsePrefix("100.64.0.0/10")
+	tsTailnetV6 = netip.MustParsePrefix("fd7a:115c:a1e0::/48")
 )
 
 // ErrForwardingOff is a Tailscale offer that cannot work because the kernel
@@ -49,7 +49,7 @@ type TailscaleView struct {
 	ControlURL     string   `json:"controlUrl"`
 	// ClientOnTailnet is the dashboard's reader arriving through the tailnet,
 	// which is what makes everything here something that must not be broken.
-	ClientOnTailnet bool         `json:"clientOnTailnet"`
+	ClientOnTailnet bool         `json:"tsClientOnTailnet"`
 	Forwarding      TSForwarding `json:"forwarding"`
 	Warnings        []string     `json:"warnings"`
 	Error           string       `json:"error,omitempty"`
@@ -189,11 +189,11 @@ func (s *Service) Tailscale(ctx context.Context, client string) (*TailscaleView,
 	}
 	if pout, err := run(ctx, "tailscale", "debug", "prefs"); err != nil {
 		v.Warnings = append(v.Warnings, "The preferences could not be read: "+err.Error())
-	} else if err := applyTailscalePrefs(pout, v); err != nil {
+	} else if err := tsApplyPrefs(pout, v); err != nil {
 		v.Warnings = append(v.Warnings, "The preferences could not be read: "+err.Error())
 	}
-	v.Forwarding = TSForwarding{IPv4: ipForwarding("ipv4"), IPv6: ipForwarding("ipv6")}
-	v.ClientOnTailnet = clientOnTailnet(client, v)
+	v.Forwarding = TSForwarding{IPv4: wgIPForwarding("ipv4"), IPv6: wgIPForwarding("ipv6")}
+	v.ClientOnTailnet = tsClientOnTailnet(client, v)
 	if v.Prefs.UsingExitNode {
 		v.Warnings = append(v.Warnings, "This server sends its own internet traffic through an exit node, so replies to visitors may leave by another route than they arrived on.")
 	}
@@ -220,8 +220,8 @@ func parseTailscaleStatus(out string, v *TailscaleView) (*TailscaleView, error) 
 	if st.Self != nil {
 		v.Self = &TSSelf{
 			HostName: st.Self.HostName, DNSName: st.Self.DNSName, OS: st.Self.OS,
-			TailscaleIPs: nonNil(st.Self.TailscaleIPs), Online: st.Self.Online,
-			ExitNodeOption: st.Self.ExitNodeOption, PrimaryRoutes: nonNil(st.Self.PrimaryRoutes),
+			TailscaleIPs: vpnNonNil(st.Self.TailscaleIPs), Online: st.Self.Online,
+			ExitNodeOption: st.Self.ExitNodeOption, PrimaryRoutes: vpnNonNil(st.Self.PrimaryRoutes),
 			Relay: st.Self.Relay,
 		}
 	}
@@ -231,11 +231,11 @@ func parseTailscaleStatus(out string, v *TailscaleView) (*TailscaleView, error) 
 		}
 		p := TSPeer{
 			ID: n.ID, HostName: n.HostName, DNSName: n.DNSName, OS: n.OS,
-			TailscaleIPs: nonNil(n.TailscaleIPs), Online: n.Online, Active: n.Active,
+			TailscaleIPs: vpnNonNil(n.TailscaleIPs), Online: n.Online, Active: n.Active,
 			ExitNode: n.ExitNode, ExitNodeOption: n.ExitNodeOption, Relay: n.Relay,
 			Direct: n.CurAddr != "", CurAddr: n.CurAddr, RxBytes: n.RxBytes, TxBytes: n.TxBytes,
-			LastSeen: unixOrZero(n.LastSeen), LastHandshake: unixOrZero(n.LastHandshake),
-			PrimaryRoutes: nonNil(n.PrimaryRoutes), Tags: nonNil(n.Tags), Expired: n.Expired,
+			LastSeen: vpnUnixOrZero(n.LastSeen), LastHandshake: vpnUnixOrZero(n.LastHandshake),
+			PrimaryRoutes: vpnNonNil(n.PrimaryRoutes), Tags: vpnNonNil(n.Tags), Expired: n.Expired,
 		}
 		if u, ok := st.User[fmt.Sprint(n.UserID)]; ok {
 			p.UserLoginName = u.LoginName
@@ -255,21 +255,21 @@ func parseTailscaleStatus(out string, v *TailscaleView) (*TailscaleView, error) 
 	return v, nil
 }
 
-func nonNil(in []string) []string {
+func vpnNonNil(in []string) []string {
 	if in == nil {
 		return []string{}
 	}
 	return in
 }
 
-func unixOrZero(t time.Time) int64 {
+func vpnUnixOrZero(t time.Time) int64 {
 	if t.IsZero() || t.Unix() <= 0 {
 		return 0
 	}
 	return t.Unix()
 }
 
-func readTailscalePrefs(ctx context.Context) (tsPrefsJSON, error) {
+func tsReadPrefs(ctx context.Context) (tsPrefsJSON, error) {
 	var p tsPrefsJSON
 	out, err := run(ctx, "tailscale", "debug", "prefs")
 	if err != nil {
@@ -281,23 +281,23 @@ func readTailscalePrefs(ctx context.Context) (tsPrefsJSON, error) {
 	return p, nil
 }
 
-func applyTailscalePrefs(out string, v *TailscaleView) error {
+func tsApplyPrefs(out string, v *TailscaleView) error {
 	var p tsPrefsJSON
 	if err := json.Unmarshal([]byte(out), &p); err != nil {
 		return errors.New("the preferences printed something unreadable")
 	}
-	v.Prefs.AdvertiseRoutes, v.Prefs.AdvertisingExitNode = splitAdvertised(p.AdvertiseRoutes)
+	v.Prefs.AdvertiseRoutes, v.Prefs.AdvertisingExitNode = tsSplitAdvertised(p.AdvertiseRoutes)
 	v.Prefs.ExitNodeID = p.ExitNodeID
 	v.Prefs.UsingExitNode = p.ExitNodeID != "" || p.ExitNodeIP != ""
 	v.Prefs.AcceptRoutes, v.Prefs.AcceptDNS, v.Prefs.ShieldsUp = p.RouteAll, p.CorpDNS, p.ShieldsUp
 	v.ControlURL = p.ControlURL
-	v.ControlServer = controlServerOf(p.ControlURL)
+	v.ControlServer = tsControlServerOf(p.ControlURL)
 	return nil
 }
 
-// splitAdvertised separates the exit-node pair (0.0.0.0/0 and ::/0, how
+// tsSplitAdvertised separates the exit-node pair (0.0.0.0/0 and ::/0, how
 // Tailscale stores "offer to be an exit node") from the subnets.
-func splitAdvertised(routes []string) (subnets []string, exit bool) {
+func tsSplitAdvertised(routes []string) (subnets []string, exit bool) {
 	subnets = []string{}
 	for _, r := range routes {
 		p, err := netip.ParsePrefix(r)
@@ -310,9 +310,9 @@ func splitAdvertised(routes []string) (subnets []string, exit bool) {
 	return subnets, exit
 }
 
-// controlServerOf says whose coordination server the node talks to: Tailscale's
+// tsControlServerOf says whose coordination server the node talks to: Tailscale's
 // own, or one somebody runs (Headscale).
-func controlServerOf(raw string) string {
+func tsControlServerOf(raw string) string {
 	if raw == "" {
 		return "tailscale"
 	}
@@ -327,14 +327,14 @@ func controlServerOf(raw string) string {
 	return "self-hosted"
 }
 
-// clientOnTailnet is the requester's address being on the tailnet: one of
+// tsClientOnTailnet is the requester's address being on the tailnet: one of
 // the devices it knows, or in the ranges Tailscale draws addresses from.
-func clientOnTailnet(client string, v *TailscaleView) bool {
+func tsClientOnTailnet(client string, v *TailscaleView) bool {
 	addr, err := ParseAddr(client)
 	if err != nil {
 		return false
 	}
-	if tailnetV4.Contains(addr) || tailnetV6.Contains(addr) {
+	if tsTailnetV4.Contains(addr) || tsTailnetV6.Contains(addr) {
 		return true
 	}
 	known := func(ips []string) bool {
@@ -363,11 +363,11 @@ func (s *Service) TailscaleNeedsForwarding(ctx context.Context) (exitNode, subne
 	if !has("tailscale") {
 		return false, false
 	}
-	p, err := readTailscalePrefs(ctx)
+	p, err := tsReadPrefs(ctx)
 	if err != nil {
 		return false, false
 	}
-	routes, exit := splitAdvertised(p.AdvertiseRoutes)
+	routes, exit := tsSplitAdvertised(p.AdvertiseRoutes)
 	return exit, len(routes) > 0
 }
 
@@ -393,8 +393,8 @@ func (e *ForwardingOffError) Error() string {
 }
 func (e *ForwardingOffError) Unwrap() error { return ErrForwardingOff }
 
-// parseAdvertiseRoutes validates the subnets to offer.
-func parseAdvertiseRoutes(in []string) ([]netip.Prefix, error) {
+// tsParseAdvertiseRoutes validates the subnets to offer.
+func tsParseAdvertiseRoutes(in []string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	seen := map[netip.Prefix]bool{}
 	for _, raw := range in {
@@ -406,7 +406,7 @@ func parseAdvertiseRoutes(in []string) ([]netip.Prefix, error) {
 		if p.Bits() == 0 {
 			return nil, fmt.Errorf("advertiseRoutes: %s is every address, which is what the exit node switch offers; use that instead", p)
 		}
-		if tailnetV4.Overlaps(p) || tailnetV6.Overlaps(p) {
+		if tsTailnetV4.Overlaps(p) || tsTailnetV6.Overlaps(p) {
 			return nil, fmt.Errorf("advertiseRoutes: %s overlaps the tailnet's own addresses", p)
 		}
 		if !seen[p] {
@@ -441,15 +441,15 @@ func (s *Service) SetTailscale(ctx context.Context, req TailscaleSetRequest, cli
 	var routes []netip.Prefix
 	if req.AdvertiseRoutes != nil {
 		var err error
-		if routes, err = parseAdvertiseRoutes(*req.AdvertiseRoutes); err != nil {
+		if routes, err = tsParseAdvertiseRoutes(*req.AdvertiseRoutes); err != nil {
 			return nil, err
 		}
 	}
-	current, err := readTailscalePrefs(ctx)
+	current, err := tsReadPrefs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("the current Tailscale preferences could not be read, so nothing was changed: %w", err)
 	}
-	curRoutes, curExit := splitAdvertised(current.AdvertiseRoutes)
+	curRoutes, curExit := tsSplitAdvertised(current.AdvertiseRoutes)
 
 	exit := curExit
 	if req.AdvertiseExitNode != nil {
@@ -457,12 +457,12 @@ func (s *Service) SetTailscale(ctx context.Context, req TailscaleSetRequest, cli
 	}
 	routeStrs := curRoutes
 	if req.AdvertiseRoutes != nil {
-		routeStrs = prefixStrings(routes)
+		routeStrs = wgPrefixStrings(routes)
 	}
 
 	// Only an offer being made needs the kernel to forward; withdrawing one
 	// must always be possible.
-	if req.AdvertiseExitNode != nil && *req.AdvertiseExitNode && !ipForwarding("ipv4") {
+	if req.AdvertiseExitNode != nil && *req.AdvertiseExitNode && !wgIPForwarding("ipv4") {
 		return nil, &ForwardingOffError{Family: "IPv4"}
 	}
 	for _, r := range routes {
@@ -470,7 +470,7 @@ func (s *Service) SetTailscale(ctx context.Context, req TailscaleSetRequest, cli
 		if r.Addr().Is6() {
 			family, label = "ipv6", "IPv6"
 		}
-		if !ipForwarding(family) {
+		if !wgIPForwarding(family) {
 			return nil, &ForwardingOffError{Family: label}
 		}
 	}

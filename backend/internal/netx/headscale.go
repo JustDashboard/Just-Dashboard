@@ -48,56 +48,56 @@ type HeadscaleUser struct {
 	Nodes int    `json:"nodes"`
 }
 
-// flexString reads a JSON string or number, because Headscale prints 64-bit
+// headscaleFlexString reads a JSON string or number, because Headscale prints 64-bit
 // ids as strings through protobuf's JSON and older builds print numbers.
-type flexString string
+type headscaleFlexString string
 
-func (f *flexString) UnmarshalJSON(b []byte) error {
+func (f *headscaleFlexString) UnmarshalJSON(b []byte) error {
 	var s string
 	if json.Unmarshal(b, &s) == nil {
-		*f = flexString(s)
+		*f = headscaleFlexString(s)
 		return nil
 	}
 	var n json.Number
 	if err := json.Unmarshal(b, &n); err != nil {
 		return err
 	}
-	*f = flexString(n.String())
+	*f = headscaleFlexString(n.String())
 	return nil
 }
 
-// flexTime reads the three shapes a timestamp arrives in: protobuf's
+// headscaleFlexTime reads the three shapes a timestamp arrives in: protobuf's
 // {"seconds":…,"nanos":…}, an RFC 3339 string, and null.
-type flexTime int64
+type headscaleFlexTime int64
 
-func (f *flexTime) UnmarshalJSON(b []byte) error {
+func (f *headscaleFlexTime) UnmarshalJSON(b []byte) error {
 	if string(b) == "null" {
 		return nil
 	}
 	var obj struct {
-		Seconds flexString `json:"seconds"`
+		Seconds headscaleFlexString `json:"seconds"`
 	}
 	if json.Unmarshal(b, &obj) == nil && obj.Seconds != "" {
 		n, _ := strconv.ParseInt(string(obj.Seconds), 10, 64)
-		*f = flexTime(n)
+		*f = headscaleFlexTime(n)
 		return nil
 	}
 	var s string
 	if json.Unmarshal(b, &s) == nil {
 		if t, err := time.Parse(time.RFC3339, s); err == nil && t.Unix() > 0 {
-			*f = flexTime(t.Unix())
+			*f = headscaleFlexTime(t.Unix())
 		}
 	}
 	return nil
 }
 
 type headscaleNodeJSON struct {
-	ID          flexString `json:"id"`
-	Name        string     `json:"name"`
-	GivenName   string     `json:"givenName"`
-	IPAddresses []string   `json:"ipAddresses"`
-	Online      bool       `json:"online"`
-	LastSeen    flexTime   `json:"lastSeen"`
+	ID          headscaleFlexString `json:"id"`
+	Name        string              `json:"name"`
+	GivenName   string              `json:"givenName"`
+	IPAddresses []string            `json:"ipAddresses"`
+	Online      bool                `json:"online"`
+	LastSeen    headscaleFlexTime   `json:"lastSeen"`
 	User        struct {
 		Name string `json:"name"`
 	} `json:"user"`
@@ -105,8 +105,8 @@ type headscaleNodeJSON struct {
 }
 
 type headscaleUserJSON struct {
-	ID   flexString `json:"id"`
-	Name string     `json:"name"`
+	ID   headscaleFlexString `json:"id"`
+	Name string              `json:"name"`
 }
 
 // Headscale reads a Headscale binary on this host. Without one, it is a view
@@ -121,7 +121,7 @@ func (s *Service) Headscale(ctx context.Context) *HeadscaleView {
 	return v
 }
 
-var containerIDRe = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
+var headscaleContainerIDRe = regexp.MustCompile(`^[a-f0-9]{12,64}$`)
 
 // HeadscaleContainer reads a Headscale that runs in a container, through
 // `docker exec`. The container is found by the caller (the API layer owns the
@@ -133,7 +133,7 @@ func (s *Service) HeadscaleContainer(ctx context.Context, id, name string) *Head
 		v.Error = "The docker command is not available here, so the nodes cannot be listed."
 		return v
 	}
-	if !containerIDRe.MatchString(id) {
+	if !headscaleContainerIDRe.MatchString(id) {
 		v.Error = "The container id is not one Docker issues."
 		return v
 	}
@@ -160,8 +160,8 @@ func fillHeadscale(ctx context.Context, v *HeadscaleView, name string, lead []st
 		for _, n := range nodes {
 			v.Nodes = append(v.Nodes, HeadscaleNode{
 				ID: string(n.ID), Name: n.Name, GivenName: n.GivenName,
-				IPAddresses: nonNil(n.IPAddresses), Online: n.Online, LastSeen: int64(n.LastSeen),
-				User: n.User.Name, ForcedTags: nonNil(n.ForcedTags),
+				IPAddresses: vpnNonNil(n.IPAddresses), Online: n.Online, LastSeen: int64(n.LastSeen),
+				User: n.User.Name, ForcedTags: vpnNonNil(n.ForcedTags),
 			})
 		}
 	}

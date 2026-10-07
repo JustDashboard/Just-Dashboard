@@ -50,24 +50,24 @@ type WGServerResult struct {
 	Warnings  []string    `json:"warnings"`
 }
 
-// hostPrefix is a network the host already has, and where it comes from, so a
+// wgHostPrefix is a network the host already has, and where it comes from, so a
 // refusal can name it.
-type hostPrefix struct {
+type wgHostPrefix struct {
 	prefix netip.Prefix
 	dev    string
 	what   string
 }
 
-// hostState is the host's addresses and routes, read once for an allocation.
-type hostState struct {
-	prefixes []hostPrefix
+// wgHostState is the host's addresses and routes, read once for an allocation.
+type wgHostState struct {
+	prefixes []wgHostPrefix
 	// addrs are the addresses by device, host bits kept.
 	addrs map[string][]netip.Prefix
 	// uplink is the device the default route leaves through.
 	uplink string
 }
 
-type ipAddrJSON struct {
+type wgIPAddrJSON struct {
 	Ifname   string `json:"ifname"`
 	AddrInfo []struct {
 		Local     string `json:"local"`
@@ -75,24 +75,24 @@ type ipAddrJSON struct {
 	} `json:"addr_info"`
 }
 
-type ipRouteJSON struct {
+type wgIPRouteJSON struct {
 	Dst    string `json:"dst"`
 	Dev    string `json:"dev"`
 	Type   string `json:"type"`
 	Metric int    `json:"metric"`
 }
 
-// readHostState reads every address and every route in every table. A tunnel's
+// wgReadHostState reads every address and every route in every table. A tunnel's
 // network must overlap none of them, and "every table" matters: Tailscale's
 // routes are in table 52 and a policy rule's in whatever it names, neither
 // of which `ip route` alone prints.
-func readHostState(ctx context.Context) (hostState, error) {
-	st := hostState{addrs: map[string][]netip.Prefix{}}
+func wgReadHostState(ctx context.Context) (wgHostState, error) {
+	st := wgHostState{addrs: map[string][]netip.Prefix{}}
 	out, err := run(ctx, "ip", "-j", "addr")
 	if err != nil {
 		return st, fmt.Errorf("reading the host's addresses: %w", err)
 	}
-	var addrs []ipAddrJSON
+	var addrs []wgIPAddrJSON
 	if err := json.Unmarshal([]byte(out), &addrs); err != nil {
 		return st, fmt.Errorf("ip addr printed something unreadable")
 	}
@@ -104,7 +104,7 @@ func readHostState(ctx context.Context) (hostState, error) {
 			}
 			p := netip.PrefixFrom(addr, a.Prefixlen)
 			st.addrs[l.Ifname] = append(st.addrs[l.Ifname], p)
-			st.prefixes = append(st.prefixes, hostPrefix{prefix: p.Masked(), dev: l.Ifname, what: "an address on " + l.Ifname})
+			st.prefixes = append(st.prefixes, wgHostPrefix{prefix: p.Masked(), dev: l.Ifname, what: "an address on " + l.Ifname})
 		}
 	}
 	for _, family := range [][]string{{"-j", "route", "show", "table", "all"}, {"-j", "-6", "route", "show", "table", "all"}} {
@@ -112,7 +112,7 @@ func readHostState(ctx context.Context) (hostState, error) {
 		if err != nil {
 			return st, fmt.Errorf("reading the host's routes: %w", err)
 		}
-		var routes []ipRouteJSON
+		var routes []wgIPRouteJSON
 		if err := json.Unmarshal([]byte(out), &routes); err != nil {
 			return st, fmt.Errorf("ip route printed something unreadable")
 		}
@@ -124,22 +124,22 @@ func readHostState(ctx context.Context) (hostState, error) {
 			if err != nil {
 				continue
 			}
-			st.prefixes = append(st.prefixes, hostPrefix{prefix: p.Masked(), dev: r.Dev, what: "a route on " + firstNonEmpty(r.Dev, "this host")})
+			st.prefixes = append(st.prefixes, wgHostPrefix{prefix: p.Masked(), dev: r.Dev, what: "a route on " + firstNonEmpty(r.Dev, "this host")})
 		}
 	}
-	st.uplink = defaultDevice(ctx)
+	st.uplink = wgDefaultDevice(ctx)
 	return st, nil
 }
 
-// defaultDevice is the device the preferred default route leaves through: the
+// wgDefaultDevice is the device the preferred default route leaves through: the
 // lowest metric, IPv4 before IPv6.
-func defaultDevice(ctx context.Context) string {
+func wgDefaultDevice(ctx context.Context) string {
 	for _, family := range [][]string{{"-j", "route", "show", "default"}, {"-j", "-6", "route", "show", "default"}} {
 		out, err := run(ctx, "ip", family...)
 		if err != nil {
 			continue
 		}
-		var routes []ipRouteJSON
+		var routes []wgIPRouteJSON
 		if json.Unmarshal([]byte(out), &routes) != nil {
 			continue
 		}
@@ -156,7 +156,7 @@ func defaultDevice(ctx context.Context) string {
 // overlap names the first host network p overlaps, skipping those that are
 // on skipDev: a tunnel's own address and routes are not a conflict with
 // itself.
-func (h hostState) overlap(p netip.Prefix, skipDev string) (hostPrefix, bool) {
+func (h wgHostState) overlap(p netip.Prefix, skipDev string) (wgHostPrefix, bool) {
 	for _, hp := range h.prefixes {
 		if skipDev != "" && hp.dev == skipDev {
 			continue
@@ -165,12 +165,12 @@ func (h hostState) overlap(p netip.Prefix, skipDev string) (hostPrefix, bool) {
 			return hp, true
 		}
 	}
-	return hostPrefix{}, false
+	return wgHostPrefix{}, false
 }
 
 // publicV4 is the first public IPv4 address of the uplink: what a client on
 // the internet dials.
-func (h hostState) publicV4() string {
+func (h wgHostState) publicV4() string {
 	for _, p := range h.addrs[h.uplink] {
 		if p.Addr().Is4() && isPublic(p.Addr()) {
 			return p.Addr().String()
@@ -179,13 +179,13 @@ func (h hostState) publicV4() string {
 	return ""
 }
 
-// udpListening is every UDP port a socket is bound to, from /proc/net/udp and
+// wgUDPListening is every UDP port a socket is bound to, from /proc/net/udp and
 // udp6. A port another program holds cannot be listened on, and a tunnel that
 // fails to bind at boot is a tunnel that is down when it is needed.
-func udpListening() map[int]bool {
+func wgUDPListening() map[int]bool {
 	ports := map[int]bool{}
 	for _, name := range []string{"udp", "udp6"} {
-		b, err := os.ReadFile(filepath.Join(procNetRoot, name))
+		b, err := os.ReadFile(filepath.Join(wgProcNet, name))
 		if err != nil {
 			continue
 		}
@@ -224,13 +224,13 @@ func wgPortsInConfs(confs map[string]*wgConf) map[int]string {
 }
 
 // wgSubnetsInConfs are the networks of tunnels that exist as files.
-func wgSubnetsInConfs(confs map[string]*wgConf) []hostPrefix {
-	var out []hostPrefix
+func wgSubnetsInConfs(confs map[string]*wgConf) []wgHostPrefix {
+	var out []wgHostPrefix
 	for name, c := range confs {
 		if sec := c.iface(); sec != nil {
 			for _, a := range sec.list("address") {
 				if p, err := ParsePrefix(a); err == nil {
-					out = append(out, hostPrefix{prefix: p.Masked(), dev: name, what: "the WireGuard tunnel " + name})
+					out = append(out, wgHostPrefix{prefix: p.Masked(), dev: name, what: "the WireGuard tunnel " + name})
 				}
 			}
 		}
@@ -239,7 +239,7 @@ func wgSubnetsInConfs(confs map[string]*wgConf) []hostPrefix {
 }
 
 // pickWGName is the first of wg0..wg9 that is neither a file nor a device.
-func pickWGName(confs map[string]*wgConf, host hostState) (string, error) {
+func pickWGName(confs map[string]*wgConf, host wgHostState) (string, error) {
 	for i := 0; i < 10; i++ {
 		name := "wg" + strconv.Itoa(i)
 		if _, ok := confs[name]; ok {
@@ -268,7 +268,7 @@ func pickWGPort(listening map[int]bool, claimed map[int]string) (int, error) {
 // address or route on the host and no other tunnel. The starting point is
 // WireGuard's own documentation's, so the first tunnel on a clean host gets
 // the network its manual shows.
-func pickWGSubnet(host hostState, other []hostPrefix) (netip.Prefix, error) {
+func pickWGSubnet(host wgHostState, other []wgHostPrefix) (netip.Prefix, error) {
 	for n := 8; n <= 250; n++ {
 		cand := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, byte(n), 0, 0}), 24)
 		if _, hit := host.overlap(cand, ""); hit {
@@ -288,8 +288,8 @@ func pickWGSubnet(host hostState, other []hostPrefix) (netip.Prefix, error) {
 	return netip.Prefix{}, fmt.Errorf("every 10.N.0.0/24 network from 10.8 to 10.250 overlaps something on this host; give a subnet")
 }
 
-// firstHost is the network's first usable address, the server's.
-func firstHost(p netip.Prefix) netip.Addr { return p.Masked().Addr().Next() }
+// wgFirstHost is the network's first usable address, the server's.
+func wgFirstHost(p netip.Prefix) netip.Addr { return p.Masked().Addr().Next() }
 
 // parseWGEndpoint reads the address clients dial: a host name or address, with
 // an optional port that defaults to the tunnel's. Brackets around an IPv6
@@ -327,15 +327,15 @@ func parseWGEndpoint(raw string, defaultPort int) (string, error) {
 		}
 		return a.String() + ":" + strconv.Itoa(port), nil
 	}
-	if !validHostname(host) {
+	if !wgValidHostname(host) {
 		return "", fmt.Errorf("%q is not a host name or an address", host)
 	}
 	return host + ":" + strconv.Itoa(port), nil
 }
 
-// validHostname is a DNS name: labels of letters, digits and hyphens. It is
+// wgValidHostname is a DNS name: labels of letters, digits and hyphens. It is
 // written into a configuration file and a comment, so nothing else passes.
-func validHostname(h string) bool {
+func wgValidHostname(h string) bool {
 	if h == "" || len(h) > 253 {
 		return false
 	}
@@ -352,9 +352,9 @@ func validHostname(h string) bool {
 	return true
 }
 
-// parseDNSList reads client resolvers. Addresses only: wg-quick also accepts
+// wgParseDNSList reads client resolvers. Addresses only: wg-quick also accepts
 // search domains in DNS, which is a different feature than "which resolver".
-func parseDNSList(in []string) ([]string, error) {
+func wgParseDNSList(in []string) ([]string, error) {
 	var out []string
 	for _, raw := range in {
 		a, err := ParseAddr(raw)
@@ -396,7 +396,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 	if err != nil {
 		return nil, err
 	}
-	host, err := readHostState(ctx)
+	host, err := wgReadHostState(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +418,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 		}
 	}
 
-	listening, claimed := udpListening(), wgPortsInConfs(confs)
+	listening, claimed := wgUDPListening(), wgPortsInConfs(confs)
 	port := req.Port
 	if port == 0 {
 		if port, err = pickWGPort(listening, claimed); err != nil {
@@ -457,7 +457,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 	if len(dns) == 0 {
 		dns = wgDefaultDNS
 	}
-	if dns, err = parseDNSList(dns); err != nil {
+	if dns, err = wgParseDNSList(dns); err != nil {
 		return nil, err
 	}
 	mtu := req.MTU
@@ -473,8 +473,8 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 		if host.uplink == "" {
 			return nil, fmt.Errorf("an exit node needs a default route to send traffic out through, and this host has none")
 		}
-		if !ipForwarding("ipv4") {
-			warnings = append(warnings, forwardingWarning)
+		if !wgIPForwarding("ipv4") {
+			warnings = append(warnings, wgForwardingWarning)
 		}
 	}
 
@@ -483,7 +483,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 		return nil, err
 	}
 	now := wgNow()
-	serverAddr := netip.PrefixFrom(firstHost(subnet), subnet.Bits())
+	serverAddr := netip.PrefixFrom(wgFirstHost(subnet), subnet.Bits())
 	// No PostUp or PostDown: the NAT that an exit node needs is the gateway
 	// table's, restored by the same boot unit as everything else the dashboard
 	// owns, and a shell line in a file that systemd runs as root is not a
@@ -551,7 +551,7 @@ SaveConfig = false
 
 // wgSubnetFor is the requested network or a free default, checked against the
 // host and every other tunnel.
-func (s *Service) wgSubnetFor(requested string, host hostState, other []hostPrefix) (netip.Prefix, error) {
+func (s *Service) wgSubnetFor(requested string, host wgHostState, other []wgHostPrefix) (netip.Prefix, error) {
 	if requested == "" {
 		return pickWGSubnet(host, other)
 	}
@@ -595,11 +595,11 @@ func (s *Service) managedWG(name string) (*wgConf, error) {
 	return c, nil
 }
 
-// refuseClientPath is the guard every change to a whole tunnel runs: the
+// wgRefuseClientPath is the guard every change to a whole tunnel runs: the
 // device the reply to the operator's browser leaves through cannot be taken
 // away. An operator who reaches the dashboard through their own WireGuard is
 // the case; Tailscale and the uplink are protected by the same comparison.
-func refuseClientPath(ctx context.Context, client, iface, verb string) error {
+func wgRefuseClientPath(ctx context.Context, client, iface, verb string) error {
 	if client == "" {
 		return nil
 	}
@@ -632,7 +632,7 @@ func (s *Service) SetWireGuardUp(ctx context.Context, iface string, up bool, cli
 		verb, action = "started", "start"
 	}
 	if !up {
-		if err := refuseClientPath(ctx, client, iface, verb); err != nil {
+		if err := wgRefuseClientPath(ctx, client, iface, verb); err != nil {
 			return err
 		}
 	}
@@ -664,7 +664,7 @@ func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, a
 		if subnet == "" {
 			return nil, fmt.Errorf("%s has no address to translate", iface)
 		}
-		host, err := readHostState(ctx)
+		host, err := wgReadHostState(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -674,8 +674,8 @@ func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, a
 		if err := s.setWGExit(ctx, iface, subnet, host.uplink, true, actor); err != nil {
 			return nil, err
 		}
-		if !ipForwarding("ipv4") {
-			warnings = append(warnings, forwardingWarning)
+		if !wgIPForwarding("ipv4") {
+			warnings = append(warnings, wgForwardingWarning)
 		}
 	} else if err := s.setWGExit(ctx, iface, "", "", false, actor); err != nil {
 		return nil, err
@@ -691,9 +691,9 @@ func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, a
 	return res, nil
 }
 
-// forwardingWarning is shown, not enforced: the NAT entry is correct and
+// wgForwardingWarning is shown, not enforced: the NAT entry is correct and
 // harmless with forwarding off, and the Routing page is where it is turned on.
-const forwardingWarning = "IPv4 forwarding is off on this host, so clients cannot reach anything beyond it. Turn it on from the Routing page."
+const wgForwardingWarning = "IPv4 forwarding is off on this host, so clients cannot reach anything beyond it. Turn it on from the Routing page."
 
 // setWGExit edits the spec for a tunnel's exit node. The caller holds s.mu.
 func (s *Service) setWGExit(ctx context.Context, iface, subnet, uplink string, on bool, actor string) error {
@@ -758,7 +758,7 @@ func (s *Service) RemoveWireGuard(ctx context.Context, iface, client string) err
 	if _, err := s.managedWG(iface); err != nil {
 		return err
 	}
-	if err := refuseClientPath(ctx, client, iface, "removed"); err != nil {
+	if err := wgRefuseClientPath(ctx, client, iface, "removed"); err != nil {
 		return err
 	}
 	unit := "wg-quick@" + iface
@@ -789,11 +789,11 @@ func (s *Service) RemoveWireGuard(ctx context.Context, iface, client string) err
 	return nil
 }
 
-// ipForwarding reads a family's forwarding switch.
-func ipForwarding(family string) bool {
-	path := filepath.Join(procSysRoot, "net", "ipv4", "ip_forward")
+// wgIPForwarding reads a family's forwarding switch.
+func wgIPForwarding(family string) bool {
+	path := filepath.Join(wgProcSys, "net", "ipv4", "ip_forward")
 	if family == "ipv6" {
-		path = filepath.Join(procSysRoot, "net", "ipv6", "conf", "all", "forwarding")
+		path = filepath.Join(wgProcSys, "net", "ipv6", "conf", "all", "forwarding")
 	}
 	b, err := os.ReadFile(path)
 	return err == nil && strings.TrimSpace(string(b)) == "1"

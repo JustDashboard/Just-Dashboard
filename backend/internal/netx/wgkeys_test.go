@@ -12,7 +12,7 @@ import (
 	"github.com/boombuler/barcode/qr"
 )
 
-func b64hex(t *testing.T, h string) string {
+func wgB64Hex(t *testing.T, h string) string {
 	t.Helper()
 	raw, err := hex.DecodeString(h)
 	if err != nil {
@@ -33,11 +33,11 @@ func TestWGPublicKeyFromRFC7748Vectors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := wgPublicKey(b64hex(t, tc.private))
+			got, err := wgPublicKey(wgB64Hex(t, tc.private))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if want := b64hex(t, tc.public); got != want {
+			if want := wgB64Hex(t, tc.public); got != want {
 				t.Fatalf("public key = %s, want %s", got, want)
 			}
 		})

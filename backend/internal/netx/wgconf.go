@@ -77,7 +77,7 @@ func (l wgLine) isFiller() bool {
 	return l.key == "" && !strings.HasPrefix(strings.TrimSpace(l.raw), "[")
 }
 
-func sectionHeader(raw string) (string, bool) {
+func wgSectionHeader(raw string) (string, bool) {
 	t := strings.TrimSpace(raw)
 	if !strings.HasPrefix(t, "[") {
 		return "", false
@@ -101,14 +101,14 @@ func parseWGConf(text string) *wgConf {
 	}
 	var cur *wgSection
 	for _, raw := range strings.Split(text, "\n") {
-		if name, ok := sectionHeader(raw); ok {
+		if name, ok := wgSectionHeader(raw); ok {
 			// The comments and blanks that ended the previous block belong to
 			// this one: they are the metadata written above its header.
 			var tail []wgLine
 			if cur != nil {
-				cur.body, tail = splitTrailingFiller(cur.body)
+				cur.body, tail = wgSplitTrailingFiller(cur.body)
 			} else {
-				c.preamble, tail = splitTrailingFiller(c.preamble)
+				c.preamble, tail = wgSplitTrailingFiller(c.preamble)
 			}
 			cur = &wgSection{name: name, lead: tail, header: raw}
 			c.sections = append(c.sections, cur)
@@ -124,7 +124,7 @@ func parseWGConf(text string) *wgConf {
 	return c
 }
 
-func splitTrailingFiller(lines []wgLine) (kept, tail []wgLine) {
+func wgSplitTrailingFiller(lines []wgLine) (kept, tail []wgLine) {
 	i := len(lines)
 	for i > 0 && lines[i-1].isFiller() {
 		i--
@@ -204,7 +204,7 @@ func (s *wgSection) list(key string) []string {
 	return out
 }
 
-func kvLine(key, value string) wgLine {
+func wgKVLine(key, value string) wgLine {
 	return wgLine{raw: key + " = " + value, key: strings.ToLower(key), val: value}
 }
 
@@ -216,7 +216,7 @@ func (s *wgSection) set(key, value string) {
 	lk := strings.ToLower(key)
 	for i, l := range s.body {
 		if l.key == lk {
-			s.body[i] = kvLine(key, value)
+			s.body[i] = wgKVLine(key, value)
 			return
 		}
 	}
@@ -233,14 +233,14 @@ func (s *wgSection) add(key, value string) {
 	}
 	s.body = append(s.body, wgLine{})
 	copy(s.body[at+1:], s.body[at:])
-	s.body[at] = kvLine(key, value)
+	s.body[at] = wgKVLine(key, value)
 }
 
-// metaPrefix opens every comment the dashboard keeps its own notes in.
-const metaPrefix = "jd:"
+// wgMetaPrefix opens every comment the dashboard keeps its own notes in.
+const wgMetaPrefix = "jd:"
 
-// metaOf reads the `# jd:key=value` comments of a run of lines.
-func metaOf(lines []wgLine) map[string]string {
+// wgMetaOf reads the `# jd:key=value` comments of a run of lines.
+func wgMetaOf(lines []wgLine) map[string]string {
 	out := map[string]string{}
 	for _, l := range lines {
 		t := strings.TrimSpace(l.raw)
@@ -248,34 +248,34 @@ func metaOf(lines []wgLine) map[string]string {
 			continue
 		}
 		t = strings.TrimSpace(strings.TrimPrefix(t, "#"))
-		if !strings.HasPrefix(t, metaPrefix) {
+		if !strings.HasPrefix(t, wgMetaPrefix) {
 			continue
 		}
-		if k, v, ok := strings.Cut(strings.TrimPrefix(t, metaPrefix), "="); ok {
+		if k, v, ok := strings.Cut(strings.TrimPrefix(t, wgMetaPrefix), "="); ok {
 			out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 		}
 	}
 	return out
 }
 
-func metaLine(key, value string) wgLine {
-	return wgLine{raw: "# " + metaPrefix + key + "=" + value}
+func wgMetaLine(key, value string) wgLine {
+	return wgLine{raw: "# " + wgMetaPrefix + key + "=" + value}
 }
 
 // bodyMeta is an [Interface]'s notes. They sit at the top of the block, never
 // the bottom: a comment trailing the last setting of a block reads, on the
 // next parse, as belonging to the block below it.
-func (s *wgSection) bodyMeta() map[string]string { return metaOf(s.body) }
+func (s *wgSection) bodyMeta() map[string]string { return wgMetaOf(s.body) }
 
 func (s *wgSection) setBodyMeta(key, value string) {
-	prefix := "# " + metaPrefix + key + "="
+	prefix := "# " + wgMetaPrefix + key + "="
 	for i, l := range s.body {
 		if strings.HasPrefix(strings.TrimSpace(l.raw), prefix) {
-			s.body[i] = metaLine(key, value)
+			s.body[i] = wgMetaLine(key, value)
 			return
 		}
 	}
-	s.body = append([]wgLine{metaLine(key, value)}, s.body...)
+	s.body = append([]wgLine{wgMetaLine(key, value)}, s.body...)
 }
 
 // wgPeerConf is one [Peer] block read for what the dashboard shows.
@@ -292,8 +292,8 @@ type wgPeerConf struct {
 	keepalive  int
 }
 
-func peerConf(s *wgSection) wgPeerConf {
-	m := metaOf(s.lead)
+func wgPeerOf(s *wgSection) wgPeerConf {
+	m := wgMetaOf(s.lead)
 	p := wgPeerConf{
 		sec:        s,
 		name:       m["name"],
@@ -309,22 +309,22 @@ func peerConf(s *wgSection) wgPeerConf {
 	return p
 }
 
-// newPeerSection is a block as the dashboard writes it: the notes above, the
+// wgNewPeerSection is a block as the dashboard writes it: the notes above, the
 // settings below. The leading blank line keeps blocks apart.
-func newPeerSection(id int, name, kind string, created time.Time, settings [][2]string) *wgSection {
+func wgNewPeerSection(id int, name, kind string, created time.Time, settings [][2]string) *wgSection {
 	s := &wgSection{
 		name: "Peer",
 		lead: []wgLine{
 			{raw: ""},
-			metaLine("id", strconv.Itoa(id)),
-			metaLine("name", name),
-			metaLine("kind", kind),
-			metaLine("created", created.UTC().Format(time.RFC3339)),
+			wgMetaLine("id", strconv.Itoa(id)),
+			wgMetaLine("name", name),
+			wgMetaLine("kind", kind),
+			wgMetaLine("created", created.UTC().Format(time.RFC3339)),
 		},
 		header: "[Peer]",
 	}
 	for _, kv := range settings {
-		s.body = append(s.body, kvLine(kv[0], kv[1]))
+		s.body = append(s.body, wgKVLine(kv[0], kv[1]))
 	}
 	return s
 }

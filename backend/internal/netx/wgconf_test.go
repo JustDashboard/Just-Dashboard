@@ -56,7 +56,7 @@ func TestWGConfReadsSettingsAndNotes(t *testing.T) {
 	if len(peers) != 2 {
 		t.Fatalf("%d peers, want 2", len(peers))
 	}
-	office := peerConf(peers[1])
+	office := wgPeerOf(peers[1])
 	if office.id != 2 || office.name != "Office" || office.kind != "site" || office.keepalive != 25 {
 		t.Errorf("office = %+v", office)
 	}
@@ -79,7 +79,7 @@ func TestWGConfHandWrittenValuesHaveTheirCommentsStripped(t *testing.T) {
 	if got := c.iface().get("address"); got != "10.9.9.1/24" {
 		t.Errorf("address = %q, want the inline comment removed", got)
 	}
-	p := peerConf(c.peers()[0])
+	p := wgPeerOf(c.peers()[0])
 	if p.keepalive != 30 {
 		t.Errorf("keepalive from a lower-case key = %d", p.keepalive)
 	}
@@ -114,7 +114,7 @@ func TestWGConfAppendAndRemovePeerIsReversible(t *testing.T) {
 	t.Parallel()
 	text := fixture(t, "wg-managed.conf")
 	c := parseWGConf(text)
-	added := newPeerSection(9, "Tablet", "device", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
+	added := wgNewPeerSection(9, "Tablet", "device", time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
 		[][2]string{{"PublicKey", "KEY"}, {"AllowedIPs", "10.8.0.4/32"}})
 	c.appendPeer(added)
 	out := c.render()
@@ -124,7 +124,7 @@ func TestWGConfAppendAndRemovePeerIsReversible(t *testing.T) {
 	}
 	// And it parses back as the peer it was.
 	back := parseWGConf(out)
-	if p := peerConf(back.peers()[2]); p.id != 9 || p.name != "Tablet" || p.publicKey != "KEY" {
+	if p := wgPeerOf(back.peers()[2]); p.id != 9 || p.name != "Tablet" || p.publicKey != "KEY" {
 		t.Errorf("parsed back as %+v", p)
 	}
 	c.removePeer(added)

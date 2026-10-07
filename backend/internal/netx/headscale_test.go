@@ -41,7 +41,7 @@ func TestHeadscaleBinaryNodesAndUsers(t *testing.T) {
 	if len(v.Users) != 3 || counts["alice"] != 2 || counts["bob"] != 1 || counts["carol"] != 0 {
 		t.Errorf("users = %+v", v.Users)
 	}
-	raw := mustString(t, v)
+	raw := wgMustString(t, v)
 	for _, secret := range []string{"mkey:", "nodekey:", "machineKey"} {
 		if strings.Contains(raw, secret) {
 			t.Errorf("a node's key leaked: %s", secret)

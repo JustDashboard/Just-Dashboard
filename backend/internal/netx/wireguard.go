@@ -26,11 +26,11 @@ const wgOnlineWithin = 180
 // Where the module looks on the host, as variables so tests point them at a
 // directory they built.
 var (
-	procNetRoot = "/proc/net"
-	procSysRoot = "/proc/sys"
-	sysRoot     = "/sys"
-	libModules  = "/lib/modules"
-	wgNow       = time.Now
+	wgProcNet    = "/proc/net"
+	wgProcSys    = "/proc/sys"
+	wgSysRoot    = "/sys"
+	wgLibModules = "/lib/modules"
+	wgNow        = time.Now
 )
 
 var wgNameRe = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
@@ -221,7 +221,7 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 			// For a tunnel made here, DNS is what clients are given; in a
 			// file somebody wrote it is the server's own setting.
 			if dns := meta["dns"]; dns != "" {
-				ifc.DNS = append(ifc.DNS, splitList(dns)...)
+				ifc.DNS = append(ifc.DNS, wgSplitList(dns)...)
 			} else {
 				ifc.DNS = append(ifc.DNS, sec.list("dns")...)
 			}
@@ -238,7 +238,7 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 			}
 		}
 		for _, sec := range conf.peers() {
-			filePeers = append(filePeers, peerConf(sec))
+			filePeers = append(filePeers, wgPeerOf(sec))
 		}
 	}
 	for _, a := range ifc.Addresses {
@@ -290,7 +290,7 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 			}
 			p.Online = lp.handshake > 0 && now-lp.handshake <= wgOnlineWithin
 		}
-		p.Address = peerAddress(p.AllowedIPs, ifc.Subnet)
+		p.Address = wgPeerAddress(p.AllowedIPs, ifc.Subnet)
 		if c, ok := clients[p.PublicKey]; ok && c.HasConfig && (p.ID == 0 || int(c.ID) == p.ID) {
 			p.HasConfig = true
 		}
@@ -316,10 +316,10 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 	}
 }
 
-// peerAddress is the peer's own address inside the tunnel: the first host
+// wgPeerAddress is the peer's own address inside the tunnel: the first host
 // route it is allowed that lies in the tunnel's network, else the first thing
 // it is allowed.
-func peerAddress(allowed []string, subnet string) string {
+func wgPeerAddress(allowed []string, subnet string) string {
 	net, _ := netip.ParsePrefix(subnet)
 	for _, a := range allowed {
 		p, err := ParsePrefix(a)
@@ -336,7 +336,7 @@ func peerAddress(allowed []string, subnet string) string {
 	return ""
 }
 
-func splitList(s string) []string {
+func wgSplitList(s string) []string {
 	var out []string
 	for _, part := range strings.Split(s, ",") {
 		if p := strings.TrimSpace(part); p != "" {
@@ -379,14 +379,14 @@ func (s *Service) listWGConfs() (map[string]*wgConf, error) {
 // On most distributions the module is not loaded until the first interface is
 // made, so its absence from /sys/module says nothing; its file on disk does.
 func wgKernelSupported() bool {
-	if _, err := os.Stat(filepath.Join(sysRoot, "module", "wireguard")); err == nil {
+	if _, err := os.Stat(filepath.Join(wgSysRoot, "module", "wireguard")); err == nil {
 		return true
 	}
-	release, err := os.ReadFile(filepath.Join(procSysRoot, "kernel", "osrelease"))
+	release, err := os.ReadFile(filepath.Join(wgProcSys, "kernel", "osrelease"))
 	if err != nil {
 		return false
 	}
-	matches, _ := filepath.Glob(filepath.Join(libModules, strings.TrimSpace(string(release)), "kernel", "drivers", "net", "wireguard", "wireguard.ko*"))
+	matches, _ := filepath.Glob(filepath.Join(wgLibModules, strings.TrimSpace(string(release)), "kernel", "drivers", "net", "wireguard", "wireguard.ko*"))
 	return len(matches) > 0
 }
 
@@ -427,15 +427,15 @@ func parseWGDump(out string) map[string]*wgLiveIface {
 		switch len(f) {
 		case 5:
 			port, _ := strconv.Atoi(f[3])
-			res[f[0]] = &wgLiveIface{name: f[0], publicKey: noneIsEmpty(f[2]), listenPort: port}
+			res[f[0]] = &wgLiveIface{name: f[0], publicKey: wgNoneIsEmpty(f[2]), listenPort: port}
 		case 9:
 			ifc := res[f[0]]
 			if ifc == nil {
 				continue
 			}
-			p := wgLivePeer{publicKey: f[1], endpoint: noneIsEmpty(f[3])}
-			if a := noneIsEmpty(f[4]); a != "" {
-				p.allowedIPs = splitList(a)
+			p := wgLivePeer{publicKey: f[1], endpoint: wgNoneIsEmpty(f[3])}
+			if a := wgNoneIsEmpty(f[4]); a != "" {
+				p.allowedIPs = wgSplitList(a)
 			}
 			p.handshake, _ = strconv.ParseInt(f[5], 10, 64)
 			p.rx, _ = strconv.ParseUint(f[6], 10, 64)
@@ -449,7 +449,7 @@ func parseWGDump(out string) map[string]*wgLiveIface {
 	return res
 }
 
-func noneIsEmpty(s string) string {
+func wgNoneIsEmpty(s string) string {
 	if s == "(none)" {
 		return ""
 	}

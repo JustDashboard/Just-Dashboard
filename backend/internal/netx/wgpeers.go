@@ -62,10 +62,10 @@ type WGPeerConfig struct {
 	QR     string `json:"qr"`
 }
 
-// parseNetworks reads CIDRs for a field, masked, de-duplicated, without the
+// wgParseNetworks reads CIDRs for a field, masked, de-duplicated, without the
 // default route: a full tunnel is a setting of the client's, never a network
 // somebody types into this server's routing.
-func parseNetworks(in []string, field string) ([]netip.Prefix, error) {
+func wgParseNetworks(in []string, field string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	seen := map[netip.Prefix]bool{}
 	for _, raw := range in {
@@ -85,7 +85,7 @@ func parseNetworks(in []string, field string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-func prefixStrings(ps []netip.Prefix) []string {
+func wgPrefixStrings(ps []netip.Prefix) []string {
 	out := make([]string, len(ps))
 	for i, p := range ps {
 		out[i] = p.String()
@@ -93,8 +93,8 @@ func prefixStrings(ps []netip.Prefix) []string {
 	return out
 }
 
-// lastAddr is a network's last address, its broadcast.
-func lastAddr(p netip.Prefix) netip.Addr {
+// wgLastAddr is a network's last address, its broadcast.
+func wgLastAddr(p netip.Prefix) netip.Addr {
 	b := p.Masked().Addr().AsSlice()
 	for bit := p.Bits(); bit < len(b)*8; bit++ {
 		b[bit/8] |= 0x80 >> (bit % 8)
@@ -103,10 +103,10 @@ func lastAddr(p netip.Prefix) netip.Addr {
 	return a
 }
 
-// nextPeerAddress is the first address in the tunnel's network no peer holds,
+// wgNextPeerAddress is the first address in the tunnel's network no peer holds,
 // starting after the server's.
-func nextPeerAddress(subnet netip.Prefix, server netip.Addr, taken []netip.Prefix) (netip.Addr, error) {
-	last := lastAddr(subnet)
+func wgNextPeerAddress(subnet netip.Prefix, server netip.Addr, taken []netip.Prefix) (netip.Addr, error) {
+	last := wgLastAddr(subnet)
 	for a := server.Next(); subnet.Contains(a) && a != last; a = a.Next() {
 		free := true
 		for _, t := range taken {
@@ -190,11 +190,11 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	if keepalive < 0 || keepalive > 65535 {
 		return nil, fmt.Errorf("the keepalive is 0 (off) to 65535 seconds")
 	}
-	share, err := parseNetworks(req.ShareNetworks, "shareNetworks")
+	share, err := wgParseNetworks(req.ShareNetworks, "shareNetworks")
 	if err != nil {
 		return nil, err
 	}
-	remote, err := parseNetworks(req.RemoteNetworks, "remoteNetworks")
+	remote, err := wgParseNetworks(req.RemoteNetworks, "remoteNetworks")
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +231,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 
 	var taken []netip.Prefix
 	for _, sec := range conf.peers() {
-		p := peerConf(sec)
+		p := wgPeerOf(sec)
 		if strings.EqualFold(p.name, name) {
 			return nil, fmt.Errorf("a peer called %s: %w", name, ErrExists)
 		}
@@ -254,7 +254,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 	if len(remote) > 0 {
-		host, err := readHostState(ctx)
+		host, err := wgReadHostState(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -272,7 +272,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 
-	addr, err := nextPeerAddress(subnet, serverAddr, taken)
+	addr, err := wgNextPeerAddress(subnet, serverAddr, taken)
 	if err != nil {
 		return nil, err
 	}
@@ -300,11 +300,11 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	}
 	settings := [][2]string{{"PublicKey", pub}, {"PresharedKey", psk}}
 	serverAllowed := []string{netip.PrefixFrom(addr, addr.BitLen()).String()}
-	serverAllowed = append(serverAllowed, prefixStrings(remote)...)
+	serverAllowed = append(serverAllowed, wgPrefixStrings(remote)...)
 	settings = append(settings, [2]string{"AllowedIPs", strings.Join(serverAllowed, ", ")})
 
 	if req.Kind == wgKindDevice {
-		cc.dns = splitList(meta["dns"])
+		cc.dns = wgSplitList(meta["dns"])
 	} else {
 		if req.Endpoint != "" {
 			dial, err := parseWGEndpoint(req.Endpoint, wgDefaultPort)
@@ -329,8 +329,8 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	}
 
 	var warnings []string
-	if !ipForwarding("ipv4") && (req.FullTunnel || len(share) > 0 || len(remote) > 0) {
-		warnings = append(warnings, forwardingWarning)
+	if !wgIPForwarding("ipv4") && (req.FullTunnel || len(share) > 0 || len(remote) > 0) {
+		warnings = append(warnings, wgForwardingWarning)
 	}
 	if req.FullTunnel {
 		if sp, err := s.loadSpec(); err == nil {
@@ -361,7 +361,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 
-	conf.appendPeer(newPeerSection(int(id), name, req.Kind, now, settings))
+	conf.appendPeer(wgNewPeerSection(int(id), name, req.Kind, now, settings))
 	if err := s.writeWGConf(iface, conf); err != nil {
 		rollback()
 		return nil, err
@@ -409,7 +409,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 func (s *Service) saveClient(ctx context.Context, conf *wgConf, c VPNClient, config string) (int64, error) {
 	used := map[int]bool{}
 	for _, sec := range conf.peers() {
-		used[peerConf(sec).id] = true
+		used[wgPeerOf(sec).id] = true
 	}
 	for range len(used) + 1 {
 		id, err := s.vpn.Save(ctx, c, config)
@@ -491,7 +491,7 @@ func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int,
 	}
 	var target *wgPeerConf
 	for _, sec := range conf.peers() {
-		if p := peerConf(sec); p.id == id && id != 0 {
+		if p := wgPeerOf(sec); p.id == id && id != 0 {
 			p := p
 			target = &p
 		}

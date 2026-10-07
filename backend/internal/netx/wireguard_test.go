@@ -37,7 +37,7 @@ var fixSecrets = []string{fixPriv0, fixPriv1, fixPSKA, fixPSKB, fixPSKC}
 // peerA's, so it is online, and long after peerC's, so that one is not.
 const fixNow = 1790000010
 
-const clientsTable = `CREATE TABLE network_vpn_clients (
+const vpnClientsTable = `CREATE TABLE network_vpn_clients (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   iface         TEXT NOT NULL,
   public_key    TEXT NOT NULL,
@@ -63,7 +63,7 @@ func vpnService(t *testing.T) *Service {
 	// One connection: a second would open a second, empty in-memory database.
 	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
-	if _, err := db.Exec(clientsTable); err != nil {
+	if _, err := db.Exec(vpnClientsTable); err != nil {
 		t.Fatal(err)
 	}
 	s.db = db
@@ -71,24 +71,24 @@ func vpnService(t *testing.T) *Service {
 		func(v string) (string, error) { return "sealed:" + v, nil },
 		func(v string) (string, error) { return strings.TrimPrefix(v, "sealed:"), nil })
 
-	prevNow, prevNet, prevSys, prevSysRoot, prevLib := wgNow, procNetRoot, procSysRoot, sysRoot, libModules
+	prevNow, prevNet, prevSys, prevSysRoot, prevLib := wgNow, wgProcNet, wgProcSys, wgSysRoot, wgLibModules
 	t.Cleanup(func() {
-		wgNow, procNetRoot, procSysRoot, sysRoot, libModules = prevNow, prevNet, prevSys, prevSysRoot, prevLib
+		wgNow, wgProcNet, wgProcSys, wgSysRoot, wgLibModules = prevNow, prevNet, prevSys, prevSysRoot, prevLib
 	})
 	wgNow = func() time.Time { return time.Unix(fixNow, 0) }
 	root := t.TempDir()
-	procNetRoot = filepath.Join(root, "proc", "net")
-	procSysRoot = filepath.Join(root, "proc", "sys")
-	sysRoot = filepath.Join(root, "sys")
-	libModules = filepath.Join(root, "lib", "modules")
-	writeFile(t, filepath.Join(procNetRoot, "udp"), udpTable(51820, 68))
-	writeFile(t, filepath.Join(procNetRoot, "udp6"), udpTable(5353))
-	setForwarding(t, true)
+	wgProcNet = filepath.Join(root, "proc", "net")
+	wgProcSys = filepath.Join(root, "proc", "sys")
+	wgSysRoot = filepath.Join(root, "sys")
+	wgLibModules = filepath.Join(root, "lib", "modules")
+	wgWriteFile(t, filepath.Join(wgProcNet, "udp"), wgUDPTable(51820, 68))
+	wgWriteFile(t, filepath.Join(wgProcNet, "udp6"), wgUDPTable(5353))
+	wgSetForwarding(t, true)
 	return s
 }
 
-// udpTable is /proc/net/udp with a socket bound to each port.
-func udpTable(ports ...int) string {
+// wgUDPTable is /proc/net/udp with a socket bound to each port.
+func wgUDPTable(ports ...int) string {
 	var b strings.Builder
 	b.WriteString("  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n")
 	for i, p := range ports {
@@ -97,7 +97,7 @@ func udpTable(ports ...int) string {
 	return b.String()
 }
 
-func writeFile(t *testing.T, path, content string) {
+func wgWriteFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -107,29 +107,29 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func setForwarding(t *testing.T, on bool) {
+func wgSetForwarding(t *testing.T, on bool) {
 	t.Helper()
 	v := "0\n"
 	if on {
 		v = "1\n"
 	}
-	writeFile(t, filepath.Join(procSysRoot, "net", "ipv4", "ip_forward"), v)
-	writeFile(t, filepath.Join(procSysRoot, "net", "ipv6", "conf", "all", "forwarding"), v)
+	wgWriteFile(t, filepath.Join(wgProcSys, "net", "ipv4", "ip_forward"), v)
+	wgWriteFile(t, filepath.Join(wgProcSys, "net", "ipv6", "conf", "all", "forwarding"), v)
 }
 
-// installConf copies a fixture into the WireGuard directory.
-func installConf(t *testing.T, s *Service, name, fixtureName string) string {
+// wgInstallConf copies a fixture into the WireGuard directory.
+func wgInstallConf(t *testing.T, s *Service, name, fixtureName string) string {
 	t.Helper()
 	path := filepath.Join(s.paths.WireGuard, name+".conf")
-	writeFile(t, path, fixture(t, fixtureName))
+	wgWriteFile(t, path, fixture(t, fixtureName))
 	return path
 }
 
-// hostReplies answers the reads of the host's addresses and routes: an
+// wgHostReplies answers the reads of the host's addresses and routes: an
 // uplink eth0 with a public address, Docker on 172.17/16, a bridge on
 // 10.9.0.0/24, a static route over 10.8.0.0/24 and 10.10.0.0/16, and
 // Tailscale's range in its own table.
-func hostReplies(t *testing.T, rec *recorder) {
+func wgHostReplies(t *testing.T, rec *recorder) {
 	t.Helper()
 	rec.on("ip -j addr", fixture(t, "wg-ip-addr.json")).
 		on("ip -j route show table all", fixture(t, "wg-ip-route-all.json")).
@@ -138,22 +138,22 @@ func hostReplies(t *testing.T, rec *recorder) {
 		on("ip -j -6 route show default", "[]")
 }
 
-// unitReplies answers the questions asked of wg0's unit afterwards, to read
+// wgUnitReplies answers the questions asked of wg0's unit afterwards, to read
 // a tunnel back.
-func unitReplies(rec *recorder, name string) {
+func wgUnitReplies(rec *recorder, name string) {
 	rec.on("wg show all dump", "").
 		on("systemctl is-enabled wg-quick@"+name, "enabled\n").
 		on("systemctl is-active wg-quick@"+name, "active\n")
 }
 
-// commitReplies answers what s.commit runs for a change to the spec.
-func commitReplies(rec *recorder) {
+// wgCommitReplies answers what s.commit runs for a change to the spec.
+func wgCommitReplies(rec *recorder) {
 	rec.on("nft -c -f", "").
 		on("systemctl daemon-reload", "").
 		on("systemctl is-enabled "+UnitName, "enabled\n")
 }
 
-func indexOf(cmds []string, prefix string) int {
+func wgIndexOf(cmds []string, prefix string) int {
 	for i, c := range cmds {
 		if strings.HasPrefix(c, prefix) {
 			return i
@@ -162,11 +162,11 @@ func indexOf(cmds []string, prefix string) int {
 	return -1
 }
 
-func assertOrder(t *testing.T, cmds []string, prefixes ...string) {
+func wgAssertOrder(t *testing.T, cmds []string, prefixes ...string) {
 	t.Helper()
 	last := -1
 	for _, p := range prefixes {
-		i := indexOf(cmds, p)
+		i := wgIndexOf(cmds, p)
 		if i < 0 {
 			t.Fatalf("%q was never run; ran:\n%s", p, strings.Join(cmds, "\n"))
 		}
@@ -177,7 +177,7 @@ func assertOrder(t *testing.T, cmds []string, prefixes ...string) {
 	}
 }
 
-func mustSpec(t *testing.T, s *Service) *Spec {
+func wgMustSpec(t *testing.T, s *Service) *Spec {
 	t.Helper()
 	sp, err := s.loadSpec()
 	if err != nil {
@@ -214,13 +214,13 @@ func TestParseWGDumpNeverKeepsASecret(t *testing.T) {
 		if !strings.Contains(dumped, secret) {
 			t.Fatalf("the fixture lost %s", secret)
 		}
-		if strings.Contains(string(raw), secret) || strings.Contains(sprintAll(got), secret) {
+		if strings.Contains(string(raw), secret) || strings.Contains(wgSprintAll(got), secret) {
 			t.Errorf("a secret key survived the parse: %s", secret)
 		}
 	}
 }
 
-func sprintAll(m map[string]*wgLiveIface) string {
+func wgSprintAll(m map[string]*wgLiveIface) string {
 	var b strings.Builder
 	for _, i := range m {
 		b.WriteString(i.name + i.publicKey)
@@ -239,7 +239,7 @@ func TestParseWGDumpToleratesGarbage(t *testing.T) {
 	}
 }
 
-func readView(t *testing.T, s *Service) *WireGuardView {
+func wgReadView(t *testing.T, s *Service) *WireGuardView {
 	t.Helper()
 	v, err := s.WireGuard(context.Background())
 	if err != nil {
@@ -248,7 +248,7 @@ func readView(t *testing.T, s *Service) *WireGuardView {
 	return v
 }
 
-func ifaceByName(t *testing.T, v *WireGuardView, name string) WGInterface {
+func wgIfaceByName(t *testing.T, v *WireGuardView, name string) WGInterface {
 	t.Helper()
 	for _, i := range v.Interfaces {
 		if i.Name == name {
@@ -261,14 +261,14 @@ func ifaceByName(t *testing.T, v *WireGuardView, name string) WGInterface {
 
 func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 	s := vpnService(t)
-	installConf(t, s, "wg0", "wg-managed.conf")
-	installConf(t, s, "wg1", "wg-handwritten.conf")
-	writeFile(t, filepath.Join(s.paths.WireGuard, "notes.txt"), "not a tunnel")
-	writeFile(t, filepath.Join(s.paths.WireGuard, wgRemovedDir, "wg9.conf.1"), "a removed tunnel is not a tunnel")
-	writeFile(t, filepath.Join(s.paths.WireGuard, "bad name.conf"), "[Interface]\n")
+	wgInstallConf(t, s, "wg0", "wg-managed.conf")
+	wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
+	wgWriteFile(t, filepath.Join(s.paths.WireGuard, "notes.txt"), "not a tunnel")
+	wgWriteFile(t, filepath.Join(s.paths.WireGuard, wgRemovedDir, "wg9.conf.1"), "a removed tunnel is not a tunnel")
+	wgWriteFile(t, filepath.Join(s.paths.WireGuard, "bad name.conf"), "[Interface]\n")
 	// The kernel's module is on disk, not loaded: still supported.
-	writeFile(t, filepath.Join(procSysRoot, "kernel", "osrelease"), "6.14.0-test\n")
-	writeFile(t, filepath.Join(libModules, "6.14.0-test", "kernel", "drivers", "net", "wireguard", "wireguard.ko.zst"), "")
+	wgWriteFile(t, filepath.Join(wgProcSys, "kernel", "osrelease"), "6.14.0-test\n")
+	wgWriteFile(t, filepath.Join(wgLibModules, "6.14.0-test", "kernel", "drivers", "net", "wireguard", "wireguard.ko.zst"), "")
 
 	sp := emptySpec()
 	vpnUpsertNAT(sp, wgOwner("wg0"), "WireGuard wg0 exit", "10.8.0.0/24", "eth0", "alice")
@@ -296,7 +296,7 @@ func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 		fail("systemctl is-enabled wg-quick@wg1", "disabled\n").
 		on("systemctl is-active", "active\n")
 
-	v := readView(t, s)
+	v := wgReadView(t, s)
 	if !v.Installed || !v.Tools.Wg || !v.Tools.WgQuick || !v.Systemd || !v.Kernel || v.Package != "wireguard-tools" {
 		t.Errorf("tools = %+v kernel=%v", v, v.Kernel)
 	}
@@ -304,7 +304,7 @@ func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 		t.Fatalf("%d interfaces, want 2 (the removed directory, notes and bad names are not tunnels)", len(v.Interfaces))
 	}
 
-	wg0 := ifaceByName(t, v, "wg0")
+	wg0 := wgIfaceByName(t, v, "wg0")
 	if !wg0.Managed || !wg0.Configured || !wg0.Up || !wg0.Enabled || !wg0.Active {
 		t.Errorf("wg0 state = %+v", wg0)
 	}
@@ -327,7 +327,7 @@ func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 		t.Errorf("office = %+v", office)
 	}
 
-	wg1 := ifaceByName(t, v, "wg1")
+	wg1 := wgIfaceByName(t, v, "wg1")
 	if wg1.Managed || !wg1.Configured || !wg1.Up || wg1.Enabled || !wg1.Active || wg1.ExitNode {
 		t.Errorf("wg1 state = %+v", wg1)
 	}
@@ -355,10 +355,10 @@ func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 // writeSpecForTest puts a spec on disk as an earlier change would have left
 // it, without running a commit.
 func (s *Service) writeSpecForTest(sp *Spec) error {
-	return writeFileAtomic(s.specPath(), mustJSON(sp), 0o600)
+	return writeFileAtomic(s.specPath(), wgMustJSON(sp), 0o600)
 }
 
-func mustJSON(v any) []byte {
+func wgMustJSON(v any) []byte {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		panic(err)
@@ -369,7 +369,7 @@ func mustJSON(v any) []byte {
 func TestWireGuardViewOnAHostWithNothing(t *testing.T) {
 	s := vpnService(t)
 	record(t, "wg", "wg-quick", "systemctl")
-	v := readView(t, s)
+	v := wgReadView(t, s)
 	if v.Installed || v.Kernel || v.Systemd || len(v.Interfaces) != 0 || v.Interfaces == nil {
 		t.Errorf("view = %+v", v)
 	}
@@ -380,7 +380,7 @@ func TestWireGuardKernelSupportAcceptsAModuleLoadedOrOnDisk(t *testing.T) {
 	if wgKernelSupported() {
 		t.Fatal("no module and no file is not supported")
 	}
-	writeFile(t, filepath.Join(sysRoot, "module", "wireguard", "version"), "1")
+	wgWriteFile(t, filepath.Join(wgSysRoot, "module", "wireguard", "version"), "1")
 	if !wgKernelSupported() {
 		t.Fatal("a loaded module is supported")
 	}
@@ -389,8 +389,8 @@ func TestWireGuardKernelSupportAcceptsAModuleLoadedOrOnDisk(t *testing.T) {
 func TestHostAllocation(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
-	hostReplies(t, rec)
-	host, err := readHostState(context.Background())
+	wgHostReplies(t, rec)
+	host, err := wgReadHostState(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +406,7 @@ func TestHostAllocation(t *testing.T) {
 		}
 	})
 	t.Run("subnet skips other tunnels that are down", func(t *testing.T) {
-		got, err := pickWGSubnet(host, []hostPrefix{{prefix: mustPrefix("10.11.0.0/24"), what: "the WireGuard tunnel wg3"}})
+		got, err := pickWGSubnet(host, []wgHostPrefix{{prefix: wgMustPrefix("10.11.0.0/24"), what: "the WireGuard tunnel wg3"}})
 		if err != nil || got.String() != "10.12.0.0/24" {
 			t.Fatalf("subnet = %v, %v", got, err)
 		}
@@ -426,7 +426,7 @@ func TestHostAllocation(t *testing.T) {
 		}
 	})
 	t.Run("port skips what listens and what a file claims", func(t *testing.T) {
-		listening := udpListening()
+		listening := wgUDPListening()
 		if !listening[51820] || !listening[68] || !listening[5353] || listening[51821] {
 			t.Fatalf("listening = %v", listening)
 		}
@@ -487,7 +487,7 @@ func TestParseWGEndpoint(t *testing.T) {
 	}
 }
 
-func mustPrefix(s string) netip.Prefix {
+func wgMustPrefix(s string) netip.Prefix {
 	p, err := ParsePrefix(s)
 	if err != nil {
 		panic(err)
@@ -498,10 +498,10 @@ func mustPrefix(s string) netip.Prefix {
 func TestCreateWireGuardServer(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
-	hostReplies(t, rec)
+	wgHostReplies(t, rec)
 	rec.on("systemctl enable --now wg-quick@wg0", "")
-	unitReplies(rec, "wg0")
-	commitReplies(rec)
+	wgUnitReplies(rec, "wg0")
+	wgCommitReplies(rec)
 
 	res, err := s.CreateWireGuard(context.Background(), WGServerRequest{ExitNode: true}, "alice")
 	if err != nil {
@@ -546,18 +546,18 @@ func TestCreateWireGuardServer(t *testing.T) {
 	if pub, err := wgPublicKey(priv); err != nil || pub != ifc.PublicKey {
 		t.Errorf("the server key does not match its public key: %v", err)
 	}
-	if strings.Contains(mustString(t, res), priv) {
+	if strings.Contains(wgMustString(t, res), priv) {
 		t.Error("the private key is in the response")
 	}
 
-	sp := mustSpec(t, s)
+	sp := wgMustSpec(t, s)
 	if len(sp.NAT) != 1 || sp.NAT[0].Owner != "wireguard:wg0" || sp.NAT[0].Source != "10.11.0.0/24" ||
 		sp.NAT[0].Interface != "eth0" || !sp.NAT[0].Enabled || sp.NAT[0].CreatedBy != "alice" {
 		t.Errorf("nat = %+v", sp.NAT)
 	}
 
 	cmds := rec.commands()
-	assertOrder(t, cmds,
+	wgAssertOrder(t, cmds,
 		"ip -j addr",
 		"ip -j route show table all",
 		"systemctl enable --now wg-quick@wg0",
@@ -570,7 +570,7 @@ func TestCreateWireGuardServer(t *testing.T) {
 	}
 }
 
-func mustString(t *testing.T, v any) string {
+func wgMustString(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -582,7 +582,7 @@ func mustString(t *testing.T, v any) string {
 func TestCreateWireGuardRollsBackWhenTheUnitWillNotStart(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
-	hostReplies(t, rec)
+	wgHostReplies(t, rec)
 	rec.fail("systemctl enable --now wg-quick@wg0", "Job for wg-quick@wg0.service failed because the control process exited with error code.").
 		on("systemctl disable --now wg-quick@wg0", "")
 
@@ -594,7 +594,7 @@ func TestCreateWireGuardRollsBackWhenTheUnitWillNotStart(t *testing.T) {
 		t.Error("the file of a tunnel that did not start must be removed")
 	}
 	cmds := rec.commands()
-	assertOrder(t, cmds, "systemctl enable --now wg-quick@wg0", "systemctl disable --now wg-quick@wg0")
+	wgAssertOrder(t, cmds, "systemctl enable --now wg-quick@wg0", "systemctl disable --now wg-quick@wg0")
 	if _, statErr := os.Stat(s.specPath()); !os.IsNotExist(statErr) {
 		t.Error("the spec must not have been written for a tunnel that never came up")
 	}
@@ -603,7 +603,7 @@ func TestCreateWireGuardRollsBackWhenTheUnitWillNotStart(t *testing.T) {
 func TestCreateWireGuardRollsBackWhenTheExitNodeCannotBeCommitted(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
-	hostReplies(t, rec)
+	wgHostReplies(t, rec)
 	rec.on("systemctl enable --now wg-quick@wg0", "").
 		fail("nft -c -f", "syntax error").
 		on("systemctl disable --now wg-quick@wg0", "")
@@ -615,7 +615,7 @@ func TestCreateWireGuardRollsBackWhenTheExitNodeCannotBeCommitted(t *testing.T) 
 	if _, statErr := os.Stat(filepath.Join(s.paths.WireGuard, "wg0.conf")); !os.IsNotExist(statErr) {
 		t.Error("the file must be removed when the NAT entry fails")
 	}
-	assertOrder(t, rec.commands(), "systemctl enable --now wg-quick@wg0", "nft -c -f", "systemctl disable --now wg-quick@wg0")
+	wgAssertOrder(t, rec.commands(), "systemctl enable --now wg-quick@wg0", "nft -c -f", "systemctl disable --now wg-quick@wg0")
 }
 
 func TestCreateWireGuardRefusals(t *testing.T) {
@@ -655,10 +655,10 @@ func TestCreateWireGuardRefusals(t *testing.T) {
 		{"public subnet", WGServerRequest{Subnet: "8.8.8.0/24", Endpoint: "vpn.example.com"}, nil, "private"},
 		{"port in use", WGServerRequest{Port: 51820, Endpoint: "vpn.example.com"}, nil, "already in use"},
 		{"port claimed by a file", WGServerRequest{Port: 51821, Endpoint: "vpn.example.com"}, func(t *testing.T, s *Service) {
-			installConf(t, s, "wg1", "wg-handwritten.conf")
+			wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		}, "wg1"},
 		{"name taken by a file", WGServerRequest{Name: "wg1", Endpoint: "vpn.example.com"}, func(t *testing.T, s *Service) {
-			installConf(t, s, "wg1", "wg-handwritten.conf")
+			wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		}, "already exists"},
 		{"name taken by a device", WGServerRequest{Name: "docker0", Endpoint: "vpn.example.com"}, nil, "already exists"},
 		{"bad name", WGServerRequest{Name: "wg0;reboot", Endpoint: "vpn.example.com"}, nil, "interface name"},
@@ -670,7 +670,7 @@ func TestCreateWireGuardRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			s := vpnService(t)
 			rec := record(t)
-			hostReplies(t, rec)
+			wgHostReplies(t, rec)
 			if tc.pre != nil {
 				tc.pre(t, s)
 			}
@@ -686,7 +686,7 @@ func TestCreateWireGuardRefusals(t *testing.T) {
 	t.Run("no public address and none given", func(t *testing.T) {
 		s := vpnService(t)
 		rec := record(t)
-		hostReplies(t, rec)
+		wgHostReplies(t, rec)
 		rec.replies = append([]reply{{prefix: "ip -j addr", out: `[{"ifname":"eth0","addr_info":[{"family":"inet","local":"192.168.1.5","prefixlen":24}]}]`}}, rec.replies...)
 		_, err := s.CreateWireGuard(ctx, WGServerRequest{}, "a")
 		if err == nil || !strings.Contains(err.Error(), "no public IPv4") {
@@ -695,12 +695,12 @@ func TestCreateWireGuardRefusals(t *testing.T) {
 	})
 }
 
-func addPeerHost(t *testing.T) (*Service, *recorder) {
+func wgAddPeerHost(t *testing.T) (*Service, *recorder) {
 	t.Helper()
 	s := vpnService(t)
-	installConf(t, s, "wg0", "wg-managed.conf")
+	wgInstallConf(t, s, "wg0", "wg-managed.conf")
 	rec := record(t)
-	hostReplies(t, rec)
+	wgHostReplies(t, rec)
 	rec.on("systemctl is-active wg-quick@wg0", "active\n").
 		on("systemctl reload wg-quick@wg0", "").
 		on("systemctl is-enabled wg-quick@wg0", "enabled\n").
@@ -713,7 +713,7 @@ func addPeerHost(t *testing.T) (*Service, *recorder) {
 }
 
 func TestAddWireGuardDevice(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	before, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf"))
 
 	res, err := s.AddWireGuardPeer(context.Background(), "wg0",
@@ -776,7 +776,7 @@ func TestAddWireGuardDevice(t *testing.T) {
 	}
 
 	// Reloaded live, after the file was written; a device has no routes to add.
-	assertOrder(t, rec.commands(), "systemctl is-active wg-quick@wg0", "systemctl reload wg-quick@wg0")
+	wgAssertOrder(t, rec.commands(), "systemctl is-active wg-quick@wg0", "systemctl reload wg-quick@wg0")
 	if rec.ran("ip route") {
 		t.Error("a device brings no routes")
 	}
@@ -799,8 +799,8 @@ func TestAddWireGuardDevice(t *testing.T) {
 		t.Errorf("warnings = %v", res.Warnings)
 	}
 	// Nothing secret is in what the page lists afterwards.
-	v := readView(t, s)
-	listing := mustString(t, v)
+	v := wgReadView(t, s)
+	listing := wgMustString(t, v)
 	for _, secret := range append([]string{clientPriv, psk}, fixSecrets...) {
 		if strings.Contains(listing, secret) {
 			t.Errorf("a secret is in the listing: %s", secret)
@@ -809,7 +809,7 @@ func TestAddWireGuardDevice(t *testing.T) {
 }
 
 func TestAddWireGuardSite(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	res, err := s.AddWireGuardPeer(context.Background(), "wg0", WGPeerRequest{
 		Name: "Branch", Kind: "site",
 		RemoteNetworks: []string{"192.168.55.9/24", "192.168.55.0/24"},
@@ -838,7 +838,7 @@ func TestAddWireGuardSite(t *testing.T) {
 	}
 	// A syncconf adds a peer and no routes; the networks are routed after the
 	// reload, and the client path was read before and after.
-	assertOrder(t, rec.commands(), "systemctl reload wg-quick@wg0", "ip route replace 192.168.55.0/24 dev wg0")
+	wgAssertOrder(t, rec.commands(), "systemctl reload wg-quick@wg0", "ip route replace 192.168.55.0/24 dev wg0")
 	n := 0
 	for _, c := range rec.commands() {
 		if strings.HasPrefix(c, "ip -j route get 198.51.100.7") {
@@ -875,12 +875,12 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 		{"remote overlaps a host network", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"172.17.5.0/24"}}, "", "docker0", true},
 		{"remote overlaps the tailnet", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"100.64.200.0/24"}}, "", "tailscale0", true},
 		{"remote holds the client", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"198.51.100.0/24"}}, "198.51.100.7", "your own address", true},
-		{"bad keepalive", WGPeerRequest{Name: "x", Kind: "device", Keepalive: intp(70000)}, "", "keepalive", false},
+		{"bad keepalive", WGPeerRequest{Name: "x", Kind: "device", Keepalive: wgIntp(70000)}, "", "keepalive", false},
 		{"bad site endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "bad host"}, "", "not a host name", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s, rec := addPeerHost(t)
+			s, rec := wgAddPeerHost(t)
 			before, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf"))
 			_, err := s.AddWireGuardPeer(ctx, "wg0", tc.req, tc.client, "a")
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -902,26 +902,26 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 		})
 	}
 	t.Run("unmanaged tunnel", func(t *testing.T) {
-		s, _ := addPeerHost(t)
-		installConf(t, s, "wg1", "wg-handwritten.conf")
+		s, _ := wgAddPeerHost(t)
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		_, err := s.AddWireGuardPeer(ctx, "wg1", WGPeerRequest{Name: "x", Kind: "device"}, "", "a")
 		if !errors.Is(err, ErrNotManaged) {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("unknown tunnel", func(t *testing.T) {
-		s, _ := addPeerHost(t)
+		s, _ := wgAddPeerHost(t)
 		_, err := s.AddWireGuardPeer(ctx, "wg7", WGPeerRequest{Name: "x", Kind: "device"}, "", "a")
 		if !errors.Is(err, ErrNotFound) {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("a full network", func(t *testing.T) {
-		s, _ := addPeerHost(t)
+		s, _ := wgAddPeerHost(t)
 		path := filepath.Join(s.paths.WireGuard, "wg0.conf")
 		text := strings.Replace(fixture(t, "wg-managed.conf"), "Address = 10.8.0.1/24", "Address = 10.8.0.1/30", 1)
 		text = strings.Replace(text, "AllowedIPs = 10.8.0.3/32, 192.168.77.0/24", "AllowedIPs = 10.8.0.3/32", 1)
-		writeFile(t, path, text)
+		wgWriteFile(t, path, text)
 		// A /30 holds the server, one client (.2, Phone) and .3 is the broadcast.
 		_, err := s.AddWireGuardPeer(ctx, "wg0", WGPeerRequest{Name: "x", Kind: "device"}, "", "a")
 		if err == nil || !strings.Contains(err.Error(), "taken") {
@@ -930,10 +930,10 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 	})
 }
 
-func intp(n int) *int { return &n }
+func wgIntp(n int) *int { return &n }
 
 func TestAddWireGuardPeerRestoresTheFileWhenReloadFails(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	rec.replies = append([]reply{{prefix: "systemctl reload wg-quick@wg0", err: errors.New("wg: Unable to modify interface"), out: "wg: Unable to modify interface"}}, rec.replies...)
 	before, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf"))
 	_, err := s.AddWireGuardPeer(context.Background(), "wg0", WGPeerRequest{Name: "Tablet", Kind: "device"}, "", "alice")
@@ -950,7 +950,7 @@ func TestAddWireGuardPeerRestoresTheFileWhenReloadFails(t *testing.T) {
 }
 
 func TestAddWireGuardPeerToAStoppedTunnelOnlyWritesTheFile(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	rec.replies = append([]reply{{prefix: "systemctl is-active wg-quick@wg0", out: "inactive\n", err: errors.New("inactive")}}, rec.replies...)
 	res, err := s.AddWireGuardPeer(context.Background(), "wg0", WGPeerRequest{Name: "Tablet", Kind: "device"}, "", "alice")
 	if err != nil {
@@ -969,7 +969,7 @@ func TestAddWireGuardPeerToAStoppedTunnelOnlyWritesTheFile(t *testing.T) {
 }
 
 func TestAddWireGuardPeerUndoesRoutesThatMoveTheClientPath(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	// After the route is added the client's reply would leave through wg0.
 	calls := 0
 	prev := run
@@ -993,7 +993,7 @@ func TestAddWireGuardPeerUndoesRoutesThatMoveTheClientPath(t *testing.T) {
 	if !errors.Is(err, ErrGuarded) {
 		t.Fatalf("err = %v, want the guard's refusal", err)
 	}
-	assertOrder(t, rec.commands(), "ip route replace 192.168.55.0/24 dev wg0", "ip route del 192.168.55.0/24 dev wg0")
+	wgAssertOrder(t, rec.commands(), "ip route replace 192.168.55.0/24 dev wg0", "ip route del 192.168.55.0/24 dev wg0")
 	after, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf"))
 	if string(before) != string(after) {
 		t.Error("the file was not restored")
@@ -1001,7 +1001,7 @@ func TestAddWireGuardPeerUndoesRoutesThatMoveTheClientPath(t *testing.T) {
 }
 
 func TestWireGuardPeerConfigShowForgetAndRemove(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	ctx := context.Background()
 	res, err := s.AddWireGuardPeer(ctx, "wg0", WGPeerRequest{Name: "Tablet", Kind: "device"}, "", "alice")
 	if err != nil {
@@ -1029,8 +1029,8 @@ func TestWireGuardPeerConfigShowForgetAndRemove(t *testing.T) {
 	if err := s.db.QueryRow(`SELECT config_sealed FROM network_vpn_clients WHERE id = ?`, res.Peer.ID).Scan(&sealed); err != nil || sealed != "" {
 		t.Errorf("the sealed text is still stored: %q %v", sealed, err)
 	}
-	v := readView(t, s)
-	for _, p := range ifaceByName(t, v, "wg0").Peers {
+	v := wgReadView(t, s)
+	for _, p := range wgIfaceByName(t, v, "wg0").Peers {
 		if p.ID == res.Peer.ID && (p.HasConfig || p.Name != "Tablet") {
 			t.Errorf("forgotten peer = %+v: it stays on the server, named, without a configuration", p)
 		}
@@ -1051,7 +1051,7 @@ func TestWireGuardPeerConfigShowForgetAndRemove(t *testing.T) {
 	if string(b) != fixture(t, "wg-managed.conf") {
 		t.Errorf("removing the peer should leave the file as it was:\n%s", b)
 	}
-	if !contains(rec.commands()[n:], "systemctl reload wg-quick@wg0") {
+	if !wgContains(rec.commands()[n:], "systemctl reload wg-quick@wg0") {
 		t.Errorf("no reload after removal: %v", rec.commands()[n:])
 	}
 	if list, _ := s.vpn.List(ctx, "wg0"); len(list) != 0 {
@@ -1059,7 +1059,7 @@ func TestWireGuardPeerConfigShowForgetAndRemove(t *testing.T) {
 	}
 }
 
-func contains(cmds []string, want string) bool {
+func wgContains(cmds []string, want string) bool {
 	for _, c := range cmds {
 		if c == want {
 			return true
@@ -1071,11 +1071,11 @@ func contains(cmds []string, want string) bool {
 func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 	ctx := context.Background()
 	t.Run("a site's routes are taken out with it", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		if err := s.RemoveWireGuardPeer(ctx, "wg0", 2, "198.51.100.7"); err != nil {
 			t.Fatal(err)
 		}
-		assertOrder(t, rec.commands(), "systemctl reload wg-quick@wg0", "ip route del 192.168.77.0/24 dev wg0")
+		wgAssertOrder(t, rec.commands(), "systemctl reload wg-quick@wg0", "ip route del 192.168.77.0/24 dev wg0")
 		if rec.ran("ip route del 10.8.0.3") {
 			t.Error("a host address has no route of its own to remove")
 		}
@@ -1085,7 +1085,7 @@ func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 		}
 	})
 	t.Run("the peer that carries your own connection stays", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		err := s.RemoveWireGuardPeer(ctx, "wg0", 1, "10.8.0.2")
 		if !errors.Is(err, ErrGuarded) {
 			t.Fatalf("err = %v", err)
@@ -1098,13 +1098,13 @@ func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 		}
 	})
 	t.Run("a site whose network holds your address stays", func(t *testing.T) {
-		s, _ := addPeerHost(t)
+		s, _ := wgAddPeerHost(t)
 		if err := s.RemoveWireGuardPeer(ctx, "wg0", 2, "192.168.77.20"); !errors.Is(err, ErrGuarded) {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("a peer somebody else added is not addressable", func(t *testing.T) {
-		s, _ := addPeerHost(t)
+		s, _ := wgAddPeerHost(t)
 		for _, id := range []int{0, 77} {
 			if err := s.RemoveWireGuardPeer(ctx, "wg0", id, ""); !errors.Is(err, ErrNotFound) {
 				t.Errorf("id %d: %v", id, err)
@@ -1112,14 +1112,14 @@ func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 		}
 	})
 	t.Run("a hand-written tunnel is not edited", func(t *testing.T) {
-		s, _ := addPeerHost(t)
-		installConf(t, s, "wg1", "wg-handwritten.conf")
+		s, _ := wgAddPeerHost(t)
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		if err := s.RemoveWireGuardPeer(ctx, "wg1", 1, ""); !errors.Is(err, ErrNotManaged) {
 			t.Fatalf("err = %v", err)
 		}
 	})
 	t.Run("a failed reload restores the file", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		rec.replies = append([]reply{{prefix: "systemctl reload", out: "boom", err: errors.New("boom")}}, rec.replies...)
 		if err := s.RemoveWireGuardPeer(ctx, "wg0", 1, ""); err == nil {
 			t.Fatal("want an error")
@@ -1129,7 +1129,7 @@ func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 		}
 	})
 	t.Run("without wg-quick, wg removes the peer from the running interface", func(t *testing.T) {
-		s, _ := addPeerHost(t)
+		s, _ := wgAddPeerHost(t)
 		rec := record(t, "wg-quick")
 		rec.on("wg set wg0 peer "+fixPeerA+" remove", "").on("ip route del", "")
 		if err := s.RemoveWireGuardPeer(ctx, "wg0", 1, ""); err != nil {
@@ -1142,10 +1142,10 @@ func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 }
 
 func TestRemoveWireGuardMovesTheFileAside(t *testing.T) {
-	s, rec := addPeerHost(t)
+	s, rec := wgAddPeerHost(t)
 	ctx := context.Background()
 	rec.on("systemctl disable --now wg-quick@wg0", "")
-	commitReplies(rec)
+	wgCommitReplies(rec)
 	// An exit node and two clients exist.
 	sp := emptySpec()
 	vpnUpsertNAT(sp, wgOwner("wg0"), "WireGuard wg0 exit", "10.8.0.0/24", "eth0", "alice")
@@ -1182,11 +1182,11 @@ func TestRemoveWireGuardMovesTheFileAside(t *testing.T) {
 	if list, _ := s.vpn.List(ctx, "wg1"); len(list) != 1 {
 		t.Errorf("another tunnel's rows were removed: %v", list)
 	}
-	sp = mustSpec(t, s)
+	sp = wgMustSpec(t, s)
 	if len(sp.NAT) != 1 || sp.NAT[0].Owner != "wireguard:wg1" {
 		t.Errorf("only wg0's NAT entry goes: %+v", sp.NAT)
 	}
-	assertOrder(t, rec.commands(), "systemctl disable --now wg-quick@wg0", "nft -c -f")
+	wgAssertOrder(t, rec.commands(), "systemctl disable --now wg-quick@wg0", "nft -c -f")
 
 	// And a tunnel that was removed once can be made again under its name.
 	if _, err := s.readWGConf("wg0"); !errors.Is(err, ErrNotFound) {
@@ -1197,7 +1197,7 @@ func TestRemoveWireGuardMovesTheFileAside(t *testing.T) {
 func TestRemoveWireGuardGuards(t *testing.T) {
 	ctx := context.Background()
 	t.Run("the tunnel that carries your connection stays", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		err := s.RemoveWireGuard(ctx, "wg0", "10.8.0.2")
 		if !errors.Is(err, ErrGuarded) || !strings.Contains(err.Error(), "wg0") {
 			t.Fatalf("err = %v", err)
@@ -1210,8 +1210,8 @@ func TestRemoveWireGuardGuards(t *testing.T) {
 		}
 	})
 	t.Run("a hand-written tunnel is not removed", func(t *testing.T) {
-		s, rec := addPeerHost(t)
-		installConf(t, s, "wg1", "wg-handwritten.conf")
+		s, rec := wgAddPeerHost(t)
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		if err := s.RemoveWireGuard(ctx, "wg1", ""); !errors.Is(err, ErrNotManaged) {
 			t.Fatalf("err = %v", err)
 		}
@@ -1220,7 +1220,7 @@ func TestRemoveWireGuardGuards(t *testing.T) {
 		}
 	})
 	t.Run("a unit that will not stop keeps its file", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		rec.fail("systemctl disable --now wg-quick@wg0", "Failed")
 		if err := s.RemoveWireGuard(ctx, "wg0", ""); err == nil {
 			t.Fatal("want an error")
@@ -1234,7 +1234,7 @@ func TestRemoveWireGuardGuards(t *testing.T) {
 func TestSetWireGuardUpAndDown(t *testing.T) {
 	ctx := context.Background()
 	t.Run("down is refused on the path your connection arrives by", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		err := s.SetWireGuardUp(ctx, "wg0", false, "10.8.0.2")
 		if !errors.Is(err, ErrGuarded) {
 			t.Fatalf("err = %v", err)
@@ -1244,7 +1244,7 @@ func TestSetWireGuardUpAndDown(t *testing.T) {
 		}
 	})
 	t.Run("down stops the unit and leaves it enabled", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		rec.on("systemctl stop wg-quick@wg0", "")
 		if err := s.SetWireGuardUp(ctx, "wg0", false, "198.51.100.7"); err != nil {
 			t.Fatal(err)
@@ -1254,7 +1254,7 @@ func TestSetWireGuardUpAndDown(t *testing.T) {
 		}
 	})
 	t.Run("up needs no guard", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		rec.on("systemctl start wg-quick@wg0", "")
 		if err := s.SetWireGuardUp(ctx, "wg0", true, "10.8.0.2"); err != nil {
 			t.Fatal(err)
@@ -1264,8 +1264,8 @@ func TestSetWireGuardUpAndDown(t *testing.T) {
 		}
 	})
 	t.Run("a hand-written tunnel is not started or stopped", func(t *testing.T) {
-		s, rec := addPeerHost(t)
-		installConf(t, s, "wg1", "wg-handwritten.conf")
+		s, rec := wgAddPeerHost(t)
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		for _, up := range []bool{true, false} {
 			if err := s.SetWireGuardUp(ctx, "wg1", up, ""); !errors.Is(err, ErrNotManaged) {
 				t.Errorf("up=%v: %v", up, err)
@@ -1276,7 +1276,7 @@ func TestSetWireGuardUpAndDown(t *testing.T) {
 		}
 	})
 	t.Run("a failing stop is reported", func(t *testing.T) {
-		s, rec := addPeerHost(t)
+		s, rec := wgAddPeerHost(t)
 		rec.fail("systemctl stop", "Failed to stop")
 		if err := s.SetWireGuardUp(ctx, "wg0", false, ""); err == nil || !strings.Contains(err.Error(), "stop wg0") {
 			t.Fatalf("err = %v", err)
@@ -1286,8 +1286,8 @@ func TestSetWireGuardUpAndDown(t *testing.T) {
 
 func TestSetWireGuardExit(t *testing.T) {
 	ctx := context.Background()
-	s, rec := addPeerHost(t)
-	commitReplies(rec)
+	s, rec := wgAddPeerHost(t)
+	wgCommitReplies(rec)
 
 	res, err := s.SetWireGuardExit(ctx, "wg0", true, "alice")
 	if err != nil {
@@ -1296,7 +1296,7 @@ func TestSetWireGuardExit(t *testing.T) {
 	if !res.Interface.ExitNode {
 		t.Error("the interface should read back as an exit node")
 	}
-	sp := mustSpec(t, s)
+	sp := wgMustSpec(t, s)
 	if len(sp.NAT) != 1 || sp.NAT[0].Source != "10.8.0.0/24" || sp.NAT[0].Interface != "eth0" || sp.NAT[0].Owner != "wireguard:wg0" {
 		t.Fatalf("nat = %+v", sp.NAT)
 	}
@@ -1304,14 +1304,14 @@ func TestSetWireGuardExit(t *testing.T) {
 	if _, err := s.SetWireGuardExit(ctx, "wg0", true, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if sp := mustSpec(t, s); len(sp.NAT) != 1 {
+	if sp := wgMustSpec(t, s); len(sp.NAT) != 1 {
 		t.Fatalf("nat = %+v", sp.NAT)
 	}
 	res, err = s.SetWireGuardExit(ctx, "wg0", false, "alice")
 	if err != nil || res.Interface.ExitNode {
 		t.Fatalf("off: %v %+v", err, res)
 	}
-	if sp := mustSpec(t, s); len(sp.NAT) != 0 {
+	if sp := wgMustSpec(t, s); len(sp.NAT) != 0 {
 		t.Fatalf("nat = %+v", sp.NAT)
 	}
 	// Off when it was never on changes nothing and is not an error.
@@ -1320,14 +1320,14 @@ func TestSetWireGuardExit(t *testing.T) {
 	}
 
 	t.Run("forwarding off is a warning", func(t *testing.T) {
-		setForwarding(t, false)
+		wgSetForwarding(t, false)
 		res, err := s.SetWireGuardExit(ctx, "wg0", true, "alice")
 		if err != nil || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "Routing") {
 			t.Fatalf("res = %+v, err = %v", res, err)
 		}
 	})
 	t.Run("hand-written tunnels have no exit switch", func(t *testing.T) {
-		installConf(t, s, "wg1", "wg-handwritten.conf")
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		if _, err := s.SetWireGuardExit(ctx, "wg1", true, "a"); !errors.Is(err, ErrNotManaged) {
 			t.Fatalf("err = %v", err)
 		}
@@ -1336,8 +1336,8 @@ func TestSetWireGuardExit(t *testing.T) {
 
 func TestVPNSummaryCountsAndNamesNobody(t *testing.T) {
 	s := vpnService(t)
-	installConf(t, s, "wg0", "wg-managed.conf")
-	installConf(t, s, "wg1", "wg-handwritten.conf")
+	wgInstallConf(t, s, "wg0", "wg-managed.conf")
+	wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 	rec := record(t)
 	rec.on("wg show all dump", fixture(t, "wg-dump.txt")).
 		on("systemctl", "enabled\n").
@@ -1352,7 +1352,7 @@ func TestVPNSummaryCountsAndNamesNobody(t *testing.T) {
 		strings.Join(ts.SelfIPs, ",") != "100.64.10.1,fd7a:115c:a1e0::1" {
 		t.Errorf("tailscale = %+v", ts)
 	}
-	raw := mustString(t, sum)
+	raw := wgMustString(t, sum)
 	for _, leak := range append([]string{"Phone", "Office", "laptop", "alice", "srv", "example"}, fixSecrets...) {
 		if strings.Contains(raw, leak) {
 			t.Errorf("the summary names %q: %s", leak, raw)
