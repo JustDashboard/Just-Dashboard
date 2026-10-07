@@ -6721,6 +6721,18 @@ export type NetworkOverview = {
   persistence: NetworkPersistence
   vpn: VPNSummary
   dns?: DNSSummary
+  gateway: {
+    loaded: boolean
+    writable: boolean
+    reason?: string
+    forwards: number
+    nat: number
+    limits: number
+    blocklists: number
+    /** Packets the blocklists and limits refused since the table was loaded. */
+    dropped: number
+    conntrack: Conntrack
+  }
   made: {
     links: number
     routes: number
@@ -7259,3 +7271,166 @@ export type SuricataView = {
   logRefused?: string
   logError?: string
 }
+
+type NetworkMade = { createdAt: string; createdBy?: string }
+
+export type GatewayCapability = {
+  writable: boolean
+  reason?: string
+  firewall: "ufw" | "firewalld" | "iptables" | "nftables" | "none"
+  docker: boolean
+  /** The drop-forward chain that makes the gateway read-only, and the accept to add there. */
+  blocker?: { family: string; table: string; chain: string; rule: string }
+}
+
+export type GatewayForward = NetworkMade & {
+  id: number
+  name: string
+  protocol: "tcp" | "udp" | "both"
+  /** "" is any device. */
+  interface: string
+  ports: string
+  target: string
+  /** "" keeps the port it arrived on. */
+  targetPort: string
+  /** Empty is anyone. */
+  sources: string[]
+  sourceNat: "auto" | "always" | "never"
+  /** What `auto` resolved to: whether the visitor's address is replaced. */
+  masquerade: boolean
+  enabled: boolean
+  packets: number
+  bytes: number
+}
+
+export type GatewayNAT = NetworkMade & {
+  id: number
+  name: string
+  source: string
+  interface: string
+  /** "" masquerades behind the interface's own address. */
+  toAddress: string
+  /** What made it when not a person: "wireguard:wg0". */
+  owner: string
+  enabled: boolean
+  packets: number
+  bytes: number
+}
+
+export type GatewayView = {
+  capability: GatewayCapability
+  loaded: boolean
+  forwarding: { ipv4: boolean; ipv6: boolean }
+  admission: { needed: boolean; present: boolean }
+  forwards: GatewayForward[]
+  nat: GatewayNAT[]
+}
+
+export type ProtectionLimit = NetworkMade & {
+  id: number
+  name: string
+  protocol: "tcp" | "udp" | "both"
+  ports: string
+  rate: number
+  per: "second" | "minute" | "hour"
+  burst: number
+  perSource: boolean
+  maxConnections: number
+  action: "drop" | "reject"
+  enabled: boolean
+  /** What it refused since the table was loaded. */
+  packets: number
+  bytes: number
+}
+
+export type ProtectionBlocklist = NetworkMade & {
+  id: number
+  name: string
+  kind: "manual" | "country" | "feed"
+  countries: string[]
+  url: string
+  entries: string[]
+  enabled: boolean
+  refreshed: string | null
+  count: number
+  error: string
+  /** The list holds the reader's own address; the trusted set still lets them in. */
+  containsYou: boolean
+  packets: number
+  bytes: number
+}
+
+export type ProtectionSetting = {
+  key: string
+  label: string
+  why: string
+  recommended: string
+  kind: "choice" | "number"
+  allowed: string[]
+  min: number
+  max: number
+  current: string
+  available: boolean
+  /** The dashboard keeps a value for boot. */
+  setHere: boolean
+  value: string
+  atRecommended: boolean
+}
+
+export type Conntrack = {
+  available: boolean
+  count: number
+  max: number
+  percent: number
+  level: "ok" | "warning" | "critical"
+}
+
+export type ProtectionView = {
+  loaded: boolean
+  limits: ProtectionLimit[]
+  blocklists: ProtectionBlocklist[]
+  presets: { id: string; name: string; url: string; description: string }[]
+  trusted: { address: string; origin: "loopback" | "allowlist" | "you" | "kept"; removable: boolean }[]
+  client: string
+  clientTrusted: boolean
+  settings: ProtectionSetting[]
+  resetNote: string
+  conntrack: Conntrack
+}
+
+export type QdiscStat = {
+  kind: string
+  bytes: number
+  packets: number
+  drops: number
+  overlimits: number
+  requeues: number
+  backlog: number
+}
+
+export type ShapeDevice = {
+  name: string
+  kind: string
+  root: QdiscStat | null
+  leaf: QdiscStat | null
+  ingress: boolean
+  managed: boolean
+  qdisc: string
+  egressKbit: number
+  ingressKbit: number
+  uplink: boolean
+  clientPath: boolean
+  shapeable: boolean
+  guard: string
+}
+
+export type BBRState = {
+  available: boolean
+  active: boolean
+  congestion: string
+  algorithms: string[]
+  defaultQdisc: string
+  managed: boolean
+}
+
+export type ShapingView = { devices: ShapeDevice[]; bbr: BBRState; qdiscs: string[] }
