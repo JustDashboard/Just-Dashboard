@@ -1,0 +1,84 @@
+[
+  {
+    "capacity": 5,
+    "created_at": "2026-10-07T08:14:31Z",
+    "decisions": [
+      {
+        "duration": "3h51m4.5s",
+        "id": 4417,
+        "origin": "crowdsec",
+        "scenario": "crowdsecurity/ssh-bf",
+        "scope": "Ip",
+        "simulated": false,
+        "type": "ban",
+        "until": "2026-10-07T12:05:36Z",
+        "value": "203.0.113.45"
+      }
+    ],
+    "events": [],
+    "events_count": 6,
+    "id": 912,
+    "labels": null,
+    "leakspeed": "10s",
+    "machine_id": "0f2a1c",
+    "message": "Ip 203.0.113.45 performed 'crowdsecurity/ssh-bf' (6 events over 3s) at 2026-10-07 08:14:31 +0000 UTC",
+    "remediation": true,
+    "scenario": "crowdsecurity/ssh-bf",
+    "scenario_hash": "",
+    "scenario_version": "",
+    "simulated": false,
+    "source": {
+      "as_name": "EXAMPLE-NET Example Hosting Ltd",
+      "as_number": "64496",
+      "cn": "NL",
+      "ip": "203.0.113.45",
+      "latitude": 52.37,
+      "longitude": 4.89,
+      "scope": "Ip",
+      "value": "203.0.113.45"
+    },
+    "start_at": "2026-10-07T08:14:28Z",
+    "stop_at": "2026-10-07T08:14:31Z"
+  },
+  {
+    "capacity": 0,
+    "created_at": "2026-10-07T07:02:10Z",
+    "decisions": [
+      {
+        "duration": "167h59m12s",
+        "id": 4390,
+        "origin": "cscli",
+        "scenario": "manual 'ban' from 'localhost'",
+        "scope": "Range",
+        "simulated": false,
+        "type": "ban",
+        "value": "198.51.100.0/24"
+      },
+      {
+        "duration": "23h58m0s",
+        "id": 4391,
+        "origin": "CAPI",
+        "scenario": "crowdsecurity/http-probing",
+        "scope": "Ip",
+        "simulated": false,
+        "type": "captcha",
+        "value": "2001:db8::bad"
+      }
+    ],
+    "events": [],
+    "events_count": 1,
+    "id": 905,
+    "machine_id": "0f2a1c",
+    "message": "",
+    "remediation": true,
+    "scenario": "manual 'ban' from 'localhost'",
+    "simulated": false,
+    "source": {
+      "ip": "198.51.100.0/24",
+      "scope": "Range",
+      "value": "198.51.100.0/24"
+    },
+    "start_at": "2026-10-07T07:02:10Z",
+    "stop_at": "2026-10-07T07:02:10Z"
+  }
+]

@@ -1,0 +1,16 @@
+# Default config for Suricata
+
+# set to yes to start the server in the init.d script
+RUN=yes
+
+# Configuration file to load
+SURCONF=/etc/suricata/suricata.yaml
+
+# Listen mode: pcap, nfqueue or af-packet
+# depending on this value, only one of the two following options
+# will be used (af-packet uses neither).
+# Please note that IPS mode is only available when using nfqueue
+LISTENMODE=af-packet
+
+# Queue number to listen on
+NFQUEUE=0

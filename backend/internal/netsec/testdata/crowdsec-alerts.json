@@ -1,0 +1,30 @@
+[
+  {
+    "created_at": "2026-10-07T08:14:31Z",
+    "decisions": [{"duration": "3h51m4s", "id": 4417, "origin": "crowdsec", "scope": "Ip", "type": "ban", "value": "203.0.113.45"}],
+    "events_count": 6,
+    "id": 912,
+    "machine_id": "0f2a1c",
+    "scenario": "crowdsecurity/ssh-bf",
+    "simulated": false,
+    "source": {"as_name": "EXAMPLE-NET Example Hosting Ltd", "as_number": "64496", "cn": "NL", "ip": "203.0.113.45", "scope": "Ip", "value": "203.0.113.45"}
+  },
+  {
+    "created_at": "2026-10-07T06:40:00Z",
+    "decisions": null,
+    "events_count": 12,
+    "id": 903,
+    "machine_id": "0f2a1c",
+    "scenario": "crowdsecurity/http-crawl-non_statics",
+    "simulated": false,
+    "source": {"as_name": "", "cn": "", "ip": "198.51.100.88", "scope": "Ip", "value": "198.51.100.88"}
+  },
+  {
+    "created_at": "2026-10-07T07:02:10Z",
+    "decisions": [{"duration": "167h59m12s", "id": 4390, "origin": "cscli", "scope": "Range", "type": "ban", "value": "198.51.100.0/24"}],
+    "events_count": 1,
+    "id": 905,
+    "scenario": "manual 'ban' from 'localhost'",
+    "source": {"ip": "198.51.100.0/24", "scope": "Range", "value": "198.51.100.0/24"}
+  }
+]
