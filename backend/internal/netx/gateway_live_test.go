@@ -1,6 +1,7 @@
 package netx
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -128,7 +129,7 @@ class S(http.server.ThreadingHTTPServer):
         self.server_name, self.server_port = sys.argv[1], self.server_address[1]
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        body = self.client_address[0].encode()
+        body = (self.client_address[0] + (sys.argv[3] if len(sys.argv) > 3 else "")).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -154,15 +155,32 @@ for i in range(5):
 print(ok)
 `
 
+const gwLiveLate = `
+import socket, sys, time, os
+s = socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=15)
+print("connected", flush=True)
+while not os.path.exists(sys.argv[3]):
+    time.sleep(0.05)
+s.sendall(b"GET / HTTP/1.0\r\nHost: x\r\n\r\n")
+data = b""
+while True:
+    chunk = s.recv(4096)
+    if not chunk:
+        break
+    data += chunk
+print(data.decode().split("\r\n\r\n", 1)[-1], flush=True)
+`
+
 // gwLiveServe starts the echo server, which answers every request with the
-// address it saw the request come from, in a namespace.
-func gwLiveServe(t *testing.T, ns, addr string, port int) {
+// address it saw the request come from, and the marker if there is one, in a
+// namespace.
+func gwLiveServe(t *testing.T, ns, addr string, port int, marker ...string) {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "echo.py")
 	if err := os.WriteFile(script, []byte(gwLiveEchoServer), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := gwLiveCmd(context.Background(), "ip", "netns", "exec", ns, "timeout", "300", "python3", script, addr, fmt.Sprint(port))
+	cmd := gwLiveCmd(context.Background(), append([]string{"ip", "netns", "exec", ns}, append([]string{"timeout", "300", "python3", script, addr, fmt.Sprint(port)}, marker...)...)...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -231,7 +249,7 @@ func TestLiveGoldenRulesetLoadsAndReadsBack(t *testing.T) {
 	listing := gwMustInNS(t, ns, "nft", "-j", "list", "ruleset")
 	var l nftListing
 	if err := json.Unmarshal([]byte(listing), &l); err != nil || len(l.Nftables) == 0 {
-		t.Fatalf("nft -j list ruleset did not parse: %v", err)
+		t.Fatalf("nft -t -j list ruleset did not parse: %v", err)
 	}
 }
 
@@ -256,11 +274,17 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 		{gw, "iptables", "-P", "FORWARD", "DROP"},
 		// And a host that accepts nothing for itself it was not asked to.
 		{gw, "iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"},
+		{gw, "iptables", "-A", "INPUT", "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"},
 		{gw, "iptables", "-P", "INPUT", "DROP"},
+		// An ordinary firewall rule that lets clients reach one port on the
+		// server directly, replies included: traffic merely passing through.
+		{gw, "iptables", "-I", "FORWARD", "-d", "10.88.0.5", "-p", "tcp", "--dport", "8080", "-j", "ACCEPT"},
+		{gw, "iptables", "-I", "FORWARD", "-s", "10.88.0.5", "-p", "tcp", "--sport", "8080", "-j", "ACCEPT"},
 	} {
 		gwMustInNS(t, c[0], c[1:]...)
 	}
 	gwLiveServe(t, sv, "10.88.0.5", 80)
+	gwLiveServe(t, sv, "10.88.0.5", 8080, "|direct")
 	gwLiveServe(t, cl, "10.77.0.2", 8000)
 	gwLiveServe(t, gw, "10.88.0.1", 8000)
 
@@ -312,6 +336,12 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 		t.Fatalf("an unmasqueraded forward: got %q, %v (want the visitor's address)", body, ok)
 	}
 
+	// Traffic passing through to the same port on another address is not
+	// captured: the forward is for what is addressed to this host.
+	if body, ok := gwFetchFrom(t, cl, "http://10.88.0.5:8080/"); !ok || body != "10.77.0.2|direct" {
+		t.Fatalf("a connection through the gateway to port 8080 of another host: got %q, %v (the forward took it)", body, ok)
+	}
+
 	// A forward to a port range keeps its numbers.
 	if _, err := svc.AddForward(ctx, ForwardRequest{Name: "range", Protocol: "tcp", Ports: "9000-9010", Target: "10.88.0.5", SourceNAT: "never"}, operator, "test", gwProtected); err != nil {
 		t.Fatal(err)
@@ -334,6 +364,10 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if out := strings.TrimSpace(gwMustInNS(t, cl, "python3", hold, "10.77.0.1", "8080")); out != "2" {
 		t.Fatalf("five connections against a limit of two: %s connected", out)
 	}
+	// The same port on another host, merely routed through, is not limited.
+	if out := strings.TrimSpace(gwMustInNS(t, cl, "python3", hold, "10.88.0.5", "8080")); out != "5" {
+		t.Fatalf("five connections through the gateway to another host's port 8080: %s connected; a limit must not throttle routed traffic", out)
+	}
 	pv, err := svc.Protection(ctx, operator)
 	if err != nil {
 		t.Fatal(err)
@@ -349,12 +383,44 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if _, err := svc.AddBlocklist(ctx, BlocklistRequest{Name: "client", Kind: "manual", Entries: []string{"10.77.0.2"}}, "10.77.0.2", "test"); err == nil {
 		t.Fatal("a manual list holding the reader was accepted")
 	}
+	// A session open before the list takes the address...
+	late := filepath.Join(t.TempDir(), "late.py")
+	if err := os.WriteFile(late, []byte(gwLiveLate), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	signal := filepath.Join(t.TempDir(), "go")
+	lateCmd := gwLiveCmd(context.Background(), "ip", "netns", "exec", cl, "timeout", "60", "python3", late, "10.77.0.1", "8080", signal)
+	lateOut, err := lateCmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lateCmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lateCmd.Process.Kill() })
+	lines := bufio.NewReader(lateOut)
+	if line, _ := lines.ReadString('\n'); strings.TrimSpace(line) != "connected" {
+		t.Fatalf("the session did not open: %q", line)
+	}
 	bl, err := svc.AddBlocklist(ctx, BlocklistRequest{Name: "client", Kind: "manual", Entries: []string{"10.77.0.2"}}, operator, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// ...a new connection from it is dropped...
 	if _, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
 		t.Fatal("a blocklisted client got through")
+	}
+	// ...and the open one carries on to its answer.
+	if err := os.WriteFile(signal, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if line, _ := lines.ReadString('\n'); strings.TrimSpace(line) != "10.77.0.2" {
+		t.Fatalf("an established session was cut by a list taking its address: %q", line)
+	}
+	// Replies to this server's own outbound connections are not dropped either:
+	// the gateway fetches from the listed address, and the answer comes back.
+	if body, ok := gwFetchFrom(t, gw, "http://10.77.0.2:8000/"); !ok || body != "10.77.0.1" {
+		t.Fatalf("a reply from a listed address to a connection this host opened: got %q, %v", body, ok)
 	}
 	if pv, _ = svc.Protection(ctx, operator); pv.Blocklists[0].Packets == 0 {
 		t.Fatalf("the list dropped nothing, by its own counter: %+v", pv.Blocklists[0])
@@ -387,6 +453,11 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 		t.Fatal("NAT admission let a source reach a service on the gateway itself")
 	}
 
+	// Copies of the rule that something else left behind go with the rest.
+	for _, chain := range []string{"FORWARD", "FORWARD", "INPUT"} {
+		gwMustInNS(t, gw, append([]string{"iptables", "-I", chain, "1"}, admissionRule()...)...)
+	}
+
 	// Everything removed: nothing is admitted any more, and the rules are gone.
 	sp, _ := svc.loadSpec()
 	for _, f := range sp.Forwards {
@@ -397,8 +468,10 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if err := svc.DeleteNAT(ctx, nat.ID); err != nil {
 		t.Fatal(err)
 	}
-	if out := gwMustInNS(t, gw, "iptables", "-S", "FORWARD"); strings.Contains(out, "just-dashboard-gateway") {
-		t.Fatalf("the admission rule outlived the last translation:\n%s", out)
+	for _, chain := range []string{"FORWARD", "INPUT"} {
+		if out := gwMustInNS(t, gw, "iptables", "-S", chain); strings.Contains(out, "just-dashboard-gateway") {
+			t.Fatalf("a copy of the admission rule outlived the last translation in %s:\n%s", chain, out)
+		}
 	}
 	if _, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
 		t.Fatal("a removed forward still forwards")
@@ -546,5 +619,60 @@ func TestLiveCapabilityReadsRealRulesets(t *testing.T) {
 	gwMustInNS(t, ns, "iptables", "-P", "FORWARD", "DROP")
 	if c := svc.GatewayCapability(ctx); !c.Writable || c.Firewall != "iptables" {
 		t.Fatalf("an iptables-nft host with a drop policy = %+v", c)
+	}
+}
+
+func TestLiveShapingLeavesAClsactQueueAlone(t *testing.T) {
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "clsact")
+	gwMustInNS(t, ns, "ip", "link", "add", "dm5", "type", "dummy")
+	gwMustInNS(t, ns, "ip", "link", "set", "dm5", "up")
+	// What tc-BPF tooling does: a clsact queue, which is where its filters hang.
+	gwMustInNS(t, ns, "tc", "qdisc", "add", "dev", "dm5", "clsact")
+	hasClsact := func() bool {
+		out := gwMustInNS(t, ns, "tc", "-j", "qdisc", "show", "dev", "dm5")
+		qs, err := parseQdiscs(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ingressKind(qs) == "clsact"
+	}
+	if !hasClsact() {
+		t.Fatal("no clsact queue to protect")
+	}
+
+	// The boot batch, run over it: the ingress half fails and the queue stays.
+	sp := emptySpec()
+	sp.Shaping = []ShapeSpec{{Device: "dm5", EgressKbit: 20000, IngressKbit: 8000}}
+	batch := filepath.Join(t.TempDir(), "shaping.batch")
+	if err := os.WriteFile(batch, []byte(renderShaping(sp)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = gwInNS(t, ns, "tc", "-force", "-batch", batch) // exits 1 where lines fail, which is the point
+	if !hasClsact() {
+		t.Fatal("the boot batch deleted a clsact queue")
+	}
+
+	// Through the Service: a download limit is refused, an upload limit is not,
+	// and clearing it leaves the queue.
+	prevRun, prevHas := run, has
+	run, has = gwLiveRun(ns), func(string) bool { return false }
+	t.Cleanup(func() { run, has = prevRun, prevHas })
+	svc := testService(t)
+	ctx := context.Background()
+	if err := svc.SetShaping(ctx, "dm5", ShapeRequest{IngressKbit: 8000}, "192.0.2.1", "test"); err == nil || !strings.Contains(err.Error(), "clsact") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := svc.SetShaping(ctx, "dm5", ShapeRequest{EgressKbit: 20000}, "192.0.2.1", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasClsact() {
+		t.Fatal("an upload limit removed the clsact queue")
+	}
+	if err := svc.ClearShaping(ctx, "dm5"); err != nil {
+		t.Fatal(err)
+	}
+	if !hasClsact() {
+		t.Fatal("clearing the shaping removed the clsact queue")
 	}
 }

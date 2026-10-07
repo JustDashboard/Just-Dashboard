@@ -32,15 +32,18 @@ func TestRenderShapingOfNothingIsTheHeaderAlone(t *testing.T) {
 	}
 }
 
-func TestShapeLinesEachHalfStartsByClearingWhatItReplaces(t *testing.T) {
+func TestShapeLinesNeverDeleteTheIngressQueue(t *testing.T) {
 	lines := shapeLines(ShapeSpec{Device: "eth0", EgressKbit: 1000, IngressKbit: 1000})
 	var dels []string
 	for _, l := range lines {
-		if strings.HasPrefix(l, "qdisc del") {
+		if strings.HasPrefix(l, "qdisc del") || strings.HasPrefix(l, "filter del") {
 			dels = append(dels, l)
 		}
+		if strings.Contains(l, "del") && strings.Contains(l, "ingress") {
+			t.Errorf("a batch that deletes the ingress queue also deletes a clsact queue's BPF filters: %s", l)
+		}
 	}
-	if len(dels) != 2 || dels[0] != "qdisc del dev eth0 root" || dels[1] != "qdisc del dev eth0 ingress" {
+	if len(dels) != 2 || dels[0] != "qdisc del dev eth0 root" || dels[1] != "filter del dev eth0 parent ffff: prio 1" {
 		t.Fatalf("deletes = %v", dels)
 	}
 	// Ingress alone must not delete the root queue it has nothing to say about.
@@ -135,14 +138,13 @@ func TestSetShapingClearsThenSetsThenVerifiesThenSaves(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"tc qdisc del dev eth0 root",
-		"tc qdisc del dev eth0 ingress",
+		"tc -j qdisc show dev eth0", // is the ingress hook a clsact queue?
 		"tc qdisc del dev eth0 root",
 		"tc qdisc replace dev eth0 root handle 1: htb default 10",
 		"tc class replace dev eth0 parent 1: classid 1:10 htb rate 50000kbit ceil 50000kbit",
 		"tc qdisc replace dev eth0 parent 1:10 handle 10: fq_codel",
-		"tc qdisc del dev eth0 ingress",
 		"tc qdisc replace dev eth0 handle ffff: ingress",
+		"tc filter del dev eth0 parent ffff: prio 1",
 		"tc filter replace dev eth0 parent ffff: protocol all prio 1 matchall action police rate 100000kbit burst 1250000 drop",
 		"tc -j qdisc show dev eth0",
 	}
@@ -197,7 +199,7 @@ func TestSetShapingFirstTimeFailureLeavesTheDeviceUnshaped(t *testing.T) {
 		t.Fatalf("cake's own error was not reported: %v", err)
 	}
 	cmds := h.tcCommands()
-	if last := cmds[len(cmds)-1]; last != "tc qdisc del dev eth0 ingress" {
+	if last := cmds[len(cmds)-1]; last != "tc qdisc del dev eth0 root" {
 		t.Fatalf("the device was left with whatever the failed change started: last command %q", last)
 	}
 	if h.saved() {
@@ -272,8 +274,9 @@ func TestClearShaping(t *testing.T) {
 		t.Fatal(err)
 	}
 	cmds := h.tcCommands()
-	if n := len(cmds); cmds[n-2] != "tc qdisc del dev eth0 root" || cmds[n-1] != "tc qdisc del dev eth0 ingress" {
-		t.Fatalf("tail of tc commands = %v", cmds[n-2:])
+	n := len(cmds)
+	if cmds[n-3] != "tc qdisc del dev eth0 root" || cmds[n-2] != "tc -j qdisc show dev eth0" || cmds[n-1] != "tc qdisc del dev eth0 ingress" {
+		t.Fatalf("tail of tc commands = %v", cmds[n-3:])
 	}
 	if len(h.spec(t).Shaping) != 0 {
 		t.Fatal("still in the spec")
@@ -389,4 +392,97 @@ func TestBBR(t *testing.T) {
 			t.Error("saved")
 		}
 	})
+}
+
+const gwTcClsact = `[{"kind":"fq_codel","handle":"0:","dev":"eth0","root":true},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`
+
+func TestAnIngressLimitIsRefusedOverAClsactQueue(t *testing.T) {
+	h := newShapeHost(t)
+	h.first("tc -j qdisc show dev eth0", gwTcClsact, nil)
+	err := h.SetShaping(context.Background(), "eth0", ShapeRequest{IngressKbit: 9000}, gwClient, "ops")
+	if err == nil || !strings.Contains(err.Error(), "clsact") {
+		t.Fatalf("err = %v", err)
+	}
+	for _, c := range h.tcCommands() {
+		if !strings.HasPrefix(c, "tc -j qdisc show") {
+			t.Fatalf("a refused change ran %s", c)
+		}
+	}
+	if h.saved() {
+		t.Error("saved")
+	}
+	// An upload limit on the same device is no business of the clsact queue.
+	h.first("tc -j qdisc show dev eth0", `[{"kind":"htb","handle":"1:","dev":"eth0","root":true},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`, nil)
+	if err := h.SetShaping(context.Background(), "eth0", ShapeRequest{EgressKbit: 9000}, gwClient, "ops"); err != nil {
+		t.Fatalf("an upload limit beside a clsact queue was refused: %v", err)
+	}
+	for _, c := range h.tcCommands() {
+		if strings.Contains(c, "ingress") {
+			t.Fatalf("touched the ingress hook of a clsact device: %s", c)
+		}
+	}
+}
+
+func TestDroppingTheDownloadLimitDeletesOnlyAPlainIngressQueue(t *testing.T) {
+	for name, listing := range map[string]string{"plain ingress": gwTcHTB, "clsact": gwTcClsact} {
+		t.Run(name, func(t *testing.T) {
+			h := newShapeHost(t)
+			ctx := context.Background()
+			h.first("tc -j qdisc show dev eth0", gwTcHTB, nil)
+			if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000, IngressKbit: 9000}, gwClient, "ops"); err != nil {
+				t.Fatal(err)
+			}
+			// Somebody attaches a BPF program's clsact queue afterwards.
+			h.first("tc -j qdisc show dev eth0", listing, nil)
+			h.rec.mu.Lock()
+			n := len(h.rec.calls)
+			h.rec.mu.Unlock()
+			// Verify wants a htb root; add one to the clsact listing.
+			if name == "clsact" {
+				h.first("tc -j qdisc show dev eth0", `[{"kind":"htb","handle":"1:","dev":"eth0","root":true},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`, nil)
+			}
+			if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000}, gwClient, "ops"); err != nil {
+				t.Fatal(err)
+			}
+			deleted := false
+			for _, c := range h.rec.commands()[n:] {
+				deleted = deleted || c == "tc qdisc del dev eth0 ingress"
+			}
+			if deleted != (name == "plain ingress") {
+				t.Fatalf("ingress deleted = %v with %s", deleted, name)
+			}
+		})
+	}
+}
+
+func TestAnIngressOnlyLimitLeavesTheRootQueueAlone(t *testing.T) {
+	h := newShapeHost(t)
+	if err := h.SetShaping(context.Background(), "wg0", ShapeRequest{IngressKbit: 8000}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range h.tcCommands() {
+		if strings.Contains(c, " root") {
+			t.Fatalf("an ingress-only limit touched the root queue: %s", c)
+		}
+	}
+}
+
+func TestClearShapingLeavesAClsactQueueAlone(t *testing.T) {
+	h := newShapeHost(t)
+	ctx := context.Background()
+	if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000, IngressKbit: 9000}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	h.first("tc -j qdisc show dev eth0", gwTcClsact, nil)
+	h.rec.mu.Lock()
+	n := len(h.rec.calls)
+	h.rec.mu.Unlock()
+	if err := h.ClearShaping(ctx, "eth0"); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range h.rec.commands()[n:] {
+		if strings.Contains(c, "del dev eth0 ingress") {
+			t.Fatalf("deleted a clsact queue: %s", c)
+		}
+	}
 }

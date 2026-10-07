@@ -324,3 +324,68 @@ func TestParseGatewayCountersRefusesGarbage(t *testing.T) {
 		t.Fatal("garbage parsed")
 	}
 }
+
+func chainBody(t *testing.T, out, name string) string {
+	t.Helper()
+	i := strings.Index(out, "chain "+name+" {")
+	if i < 0 {
+		t.Fatalf("no chain %s in:\n%s", name, out)
+	}
+	body := out[i:]
+	return body[:strings.Index(body, "\n\t}\n")]
+}
+
+func TestEveryForwardOnlyCapturesTrafficAddressedToThisHost(t *testing.T) {
+	body := chainBody(t, gwRenderFull(t), "nat_pre")
+	rules := 0
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.Contains(line, "dnat ") {
+			continue
+		}
+		rules++
+		// Before the protocol and port match, so it is part of what selects
+		// the flow and not an afterthought on the verdict.
+		if i, j := strings.Index(line, "fib daddr type local"), strings.Index(line, "meta l4proto"); i < 0 || i > j {
+			t.Errorf("a forward that also captures pass-through traffic: %s", line)
+		}
+	}
+	if rules != 4 {
+		t.Fatalf("%d dnat rules", rules)
+	}
+}
+
+func TestForwardChainLimitsOnlyCountTranslatedFlows(t *testing.T) {
+	out := gwRenderFull(t)
+	for _, line := range strings.Split(chainBody(t, out, "forward"), "\n") {
+		if strings.Contains(line, `comment "limit:`) && !strings.Contains(line, "ct status dnat") {
+			t.Errorf("a limit that throttles all routed traffic: %s", line)
+		}
+	}
+	for _, line := range strings.Split(chainBody(t, out, "input"), "\n") {
+		if strings.Contains(line, "ct status dnat") {
+			t.Errorf("the input chain sees this host's own traffic, which is not translated: %s", line)
+		}
+	}
+}
+
+func TestBlocklistDropsComeAfterConntrackAndOnlyRefuseNewConnections(t *testing.T) {
+	body := chainBody(t, gwRenderFull(t), "pre")
+	if !strings.Contains(body, "hook prerouting priority mangle;") {
+		t.Fatalf("the drops must run after connection tracking (-200), not at raw:\n%s", body)
+	}
+	lines := strings.Split(body, "\n")
+	est, trusted, drop := -1, -1, -1
+	for i, l := range lines {
+		switch {
+		case strings.Contains(l, "ct state established,related return") && est < 0:
+			est = i
+		case strings.Contains(l, "@trusted4 return") && trusted < 0:
+			trusted = i
+		case strings.Contains(l, "counter drop") && drop < 0:
+			drop = i
+		}
+	}
+	if est < 0 || est > trusted || trusted > drop || drop < 0 {
+		t.Fatalf("order must be established, trusted, drops (%d %d %d):\n%s", est, trusted, drop, body)
+	}
+}

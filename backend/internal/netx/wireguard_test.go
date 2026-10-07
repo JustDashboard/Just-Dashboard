@@ -140,7 +140,7 @@ func wgHostReplies(t *testing.T, rec *recorder) {
 	// An exit node is a NAT entry the gateway loads and admits, so a host
 	// that makes one answers the gateway's own questions: a plain ruleset
 	// (writable), no firewalld, and every load and admission succeeding.
-	rec.on("nft -j list ruleset", `{"nftables": []}`).
+	rec.on("nft -t -j list ruleset", `{"nftables": []}`).
 		fail("firewall-cmd", "not running").
 		on("ufw status", "Status: active\n").
 		on("iptables", "").

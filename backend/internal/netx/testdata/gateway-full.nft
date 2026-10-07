@@ -62,7 +62,8 @@ table inet jd_gateway {
 		size 65535
 	}
 	chain pre {
-		type filter hook prerouting priority raw; policy accept;
+		type filter hook prerouting priority mangle; policy accept;
+		ct state established,related return
 		iif "lo" return
 		ip saddr @trusted4 return
 		ip6 saddr @trusted6 return
@@ -92,20 +93,20 @@ table inet jd_gateway {
 		ct state established,related return
 		ip saddr @trusted4 return
 		ip6 saddr @trusted6 return
-		meta l4proto tcp ct original proto-dst 22 ct state new limit rate over 10/minute burst 5 packets counter reject with tcp reset comment "limit:8"
-		meta l4proto tcp ct original proto-dst 8000-8010 ct state new add @conn_9_4 { ip saddr ct count over 50 } counter drop comment "limit:9"
-		meta l4proto tcp ct original proto-dst 8000-8010 ct state new add @conn_9_6 { ip6 saddr ct count over 50 } counter drop comment "limit:9"
-		meta l4proto tcp ct original proto-dst 8000-8010 ct state new update @lim_9_4 { ip saddr limit rate over 10/second burst 20 packets } counter drop comment "limit:9"
-		meta l4proto tcp ct original proto-dst 8000-8010 ct state new update @lim_9_6 { ip6 saddr limit rate over 10/second burst 20 packets } counter drop comment "limit:9"
-		meta l4proto tcp ct original proto-dst 53 ct state new limit rate over 100/second counter reject with tcp reset comment "limit:10"
-		meta l4proto udp ct original proto-dst 53 ct state new limit rate over 100/second counter reject comment "limit:10"
+		meta l4proto tcp ct original proto-dst 22 ct status dnat ct state new limit rate over 10/minute burst 5 packets counter reject with tcp reset comment "limit:8"
+		meta l4proto tcp ct original proto-dst 8000-8010 ct status dnat ct state new add @conn_9_4 { ip saddr ct count over 50 } counter drop comment "limit:9"
+		meta l4proto tcp ct original proto-dst 8000-8010 ct status dnat ct state new add @conn_9_6 { ip6 saddr ct count over 50 } counter drop comment "limit:9"
+		meta l4proto tcp ct original proto-dst 8000-8010 ct status dnat ct state new update @lim_9_4 { ip saddr limit rate over 10/second burst 20 packets } counter drop comment "limit:9"
+		meta l4proto tcp ct original proto-dst 8000-8010 ct status dnat ct state new update @lim_9_6 { ip6 saddr limit rate over 10/second burst 20 packets } counter drop comment "limit:9"
+		meta l4proto tcp ct original proto-dst 53 ct status dnat ct state new limit rate over 100/second counter reject with tcp reset comment "limit:10"
+		meta l4proto udp ct original proto-dst 53 ct status dnat ct state new limit rate over 100/second counter reject comment "limit:10"
 	}
 	chain nat_pre {
 		type nat hook prerouting priority dstnat - 10; policy accept;
-		iifname "eth0" ip saddr { 198.51.100.0/24, 203.0.113.7/32 } meta l4proto tcp th dport 8080 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip to 10.0.0.5:80 comment "forward:1"
-		meta l4proto tcp th dport 27015-27020 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip to 172.17.0.2 comment "forward:2"
-		meta l4proto udp th dport 27015-27020 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip to 172.17.0.2 comment "forward:2"
-		meta l4proto tcp th dport 443 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip6 to [2001:db8::5]:8443 comment "forward:3"
+		iifname "eth0" ip saddr { 198.51.100.0/24, 203.0.113.7/32 } fib daddr type local meta l4proto tcp th dport 8080 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip to 10.0.0.5:80 comment "forward:1"
+		fib daddr type local meta l4proto tcp th dport 27015-27020 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip to 172.17.0.2 comment "forward:2"
+		fib daddr type local meta l4proto udp th dport 27015-27020 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip to 172.17.0.2 comment "forward:2"
+		fib daddr type local meta l4proto tcp th dport 443 ct mark set ct mark and 0x00ffffff or 0x4a000000 counter dnat ip6 to [2001:db8::5]:8443 comment "forward:3"
 	}
 	chain nat_post {
 		type nat hook postrouting priority srcnat - 10; policy accept;

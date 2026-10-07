@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -163,7 +165,65 @@ func blocklistEntries(dir string, bl BlocklistSpec) []netip.Prefix {
 		}
 		return mergePrefixes(out)
 	}
-	return mergePrefixes(readBlocklist(dir, bl.ID))
+	return cachedBlocklist(dir, bl.ID)
+}
+
+// blocklistMemo keeps a fetched list's parsed, merged networks beside the file
+// they came from. A country or feed list is up to half a million lines, and
+// the Protection and Gateway pages are polled: reading and sorting a list
+// again for each poll to learn whether it holds the reader's address would
+// cost more than everything else those routes do. The key is the file's
+// modification time and size, so a refresh that rewrites it is seen at once.
+var blocklistMemo = struct {
+	sync.Mutex
+	byPath map[string]memoizedList
+}{byPath: map[string]memoizedList{}}
+
+type memoizedList struct {
+	mtime int64
+	size  int64
+	nets  []netip.Prefix
+}
+
+// blocklistParses counts the times a list file was actually read, for the
+// test that pins the memo.
+var blocklistParses atomic.Int64
+
+// cachedBlocklist returns a list's networks, merged. The slice is shared with
+// the memo and must not be changed.
+func cachedBlocklist(dir string, id int) []netip.Prefix {
+	if dir == "" {
+		return nil
+	}
+	path := blocklistFile(dir, id)
+	fi, err := os.Stat(path)
+	if err != nil {
+		forgetBlocklist(dir, id)
+		return nil
+	}
+	mtime, size := fi.ModTime().UnixNano(), fi.Size()
+	blocklistMemo.Lock()
+	if m, ok := blocklistMemo.byPath[path]; ok && m.mtime == mtime && m.size == size {
+		blocklistMemo.Unlock()
+		return m.nets
+	}
+	blocklistMemo.Unlock()
+	nets := mergePrefixes(readBlocklist(dir, id))
+	blocklistParses.Add(1)
+	blocklistMemo.Lock()
+	if len(blocklistMemo.byPath) > 64 {
+		clear(blocklistMemo.byPath) // far more lists than anyone keeps: start over rather than grow
+	}
+	blocklistMemo.byPath[path] = memoizedList{mtime: mtime, size: size, nets: nets}
+	blocklistMemo.Unlock()
+	return nets
+}
+
+// forgetBlocklist drops a list's memo, when the list or its file goes.
+func forgetBlocklist(dir string, id int) {
+	blocklistMemo.Lock()
+	delete(blocklistMemo.byPath, blocklistFile(dir, id))
+	blocklistMemo.Unlock()
 }
 
 // renderGateway renders the gateway table. Loading the file replaces the
@@ -210,7 +270,7 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 			fmt.Sprintf("ip6 saddr @bl_%d_6 counter drop comment \"blocklist:%d\"", bl.ID, bl.ID))
 	}
 
-	var guard []string
+	var guard, routed []string
 	for _, l := range limits {
 		if !l.Enabled {
 			continue
@@ -223,7 +283,8 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 			writeGatewayDynamicSet(&b, fmt.Sprintf("lim_%d_4", l.ID), "ipv4_addr", gatewayLimitTimeout(l.Per))
 			writeGatewayDynamicSet(&b, fmt.Sprintf("lim_%d_6", l.ID), "ipv6_addr", gatewayLimitTimeout(l.Per))
 		}
-		guard = append(guard, gatewayLimitRules(l)...)
+		guard = append(guard, gatewayLimitRules(l, false)...)
+		routed = append(routed, gatewayLimitRules(l, true)...)
 	}
 
 	// Marking a NAT entry's traffic happens in the forward hook, before the
@@ -243,17 +304,22 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 
 	returns := []string{"ct state established,related return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}
 	if len(pre) > 0 {
-		writeGatewayChain(&b, "pre", "type filter hook prerouting priority raw; policy accept;",
-			append([]string{"iif \"lo\" return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}, pre...))
+		// Mangle priority, after connection tracking (-200): at raw priority a
+		// drop has no connection state to consult, so a list taking an address
+		// would cut the sessions already open with it and drop the replies to
+		// this server's own outbound connections (DNS, ACME, updates). Only a
+		// new connection from a listed network is refused.
+		writeGatewayChain(&b, "pre", "type filter hook prerouting priority mangle; policy accept;",
+			append([]string{"ct state established,related return", "iif \"lo\" return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}, pre...))
 	}
 	if len(guard) > 0 {
 		writeGatewayChain(&b, "input", "type filter hook input priority filter - 10; policy accept;", append(append([]string{}, returns...), guard...))
 	}
 	var fwd []string
 	fwd = append(fwd, marks...)
-	if len(guard) > 0 {
+	if len(routed) > 0 {
 		fwd = append(fwd, returns...)
-		fwd = append(fwd, guard...)
+		fwd = append(fwd, routed...)
 	}
 	if len(fwd) > 0 {
 		writeGatewayChain(&b, "forward", "type filter hook forward priority filter - 10; policy accept;", fwd)
@@ -349,7 +415,14 @@ func gwSaddr(a netip.Addr) string {
 	return "ip6 saddr"
 }
 
-func gatewayLimitRules(l LimitSpec) []string {
+// gatewayLimitRules is a limit's rules for the input chain, or for the forward
+// chain when forward is set.
+//
+// In the forward chain a limit applies only to flows a destination translation
+// carried (ct status dnat): a published or forwarded port. Without that, a
+// limit on port 443 would throttle every container's and VPN client's
+// outbound connections to any remote host's 443.
+func gatewayLimitRules(l LimitSpec, forward bool) []string {
 	var out []string
 	for _, proto := range gwProtocols(l.Protocol) {
 		// ct original proto-dst, not dport: a connection the forwards below
@@ -357,6 +430,9 @@ func gatewayLimitRules(l LimitSpec) []string {
 		// with its destination port already rewritten, and the operator
 		// limits the port the visitor used.
 		match := fmt.Sprintf("meta l4proto %s ct original proto-dst %s ct state new", proto, l.Ports)
+		if forward {
+			match = fmt.Sprintf("meta l4proto %s ct original proto-dst %s ct status dnat ct state new", proto, l.Ports)
+		}
 		action := "drop"
 		if l.Action == "reject" {
 			action = "reject"
@@ -412,7 +488,11 @@ func gatewayForwardRules(f ForwardSpec) []string {
 		if len(f.Sources) > 0 {
 			m = append(m, fmt.Sprintf("%s %s", gwSaddr(target), gwBraces(f.Sources)))
 		}
-		m = append(m, fmt.Sprintf("meta l4proto %s th dport %s", proto, f.Ports), gatewayMarkConn, "counter")
+		// fib daddr type local: only traffic addressed to this host. Without
+		// it a forward of 5432 would also capture a container's or a VPN
+		// client's outbound connection to any remote host's 5432, which is
+		// merely passing through.
+		m = append(m, "fib daddr type local", fmt.Sprintf("meta l4proto %s th dport %s", proto, f.Ports), gatewayMarkConn, "counter")
 		out = append(out, fmt.Sprintf("%s %s comment \"forward:%d\"", strings.Join(m, " "), gatewayDNATTo(target, f.TargetPort), f.ID))
 	}
 	return out
