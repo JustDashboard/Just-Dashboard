@@ -1,0 +1,82 @@
+[
+ {
+  "type": "unicast",
+  "dst": "default",
+  "gateway": "203.0.113.1",
+  "dev": "eth0",
+  "protocol": "dhcp",
+  "metric": 100,
+  "flags": []
+ },
+ {
+  "type": "unicast",
+  "dst": "203.0.113.0/24",
+  "dev": "eth0",
+  "protocol": "kernel",
+  "scope": "link",
+  "prefsrc": "203.0.113.20",
+  "flags": []
+ },
+ {
+  "type": "unicast",
+  "dst": "172.17.0.0/16",
+  "dev": "docker0",
+  "protocol": "kernel",
+  "scope": "link",
+  "prefsrc": "172.17.0.1",
+  "flags": []
+ },
+ {
+  "type": "unicast",
+  "dst": "10.9.0.0/24",
+  "dev": "br-0123456789ab",
+  "protocol": "kernel",
+  "scope": "link",
+  "prefsrc": "10.9.0.1",
+  "flags": []
+ },
+ {
+  "type": "unicast",
+  "dst": "10.8.0.0/24",
+  "gateway": "172.17.0.9",
+  "dev": "docker0",
+  "protocol": "static",
+  "flags": []
+ },
+ {
+  "type": "unicast",
+  "dst": "10.10.0.0/16",
+  "gateway": "203.0.113.77",
+  "dev": "eth0",
+  "protocol": "static",
+  "flags": []
+ },
+ {
+  "type": "unicast",
+  "dst": "100.64.0.0/10",
+  "dev": "tailscale0",
+  "table": "52",
+  "protocol": "static",
+  "flags": []
+ },
+ {
+  "type": "local",
+  "dst": "203.0.113.20",
+  "dev": "eth0",
+  "table": "local",
+  "protocol": "kernel",
+  "scope": "host",
+  "prefsrc": "203.0.113.20",
+  "flags": []
+ },
+ {
+  "type": "broadcast",
+  "dst": "203.0.113.255",
+  "dev": "eth0",
+  "table": "local",
+  "protocol": "kernel",
+  "scope": "link",
+  "prefsrc": "203.0.113.20",
+  "flags": []
+ }
+]

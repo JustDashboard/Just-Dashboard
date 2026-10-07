@@ -1,0 +1,28 @@
+{
+ "ControlURL": "https://controlplane.tailscale.com",
+ "RouteAll": true,
+ "ExitNodeID": "",
+ "ExitNodeIP": "",
+ "InternalExitNodePrior": "",
+ "ExitNodeAllowLANAccess": false,
+ "CorpDNS": true,
+ "RunSSH": false,
+ "WantRunning": true,
+ "LoggedOut": false,
+ "ShieldsUp": false,
+ "AdvertiseTags": null,
+ "Hostname": "",
+ "NoSNAT": false,
+ "NetfilterMode": 2,
+ "Config": {
+  "PrivateNodeKey": "privkey:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "OldPrivateNodeKey": "privkey:0000000000000000000000000000000000000000000000000000000000000000",
+  "NetworkLockKey": "nlpriv:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "NodeID": "nSELF1CNTRL"
+ },
+ "AdvertiseRoutes": [
+  "192.0.2.0/24",
+  "0.0.0.0/0",
+  "::/0"
+ ]
+}
