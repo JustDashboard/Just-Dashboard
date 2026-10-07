@@ -36,10 +36,6 @@ func (s *Server) mountNetworkRoutingRoutes(r chi.Router) {
 // forwardingNeeds is what depends on this host forwarding traffic, besides
 // what the network module's own spec holds: Docker's bridge networks, and
 // what Tailscale advertises.
-//
-// TODO(vpn slice): Tailscale's exit node and subnet routes are read by the VPN
-// slice's reader; until it exists they are not known here, so turning
-// forwarding off is not refused on their account.
 func (s *Server) forwardingNeeds(ctx context.Context) netx.ForwardingNeeds {
 	var needs netx.ForwardingNeeds
 	for _, n := range s.networkInventory(ctx).Networks {
@@ -47,6 +43,9 @@ func (s *Server) forwardingNeeds(ctx context.Context) netx.ForwardingNeeds {
 			needs.DockerNetworks++
 		}
 	}
+	// What this server offers its tailnet routes other machines' traffic
+	// through it, so it needs forwarding exactly as a NAT entry does.
+	needs.TailscaleExitNode, needs.TailscaleSubnetRoutes = s.modules.network.TailscaleNeedsForwarding(ctx)
 	return needs
 }
 
