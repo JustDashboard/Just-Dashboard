@@ -131,7 +131,8 @@ func wgInstallConf(t *testing.T, s *Service, name, fixtureName string) string {
 // Tailscale's range in its own table.
 func wgHostReplies(t *testing.T, rec *recorder) {
 	t.Helper()
-	rec.on("ip -j addr", fixture(t, "wg-ip-addr.json")).
+	rec.on("ip -j link show", fixture(t, "wg-ip-link.json")).
+		on("ip -j addr", fixture(t, "wg-ip-addr.json")).
 		on("ip -j route show table all", fixture(t, "wg-ip-route-all.json")).
 		on("ip -j -6 route show table all", fixture(t, "wg-ip-route6-all.json")).
 		on("ip -j route show default", fixture(t, "wg-ip-route-default.json")).
@@ -450,12 +451,17 @@ func TestHostAllocation(t *testing.T) {
 	})
 	t.Run("name is the first free of wg0 to wg9", func(t *testing.T) {
 		confs := map[string]*wgConf{"wg0": {}, "wg1": {}}
-		if got, _ := pickWGName(confs, host); got != "wg2" {
-			t.Fatalf("name = %s", got)
+		// wg2 is a device with no address (the fixture's `ip link` lists it, `ip
+		// addr` does not), and it still counts.
+		if _, hasAddr := host.addrs["wg2"]; hasAddr || !host.links["wg2"] {
+			t.Fatalf("the fixture should have wg2 as a link with no address")
 		}
-		host.addrs["wg2"] = nil
 		if got, _ := pickWGName(confs, host); got != "wg3" {
-			t.Fatalf("name = %s, want a live device to count", got)
+			t.Fatalf("name = %s, want wg3: an unaddressed device is still taken", got)
+		}
+		host.links["wg3"] = true
+		if got, _ := pickWGName(confs, host); got != "wg4" {
+			t.Fatalf("name = %s, want wg4", got)
 		}
 		all := map[string]*wgConf{}
 		for _, n := range []string{"wg0", "wg1", "wg2", "wg3", "wg4", "wg5", "wg6", "wg7", "wg8", "wg9"} {
@@ -672,6 +678,8 @@ func TestCreateWireGuardRefusals(t *testing.T) {
 			wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
 		}, "already exists"},
 		{"name taken by a device", WGServerRequest{Name: "docker0", Endpoint: "vpn.example.com"}, nil, "already exists"},
+		{"name taken by a device with no address", WGServerRequest{Name: "dummy7", Endpoint: "vpn.example.com"}, nil, "already exists"},
+		{"name wg2 taken by a device with no address", WGServerRequest{Name: "wg2", Endpoint: "vpn.example.com"}, nil, "already exists"},
 		{"bad name", WGServerRequest{Name: "wg0;reboot", Endpoint: "vpn.example.com"}, nil, "interface name"},
 		{"bad endpoint", WGServerRequest{Endpoint: "bad host"}, nil, "not a host name"},
 		{"bad dns", WGServerRequest{Endpoint: "vpn.example.com", DNS: []string{"resolver.example"}}, nil, "DNS"},

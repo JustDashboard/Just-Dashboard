@@ -3,6 +3,8 @@ package netx
 import (
 	"context"
 	"errors"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -339,5 +341,145 @@ func TestSetTailscaleNotInstalled(t *testing.T) {
 	_, err := s.SetTailscale(context.Background(), TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, "")
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// While the daemon is up and its preferences cannot be read, what this server
+// offers is unknown, and forwarding must not be allowed off on a guess.
+func TestTailscaleNeedsForwardingFailsClosedWhenPrefsAreUnreadable(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     func(*recorder)
+		wantExit   bool
+		wantSubnet bool
+	}{
+		{"running", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"Running"}`) }, true, true},
+		{"starting", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"Starting"}`) }, true, true},
+		{"status unreadable", func(r *recorder) { r.on("tailscale status --json", "garbled") }, true, true},
+		{"stopped", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"Stopped"}`) }, false, false},
+		{"needs login", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"NeedsLogin"}`) }, false, false},
+		{"daemon not running", func(r *recorder) { r.fail("tailscale status --json", "failed to connect to local tailscaled") }, false, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := vpnService(t)
+			rec := record(t)
+			rec.fail("tailscale debug prefs", "permission denied")
+			tc.status(rec)
+			exit, routes := s.TailscaleNeedsForwarding(context.Background())
+			if exit != tc.wantExit || routes != tc.wantSubnet {
+				t.Errorf("exit=%v routes=%v, want %v %v", exit, routes, tc.wantExit, tc.wantSubnet)
+			}
+		})
+	}
+}
+
+func TestTailscaleWithdraws(t *testing.T) {
+	tests := []struct {
+		name  string
+		prefs string
+		req   TailscaleSetRequest
+		want  bool
+	}{
+		{"turn the exit node off", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(false)}, true},
+		{"keep the exit node on", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, false},
+		{"turn off what was never on", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(false)}, false},
+		{"turn the exit node on", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, false},
+		{"withdraw every route", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr()}, true},
+		{"withdraw the only route by naming another", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("198.51.100.0/24")}, true},
+		{"add a route and keep the one there", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("198.51.100.0/24", "192.0.2.9/24")}, false},
+		{"the same routes again", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24")}, false},
+		{"empty list when there are none", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr()}, false},
+		{"routes added to none", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24")}, false},
+		{"nothing asked", "tailscale-prefs-exit.json", TailscaleSetRequest{}, false},
+		{"a malformed list changes nothing, so it withdraws nothing", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("lan")}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := tsHost(t, "tailscale-status.json", tc.prefs)
+			if got := s.TailscaleWithdraws(context.Background(), tc.req); got != tc.want {
+				t.Errorf("withdraws = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	t.Run("preferences that cannot be read count as withdrawing", func(t *testing.T) {
+		s := vpnService(t)
+		rec := record(t)
+		rec.fail("tailscale debug prefs", "denied")
+		if !s.TailscaleWithdraws(context.Background(), TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24")}) {
+			t.Error("an unknown current state must fail closed")
+		}
+	})
+}
+
+// The page is written from these keys; a rename pass once turned
+// "clientOnTailnet" into "tsClientOnTailnet" inside a tag. Every tag of every
+// view is lower camel case and none starts with one of this package's own
+// identifier prefixes.
+func TestVPNJSONKeysAreTheContract(t *testing.T) {
+	t.Parallel()
+	keys := func(v any) []string {
+		var out []string
+		var walk func(rt reflect.Type)
+		walk = func(rt reflect.Type) {
+			for rt.Kind() == reflect.Pointer || rt.Kind() == reflect.Slice || rt.Kind() == reflect.Map {
+				rt = rt.Elem()
+			}
+			if rt.Kind() != reflect.Struct {
+				return
+			}
+			for i := 0; i < rt.NumField(); i++ {
+				f := rt.Field(i)
+				tag, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+				if tag == "" || tag == "-" {
+					t.Errorf("%s.%s has no json tag", rt.Name(), f.Name)
+					continue
+				}
+				out = append(out, tag)
+				walk(f.Type)
+			}
+		}
+		walk(reflect.TypeOf(v))
+		return out
+	}
+	camel := regexp.MustCompile(`^[a-z][a-zA-Z0-9]*$`)
+	prefixed := regexp.MustCompile(`^(wg|ts|vpn|headscale)[A-Z]`)
+	for _, v := range []any{
+		WireGuardView{}, TailscaleView{}, HeadscaleView{}, VPNSummary{},
+		WGServerRequest{}, WGServerResult{}, WGPeerRequest{}, WGPeerResult{}, WGPeerConfig{}, TailscaleSetRequest{}, TailscaleSetResult{},
+	} {
+		for _, k := range keys(v) {
+			if !camel.MatchString(k) {
+				t.Errorf("%T: %q is not lower camel case", v, k)
+			}
+			if prefixed.MatchString(k) && k != "wgQuick" {
+				t.Errorf("%T: %q looks like an identifier the rename pass reached", v, k)
+			}
+		}
+	}
+	want := map[string][]string{
+		"TailscaleView": {"clientOnTailnet", "magicDnsSuffix", "controlServer", "controlUrl", "backendState", "authUrl", "forwarding", "advertisingExitNode", "usingExitNode", "routeAll", "corpDns", "shieldsUp", "tailscaleIps", "exitNodeOption", "primaryRoutes", "userLoginName", "lastHandshake"},
+		"VPNSummary":    {"selfIps", "subnetRoutes", "exitNode", "wireguard", "tailscale"},
+		"WireGuardView": {"wgQuick", "latestHandshake", "allowedIps", "publicKey", "listenPort", "hasConfig", "exitNode", "configured"},
+	}
+	for name, list := range want {
+		var v any
+		switch name {
+		case "TailscaleView":
+			v = TailscaleView{}
+		case "VPNSummary":
+			v = VPNSummary{}
+		default:
+			v = WireGuardView{}
+		}
+		have := map[string]bool{}
+		for _, k := range keys(v) {
+			have[k] = true
+		}
+		for _, k := range list {
+			if !have[k] {
+				t.Errorf("%s lost the key %q", name, k)
+			}
+		}
 	}
 }

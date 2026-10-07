@@ -63,6 +63,10 @@ type wgHostState struct {
 	prefixes []wgHostPrefix
 	// addrs are the addresses by device, host bits kept.
 	addrs map[string][]netip.Prefix
+	// links is every device by name, addresses or not. A device with none (a
+	// bridge port, a tunnel that is down, a veth) is invisible in addrs, and a
+	// name picked from addrs alone would collide with it.
+	links map[string]bool
 	// uplink is the device the default route leaves through.
 	uplink string
 }
@@ -87,7 +91,20 @@ type wgIPRouteJSON struct {
 // routes are in table 52 and a policy rule's in whatever it names, neither
 // of which `ip route` alone prints.
 func wgReadHostState(ctx context.Context) (wgHostState, error) {
-	st := wgHostState{addrs: map[string][]netip.Prefix{}}
+	st := wgHostState{addrs: map[string][]netip.Prefix{}, links: map[string]bool{}}
+	linkOut, err := run(ctx, "ip", "-j", "link", "show")
+	if err != nil {
+		return st, fmt.Errorf("reading the host's devices: %w", err)
+	}
+	var links []struct {
+		Ifname string `json:"ifname"`
+	}
+	if err := json.Unmarshal([]byte(linkOut), &links); err != nil {
+		return st, fmt.Errorf("ip link printed something unreadable")
+	}
+	for _, l := range links {
+		st.links[l.Ifname] = true
+	}
 	out, err := run(ctx, "ip", "-j", "addr")
 	if err != nil {
 		return st, fmt.Errorf("reading the host's addresses: %w", err)
@@ -103,6 +120,7 @@ func wgReadHostState(ctx context.Context) (wgHostState, error) {
 				continue
 			}
 			p := netip.PrefixFrom(addr, a.Prefixlen)
+			st.links[l.Ifname] = true
 			st.addrs[l.Ifname] = append(st.addrs[l.Ifname], p)
 			st.prefixes = append(st.prefixes, wgHostPrefix{prefix: p.Masked(), dev: l.Ifname, what: "an address on " + l.Ifname})
 		}
@@ -238,6 +256,16 @@ func wgSubnetsInConfs(confs map[string]*wgConf) []wgHostPrefix {
 	return out
 }
 
+// hasDevice reports whether a network device of that name exists, with or
+// without addresses.
+func (h wgHostState) hasDevice(name string) bool {
+	if h.links[name] {
+		return true
+	}
+	_, ok := h.addrs[name]
+	return ok
+}
+
 // pickWGName is the first of wg0..wg9 that is neither a file nor a device.
 func pickWGName(confs map[string]*wgConf, host wgHostState) (string, error) {
 	for i := 0; i < 10; i++ {
@@ -245,7 +273,7 @@ func pickWGName(confs map[string]*wgConf, host wgHostState) (string, error) {
 		if _, ok := confs[name]; ok {
 			continue
 		}
-		if _, ok := host.addrs[name]; ok {
+		if host.hasDevice(name) {
 			continue
 		}
 		return name, nil
@@ -413,7 +441,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 		if _, ok := confs[name]; ok {
 			return nil, fmt.Errorf("%s: %w", name, ErrExists)
 		}
-		if _, ok := host.addrs[name]; ok {
+		if host.hasDevice(name) {
 			return nil, fmt.Errorf("a network device called %s already exists: %w", name, ErrExists)
 		}
 	}

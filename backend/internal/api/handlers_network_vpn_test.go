@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
 // vpnRoutes is the VPN surface and the gate in front of each route. Every
@@ -278,5 +279,105 @@ func TestWireGuardPeerConfigRoute(t *testing.T) {
 	w = c.do(http.MethodGet, path(kept, "/config"), "", nil)
 	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), `"forgotten"`) {
 		t.Errorf("after forgetting: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// postUntilLimited posts the same body until the destructive budget refuses,
+// and says how many calls it took (0 when it never did within max).
+func postUntilLimited(c *client, path, body string, max int) int {
+	for i := 1; i <= max; i++ {
+		if w := c.do(http.MethodPost, path, body, nil); w.Code == http.StatusTooManyRequests {
+			return i
+		}
+	}
+	return 0
+}
+
+// A request that only adds an offer is routine, and the same route taking one
+// away spends the destructive budget: the body decides, not the path.
+func TestExitNodeOffAndTailscaleWithdrawalSpendTheDestructiveBudget(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"tailscale-status.json", "tailscale-prefs-exit.json"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(vpnNetxFixture(t, f)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vpnFakeBin(t, map[string]string{
+		"tailscale": `case "$1 $2" in "status --json") cat ` + dir + `/tailscale-status.json;; "debug prefs") cat ` + dir + `/tailscale-prefs-exit.json;; *) exit 9;; esac`,
+	})
+	c, _ := newClient(t)
+	const exit = "/api/v1/network/vpn/wireguard/wgnone/exit"
+	const ts = "/api/v1/network/vpn/tailscale"
+
+	if n := postUntilLimited(c, exit, `{"on":true}`, 40); n != 0 {
+		t.Errorf("turning an exit node on was limited after %d calls", n)
+	}
+	if n := postUntilLimited(c, exit, `{"on":false}`, 40); n == 0 || n > 15 {
+		t.Errorf("turning an exit node off was limited after %d calls, want it to spend the destructive budget", n)
+	}
+
+	// The prefs say the exit node and 192.0.2.0/24 are offered now.
+	for name, body := range map[string]string{
+		"keeping the routes":    `{"advertiseRoutes":["192.0.2.0/24","198.51.100.0/24"]}`,
+		"keeping the exit node": `{"advertiseExitNode":true}`,
+	} {
+		if n := postUntilLimited(c, ts, body, 40); n != 0 {
+			t.Errorf("%s was limited after %d calls", name, n)
+		}
+	}
+	for name, body := range map[string]string{
+		"withdrawing every route": `{"advertiseRoutes":[]}`,
+		"withdrawing the exit":    `{"advertiseExitNode":false}`,
+	} {
+		if n := postUntilLimited(c, ts, body, 40); n == 0 || n > 15 {
+			t.Errorf("%s was limited after %d calls, want it to spend the destructive budget", name, n)
+		}
+	}
+}
+
+func TestWireGuardRuleNumberFindsOnlyTheRuleTheDashboardWrote(t *testing.T) {
+	t.Parallel()
+	rule := func(n int, comment, action, port, proto string, v6 bool) netsec.Rule {
+		return netsec.Rule{Number: n, Comment: comment, Action: action, Port: port, Protocol: proto, IPv6: v6}
+	}
+	tests := []struct {
+		name   string
+		rules  []netsec.Rule
+		want   int
+		wantOK bool
+	}{
+		{"the v4 row, whose delete takes its twin", []netsec.Rule{
+			rule(1, "ssh", "ALLOW", "22", "tcp", false),
+			rule(2, "WireGuard wg0", "ALLOW", "51821", "udp", false),
+			rule(5, "WireGuard wg0", "ALLOW", "51821", "udp", true),
+		}, 2, true},
+		{"the v6 row when it is alone", []netsec.Rule{rule(4, "WireGuard wg0", "ALLOW", "51821", "udp", true)}, 4, true},
+		{"the v4 row even when the v6 row is listed first", []netsec.Rule{
+			rule(3, "WireGuard wg0", "ALLOW", "51821", "udp", true),
+			rule(7, "WireGuard wg0", "ALLOW", "51821", "udp", false),
+		}, 7, true},
+		{"another tunnel's rule", []netsec.Rule{rule(2, "WireGuard wg1", "ALLOW", "51821", "udp", false)}, 0, false},
+		{"a comment that only starts the same", []netsec.Rule{rule(2, "WireGuard wg0 backup", "ALLOW", "51821", "udp", false)}, 0, false},
+		{"a hand-written rule for the port", []netsec.Rule{rule(2, "", "ALLOW", "51821", "udp", false)}, 0, false},
+		{"the same comment on another port", []netsec.Rule{rule(2, "WireGuard wg0", "ALLOW", "51999", "udp", false)}, 0, false},
+		{"the same comment on tcp", []netsec.Rule{rule(2, "WireGuard wg0", "ALLOW", "51821", "tcp", false)}, 0, false},
+		{"a deny with the comment", []netsec.Rule{rule(2, "WireGuard wg0", "DENY", "51821", "udp", false)}, 0, false},
+		{"nothing", nil, 0, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := wgRuleNumber(tc.rules, "wg0", 51821)
+			if got != tc.want || ok != tc.wantOK {
+				t.Errorf("= %d, %v; want %d, %v", got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestWireGuardRuleCommentIsWhatOpeningWrites(t *testing.T) {
+	t.Parallel()
+	if got := wgRuleComment("wg0"); got != "WireGuard wg0" {
+		t.Fatalf("comment = %q", got)
 	}
 }

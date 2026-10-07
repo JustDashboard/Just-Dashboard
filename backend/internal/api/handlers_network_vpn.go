@@ -167,7 +167,7 @@ func (s *Server) openWireGuardPort(ctx context.Context, ifc netx.WGInterface, cl
 	}
 	_, err = s.modules.netsec.AddRule(ctx, netsec.RuleRequest{
 		Action: "allow", Direction: "in", Port: strconv.Itoa(ifc.ListenPort), Protocol: "udp",
-		Comment: "WireGuard " + ifc.Name,
+		Comment: wgRuleComment(ifc.Name),
 	}, client)
 	if err != nil {
 		return wgFirewall{Reason: err.Error()}
@@ -231,6 +231,14 @@ func (s *Server) handleWireGuardExit(w http.ResponseWriter, r *http.Request) err
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	// Turning an exit node on is routine; turning it off cuts every client that
+	// sends its traffic through this server, so that body asks for the
+	// destructive capability and its budget.
+	if !req.On {
+		if err := s.requireDestructive(r, "wgexit", "turning an exit node off"); err != nil {
+			return err
+		}
+	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.exit", iface, map[string]any{"on": req.On})
@@ -247,11 +255,88 @@ func (s *Server) handleWireGuardRemove(w http.ResponseWriter, r *http.Request) e
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.remove", iface, nil)
+	// The port is read before the file is moved aside, to find the rule that
+	// opened it.
+	port := 0
+	if v, err := s.modules.network.WireGuard(ctx); err == nil {
+		for _, ifc := range v.Interfaces {
+			if ifc.Name == iface {
+				port = ifc.ListenPort
+			}
+		}
+	}
 	if err := s.modules.network.RemoveWireGuard(ctx, iface, s.networkClient(r)); err != nil {
 		return mapNetworkError(err)
 	}
-	httpx.NoContent(w)
+	httpx.JSON(w, http.StatusOK, wgRemoveResponse{Firewall: s.closeWireGuardPort(ctx, iface, port)})
 	return nil
+}
+
+// wgFirewallRemoval is what became of the firewall rule that opened a removed
+// tunnel's port.
+type wgFirewallRemoval struct {
+	Removed bool   `json:"removed"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+type wgRemoveResponse struct {
+	Firewall wgFirewallRemoval `json:"firewall"`
+}
+
+// wgRuleComment is the comment openWireGuardPort writes, and so the only thing
+// a rule is recognised by when it is taken away again.
+func wgRuleComment(iface string) string { return "WireGuard " + iface }
+
+// wgRuleNumber finds the rule openWireGuardPort wrote for a tunnel: an allow
+// for its UDP port carrying exactly its comment. A rule somebody else made for
+// the same port, or with a different comment, is not this one. The IPv4 row is
+// preferred because deleting it takes its IPv6 twin along; a row of only the
+// other family is found when that is all there is.
+func wgRuleNumber(rules []netsec.Rule, iface string, port int) (int, bool) {
+	found, foundV6 := 0, 0
+	for _, r := range rules {
+		if r.Comment != wgRuleComment(iface) || !strings.EqualFold(r.Action, "allow") ||
+			r.Port != strconv.Itoa(port) || (r.Protocol != "" && !strings.EqualFold(r.Protocol, "udp")) {
+			continue
+		}
+		if r.IPv6 {
+			if foundV6 == 0 {
+				foundV6 = r.Number
+			}
+		} else if found == 0 {
+			found = r.Number
+		}
+	}
+	if found != 0 {
+		return found, true
+	}
+	return foundV6, foundV6 != 0
+}
+
+// closeWireGuardPort removes the firewall rule a removed tunnel had opened. A
+// failure is reported, not returned: the tunnel is gone either way, and a rule
+// left open is for the operator to see and delete.
+func (s *Server) closeWireGuardPort(ctx context.Context, iface string, port int) wgFirewallRemoval {
+	if port == 0 {
+		return wgFirewallRemoval{Reason: "the tunnel's port was not known, so no firewall rule was looked for"}
+	}
+	st, err := s.modules.netsec.Status(ctx)
+	switch {
+	case err != nil || st.Error != "":
+		return wgFirewallRemoval{Reason: "the firewall could not be read"}
+	case !st.Available:
+		return wgFirewallRemoval{Reason: "no firewall was found on this host"}
+	case !st.Capabilities.Editable:
+		return wgFirewallRemoval{Reason: firstNonEmptyString(st.Capabilities.ReadOnlyReason, "this firewall cannot be edited from the dashboard")}
+	}
+	number, ok := wgRuleNumber(st.Rules, iface, port)
+	if !ok {
+		return wgFirewallRemoval{Reason: "no rule opened by the dashboard for this tunnel was found"}
+	}
+	if _, err := s.modules.netsec.DeleteRule(ctx, number); err != nil {
+		return wgFirewallRemoval{Reason: err.Error()}
+	}
+	return wgFirewallRemoval{Removed: true}
 }
 
 func (s *Server) handleWireGuardPeerAdd(w http.ResponseWriter, r *http.Request) error {
@@ -346,6 +431,13 @@ func (s *Server) handleTailscaleSet(w http.ResponseWriter, r *http.Request) erro
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
+	// Adding an offer is routine; taking the exit node or a subnet route away
+	// strands the devices using it, so the body decides which this is.
+	if s.modules.network.TailscaleWithdraws(ctx, req) {
+		if err := s.requireDestructive(r, "tsoffer", "withdrawing an exit node or subnet route"); err != nil {
+			return err
+		}
+	}
 	detail := map[string]any{}
 	if req.AdvertiseExitNode != nil {
 		detail["advertiseExitNode"] = *req.AdvertiseExitNode
