@@ -90,14 +90,18 @@ export function BGPBlock({ bgp }: { bgp: BGPView | undefined }) {
             </TableCell>
             <TableCell>
               <Status
-                tone={p.state === "Established" ? "running" : p.state === "Idle" ? "danger" : "warning"}
+                tone={
+                  p.state === "Established" ? "running" : p.state === "Idle" ? "danger" : "warning"
+                }
                 label={p.state}
               />
             </TableCell>
             <TableCell className="numeric text-right text-xs">
               {p.uptimeSeconds ? duration(p.uptimeSeconds) : "—"}
             </TableCell>
-            <TableCell className="numeric text-right font-mono text-xs">{p.prefixesReceived}</TableCell>
+            <TableCell className="numeric text-right font-mono text-xs">
+              {p.prefixesReceived}
+            </TableCell>
             <TableCell className="numeric text-right font-mono text-xs">{p.prefixesSent}</TableCell>
           </TableRow>
         ))}

@@ -52,9 +52,8 @@ function Family({
         confirmLabel: "Turn off",
         description: (
           <p>
-            This server stops passing {name} traffic between its networks: every tunnel, NAT
-            entry and container network that relies on it stops reaching anything beyond this
-            machine.
+            This server stops passing {name} traffic between its networks: every tunnel, NAT entry
+            and container network that relies on it stops reaching anything beyond this machine.
           </p>
         ),
         action: async () => {
@@ -102,12 +101,19 @@ function Family({
           aria-label={`${name} forwarding`}
         />
       </div>
-      <p className={cn("text-hint", state.neededBy.length ? "text-foreground/80" : "text-muted-foreground")}>
+      <p
+        className={cn(
+          "text-hint",
+          state.neededBy.length ? "text-foreground/80" : "text-muted-foreground",
+        )}
+      >
         {state.neededBy.length > 0
           ? `Needed by ${state.neededBy.join(", ")}.`
           : "Nothing here needs it."}
       </p>
-      {locked && <p className="text-hint text-muted-foreground">{state.guard}</p>}
+      {locked && state.neededBy.length === 0 && (
+        <p className="text-hint text-muted-foreground">{state.guard}</p>
+      )}
       {dialog}
     </div>
   )

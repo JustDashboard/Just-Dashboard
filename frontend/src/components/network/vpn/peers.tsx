@@ -97,8 +97,18 @@ export function AddPeer({
         if (!next) reset()
       }}
       size="lg"
-      title={made ? `${made.peer.name} is on ${tunnel.name}` : kind === "device" ? "Add a device" : "Join a site"}
-      description={kind === "device" ? "A phone or laptop that dials into this tunnel" : "Another network joined through this tunnel"}
+      title={
+        made
+          ? `${made.peer.name} is on ${tunnel.name}`
+          : kind === "device"
+            ? "Add a device"
+            : "Join a site"
+      }
+      description={
+        kind === "device"
+          ? "A phone or laptop that dials into this tunnel"
+          : "Another network joined through this tunnel"
+      }
       footer={
         made ? (
           <Button onClick={() => onOpenChange(false)}>Done</Button>
@@ -123,8 +133,8 @@ export function AddPeer({
             </Notice>
           )}
           <p className="text-hint text-muted-foreground">
-            The configuration is kept sealed; open the peer again to show this code, or forget
-            it once the device has it.
+            The configuration is kept sealed; open the peer again to show this code, or forget it
+            once the device has it.
           </p>
         </div>
       ) : (
@@ -132,7 +142,11 @@ export function AddPeer({
           <Field
             label="Name"
             htmlFor="peer-name"
-            hint={kind === "device" ? "Whose it is: Ana's phone, the office laptop" : "The site: Office, Backup server"}
+            hint={
+              kind === "device"
+                ? "Whose it is: Ana's phone, the office laptop"
+                : "The site: Office, Backup server"
+            }
           >
             <Input
               id="peer-name"
@@ -151,7 +165,11 @@ export function AddPeer({
               }
             >
               <label className="flex h-9 items-center gap-2 text-body">
-                <Switch checked={fullTunnel} onCheckedChange={setFullTunnel} aria-label="Full tunnel" />
+                <Switch
+                  checked={fullTunnel}
+                  onCheckedChange={setFullTunnel}
+                  aria-label="Full tunnel"
+                />
                 {fullTunnel ? "Everything" : "Only this server's networks"}
               </label>
             </Field>
@@ -267,8 +285,8 @@ export function PeerSheet({
       confirmLabel: "Remove",
       description: (
         <p>
-          Its key stops working now: the device or site is cut off from {tunnel.name} until it
-          is added again with a new one.
+          Its key stops working now: the device or site is cut off from {tunnel.name} until it is
+          added again with a new one.
         </p>
       ),
       action: async () => {

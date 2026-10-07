@@ -77,7 +77,9 @@ export function RouteTable({
           <span className="inline-flex items-center gap-2">
             {table.id === 52 && <ProductGlyph id="tailscale" />}
             {table.name}
-            <span className="numeric text-hint font-normal text-muted-foreground">table {table.id}</span>
+            <span className="numeric text-hint font-normal text-muted-foreground">
+              table {table.id}
+            </span>
           </span>
         }
         actions={
@@ -119,14 +121,18 @@ export function RouteTable({
                 </TableCell>
                 <TableCell className="font-mono text-xs">
                   {route.gateway ??
-                    (route.nexthops.length > 0
-                      ? route.nexthops.map((n) => n.gateway ?? n.device).join(", ")
-                      : <span className="text-muted-foreground">on-link</span>)}
+                    (route.nexthops.length > 0 ? (
+                      route.nexthops.map((n) => n.gateway ?? n.device).join(", ")
+                    ) : (
+                      <span className="text-muted-foreground">on-link</span>
+                    ))}
                 </TableCell>
                 <TableCell className="font-mono text-xs">{route.device ?? "—"}</TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5 text-xs">
-                    {OWNER_PRODUCT[route.owner] && <ProductGlyph id={OWNER_PRODUCT[route.owner]!} />}
+                    {OWNER_PRODUCT[route.owner] && (
+                      <ProductGlyph id={OWNER_PRODUCT[route.owner]!} />
+                    )}
                     <span className={cn(route.managed ? "text-brand" : "text-muted-foreground")}>
                       {OWNER_WORD[route.owner]}
                     </span>
@@ -216,8 +222,12 @@ export function RuleTable({
           </TableHeader>
           <TableBody>
             {rules.map((rule) => (
-              <TableRow key={`${rule.family}:${rule.priority}:${rule.id}:${rule.from}:${rule.fwmark}`}>
-                <TableCell className="numeric text-right font-mono text-xs">{rule.priority}</TableCell>
+              <TableRow
+                key={`${rule.family}:${rule.priority}:${rule.id}:${rule.from}:${rule.fwmark}`}
+              >
+                <TableCell className="numeric text-right font-mono text-xs">
+                  {rule.priority}
+                </TableCell>
                 <TableCell className="font-mono text-xs" title={rule.guard}>
                   {[
                     rule.from && `from ${rule.from}`,

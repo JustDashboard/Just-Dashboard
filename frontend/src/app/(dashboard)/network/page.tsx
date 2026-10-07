@@ -2,7 +2,7 @@
 
 import { useMemo } from "react"
 import { useRouter } from "next/navigation"
-import { Connection, LockClosed, Topology } from "@/components/icons"
+import { Connection, LockClosed, ShieldCheck, Topology } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
@@ -176,10 +176,9 @@ function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links
           {primary ? (
             <HostFact>
               <span className="font-mono">{primary.device}</span>
-              {uplink?.speedMbps ? <span> · {speed(uplink.speedMbps)}</span> : null}
+              {uplink?.speedMbps ? <span className="ml-1.5">· {speed(uplink.speedMbps)}</span> : null}
               {primary.gateway && (
-                <span>
-                  {" "}
+                <span className="ml-1.5">
                   via <span className="font-mono">{primary.gateway}</span>
                 </span>
               )}
@@ -197,6 +196,21 @@ function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links
           )}
           <FactDot />
           <HostFact>{overview.forwarding.ipv4 ? "routing" : "not routing"}</HostFact>
+          {overview.persistence.made > 0 && (
+            <>
+              <FactDot />
+              <HostFact>
+                <span
+                  className={overview.persistence.unit === "enabled" ? undefined : "text-warning"}
+                >
+                  {plural(overview.persistence.made, "change")}{" "}
+                  {overview.persistence.unit === "enabled"
+                    ? "kept for boot"
+                    : "not restored at boot"}
+                </span>
+              </HostFact>
+            </>
+          )}
           {overview.client.address && (
             <>
               <FactDot />
@@ -234,8 +248,10 @@ function speed(mbps: number) {
 
 /**
  * The five readings that move: in and out through the uplink, each live and
- * with its last fifteen minutes as its trend; the connections, the tunnels
- * that are up and what the dashboard has made here.
+ * with its last fifteen minutes as its trend; the connections, the VPN peers
+ * online across WireGuard and the tailnet, and what the gateway's blocklists
+ * and limits have refused since the table was loaded. What the dashboard has
+ * made and whether it comes back at boot is a fact in the identity line.
  */
 function Readings({
   overview,
@@ -252,7 +268,8 @@ function Readings({
   const tx = uplinks.reduce((n, l) => n + l.txRate, 0)
   const tunnels = links.filter((l) => l.role === "tunnel" && l.owner !== "kernel")
   const tunnelsUp = tunnels.filter((l) => l.adminUp)
-  const persistence = overview.persistence
+  const vpnPeers = overview.vpn.wireguard.peers + overview.vpn.tailscale.peers
+  const vpnOnline = overview.vpn.wireguard.online + overview.vpn.tailscale.online
   return (
     <Section
       title="Throughput"
@@ -315,23 +332,26 @@ function Readings({
                 aria-hidden
                 className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
               />
-              Tunnels
+              VPN
             </>
           }
           value={
-            tunnels.length === 0 ? (
+            vpnPeers === 0 && tunnels.length === 0 ? (
               "None"
             ) : (
               <>
-                <NumberTicker value={tunnelsUp.length} />
-                {` up`}
+                <NumberTicker value={vpnOnline} />
+                <span className="text-muted-foreground"> / {vpnPeers}</span>
               </>
             )
           }
+          trailing={vpnPeers > 0 ? "online" : undefined}
           hint={
             <span className="inline-flex max-w-full min-w-0 items-center gap-2">
               <span className="truncate">
-                {tunnels.length === 0 ? "no VPN or tunnel" : tunnels.map((l) => l.name).join(", ")}
+                {tunnels.length === 0
+                  ? "no VPN or tunnel"
+                  : tunnelsUp.map((l) => l.name).join(", ")}
               </span>
               <ProductGlyphs
                 ids={[
@@ -342,17 +362,21 @@ function Readings({
           }
         />
         <StatTile
-          label="Made here"
-          value={persistence.made === 0 ? "Nothing yet" : <NumberTicker value={persistence.made} />}
-          tone={persistence.made > 0 && persistence.unit === "disabled" ? "warning" : "default"}
+          label={
+            <>
+              <ShieldCheck
+                aria-hidden
+                className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
+              />
+              Refused
+            </>
+          }
+          value={<NumberTicker value={overview.gateway.dropped} />}
+          trailing="packets"
           hint={
-            persistence.made === 0
-              ? "devices, routes and rules you add"
-              : persistence.unit === "enabled"
-                ? "restored at boot"
-                : persistence.unit === "unsupported"
-                  ? "no systemd to restore them"
-                  : "not restored at boot"
+            overview.gateway.blocklists + overview.gateway.limits === 0
+              ? "no blocklist or rate limit yet"
+              : `${plural(overview.gateway.blocklists, "blocklist")} · ${plural(overview.gateway.limits, "limit")} since loaded`
           }
         />
       </StatGrid>

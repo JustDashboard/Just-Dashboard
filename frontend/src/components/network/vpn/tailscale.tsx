@@ -56,7 +56,10 @@ export function TailscaleBlock({
   const [busy, setBusy] = useState(false)
   const [route, setRoute] = useState("")
   const self = tailscale.self
-  const apply = async (body: { advertiseExitNode?: boolean; advertiseRoutes?: string[] }, label: string) => {
+  const apply = async (
+    body: { advertiseExitNode?: boolean; advertiseRoutes?: string[] },
+    label: string,
+  ) => {
     setBusy(true)
     try {
       const res = await post<{ note: string }>("/network/vpn/tailscale", body)
@@ -85,7 +88,9 @@ export function TailscaleBlock({
             <HostFact>{tailscale.tailnet || "tailnet"}</HostFact>
             <FactDot />
             <HostFact product={tailscale.controlServer === "tailscale" ? "tailscale" : "headscale"}>
-              {tailscale.controlServer === "tailscale" ? "Tailscale's coordination" : tailscale.controlUrl}
+              {tailscale.controlServer === "tailscale"
+                ? "Tailscale's coordination"
+                : tailscale.controlUrl}
             </HostFact>
             {tailscale.version && (
               <>
@@ -98,7 +103,11 @@ export function TailscaleBlock({
         aside={
           <Status
             tone={tailscale.running ? "running" : "warning"}
-            label={tailscale.running ? `${online} of ${tailscale.peers.length} online` : tailscale.backendState}
+            label={
+              tailscale.running
+                ? `${online} of ${tailscale.peers.length} online`
+                : tailscale.backendState
+            }
             live={tailscale.running}
             className="text-body"
           />
@@ -111,7 +120,7 @@ export function TailscaleBlock({
       ))}
 
       <div className="grid min-w-0 gap-x-10 gap-y-6 md:grid-cols-2">
-        <div className="flex min-w-0 flex-col gap-2 border-t border-hairline pt-4">
+        <div className="flex min-w-0 flex-col gap-2">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-title font-medium">Offer as an exit node</p>
@@ -123,7 +132,10 @@ export function TailscaleBlock({
               checked={tailscale.prefs.advertisingExitNode}
               disabled={busy || !tailscale.running}
               onCheckedChange={(on) =>
-                void apply({ advertiseExitNode: on }, on ? "Offered as an exit node" : "No longer an exit node")
+                void apply(
+                  { advertiseExitNode: on },
+                  on ? "Offered as an exit node" : "No longer an exit node",
+                )
               }
               aria-label="Offer as an exit node"
             />
@@ -134,7 +146,7 @@ export function TailscaleBlock({
             </p>
           )}
         </div>
-        <div className="flex min-w-0 flex-col gap-2 border-t border-hairline pt-4">
+        <div className="flex min-w-0 flex-col gap-2">
           <p className="text-title font-medium">Subnet routes</p>
           <p className="text-hint text-muted-foreground">
             Networks behind this server the tailnet may reach through it.
@@ -164,9 +176,10 @@ export function TailscaleBlock({
               onSubmit={(event) => {
                 event.preventDefault()
                 if (!route.trim()) return
-                void apply({ advertiseRoutes: [...routes, route.trim()] }, `${route.trim()} offered`).then(
-                  () => setRoute(""),
-                )
+                void apply(
+                  { advertiseRoutes: [...routes, route.trim()] },
+                  `${route.trim()} offered`,
+                ).then(() => setRoute(""))
               }}
             >
               <Input
@@ -176,7 +189,13 @@ export function TailscaleBlock({
                 aria-label="A network to offer"
                 className="h-7 w-36 font-mono text-xs"
               />
-              <Button size="icon-xs" variant="outline" type="submit" disabled={busy || !route.trim()} aria-label="Offer it">
+              <Button
+                size="icon-xs"
+                variant="outline"
+                type="submit"
+                disabled={busy || !route.trim()}
+                aria-label="Offer it"
+              >
                 <Plus aria-hidden />
               </Button>
             </form>
@@ -286,7 +305,10 @@ export function TailscaleBlock({
                 {headscale.nodes.map((n) => (
                   <li key={n.id} className="flex min-w-0 items-center gap-2 text-body">
                     <span
-                      className={cn("size-1.5 shrink-0 rounded-full", n.online ? "bg-success" : "bg-muted-foreground")}
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full",
+                        n.online ? "bg-success" : "bg-muted-foreground",
+                      )}
                     />
                     <span className="truncate">{n.givenName || n.name}</span>
                     <span className="truncate font-mono text-hint text-muted-foreground">

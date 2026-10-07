@@ -151,10 +151,15 @@ export function Topology({
                   </span>
                   <span className="block">
                     {overview.forwarding.ipv4 ? "routing on" : "routing off"}
-                    {overview.made.forwards > 0 &&
-                      ` · ${overview.made.forwards} forward${overview.made.forwards === 1 ? "" : "s"}`}
-                    {overview.made.nat > 0 && ` · NAT`}
+                    {overview.gateway.forwards > 0 &&
+                      ` · ${overview.gateway.forwards} forward${overview.gateway.forwards === 1 ? "" : "s"}`}
+                    {overview.gateway.nat > 0 && ` · NAT`}
                   </span>
+                  {overview.gateway.dropped > 0 && (
+                    <span className="numeric block">
+                      {overview.gateway.dropped.toLocaleString()} refused
+                    </span>
+                  )}
                 </>
               }
             />
@@ -309,8 +314,18 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
       title: tailnet ? "Tailnet" : l.remote ? `${l.name} → ${l.remote}` : l.name,
       hint: (
         <>
-          <span className="block truncate font-mono">
-            {down ? "down" : address ? address.replace(/\/(32|128)$/, "") : l.name}
+          <span className="block truncate">
+            {down ? (
+              "down"
+            ) : tailnet && overview.vpn.tailscale.installed ? (
+              `${overview.vpn.tailscale.online} of ${overview.vpn.tailscale.peers} online`
+            ) : l.kind === "wireguard" && overview.vpn.wireguard.installed ? (
+              `${overview.vpn.wireguard.online} of ${overview.vpn.wireguard.peers} peers online`
+            ) : (
+              <span className="font-mono">
+                {address ? address.replace(/\/(32|128)$/, "") : l.name}
+              </span>
+            )}
           </span>
           {!down && <Throughput devices={[l]} />}
         </>

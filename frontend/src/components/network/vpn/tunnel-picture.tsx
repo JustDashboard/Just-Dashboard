@@ -92,11 +92,17 @@ export function TunnelPicture({
                 </WireMark>
               }
               eyebrow={`${tunnel.name} · udp ${tunnel.listenPort || "—"}`}
-              title={<span className="font-mono">{tunnel.subnet || tunnel.addresses[0] || "—"}</span>}
+              title={
+                <span className="font-mono">{tunnel.subnet || tunnel.addresses[0] || "—"}</span>
+              }
               hint={
                 <>
                   <span className={cn("block", !tunnel.up && "text-warning")}>
-                    {!tunnel.up ? "down" : tunnel.exitNode ? "exit node · routes the internet" : "private network only"}
+                    {!tunnel.up
+                      ? "down"
+                      : tunnel.exitNode
+                        ? "exit node · routes the internet"
+                        : "private network only"}
                   </span>
                   {tunnel.endpoint && (
                     <span className="block truncate font-mono">{tunnel.endpoint}</span>
@@ -188,7 +194,10 @@ function Side({
               hint={
                 <>
                   <span className="block truncate font-mono">
-                    {site ? peer.allowedIps.filter((ip) => ip !== peer.address).join(", ") || peer.address : peer.address}
+                    {site
+                      ? peer.allowedIps.filter((ip) => ip !== peer.address).join(", ") ||
+                        peer.address
+                      : peer.address}
                   </span>
                   {(peer.rxBytes > 0 || peer.txBytes > 0) && (
                     <span className="numeric block font-mono text-micro">
@@ -207,7 +216,12 @@ function Side({
             <WireNode
               align={align}
               mark={
-                <button type="button" onClick={add} aria-label={addLabel} className="rounded-full focus-ring">
+                <button
+                  type="button"
+                  onClick={add}
+                  aria-label={addLabel}
+                  className="rounded-full focus-ring"
+                >
                   <WirePlaceholder size="md">
                     <Plus aria-hidden />
                   </WirePlaceholder>

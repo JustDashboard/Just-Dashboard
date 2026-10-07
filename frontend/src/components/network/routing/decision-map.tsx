@@ -19,8 +19,9 @@ const QUIET = new Set([0])
  * The rule and table that answer this browser's replies carry a moving wire,
  * so "why does my traffic leave through tailscale0" is answered by following
  * the one line that moves. A rule that discards (blackhole, prohibit,
- * unreachable) ends in a mark of its own rather than a table. Rules the
- * dashboard made take the brand mark's ring; Tailscale's take its logo.
+ * unreachable) ends in a mark of its own rather than a table. A rule the
+ * dashboard made has its priority in the brand's blue, the colour of where
+ * the reader is (§3); Tailscale's take its logo.
  */
 export function DecisionMap({ routing }: { routing: NetworkRouting }) {
   const container = useRef<HTMLDivElement>(null)
@@ -32,7 +33,8 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
   const tables = useMemo(() => {
     const out: NetworkRouting["tables"] = []
     for (const r of rules) {
-      if (r.action !== "lookup" || r.table === undefined || out.some((t) => t.id === r.table)) continue
+      if (r.action !== "lookup" || r.table === undefined || out.some((t) => t.id === r.table))
+        continue
       out.push(
         routing.tables.find((t) => t.id === r.table) ?? {
           id: r.table,
@@ -45,7 +47,11 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
   }, [routing.tables, rules])
   const answering = answeringTable(routing)
 
-  const ids = [...rules.map((r) => `r:${r.priority}:${r.id}`), ...tables.map((t) => `t:${t.id}`), "drop"].join("\n")
+  const ids = [
+    ...rules.map((r) => `r:${r.priority}:${r.id}`),
+    ...tables.map((t) => `t:${t.id}`),
+    "drop",
+  ].join("\n")
   const refs = useMemo(() => {
     const map = new Map<string, RefObject<HTMLDivElement | null>>()
     for (const id of ids.split("\n")) if (id) map.set(id, createRef<HTMLDivElement>())
@@ -90,7 +96,7 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
             />
           )
         })}
-        <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1.1fr)_clamp(3rem,10vw,9rem)_minmax(0,1fr)] lg:items-center">
+        <div className="relative mx-auto grid max-w-4xl gap-y-8 lg:grid-cols-[minmax(0,1.1fr)_clamp(3rem,10vw,9rem)_minmax(0,1fr)] lg:items-center">
           <section aria-label="Policy rules, in the order they are asked" className="min-w-0">
             <p className="eyebrow mb-4">Asked in this order</p>
             <ol className="flex flex-col gap-4">
@@ -110,15 +116,18 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
                       nodeRef={refs.get(id)}
                       align="end"
                       mark={
-                        <WireMark
-                          tone={rule.managed ? "brand" : "logo"}
-                          shape="square"
-                          size="sm"
-                        >
+                        <WireMark tone="logo" shape="square" size="sm">
                           {rule.owner === "tailscale" ? (
                             <ProductGlyph id="tailscale" />
                           ) : (
-                            <span className="numeric font-mono text-micro">{short(rule.priority)}</span>
+                            <span
+                              className={cn(
+                                "numeric font-mono text-micro",
+                                rule.managed && "text-brand",
+                              )}
+                            >
+                              {short(rule.priority)}
+                            </span>
                           )}
                         </WireMark>
                       }

@@ -31,7 +31,10 @@ import { BGPBlock } from "@/components/network/routing/bgp"
  * rule beside the rules.
  */
 export default function NetworkRoutingPage() {
-  const routing = usePoll<NetworkRouting>((signal) => get("/network/routing", undefined, signal), 15_000)
+  const routing = usePoll<NetworkRouting>(
+    (signal) => get("/network/routing", undefined, signal),
+    15_000,
+  )
   const links = usePoll<NetworkLink[]>((signal) => get("/network/links", undefined, signal), 30_000)
   const bgp = usePoll<BGPView>((signal) => get("/network/bgp", undefined, signal), 30_000)
   const [adding, setAdding] = useState<"route" | "rule">()
@@ -40,7 +43,11 @@ export default function NetworkRoutingPage() {
     return (
       <Page className="animate-rise">
         <PageContext eyebrow="Network" title="Routing" />
-        {routing.error ? <ErrorState error={routing.error} onRetry={routing.refresh} /> : <LoadingPanel />}
+        {routing.error ? (
+          <ErrorState error={routing.error} onRetry={routing.refresh} />
+        ) : (
+          <LoadingPanel />
+        )}
       </Page>
     )
   }

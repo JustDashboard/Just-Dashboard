@@ -13,10 +13,34 @@ import { Switch } from "@/components/ui/switch"
 
 /** What a client is told to resolve names with: a public resolver, or one that also blocks ads. */
 const RESOLVERS = [
-  { id: "cloudflare", name: "Cloudflare", product: "cloudflare", servers: ["1.1.1.1", "1.0.0.1"], hint: "fast, no filtering" },
-  { id: "quad9", name: "Quad9", product: "quad9", servers: ["9.9.9.9", "149.112.112.112"], hint: "blocks known malware" },
-  { id: "adguard", name: "AdGuard DNS", product: "adguard", servers: ["94.140.14.14", "94.140.15.15"], hint: "blocks ads and trackers" },
-  { id: "mullvad", name: "Mullvad", product: "mullvad", servers: ["194.242.2.3"], hint: "blocks ads, no logs" },
+  {
+    id: "cloudflare",
+    name: "Cloudflare",
+    product: "cloudflare",
+    servers: ["1.1.1.1", "1.0.0.1"],
+    hint: "fast, no filtering",
+  },
+  {
+    id: "quad9",
+    name: "Quad9",
+    product: "quad9",
+    servers: ["9.9.9.9", "149.112.112.112"],
+    hint: "blocks known malware",
+  },
+  {
+    id: "adguard",
+    name: "AdGuard DNS",
+    product: "adguard",
+    servers: ["94.140.14.14", "94.140.15.15"],
+    hint: "blocks ads and trackers",
+  },
+  {
+    id: "mullvad",
+    name: "Mullvad",
+    product: "mullvad",
+    servers: ["194.242.2.3"],
+    hint: "blocks ads, no logs",
+  },
 ]
 
 /**
@@ -97,7 +121,11 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         </ChoiceGrid>
       </div>
       <FieldRow>
-        <Field label="Endpoint" htmlFor="wg-endpoint" hint="Where clients dial; this server's public address when empty">
+        <Field
+          label="Endpoint"
+          htmlFor="wg-endpoint"
+          hint="Where clients dial; this server's public address when empty"
+        >
           <Input
             id="wg-endpoint"
             value={endpoint}

@@ -68,7 +68,8 @@ export default function NetworkVPNPage() {
     ...(overview.data?.dockerNetworks.flatMap((n) => n.subnets) ?? []),
     ...(overview.data?.links
       .filter((l) => l.managed && l.role === "bridge")
-      .flatMap((l) => l.addresses.filter((a) => a.family === "inet").map((a) => network(a.cidr))) ?? []),
+      .flatMap((l) => l.addresses.filter((a) => a.family === "inet").map((a) => network(a.cidr))) ??
+      []),
   ]
   const addingTunnel = wireguard.interfaces.find((t) => t.name === adding?.tunnel)
   const openTunnel = wireguard.interfaces.find((t) => t.name === opened?.tunnel)
@@ -123,12 +124,19 @@ export default function NetworkVPNPage() {
             )
           }
           trailing={tailscale.installed ? "online" : undefined}
-          hint={tailscale.tailnet || (tailscale.installed ? tailscale.backendState : "Tailscale is not installed")}
+          hint={
+            tailscale.tailnet ||
+            (tailscale.installed ? tailscale.backendState : "Tailscale is not installed")
+          }
         />
         <StatTile
           label="Exit"
           value={exits.length ? exits.join(" · ") : "None"}
-          hint={exits.length ? "clients browse through this server" : "this server routes no client's internet"}
+          hint={
+            exits.length
+              ? "clients browse through this server"
+              : "this server routes no client's internet"
+          }
         />
         <StatTile
           label="Moved"
@@ -297,7 +305,9 @@ function TunnelBlock({
                     onCheckedChange={(on) =>
                       void act(
                         () => post(`${base}/exit`, { on }),
-                        on ? `${tunnel.name} routes its clients' internet` : `${tunnel.name} is a private network only`,
+                        on
+                          ? `${tunnel.name} routes its clients' internet`
+                          : `${tunnel.name} is a private network only`,
                       )
                     }
                     aria-label={`${tunnel.name} as an exit node`}
@@ -321,7 +331,12 @@ function TunnelBlock({
                   <Plus aria-hidden />
                   Device
                 </Button>
-                <Button size="icon-xs" variant="ghost" onClick={remove} aria-label={`Remove ${tunnel.name}`}>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  onClick={remove}
+                  aria-label={`Remove ${tunnel.name}`}
+                >
                   <Trash aria-hidden />
                 </Button>
               </>

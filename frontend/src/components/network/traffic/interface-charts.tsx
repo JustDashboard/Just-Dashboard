@@ -102,8 +102,8 @@ export function InterfaceCharts({
   if (span !== "live" && history.data && !history.data.recording) {
     return (
       <Notice title="Nothing is recorded">
-        The metrics retention is zero (JD_METRICS_RETENTION), so the server keeps no history of
-        any device. Live still shows the last fifteen minutes.
+        The metrics retention is zero (JD_METRICS_RETENTION), so the server keeps no history of any
+        device. Live still shows the last fifteen minutes.
       </Notice>
     )
   }
