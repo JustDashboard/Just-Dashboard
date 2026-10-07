@@ -120,7 +120,7 @@ taking a frame:
   preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s, the run page's Details is one frame
-  around a rail of the run's steps and an inspector of the picked one (Security's Tools shape, the
+  around a rail of the run's steps and an inspector of the picked one (the Network Tools page's shape, the
   rail deciding what the inspector shows), and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
   everything inside it changes what the deployment is, so one red edge says "careful" once where
