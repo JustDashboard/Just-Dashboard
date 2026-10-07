@@ -223,7 +223,7 @@ func TestMapGatewayError(t *testing.T) {
 		{"forwarding off", &netx.ForwardingRequiredError{Family: "4"}, 409, "forwarding_off"},
 		{"forwarding off, wrapped", errors.Join(errors.New("x"), &netx.ForwardingRequiredError{Family: "6"}), 409, "forwarding_off"},
 		{"a guard", &netx.GuardError{Reason: "no"}, 409, "would_lock_you_out"},
-		{"read-only", &netx.ReadOnlyError{Reason: "firewalld"}, 501, "network_read_only"},
+		{"read-only", &netx.ReadOnlyError{Reason: "firewalld"}, 409, "network_read_only"},
 		{"a missing tool", &netx.UnavailableError{Tool: "nft", Package: "nftables"}, 503, "tool_unavailable"},
 		{"not found", netx.ErrNotFound, 404, "not_found"},
 		{"exists", netx.ErrExists, 409, "exists"},

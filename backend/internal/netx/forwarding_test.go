@@ -144,8 +144,8 @@ func TestForwardingDisabledEntriesAndTheOtherFamilyDoNotBlock(t *testing.T) {
 	rtProc(t, rec, "1", "1")
 	s := testService(t)
 	sp := emptySpec()
-	sp.NAT = []NATSpec{{ID: 1, Name: "lan", Source: "192.168.50.0/24", Enabled: false}}
-	sp.Forwards = []ForwardSpec{{ID: 2, Name: "web", Target: "10.0.1.5", Enabled: true}}
+	sp.NAT = []NATSpec{{ID: 1, Name: "lan", Source: "192.168.50.0/24", Interface: "eth0", Enabled: false}}
+	sp.Forwards = []ForwardSpec{{ID: 2, Name: "web", Protocol: "tcp", Ports: "80", Target: "10.0.1.5", SourceNAT: "never", Enabled: true}}
 	rtSaveSpec(t, s, sp)
 	// The only live forward is IPv4; IPv6 may go off.
 	v, err := s.SetForwarding(context.Background(), "ipv6", false, ForwardingNeeds{DockerNetworks: 4}, "ion")

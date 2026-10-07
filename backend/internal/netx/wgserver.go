@@ -695,53 +695,31 @@ func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, a
 // harmless with forwarding off, and the Routing page is where it is turned on.
 const wgForwardingWarning = "IPv4 forwarding is off on this host, so clients cannot reach anything beyond it. Turn it on from the Routing page."
 
-// setWGExit edits the spec for a tunnel's exit node. The caller holds s.mu.
+// setWGExit edits the spec for a tunnel's exit node and loads the gateway
+// table with it: the masquerade is the gateway's like any NAT entry, so it is
+// applied, admitted past the host's forward filters and taken back the same
+// way, and a host whose firewall cannot admit it refuses it with the
+// gateway's own reason. The caller holds s.mu.
 func (s *Service) setWGExit(ctx context.Context, iface, subnet, uplink string, on bool, actor string) error {
-	sp, err := s.loadSpec()
+	old, err := s.loadSpec()
 	if err != nil {
 		return err
 	}
-	next := sp.clone()
+	next := old.clone()
+	owner := wgOwner(iface)
 	if on {
-		vpnUpsertNAT(next, wgOwner(iface), "WireGuard "+iface+" exit", subnet, uplink, actor)
-	} else if !vpnRemoveNAT(next, wgOwner(iface)) {
-		return nil
-	}
-	return s.commit(ctx, next, step{})
-}
-
-// vpnUpsertNAT adds or updates the NAT entry a tunnel's exit node owns.
-// Pure: an edit of next.NAT keyed by owner, so the gateway renders it like
-// any other entry.
-func vpnUpsertNAT(next *Spec, owner, name, source, iface, actor string) {
-	for i := range next.NAT {
-		if next.NAT[i].Owner == owner {
-			next.NAT[i].Name, next.NAT[i].Source, next.NAT[i].Interface = name, source, iface
-			next.NAT[i].Enabled = true
-			return
+		if _, err := s.requireWritable(ctx); err != nil {
+			return err
+		}
+		upsertOwnedNAT(next, owner, "WireGuard "+iface+" exit", subnet, uplink, actor)
+	} else {
+		had := len(next.NAT)
+		removeOwnedNAT(next, owner)
+		if len(next.NAT) == had {
+			return nil
 		}
 	}
-	next.NAT = append(next.NAT, NATSpec{
-		ID: next.takeID(), Name: name, Source: source, Interface: iface,
-		Owner: owner, Enabled: true,
-		Made: Made{CreatedAt: wgNow().UTC(), CreatedBy: actor},
-	})
-}
-
-// vpnRemoveNAT removes every entry an owner made and reports whether there
-// was one.
-func vpnRemoveNAT(next *Spec, owner string) bool {
-	kept := next.NAT[:0]
-	removed := false
-	for _, n := range next.NAT {
-		if n.Owner == owner {
-			removed = true
-			continue
-		}
-		kept = append(kept, n)
-	}
-	next.NAT = kept
-	return removed
+	return s.commit(ctx, next, s.gatewayStep(old, next))
 }
 
 // RemoveWireGuard stops and removes a tunnel the dashboard made. Its file is

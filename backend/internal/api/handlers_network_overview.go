@@ -32,6 +32,7 @@ type networkOverview struct {
 	Persistence     netx.Persistence        `json:"persistence"`
 	VPN             netx.VPNSummary         `json:"vpn"`
 	DNS             *netx.DNSSummary        `json:"dns,omitempty"`
+	Gateway         overviewGateway         `json:"gateway"`
 	Made            overviewMade            `json:"made"`
 	Findings        []netx.Finding          `json:"findings"`
 }
@@ -68,6 +69,23 @@ type overviewConnections struct {
 	Listening    int `json:"listening"`
 }
 
+// overviewGateway is the gateway and protection at a glance: whether the
+// table is loaded and may be written, what is in force, what it has refused
+// since it was loaded, and how full the connection-tracking table is.
+type overviewGateway struct {
+	Loaded   bool   `json:"loaded"`
+	Writable bool   `json:"writable"`
+	Reason   string `json:"reason,omitempty"`
+	Forwards int    `json:"forwards"`
+	NAT      int    `json:"nat"`
+	Limits   int    `json:"limits"`
+	Lists    int    `json:"blocklists"`
+	// Dropped is every packet the blocklists and limits refused since the
+	// table was loaded.
+	Dropped   uint64         `json:"dropped"`
+	Conntrack netx.Conntrack `json:"conntrack"`
+}
+
 // overviewMade counts what the dashboard has made, by kind, for the gateway
 // and inside nodes of the topology.
 type overviewMade struct {
@@ -95,11 +113,10 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	}
 
 	var (
-		wg        sync.WaitGroup
-		inv       netx.Inventory
-		linksErr  error
-		errs      map[string]uint64
-		conntrack = -1.0
+		wg       sync.WaitGroup
+		inv      netx.Inventory
+		linksErr error
+		errs     map[string]uint64
 	)
 	do := func(fn func()) {
 		wg.Add(1)
@@ -146,6 +163,7 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	do(func() { out.Persistence = s.modules.network.PersistenceStatus(ctx) })
 	do(func() { out.VPN = s.modules.network.VPNSummary(ctx) })
 	do(func() { out.DNS = s.cachedDNSSummary(ctx) })
+	do(func() { out.Gateway = s.overviewGateway(ctx, client) })
 	wg.Wait()
 	if linksErr != nil {
 		return mapNetworkError(linksErr)
@@ -183,7 +201,7 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	out.Findings = netx.OverviewFindings(netx.OverviewInput{
 		Links: out.Links, Spec: spec, Persistence: out.Persistence, Forwarding: out.Forwarding,
 		LinkHistoryErrors: errs, FirewallAvailable: out.Firewall.Available,
-		FirewallEnabled: out.Firewall.Enabled, ConntrackPercent: conntrack,
+		FirewallEnabled: out.Firewall.Enabled, ConntrackPercent: conntrackPercent(out.Gateway.Conntrack),
 		EncryptedDNS: encrypted,
 	})
 	httpx.JSON(w, http.StatusOK, out)
@@ -256,4 +274,46 @@ func (s *Server) cachedDNSSummary(ctx context.Context) *netx.DNSSummary {
 	sum := s.modules.network.DNSSummary(ctx, s.dnsContainers(ctx))
 	dnsSummaryCache.sum, dnsSummaryCache.at = &sum, time.Now()
 	return dnsSummaryCache.sum
+}
+
+// overviewGateway reads the gateway's and the protections' counters; each
+// read is one `nft -j list table`, so the Overview's poll costs two.
+func (s *Server) overviewGateway(ctx context.Context, client string) overviewGateway {
+	g := overviewGateway{Conntrack: netx.CurrentConntrack()}
+	if gw, err := s.modules.network.Gateway(ctx); err == nil {
+		g.Loaded, g.Writable, g.Reason = gw.Loaded, gw.Capability.Writable, gw.Capability.Reason
+		for _, f := range gw.Forwards {
+			if f.Enabled {
+				g.Forwards++
+			}
+		}
+		for _, n := range gw.NAT {
+			if n.Enabled {
+				g.NAT++
+			}
+		}
+	}
+	if p, err := s.modules.network.Protection(ctx, client); err == nil {
+		for _, l := range p.Limits {
+			if l.Enabled {
+				g.Limits++
+			}
+			g.Dropped += l.Packets
+		}
+		for _, b := range p.Blocklists {
+			if b.Enabled {
+				g.Lists++
+			}
+			g.Dropped += b.Packets
+		}
+	}
+	return g
+}
+
+// conntrackPercent is the table's fullness, negative where it cannot be read.
+func conntrackPercent(c netx.Conntrack) float64 {
+	if !c.Available {
+		return -1
+	}
+	return c.Percent
 }

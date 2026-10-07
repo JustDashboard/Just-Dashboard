@@ -157,6 +157,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
 	s.modules.network.Start(ctx)
+	// Country and feed blocklists go stale; each is fetched again a day after
+	// its last refresh, whether or not anybody opens the Protection page.
+	s.modules.network.StartBlocklistRefresh(ctx)
 	s.startDatabaseMetrics(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,

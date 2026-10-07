@@ -195,3 +195,7 @@ func OverviewFindings(in OverviewInput) []Finding {
 	}
 	return out
 }
+
+// CurrentConntrack is the connection-tracking table's fullness, for the
+// Overview's attention list and the gateway's reading.
+func CurrentConntrack() Conntrack { return readConntrack() }

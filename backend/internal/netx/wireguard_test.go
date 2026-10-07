@@ -136,6 +136,17 @@ func wgHostReplies(t *testing.T, rec *recorder) {
 		on("ip -j -6 route show table all", fixture(t, "wg-ip-route6-all.json")).
 		on("ip -j route show default", fixture(t, "wg-ip-route-default.json")).
 		on("ip -j -6 route show default", "[]")
+	// An exit node is a NAT entry the gateway loads and admits, so a host
+	// that makes one answers the gateway's own questions: a plain ruleset
+	// (writable), no firewalld, and every load and admission succeeding.
+	rec.on("nft -j list ruleset", `{"nftables": []}`).
+		fail("firewall-cmd", "not running").
+		on("ufw status", "Status: active\n").
+		on("iptables", "").
+		on("ip6tables", "").
+		on("nft -f", "").
+		on("nft list set", "").
+		on("nft delete table", "")
 }
 
 // wgUnitReplies answers the questions asked of wg0's unit afterwards, to read
@@ -271,7 +282,7 @@ func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 	wgWriteFile(t, filepath.Join(wgLibModules, "6.14.0-test", "kernel", "drivers", "net", "wireguard", "wireguard.ko.zst"), "")
 
 	sp := emptySpec()
-	vpnUpsertNAT(sp, wgOwner("wg0"), "WireGuard wg0 exit", "10.8.0.0/24", "eth0", "alice")
+	upsertOwnedNAT(sp, wgOwner("wg0"), "WireGuard wg0 exit", "10.8.0.0/24", "eth0", "alice")
 	if err := s.writeSpecForTest(sp); err != nil {
 		t.Fatal(err)
 	}
@@ -1148,8 +1159,8 @@ func TestRemoveWireGuardMovesTheFileAside(t *testing.T) {
 	wgCommitReplies(rec)
 	// An exit node and two clients exist.
 	sp := emptySpec()
-	vpnUpsertNAT(sp, wgOwner("wg0"), "WireGuard wg0 exit", "10.8.0.0/24", "eth0", "alice")
-	vpnUpsertNAT(sp, "wireguard:wg1", "WireGuard wg1 exit", "10.9.9.0/24", "eth0", "alice")
+	upsertOwnedNAT(sp, wgOwner("wg0"), "WireGuard wg0 exit", "10.8.0.0/24", "eth0", "alice")
+	upsertOwnedNAT(sp, "wireguard:wg1", "WireGuard wg1 exit", "10.9.9.0/24", "eth0", "alice")
 	if err := s.writeSpecForTest(sp); err != nil {
 		t.Fatal(err)
 	}
