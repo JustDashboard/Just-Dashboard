@@ -32,7 +32,7 @@ type feedPage struct {
 func newFeedServer(t *testing.T) *feedServer {
 	t.Helper()
 	f := &feedServer{pages: map[string]feedPage{}, hits: map[string]int{}}
-	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	f.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		p, ok := f.pages[r.URL.Path]
 		f.hits[r.URL.Path]++
@@ -49,12 +49,25 @@ func newFeedServer(t *testing.T) *feedServer {
 		fmt.Fprint(w, p.body)
 	}))
 	t.Cleanup(f.Close)
-	// The real client is used as it is — its timeout and its redirect limit
-	// are part of what is tested — against a plain-http server.
+	// Lists are fetched over https only, so the server is a TLS one and the
+	// client is the real one — its timeout and its redirect rules are part of
+	// what is tested — trusting that server's certificate.
 	prev4, prev6 := ipdenyV4, ipdenyV6
 	ipdenyV4, ipdenyV6 = f.URL+"/v4/%s.zone", f.URL+"/v6/%s.zone"
 	t.Cleanup(func() { ipdenyV4, ipdenyV6 = prev4, prev6 })
+	trustServer(t, f.Server)
 	return f
+}
+
+// trustServer points the blocklist client at a test server's certificate and
+// keeps the client's own timeout and redirect rules.
+func trustServer(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	prev := httpClient
+	c := *srv.Client()
+	c.Timeout, c.CheckRedirect = prev.Timeout, prev.CheckRedirect
+	httpClient = &c
+	t.Cleanup(func() { httpClient = prev })
 }
 
 func (f *feedServer) set(path, body string) {
@@ -100,12 +113,12 @@ func TestParseFeedReadsSpamhausStyleAndSkipsWhatItMust(t *testing.T) {
 }
 
 func TestParseFeedFireholNetsetKeepsTheBogonsOut(t *testing.T) {
-	nets, _ := parseFeed([]byte("#\n# firehol_level1\n#\n0.0.0.0/8\n10.0.0.0/8\n100.64.0.0/10\n127.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n169.254.0.0/16\n198.51.100.7\n203.0.113.0/24\n"))
+	nets, _ := parseFeed([]byte("#\n# firehol_level1\n#\n0.0.0.0/8\n10.0.0.0/8\n100.64.0.0/10\n127.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16\n169.254.0.0/16\n224.0.0.0/4\n240.0.0.0/4\nff00::/8\n198.51.100.7\n203.0.113.0/24\n"))
 	var got []string
 	for _, n := range nets {
 		got = append(got, n.String())
 	}
-	if strings.Join(got, ",") != "0.0.0.0/8,198.51.100.7/32,203.0.113.0/24" {
+	if strings.Join(got, ",") != "198.51.100.7/32,203.0.113.0/24" {
 		t.Fatalf("networks = %v: a drop in raw cannot be allowed to take the machines behind this host", got)
 	}
 }
@@ -135,6 +148,7 @@ func TestBuildBlocklistRules(t *testing.T) {
 		{"feed", BlocklistRequest{Name: "x", URL: "https://feed.example/l.txt"}, "feed", ""},
 		{"feed with credentials", BlocklistRequest{Name: "x", URL: "https://u:p@feed.example/l.txt"}, "feed", "user name"},
 		{"feed over ftp", BlocklistRequest{Name: "x", URL: "ftp://feed.example/l.txt"}, "feed", "http"},
+		{"feed over plain http", BlocklistRequest{Name: "x", URL: "http://feed.example/l.txt"}, "feed", "over https"},
 		{"feed preset", BlocklistRequest{Preset: "spamhaus-drop"}, "feed", ""},
 		{"unknown preset", BlocklistRequest{Name: "x", Preset: "evil-list"}, "feed", "not a feed"},
 		{"a name with a quote", BlocklistRequest{Name: `x" accept`, Entries: []string{"203.0.113.0/24"}}, "manual", "quotes"},
@@ -259,7 +273,7 @@ func TestAddCountryBlocklistWithNoV4ZoneIsRefused(t *testing.T) {
 
 func TestFeedFollowsRedirectsUpToThree(t *testing.T) {
 	// /chain/K redirects to /chain/K-1 until K is zero, then serves the list.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		k := mustAtoi(strings.TrimPrefix(r.URL.Path, "/chain/"))
 		if k > 0 {
 			http.Redirect(w, r, fmt.Sprintf("/chain/%d", k-1), http.StatusFound)
@@ -268,6 +282,7 @@ func TestFeedFollowsRedirectsUpToThree(t *testing.T) {
 		fmt.Fprint(w, "203.0.113.0/24\n")
 	}))
 	defer srv.Close()
+	trustServer(t, srv)
 
 	if _, err := fetchList(context.Background(), "feed", nil, srv.URL+"/chain/3"); err != nil {
 		t.Fatalf("three redirects were refused: %v", err)
@@ -633,5 +648,136 @@ func TestReadBlocklistSkipsGarbageAndAMissingFile(t *testing.T) {
 	}
 	if readBlocklist("", 1) != nil {
 		t.Fatal("no directory should read as no list")
+	}
+}
+
+func TestFeedsAreFetchedOverHTTPSOnly(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "203.0.113.0/24\n") }))
+	defer plain.Close()
+	if _, err := fetchList(context.Background(), "feed", nil, plain.URL+"/list"); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("a plain-http feed was fetched: %v", err)
+	}
+	// And a redirect from https down to http is the same downgrade.
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/list", http.StatusFound)
+	}))
+	defer tls.Close()
+	trustServer(t, tls)
+	if _, err := fetchList(context.Background(), "feed", nil, tls.URL+"/list"); err == nil || !strings.Contains(err.Error(), "plain-http") {
+		t.Fatalf("a downgrade redirect was followed: %v", err)
+	}
+}
+
+func TestFeedEntriesShorterThanARegionAreDropped(t *testing.T) {
+	srv := newFeedServer(t)
+	srv.set("/feed", "4.0.0.0/6\n8.0.0.0/7\n11.0.0.0/8\n2000::/16\n2a00:1450::/32\n2c00::/19\n203.0.113.0/24\n")
+	got, err := fetchList(context.Background(), "feed", nil, srv.URL+"/feed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s []string
+	for _, p := range got {
+		s = append(s, p.String())
+	}
+	// /6 and /7 and the IPv6 /16 are regions; /8 and /19 are the shortest kept.
+	if strings.Join(s, ",") != "11.0.0.0/8,203.0.113.0/24,2a00:1450::/32,2c00::/19" {
+		t.Fatalf("kept %v", s)
+	}
+}
+
+func TestACountryListMayHoldAShortPrefix(t *testing.T) {
+	srv := newFeedServer(t)
+	srv.set("/v4/xx.zone", "12.0.0.0/7\n")
+	got, err := fetchList(context.Background(), "country", []string{"xx"}, "")
+	if err != nil || len(got) != 1 || got[0].String() != "12.0.0.0/7" {
+		t.Fatalf("got %v, %v: a country's own aggregated blocks are what they are", got, err)
+	}
+}
+
+func TestAFeedCoveringAWholeSixteenthOfIPv4IsRefused(t *testing.T) {
+	srv := newFeedServer(t)
+	// Sixteen /8s are exactly 2^28 addresses: allowed. One more is not.
+	var ok, over strings.Builder
+	for i := 11; i < 27; i++ {
+		fmt.Fprintf(&ok, "%d.0.0.0/8\n", i)
+	}
+	over.WriteString(ok.String())
+	over.WriteString("27.0.0.0/8\n")
+	srv.set("/ok", ok.String())
+	srv.set("/over", over.String())
+	if _, err := fetchList(context.Background(), "feed", nil, srv.URL+"/ok"); err != nil {
+		t.Fatalf("2^28 addresses refused: %v", err)
+	}
+	_, err := fetchList(context.Background(), "feed", nil, srv.URL+"/over")
+	if err == nil || !strings.Contains(err.Error(), "sixteenth") {
+		t.Fatalf("err = %v", err)
+	}
+	h := newGwHost(t)
+	if _, err := h.AddBlocklist(context.Background(), BlocklistRequest{Name: "wide", Kind: "feed", URL: srv.URL + "/over"}, gwClient, "ops"); err == nil || h.saved() {
+		t.Fatalf("a feed that wide was saved: %v", err)
+	}
+}
+
+func TestNeverBlockCoversTheSpecialPurposeRanges(t *testing.T) {
+	nets, skipped := parseFeed([]byte("0.0.0.0/8\n0.1.2.0/24\n224.0.0.0/4\n239.1.1.0/24\n240.0.0.0/4\n255.255.255.255\nff00::/8\nff02::1\n198.51.100.0/24\n"))
+	if len(nets) != 1 || nets[0].String() != "198.51.100.0/24" || skipped != 8 {
+		t.Fatalf("kept %v, skipped %d", nets, skipped)
+	}
+}
+
+func TestParsedListsAreRememberedUntilTheirFileChanges(t *testing.T) {
+	dir := t.TempDir()
+	write := func(body string) {
+		t.Helper()
+		if err := writeFileAtomic(blocklistFile(dir, 3), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("203.0.113.0/24\n198.51.100.0/24\n")
+	before := blocklistParses.Load()
+	bl := BlocklistSpec{ID: 3, Kind: "country"}
+	for i := 0; i < 5; i++ {
+		if got := blocklistEntries(dir, bl); len(got) != 2 {
+			t.Fatalf("got %v", got)
+		}
+	}
+	if n := blocklistParses.Load() - before; n != 1 {
+		t.Fatalf("the file was parsed %d times in five reads", n)
+	}
+	write("203.0.113.0/24\n")
+	if got := blocklistEntries(dir, bl); len(got) != 1 {
+		t.Fatalf("a rewritten list read as %v", got)
+	}
+	// Same size, new content: a different mtime is enough to be seen.
+	write("198.51.100.0/24\n")
+	if got := blocklistEntries(dir, bl); len(got) != 1 || got[0].String() != "198.51.100.0/24" {
+		t.Fatalf("a same-size rewrite read as %v", got)
+	}
+	_ = os.Remove(blocklistFile(dir, 3))
+	if got := blocklistEntries(dir, bl); got != nil {
+		t.Fatalf("a removed file read as %v", got)
+	}
+}
+
+func TestTheProtectionViewDoesNotReparseAListEveryPoll(t *testing.T) {
+	srv := newFeedServer(t)
+	srv.set("/feed", "203.0.113.0/24\n198.51.100.0/24\n")
+	h := newGwHost(t)
+	ctx := context.Background()
+	if _, err := h.AddBlocklist(ctx, BlocklistRequest{Name: "f", Kind: "feed", URL: srv.URL + "/feed"}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Protection(ctx, "198.51.100.9"); err != nil {
+		t.Fatal(err)
+	}
+	before := blocklistParses.Load()
+	for i := 0; i < 10; i++ {
+		v, err := h.Protection(ctx, "198.51.100.9")
+		if err != nil || !v.Blocklists[0].ContainsYou {
+			t.Fatalf("%v %+v", err, v.Blocklists)
+		}
+	}
+	if n := blocklistParses.Load() - before; n != 0 {
+		t.Fatalf("ten polls parsed the list %d times", n)
 	}
 }

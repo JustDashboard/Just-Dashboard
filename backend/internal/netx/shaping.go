@@ -30,9 +30,14 @@ const (
 // Ingress cannot be queued, only policed: packets over the rate are dropped
 // as they arrive, which is what makes TCP slow down.
 //
-// Each half starts by deleting what the device had. htb and matchall refuse
-// to be replaced by themselves, and the boot unit may run over a device that
-// is already shaped; the deletes fail harmlessly when there is nothing.
+// Each half starts by clearing what the device had, so the unit can run over a
+// device that is already shaped: htb refuses to be replaced by itself and
+// matchall by itself, so the root queue is deleted and the policer's one
+// filter is. The deletes fail harmlessly when there is nothing. The ingress
+// queue is never deleted here: tc-BPF programs hang their filters on a
+// clsact queue, and deleting "ingress" there takes the whole of it, and them,
+// away. Replacing the plain ingress queue over itself is a no-op, and over a
+// clsact one an error the batch's -force carries on past.
 func shapeLines(sh ShapeSpec) []string {
 	d := sh.Device
 	var out []string
@@ -58,8 +63,8 @@ func shapeLines(sh ShapeSpec) []string {
 	}
 	if sh.IngressKbit > 0 {
 		out = append(out,
-			fmt.Sprintf("qdisc del dev %s ingress", d),
 			fmt.Sprintf("qdisc replace dev %s handle ffff: ingress", d),
+			fmt.Sprintf("filter del dev %s parent ffff: prio 1", d),
 			fmt.Sprintf("filter replace dev %s parent ffff: protocol all prio 1 matchall action police rate %dkbit burst %d drop",
 				d, sh.IngressKbit, policeBurst(sh.IngressKbit)))
 	}
@@ -123,17 +128,70 @@ func runShapeLines(ctx context.Context, lines []string) error {
 	for _, l := range lines {
 		args := strings.Fields(l)
 		_, err := run(ctx, "tc", args...)
-		if err != nil && !strings.HasPrefix(l, "qdisc del ") {
+		if err != nil && !strings.HasPrefix(l, "qdisc del ") && !strings.HasPrefix(l, "filter del ") {
 			return fmt.Errorf("tc %s: %w", l, err)
 		}
 	}
 	return nil
 }
 
-// clearShaping removes whatever shaping a device has.
-func clearShaping(ctx context.Context, device string) {
-	_, _ = run(ctx, "tc", "qdisc", "del", "dev", device, "root")    // nothing to delete is the common case
-	_, _ = run(ctx, "tc", "qdisc", "del", "dev", device, "ingress") // as above
+// hasRoot is whether the entry sets the device's root queue.
+func (sh ShapeSpec) hasRoot() bool { return sh.EgressKbit > 0 || sh.Qdisc != "" }
+
+// deviceQdiscs reads the queues a device has now.
+func deviceQdiscs(ctx context.Context, device string) ([]tcQdisc, error) {
+	out, err := run(ctx, "tc", "-j", "qdisc", "show", "dev", device)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s's queues: %w", device, err)
+	}
+	return parseQdiscs(out)
+}
+
+// ingressKind is what holds a device's ingress hook: "ingress" for the plain
+// queue the dashboard makes, "clsact" for the one tc-BPF programs use, empty
+// for neither.
+func ingressKind(qs []tcQdisc) string {
+	kind := ""
+	for _, q := range qs {
+		switch q.Kind {
+		case "clsact":
+			return "clsact"
+		case "ingress":
+			kind = "ingress"
+		}
+	}
+	return kind
+}
+
+// removeRoot deletes a device's root queue, which the kernel then replaces
+// with its default.
+func removeRoot(ctx context.Context, device string) {
+	_, _ = run(ctx, "tc", "qdisc", "del", "dev", device, "root") // nothing to delete is the common case
+}
+
+// removeIngress deletes a device's ingress queue only when it is the plain
+// one. A clsact queue is somebody else's — a BPF program's — and goes with
+// everything attached to it if it is deleted.
+func removeIngress(ctx context.Context, device string) {
+	qs, err := deviceQdiscs(ctx, device)
+	if err != nil || ingressKind(qs) != "ingress" {
+		return
+	}
+	_, _ = run(ctx, "tc", "qdisc", "del", "dev", device, "ingress") // the plain queue, removed after the policer's filter
+}
+
+// undoShaping takes off what an entry set and puts back what was there before.
+func undoShaping(ctx context.Context, set ShapeSpec, prev *ShapeSpec) error {
+	if set.hasRoot() {
+		removeRoot(ctx, set.Device)
+	}
+	if set.IngressKbit > 0 {
+		removeIngress(ctx, set.Device)
+	}
+	if prev == nil {
+		return nil
+	}
+	return runShapeLines(ctx, shapeLines(*prev))
 }
 
 // ShapeRequest is the body of a device's shaping.
@@ -196,6 +254,16 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 		}
 	}
 
+	if sh.IngressKbit > 0 {
+		qs, err := deviceQdiscs(ctx, sh.Device)
+		if err != nil {
+			return err
+		}
+		if ingressKind(qs) == "clsact" {
+			return fmt.Errorf("%s has a clsact queue, which tc-BPF programs attach to; a download limit needs the ingress queue and would replace it, taking their filters with it. Limit the upload only, or remove the clsact queue yourself first", sh.Device)
+		}
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, err := s.loadSpec()
@@ -220,16 +288,20 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 		next.Shaping[idx] = sh
 	}
 	restore := func(ctx context.Context) {
-		clearShaping(ctx, sh.Device)
-		if prev != nil {
-			if err := runShapeLines(ctx, shapeLines(*prev)); err != nil {
-				s.log.Error("restoring a device's shaping after a failed change", "device", sh.Device, "err", err)
-			}
+		if err := undoShaping(ctx, sh, prev); err != nil {
+			s.log.Error("restoring a device's shaping after a failed change", "device", sh.Device, "err", err)
 		}
 	}
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
-			clearShaping(ctx, sh.Device)
+			// A half the new entry no longer sets is cleared; a half it sets is
+			// replaced by its own lines.
+			if prev != nil && prev.hasRoot() && !sh.hasRoot() {
+				removeRoot(ctx, sh.Device)
+			}
+			if prev != nil && prev.IngressKbit > 0 && sh.IngressKbit == 0 {
+				removeIngress(ctx, sh.Device)
+			}
 			if err := runShapeLines(ctx, shapeLines(sh)); err != nil {
 				restore(ctx)
 				return err
@@ -267,11 +339,15 @@ func (s *Service) ClearShaping(ctx context.Context, device string) error {
 	}
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
-			clearShaping(ctx, device)
+			if prev.hasRoot() {
+				removeRoot(ctx, device)
+			}
+			if prev.IngressKbit > 0 {
+				removeIngress(ctx, device)
+			}
 			return nil
 		},
 		undo: func(ctx context.Context) {
-			clearShaping(ctx, device)
 			if err := runShapeLines(ctx, shapeLines(*prev)); err != nil {
 				s.log.Error("restoring a device's shaping after a failed change", "device", device, "err", err)
 			}

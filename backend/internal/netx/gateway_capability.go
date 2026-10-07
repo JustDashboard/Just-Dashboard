@@ -60,7 +60,8 @@ const admitMarkRule = "ct mark and " + connMask + " == " + connMark + " accept"
 // ruleset that happens to be called filter.
 var iptablesCompat = map[string]bool{"filter": true, "nat": true, "raw": true, "mangle": true, "security": true}
 
-// nftListing is `nft -j list ruleset` read for the two kinds of object that
+// nftListing is `nft -t -j list ruleset` (terse: no set elements, which on a
+// host with a blocklist loaded are most of the output) read for the two kinds of object that
 // matter here. Everything else it prints is left unparsed.
 type nftListing struct {
 	Nftables []struct {
@@ -89,7 +90,7 @@ type nftListing struct {
 // accept would have to be written into that table.
 func (s *Service) GatewayCapability(ctx context.Context) Capability {
 	c := Capability{Firewall: "none"}
-	out, err := run(ctx, "nft", "-j", "list", "ruleset")
+	out, err := run(ctx, "nft", "-t", "-j", "list", "ruleset")
 	if err != nil {
 		var missing *UnavailableError
 		if errors.As(err, &missing) {

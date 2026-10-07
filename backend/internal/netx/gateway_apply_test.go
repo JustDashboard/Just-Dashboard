@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -57,17 +58,20 @@ func newGwHost(t *testing.T, allowlist ...string) *gwHost {
 		}
 	}
 
-	rec.on("nft -j list ruleset", fixture(t, "gateway-ruleset-ufw.json"))
+	rec.on("nft -t -j list ruleset", fixture(t, "gateway-ruleset-ufw.json"))
 	rec.fail("firewall-cmd", "not running")
 	rec.on("ufw status", "Status: active\n")
 	rec.on("iptables -S DOCKER-USER", "-N DOCKER-USER\n")
+	// Nothing left to delete: the removal loop ends at the first failure.
+	rec.fail("iptables -D", "iptables: Bad rule (does a matching rule exist in that chain?).")
+	rec.fail("ip6tables -D", "ip6tables: Bad rule (does a matching rule exist in that chain?).")
 	rec.on("iptables ", "")
 	rec.on("ip6tables ", "")
 	rec.on("nft -c -f", "")
 	rec.on("nft -f", "")
 	rec.on("nft list set", "")
 	rec.on("nft delete table", "")
-	rec.on("nft -j list table inet jd_gateway", fixture(t, "gateway-table.json"))
+	rec.on("nft -t -j list table inet jd_gateway", fixture(t, "gateway-table.json"))
 	rec.fail("ip -j addr show dev nope", "Device \"nope\" does not exist.")
 	rec.on("ip -j addr show dev eth0", gwAddrEth0)
 	rec.on("ip -j addr show dev tailscale0", gwAddrTS)
@@ -179,7 +183,7 @@ func TestAddForwardAppliesInOrderThenWritesTheFilesAndSpec(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.order(t, "nft -j list ruleset", "ip -j addr show", "nft -c -f", "nft -f", "iptables -D FORWARD", "iptables -I FORWARD 1", "nft list set inet jd_gateway trusted4", "systemctl")
+	h.order(t, "nft -t -j list ruleset", "ip -j addr show", "nft -c -f", "nft -f", "iptables -D FORWARD", "iptables -I FORWARD 1", "nft list set inet jd_gateway trusted4", "systemctl")
 	if len(h.loaded) != 1 || !strings.Contains(h.loaded[0], `dnat ip to 10.0.0.5:80 comment "forward:1"`) {
 		t.Fatalf("loaded %v", h.loaded)
 	}
@@ -319,7 +323,7 @@ func TestForwardsAreReadOnlyWhereTheFirewallCannotAdmitThem(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := newGwHost(t)
-			h.first("nft -j list ruleset", c.listing, nil)
+			h.first("nft -t -j list ruleset", c.listing, nil)
 			if c.firewalldState != "" {
 				h.first("firewall-cmd --state", c.firewalldState, nil)
 			}
@@ -357,7 +361,7 @@ func TestTheRealRulesetOfAUfwDockerTailscaleHostIsWritable(t *testing.T) {
 
 func TestNftMissingIsAnInstallHandOffNotAReadOnlyHost(t *testing.T) {
 	h := newGwHost(t)
-	h.first("nft -j list ruleset", "", &UnavailableError{Tool: "nft"})
+	h.first("nft -t -j list ruleset", "", &UnavailableError{Tool: "nft"})
 	_, err := h.AddForward(context.Background(), gwWebForward(), gwClient, "ops", gwProtected)
 	var missing *UnavailableError
 	if !errors.As(err, &missing) || missing.Package != "nftables" {
@@ -785,7 +789,7 @@ func TestGatewayViewJoinsCountersByComment(t *testing.T) {
 
 func TestGatewayViewWithNothingMadeOrNotLoadedIsEmptyListsAndZeroCounters(t *testing.T) {
 	h := newGwHost(t)
-	h.first("nft -j list table inet jd_gateway", "Error: No such file or directory", errors.New("no such table"))
+	h.first("nft -t -j list table inet jd_gateway", "Error: No such file or directory", errors.New("no such table"))
 	h.first("iptables -C FORWARD", "Bad rule", errors.New("Bad rule"))
 	v, err := h.Gateway(context.Background())
 	if err != nil {
@@ -821,5 +825,92 @@ func TestAnUnreadableSpecIsAnErrorNotAnEmptyGateway(t *testing.T) {
 	}
 	if _, err := h.AddLimit(context.Background(), LimitRequest{Name: "x", Protocol: "tcp", Ports: "22", Rate: 1, Per: "second"}, gwClient, "ops"); err == nil {
 		t.Fatal("a change was made over an unreadable spec")
+	}
+}
+
+func TestAdmissionRemovalRepeatsUntilNoCopyIsLeft(t *testing.T) {
+	h := newGwHost(t)
+	ctx := context.Background()
+	if _, err := h.AddForward(ctx, gwWebForward(), gwClient, "ops", gwProtected); err != nil {
+		t.Fatal(err)
+	}
+	// Three copies of the rule sit in FORWARD (and one on the others): each -D
+	// succeeds while there is one and fails when there is none.
+	copies := map[string]int{"iptables -D FORWARD": 3, "iptables -D INPUT": 1}
+	var mu sync.Mutex
+	prev := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		line := strings.Join(append([]string{name}, args...), " ")
+		for prefix := range copies {
+			if strings.HasPrefix(line, prefix) {
+				mu.Lock()
+				defer mu.Unlock()
+				if copies[prefix] > 0 {
+					copies[prefix]--
+					return "", nil
+				}
+				return "", errors.New("Bad rule")
+			}
+		}
+		return prev(ctx, name, args...)
+	}
+	t.Cleanup(func() { run = prev })
+	h.rec.mu.Lock()
+	n := len(h.rec.calls)
+	h.rec.mu.Unlock()
+	if err := h.DeleteForward(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if copies["iptables -D FORWARD"] != 0 || copies["iptables -D INPUT"] != 0 {
+		t.Fatalf("copies left: %v", copies)
+	}
+	// Chains with nothing to remove still get exactly one failing attempt.
+	got := 0
+	for _, c := range h.rec.commands()[n:] {
+		if strings.HasPrefix(c, "iptables -D DOCKER-USER") {
+			got++
+		}
+	}
+	if got != 1 {
+		t.Fatalf("DOCKER-USER was tried %d times", got)
+	}
+}
+
+func TestAdmissionRemovalStopsAtTheCapWhateverTheKernelSays(t *testing.T) {
+	h := newGwHost(t)
+	ctx := context.Background()
+	if _, err := h.AddForward(ctx, gwWebForward(), gwClient, "ops", gwProtected); err != nil {
+		t.Fatal(err)
+	}
+	h.first("iptables -D FORWARD", "", nil) // always succeeds
+	h.rec.mu.Lock()
+	n := len(h.rec.calls)
+	h.rec.mu.Unlock()
+	if err := h.DeleteForward(ctx, 1); err != nil {
+		t.Fatal(err)
+	}
+	got := 0
+	for _, c := range h.rec.commands()[n:] {
+		if strings.HasPrefix(c, "iptables -D FORWARD") {
+			got++
+		}
+	}
+	if got != admissionDeleteCap {
+		t.Fatalf("-D FORWARD ran %d times, want the cap of %d", got, admissionDeleteCap)
+	}
+}
+
+func TestTheRulesetAndTableAreReadTerse(t *testing.T) {
+	h := newGwHost(t)
+	if _, err := h.Gateway(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range h.rec.commands() {
+		if strings.HasPrefix(c, "nft ") && strings.Contains(c, " list ") && !strings.Contains(c, "list set") && !strings.HasPrefix(c, "nft -t -j list ") {
+			t.Errorf("a listing that carries every set element: %s", c)
+		}
+	}
+	if !h.rec.ran("nft -t -j list ruleset") || !h.rec.ran("nft -t -j list table inet jd_gateway") {
+		t.Fatalf("commands: %v", h.rec.commands())
 	}
 }

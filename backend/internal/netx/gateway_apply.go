@@ -103,6 +103,9 @@ func (s *Service) restoreGateway(ctx context.Context, sp *Spec) {
 	}
 }
 
+// admissionDeleteCap bounds how many copies of the rule one removal takes out.
+const admissionDeleteCap = 8
+
 // syncAdmission makes the iptables admission rules what target needs: present
 // and first when anything translates, absent when nothing does. Idempotent —
 // the commands delete before they insert — and run on every change while
@@ -116,9 +119,22 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 		return nil
 	}
 	for _, cmd := range admissionCommands(insert) {
+		if cmd[1] == "-D" {
+			// One -D removes one copy of the rule. Duplicates arise — an
+			// earlier run that died between the delete and the insert, a
+			// boot unit started twice — and an inserted rule that leaves
+			// another beneath it is not removed when the translations are.
+			// Delete until the kernel says there is none left, a few times
+			// at most. The failure that ends it is the common case.
+			for i := 0; i < admissionDeleteCap; i++ {
+				if _, err := run(ctx, cmd[0], cmd[1:]...); err != nil {
+					break
+				}
+			}
+			continue
+		}
 		_, err := run(ctx, cmd[0], cmd[1:]...)
-		if err == nil || cmd[1] == "-D" {
-			// A delete that finds nothing to delete is the common case.
+		if err == nil {
 			continue
 		}
 		var missing *UnavailableError
@@ -763,7 +779,7 @@ type RuleCounter struct {
 	Bytes   uint64 `json:"bytes"`
 }
 
-// nftRules is `nft -j list table`, read for each rule's comment and counter.
+// nftRules is `nft -t -j list table`, read for each rule's comment and counter.
 type nftRules struct {
 	Nftables []struct {
 		Rule *struct {
@@ -809,7 +825,7 @@ func parseGatewayCounters(out string) (map[string]RuleCounter, error) {
 // counters and loaded false, not an error: the page then says the entries
 // are not in force.
 func gatewayCounters(ctx context.Context) (counters map[string]RuleCounter, loaded bool) {
-	out, err := run(ctx, "nft", "-j", "list", "table", "inet", gatewayTable)
+	out, err := run(ctx, "nft", "-t", "-j", "list", "table", "inet", gatewayTable)
 	if err != nil {
 		return map[string]RuleCounter{}, false
 	}

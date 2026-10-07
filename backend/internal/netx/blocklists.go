@@ -26,6 +26,15 @@ const (
 	maxCountries             = 30
 	blocklistStaleAfter      = 24 * time.Hour
 	blocklistRefreshInterval = time.Hour
+
+	// A feed's networks are somebody else's idea of what to drop, and a feed
+	// that has gone wrong, or been tampered with, would otherwise take the
+	// server off the internet. An entry shorter than a /8 (a /19 in IPv6) is
+	// not a bad network but a region, and a feed whose IPv4 networks add up to
+	// more than a sixteenth of the address space is not a blocklist.
+	feedMinBitsV4      = 8
+	feedMinBitsV6      = 19
+	feedMaxV4Addresses = 1 << 28
 )
 
 // httpClient fetches feeds and country zones. A variable so tests point it at
@@ -36,6 +45,12 @@ var httpClient = &http.Client{
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) > 3 {
 			return errors.New("the feed redirected more than three times")
+		}
+		// A feed is a list of what to drop. Over plain http anyone on the
+		// path could hand back a list that drops the operator's own networks,
+		// and a redirect from https to http is that same downgrade.
+		if req.URL.Scheme != "https" {
+			return errors.New("the feed redirected to a plain-http address")
 		}
 		return nil
 	},
@@ -79,14 +94,18 @@ var feedPresets = []FeedPreset{
 // would cut off every Docker container, LAN client and tailnet peer. The
 // trusted set protects the operator, not the machines behind the host.
 var neverBlock = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("10.0.0.0/8"),
 	netip.MustParsePrefix("172.16.0.0/12"),
 	netip.MustParsePrefix("192.168.0.0/16"),
 	netip.MustParsePrefix("100.64.0.0/10"),
 	netip.MustParsePrefix("127.0.0.0/8"),
 	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("224.0.0.0/4"),
+	netip.MustParsePrefix("240.0.0.0/4"),
 	netip.MustParsePrefix("fc00::/7"),
 	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("ff00::/8"),
 	netip.MustParsePrefix("::1/128"),
 }
 
@@ -150,6 +169,9 @@ func fetch(ctx context.Context, url string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	if req.URL.Scheme != "https" {
+		return nil, 0, fmt.Errorf("%s is not an https address; lists are fetched over https only", url)
+	}
 	req.Header.Set("User-Agent", "just-dashboard-blocklist")
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -181,7 +203,13 @@ func fetchList(ctx context.Context, kind string, countries []string, url string)
 		if err != nil {
 			return nil, err
 		}
-		all, _ = parseFeed(body)
+		nets, _ := parseFeed(body)
+		for _, p := range nets {
+			if (p.Addr().Is4() && p.Bits() < feedMinBitsV4) || (p.Addr().Is6() && p.Bits() < feedMinBitsV6) {
+				continue
+			}
+			all = append(all, p)
+		}
 	case "country":
 		for _, cc := range countries {
 			body, code, err := fetch(ctx, fmt.Sprintf(ipdenyV4, cc))
@@ -208,6 +236,17 @@ func fetchList(ctx context.Context, kind string, countries []string, url string)
 	merged := mergePrefixes(all)
 	if len(merged) == 0 {
 		return nil, errors.New("the list held no networks this host could use")
+	}
+	if kind == "feed" {
+		var covered uint64
+		for _, p := range merged {
+			if p.Addr().Is4() {
+				covered += 1 << (32 - p.Bits())
+			}
+		}
+		if covered > feedMaxV4Addresses {
+			return nil, fmt.Errorf("the feed's IPv4 networks cover %d million addresses, more than a sixteenth of the internet. A list that wide is not a list of bad networks, and loading it would cut this server off from much of the world", covered>>20)
+		}
 	}
 	if len(merged) > maxListEntries {
 		return nil, fmt.Errorf("the list holds %d networks; more than %d is too many to load as one set", len(merged), maxListEntries)
@@ -317,6 +356,9 @@ func buildBlocklist(req BlocklistRequest, kind, client string) (BlocklistSpec, e
 		u, err := ParseFeedURL(url)
 		if err != nil {
 			return bl, err
+		}
+		if !strings.HasPrefix(u, "https://") {
+			return bl, errors.New("a feed is fetched over https; an http address could be answered by anyone on the way with a list that drops your own networks")
 		}
 		bl.URL = u
 	default:
@@ -478,6 +520,7 @@ func (s *Service) DeleteBlocklist(ctx context.Context, id int, client string) er
 	})
 	if err == nil {
 		_ = os.Remove(blocklistFile(filepath.Join(s.paths.Dir, "lists"), id)) // a cache of a list that no longer exists
+		forgetBlocklist(filepath.Join(s.paths.Dir, "lists"), id)
 	}
 	return err
 }
