@@ -6732,3 +6732,111 @@ export type NetworkOverview = {
   }
   findings: NetworkFinding[]
 }
+
+/** What a change to a device the dashboard did not make says about the next boot. */
+export type NetworkLinkChange = { persisted: boolean; note?: string }
+
+export type NetworkNamespace = {
+  name: string
+  kind: "named" | "container"
+  id?: number
+  managed: boolean
+  image?: string
+  pid?: number
+  devices: { name: string; state: string; mtu: number; mac?: string; addresses: string[] }[]
+}
+
+export type NetworkRouteOwner =
+  | "kernel"
+  | "dhcp"
+  | "tailscale"
+  | "docker"
+  | "wireguard"
+  | "just-dashboard"
+  | "system"
+
+export type NetworkRoute = {
+  /** Zero unless the dashboard made it. */
+  id: number
+  family: "inet" | "inet6"
+  /** "default" for either family's default route. */
+  destination: string
+  type: string
+  gateway?: string
+  device?: string
+  protocol: string
+  scope?: string
+  metric: number
+  source?: string
+  flags: string[]
+  nexthops: { gateway?: string; device?: string; weight?: number }[]
+  owner: NetworkRouteOwner
+  managed: boolean
+  guard?: string
+}
+
+export type NetworkRule = {
+  id: number
+  family: "inet" | "inet6"
+  priority: number
+  from?: string
+  to?: string
+  iif?: string
+  oif?: string
+  fwmark?: string
+  action: "lookup" | "blackhole" | "unreachable" | "prohibit" | "goto"
+  table?: number
+  tableName?: string
+  owner: "system" | "tailscale" | "just-dashboard"
+  managed: boolean
+  guard?: string
+}
+
+export type ForwardingFamily = {
+  available: boolean
+  enabled: boolean
+  /** The dashboard's boot file sets it. */
+  persisted: boolean
+  /** What stops working if it is turned off. */
+  neededBy: string[]
+  guard?: string
+}
+
+export type NetworkForwarding = { ipv4: ForwardingFamily; ipv6: ForwardingFamily }
+
+export type NetworkRouting = {
+  /** Main first, then by id. */
+  tables: { id: number; name: string; routes: NetworkRoute[] }[]
+  /** By priority: the order the kernel asks them in. */
+  rules: NetworkRule[]
+  clientPath: NetworkPath
+  /** The local table's entries, which are the kernel's bookkeeping and not drawn. */
+  hiddenLocal: number
+  rulePriorities: { min: number; max: number }
+  forwarding: NetworkForwarding
+}
+
+export type BGPView = {
+  installed: boolean
+  running: boolean
+  error?: string
+  families: {
+    name: string
+    routerId: string
+    localAs: number
+    peers: {
+      address: string
+      hostname?: string
+      remoteAs: number
+      state: string
+      uptime?: string
+      uptimeSeconds: number
+      prefixesReceived: number
+      prefixesSent: number
+      messagesReceived: number
+      messagesSent: number
+      connectionsDropped: number
+      description?: string
+    }[]
+  }[]
+}
