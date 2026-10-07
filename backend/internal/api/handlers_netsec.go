@@ -180,7 +180,7 @@ func (s *Server) handleFirewallAddRule(w http.ResponseWriter, r *http.Request) e
 	}
 	// The caller's own address is handed to the firewall layer so it can
 	// refuse a rule that would sever this very connection.
-	out, err := s.modules.netsec.AddRule(r.Context(), req, httpx.ClientIP(r))
+	out, err := s.modules.netsec.AddRule(r.Context(), req, s.networkClient(r))
 	if err != nil {
 		if errors.Is(err, netsec.ErrLockout) {
 			httpx.SetAudit(r, "firewall.rule.add", req.Port, map[string]any{"result": "refused_lockout"})
@@ -215,7 +215,7 @@ func (s *Server) handleFirewallReplaceRule(w http.ResponseWriter, r *http.Reques
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	out, err := s.modules.netsec.ReplaceRule(r.Context(), number, req, httpx.ClientIP(r))
+	out, err := s.modules.netsec.ReplaceRule(r.Context(), number, req, s.networkClient(r))
 	if err != nil {
 		if errors.Is(err, netsec.ErrLockout) {
 			httpx.SetAudit(r, "firewall.rule.replace", strconv.Itoa(number),
@@ -301,7 +301,7 @@ func (s *Server) handleFail2banBan(w http.ResponseWriter, r *http.Request) error
 	// The caller's own address goes down with the request for the reason it
 	// does on the firewall route: a ban is a drop rule, and banning yourself
 	// ends this session and every future one from here.
-	out, err := s.modules.netsec.Ban(r.Context(), jail, req.IP, httpx.ClientIP(r))
+	out, err := s.modules.netsec.Ban(r.Context(), jail, req.IP, s.networkClient(r))
 	if err != nil {
 		if errors.Is(err, netsec.ErrLockout) {
 			httpx.SetAudit(r, "fail2ban.ban", jail, map[string]any{"result": "refused_lockout"})

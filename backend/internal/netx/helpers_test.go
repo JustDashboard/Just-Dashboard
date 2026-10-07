@@ -33,7 +33,10 @@ type reply struct {
 func record(t *testing.T, missing ...string) *recorder {
 	t.Helper()
 	rec := &recorder{t: t, stdin: map[string][]byte{}}
-	prevRun, prevStdin, prevHas := run, runStdin, has
+	prevRun, prevStdin, prevHas, prevAnchors := run, runStdin, has, anchorPaths
+	// The anchors are their own test's; everywhere else a host has none, so
+	// a transcript about a bridge is not also a transcript about 1.1.1.1.
+	anchorPaths = func(context.Context) []anchorPath { return nil }
 	run = func(ctx context.Context, name string, args ...string) (string, error) {
 		return rec.answer(nil, name, args...)
 	}
@@ -45,7 +48,7 @@ func record(t *testing.T, missing ...string) *recorder {
 		absent[m] = true
 	}
 	has = func(name string) bool { return !absent[name] }
-	t.Cleanup(func() { run, runStdin, has = prevRun, prevStdin, prevHas })
+	t.Cleanup(func() { run, runStdin, has, anchorPaths = prevRun, prevStdin, prevHas, prevAnchors })
 	return rec
 }
 

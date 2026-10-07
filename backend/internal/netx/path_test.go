@@ -2,6 +2,7 @@ package netx
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
@@ -77,5 +78,47 @@ func TestMergePrefixesDropsWhatAnotherHolds(t *testing.T) {
 	}
 	if s := prefixList(got[:2]); s != "10.0.0.0/8, 192.0.2.7" {
 		t.Fatalf("set elements = %q", s)
+	}
+}
+
+// readAnchors is the real anchor reader, kept before record() stubs it.
+var readAnchors = anchorPaths
+
+func TestVerifyPathRefusesMovingThisServersOwnWayOut(t *testing.T) {
+	rec := record(t)
+	anchorPaths = readAnchors
+	rec.on("ip -j route get 1.1.1.1 mark 0x80000", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
+		on("ip -j route get 1.1.1.1", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
+		fail("ip -j -6 route get", "RTNETLINK answers: Network is unreachable").
+		on("ip -j route get 100.110.34.9", `[{"dst":"100.110.34.9","dev":"tailscale0"}]`)
+	before, err := clientPath(context.Background(), "100.110.34.9")
+	if err != nil || len(before.anchors) != 2 {
+		t.Fatalf("anchors = %+v, %v", before.anchors, err)
+	}
+	// Two half-default blackholes leave the tailnet address on tailscale0 but
+	// take Tailscale's own packets nowhere.
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "ip -j route get 1.1.1.1", err: fmt.Errorf("RTNETLINK answers: No route to host")}}, rec.replies...)
+	rec.mu.Unlock()
+	err = verifyPath(before)(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no route to the internet") {
+		t.Fatalf("a lost way out must be refused: %v", err)
+	}
+}
+
+func TestLoopbackClientsStillProtectTheWayOut(t *testing.T) {
+	rec := record(t)
+	anchorPaths = readAnchors
+	rec.on("ip -j route get 1.1.1.1", `[{"dst":"1.1.1.1","gateway":"203.0.113.1","dev":"eth0"}]`).
+		fail("ip -j -6 route get", "unreachable")
+	before, _ := clientPath(context.Background(), "127.0.0.1")
+	if !before.Local || len(before.anchors) == 0 {
+		t.Fatalf("path = %+v", before)
+	}
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "ip -j route get 1.1.1.1", out: `[{"dst":"1.1.1.1","gateway":"10.9.0.1","dev":"wg0"}]`}}, rec.replies...)
+	rec.mu.Unlock()
+	if err := verifyPath(before)(context.Background()); err == nil || !strings.Contains(err.Error(), "through wg0") {
+		t.Fatalf("a moved way out must be refused for a local client too: %v", err)
 	}
 }

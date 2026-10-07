@@ -59,7 +59,7 @@ type routingResponse struct {
 func (s *Server) handleNetworkRouting(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	view, err := s.modules.network.Routing(ctx, httpx.ClientIP(r))
+	view, err := s.modules.network.Routing(ctx, s.networkClient(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -89,7 +89,7 @@ func (s *Server) handleNetworkRouteAdd(w http.ResponseWriter, r *http.Request) e
 	httpx.SetAudit(r, "network.route.add", req.Destination, req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	route, err := s.modules.network.AddRoute(ctx, req, httpx.ClientIP(r), actor(r))
+	route, err := s.modules.network.AddRoute(ctx, req, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -105,7 +105,7 @@ func (s *Server) handleNetworkRouteDelete(w http.ResponseWriter, r *http.Request
 	httpx.SetAudit(r, "network.route.delete", strconv.Itoa(id), nil)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if err := s.modules.network.DeleteRoute(ctx, id, httpx.ClientIP(r), actor(r)); err != nil {
+	if err := s.modules.network.DeleteRoute(ctx, id, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
@@ -120,7 +120,7 @@ func (s *Server) handleNetworkRuleAdd(w http.ResponseWriter, r *http.Request) er
 	httpx.SetAudit(r, "network.rule.add", strconv.Itoa(req.Priority), req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	rule, err := s.modules.network.AddRule(ctx, req, httpx.ClientIP(r), actor(r))
+	rule, err := s.modules.network.AddRule(ctx, req, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -136,7 +136,7 @@ func (s *Server) handleNetworkRuleDelete(w http.ResponseWriter, r *http.Request)
 	httpx.SetAudit(r, "network.rule.delete", strconv.Itoa(id), nil)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if err := s.modules.network.DeleteRule(ctx, id, httpx.ClientIP(r), actor(r)); err != nil {
+	if err := s.modules.network.DeleteRule(ctx, id, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)

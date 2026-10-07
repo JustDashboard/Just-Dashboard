@@ -55,7 +55,7 @@ func (s *Server) handleNetworkNamespaceCreate(w http.ResponseWriter, r *http.Req
 	httpx.SetAudit(r, "network.namespace.create", req.Name, req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	ns, err := s.modules.network.CreateNamespace(ctx, req, httpx.ClientIP(r), actor(r))
+	ns, err := s.modules.network.CreateNamespace(ctx, req, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -68,7 +68,7 @@ func (s *Server) handleNetworkNamespaceDelete(w http.ResponseWriter, r *http.Req
 	httpx.SetAudit(r, "network.namespace.delete", name, nil)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if err := s.modules.network.DeleteNamespace(ctx, name, httpx.ClientIP(r), actor(r)); err != nil {
+	if err := s.modules.network.DeleteNamespace(ctx, name, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
@@ -83,7 +83,7 @@ func (s *Server) handleNetworkLinkCreate(w http.ResponseWriter, r *http.Request)
 	httpx.SetAudit(r, "network.link.create", req.Name, req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	link, err := s.modules.network.CreateLink(ctx, req, httpx.ClientIP(r), actor(r))
+	link, err := s.modules.network.CreateLink(ctx, req, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -96,7 +96,7 @@ func (s *Server) handleNetworkLinkDelete(w http.ResponseWriter, r *http.Request)
 	httpx.SetAudit(r, "network.link.delete", name, nil)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if err := s.modules.network.DeleteLink(ctx, name, httpx.ClientIP(r), actor(r)); err != nil {
+	if err := s.modules.network.DeleteLink(ctx, name, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
@@ -120,7 +120,7 @@ func (s *Server) setLinkState(w http.ResponseWriter, r *http.Request, up bool) e
 	httpx.SetAudit(r, action, name, nil)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	change, err := s.modules.network.SetLinkState(ctx, name, up, httpx.ClientIP(r), actor(r))
+	change, err := s.modules.network.SetLinkState(ctx, name, up, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -141,7 +141,7 @@ func (s *Server) handleNetworkLinkMTU(w http.ResponseWriter, r *http.Request) er
 	httpx.SetAudit(r, "network.link.mtu", name, req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	change, err := s.modules.network.SetLinkMTU(ctx, name, req.MTU, httpx.ClientIP(r), actor(r))
+	change, err := s.modules.network.SetLinkMTU(ctx, name, req.MTU, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -163,7 +163,7 @@ func (s *Server) handleNetworkLinkMaster(w http.ResponseWriter, r *http.Request)
 	httpx.SetAudit(r, "network.link.master", name, req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	change, err := s.modules.network.SetLinkMaster(ctx, name, req.Master, httpx.ClientIP(r), actor(r))
+	change, err := s.modules.network.SetLinkMaster(ctx, name, req.Master, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -184,7 +184,7 @@ func (s *Server) handleNetworkAddressAdd(w http.ResponseWriter, r *http.Request)
 	httpx.SetAudit(r, "network.address.add", name, req)
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	change, err := s.modules.network.AddAddress(ctx, name, req.CIDR, httpx.ClientIP(r), actor(r))
+	change, err := s.modules.network.AddAddress(ctx, name, req.CIDR, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -204,7 +204,7 @@ func (s *Server) handleNetworkAddressRemove(w http.ResponseWriter, r *http.Reque
 	httpx.SetAudit(r, "network.address.remove", name, map[string]string{"cidr": cidr})
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	if _, err := s.modules.network.RemoveAddress(ctx, name, cidr, httpx.ClientIP(r), actor(r)); err != nil {
+	if _, err := s.modules.network.RemoveAddress(ctx, name, cidr, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)

@@ -106,7 +106,7 @@ type overviewMade struct {
 func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	client := httpx.ClientIP(r)
+	client := s.networkClient(r)
 	out := networkOverview{
 		Links: []netx.Link{}, DockerNetworks: []overviewDockerNet{},
 		PublicAddresses: []string{}, Defaults: []netx.DefaultRoute{},

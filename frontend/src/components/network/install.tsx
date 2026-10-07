@@ -7,7 +7,7 @@ import type { Job } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState } from "@/components/state"
 import { JobConsole, useJobConsole } from "@/components/job-console"
-import { ProductLogos } from "@/components/product-logo"
+import { ProductLogos, hasProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -24,12 +24,16 @@ import { Button } from "@/components/ui/button"
 export function InstallHandoff({
   pkg,
   products,
+  icon,
   title,
   description,
   onInstalled,
 }: {
   pkg: string
+  /** The tool drawn as itself, where the logo collection has it. */
   products: string[]
+  /** The glyph for a tool no logo names; used when `products` draws nothing. */
+  icon?: React.ComponentType<{ className?: string }>
   title: string
   description: React.ReactNode
   onInstalled: () => void
@@ -51,7 +55,8 @@ export function InstallHandoff({
     <div className="flex min-w-0 flex-col gap-3">
       <EmptyState
         title={title}
-        mark={<ProductLogos ids={products} />}
+        icon={icon}
+        mark={products.some(hasProductLogo) ? <ProductLogos ids={products} /> : undefined}
         description={description}
         action={
           can("system.admin") ? (

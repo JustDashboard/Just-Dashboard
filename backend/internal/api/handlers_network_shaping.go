@@ -34,7 +34,7 @@ func (s *Server) mountNetworkShapingRoutes(r chi.Router) {
 func (s *Server) handleNetworkShaping(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	v, err := s.modules.network.Shaping(ctx, httpx.ClientIP(r))
+	v, err := s.modules.network.Shaping(ctx, s.networkClient(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -50,7 +50,7 @@ func (s *Server) handleShapingSet(w http.ResponseWriter, r *http.Request) error 
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	client := httpx.ClientIP(r)
+	client := s.networkClient(r)
 	if err := s.modules.network.SetShaping(ctx, device, req, client, actor(r)); err != nil {
 		auditChange(r, "network.shaping.set", device, req, err)
 		return mapNetworkError(err)
@@ -96,7 +96,7 @@ func (s *Server) handleShapingBBR(w http.ResponseWriter, r *http.Request) error 
 		return mapNetworkError(err)
 	}
 	httpx.SetAudit(r, "network.shaping.bbr", "bbr", req)
-	view, err := s.modules.network.Shaping(ctx, httpx.ClientIP(r))
+	view, err := s.modules.network.Shaping(ctx, s.networkClient(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}

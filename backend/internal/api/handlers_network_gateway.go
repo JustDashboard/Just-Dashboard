@@ -150,7 +150,7 @@ func (s *Server) handleNetworkGateway(w http.ResponseWriter, r *http.Request) er
 func (s *Server) handleNetworkProtection(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	v, err := s.modules.network.Protection(ctx, httpx.ClientIP(r))
+	v, err := s.modules.network.Protection(ctx, s.networkClient(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -178,10 +178,10 @@ func (s *Server) handleForwardSave(w http.ResponseWriter, r *http.Request) error
 	defer cancel()
 	action, v := "network.forward.add", netx.ForwardView{}
 	if id == 0 {
-		v, err = s.modules.network.AddForward(ctx, req, httpx.ClientIP(r), actor(r), s.protectedPorts(r))
+		v, err = s.modules.network.AddForward(ctx, req, s.networkClient(r), actor(r), s.protectedPorts(r))
 	} else {
 		action = "network.forward.update"
-		v, err = s.modules.network.UpdateForward(ctx, id, req, httpx.ClientIP(r), actor(r), s.protectedPorts(r))
+		v, err = s.modules.network.UpdateForward(ctx, id, req, s.networkClient(r), actor(r), s.protectedPorts(r))
 	}
 	if err != nil {
 		auditChange(r, action, req.Name, req, err)
@@ -276,10 +276,10 @@ func (s *Server) handleLimitSave(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	action, v := "network.limit.add", netx.LimitView{}
 	if id == 0 {
-		v, err = s.modules.network.AddLimit(ctx, req, httpx.ClientIP(r), actor(r))
+		v, err = s.modules.network.AddLimit(ctx, req, s.networkClient(r), actor(r))
 	} else {
 		action = "network.limit.update"
-		v, err = s.modules.network.UpdateLimit(ctx, id, req, httpx.ClientIP(r), actor(r))
+		v, err = s.modules.network.UpdateLimit(ctx, id, req, s.networkClient(r), actor(r))
 	}
 	if err != nil {
 		auditChange(r, action, req.Name, req, err)
@@ -327,10 +327,10 @@ func (s *Server) handleBlocklistSave(w http.ResponseWriter, r *http.Request) err
 	defer cancel()
 	action, v := "network.blocklist.add", netx.BlocklistView{}
 	if id == 0 {
-		v, err = s.modules.network.AddBlocklist(ctx, req, httpx.ClientIP(r), actor(r))
+		v, err = s.modules.network.AddBlocklist(ctx, req, s.networkClient(r), actor(r))
 	} else {
 		action = "network.blocklist.update"
-		v, err = s.modules.network.UpdateBlocklist(ctx, id, req, httpx.ClientIP(r), actor(r))
+		v, err = s.modules.network.UpdateBlocklist(ctx, id, req, s.networkClient(r), actor(r))
 	}
 	if err != nil {
 		auditChange(r, action, req.Name, req, err)
@@ -352,7 +352,7 @@ func (s *Server) handleBlocklistRefresh(w http.ResponseWriter, r *http.Request) 
 	if err := s.modules.network.RefreshBlocklist(ctx, id); err != nil {
 		return mapGatewayError(err)
 	}
-	v, err := s.modules.network.Blocklist(ctx, id, httpx.ClientIP(r))
+	v, err := s.modules.network.Blocklist(ctx, id, s.networkClient(r))
 	if err != nil {
 		return mapGatewayError(err)
 	}
@@ -368,7 +368,7 @@ func (s *Server) handleBlocklistDelete(w http.ResponseWriter, r *http.Request) e
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	if err := s.modules.network.DeleteBlocklist(ctx, id, httpx.ClientIP(r)); err != nil {
+	if err := s.modules.network.DeleteBlocklist(ctx, id, s.networkClient(r)); err != nil {
 		return mapGatewayError(err)
 	}
 	httpx.SetAudit(r, "network.blocklist.delete", strconv.Itoa(id), nil)
@@ -429,7 +429,7 @@ func (s *Server) handleTrustedRemove(w http.ResponseWriter, r *http.Request) err
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	if err := s.modules.network.RemoveTrusted(ctx, address, httpx.ClientIP(r)); err != nil {
+	if err := s.modules.network.RemoveTrusted(ctx, address, s.networkClient(r)); err != nil {
 		auditChange(r, "network.trusted.remove", address, nil, err)
 		return mapGatewayError(err)
 	}

@@ -59,7 +59,7 @@ type vpnView struct {
 func (s *Server) handleVPN(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	client := httpx.ClientIP(r)
+	client := s.networkClient(r)
 	var out vpnView
 	// Three independent reads of the host's own tools, each ending when its
 	// command does; the page waits for the slowest rather than the sum.
@@ -142,7 +142,7 @@ func (s *Server) handleWireGuardCreate(w http.ResponseWriter, r *http.Request) e
 	httpx.JSON(w, http.StatusOK, wgCreateResponse{
 		Interface: res.Interface,
 		Warnings:  res.Warnings,
-		Firewall:  s.openWireGuardPort(ctx, res.Interface, httpx.ClientIP(r)),
+		Firewall:  s.openWireGuardPort(ctx, res.Interface, s.networkClient(r)),
 	})
 	return nil
 }
@@ -189,7 +189,7 @@ func (s *Server) handleWireGuardUp(w http.ResponseWriter, r *http.Request) error
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.up", iface, nil)
-	if err := s.modules.network.SetWireGuardUp(ctx, iface, true, httpx.ClientIP(r)); err != nil {
+	if err := s.modules.network.SetWireGuardUp(ctx, iface, true, s.networkClient(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	return s.writeWireGuardInterface(ctx, w, iface)
@@ -200,7 +200,7 @@ func (s *Server) handleWireGuardDown(w http.ResponseWriter, r *http.Request) err
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.down", iface, nil)
-	if err := s.modules.network.SetWireGuardUp(ctx, iface, false, httpx.ClientIP(r)); err != nil {
+	if err := s.modules.network.SetWireGuardUp(ctx, iface, false, s.networkClient(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	return s.writeWireGuardInterface(ctx, w, iface)
@@ -247,7 +247,7 @@ func (s *Server) handleWireGuardRemove(w http.ResponseWriter, r *http.Request) e
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.remove", iface, nil)
-	if err := s.modules.network.RemoveWireGuard(ctx, iface, httpx.ClientIP(r)); err != nil {
+	if err := s.modules.network.RemoveWireGuard(ctx, iface, s.networkClient(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
@@ -262,7 +262,7 @@ func (s *Server) handleWireGuardPeerAdd(w http.ResponseWriter, r *http.Request) 
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	res, err := s.modules.network.AddWireGuardPeer(ctx, iface, req, httpx.ClientIP(r), actor(r))
+	res, err := s.modules.network.AddWireGuardPeer(ctx, iface, req, s.networkClient(r), actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -332,7 +332,7 @@ func (s *Server) handleWireGuardPeerRemove(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.peer.remove", iface+"/"+strconv.Itoa(id), nil)
-	if err := s.modules.network.RemoveWireGuardPeer(ctx, iface, id, httpx.ClientIP(r)); err != nil {
+	if err := s.modules.network.RemoveWireGuardPeer(ctx, iface, id, s.networkClient(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
@@ -354,7 +354,7 @@ func (s *Server) handleTailscaleSet(w http.ResponseWriter, r *http.Request) erro
 		detail["advertiseRoutes"] = *req.AdvertiseRoutes
 	}
 	httpx.SetAudit(r, "network.vpn.tailscale.set", "", detail)
-	res, err := s.modules.network.SetTailscale(ctx, req, httpx.ClientIP(r))
+	res, err := s.modules.network.SetTailscale(ctx, req, s.networkClient(r))
 	if errors.Is(err, netx.ErrForwardingOff) {
 		return httpx.Err(http.StatusConflict, "forwarding_off",
 			err.Error()+". Turn IP forwarding on from the Routing page, then try again.")

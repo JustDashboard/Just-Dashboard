@@ -84,7 +84,8 @@ export function SuricataPanel() {
     return (
       <InstallHandoff
         pkg="suricata"
-        products={["suricata"]}
+        products={[]}
+        icon={Bug}
         title="Suricata is not installed"
         description="An intrusion detection system that inspects packets against signatures, so it sees scans and exploit attempts that no service logs. In IDS mode it only reads and raises alerts; in IPS mode (NFQUEUE) it can also drop. Which one runs is set in Suricata's own configuration, not here."
         onInstalled={refresh}

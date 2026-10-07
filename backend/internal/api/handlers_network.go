@@ -64,7 +64,7 @@ func (s *Server) mountNetworkRoutes(r chi.Router) {
 func (s *Server) handleNetworkLinks(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	links, err := s.modules.network.ReadLinks(ctx, s.networkInventory(ctx), httpx.ClientIP(r))
+	links, err := s.modules.network.ReadLinks(ctx, s.networkInventory(ctx), s.networkClient(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}
@@ -209,6 +209,13 @@ func mapNetworkError(err error) error {
 		return httpx.Err(http.StatusGatewayTimeout, "timeout", "the host did not answer in time").Retry()
 	}
 	return httpx.Wrap(http.StatusBadRequest, "bad_request", err)
+}
+
+// networkClient is the address the network guards protect for a request
+// (netx.OperatorAddress): the browser's own, or the SSH session's behind a
+// tunnel to loopback, which a route or a blocklist can cut as surely.
+func (s *Server) networkClient(r *http.Request) string {
+	return s.modules.network.OperatorAddress(r.Context(), httpx.ClientIP(r))
 }
 
 // allowlistStrings renders the allowlist for modules that take it as text.

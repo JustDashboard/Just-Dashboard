@@ -21,9 +21,23 @@ type Path struct {
 	Device  string `json:"device,omitempty"`
 	Gateway string `json:"gateway,omitempty"`
 	Source  string `json:"source,omitempty"`
-	// Local is a client on this machine itself (an SSH tunnel to loopback),
-	// whose path no network change can take away.
+	// Local is a client on this machine itself (a local process, or an SSH
+	// tunnel whose session could not be found), whose path no network change
+	// can take away.
 	Local bool `json:"local,omitempty"`
+	// anchors are how this server itself reaches the internet, read with
+	// the client's path: every guard that compares the one compares the
+	// other, because the operator's way in rides on them too — tailscaled's
+	// own packets, a WireGuard tunnel's endpoint, the SSH session behind a
+	// tunnel to loopback.
+	anchors []anchorPath
+}
+
+// anchorPath is the kernel's answer for one fixed address, as plainly and as
+// tailscaled's marked packets would ask it.
+type anchorPath struct {
+	label string
+	path  Path
 }
 
 // routeGet is one entry of `ip -j route get`.
@@ -50,9 +64,9 @@ func (s *Service) ClientPath(ctx context.Context, client string) (Path, error) {
 func clientPath(ctx context.Context, client string) (Path, error) {
 	addr, err := ParseAddr(client)
 	if err != nil {
-		return Path{}, nil
+		return Path{anchors: anchorPaths(ctx)}, nil
 	}
-	p := Path{Address: addr.String()}
+	p := Path{Address: addr.String(), anchors: anchorPaths(ctx)}
 	if addr.IsLoopback() {
 		p.Local, p.Device = true, "lo"
 		return p, nil
@@ -91,9 +105,12 @@ func samePath(before, after Path) bool {
 }
 
 // verifyPath is the verify half of a route or rule change: resolve the client
-// again and refuse what moved it.
+// and the anchors again and refuse what moved either.
 func verifyPath(before Path) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
+		if err := verifyAnchors(ctx, before.anchors); err != nil {
+			return err
+		}
 		if before.Address == "" || before.Local {
 			return nil
 		}
@@ -107,6 +124,62 @@ func verifyPath(before Path) func(ctx context.Context) error {
 		}
 		return nil
 	}
+}
+
+// The addresses this server's own way out is read against: one public
+// resolver per family, never contacted — `ip route get` only asks the kernel.
+// Tailscale marks its own packets 0x80000 and looks them up in the main table
+// past its rules, so a route that moves them takes the tailnet down while the
+// browser's tailnet address still resolves to tailscale0.
+var anchorTargets = []struct {
+	label string
+	args  []string
+}{
+	{"the internet", []string{"-j", "route", "get", "1.1.1.1"}},
+	{"the internet for Tailscale's own packets", []string{"-j", "route", "get", "1.1.1.1", "mark", "0x80000"}},
+	{"the internet over IPv6", []string{"-j", "-6", "route", "get", "2606:4700:4700::1111"}},
+}
+
+// anchorPaths reads every anchor that has a route now; a family with no
+// default route has none and is not compared. A variable so the recorder can
+// leave it out of tests about something else.
+var anchorPaths = func(ctx context.Context) []anchorPath {
+	var out []anchorPath
+	for _, a := range anchorTargets {
+		raw, err := run(ctx, "ip", a.args...)
+		if err != nil {
+			continue
+		}
+		p, err := parseRouteGet(raw, Path{Address: a.args[len(a.args)-1]})
+		if err != nil {
+			continue
+		}
+		out = append(out, anchorPath{label: a.label, path: p})
+	}
+	return out
+}
+
+// verifyAnchors refuses a change that moved how this server reaches the
+// internet, or left it with no way at all.
+func verifyAnchors(ctx context.Context, before []anchorPath) error {
+	if len(before) == 0 {
+		return nil
+	}
+	now := map[string]Path{}
+	for _, a := range anchorPaths(ctx) {
+		now[a.label] = a.path
+	}
+	for _, a := range before {
+		after, ok := now[a.label]
+		if !ok {
+			return guarded("this would leave this server with no route to %s, which your connection and every outbound one ride on, so it was put back", a.label)
+		}
+		if !samePath(a.path, after) {
+			return guarded("this would move how this server reaches %s (%s instead of %s), which your connection and every outbound one ride on, so it was put back",
+				a.label, describePath(after), describePath(a.path))
+		}
+	}
+	return nil
 }
 
 func describePath(p Path) string {

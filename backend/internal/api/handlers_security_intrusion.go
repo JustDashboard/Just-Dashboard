@@ -71,7 +71,7 @@ func (s *Server) handleCrowdSecAdd(w http.ResponseWriter, r *http.Request) error
 	// The caller's own address goes down with the request for the reason it
 	// does on the fail2ban ban: a decision is a drop at the bouncer, and
 	// banning the address you are connected from ends this session.
-	out, err := s.modules.netsec.AddDecision(ctx, req.Value, req.Duration, req.Reason, httpx.ClientIP(r))
+	out, err := s.modules.netsec.AddDecision(ctx, req.Value, req.Duration, req.Reason, s.networkClient(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, netsec.ErrLockout):
