@@ -261,7 +261,9 @@ export function Services() {
           title={host?.hostname ?? "Services"}
           facts={
             <>
-              {host && (
+              {/* The host's facts arrive on their own read, and an install
+                  that cannot say its distribution still lists its services. */}
+              {host?.platform && (
                 <>
                   <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
                   <FactDot />
