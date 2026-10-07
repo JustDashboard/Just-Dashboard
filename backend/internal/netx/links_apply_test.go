@@ -350,7 +350,7 @@ func TestLinksCreateIsRolledBackWhenItShadowsTheClientPath(t *testing.T) {
 		Name: "jd-d0", Kind: "dummy", Addresses: []string{"100.110.0.0/16"}, Up: true,
 	}, rtClient, "ion")
 	g := rtGuarded(t, err)
-	if !strings.Contains(g.Reason, "your browser") {
+	if !strings.Contains(g.Reason, "your connection") {
 		t.Fatalf("reason = %q", g.Reason)
 	}
 	if got := rtMutations(rec); strings.Join(got, "|") != "ip -batch -|ip link del jd-d0" {

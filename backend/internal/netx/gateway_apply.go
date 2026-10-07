@@ -26,10 +26,10 @@ func (e *ForwardingRequiredError) Error() string {
 
 // gatewayForwardingOn reads the kernel's forwarding switch for a family.
 //
-// ensureForwarding, which another part of this package owns, turns the switch
-// on as part of the same change; until it is joined to this, an entry that
-// needs forwarding is refused while it is off, rather than writing a second
-// sysctl for it here and having two places own the setting.
+// The switch belongs to the Routing page (SetForwarding), which checks what
+// turning it on would do to this server's own IPv6 addresses; an entry that
+// needs forwarding is refused while it is off rather than flipping it here,
+// so there is one place that owns the setting and its guard.
 func gatewayForwardingOn(family string) bool {
 	path := "net/ipv4/ip_forward"
 	if family == "6" {

@@ -6761,13 +6761,7 @@ export type NetworkNamespace = {
 }
 
 export type NetworkRouteOwner =
-  | "kernel"
-  | "dhcp"
-  | "tailscale"
-  | "docker"
-  | "wireguard"
-  | "just-dashboard"
-  | "system"
+  "kernel" | "dhcp" | "tailscale" | "docker" | "wireguard" | "just-dashboard" | "system"
 
 export type NetworkRoute = {
   /** Zero unless the dashboard made it. */
@@ -7002,7 +6996,11 @@ export type HeadscaleView = {
   error?: string
 }
 
-export type VPNView = { wireguard: WireGuardView; tailscale: TailscaleView; headscale: HeadscaleView }
+export type VPNView = {
+  wireguard: WireGuardView
+  tailscale: TailscaleView
+  headscale: HeadscaleView
+}
 
 export type WGPeerCreated = {
   peer: WGPeer
@@ -7122,6 +7120,7 @@ export type DNSApplied = {
   via?: string
   millis?: number
   warning?: string
+  managed: DNSView["managed"] | null
 }
 
 export type HostRecords = {
@@ -7151,7 +7150,13 @@ export type ProcessTraffic = {
     txRate: number
     rxTotal: number
     txTotal: number
-    peers: { address: string; port: number; connections: number; rxBytes: number; txBytes: number }[]
+    peers: {
+      address: string
+      port: number
+      connections: number
+      rxBytes: number
+      txBytes: number
+    }[]
   }[]
 }
 
@@ -7390,7 +7395,11 @@ export type ProtectionView = {
   limits: ProtectionLimit[]
   blocklists: ProtectionBlocklist[]
   presets: { id: string; name: string; url: string; description: string }[]
-  trusted: { address: string; origin: "loopback" | "allowlist" | "you" | "kept"; removable: boolean }[]
+  trusted: {
+    address: string
+    origin: "loopback" | "allowlist" | "you" | "kept"
+    removable: boolean
+  }[]
   client: string
   clientTrusted: boolean
   settings: ProtectionSetting[]

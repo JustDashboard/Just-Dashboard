@@ -119,7 +119,7 @@ func verifyPath(before Path) func(ctx context.Context) error {
 			return err
 		}
 		if !samePath(before, after) {
-			return guarded("this would send the reply to your browser (%s) %s instead of %s, so it was put back",
+			return guarded("this would send the reply to your connection (%s) %s instead of %s, so it was put back",
 				before.Address, describePath(after), describePath(before))
 		}
 		return nil
