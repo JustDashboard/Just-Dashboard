@@ -1,0 +1,2443 @@
+{
+ "nftables": [
+  {
+   "metainfo": {
+    "version": "1.1.1",
+    "release_name": "Commodore Bullmoose #2",
+    "json_schema_version": 1
+   }
+  },
+  {
+   "table": {
+    "family": "inet",
+    "name": "jd_gateway",
+    "handle": 5
+   }
+  },
+  {
+   "chain": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "name": "pre",
+    "handle": 1,
+    "type": "filter",
+    "hook": "prerouting",
+    "prio": -300,
+    "policy": "accept"
+   }
+  },
+  {
+   "chain": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "name": "input",
+    "handle": 2,
+    "type": "filter",
+    "hook": "input",
+    "prio": -10,
+    "policy": "accept"
+   }
+  },
+  {
+   "chain": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "name": "forward",
+    "handle": 3,
+    "type": "filter",
+    "hook": "forward",
+    "prio": -10,
+    "policy": "accept"
+   }
+  },
+  {
+   "chain": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "name": "nat_pre",
+    "handle": 4,
+    "type": "nat",
+    "hook": "prerouting",
+    "prio": -110,
+    "policy": "accept"
+   }
+  },
+  {
+   "chain": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "name": "nat_post",
+    "handle": 5,
+    "type": "nat",
+    "hook": "postrouting",
+    "prio": 90,
+    "policy": "accept"
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "trusted4",
+    "table": "jd_gateway",
+    "type": "ipv4_addr",
+    "handle": 6,
+    "flags": [
+     "interval"
+    ],
+    "auto-merge": true,
+    "elem": [
+     {
+      "prefix": {
+       "addr": "100.64.0.0",
+       "len": 10
+      }
+     },
+     {
+      "prefix": {
+       "addr": "127.0.0.0",
+       "len": 8
+      }
+     },
+     "203.0.113.9"
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "trusted6",
+    "table": "jd_gateway",
+    "type": "ipv6_addr",
+    "handle": 7,
+    "flags": [
+     "interval"
+    ],
+    "auto-merge": true,
+    "elem": [
+     "::1"
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "bl_12_4",
+    "table": "jd_gateway",
+    "type": "ipv4_addr",
+    "handle": 8,
+    "flags": [
+     "interval"
+    ],
+    "auto-merge": true,
+    "elem": [
+     "198.51.100.7",
+     {
+      "prefix": {
+       "addr": "203.0.113.0",
+       "len": 24
+      }
+     }
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "bl_12_6",
+    "table": "jd_gateway",
+    "type": "ipv6_addr",
+    "handle": 9,
+    "flags": [
+     "interval"
+    ],
+    "auto-merge": true,
+    "elem": [
+     {
+      "prefix": {
+       "addr": "2001:db8:bad::",
+       "len": 48
+      }
+     }
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "bl_13_4",
+    "table": "jd_gateway",
+    "type": "ipv4_addr",
+    "handle": 10,
+    "flags": [
+     "interval"
+    ],
+    "auto-merge": true,
+    "elem": [
+     {
+      "prefix": {
+       "addr": "192.0.2.0",
+       "len": 24
+      }
+     },
+     {
+      "prefix": {
+       "addr": "198.18.0.0",
+       "len": 15
+      }
+     }
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "bl_13_6",
+    "table": "jd_gateway",
+    "type": "ipv6_addr",
+    "handle": 11,
+    "flags": [
+     "interval"
+    ],
+    "auto-merge": true,
+    "elem": [
+     {
+      "prefix": {
+       "addr": "2001:db8:1::",
+       "len": 48
+      }
+     }
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "conn_9_4",
+    "table": "jd_gateway",
+    "type": "ipv4_addr",
+    "handle": 12,
+    "size": 65535,
+    "flags": [
+     "dynamic"
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "conn_9_6",
+    "table": "jd_gateway",
+    "type": "ipv6_addr",
+    "handle": 13,
+    "size": 65535,
+    "flags": [
+     "dynamic"
+    ]
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "lim_9_4",
+    "table": "jd_gateway",
+    "type": "ipv4_addr",
+    "handle": 14,
+    "size": 65535,
+    "flags": [
+     "timeout",
+     "dynamic"
+    ],
+    "timeout": 60
+   }
+  },
+  {
+   "set": {
+    "family": "inet",
+    "name": "lim_9_6",
+    "table": "jd_gateway",
+    "type": "ipv6_addr",
+    "handle": 15,
+    "size": 65535,
+    "flags": [
+     "timeout",
+     "dynamic"
+    ],
+    "timeout": 60
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 16,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "iif"
+        }
+       },
+       "right": "lo"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 17,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": "@trusted4"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 18,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": "@trusted6"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 19,
+    "comment": "blocklist:12",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": "@bl_12_4"
+      }
+     },
+     {
+      "counter": {
+       "packets": 2,
+       "bytes": 120
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 20,
+    "comment": "blocklist:12",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": "@bl_12_6"
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 21,
+    "comment": "blocklist:13",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": "@bl_13_4"
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "pre",
+    "handle": 22,
+    "comment": "blocklist:13",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": "@bl_13_6"
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 23,
+    "expr": [
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": [
+        "established",
+        "related"
+       ]
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 24,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": "@trusted4"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 25,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": "@trusted6"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 26,
+    "comment": "limit:8",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": 22
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "limit": {
+       "rate": 10,
+       "burst": 5,
+       "per": "minute",
+       "inv": true
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "reject": {
+       "type": "tcp reset"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 27,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "add",
+       "elem": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "set": "@conn_9_4",
+       "stmt": [
+        {
+         "ct count": {
+          "val": 50,
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 1,
+       "bytes": 60
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 28,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "add",
+       "elem": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "set": "@conn_9_6",
+       "stmt": [
+        {
+         "ct count": {
+          "val": 50,
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 29,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "update",
+       "elem": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "set": "@lim_9_4",
+       "stmt": [
+        {
+         "limit": {
+          "rate": 10,
+          "burst": 20,
+          "per": "second",
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 30,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "update",
+       "elem": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "set": "@lim_9_6",
+       "stmt": [
+        {
+         "limit": {
+          "rate": 10,
+          "burst": 20,
+          "per": "second",
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 31,
+    "comment": "limit:10",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": 53
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "limit": {
+       "rate": 100,
+       "burst": 5,
+       "per": "second",
+       "inv": true
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "reject": {
+       "type": "tcp reset"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "input",
+    "handle": 32,
+    "comment": "limit:10",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "udp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": 53
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "limit": {
+       "rate": 100,
+       "burst": 5,
+       "per": "second",
+       "inv": true
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "reject": {
+       "type": "icmpx",
+       "expr": "port-unreachable"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 33,
+    "comment": "nat-mark:5",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "prefix": {
+         "addr": "10.8.0.0",
+         "len": 24
+        }
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "oifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 34,
+    "comment": "nat-mark:6",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "prefix": {
+         "addr": "10.9.0.0",
+         "len": 24
+        }
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "oifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 35,
+    "comment": "nat-mark:7",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "prefix": {
+         "addr": "fd00:9::",
+         "len": 64
+        }
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "oifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 36,
+    "expr": [
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": [
+        "established",
+        "related"
+       ]
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 37,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": "@trusted4"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 38,
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": "@trusted6"
+      }
+     },
+     {
+      "return": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 39,
+    "comment": "limit:8",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": 22
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "limit": {
+       "rate": 10,
+       "burst": 5,
+       "per": "minute",
+       "inv": true
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "reject": {
+       "type": "tcp reset"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 40,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "add",
+       "elem": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "set": "@conn_9_4",
+       "stmt": [
+        {
+         "ct count": {
+          "val": 50,
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 41,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "add",
+       "elem": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "set": "@conn_9_6",
+       "stmt": [
+        {
+         "ct count": {
+          "val": 50,
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 42,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "update",
+       "elem": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "set": "@lim_9_4",
+       "stmt": [
+        {
+         "limit": {
+          "rate": 10,
+          "burst": 20,
+          "per": "second",
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 43,
+    "comment": "limit:9",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": {
+        "range": [
+         8000,
+         8010
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "set": {
+       "op": "update",
+       "elem": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "set": "@lim_9_6",
+       "stmt": [
+        {
+         "limit": {
+          "rate": 10,
+          "burst": 20,
+          "per": "second",
+          "inv": true
+         }
+        }
+       ]
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "drop": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 44,
+    "comment": "limit:10",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "tcp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": 53
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "limit": {
+       "rate": 100,
+       "burst": 5,
+       "per": "second",
+       "inv": true
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "reject": {
+       "type": "tcp reset"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "forward",
+    "handle": 45,
+    "comment": "limit:10",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "l4proto"
+        }
+       },
+       "right": "udp"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "ct": {
+         "key": "proto-dst",
+         "dir": "original"
+        }
+       },
+       "right": 53
+      }
+     },
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "state"
+        }
+       },
+       "right": "new"
+      }
+     },
+     {
+      "limit": {
+       "rate": 100,
+       "burst": 5,
+       "per": "second",
+       "inv": true
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "reject": {
+       "type": "icmpx",
+       "expr": "port-unreachable"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_pre",
+    "handle": 47,
+    "comment": "forward:1",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "iifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "set": [
+         {
+          "prefix": {
+           "addr": "198.51.100.0",
+           "len": 24
+          }
+         },
+         "203.0.113.7"
+        ]
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "tcp",
+         "field": "dport"
+        }
+       },
+       "right": 8080
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "dnat": {
+       "family": "ip",
+       "addr": "10.0.0.5",
+       "port": 80
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_pre",
+    "handle": 48,
+    "comment": "forward:2",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "tcp",
+         "field": "dport"
+        }
+       },
+       "right": {
+        "range": [
+         27015,
+         27020
+        ]
+       }
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     },
+     {
+      "counter": {
+       "packets": 2,
+       "bytes": 120
+      }
+     },
+     {
+      "dnat": {
+       "family": "ip",
+       "addr": "172.17.0.2"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_pre",
+    "handle": 49,
+    "comment": "forward:2",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "udp",
+         "field": "dport"
+        }
+       },
+       "right": {
+        "range": [
+         27015,
+         27020
+        ]
+       }
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     },
+     {
+      "counter": {
+       "packets": 1,
+       "bytes": 60
+      }
+     },
+     {
+      "dnat": {
+       "family": "ip",
+       "addr": "172.17.0.2"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_pre",
+    "handle": 50,
+    "comment": "forward:3",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "tcp",
+         "field": "dport"
+        }
+       },
+       "right": 443
+      }
+     },
+     {
+      "mangle": {
+       "key": {
+        "ct": {
+         "key": "mark"
+        }
+       },
+       "value": {
+        "|": [
+         {
+          "&": [
+           {
+            "ct": {
+             "key": "mark"
+            }
+           },
+           1258291199
+          ]
+         },
+         1241513984
+        ]
+       }
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "dnat": {
+       "family": "ip6",
+       "addr": "2001:db8::5",
+       "port": 8443
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_post",
+    "handle": 51,
+    "comment": "forward-nat:1",
+    "expr": [
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "status"
+        }
+       },
+       "right": "dnat"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "&": [
+         {
+          "ct": {
+           "key": "mark"
+          }
+         },
+         4278190080
+        ]
+       },
+       "right": 1241513984
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "daddr"
+        }
+       },
+       "right": "10.0.0.5"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "tcp",
+         "field": "dport"
+        }
+       },
+       "right": 80
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "masquerade": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_post",
+    "handle": 52,
+    "comment": "forward-nat:3",
+    "expr": [
+     {
+      "match": {
+       "op": "in",
+       "left": {
+        "ct": {
+         "key": "status"
+        }
+       },
+       "right": "dnat"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "&": [
+         {
+          "ct": {
+           "key": "mark"
+          }
+         },
+         4278190080
+        ]
+       },
+       "right": 1241513984
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "daddr"
+        }
+       },
+       "right": "2001:db8::5"
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "tcp",
+         "field": "dport"
+        }
+       },
+       "right": 8443
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "masquerade": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_post",
+    "handle": 53,
+    "comment": "nat:5",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "prefix": {
+         "addr": "10.8.0.0",
+         "len": 24
+        }
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "oifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "counter": {
+       "packets": 7,
+       "bytes": 420
+      }
+     },
+     {
+      "masquerade": null
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_post",
+    "handle": 54,
+    "comment": "nat:6",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "prefix": {
+         "addr": "10.9.0.0",
+         "len": 24
+        }
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "oifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "snat": {
+       "family": "ip",
+       "addr": "203.0.113.20"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "rule": {
+    "family": "inet",
+    "table": "jd_gateway",
+    "chain": "nat_post",
+    "handle": 55,
+    "comment": "nat:7",
+    "expr": [
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "payload": {
+         "protocol": "ip6",
+         "field": "saddr"
+        }
+       },
+       "right": {
+        "prefix": {
+         "addr": "fd00:9::",
+         "len": 64
+        }
+       }
+      }
+     },
+     {
+      "match": {
+       "op": "==",
+       "left": {
+        "meta": {
+         "key": "oifname"
+        }
+       },
+       "right": "eth0"
+      }
+     },
+     {
+      "counter": {
+       "packets": 0,
+       "bytes": 0
+      }
+     },
+     {
+      "masquerade": null
+     }
+    ]
+   }
+  }
+ ]
+}

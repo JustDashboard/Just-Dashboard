@@ -37,6 +37,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -171,6 +172,9 @@ func New(opts Options) *Service {
 		log:           opts.Log,
 		trustedRanges: operatorRanges(opts.Allowlist),
 	}
+	// Gateway slice: the renderer reads a fetched blocklist's cache from here
+	// (gateway.go, gatewayListDir).
+	gatewayListDir = filepath.Join(opts.Paths.Dir, "lists")
 	s.sampler = newSampler(opts.DB, opts.Log, opts.SampleEvery, opts.Retention)
 	s.vpn = newVPNStore(opts.DB, opts.Seal, opts.Open)
 	s.flows = newFlowSampler()
