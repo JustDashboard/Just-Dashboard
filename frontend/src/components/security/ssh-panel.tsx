@@ -31,6 +31,7 @@ import {
 } from "@/components/security/log-section"
 import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status, StatusDot } from "@/components/status-dot"
+import { BASTION_PROFILE, JUMP_KEYS, JumpHost } from "@/components/security/bastion"
 import { SSHPicture } from "@/components/security/ssh-picture"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -176,13 +177,21 @@ export function SSHPanel({
     pending[setting.key] !== undefined && pending[setting.key] !== setting.value
   const setting = (key: string) => data.settings.find((s) => s.key === key)
 
+  // The jump host's directives are drawn in their own section, so the list
+  // below holds the rest — unless the server did not send them, in which case
+  // there is no section and nothing may go missing.
+  const jumpRows = JUMP_KEYS.map(setting).filter((s) => s !== undefined)
+  const jumpable = setting("allowtcpforwarding") !== undefined
+  const general = jumpable ? data.settings.filter((s) => !JUMP_KEYS.includes(s.key)) : data.settings
+  const generalInsecure = general.filter((s) => !s.secure).length
+  const generalEdited = general.filter(changed).length
   const noKeys = data.keyedAccounts.length === 0
   const shown =
     only === "attention"
-      ? data.settings.filter((s) => !s.secure || changed(s))
+      ? general.filter((s) => !s.secure || changed(s))
       : only === "edited"
-        ? data.settings.filter(changed)
-        : data.settings
+        ? general.filter(changed)
+        : general
   const draft = (key: string) => {
     const s = setting(key)
     return s ? valueOf(s) : undefined
@@ -347,23 +356,23 @@ export function SSHPanel({
           title="Settings"
           actions={
             <span className="numeric text-hint text-muted-foreground">
-              {data.settings.length} directives · staged here, applied together
+              {general.length} directives · staged here, applied together
             </span>
           }
         />
         <PanelToolbar>
           <ChipStrip aria-label="Which settings to show">
             <FilterChip selected={only === "all"} onClick={() => setOnly("all")}>
-              All <ChipCount>{data.settings.length}</ChipCount>
+              All <ChipCount>{general.length}</ChipCount>
             </FilterChip>
             <FilterChip selected={only === "attention"} onClick={() => setOnly("attention")}>
-              <StatusDot tone={insecure ? "warning" : "running"} />
-              Below recommendation <ChipCount>{insecure}</ChipCount>
+              <StatusDot tone={generalInsecure ? "warning" : "running"} />
+              Below recommendation <ChipCount>{generalInsecure}</ChipCount>
             </FilterChip>
-            {dirty && (
+            {generalEdited > 0 && (
               <FilterChip selected={only === "edited"} onClick={() => setOnly("edited")}>
                 <span style={{ color: "var(--git-modified)" }}>Edited</span>
-                <ChipCount>{Object.keys(changes).length}</ChipCount>
+                <ChipCount>{generalEdited}</ChipCount>
               </FilterChip>
             )}
           </ChipStrip>
@@ -423,6 +432,38 @@ export function SSHPanel({
           )}
         </PanelBody>
       </Panel>
+
+      {jumpable && (
+        <Panel plain>
+          <PanelHeader
+            title="Jump host"
+            actions={
+              <span className="numeric text-hint text-muted-foreground">
+                {plural(jumpRows.length, "directive")} · staged with the rest
+              </span>
+            }
+          />
+          <PanelBody flush>
+            <JumpHost
+              value={draft}
+              saved={setting("allowtcpforwarding")?.value}
+              edited={jumpRows.some(changed)}
+              port={data.ports[0] ?? "22"}
+              user={data.keyedAccounts[0]?.user ?? "user"}
+              onPreset={() => setPending((previous) => ({ ...previous, ...BASTION_PROFILE }))}
+              rows={jumpRows.map((s) => (
+                <SettingRow
+                  key={s.key}
+                  setting={s}
+                  value={valueOf(s)}
+                  changed={changed(s)}
+                  onChange={(value) => setPending((previous) => ({ ...previous, [s.key]: value }))}
+                />
+              ))}
+            />
+          </PanelBody>
+        </Panel>
+      )}
 
       <Panel plain>
         <PanelHeader
@@ -552,7 +593,6 @@ const SSH_GROUPS = [
       "logingracetime",
       "clientaliveinterval",
       "clientalivecountmax",
-      "maxsessions",
       "maxstartups",
     ],
   },
