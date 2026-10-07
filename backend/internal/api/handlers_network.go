@@ -195,7 +195,10 @@ func mapNetworkError(err error) error {
 		}
 		return e
 	case errors.As(err, &readOnly):
-		return httpx.Err(http.StatusNotImplemented, "network_read_only", readOnly.Reason)
+		// A 409 rather than the firewall's 501: the request was understood
+		// and this host's other software owns the thing, which is an expected
+		// answer and must not be logged as a server fault.
+		return httpx.Err(http.StatusConflict, "network_read_only", readOnly.Reason)
 	case errors.Is(err, netx.ErrNotManaged):
 		return httpx.Err(http.StatusConflict, "not_managed", err.Error())
 	case errors.Is(err, netx.ErrNotFound):

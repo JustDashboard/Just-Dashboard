@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -55,31 +53,19 @@ func DefaultRoutes(ctx context.Context) []DefaultRoute {
 	return out
 }
 
-// procSys is where kernel settings are read from; a variable for tests.
-var procSys = "/proc/sys"
-
-// readSysctl reads one kernel setting by its dotted key, empty when it does
-// not exist on this kernel.
-func readSysctl(key string) string {
-	b, err := os.ReadFile(filepath.Join(procSys, strings.ReplaceAll(key, ".", "/")))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-// ForwardingState is whether this machine routes packets that are not its own.
-type ForwardingState struct {
+// ForwardingSwitches is whether this machine routes packets that are not its
+// own, as two plain switches for the Overview; the Routing page reads the
+// fuller ForwardingView with what needs each.
+type ForwardingSwitches struct {
 	IPv4 bool `json:"ipv4"`
 	IPv6 bool `json:"ipv6"`
 }
 
 // CurrentForwarding reads the two forwarding switches.
-func CurrentForwarding() ForwardingState {
-	return ForwardingState{
-		IPv4: readSysctl("net.ipv4.ip_forward") == "1",
-		IPv6: readSysctl("net.ipv6.conf.all.forwarding") == "1",
-	}
+func CurrentForwarding() ForwardingSwitches {
+	v4, _ := readSysctl(sysctlForwardV4)
+	v6, _ := readSysctl(sysctlForwardV6)
+	return ForwardingSwitches{IPv4: v4 == "1", IPv6: v6 == "1"}
 }
 
 // Finding is one thing on the Overview's attention list: what was measured,
@@ -99,7 +85,7 @@ type OverviewInput struct {
 	Links       []Link
 	Spec        *Spec
 	Persistence Persistence
-	Forwarding  ForwardingState
+	Forwarding  ForwardingSwitches
 	// LinkHistoryErrors is each device's errors and drops over the last hour,
 	// from the recorded samples; a counter since boot cannot tell an old
 	// incident from a current one.
@@ -201,7 +187,7 @@ func OverviewFindings(in OverviewInput) []Finding {
 	if len(in.StalePeers) > 0 {
 		add(Finding{
 			ID: "vpn.stale", Level: "notice", Href: "/network/vpn",
-			Title:  fmt.Sprintf("%d WireGuard peer%s quiet for over a day", len(in.StalePeers), plural(len(in.StalePeers))),
+			Title:  fmt.Sprintf("%d WireGuard %s quiet for over a day", len(in.StalePeers), plural(len(in.StalePeers), "peer", "peers")),
 			Detail: strings.Join(in.StalePeers, ", "),
 		})
 	}
@@ -219,11 +205,4 @@ func OverviewFindings(in OverviewInput) []Finding {
 		out = []Finding{}
 	}
 	return out
-}
-
-func plural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }

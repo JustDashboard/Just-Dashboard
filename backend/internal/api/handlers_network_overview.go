@@ -22,15 +22,15 @@ type networkOverview struct {
 	Defaults []netx.DefaultRoute `json:"defaults"`
 	// PublicAddresses are the globally routable addresses on the uplinks:
 	// what the internet reaches this server at.
-	PublicAddresses []string             `json:"publicAddresses"`
-	Links           []netx.Link          `json:"links"`
-	DockerNetworks  []overviewDockerNet  `json:"dockerNetworks"`
-	Firewall        overviewFirewall     `json:"firewall"`
-	Connections     overviewConnections  `json:"connections"`
-	Forwarding      netx.ForwardingState `json:"forwarding"`
-	Persistence     netx.Persistence     `json:"persistence"`
-	Made            overviewMade         `json:"made"`
-	Findings        []netx.Finding       `json:"findings"`
+	PublicAddresses []string                `json:"publicAddresses"`
+	Links           []netx.Link             `json:"links"`
+	DockerNetworks  []overviewDockerNet     `json:"dockerNetworks"`
+	Firewall        overviewFirewall        `json:"firewall"`
+	Connections     overviewConnections     `json:"connections"`
+	Forwarding      netx.ForwardingSwitches `json:"forwarding"`
+	Persistence     netx.Persistence        `json:"persistence"`
+	Made            overviewMade            `json:"made"`
+	Findings        []netx.Finding          `json:"findings"`
 }
 
 // overviewDockerNet is a Docker network as the topology draws it: its bridge
