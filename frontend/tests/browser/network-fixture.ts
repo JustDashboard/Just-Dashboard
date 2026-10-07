@@ -24,7 +24,14 @@ export const admin = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -299,9 +306,25 @@ export const links: Link[] = [
   ...veth("veth6e4f828", 66193, "docker0", "postgres", "postgres:17-alpine", 120_000, 340_000),
   ...veth("veth7a16418", 66194, "docker0", "redis", "redis:7", 40_000, 22_000),
   ...veth("veth78bb67b", 66201, "br-93e5e9c9442b", "proxy", "caddy:2-alpine", 1_100_000, 2_100_000),
-  ...veth("vethd366621", 66202, "br-93e5e9c9442b", "website", "ghcr.io/acme/website:main", 80_000, 160_000),
+  ...veth(
+    "vethd366621",
+    66202,
+    "br-93e5e9c9442b",
+    "website",
+    "ghcr.io/acme/website:main",
+    80_000,
+    160_000,
+  ),
   ...veth("veth634b694", 66211, "br-b17d23d019f2", "n8n", "n8nio/n8n:1.94", 96_000, 54_000),
-  ...veth("vethc7e574f", 66212, "br-041b209e03b1", "uptime", "louislam/uptime-kuma:2.5.5", 8_400, 22_000),
+  ...veth(
+    "vethc7e574f",
+    66212,
+    "br-041b209e03b1",
+    "uptime",
+    "louislam/uptime-kuma:2.5.5",
+    8_400,
+    22_000,
+  ),
 ]
 
 function dockerBridge(
@@ -331,7 +354,8 @@ function dockerBridge(
       txRate: tx,
       dockerNetwork: network,
       managed: false,
-      guard: "Docker owns this device and recreates it as it needs; change it through the Docker pages.",
+      guard:
+        "Docker owns this device and recreates it as it needs; change it through the Docker pages.",
     },
   ]
 }
@@ -365,7 +389,8 @@ function veth(
       container,
       containerImage: image,
       managed: false,
-      guard: "Docker owns this device and recreates it as it needs; change it through the Docker pages.",
+      guard:
+        "Docker owns this device and recreates it as it needs; change it through the Docker pages.",
     },
   ]
 }
@@ -477,6 +502,85 @@ export function liveSeries(nowSeconds = Math.floor(Date.now() / 1000)) {
   return series
 }
 
+export const connections = {
+  total: 214,
+  listening: 27,
+  loopback: 61,
+  peers: [
+    {
+      address: "198.51.100.23",
+      count: 18,
+      established: 14,
+      ports: [443],
+      processes: ["caddy"],
+      private: false,
+      service: "HTTPS",
+    },
+    {
+      address: "203.0.113.77",
+      count: 9,
+      established: 6,
+      ports: [443, 80],
+      processes: ["caddy"],
+      private: false,
+      service: "HTTPS",
+    },
+    {
+      address: "192.0.2.145",
+      count: 4,
+      established: 1,
+      ports: [22],
+      processes: ["sshd"],
+      private: false,
+      service: "SSH",
+    },
+    {
+      address: "198.51.100.200",
+      count: 3,
+      established: 3,
+      ports: [51820],
+      processes: [],
+      private: false,
+      service: "WireGuard",
+    },
+    {
+      address: "100.110.34.9",
+      count: 12,
+      established: 12,
+      ports: [443, 8443],
+      processes: ["caddy"],
+      private: true,
+    },
+    {
+      address: "100.84.53.82",
+      count: 5,
+      established: 4,
+      ports: [5432],
+      processes: ["postgres"],
+      private: true,
+      service: "PostgreSQL",
+    },
+    {
+      address: "10.0.4.3",
+      count: 22,
+      established: 20,
+      ports: [5432],
+      processes: ["postgres"],
+      private: true,
+      service: "PostgreSQL",
+    },
+    {
+      address: "10.0.1.2",
+      count: 7,
+      established: 7,
+      ports: [6379],
+      processes: ["redis-server"],
+      private: true,
+      service: "Redis",
+    },
+  ],
+}
+
 export function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -514,6 +618,10 @@ export async function mockNetwork(
         return json(route, overview)
       case "/network/links":
         return json(route, links)
+      case "/connections":
+        return json(route, connections)
+      case "/ports/meta":
+        return json(route, { ephemeralRange: [32768, 60999] })
       case "/network/traffic/live": {
         const since = Number(url.searchParams.get("since") ?? 0)
         const series = liveSeries()

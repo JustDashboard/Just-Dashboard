@@ -61,6 +61,12 @@ export function linkGlyph(kind: string): Icon {
   return KIND_GLYPH[kind] ?? Connection
 }
 
+/** A device's kind as a bare glyph, for inside a `WireMark` or a line of text. */
+export function LinkGlyph({ kind, className }: { kind: string; className?: string }) {
+  const Glyph = KIND_GLYPH[kind] ?? Connection
+  return <Glyph aria-hidden className={className} />
+}
+
 /** A device as what made it, else as its kind, on the tile every product takes. */
 export function LinkMark({
   link,

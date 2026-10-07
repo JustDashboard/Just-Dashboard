@@ -97,7 +97,10 @@ export default function NetworkOverviewPage() {
           title="Topology"
           actions={
             <span className="text-hint text-muted-foreground">
-              {plural(links.filter((l) => l.owner !== "kernel" && l.role !== "container").length, "device")}
+              {plural(
+                links.filter((l) => l.owner !== "kernel" && l.role !== "container").length,
+                "device",
+              )}
               {" · "}
               {plural(data.dockerNetworks.length, "Docker network")}
             </span>
@@ -253,7 +256,9 @@ function Readings({
   return (
     <Section
       title="Throughput"
-      actions={live.now > 0 ? <StreamState connection={live.error ? "closed" : "open"} /> : undefined}
+      actions={
+        live.now > 0 ? <StreamState connection={live.error ? "closed" : "open"} /> : undefined
+      }
     >
       <StatGrid columns={5}>
         <StatTile
@@ -293,7 +298,10 @@ function Readings({
         <StatTile
           label={
             <>
-              <Connection aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
+              <Connection
+                aria-hidden
+                className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
+              />
               Connections
             </>
           }
@@ -303,7 +311,10 @@ function Readings({
         <StatTile
           label={
             <>
-              <LockClosed aria-hidden className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand" />
+              <LockClosed
+                aria-hidden
+                className="mr-1.5 inline-block size-3 align-[-1.5px] text-brand"
+              />
               Tunnels
             </>
           }
@@ -323,16 +334,16 @@ function Readings({
                 {tunnels.length === 0 ? "no VPN or tunnel" : tunnels.map((l) => l.name).join(", ")}
               </span>
               <ProductGlyphs
-                ids={[...new Set(tunnels.map((l) => linkProduct(l)).filter((p): p is string => !!p))]}
+                ids={[
+                  ...new Set(tunnels.map((l) => linkProduct(l)).filter((p): p is string => !!p)),
+                ]}
               />
             </span>
           }
         />
         <StatTile
           label="Made here"
-          value={
-            persistence.made === 0 ? "Nothing yet" : <NumberTicker value={persistence.made} />
-          }
+          value={persistence.made === 0 ? "Nothing yet" : <NumberTicker value={persistence.made} />}
           tone={persistence.made > 0 && persistence.unit === "disabled" ? "warning" : "default"}
           hint={
             persistence.made === 0

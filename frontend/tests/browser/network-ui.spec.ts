@@ -9,7 +9,7 @@ import { mockNetwork } from "./network-fixture"
  * answers, which is the part a Go test cannot see.
  */
 
-const PAGES = ["/network"]
+const PAGES = ["/network", "/network/interfaces", "/network/connections"]
 
 /**
  * Review screenshots, for the eyes the checks do not have. Written only when

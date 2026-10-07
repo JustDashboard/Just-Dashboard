@@ -1,6 +1,6 @@
 "use client"
 
-import { Fragment, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { NetworkDevice, Servers } from "@/components/icons"
@@ -21,6 +21,9 @@ import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
 import { ProductLogo, processProduct } from "@/components/product-logo"
+import { NumberTicker } from "@/components/ui/number-ticker"
+import { TileTrend } from "@/components/metrics/sparkline"
+import { ConnectionsMap } from "@/components/network/connections-map"
 import { Meter } from "@/components/meter"
 import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -48,6 +51,12 @@ import {
  * each process as the product it is, so the one caller from the internet
  * talking to Caddy is found before any row is read. A reading with verbs,
  * not a destination, so the rows stay rows (§16).
+ *
+ * Above the table the same peers are drawn at once (`ConnectionsMap`): where
+ * the callers are, this server, and the programs they reached. The figures
+ * over it count up as they land and carry the counts of every read since the
+ * page opened as their trend, so a burst from the internet is a shape rather
+ * than a number that was briefly larger.
  */
 export function ConnectionsPanel() {
   const { can } = useAuth()
@@ -91,10 +100,11 @@ export function ConnectionsPanel() {
   const peers = held.rows
   const most = Math.max(1, ...(data?.peers ?? []).map((p) => p.count))
   const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
+  const history = useReadings(data)
 
   const header = (
     <PageContext
-      eyebrow="Security"
+      eyebrow="Network"
       title="Connections"
       actions={
         <>
@@ -167,21 +177,59 @@ export function ConnectionsPanel() {
       <StatGrid columns={4}>
         <StatTile
           label="Remote addresses"
-          value={data?.peers.length ?? 0}
-          tone={fromInternet > 0 ? "warning" : "default"}
-          hint={fromInternet > 0 ? `${fromInternet} from the internet` : "all private or loopback"}
+          value={<NumberTicker value={data?.peers.length ?? 0} />}
+          trend={
+            <TileTrend
+              values={history.map((h) => h.peers)}
+              color="var(--chart-1)"
+              label="Remote addresses since the page opened"
+            />
+          }
+          hint={`${data?.peers.filter((p) => p.private).length ?? 0} private or on the tailnet`}
         />
-        <StatTile label="Sockets" value={data?.total ?? 0} hint="every connection counted" />
+        <StatTile
+          label="From the internet"
+          value={<NumberTicker value={fromInternet} />}
+          tone={fromInternet > 0 ? "warning" : "default"}
+          trend={
+            <TileTrend
+              values={history.map((h) => h.internet)}
+              color="var(--chart-3)"
+              label="Addresses from the internet since the page opened"
+            />
+          }
+          hint={fromInternet > 0 ? "neither private nor on the tailnet" : "all private or loopback"}
+        />
+        <StatTile
+          label="Sockets"
+          value={<NumberTicker value={data?.total ?? 0} />}
+          trend={
+            <TileTrend
+              values={history.map((h) => h.total)}
+              color="var(--chart-2)"
+              label="Sockets since the page opened"
+            />
+          }
+          hint={`${data?.loopback ?? 0} never left the machine`}
+        />
         <StatLink href={portsHref({})} label="Listening ports">
           <StatTile
             className="h-full transition-colors group-hover:bg-row-hover"
             label="Listening"
-            value={data?.listening ?? 0}
+            value={<NumberTicker value={data?.listening ?? 0} />}
             hint="sockets waiting for a caller"
           />
         </StatLink>
-        <StatTile label="Loopback" value={data?.loopback ?? 0} hint="never left the machine" />
       </StatGrid>
+
+      {data && data.peers.length > 0 && (
+        <Panel plain>
+          <PanelHeader title="Who is connected" />
+          <PanelBody>
+            <ConnectionsMap data={data} />
+          </PanelBody>
+        </Panel>
+      )}
 
       {/* The "ports" findings are about listeners, which live on the proxy's
           Ports page; they are shown here because this is the page somebody
@@ -345,4 +393,26 @@ export function ConnectionsPanel() {
       </Panel>
     </Workspace>
   )
+}
+
+type Reading = { peers: number; internet: number; total: number }
+
+/**
+ * Every read's counts since the page opened, at most an hour of them, for the
+ * tiles' trends. The backend keeps no history of connections, and a count that
+ * is only ever "now" cannot show that the burst was ten minutes ago.
+ */
+function useReadings(data: Connections | undefined): Reading[] {
+  const [history, setHistory] = useState<Reading[]>([])
+  useEffect(() => {
+    if (!data) return
+    const next = {
+      peers: data.peers.length,
+      internet: data.peers.filter((p) => !p.private).length,
+      total: data.total,
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- appending a read, not deriving from props
+    setHistory((previous) => [...previous.slice(-359), next])
+  }, [data])
+  return history
 }

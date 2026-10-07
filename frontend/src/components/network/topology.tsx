@@ -2,14 +2,14 @@
 
 import Link from "next/link"
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
-import { Bridge, Globe, Linked } from "@/components/icons"
+import { Bridge, Globe } from "@/components/icons"
 import { rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductGlyphs, imageProduct } from "@/components/product-logo"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { carrying, linkGlyph, pulseDuration } from "@/components/network/marks"
+import { LinkGlyph, carrying, pulseDuration } from "@/components/network/marks"
 
 type Tone = "default" | "warning" | "danger"
 
@@ -301,10 +301,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
           ) : l.kind === "wireguard" ? (
             <ProductGlyph id="wireguard" />
           ) : (
-            (() => {
-              const Glyph = linkGlyph(l.kind)
-              return <Glyph aria-hidden />
-            })()
+            <LinkGlyph kind={l.kind} />
           )}
         </WireMark>
       ),
@@ -380,7 +377,7 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
       lane: "inside",
       mark: (
         <WireMark tone="logo" shape="square" size="md">
-          <LinkMarkGlyph link={l} />
+          <LinkGlyph kind={l.kind} />
         </WireMark>
       ),
       eyebrow:
@@ -417,10 +414,4 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
     })
   }
   return nodes
-}
-
-/** A device's mark as a bare glyph, for inside a `WireMark`. */
-function LinkMarkGlyph({ link }: { link: NetworkLink }) {
-  const Glyph = link.kind === "vxlan" || link.kind.startsWith("gre") ? Linked : linkGlyph(link.kind)
-  return <Glyph aria-hidden />
 }
