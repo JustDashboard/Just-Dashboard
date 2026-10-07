@@ -500,7 +500,8 @@ function Dot() {
   return <span className="text-muted-foreground/40">·</span>
 }
 
-function Counter({ label, children }: { label: string; children: React.ReactNode }) {
+/** A counter in a sheet's grid of them; the unit sheet's last run draws its own the same way. */
+export function Counter({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline py-1">
       <dt className="truncate text-xs text-muted-foreground">{label}</dt>
