@@ -1232,6 +1232,8 @@ export type PM2Daemon = {
   home: string
   /** When `pm2 save` last wrote the resurrection list; absent when it never has. */
   dumpSavedAt?: string
+  /** The application names that list holds; null when there is none or it could not be read. */
+  savedApps?: string[] | null
   /** The systemd unit `pm2 startup` installed for this account, if any. */
   startupUnit?: string
 }
