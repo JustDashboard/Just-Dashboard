@@ -131,10 +131,10 @@ taking a frame:
   servers, a database's home, its Performance, Advisor, Search and Generate — each a title, a toolbar
   and a hairline, with every database, found server, generator and search hit on them a lit card,
   and every block on the four Processes pages — the live table under its band of workloads, the
-  PM2 applications, the systemd units under their band of busy services and recent changes, and
-  the cron jobs, timers and system cron files on Scheduled, each a title, a toolbar and a
-  hairline, PM2 and Scheduled under `StatTile` readings — four, and five on Scheduled (what fires
-  next across cron and
+  PM2 applications under their band of what PM2 takes of the machine, the systemd units
+  under their band of busy services and recent changes, and the cron jobs, timers and
+  system cron files on Scheduled, each a title, a toolbar and a hairline, Scheduled
+  under five `StatTile` readings (what fires next across cron and
   the timers together, the account's jobs, the runs cron started in the last day, the timers armed
   and what the packages run), whose Cron log is a plain panel holding the log's `Pane` and whose
   timers open their runs inside the table's own row, framed by nothing but the row — with a detail
@@ -1864,6 +1864,25 @@ The passes, in order. Each one is a diff you can review on its own.
    two tabs for one scroll that opens on four live readings over the process's recent windows,
    which the sampler keeps for every process it measures, so a sheet opened from a table that has
    been open for minutes opens on those minutes.
+
+   PM2 took the same exit in the same pass, at the operator's request, and for the same reason: four
+   grey figures over a table, and nothing that moved. Online and Not running went to state chips in
+   the table's head, Errored in its tone and drawn only while there is one; Restarts summed every
+   application's counter since PM2 last reset it, so the one worker crash-looping hid inside a
+   number — it is the table's first row now, its unstable restarts in red under the count, which
+   rises when it moves; and Memory, one figure for all of them, is the band's
+   (`components/procs/pm2-band.tsx`): the Processes band drawn for PM2 alone, each application —
+   a cluster summed into one — a span of one bar the size of the host beside everything else in
+   use, a press narrowing the table to it. Each row's uptime ticks between polls, from a start held
+   across them so it never steps back; memory is drawn against the limit PM2 restarts the
+   application at where it has one, because that is its ceiling. The verdict reads the saved list's
+   names, so a list saved before the last start is amber with **Save list** beside it, and each
+   application the list lacks says *not saved*. The sheet kept its Logs tab — the log is a `Pane`
+   that wants the sheet's height — and its overview became the process sheet's one scroll: what is
+   wrong as a `Notice` with the way to the log, four readings from the process table's read of the
+   application's PID over the sampler's windows, a cluster's instances as rows, what it listens on,
+   the command coloured. Its scale dialog is a stepper over the workers themselves, and the start
+   dialog picks the interpreter and the mode as cards with their marks (§16), not two selects.
 
    Services took the same exit the day after, at the operator's request, because beside Live it
    was the still page of the two: four grey tiles over a table of names and state words, with no

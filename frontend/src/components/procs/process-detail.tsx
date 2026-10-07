@@ -36,6 +36,7 @@ import {
   ownerName,
   processKey,
   processStateTone,
+  reach,
   uncontrollable,
 } from "@/components/procs/shared"
 
@@ -508,14 +509,6 @@ export function Counter({ label, children }: { label: string; children: React.Re
       <dd className="numeric truncate font-mono text-xs">{children}</dd>
     </div>
   )
-}
-
-/** Who can reach a listening address. */
-function reach(address: string) {
-  if (!address || address === "0.0.0.0" || address === "::" || address === "*")
-    return "every interface"
-  if (address.startsWith("127.") || address === "::1") return "this machine only"
-  return "one address"
 }
 
 function PriorityPanel({

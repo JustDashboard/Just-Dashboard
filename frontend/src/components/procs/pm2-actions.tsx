@@ -22,14 +22,10 @@ import type { PM2Daemon, PM2Process } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import type { Verb } from "@/components/verbs"
+import { isCluster, pm2Key } from "@/components/procs/pm2-shared"
 
 export type ConfirmFn = (request: ConfirmRequest) => void
 export type PendingMap = Record<string, string>
-
-/** Names and numeric ids are per daemon; the pair is the identity. */
-export function pm2Key(process: Pick<PM2Process, "daemonId" | "id">): string {
-  return `${process.daemonId}:${process.id}`
-}
 
 const PAST: Record<string, string> = {
   start: "started",
@@ -104,7 +100,7 @@ export function usePM2Verbs({
   return useMemo(() => {
     const verbs: Verb[] = []
     const online = process.status === "online"
-    const cluster = process.execMode === "cluster_mode" || process.execMode === "cluster"
+    const cluster = isCluster(process)
 
     if (can("service.control")) {
       if (!online) {

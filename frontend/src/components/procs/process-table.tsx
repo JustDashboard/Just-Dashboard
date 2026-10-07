@@ -818,7 +818,7 @@ function MemoryReading({
   )
 }
 
-/** A reading's bar inside a cell, easing to each poll's width; the Services table's too. */
+/** A reading's bar inside a cell, shared by Live, PM2 and Services for the same scale. */
 export function MiniBar({ value, color }: { value: number; color: string }) {
   return (
     <span aria-hidden className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-meter-track">
