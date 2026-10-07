@@ -31,7 +31,8 @@ choice, is [`docs/audits/2026-10-07-network-section/`](../../audits/2026-10-07-n
 ## Applying a change
 
 `Service.commit` (`persist.go`) is the proxy editor's order: render the new spec, check what can be
-checked (`nft -c -f` on the gateway file whenever it changed), apply the one runtime change, verify it,
+checked (`nft -c -f` on the gateway file whenever it changed and holds an entry, so a host without
+nftables can still make bridges and routes), apply the one runtime change, verify it,
 and only then write the boot files atomically and save the spec. A failure before the files are written
 runs the change's `undo`, so the boot files never describe a network that did not work. `s.mu`
 serialises every mutation. The unit is enabled, not started: everything it would restore was just

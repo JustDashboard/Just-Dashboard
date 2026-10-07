@@ -50,7 +50,9 @@ func TestCommitPutsTheRuntimeChangeBackWhenVerifyFails(t *testing.T) {
 func TestCommitRefusesARulesetNftRejects(t *testing.T) {
 	rec := record(t).fail("nft -c -f", "Error: syntax error")
 	s := testService(t)
-	err := s.commit(context.Background(), emptySpec(), step{apply: func(context.Context) error {
+	sp := emptySpec()
+	sp.Limits = []LimitSpec{{ID: 1, Name: "ssh", Protocol: "tcp", Ports: "22", Rate: 10, Per: "minute", Action: "drop"}}
+	err := s.commit(context.Background(), sp, step{apply: func(context.Context) error {
 		t.Fatal("nothing may be applied after the check failed")
 		return nil
 	}})
@@ -66,7 +68,7 @@ func TestUnitRestoresEverythingAndAdmitsOnlyWhenNeeded(t *testing.T) {
 	for _, want := range []string{
 		"ExecStart=-ip -force -batch /etc/just-dashboard/network/links.batch",
 		"ExecStart=-tc -force -batch /etc/just-dashboard/network/shaping.batch",
-		"ExecStart=nft -f /etc/just-dashboard/network/gateway.nft",
+		"ExecStart=-nft -f /etc/just-dashboard/network/gateway.nft",
 		"ExecStop=-nft delete table inet jd_gateway",
 		"After=network-online.target",
 	} {
@@ -83,5 +85,17 @@ func TestUnitRestoresEverythingAndAdmitsOnlyWhenNeeded(t *testing.T) {
 	// Delete comes before insert in each chain, so a second run leaves one rule.
 	if strings.Index(with, "-iptables -D FORWARD") > strings.Index(with, "-iptables -I FORWARD") {
 		t.Error("delete must precede insert")
+	}
+}
+
+func TestCommitNeedsNoNftForAChangeOutsideTheGateway(t *testing.T) {
+	// No reply for nft at all: running it would fail the test.
+	record(t, "nft").on("systemctl daemon-reload", "").
+		on("systemctl is-enabled", "disabled").on("systemctl enable", "")
+	s := testService(t)
+	sp := emptySpec()
+	sp.Links = []LinkSpec{{Name: "lan0", Kind: "bridge", Up: true}}
+	if err := s.commit(context.Background(), sp, step{}); err != nil {
+		t.Fatalf("a bridge on a host without nftables: %v", err)
 	}
 }
