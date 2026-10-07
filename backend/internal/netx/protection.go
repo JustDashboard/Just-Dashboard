@@ -363,9 +363,26 @@ func (s *Service) ResetProtection(ctx context.Context, key string) error {
 // ----------------------------------------------------------------------------
 // Reading
 
-// LimitView is a limit with what it has dropped.
+// LimitView is a limit with what it has dropped. Spelled out rather than
+// embedding the spec's entry so every field is always present: the spec omits
+// what is zero, and a page reading a missing rate as undefined is a bug that
+// only shows on a limit that has none.
 type LimitView struct {
-	LimitSpec
+	ID       int    `json:"id"`
+	Name     string `json:"name"`
+	Protocol string `json:"protocol"`
+	Ports    string `json:"ports"`
+	// Rate new connections per Per (second, minute or hour), allowing Burst
+	// more; Rate zero is no rate limit, and Per and Burst are then empty and
+	// zero. A Burst of zero under a rate is nft's own default of five.
+	Rate           int    `json:"rate"`
+	Per            string `json:"per"`
+	Burst          int    `json:"burst"`
+	PerSource      bool   `json:"perSource"`
+	MaxConnections int    `json:"maxConnections"`
+	Action         string `json:"action"`
+	Enabled        bool   `json:"enabled"`
+	Made
 	// Packets and Bytes are what the limit has refused since the table was
 	// loaded.
 	Packets uint64 `json:"packets"`
@@ -374,7 +391,11 @@ type LimitView struct {
 
 func limitView(l LimitSpec, counters map[string]RuleCounter) LimitView {
 	c := counters["limit:"+strconv.Itoa(l.ID)]
-	return LimitView{LimitSpec: l, Packets: c.Packets, Bytes: c.Bytes}
+	return LimitView{
+		ID: l.ID, Name: l.Name, Protocol: l.Protocol, Ports: l.Ports, Rate: l.Rate, Per: l.Per, Burst: l.Burst,
+		PerSource: l.PerSource, MaxConnections: l.MaxConnections, Action: l.Action, Enabled: l.Enabled,
+		Made: l.Made, Packets: c.Packets, Bytes: c.Bytes,
+	}
 }
 
 // BlocklistView is a list with its size, freshness and what it has dropped.
@@ -554,4 +575,14 @@ func (s *Service) RemoveTrusted(ctx context.Context, address, client string) err
 		return false, fmt.Errorf("%s: %w", want, ErrNotFound)
 	})
 	return err
+}
+
+// ProtectionSettings reads the kernel settings alone, for the response to a
+// change to one.
+func (s *Service) ProtectionSettings() ([]ProtectionSetting, error) {
+	sp, err := s.loadSpec()
+	if err != nil {
+		return nil, err
+	}
+	return protectionSettings(sp), nil
 }

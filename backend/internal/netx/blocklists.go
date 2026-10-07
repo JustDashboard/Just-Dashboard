@@ -609,3 +609,8 @@ func (s *Service) refreshStale(ctx context.Context, now time.Time) {
 		}
 	}
 }
+
+// Blocklist reads one list as the page shows it.
+func (s *Service) Blocklist(ctx context.Context, id int, client string) (BlocklistView, error) {
+	return s.blocklistViewByID(ctx, id, client)
+}
