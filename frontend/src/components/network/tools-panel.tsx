@@ -5,7 +5,6 @@ import { useSearchParams } from "next/navigation"
 import { Crosshair, Globe, NetworkDevice, SecureConnection, Servers } from "@/components/icons"
 import { PageContext, SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
-import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ChoiceCard } from "@/components/choice-card"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -61,29 +60,6 @@ export function ToolsPanel() {
   return (
     <>
       <PageContext eyebrow="Network" title="Tools" />
-      <StatGrid columns={4}>
-        <StatTile
-          label="Diagnostics"
-          value={tools.length}
-          hint="network, services, TLS and reputation"
-        />
-        <StatTile
-          label="Categories"
-          value={TOOL_GROUPS.length}
-          hint="choose the question you want answered"
-        />
-        <StatTile
-          label="Local tools"
-          value={tools.filter((tool) => !tool.needsTarget).length}
-          hint="inspect this host without a target"
-        />
-        <StatTile
-          label="Probe origin"
-          value="This server"
-          hint="outward results do not prove inbound access"
-        />
-      </StatGrid>
-
       {/* The chooser and result own their scrolling; this is one framed workbench. */}
       <div
         data-slot="security-tools"
@@ -151,8 +127,17 @@ export function ToolsPanel() {
         </Pane>
         <Pane flush className="min-h-80">
           <PaneHeader className="justify-between">
-            <span className="text-body font-medium">
-              {selectedGroup?.title ?? "Address planning"}
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span className="text-body font-medium">
+                {selectedGroup?.title ?? "Address planning"}
+              </span>
+              {/* Where every probe is sent from, which is what its answer can
+                  and cannot say: an open port seen from here is not one the
+                  internet can reach. It was a tile; a fact read with the
+                  result belongs beside it. */}
+              <span className="hidden truncate text-hint text-muted-foreground sm:inline">
+                sent from this server · {tools.length} diagnostics
+              </span>
             </span>
             <Button
               size="xs"

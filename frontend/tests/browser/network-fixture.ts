@@ -1191,6 +1191,10 @@ export async function mockNetwork(
         return json(route, posture)
       case "/firewall/":
         return json(route, firewall)
+      case "/firewall/apps":
+        return json(route, [{ name: "OpenSSH", ports: ["22/tcp"] }])
+      case "/security/services":
+        return json(route, [])
       case "/network/overview":
         return json(route, overview)
       case "/network/links":

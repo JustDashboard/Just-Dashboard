@@ -14,7 +14,9 @@ const PAGES = [
   "/network/interfaces",
   "/network/routing",
   "/network/vpn",
+  "/network/firewall",
   "/network/connections",
+  "/network/tools",
 ]
 
 /**
