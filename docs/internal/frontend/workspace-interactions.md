@@ -1,7 +1,7 @@
 # Workspace interactions
 
 `components/workspace/` supplies page-owned keyboard commands and place memory to Processes,
-Git, Logs, Docker containers, Packages, Backups, deployment setup, Audit and the Security
+Services, Git, Logs, Docker containers, Packages, Backups, deployment setup, Audit and the Security
 Connections, Logins and Firewall lists. Files retains its existing interaction controller.
 
 A workspace registers its read commands in the command palette's **This page** group. Ctrl/Cmd+F
@@ -17,6 +17,7 @@ page's opening on its figures rather than adding a context header.
 | Surface | Behavior |
 | --- | --- |
 | Processes | Pause stops scheduled inventory reads; changing the question (a search, a chip, a workload) and explicit refresh still read it. Focusing a process holds the returned row order while readings update, keyed by PID and creation time. Leaving the table releases the order; signals retain the existing confirmation and identity checks. Escape clears the search, then the workload, then the held order. A row new since the last read rises once; a changed filter is a new list, not arrivals. |
+| Services | The unit list keeps reading every five seconds; a row is a unit by name, so focus and place survive a read that reorders it. Escape clears the search, then the startup chip, then the state chip. The palette's **This page** group toggles the failed units. A unit whose state changed since the last read rises once; a changed filter is a new list, not arrivals. |
 | Git | Commit messages are session drafts per checkout and clear after a successful commit. Alt+Up/Down and the adjacent-file buttons walk changed files. Escape closes the preview and returns focus to its file. The repository list has the shared row navigation and place memory. Find targets History's existing search. |
 | Logs | Source and mode changes, run handoffs and settled filters become history entries. Typing settles after 400ms; submission commits immediately. Back/Forward rebuild the question from the URL. Consoles remember the opened and active record and following state in memory. Opaque content/position identities match fresh responses, distinguish repeated records and retain no raw log text in Web Storage. F3/Shift+F3, n/N and visible match buttons cycle search hits; opening or walking a line stops following. Refresh reconnects or searches in place. |
 | Docker containers | Returning from a detail restores the list's focused container and scroll position. Name typing selects a container. Adjacent-container buttons and Alt+Up/Down use the first 500 rows of the last visible inventory, retained for the tab, and preserve the detail tab. A direct link without a remembered inventory disables unavailable adjacent navigation. |

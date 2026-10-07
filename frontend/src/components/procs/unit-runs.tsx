@@ -28,6 +28,7 @@ import { IconAction } from "@/components/icon-action"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
+import { RESULT_WORDS } from "@/components/procs/units"
 
 /**
  * The most lifecycle lines one read returns. A unit restarting every five
@@ -58,18 +59,6 @@ const OUTCOME: Record<RunOutcome, { label: string; tone: DotTone }> = {
   restarted: { label: "restarted", tone: "warning" },
   stopped: { label: "stopped", tone: "stopped" },
   ended: { label: "ended", tone: "unknown" },
-}
-
-/** systemd's result words, where they say more than the exit beside them. */
-const RESULT: Record<string, string> = {
-  timeout: "timed out",
-  "oom-kill": "killed for memory",
-  "start-limit-hit": "start limit hit",
-  watchdog: "watchdog timeout",
-  "core-dump": "core dumped",
-  resources: "resources unavailable",
-  protocol: "protocol violation",
-  "exec-condition": "condition failed",
 }
 
 /**
@@ -461,5 +450,5 @@ function resultWords(run: UnitRun) {
   if (result === "exit-code" && run.exitCode === "exited") return undefined
   if (result === "signal" && run.exitCode === "killed") return undefined
   if (result === "core-dump" && run.exitCode === "dumped") return undefined
-  return RESULT[result] ?? result.replace(/-/g, " ")
+  return RESULT_WORDS[result] ?? result.replace(/-/g, " ")
 }
