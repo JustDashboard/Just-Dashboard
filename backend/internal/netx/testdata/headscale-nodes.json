@@ -1,0 +1,62 @@
+[
+ {
+  "id": "1",
+  "machineKey": "mkey:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "nodeKey": "nodekey:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "name": "laptop",
+  "user": {
+   "id": "1",
+   "name": "alice",
+   "createdAt": {
+    "seconds": 1760000000,
+    "nanos": 0
+   }
+  },
+  "lastSeen": {
+   "seconds": 1790000000,
+   "nanos": 5
+  },
+  "ipAddresses": [
+   "100.64.0.1",
+   "fd7a:115c:a1e0::1"
+  ],
+  "givenName": "alice-laptop",
+  "forcedTags": [],
+  "online": true,
+  "registerMethod": "REGISTER_METHOD_CLI"
+ },
+ {
+  "id": "2",
+  "name": "server",
+  "user": {
+   "id": "2",
+   "name": "bob"
+  },
+  "lastSeen": {
+   "seconds": 1789000000,
+   "nanos": 0
+  },
+  "ipAddresses": [
+   "100.64.0.2"
+  ],
+  "givenName": "bob-server",
+  "forcedTags": [
+   "tag:server"
+  ],
+  "online": false
+ },
+ {
+  "id": 3,
+  "name": "phone",
+  "user": {
+   "id": "1",
+   "name": "alice"
+  },
+  "lastSeen": "2026-10-06T08:00:00Z",
+  "ipAddresses": [
+   "100.64.0.3"
+  ],
+  "givenName": "phone",
+  "online": true
+ }
+]
