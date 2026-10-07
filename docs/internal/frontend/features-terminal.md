@@ -149,7 +149,9 @@ under the domain field because "the name does not point here yet" causes most ce
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
-The security section has eight reading pages (§15–16). The overview opens on the exposure identity
+The security section has four reading pages (§15–16): the overview, SSH, Intrusion and Logins.
+The firewall, connections, interfaces and tools moved to the Network section in 0.7.1 and are
+described with it below; the overview's Firewall and Connections tiles open them there. The overview opens on the exposure identity
 line, then the posture's seven checks as a coloured strip (`posture-strip.tsx`; a dashed segment is
 a check that could not run, and a segment narrows the findings to its area), then five area
 readings, then the ways onto the machine as a wiring picture (`perimeter.tsx`: the internet through
@@ -158,7 +160,51 @@ deployment section's `WireNode` and `AnimatedBeam` vocabulary. It describes the 
 states, not the reach of every port on the host. The finding severity counts sit in the Findings
 head.
 
-- **Firewall:** the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
+- **SSH:** the page opens on sshd's doors as a picture (`ssh-picture.tsx`) — the port, public keys
+  with the keyed accounts' faces, passwords and root — drawn from the draft, so a staged change
+  shows its effect before it is applied. Authentication, access, session limits and other
+  directives are `FormSection aside` groups, two to a row from `xl`, each marked *Edited* while it
+  holds a staged change. Every control occupies the same column; recommendations sit with the
+  setting, explanatory detail is available beside its label, and a sticky apply bar naming what
+  changed applies the values together. Reverting a draft to its effective value removes it from the change set. The apply
+  dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
+  administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
+  su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
+  The **Jump host** section reads the five forwarding directives the closed list gained in 0.7.1
+  (`AllowTcpForwarding`, `GatewayPorts`, `AllowAgentForwarding`, `PermitTunnel`, `MaxSessions`), stages
+  a safe bastion profile into the same draft, and writes a ProxyJump snippet for the hosts behind this
+  server (`bastion.tsx`).
+- **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
+  of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
+  the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
+  Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
+  case. Repeat offenders take their row alone, and Activity — fail2ban's own log, every strike as
+  well as every ban — follows across the page; where fail2ban writes only to its journal, the
+  offenders' fold says Activity reads it instead rather than "nothing has been banned". CrowdSec
+  and Suricata follow, each opening on its install where it is missing (`network/install.tsx`):
+  CrowdSec's decisions with release and a ban form that refuses the reader's own address, its alerts
+  and bouncers (`crowdsec-panel.tsx`); Suricata's mode, rules and alerts by severity, read from
+  `eve.json` through the log roots (`suricata-panel.tsx`).
+- **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
+  would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
+  and fall back to the journal's reading of the same program, saying in the pane's facts whether the
+  file is missing or outside `JD_LOG_ROOTS` (`host-logs.ts`, `log-section.tsx`). The day's counts
+  from the log are a second run of the page's one grid, each a press that narrows the log under it.
+  The client of a line takes the same address verbs as a peer anywhere else in the section, but the
+  block only where the line is an attack a deny answers — a failed or invalid login, a strike or a
+  ban, a rate-limited packet — never an accepted login, an `ignoreip` match or an allowed packet,
+  which can be the operator's own; an outbound packet's address is this host's, and gets no verbs.
+- **Logins** groups account/terminal, origin and session age, then places attackers and login
+  history beside one another when there is room. Addresses use `PeerIdentity` or the inline
+  `Address`; address block and lookup actions remain in `address-verbs.tsx`.
+
+**The Network section** (`app/(dashboard)/network/`, `components/network/`) is eleven reading pages
+over the network module; [`feature-map.md`](feature-map.md) lists each and
+[`design-system.md`](design-system.md) §15 records how they are drawn. Its layout renders the same
+`SecurityState` the Security section does, so the moved firewall keeps its posture findings and every
+page knows the reader's address. The pages that moved keep their behaviour:
+
+- **Firewall** (`/network/firewall`): the page opens on its inbound path as a picture (`firewall-picture.tsx`, reading the
   rules through `firewall-reading.ts`): each port the rules admit, drawn as the product that answers
   there with who may reach it, and the default for everything else. The rules are the working
   column, with default-policy and logging controls beside them on wide screens. Each row carries its
@@ -170,59 +216,35 @@ head.
   log (`ufw.log`, else `kern.log`, else the kernel ring, read as the firewall lens); while ufw or
   firewalld says logging is off, the section says so and its button brings the logging control
   beside the rules into view instead of drawing an empty pane.
-- **SSH:** the page opens on sshd's doors as a picture (`ssh-picture.tsx`) — the port, public keys
-  with the keyed accounts' faces, passwords and root — drawn from the draft, so a staged change
-  shows its effect before it is applied. Authentication, access, session limits and other
-  directives are `FormSection aside` groups, two to a row from `xl`, each marked *Edited* while it
-  holds a staged change. Every control occupies the same column; recommendations sit with the
-  setting, explanatory detail is available beside its label, and a sticky apply bar naming what
-  changed applies the values together. Reverting a draft to its effective value removes it from the change set. The apply
-  dialog still requires `change ssh`; the backend tests and reloads through its existing job. For an
-  administrator the page ends on the Auth log (`auth.log` or `secure`, else the journal's sshd, sudo,
-  su and logind lines); anyone else is told the page needs an administrator and no log is asked for.
-- **Intrusion:** jail destination rows carry the watched service, current state, counts and a meter
-  of bans still held. The jail sheet retains manual ban and release actions. Its tuning form shows
-  the subject, groups the three policy numbers, and offers the browser's address for the allowlist.
-  Draft values use fail2ban's lowercase parameter names while the saved configuration uses camel
-  case. Repeat offenders take their row alone, and Activity — fail2ban's own log, every strike as
-  well as every ban — follows across the page; where fail2ban writes only to its journal, the
-  offenders' fold says Activity reads it instead rather than "nothing has been banned".
-- **Each area reads its own log in place.** SSH, Firewall and Intrusion read the file an operator
-  would open first, each asked after with `GET /logs/source` rather than out of the whole log index,
-  and fall back to the journal's reading of the same program, saying in the pane's facts whether the
-  file is missing or outside `JD_LOG_ROOTS` (`host-logs.ts`, `log-section.tsx`). The day's counts
-  from the log are a second run of the page's one grid, each a press that narrows the log under it.
-  The client of a line takes the same address verbs as a peer anywhere else in the section, but the
-  block only where the line is an attack a deny answers — a failed or invalid login, a strike or a
-  ban, a rate-limited packet — never an accepted login, an `ignoreip` match or an allowed packet,
-  which can be the operator's own; an outbound packet's address is this host's, and gets no verbs.
-- **Connections:** each peer's address and network share one column, its process and ports another,
-  with a socket count and a comparative meter. **Logins** groups account/terminal, origin and session
-  age, then places attackers and login history beside one another when there is room. Addresses
-  use `PeerIdentity` or the inline `Address`; real product marks and consistent account initials
-  carry through all three pages. Address block and lookup actions remain in `address-verbs.tsx`.
-- **Network:** devices group identity, addresses/reach, link state/MTU and transferred bytes. The
-  received/sent meter compares cumulative byte counts, not bandwidth or utilization. Routes keep
-  their own table beside the resolver facts. Virtual and bridge devices remain folded by default.
-- **Tools:** 21 probes plus the browser-only subnet calculator occupy a two-pane workbench. The
-  searchable chooser selects one labelled form and result area. Other probes stay mounted while
-  hidden, preserving drafts, results and in-flight requests when switching. A new query-string
-  arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs it;
-  sending traffic remains an explicit Run action. The metrics and outward-tool hint distinguish
-  outbound reachability from inbound exposure.
+- **Connections** (`/network/connections`): opens on four live readings, each carrying every read
+  since the page opened as its trend, and a picture of who is connected (`connections-map.tsx`: the
+  callers by network, this server, the programs they reached), then the peers as before — address and
+  network in one column, process and ports in another, a socket count and a comparative meter.
+- **Tools** (`/network/tools`): 21 probes plus the browser-only subnet calculator occupy a two-pane
+  workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
+  result pane's head). The searchable chooser selects one labelled form and result area. Other probes
+  stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
+  query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
+  it; sending traffic remains an explicit Run action.
+- The interface list that was `/security/network` is the Interfaces page, rebuilt over
+  `GET /network/links`; `/security/network` redirects there.
 
 Capability-gated controls, unavailable modules, backend paths and audit/confirmation boundaries
 retain their contracts. Tables keep their frames because they own scroll regions; plain findings
 and forms do not. Phone tables scroll inside those frames without expanding the page.
 
-`tests/browser/security-ui.spec.ts` checks all eight pages, their mutations and lookup handoffs,
+`tests/browser/security-ui.spec.ts` checks the Security pages and the three that moved, their mutations and lookup handoffs,
 probe draft/request preservation, jail policy edits, SSH draft reversion, source-only rules,
 ordinary confirmations, limited roles and unavailable modules, and each area's log — its lens, its
 readings, its fallbacks and which lines offer a block — against the lines the Go lenses read
 (`host-logs-fixture.ts`). It checks the viewport at 390, 1280 and 1720, and requires desktop tables to
 fit their action columns. `JD_SECURITY_SHOTS` writes
 review screenshots at those three widths, including scrolled content and rule/jail dialogs.
-The changed-file gate also runs the design-system checks.
+The changed-file gate also runs the design-system checks. `tests/browser/network-ui.spec.ts` (with
+`network-fixture.ts`) checks every Network page's structure — no unnamed control, no pill, no frame
+that is not a table, no sideways scroll on a phone — the redirects, the overview's picture and
+findings, the device sheet's guards, the create forms' bodies, the routing picture and a peer's QR
+code; `JD_NETWORK_SHOTS` writes review screenshots at 390 and 1440.
 
 **Packages.** `install-panel.tsx` updates as you type, which is not decoration: the reason people open a
 terminal instead of a package page is that they do not know the name (`postgresql-client`, not `psql`;
