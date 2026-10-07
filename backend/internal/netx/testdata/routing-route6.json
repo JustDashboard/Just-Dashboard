@@ -1,0 +1,8 @@
+[{"dst":"fd7a:115c:a1e0::53","dev":"tailscale0","table":"52","metric":1024,"flags":[],"pref":"medium"},
+{"dst":"2001:db8::/64","dev":"eth0","protocol":"kernel","metric":256,"flags":[],"pref":"medium"},
+{"dst":"fe80::/64","dev":"eth0","protocol":"kernel","metric":256,"flags":[],"pref":"medium"},
+{"dst":"default","gateway":"fe80::1","dev":"eth0","protocol":"ra","metric":1024,"flags":[],"pref":"medium"},
+{"dst":"2001:db8:88::/64","gateway":"2001:db8:77::2","dev":"jd-lan","table":"100","metric":1024,"flags":[],"pref":"medium"},
+{"type":"unreachable","dst":"2001:db8:98::/64","dev":"lo","metric":1024,"flags":[],"pref":"medium"},
+{"type":"local","dst":"::1","dev":"lo","table":"local","protocol":"kernel","metric":0,"flags":[],"pref":"medium"},
+{"type":"multicast","dst":"ff00::/8","dev":"eth0","table":"local","protocol":"kernel","metric":256,"flags":[],"pref":"medium"}]

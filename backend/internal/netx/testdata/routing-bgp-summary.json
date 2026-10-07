@@ -1,0 +1,9 @@
+{"ipv4Unicast":{"routerId":"192.0.2.1","as":65000,"vrfId":0,"vrfName":"default","tableVersion":7,"ribCount":9,"ribMemory":864,"peerCount":3,"peerMemory":65232,
+"peers":{
+"192.0.2.2":{"hostname":"edge-a","remoteAs":65001,"localAs":65000,"version":4,"msgRcvd":1042,"msgSent":1040,"tableVersion":7,"outq":0,"inq":0,"peerUptime":"1d02h03m","peerUptimeMsec":93780000,"peerUptimeEstablishedEpoch":1759800000,"pfxRcd":4,"pfxSnt":2,"state":"Established","peerState":"OK","connectionsEstablished":1,"connectionsDropped":0,"idType":"ipv4"},
+"192.0.2.3":{"remoteAs":65002,"localAs":65000,"version":4,"msgRcvd":0,"msgSent":0,"tableVersion":0,"outq":0,"inq":0,"peerUptime":"never","peerUptimeMsec":0,"state":"Active","peerState":"OK","connectionsEstablished":0,"connectionsDropped":0,"idType":"ipv4"},
+"192.0.2.9":{"remoteAs":4200000001,"localAs":65000,"version":4,"msgRcvd":12,"msgSent":15,"peerUptime":"00:00:42","peerUptimeMsec":42000,"pfxRcd":0,"pfxSnt":1,"state":"Established","connectionsDropped":2,"idType":"ipv4"}},
+"failedPeers":1,"displayedPeers":3,"totalPeers":3,"dynamicPeers":0},
+"ipv6Unicast":{"routerId":"192.0.2.1","as":65000,"vrfId":0,"vrfName":"default","tableVersion":3,"ribCount":3,"peerCount":1,
+"peers":{"2001:db8:ffff::2":{"remoteAs":65001,"localAs":65000,"version":4,"msgRcvd":300,"msgSent":298,"peerUptime":"02:00:01","peerUptimeMsec":7201000,"pfxRcd":1,"pfxSnt":1,"state":"Established","idType":"ipv6"}},
+"failedPeers":0,"displayedPeers":1,"totalPeers":1,"dynamicPeers":0}}
