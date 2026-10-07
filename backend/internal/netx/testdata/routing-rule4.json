@@ -1,0 +1,10 @@
+[{"priority":0,"src":"all","table":"local"},
+{"priority":5210,"src":"all","fwmark":"0x80000","fwmask":"0xff0000","table":"main"},
+{"priority":5230,"src":"all","fwmark":"0x80000","fwmask":"0xff0000","table":"default"},
+{"priority":5250,"src":"all","fwmark":"0x80000","fwmask":"0xff0000","action":"unreachable"},
+{"priority":5270,"src":"all","table":"52"},
+{"priority":10000,"src":"192.168.50.0","srclen":24,"table":"100"},
+{"priority":10001,"src":"all","dst":"198.51.100.0","dstlen":24,"iif":"jd-lan","action":"blackhole"},
+{"priority":12000,"src":"all","fwmark":"0x10","table":"isp2"},
+{"priority":32766,"src":"all","table":"main"},
+{"priority":32767,"src":"all","table":"default"}]
