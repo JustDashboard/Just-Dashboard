@@ -102,26 +102,7 @@ export function ConnectionsPanel() {
   const fromInternet = (data?.peers ?? []).filter((p) => !p.private).length
   const history = useReadings(data)
 
-  const header = (
-    <PageContext
-      eyebrow="Network"
-      title="Connections"
-      actions={
-        <>
-          <WorkspaceHelp />
-          {held.pending > 0 && (
-            <Button
-              size="xs"
-              aria-label={`Show ${held.pending} new addresses`}
-              onClick={held.reveal}
-            >
-              <span role="status">{held.pending} new addresses</span> · Show
-            </Button>
-          )}
-        </>
-      }
-    />
-  )
+  const header = <PageContext eyebrow="Network" title="Connections" />
 
   if (loading && !data) {
     return (
@@ -240,8 +221,22 @@ export function ConnectionsPanel() {
         <PanelHeader
           title="Live connections"
           actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {peers.length} addresses · refreshes every 10s
+            // The shortcuts and the held rows are the table's, so they sit in
+            // its head rather than on a line of their own above the page.
+            <span className="flex flex-wrap items-center gap-3">
+              {held.pending > 0 && (
+                <Button
+                  size="xs"
+                  aria-label={`Show ${held.pending} new addresses`}
+                  onClick={held.reveal}
+                >
+                  <span role="status">{held.pending} new addresses</span> · Show
+                </Button>
+              )}
+              <span className="numeric text-hint text-muted-foreground">
+                {peers.length} addresses · refreshes every 10s
+              </span>
+              <WorkspaceHelp compact />
             </span>
           }
         />
