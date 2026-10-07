@@ -114,7 +114,7 @@ taking a frame:
   slot at the page's 16px, louder than the head itself. Runtime's, Databases' and Automation's
   followed with the rest of the settings pages, through `SettingPicture`; Security's pictures — the
   overview's ways onto the machine (`security/perimeter.tsx`), the firewall's inbound path
-  (`security/firewall-picture.tsx`) and sshd's doors (`security/ssh-picture.tsx`) — stand on the
+  (`network/firewall-picture.tsx`) and sshd's doors (`security/ssh-picture.tsx`) — stand on the
   same ground since 0.7.1, the overview's having lost the frame it kept as a block among framed
   readings. The
   preview beside it is the

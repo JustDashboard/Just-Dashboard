@@ -877,21 +877,21 @@ func preflightFindings(
 				"Firewall state is unavailable", observation.Firewall.Detail,
 				"The public port cannot be compared with the host firewall.",
 				"Inspect the firewall before deploying a public bind.", "security", "runtime.hostPort")
-			item.DeepLink = "/security/firewall"
+			item.DeepLink = "/network/firewall"
 			findings = append(findings, item)
 		case !observation.Firewall.Enabled:
 			item := finding("firewall_mismatch", PreflightWarning,
 				"Public port has no active firewall boundary", observation.Firewall.Backend,
 				"The selected direct bind may be reachable from every network interface.",
 				"Enable an allowlisted firewall policy or explicitly accept public exposure.", "security", "runtime.hostPort")
-			item.DeepLink = "/security/firewall"
+			item.DeepLink = "/network/firewall"
 			findings = append(findings, item)
 		case !observation.Firewall.Allows:
 			item := finding("firewall_mismatch", PreflightBlocked,
 				"Firewall does not admit the selected port", observation.Firewall.Backend,
 				"The runtime may start, but clients cannot reach its direct public port.",
 				"Add the port through Firewall or choose a route already admitted.", "security", "runtime.hostPort")
-			item.DeepLink = "/security/firewall"
+			item.DeepLink = "/network/firewall"
 			findings = append(findings, item)
 		default:
 			findings = append(findings, finding("firewall_matches", PreflightPass,
