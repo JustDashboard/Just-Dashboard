@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 )
 
 // DefaultRoute is one way off this machine: the device a default route leaves
@@ -95,9 +94,6 @@ type OverviewInput struct {
 	// ConntrackPercent is the connection-tracking table's fullness, negative
 	// when it could not be read.
 	ConntrackPercent float64
-	// StalePeers are WireGuard peers that have not completed a handshake in a
-	// day although they have before.
-	StalePeers []string
 	// EncryptedDNS is false where every upstream is plain DNS; nil when the
 	// resolver could not be read.
 	EncryptedDNS *bool
@@ -183,13 +179,6 @@ func OverviewFindings(in OverviewInput) []Finding {
 				Detail: "The device is up but nothing is connected to it.",
 			})
 		}
-	}
-	if len(in.StalePeers) > 0 {
-		add(Finding{
-			ID: "vpn.stale", Level: "notice", Href: "/network/vpn",
-			Title:  fmt.Sprintf("%d WireGuard %s quiet for over a day", len(in.StalePeers), plural(len(in.StalePeers), "peer", "peers")),
-			Detail: strings.Join(in.StalePeers, ", "),
-		})
 	}
 	if in.EncryptedDNS != nil && !*in.EncryptedDNS {
 		add(Finding{

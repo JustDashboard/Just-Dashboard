@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -29,6 +30,8 @@ type networkOverview struct {
 	Connections     overviewConnections     `json:"connections"`
 	Forwarding      netx.ForwardingSwitches `json:"forwarding"`
 	Persistence     netx.Persistence        `json:"persistence"`
+	VPN             netx.VPNSummary         `json:"vpn"`
+	DNS             *netx.DNSSummary        `json:"dns,omitempty"`
 	Made            overviewMade            `json:"made"`
 	Findings        []netx.Finding          `json:"findings"`
 }
@@ -141,6 +144,8 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 		}
 	})
 	do(func() { out.Persistence = s.modules.network.PersistenceStatus(ctx) })
+	do(func() { out.VPN = s.modules.network.VPNSummary(ctx) })
+	do(func() { out.DNS = s.cachedDNSSummary(ctx) })
 	wg.Wait()
 	if linksErr != nil {
 		return mapNetworkError(linksErr)
@@ -170,10 +175,16 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 			Blocklists: len(spec.Blocklists), Shaping: len(spec.Shaping), Namespaces: len(spec.Namespaces),
 		}
 	}
+	var encrypted *bool
+	if out.DNS != nil && out.DNS.Resolver == "systemd-resolved" {
+		on := out.DNS.DNSOverTLS == "yes" || out.DNS.DNSOverTLS == "opportunistic"
+		encrypted = &on
+	}
 	out.Findings = netx.OverviewFindings(netx.OverviewInput{
 		Links: out.Links, Spec: spec, Persistence: out.Persistence, Forwarding: out.Forwarding,
 		LinkHistoryErrors: errs, FirewallAvailable: out.Firewall.Available,
 		FirewallEnabled: out.Firewall.Enabled, ConntrackPercent: conntrack,
+		EncryptedDNS: encrypted,
 	})
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
@@ -224,4 +235,25 @@ func dockerTopology(inv netx.Inventory, links []netx.Link) []overviewDockerNet {
 		return strings.Compare(out[i].Name, out[j].Name) < 0
 	})
 	return out
+}
+
+// dnsSummaryCache holds the resolver's summary for a minute. Reading it walks
+// every socket on port 53 to its process, and the resolver chain changes when
+// somebody changes it — which the DNS page does through its own read, not
+// the Overview's fifteen-second poll.
+var dnsSummaryCache = struct {
+	sync.Mutex
+	at  time.Time
+	sum *netx.DNSSummary
+}{}
+
+func (s *Server) cachedDNSSummary(ctx context.Context) *netx.DNSSummary {
+	dnsSummaryCache.Lock()
+	defer dnsSummaryCache.Unlock()
+	if dnsSummaryCache.sum != nil && time.Since(dnsSummaryCache.at) < time.Minute {
+		return dnsSummaryCache.sum
+	}
+	sum := s.modules.network.DNSSummary(ctx, s.dnsContainers(ctx))
+	dnsSummaryCache.sum, dnsSummaryCache.at = &sum, time.Now()
+	return dnsSummaryCache.sum
 }
