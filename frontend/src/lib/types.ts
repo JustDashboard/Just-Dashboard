@@ -6562,3 +6562,118 @@ export type DeploymentLifecycle = {
   since?: string
   events: DockerEvent[]
 }
+
+/*
+ * The Network section (`backend/internal/netx`). Every shape below is the
+ * module's JSON as it is written; the comments say what a field means where
+ * the name alone does not.
+ */
+
+/** One network device, joined with what the rest of the host says about it. */
+export type NetworkLink = {
+  name: string
+  index: number
+  /** The kernel's driver kind (bridge, veth, vlan, vxlan, wireguard, tun, …), "physical" or "loopback". */
+  kind: string
+  role: "uplink" | "loopback" | "tunnel" | "bridge" | "container" | "vlan" | "virtual" | "physical"
+  owner:
+    | "kernel"
+    | "system"
+    | "docker"
+    | "tailscale"
+    | "wireguard"
+    | "libvirt"
+    | "lxd"
+    | "just-dashboard"
+  /** Operational state, lower-cased. A working tunnel reads "unknown". */
+  state: string
+  adminUp: boolean
+  carrier: boolean
+  mtu: number
+  mac?: string
+  qdisc?: string
+  speedMbps?: number
+  master?: string
+  members?: string[]
+  parent?: string
+  vlanId?: number
+  vni?: number
+  local?: string
+  remote?: string
+  port?: number
+  addresses: NetworkAddress[]
+  uplink: boolean
+  /** The reply to this browser leaves through this device. */
+  clientPath?: boolean
+  counters: {
+    rxBytes: number
+    txBytes: number
+    rxPackets: number
+    txPackets: number
+    rxErrors: number
+    txErrors: number
+    rxDropped: number
+    txDropped: number
+  }
+  /** Bytes a second over the sampler's last two seconds. */
+  rxRate: number
+  txRate: number
+  container?: string
+  containerImage?: string
+  dockerNetwork?: string
+  xdp?: string
+  managed: boolean
+  /** Why it may not be set down, deleted or re-parented. */
+  guard?: string
+}
+
+export type NetworkAddress = {
+  cidr: string
+  family: "inet" | "inet6"
+  scope: string
+  dynamic?: boolean
+  public?: boolean
+  managed?: boolean
+  guard?: string
+}
+
+/** One two-second reading of a device. */
+export type NetworkLivePoint = { t: number; rx: number; tx: number }
+
+export type NetworkLive = {
+  now: number
+  series: Record<string, NetworkLivePoint[]>
+}
+
+export type NetworkHistoryPoint = {
+  t: number
+  rx: number
+  tx: number
+  rxPeak: number
+  txPeak: number
+  errors: number
+  dropped: number
+}
+
+export type NetworkHistory = {
+  from: number
+  to: number
+  stepSeconds: number
+  interfaces: Record<string, NetworkHistoryPoint[]>
+  recording: boolean
+}
+
+/** How the kernel answers one address: this browser's, on every Network page. */
+export type NetworkPath = {
+  address: string
+  device?: string
+  gateway?: string
+  source?: string
+  local?: boolean
+}
+
+export type NetworkPersistence = {
+  unit: "enabled" | "disabled" | "missing" | "unsupported"
+  made: number
+  dir: string
+}

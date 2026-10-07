@@ -412,11 +412,20 @@ func annotate(links []Link, a annotation) {
 	})
 }
 
+// fallbackDevices are the devices a tunnel module makes for itself the moment
+// it loads: the catch-all for packets no configured tunnel claims. They are
+// always down, carry nothing, and cannot be deleted while the module is
+// loaded, so they are the kernel's rather than this system's.
+var fallbackDevices = map[string]bool{
+	"gre0": true, "gretap0": true, "erspan0": true, "ip6gre0": true, "ip6tnl0": true,
+	"sit0": true, "tunl0": true, "ip_vti0": true, "ip6_vti0": true,
+}
+
 func ownerOf(l Link, managed bool, dockerBridge func(string) bool) string {
 	switch {
 	case managed:
 		return "just-dashboard"
-	case l.Kind == "loopback":
+	case l.Kind == "loopback", fallbackDevices[l.Name]:
 		return "kernel"
 	case strings.HasPrefix(l.Name, "tailscale"):
 		return "tailscale"
@@ -483,6 +492,8 @@ func linkGuard(l Link) string {
 	switch {
 	case l.Kind == "loopback":
 		return "Loopback carries this machine's own traffic, the dashboard's included."
+	case fallbackDevices[l.Name]:
+		return "The kernel made this when the tunnel module loaded; it carries nothing and goes when the module does."
 	case l.ClientPath:
 		return fmt.Sprintf("Your browser is reached through %s.", l.Name)
 	case l.Uplink:

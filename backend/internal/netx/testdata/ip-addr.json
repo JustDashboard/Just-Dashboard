@@ -7,4 +7,5 @@
 {"ifindex":7,"ifname":"wg0","addr_info":[{"family":"inet","local":"10.8.0.1","prefixlen":24,"scope":"global"}]},
 {"ifindex":8,"ifname":"jd-lan","addr_info":[{"family":"inet","local":"192.168.50.1","prefixlen":24,"scope":"global"}]},
 {"ifindex":9,"ifname":"eth0.100","addr_info":[]},
-{"ifindex":10,"ifname":"vx42","addr_info":[]}]
+{"ifindex":10,"ifname":"vx42","addr_info":[]},
+{"ifindex":11,"ifname":"gre0","addr_info":[]}]

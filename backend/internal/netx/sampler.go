@@ -390,3 +390,27 @@ func parseProcNetDev(r io.Reader) map[string]devCounters {
 	}
 	return out
 }
+
+// RecentErrors sums each recorded device's errors and drops over a window.
+// The kernel's counters run since boot, so only the recorded deltas can tell
+// a fault happening now from one last month.
+func (s *Sampler) RecentErrors(ctx context.Context, window time.Duration) map[string]uint64 {
+	out := map[string]uint64{}
+	if s.db == nil || s.retention <= 0 {
+		return out
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT iface, SUM(rx_errors + tx_errors + rx_dropped + tx_dropped)
+		  FROM metric_interface_samples WHERE ts >= ? GROUP BY iface`, time.Now().Add(-window).Unix())
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var n uint64
+		if rows.Scan(&name, &n) == nil {
+			out[name] = n
+		}
+	}
+	return out
+}

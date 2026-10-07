@@ -71,6 +71,7 @@ func TestAnnotateNamesOwnersRolesAndGuards(t *testing.T) {
 		{"jd-lan", "bridge", "just-dashboard"},
 		{"eth0.100", "vlan", "system"},
 		{"lo", "loopback", "kernel"},
+		{"gre0", "tunnel", "kernel"},
 	}
 	for _, c := range cases {
 		if got := by[c.name]; got.Role != c.role || got.Owner != c.owner {
