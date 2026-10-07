@@ -158,7 +158,7 @@ export function FirewallPanel({
       ? rules.find((r) => r.number === handoffEdit.number && r.port === handoffEdit.port)
       : undefined
 
-  const header = <PageContext eyebrow="Security" title="Firewall" />
+  const header = <PageContext eyebrow="Network" title="Firewall" />
   // Whether the firewall is enforcing, and the switch that decides it, at the
   // right end of the identity line: the control beside the fact it changes.
   // The page's shortcuts sit there too, rather than on a line of their own

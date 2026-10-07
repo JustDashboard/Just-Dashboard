@@ -49,7 +49,7 @@ export function ToolsPanel() {
   if (!can("system.admin"))
     return (
       <>
-        <PageContext eyebrow="Security" title="Tools" />
+        <PageContext eyebrow="Network" title="Tools" />
         <EmptyState
           icon={Crosshair}
           title="Diagnostics need the admin capability"
@@ -60,7 +60,7 @@ export function ToolsPanel() {
 
   return (
     <>
-      <PageContext eyebrow="Security" title="Tools" />
+      <PageContext eyebrow="Network" title="Tools" />
       <StatGrid columns={4}>
         <StatTile
           label="Diagnostics"

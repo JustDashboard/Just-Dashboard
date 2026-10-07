@@ -1233,7 +1233,7 @@ test.describe("a deployment's traffic", () => {
       await expect(page.getByText(reason, { exact: false })).toBeVisible()
       await expect(page.getByRole("link", { name: "Open Firewall" })).toHaveAttribute(
         "href",
-        "/security/firewall",
+        "/network/firewall",
       )
     })
   }

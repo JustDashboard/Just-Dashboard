@@ -1193,7 +1193,7 @@ test("a failed scan says where to look next, and only where the fault can be her
   await page.getByRole("button", { name: "Scan", exact: true }).click()
   await expect(page.getByRole("link", { name: "Firewall" })).toHaveAttribute(
     "href",
-    "/security/firewall",
+    "/network/firewall",
   )
   expect((await tiles(page))["Port 443"]).toBe("timed out")
 })

@@ -847,7 +847,7 @@ test("a connection's service port opens what listens on it; a port the kernel pi
 }) => {
   await mockHost(page)
   await mockConnections(page)
-  await page.goto("/security/connections")
+  await page.goto("/network/connections")
   const row = page.getByRole("row").filter({ hasText: "203.0.113.50" })
   await expect(row.getByText("51234")).toBeVisible()
   await expect(row.getByRole("link", { name: "What listens on port 51234" })).toHaveCount(0)
@@ -862,7 +862,7 @@ test("the Listening tile opens every socket, not the port a link opened a moment
 }) => {
   await mockHost(page)
   await mockConnections(page)
-  await page.goto("/security/connections")
+  await page.goto("/network/connections")
   await page
     .getByRole("row")
     .filter({ hasText: "203.0.113.50" })
