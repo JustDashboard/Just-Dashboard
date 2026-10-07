@@ -131,7 +131,7 @@ function drawnElsewhere(step: DeploymentStep): string[] {
  * Its steps used to be an accordion: sixteen rows that each opened in place,
  * so reading two of them pushed the rest of the run a screen apart and the
  * evidence of the one open was a well of JSON between them. It is one working
- * surface now, the shape of Security's Tools: a rail of the steps beside one
+ * surface now, the shape of the Network Tools page: a rail of the steps beside one
  * inspector, and picking a step fills the inspector rather than unfolding a
  * row. The frame is that surface's, because the rail decides what the
  * inspector shows (§7).

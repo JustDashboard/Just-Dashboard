@@ -10,7 +10,7 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { WireHost, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { EXPOSURE_GRADE } from "@/components/security/exposure-panel"
-import { openings, refusesByDefault } from "@/components/security/firewall-reading"
+import { openings, refusesByDefault } from "@/components/network/firewall-reading"
 import { worstLevel } from "@/components/security/posture-panel"
 
 type Fail2ban = { available: boolean; running: boolean; jails: Fail2banJail[] }

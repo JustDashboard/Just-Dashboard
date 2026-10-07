@@ -122,6 +122,7 @@ func (s *Server) Routes() http.Handler {
 			s.mountBoardRoutes(r)
 			s.mountLinuxUserRoutes(r)
 			s.mountNetSecRoutes(r)
+			s.mountNetworkRoutes(r)
 			s.mountBackupRoutes(r)
 			s.mountDeployRoutes(r)
 			s.mountJobRoutes(r)

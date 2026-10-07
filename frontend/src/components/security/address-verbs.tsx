@@ -33,7 +33,7 @@ export function blockAddress(ip: string, comment: string) {
 export function toolHref(tool: string, target: string, record?: string) {
   const query = new URLSearchParams({ tool, target })
   if (record) query.set("record", record)
-  return `/security/tools?${query.toString()}`
+  return `/network/tools?${query.toString()}`
 }
 
 /**

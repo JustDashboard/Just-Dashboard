@@ -80,6 +80,10 @@ to the contribution terms above, including the additional licence grant to the p
   It owns and removes its temporary fixtures and does not modify existing workloads. The Linux
   harness also verifies `/host` against host PID 1 using a read-only host-root bind and an isolated
   fixture. It never cleans host files during that check; restricted roots remain enforced.
+- Changes to `internal/netx` that apply devices, routes, the gateway table or shaping also run, from
+  `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
+  passwordless sudo and does everything inside throwaway network namespaces it removes, never on the
+  host's own interfaces, firewall or tailscaled.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.

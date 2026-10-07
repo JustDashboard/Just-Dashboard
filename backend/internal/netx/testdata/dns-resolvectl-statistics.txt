@@ -1,0 +1,20 @@
+Transactions
+                       Current Transactions:        0
+                         Total Transactions: 50421344
+
+Cache
+                         Current Cache Size:       55
+                                 Cache Hits: 44866630
+                               Cache Misses:  5555394
+
+Failure Transactions
+                             Total Timeouts:      329
+         Total Timeouts (Stale Data Served):        0
+                    Total Failure Responses:       60
+Total Failure Responses (Stale Data Served):        0
+
+DNSSEC Verdicts
+                                     Secure:        0
+                                   Insecure:        0
+                                      Bogus:        0
+                              Indeterminate:        0

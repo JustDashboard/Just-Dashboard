@@ -137,7 +137,7 @@ test("a socket on one address can be taken to the firewall", async ({ page }) =>
 
   await page.getByRole("button", { name: "Actions for tcp 100.110.34.31:8443" }).click()
   await page.getByRole("menuitem", { name: "Firewall" }).click()
-  await expect(page).toHaveURL(/\/security\/firewall$/)
+  await expect(page).toHaveURL(/\/network\/firewall$/)
 })
 
 test("the overview counts services and names a public database critical", async ({ page }) => {
@@ -847,7 +847,7 @@ test("a connection's service port opens what listens on it; a port the kernel pi
 }) => {
   await mockHost(page)
   await mockConnections(page)
-  await page.goto("/security/connections")
+  await page.goto("/network/connections")
   const row = page.getByRole("row").filter({ hasText: "203.0.113.50" })
   await expect(row.getByText("51234")).toBeVisible()
   await expect(row.getByRole("link", { name: "What listens on port 51234" })).toHaveCount(0)
@@ -862,7 +862,7 @@ test("the Listening tile opens every socket, not the port a link opened a moment
 }) => {
   await mockHost(page)
   await mockConnections(page)
-  await page.goto("/security/connections")
+  await page.goto("/network/connections")
   await page
     .getByRole("row")
     .filter({ hasText: "203.0.113.50" })

@@ -6594,3 +6594,884 @@ export type DeploymentLifecycle = {
   since?: string
   events: DockerEvent[]
 }
+
+/*
+ * The Network section (`backend/internal/netx`). Every shape below is the
+ * module's JSON as it is written; the comments say what a field means where
+ * the name alone does not.
+ */
+
+/** One network device, joined with what the rest of the host says about it. */
+export type NetworkLink = {
+  name: string
+  index: number
+  /** The kernel's driver kind (bridge, veth, vlan, vxlan, wireguard, tun, …), "physical" or "loopback". */
+  kind: string
+  role: "uplink" | "loopback" | "tunnel" | "bridge" | "container" | "vlan" | "virtual" | "physical"
+  owner:
+    | "kernel"
+    | "system"
+    | "docker"
+    | "tailscale"
+    | "wireguard"
+    | "libvirt"
+    | "lxd"
+    | "just-dashboard"
+  /** Operational state, lower-cased. A working tunnel reads "unknown". */
+  state: string
+  adminUp: boolean
+  carrier: boolean
+  mtu: number
+  mac?: string
+  qdisc?: string
+  speedMbps?: number
+  master?: string
+  members?: string[]
+  parent?: string
+  vlanId?: number
+  vni?: number
+  local?: string
+  remote?: string
+  port?: number
+  addresses: NetworkAddress[]
+  uplink: boolean
+  /** The reply to this browser leaves through this device. */
+  clientPath?: boolean
+  counters: {
+    rxBytes: number
+    txBytes: number
+    rxPackets: number
+    txPackets: number
+    rxErrors: number
+    txErrors: number
+    rxDropped: number
+    txDropped: number
+  }
+  /** Bytes a second over the sampler's last two seconds. */
+  rxRate: number
+  txRate: number
+  container?: string
+  containerImage?: string
+  dockerNetwork?: string
+  xdp?: string
+  managed: boolean
+  /** Why it may not be set down, deleted or re-parented. */
+  guard?: string
+}
+
+export type NetworkAddress = {
+  cidr: string
+  family: "inet" | "inet6"
+  scope: string
+  dynamic?: boolean
+  public?: boolean
+  managed?: boolean
+  guard?: string
+}
+
+/** One two-second reading of a device. */
+export type NetworkLivePoint = { t: number; rx: number; tx: number }
+
+export type NetworkLive = {
+  now: number
+  series: Record<string, NetworkLivePoint[]>
+}
+
+export type NetworkHistoryPoint = {
+  t: number
+  rx: number
+  tx: number
+  rxPeak: number
+  txPeak: number
+  errors: number
+  dropped: number
+}
+
+export type NetworkHistory = {
+  from: number
+  to: number
+  stepSeconds: number
+  interfaces: Record<string, NetworkHistoryPoint[]>
+  recording: boolean
+}
+
+/** How the kernel answers one address: this browser's, on every Network page. */
+export type NetworkPath = {
+  address: string
+  device?: string
+  gateway?: string
+  source?: string
+  local?: boolean
+}
+
+export type NetworkPersistence = {
+  unit: "enabled" | "disabled" | "missing" | "unsupported"
+  made: number
+  dir: string
+}
+
+export type NetworkDefaultRoute = {
+  family: "inet" | "inet6"
+  device: string
+  gateway?: string
+  metric?: number
+}
+
+export type NetworkFinding = {
+  id: string
+  level: "critical" | "warning" | "notice"
+  title: string
+  detail: string
+  /** The page that fixes it. */
+  href: string
+}
+
+/** The Network Overview's one read. */
+export type NetworkOverview = {
+  hostname: string
+  client: NetworkPath
+  defaults: NetworkDefaultRoute[]
+  /** The globally routable addresses on the uplinks: what the internet reaches. */
+  publicAddresses: string[]
+  links: NetworkLink[]
+  dockerNetworks: {
+    id: string
+    name: string
+    bridge?: string
+    subnets: string[]
+    containers: { name: string; image: string }[]
+  }[]
+  firewall: {
+    backend?: string
+    available: boolean
+    enabled: boolean
+    incoming?: string
+    rules: number
+  }
+  connections: { total: number; peers: number; fromInternet: number; listening: number }
+  forwarding: { ipv4: boolean; ipv6: boolean }
+  persistence: NetworkPersistence
+  vpn: VPNSummary
+  dns?: DNSSummary
+  gateway: {
+    loaded: boolean
+    writable: boolean
+    reason?: string
+    forwards: number
+    nat: number
+    limits: number
+    blocklists: number
+    /** Packets the blocklists and limits refused since the table was loaded. */
+    dropped: number
+    conntrack: Conntrack
+  }
+  made: {
+    links: number
+    routes: number
+    rules: number
+    forwards: number
+    nat: number
+    limits: number
+    blocklists: number
+    shaping: number
+    namespaces: number
+  }
+  findings: NetworkFinding[]
+}
+
+/** What a change to a device the dashboard did not make says about the next boot. */
+export type NetworkLinkChange = { persisted: boolean; note?: string }
+
+export type NetworkNamespace = {
+  name: string
+  kind: "named" | "container"
+  id?: number
+  managed: boolean
+  image?: string
+  pid?: number
+  devices: { name: string; state: string; mtu: number; mac?: string; addresses: string[] }[]
+}
+
+export type NetworkRouteOwner =
+  "kernel" | "dhcp" | "tailscale" | "docker" | "wireguard" | "just-dashboard" | "system"
+
+export type NetworkRoute = {
+  /** Zero unless the dashboard made it. */
+  id: number
+  family: "inet" | "inet6"
+  /** "default" for either family's default route. */
+  destination: string
+  type: string
+  gateway?: string
+  device?: string
+  protocol: string
+  scope?: string
+  metric: number
+  source?: string
+  flags: string[]
+  nexthops: { gateway?: string; device?: string; weight?: number }[]
+  owner: NetworkRouteOwner
+  managed: boolean
+  guard?: string
+}
+
+export type NetworkRule = {
+  id: number
+  family: "inet" | "inet6"
+  priority: number
+  from?: string
+  to?: string
+  iif?: string
+  oif?: string
+  fwmark?: string
+  action: "lookup" | "blackhole" | "unreachable" | "prohibit" | "goto"
+  table?: number
+  tableName?: string
+  owner: "system" | "tailscale" | "just-dashboard"
+  managed: boolean
+  guard?: string
+}
+
+export type ForwardingFamily = {
+  available: boolean
+  enabled: boolean
+  /** The dashboard's boot file sets it. */
+  persisted: boolean
+  /** What stops working if it is turned off. */
+  neededBy: string[]
+  guard?: string
+}
+
+export type NetworkForwarding = { ipv4: ForwardingFamily; ipv6: ForwardingFamily }
+
+export type NetworkRouting = {
+  /** Main first, then by id. */
+  tables: { id: number; name: string; routes: NetworkRoute[] }[]
+  /** By priority: the order the kernel asks them in. */
+  rules: NetworkRule[]
+  clientPath: NetworkPath
+  /** The local table's entries, which are the kernel's bookkeeping and not drawn. */
+  hiddenLocal: number
+  rulePriorities: { min: number; max: number }
+  forwarding: NetworkForwarding
+}
+
+export type BGPView = {
+  installed: boolean
+  running: boolean
+  error?: string
+  families: {
+    name: string
+    routerId: string
+    localAs: number
+    peers: {
+      address: string
+      hostname?: string
+      remoteAs: number
+      state: string
+      uptime?: string
+      uptimeSeconds: number
+      prefixesReceived: number
+      prefixesSent: number
+      messagesReceived: number
+      messagesSent: number
+      connectionsDropped: number
+      description?: string
+    }[]
+  }[]
+}
+
+export type VPNSummary = {
+  wireguard: {
+    installed: boolean
+    interfaces: number
+    peers: number
+    online: number
+    rx: number
+    tx: number
+  }
+  tailscale: {
+    installed: boolean
+    running: boolean
+    peers: number
+    online: number
+    exitNode: boolean
+    subnetRoutes: number
+    selfIps: string[]
+  }
+}
+
+export type WGPeer = {
+  /** Zero for a peer the dashboard did not make, which is read-only. */
+  id: number
+  name: string
+  kind: "device" | "site" | "peer"
+  publicKey: string
+  address: string
+  allowedIps: string[]
+  endpoint: string
+  /** Unix seconds; zero is never. */
+  latestHandshake: number
+  /** A handshake within the last three minutes. */
+  online: boolean
+  rxBytes: number
+  txBytes: number
+  keepalive: number
+  /** The client's configuration is kept, sealed, and can be shown again. */
+  hasConfig: boolean
+  createdAt?: string
+}
+
+export type WGInterface = {
+  name: string
+  /** The dashboard wrote this tunnel's file; a hand-written one is read-only. */
+  managed: boolean
+  configured: boolean
+  up: boolean
+  enabled: boolean
+  active: boolean
+  publicKey: string
+  listenPort: number
+  addresses: string[]
+  mtu: number
+  dns: string[]
+  endpoint: string
+  exitNode: boolean
+  subnet: string
+  peers: WGPeer[]
+}
+
+export type WireGuardView = {
+  installed: boolean
+  tools: { wg: boolean; wgQuick: boolean }
+  package: string
+  kernel: boolean
+  systemd: boolean
+  interfaces: WGInterface[]
+  error?: string
+}
+
+export type TailscalePeer = {
+  id: string
+  hostName: string
+  dnsName: string
+  os: string
+  tailscaleIps: string[]
+  online: boolean
+  active: boolean
+  exitNode: boolean
+  exitNodeOption: boolean
+  relay: string
+  direct: boolean
+  curAddr: string
+  rxBytes: number
+  txBytes: number
+  lastSeen?: string
+  lastHandshake?: string
+  primaryRoutes?: string[]
+  tags?: string[]
+  userLoginName?: string
+  expired?: boolean
+}
+
+export type TailscaleView = {
+  installed: boolean
+  running: boolean
+  backendState: string
+  version: string
+  authUrl?: string
+  self: {
+    hostName: string
+    dnsName: string
+    tailscaleIps: string[]
+    os: string
+    online: boolean
+    exitNodeOption: boolean
+    primaryRoutes?: string[]
+    relay: string
+  } | null
+  magicDnsSuffix: string
+  tailnet: string
+  health: string[]
+  peers: TailscalePeer[]
+  prefs: {
+    advertiseRoutes: string[]
+    advertisingExitNode: boolean
+    usingExitNode: boolean
+    exitNodeId?: string
+    routeAll: boolean
+    corpDns: boolean
+    shieldsUp: boolean
+  }
+  controlServer: "tailscale" | "self-hosted"
+  controlUrl: string
+  clientOnTailnet: boolean
+  forwarding: { ipv4: boolean; ipv6: boolean }
+  warnings: string[]
+  error?: string
+}
+
+export type HeadscaleView = {
+  installed: boolean
+  container?: string
+  nodes: {
+    id: string
+    name: string
+    givenName: string
+    ipAddresses: string[]
+    online: boolean
+    lastSeen?: string
+    user: string
+    forcedTags?: string[]
+  }[]
+  users: { id: string; name: string; nodes: number }[]
+  error?: string
+}
+
+export type VPNView = {
+  wireguard: WireGuardView
+  tailscale: TailscaleView
+  headscale: HeadscaleView
+}
+
+export type WGPeerCreated = {
+  peer: WGPeer
+  config: string
+  /** A PNG data URL. */
+  qr: string
+  reloaded: boolean
+  warnings: string[]
+}
+
+export type DNSScope = {
+  protocols: string[]
+  dnsOverTLS: "yes" | "opportunistic" | "no"
+  dnssec: string
+  dnssecSupported: boolean
+  currentServer?: string
+  servers: string[]
+  fallbackServers: string[]
+  domains: string[]
+}
+
+export type DNSPreset = {
+  id: string
+  name: string
+  product: string
+  servers: string[]
+  tlsName: string
+  tlsServers: string[]
+  blocksAds: boolean
+  blocksMalware: boolean
+}
+
+export type DNSView = {
+  resolvConf: {
+    path: string
+    mode: "stub" | "uplink" | "static" | "link" | "missing"
+    target?: string
+    managedBy?: string
+    nameservers: string[]
+    search: string[]
+    options: string[]
+  }
+  resolved: {
+    installed: boolean
+    active: boolean
+    global: DNSScope & { resolvConfMode?: string }
+    links: (DNSScope & { name: string; index: number; scopes: string[]; defaultRoute: boolean })[]
+    linksTotal: number
+    statistics?: {
+      cacheSize: number
+      cacheHits: number
+      cacheMisses: number
+      hitPercent: number
+      transactions: number
+      currentTransactions: number
+      timeouts: number
+      failures: number
+      dnssecSecure: number
+      dnssecInsecure: number
+      dnssecBogus: number
+      dnssecIndeterminate: number
+    }
+    statisticsError?: string
+    error?: string
+  }
+  listeners: {
+    address: string
+    protocol: string
+    process?: string
+    pid?: number
+    container?: string
+    loopback: boolean
+    kind:
+      | "resolved-stub"
+      | "dnsmasq"
+      | "unbound"
+      | "named"
+      | "adguardhome"
+      | "pihole"
+      | "docker-proxy"
+      | "other"
+  }[]
+  adblock: {
+    kind: "adguardhome" | "pihole"
+    name: string
+    runsAs: "container" | "process"
+    container?: string
+    image?: string
+    answering: boolean
+    webPort?: number
+  }[]
+  managed: {
+    path: string
+    exists: boolean
+    servers: string[]
+    fallback: string[]
+    domains: string[]
+    dnssec: string
+    dnsOverTLS: string
+    cache: string
+  }
+  presets: DNSPreset[]
+}
+
+export type DNSSummary = {
+  resolver: string
+  mode: string
+  upstreams: string[]
+  dnsOverTLS: string
+  dnssec: string
+  adblock: boolean
+  custom: boolean
+}
+
+export type DNSApplied = {
+  verified: boolean
+  via?: string
+  millis?: number
+  warning?: string
+  managed: DNSView["managed"] | null
+}
+
+export type HostRecords = {
+  path: string
+  managed: { address: string; names: string[] }[]
+  other: { address: string; names: string[]; line: number }[]
+  problem?: string
+}
+
+export type DNSLookup = {
+  name: string
+  type: string
+  results: { server: string; label: string; answers: string[]; latencyMs: number; error?: string }[]
+}
+
+export type ProcessTraffic = {
+  at: string
+  intervalSeconds: number
+  warming: boolean
+  truncated: boolean
+  note: string
+  programs: {
+    name: string
+    pids: number[]
+    connections: number
+    rxRate: number
+    txRate: number
+    rxTotal: number
+    txTotal: number
+    peers: {
+      address: string
+      port: number
+      connections: number
+      rxBytes: number
+      txBytes: number
+    }[]
+  }[]
+}
+
+export type ContainerTraffic = {
+  windowSeconds: number
+  recording: boolean
+  containers: {
+    name: string
+    rxBytes: number
+    txBytes: number
+    rxRate: number
+    txRate: number
+    lastSeen: string
+    series: { t: number; rx: number; tx: number }[]
+  }[]
+}
+
+export type EBPFView = {
+  installed: boolean
+  package?: string
+  bpfStatsEnabled: boolean
+  total: number
+  programs: {
+    id: number
+    type: string
+    name?: string
+    tag?: string
+    loadedAt?: string
+    uid: number
+    bytesXlated: number
+    bytesJited: number
+    memlock: number
+    mapIds: number[]
+    runTimeNs?: number
+    runCount?: number
+    pinned?: string[]
+    owners?: string[]
+  }[]
+  byType: { type: string; count: number }[]
+  attachments: {
+    device: string
+    ifindex: number
+    kind: "xdp" | "tc ingress" | "tc egress"
+    programId: number
+    name?: string
+    mode?: string
+  }[]
+  error?: string
+}
+
+export type CrowdSecView = {
+  installed: boolean
+  active: boolean
+  decisions: {
+    id: number
+    origin: string
+    scenario: string
+    scope: string
+    value: string
+    type: string
+    duration: string
+    until?: string
+    alertId: number
+    country?: string
+    as?: string
+  }[]
+  alerts: {
+    id: number
+    scenario: string
+    source: { ip?: string; scope?: string; value?: string; country?: string; asName?: string }
+    eventsCount: number
+    createdAt: string
+    decisions: number
+  }[]
+  bouncers: {
+    name: string
+    ipAddress?: string
+    valid: boolean
+    lastPull?: string
+    type?: string
+    version?: string
+  }[]
+  error?: string
+}
+
+export type SuricataView = {
+  installed: boolean
+  active: boolean
+  version?: string
+  mode: "ids" | "ips"
+  modeSource?: string
+  alerts: {
+    time: string
+    srcIp: string
+    srcPort?: number
+    destIp: string
+    destPort?: number
+    proto?: string
+    appProto?: string
+    signature: string
+    signatureId: number
+    category?: string
+    severity: number
+    action?: "allowed" | "blocked"
+  }[]
+  scanned: number
+  bySeverity: { severity: number; label: string; count: number }[]
+  topSignatures: {
+    signature: string
+    signatureId: number
+    category?: string
+    severity: number
+    count: number
+  }[]
+  rulesLoaded?: number
+  logPath: string
+  logRefused?: string
+  logError?: string
+}
+
+type NetworkMade = { createdAt: string; createdBy?: string }
+
+export type GatewayCapability = {
+  writable: boolean
+  reason?: string
+  firewall: "ufw" | "firewalld" | "iptables" | "nftables" | "none"
+  docker: boolean
+  /** The drop-forward chain that makes the gateway read-only, and the accept to add there. */
+  blocker?: { family: string; table: string; chain: string; rule: string }
+}
+
+export type GatewayForward = NetworkMade & {
+  id: number
+  name: string
+  protocol: "tcp" | "udp" | "both"
+  /** "" is any device. */
+  interface: string
+  ports: string
+  target: string
+  /** "" keeps the port it arrived on. */
+  targetPort: string
+  /** Empty is anyone. */
+  sources: string[]
+  sourceNat: "auto" | "always" | "never"
+  /** What `auto` resolved to: whether the visitor's address is replaced. */
+  masquerade: boolean
+  enabled: boolean
+  packets: number
+  bytes: number
+}
+
+export type GatewayNAT = NetworkMade & {
+  id: number
+  name: string
+  source: string
+  interface: string
+  /** "" masquerades behind the interface's own address. */
+  toAddress: string
+  /** What made it when not a person: "wireguard:wg0". */
+  owner: string
+  enabled: boolean
+  packets: number
+  bytes: number
+}
+
+export type GatewayView = {
+  capability: GatewayCapability
+  loaded: boolean
+  forwarding: { ipv4: boolean; ipv6: boolean }
+  admission: { needed: boolean; present: boolean }
+  forwards: GatewayForward[]
+  nat: GatewayNAT[]
+}
+
+export type ProtectionLimit = NetworkMade & {
+  id: number
+  name: string
+  protocol: "tcp" | "udp" | "both"
+  ports: string
+  rate: number
+  per: "second" | "minute" | "hour"
+  burst: number
+  perSource: boolean
+  maxConnections: number
+  action: "drop" | "reject"
+  enabled: boolean
+  /** What it refused since the table was loaded. */
+  packets: number
+  bytes: number
+}
+
+export type ProtectionBlocklist = NetworkMade & {
+  id: number
+  name: string
+  kind: "manual" | "country" | "feed"
+  countries: string[]
+  url: string
+  entries: string[]
+  enabled: boolean
+  refreshed: string | null
+  count: number
+  error: string
+  /** The list holds the reader's own address; the trusted set still lets them in. */
+  containsYou: boolean
+  packets: number
+  bytes: number
+}
+
+export type ProtectionSetting = {
+  key: string
+  label: string
+  why: string
+  recommended: string
+  kind: "choice" | "number"
+  allowed: string[]
+  min: number
+  max: number
+  current: string
+  available: boolean
+  /** The dashboard keeps a value for boot. */
+  setHere: boolean
+  value: string
+  atRecommended: boolean
+}
+
+export type Conntrack = {
+  available: boolean
+  count: number
+  max: number
+  percent: number
+  level: "ok" | "warning" | "critical"
+}
+
+export type ProtectionView = {
+  loaded: boolean
+  limits: ProtectionLimit[]
+  blocklists: ProtectionBlocklist[]
+  presets: { id: string; name: string; url: string; description: string }[]
+  trusted: {
+    address: string
+    origin: "loopback" | "allowlist" | "you" | "kept"
+    removable: boolean
+  }[]
+  client: string
+  clientTrusted: boolean
+  settings: ProtectionSetting[]
+  resetNote: string
+  conntrack: Conntrack
+}
+
+export type QdiscStat = {
+  kind: string
+  bytes: number
+  packets: number
+  drops: number
+  overlimits: number
+  requeues: number
+  backlog: number
+}
+
+export type ShapeDevice = {
+  name: string
+  kind: string
+  root: QdiscStat | null
+  leaf: QdiscStat | null
+  ingress: boolean
+  managed: boolean
+  qdisc: string
+  egressKbit: number
+  ingressKbit: number
+  uplink: boolean
+  clientPath: boolean
+  shapeable: boolean
+  guard: string
+}
+
+export type BBRState = {
+  available: boolean
+  active: boolean
+  congestion: string
+  algorithms: string[]
+  defaultQdisc: string
+  managed: boolean
+}
+
+export type ShapingView = { devices: ShapeDevice[]; bbr: BBRState; qdiscs: string[] }

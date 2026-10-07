@@ -1,0 +1,1 @@
+[{"xdp":[{"devname":"eth0","ifindex":2,"multi_attachments":[{"mode":"driver","id":71}]},{"devname":"wg0","ifindex":9,"id":71,"mode":"generic"}],"tc":[{"devname":"eth0","ifindex":2,"kind":"clsact/ingress","name":"tc_ingress_count","prog_id":72},{"devname":"eth0","ifindex":2,"kind":"clsact/egress","prog_id":73}],"flow_dissector":[],"netfilter":[]}]

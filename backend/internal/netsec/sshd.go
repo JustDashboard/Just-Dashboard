@@ -310,6 +310,48 @@ var sshDirectives = []sshDirective{
 		Risk:   "Rarely wanted on a server, and it widens what a compromised session can reach.",
 	},
 	{
+		Key: "allowtcpforwarding", Label: "TCP forwarding", Default: "yes",
+		// Not graded: a jump host exists to forward TCP, and "no" there takes
+		// the host's one job away. Everywhere else it is the setting that
+		// turns a stolen key into a tunnel into the internal network, which
+		// is what the recommendation says. "local" is the middle answer for
+		// a bastion: ProxyJump needs it, remote forwards (-R) do not.
+		Recommended: "no, unless this server is a jump host", Kind: "choice", AlwaysAcceptable: true,
+		Options: []string{"no", "local", "remote", "all", "yes"},
+		Detail:  "Whether a login may open TCP tunnels through this server (ssh -L and -R, and ProxyJump).",
+		Risk:    "With forwarding on, anyone holding a key can reach whatever this server can reach, from outside the firewall. A jump host needs yes or local; a server that is not one should say no.",
+	},
+	{
+		Key: "gatewayports", Label: "Forwarded ports on all interfaces", Default: "no",
+		Recommended: "no", Accept: []string{"no"},
+		Kind: "choice", Options: []string{"no", "clientspecified", "yes"},
+		Detail: "Whether a port forwarded with -R listens on this server's public addresses or only on loopback.",
+		Risk:   "With yes, a remote forward is open to the whole network instead of the one session that asked for it.",
+	},
+	{
+		Key: "allowagentforwarding", Label: "Agent forwarding", Default: "yes",
+		Recommended: "no", Accept: []string{"no"},
+		Kind: "choice", Options: []string{"no", "yes"},
+		Detail: "Whether a login may use the SSH agent on the machine it came from, from this server.",
+		Risk:   "Anyone with root here can use the forwarded agent to sign in as you elsewhere for as long as you are connected. ProxyJump reaches the same hosts without lending out the agent.",
+	},
+	{
+		Key: "permittunnel", Label: "Tunnel devices", Default: "no",
+		Recommended: "no", Accept: []string{"no"},
+		Kind: "choice", Options: []string{"no", "point-to-point", "ethernet", "yes"},
+		Detail: "Whether a login may create a tun or tap device on this server, which is a VPN over SSH.",
+		Risk:   "A tunnel device puts the client on this server's network at layer 3 or 2, past anything that filters TCP forwards.",
+	},
+	{
+		Key: "maxsessions", Label: "Sessions per connection", Default: "10",
+		// A multiplexed connection (ControlMaster) shares one login across its
+		// sessions, so a bastion serving many people through one master
+		// wants more and a hardened server fewer; neither is wrong.
+		Recommended: "any", LegalMin: 1, LegalMax: 64, Kind: "number", AlwaysAcceptable: true,
+		Detail: "How many shells, forwards and file transfers one login may have open at once.",
+		Risk:   "Lowering it below what automation multiplexes over one connection makes the extra sessions fail with an error that does not mention this setting.",
+	},
+	{
 		Key: "maxauthtries", Label: "Attempts per connection", Default: "6",
 		Recommended: "3 or fewer", Max: 4, Kind: "number",
 		Detail: "How many guesses one connection gets before it is dropped.",

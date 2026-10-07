@@ -743,7 +743,7 @@ function RequestDetail({
       {ip && onBlock && !isPrivate(ip) && blockUnavailable && (
         <p className="mt-2 font-sans text-xs text-muted-foreground">
           {blockUnavailable}{" "}
-          <Link href="/security/firewall" className="text-link hover:underline">
+          <Link href="/network/firewall" className="text-link hover:underline">
             Open Firewall
           </Link>
         </p>

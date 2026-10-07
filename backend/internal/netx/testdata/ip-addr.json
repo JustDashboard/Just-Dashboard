@@ -1,0 +1,11 @@
+[{"ifindex":1,"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1","prefixlen":8,"scope":"host"},{"family":"inet6","local":"::1","prefixlen":128,"scope":"host"}]},
+{"ifindex":2,"ifname":"eth0","addr_info":[{"family":"inet","local":"203.0.113.20","prefixlen":24,"scope":"global","dynamic":true},{"family":"inet6","local":"2001:db8::20","prefixlen":64,"scope":"global"},{"family":"inet6","local":"fe80::ff:feaa:bb01","prefixlen":64,"scope":"link"}]},
+{"ifindex":3,"ifname":"br-0123456789ab","addr_info":[{"family":"inet","local":"10.0.1.1","prefixlen":24,"scope":"global"}]},
+{"ifindex":4,"ifname":"tailscale0","addr_info":[{"family":"inet","local":"100.110.34.31","prefixlen":32,"scope":"global"},{"family":"inet6","local":"fd7a:115c:a1e0::1","prefixlen":128,"scope":"global"}]},
+{"ifindex":5,"ifname":"docker0","addr_info":[{"family":"inet","local":"10.0.0.1","prefixlen":24,"scope":"global"}]},
+{"ifindex":66193,"ifname":"veth6e4f828","addr_info":[]},
+{"ifindex":7,"ifname":"wg0","addr_info":[{"family":"inet","local":"10.8.0.1","prefixlen":24,"scope":"global"}]},
+{"ifindex":8,"ifname":"jd-lan","addr_info":[{"family":"inet","local":"192.168.50.1","prefixlen":24,"scope":"global"}]},
+{"ifindex":9,"ifname":"eth0.100","addr_info":[]},
+{"ifindex":10,"ifname":"vx42","addr_info":[]},
+{"ifindex":11,"ifname":"gre0","addr_info":[]}]

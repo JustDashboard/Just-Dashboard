@@ -114,13 +114,13 @@ taking a frame:
   slot at the page's 16px, louder than the head itself. Runtime's, Databases' and Automation's
   followed with the rest of the settings pages, through `SettingPicture`; Security's pictures — the
   overview's ways onto the machine (`security/perimeter.tsx`), the firewall's inbound path
-  (`security/firewall-picture.tsx`) and sshd's doors (`security/ssh-picture.tsx`) — stand on the
+  (`network/firewall-picture.tsx`) and sshd's doors (`security/ssh-picture.tsx`) — stand on the
   same ground since 0.7.1, the overview's having lost the frame it kept as a block among framed
   readings. The
   preview beside it is the
   Overview's one framed block, a tile that *is* the website. Past the pictures, the build console
   and the two shells, Docker's and a game server's, are `Pane`s, the run page's Details is one frame
-  around a rail of the run's steps and an inspector of the picked one (Security's Tools shape, the
+  around a rail of the run's steps and an inspector of the picked one (the Network Tools page's shape, the
   rail deciding what the inspector shows), and a game's raw settings file is
   a `Well`, for §7's reasons; and the Danger zone is one `border-rule-danger` panel, because
   everything inside it changes what the deployment is, so one red edge says "careful" once where
@@ -2216,6 +2216,47 @@ and the live tail keeps its height under them — a window of at least 1280 by 8
 three and two at the old 200px tile floor, now 180 — and on a smaller window the same figures are
 the counts on the lens row's chips, the database workbench's answer.
 
+**The Network section was made in 0.7.1 out of four Security pages**, at the operator's request: the
+firewall, the connections, the interface list and the tools left Security, which kept what is about
+who may get in, and joined new pages that change the network as well as read it. Every page is a
+reading page, and what makes them alive is the sanctioned five, held hard:
+
+- **Things drawn as themselves.** A device is the product that made it (`network/marks.tsx`:
+  Docker's bridge, Tailscale's tunnel, WireGuard's, a container's veth as the product its image runs)
+  or a glyph for its kernel kind; an upstream resolver is its provider; a tailnet peer its system.
+  Ten marks arrived for it (WireGuard, AdGuard, Pi-hole, CrowdSec, Headscale, Mullvad, Quad9,
+  Unbound, OpenVPN, ZeroTier), each lifted to the L 0.72 rung where its own colour vanished on the
+  ground (`public/logos/NOTICE`).
+- **Pictures whose wires are traffic.** Six pictures stand unframed over `wire-grid` in the
+  deployment section's vocabulary: the Overview's topology (`network/topology.tsx`: the outside —
+  the internet through the uplink, the tailnet, each tunnel — this server with its firewall and
+  gateway as facts, and the inside — each Docker network with its containers' products, each bridge
+  made here), the Connections page's callers and what they reached (`connections-map.tsx`), Routing's
+  decision (`routing/decision-map.tsx`: the policy rules in the order they are asked, each wired to
+  the table it looks in, the one answering this browser lit), each WireGuard tunnel's devices and
+  sites (`vpn/tunnel-picture.tsx`), the gateway's forwards, and DNS's resolver chain. A wire carries
+  a pulse while its device moves more than a kilobyte a second, quicker the busier it is
+  (`pulseDuration`, logarithmic over eight orders of magnitude), running the way most of the bytes
+  go; still while idle, dashed where the thing is down or not set up, amber where the internet
+  reaches a server no firewall filters. Where nothing is set up a dashed ring stands where it would
+  go, and is the way to set it up.
+- **Figures that move.** The live ring (`use-live-traffic.ts`, two-second points topped up with only
+  what the page has not drawn) feeds `LiveBytes` figures, each tile's fifteen minutes as its
+  `TileTrend`, the device rows' two-minute sparklines and every chart's Live window.
+- **Colour that names a kind.** A device's role takes a lane hue (`ROLE_HUE`, from the palette that
+  cannot be read as a state), an address's prefix the port hue (`network/address.tsx`), in and out
+  their chart colours everywhere they are drawn.
+- **The lit edge on what is taken.** Devices, peers, forwards and lists open their sheets and are lit
+  rows; route tables, rule lists, peers on the tailnet and shaping are readings and stay framed
+  tables.
+
+What the guard refuses is drawn, not hidden: a control the server would refuse stays, disabled,
+with the guard's sentence beside it (a device's *Set down* on the uplink, forwarding that Docker
+needs), because a control that disappears says nothing and one greyed out with no reason says less.
+Each page that reads a tool this host may not have opens on its install where it is missing
+(`network/install.tsx`: the package's name, what it would do here drawn as the product, and the
+Packages page's install job streaming under the button).
+
 ## 16. Two registers
 
 Everything above §15 describes a page that **reports**. The Overview, the metrics page, the Docker
@@ -2265,7 +2306,7 @@ the reader through it.
 
 | Page | Register | Why |
 | --- | --- | --- |
-| Host Overview, metrics, Docker, Security, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
+| Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
 | Databases — the control center, the map, a database's home, Search, Generate, Performance, Advisor, Access, Backups, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |

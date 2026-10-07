@@ -177,3 +177,13 @@ after the product key the folders use: nodedotjs.svg is nodejs.svg,
 nextdotjs.svg nextjs.svg, letsencrypt.svg lets-encrypt.svg, rubygems.svg
 ruby.svg, openjdk.svg java.svg, visualstudiocode.svg vscode.svg and gnubash.svg
 bash.svg.
+
+The Network pages draw the tunnels, resolvers and intrusion tools a server
+runs. From homarr-labs/dashboard-icons, under the Apache License 2.0:
+adguard-home.svg, pi-hole.svg and zerotier.svg are unchanged. wireguard.svg had
+its near-black #231f20 lifted to #a8a3a4, crowdsec.svg its purples #3e3978 and
+#4e4a99 to #9c9ce4 and #999af1, headscale.svg its #303030 to #a4a4a4,
+mullvad.svg its navy #192e45 to #8ea7c4, unbound.svg its #2d2e83 to #8e9bfb and
+openvpn.svg its #1a3967 to #82a6dc — each the same hue at the L 0.72 rung, so
+the mark reads on a dark ground. quad9.svg is Simple Icons' path (CC0) filled
+with the brand's #DC205E.

@@ -249,7 +249,7 @@ function DomainsForm({
           {publicBind && (
             <Notice tone="warning" title="This environment binds a public address" icon={Warning}>
               Traffic on {bindAddress} reaches the container directly, ahead of Proxy. Make sure the{" "}
-              <Link href="/security/firewall" className="underline underline-offset-4">
+              <Link href="/network/firewall" className="underline underline-offset-4">
                 firewall
               </Link>{" "}
               allows only the traffic you expect.

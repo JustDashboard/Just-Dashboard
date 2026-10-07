@@ -464,7 +464,8 @@ func canonicalDirective(key string) string {
 		"PermitRootLogin", "PasswordAuthentication", "PubkeyAuthentication",
 		"PermitEmptyPasswords", "X11Forwarding", "MaxAuthTries", "LoginGraceTime",
 		"ClientAliveInterval", "ClientAliveCountMax", "Port", "AllowUsers", "DenyUsers",
-		"AllowGroups", "DenyGroups",
+		"AllowGroups", "DenyGroups", "AllowTcpForwarding", "GatewayPorts",
+		"AllowAgentForwarding", "PermitTunnel", "MaxSessions",
 	} {
 		if strings.EqualFold(name, key) {
 			return name
