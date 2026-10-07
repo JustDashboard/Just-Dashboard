@@ -22,27 +22,21 @@ import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
 import { FactDot, HostIdentity, platformName } from "@/components/metrics/host-identity"
 import { InstallPanel } from "@/components/packages/install-panel"
 import { PackageLogView } from "@/components/packages/log-view"
-import {
-  OriginFact,
-  PackageMark,
-  VersionTo,
-  managerProduct,
-  packageProduct,
-} from "@/components/packages/marks"
+import { OriginFact, PackageMark, VersionTo, managerProduct } from "@/components/packages/marks"
+import { HUE } from "@/components/overview/readings"
+import { SoftwareBand } from "@/components/packages/software-band"
+import { softwareKey, softwareName } from "@/components/packages/inventory"
 import { PackageSheet } from "@/components/packages/package-sheet"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
-import { ProductGlyphs, platformProduct } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { platformProduct } from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { NumberTicker } from "@/components/ui/number-ticker"
-import { Skeleton } from "@/components/ui/skeleton"
 import {
   stickyTableHeader,
   Table,
@@ -54,44 +48,17 @@ import {
 } from "@/components/ui/table"
 
 /**
- * Everything installed on this server, and everything that could be.
- *
- * The old page answered one question — which packages are behind — which is
- * the question you have *after* you already know what is on the machine and
- * how to add to it. Both of those sent the operator to an SSH session, which
- * is the thing this product exists to avoid, and neither is harder to answer
- * than the one that was already here.
- *
- * The dashboard's own version is deliberately not on this page any more. It
- * shares nothing with apt but the word "update", and having the two together
- * meant the release notes for a root-equivalent panel lived under a table of
- * library versions.
- *
- * Drawn the way the host Overview is (design-system.md §15): the host's
- * identity line — its distribution as the mark, the manager beside the name,
- * the index's age as a fact and whether anything is owed as the verdict, with
- * the index's verbs at its end — four figures as tiles, and four views under
- * one strip of tabs: three a toolbar, a hairline and a framed table, and the
- * fourth the package manager's own log, read in place through its lens — what
- * was installed, upgraded and removed, when, by which command — rather than
- * a link to the logs page. The three
- * things worth acting on before reading any of that — security updates
- * waiting, a reboot owed, an index too old to trust — are notices, each
- * carrying its own button, rather than a framed box with a header and nothing
- * in it.
- *
- * Every package is drawn as the software it is (§14, `packages/marks.tsx`):
- * `postgresql-16` as PostgreSQL, `python3-requests` as Python, the kernel as
- * Linux, and a library no product names as its section's glyph. The tiles
- * carry the products they count after their words, an upgrade's origin is the
- * archive that published it, and the part of a version an upgrade changes is
- * in ink beside the part it keeps.
+ * Reading register, design-system §15. The four summary tiles each moved to
+ * what they describe: installed to the identity and view count, by-hand and
+ * dependencies to scope chips, updates to their queue and view, and disk use
+ * to the software band. Like Processes, the band answers who, and pressing a
+ * software group narrows the whole inventory, including its dependencies.
  */
 
 /** Rows rendered at once. See the footer below for why there is a cap at all. */
 const MAX_ROWS = 400
 
-type Scope = "explicit" | "all" | "upgradable"
+type Scope = "explicit" | "all" | "dependencies" | "upgradable" | "security"
 type View = "installed" | "updates" | "install" | "log"
 
 const VIEWS: { key: View; label: string }[] = [
@@ -111,6 +78,7 @@ export default function PackagesPage() {
   const [scope, setScope] = useViewState<Scope>("packages.scope", "explicit")
   const [bySize, setBySize] = useViewState("packages.by-size", false)
   const [inspect, setInspect] = useQuerySelection("package")
+  const [software, setSoftware] = useSessionState("packages.software", "")
   const [applying, setApplying] = useState(false)
 
   const inventory = usePoll(
@@ -145,6 +113,9 @@ export default function PackagesPage() {
     const list = data?.packages ?? []
     const needle = filter.trim().toLowerCase()
     const matched = list.filter((p) => {
+      if (software && softwareKey(p) !== software) return false
+      if (effectiveScope === "dependencies" && p.explicit) return false
+      if (effectiveScope === "security" && (!p.upgradable || !p.security)) return false
       if (effectiveScope === "explicit" && !p.explicit) return false
       if (effectiveScope === "upgradable" && !p.upgradable) return false
       if (!needle) return true
@@ -158,31 +129,8 @@ export default function PackagesPage() {
       return [...matched].sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
     }
     return matched
-  }, [data, filter, effectiveScope, bySize])
+  }, [data, filter, effectiveScope, bySize, software])
 
-  // The one package worth naming on the disk tile: a host whose 4 GB of
-  // packages is mostly one toolchain wants to know which.
-  const largest = useMemo(
-    () =>
-      (data?.packages ?? []).reduce<InstalledPackage | undefined>(
-        (top, p) => (p.size && (!top?.size || p.size > top.size) ? p : top),
-        undefined,
-      ),
-    [data],
-  )
-
-  // The software the tiles count, as the products it is — what was asked for
-  // and what is behind — each once, in the inventory's order.
-  const products = useMemo(() => {
-    const of = (list: InstalledPackage[]) => [
-      ...new Set(list.map((p) => packageProduct(p.name)).filter((id) => id !== undefined)),
-    ]
-    const list = data?.packages ?? []
-    return {
-      explicit: of(list.filter((p) => p.explicit)),
-      behind: of(list.filter((p) => p.upgradable)),
-    }
-  }, [data])
   // The upgrade report names no section, so its rows borrow the inventory's.
   const sections = useMemo(
     () => new Map((data?.packages ?? []).map((p) => [p.name, p.section])),
@@ -239,7 +187,6 @@ export default function PackagesPage() {
 
   const canRefresh = Boolean(data?.canRefresh) && can("service.control")
   const canUpgrade = can("destructive") && data?.available && (data.upgradeCount ?? 0) > 0
-  const securityWaiting = Boolean(report?.securityFiltering) && (report?.securityCount ?? 0) > 0
   // A week is where an index stops being current enough to trust for "what is
   // available": the archive moves daily, and the timer that keeps it fresh is
   // the first thing to stop on a server nobody logs into.
@@ -255,10 +202,6 @@ export default function PackagesPage() {
 
   const upgradeCount = data?.upgradeCount ?? 0
   const securityCount = data?.securityCount ?? 0
-  // An inventory that failed has answered too: its figures are dashes beside
-  // the error and the package log under it, not a load that never ends.
-  const answered = Boolean(data) || Boolean(inventory.error)
-
   return (
     <Workspace
       name="Packages"
@@ -267,6 +210,10 @@ export default function PackagesPage() {
         updates.refresh()
       }}
       escape={() => {
+        if (software) {
+          setSoftware("")
+          return true
+        }
         if (!filter) return false
         setFilter("")
         return true
@@ -274,7 +221,7 @@ export default function PackagesPage() {
     >
       <Page>
         {dialog}
-        <PageContext eyebrow="Advanced" title="Packages" actions={<WorkspaceHelp />} />
+        <PageContext eyebrow="Advanced" title="Packages" />
 
         {/* What manages this host and how fresh the answer is, as the line the
           Overview opens on: the distribution the manager belongs to as the
@@ -283,14 +230,14 @@ export default function PackagesPage() {
           index's verbs beside it, because they change what the line says. */}
         {data?.available && (
           <HostIdentity
-            className="animate-rise"
+            className="animate-rise sm:[&>div:first-child]:min-w-64 [&>div:last-child]:max-w-full [&>div:last-child]:min-w-0 [&>div:last-child]:shrink"
             mark={platformProduct(host?.platform) ?? managerProduct(data.manager)}
             fallback={Puzzle}
             title={
               <>
                 {host?.platform ? platformName(host) : data.manager}{" "}
                 {host?.platform && (
-                  <span className="font-mono text-body font-normal text-muted-foreground">
+                  <span className="ml-2 font-mono text-body font-normal text-muted-foreground">
                     {data.manager}
                   </span>
                 )}
@@ -315,7 +262,7 @@ export default function PackagesPage() {
             }
             aside={
               <div className="flex max-w-full flex-wrap items-center gap-2">
-                <span className="mr-2 text-body">
+                <span className="w-full text-body sm:mr-2 sm:w-auto">
                   {report?.rebootRequired ? (
                     <Status verdict="warning" label="Reboot required" />
                   ) : securityCount > 0 ? (
@@ -356,106 +303,30 @@ export default function PackagesPage() {
                   <RefreshClockwise className="size-4" />
                   Re-read
                 </Button>
+                <WorkspaceHelp compact />
               </div>
             }
           />
         )}
 
-        <StatGrid columns={4}>
-          <StatTile
-            label="Installed"
-            value={
-              <Figure settled={answered}>
-                {data?.available ? <NumberTicker value={data.packages.length} /> : "—"}
-              </Figure>
-            }
-            hint={
-              data?.available
-                ? knowsExplicit
-                  ? `${(data.packages.length - data.explicitCount).toLocaleString()} arrived as dependencies`
-                  : undefined
-                : data
-                  ? "no supported package manager"
-                  : undefined
-            }
+        {data?.available && !data.error && (
+          <SoftwareBand
+            inventory={data}
+            report={report}
+            error={updates.error}
+            selected={software}
+            onSelect={(key) => {
+              setSoftware(key)
+              setScope("all")
+              setFilter("")
+              setView("installed")
+            }}
+            onInspect={setInspect}
+            onUpdates={() => setView("updates")}
+            onUpgrade={upgrade}
+            canUpgrade={Boolean(canUpgrade)}
+            busy={applying}
           />
-          <StatTile
-            label="Installed by hand"
-            value={
-              <Figure settled={answered}>
-                {knowsExplicit ? <NumberTicker value={data!.explicitCount} /> : "—"}
-              </Figure>
-            }
-            hint={
-              knowsExplicit ? (
-                <ProductsHint products={products.explicit}>asked for, not pulled in</ProductsHint>
-              ) : data?.available ? (
-                `${data.manager} does not record this`
-              ) : undefined
-            }
-          />
-          <StatTile
-            label="Updates"
-            value={
-              <Figure settled={answered}>
-                {data?.available ? <NumberTicker value={upgradeCount} /> : "—"}
-              </Figure>
-            }
-            tone={
-              securityCount > 0
-                ? "warning"
-                : upgradeCount > 0
-                  ? "default"
-                  : data?.available
-                    ? "success"
-                    : "default"
-            }
-            hint={
-              data?.available ? (
-                <ProductsHint products={products.behind}>
-                  {securityCount > 0
-                    ? `${securityCount} security`
-                    : upgradeCount > 0
-                      ? report?.securityFiltering
-                        ? "none are security updates"
-                        : `${data.manager} publishes no advisory data`
-                      : "everything is current"}
-                </ProductsHint>
-              ) : undefined
-            }
-          />
-          <StatTile
-            label="On disk"
-            value={
-              <Figure settled={answered}>{data?.totalSize ? bytes(data.totalSize) : "—"}</Figure>
-            }
-            hint={
-              largest?.size
-                ? `${largest.name} is the largest at ${bytes(largest.size)}`
-                : data?.available
-                  ? "what the installed packages occupy"
-                  : undefined
-            }
-          />
-        </StatGrid>
-
-        {/* The decision. Security updates are the reason to be on this page in a
-          hurry, and the button to act is here rather than three tabs in. */}
-        {canUpgrade && securityWaiting && (
-          <Notice
-            tone="warning"
-            icon={ShieldOff}
-            title={`${report!.securityCount} security update${report!.securityCount === 1 ? "" : "s"} waiting`}
-          >
-            Installing only these leaves everything else at the version it is on now. Services whose
-            packages change are restarted.
-            <div className="pt-2">
-              <Button size="sm" disabled={applying} onClick={() => upgrade(true)}>
-                <ShieldOff className="size-4" />
-                Install security updates
-              </Button>
-            </div>
-          </Notice>
         )}
 
         {report?.rebootRequired && (
@@ -543,14 +414,18 @@ export default function PackagesPage() {
                   className={tabClasses(view === entry.key, "h-10")}
                 >
                   {entry.label}
-                  {entry.key === "updates" && upgradeCount > 0 && (
+                  {(entry.key === "updates" || entry.key === "installed") && (
                     <span
                       className={cn(
                         "numeric text-hint font-medium",
-                        securityCount > 0 ? "text-warning" : "text-muted-foreground",
+                        entry.key === "updates" && securityCount > 0
+                          ? "text-warning"
+                          : "text-muted-foreground",
                       )}
                     >
-                      {upgradeCount}
+                      {entry.key === "installed"
+                        ? data.packages.length.toLocaleString()
+                        : upgradeCount}
                     </span>
                   )}
                 </button>
@@ -564,6 +439,7 @@ export default function PackagesPage() {
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                     placeholder="Name, description or section"
+                    aria-label="Find installed packages"
                     containerClassName="sm:w-72"
                   />
                   <div className="flex min-w-0 flex-wrap items-center gap-1">
@@ -578,6 +454,24 @@ export default function PackagesPage() {
                     <FilterChip selected={effectiveScope === "all"} onClick={() => setScope("all")}>
                       Everything <ChipCount>{data.packages.length}</ChipCount>
                     </FilterChip>
+                    {knowsExplicit && (
+                      <FilterChip
+                        selected={effectiveScope === "dependencies"}
+                        onClick={() => setScope("dependencies")}
+                      >
+                        Dependencies{" "}
+                        <ChipCount>{data.packages.length - data.explicitCount}</ChipCount>
+                      </FilterChip>
+                    )}
+                    {securityCount > 0 && (
+                      <FilterChip
+                        selected={effectiveScope === "security"}
+                        onClick={() => setScope("security")}
+                      >
+                        Security{" "}
+                        <ChipCount className="text-warning opacity-100">{securityCount}</ChipCount>
+                      </FilterChip>
+                    )}
                     <FilterChip
                       selected={effectiveScope === "upgradable"}
                       onClick={() => setScope("upgradable")}
@@ -585,6 +479,15 @@ export default function PackagesPage() {
                       Behind <ChipCount>{upgradeCount}</ChipCount>
                     </FilterChip>
                   </div>
+                  {software && (
+                    <FilterChip
+                      selected
+                      onClick={() => setSoftware("")}
+                      aria-label="Clear software filter"
+                    >
+                      {softwareName(software)} ×
+                    </FilterChip>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -637,15 +540,17 @@ export default function PackagesPage() {
               <Panel>
                 <PanelToolbar className="min-h-12">
                   <p className="text-body text-muted-foreground">
-                    {!report
-                      ? "Reading what is behind…"
-                      : report.packages.length === 0
-                        ? "Nothing is waiting to be upgraded"
-                        : `${report.packages.length} package${report.packages.length === 1 ? "" : "s"} behind${
-                            report.securityFiltering ? ` · ${report.securityCount} security` : ""
-                          }`}
+                    {updates.error || report?.error
+                      ? "Could not read updates"
+                      : !report
+                        ? "Reading what is behind…"
+                        : report.packages.length === 0
+                          ? "Nothing is waiting to be upgraded"
+                          : `${report.packages.length} package${report.packages.length === 1 ? "" : "s"} behind${
+                              report.securityFiltering ? ` · ${report.securityCount} security` : ""
+                            }`}
                   </p>
-                  {canUpgrade && (
+                  {canUpgrade && !updates.error && !report?.error && (
                     <Button
                       size="sm"
                       variant="outline"
@@ -659,7 +564,12 @@ export default function PackagesPage() {
                   )}
                 </PanelToolbar>
                 <PanelBody flush>
-                  {updates.loading && !report ? (
+                  {updates.error || report?.error ? (
+                    <ErrorState
+                      error={updates.error ?? new Error(report?.error)}
+                      onRetry={updates.refresh}
+                    />
+                  ) : updates.loading && !report ? (
                     <LoadingPanel className="mt-4" />
                   ) : !report || report.packages.length === 0 ? (
                     <EmptyState
@@ -674,14 +584,19 @@ export default function PackagesPage() {
                     />
                   ) : (
                     <div className="min-w-0 group-data-[plain]/panel:-mx-4">
-                      <Table containerClassName="max-h-[calc(100svh-30rem)]">
+                      <Table
+                        className="table-fixed"
+                        containerClassName="max-h-[max(20rem,calc(100svh-26rem))]"
+                      >
                         <TableHeader className={stickyTableHeader}>
                           <TableRow>
-                            <TableHead>Package</TableHead>
-                            <TableHead>Installed</TableHead>
-                            <TableHead>Available</TableHead>
-                            <TableHead className="hidden w-full md:table-cell">Origin</TableHead>
-                            <TableHead className="w-px" />
+                            <TableHead className="w-[45%] xl:w-[25%]">Package</TableHead>
+                            <TableHead className="hidden w-[22%] xl:table-cell">
+                              Installed
+                            </TableHead>
+                            <TableHead className="w-[55%] xl:w-[23%]">Available</TableHead>
+                            <TableHead className="hidden w-[20%] xl:table-cell">Origin</TableHead>
+                            <TableHead className="hidden w-[10%] xl:table-cell" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -699,7 +614,10 @@ export default function PackagesPage() {
                                   onInspect={setInspect}
                                 />
                               </TableCell>
-                              <TableCell className="font-mono text-muted-foreground">
+                              <TableCell
+                                className="hidden truncate font-mono text-muted-foreground xl:table-cell"
+                                title={p.current}
+                              >
                                 {p.current || "—"}
                               </TableCell>
                               <TableCell>
@@ -707,15 +625,16 @@ export default function PackagesPage() {
                                   from={p.current}
                                   to={p.candidate}
                                   security={p.security}
+                                  className="block truncate"
                                 />
                               </TableCell>
-                              <TableCell className="hidden md:table-cell">
+                              <TableCell className="hidden xl:table-cell">
                                 <OriginFact
                                   origin={p.origin}
                                   className="max-w-[18rem] text-hint text-muted-foreground"
                                 />
                               </TableCell>
-                              <TableCell className="text-right">
+                              <TableCell className="hidden text-right xl:table-cell">
                                 {p.security && <Tag tone="warning">security</Tag>}
                               </TableCell>
                             </TableRow>
@@ -743,21 +662,12 @@ export default function PackagesPage() {
         <PackageSheet
           name={inspect}
           canPurge={Boolean(data?.canPurge)}
+          onInspect={setInspect}
           onOpenChange={(open) => !open && setInspect(null)}
           onJob={console_.attach}
         />
       </Page>
     </Workspace>
-  )
-}
-
-/** A tile's hint with the products it counts drawn bare after the words. */
-function ProductsHint({ products, children }: { products: string[]; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-      <span className="truncate">{children}</span>
-      <ProductGlyphs ids={products} />
-    </span>
   )
 }
 
@@ -772,28 +682,12 @@ function PackageName({
   onInspect: (name: string) => void
 }) {
   return (
-    <div className="flex max-w-[22rem] min-w-0 items-center gap-3">
+    <div className="flex min-w-0 items-center gap-2.5">
       <PackageMark name={name} section={section} />
-      <RowLink mono className="text-body" onClick={() => onInspect(name)}>
+      <RowLink mono className="truncate text-body" onClick={() => onInspect(name)}>
         {name}
       </RowLink>
     </div>
-  )
-}
-
-/**
- * A tile's figure, rising once when the inventory lands: the key swaps
- * between the skeleton and the value so the number remounts rather than
- * flickering from bone to digits.
- */
-function Figure({ settled, children }: { settled: boolean; children: React.ReactNode }) {
-  return (
-    <span
-      key={settled ? "figure" : "skeleton"}
-      className={cn("inline-block max-w-full truncate align-bottom", settled && "animate-rise")}
-    >
-      {settled ? children : <Skeleton className="my-1.5 h-5 w-16" />}
-    </span>
   )
 }
 
@@ -804,16 +698,16 @@ function PackageTable({
   packages: InstalledPackage[]
   onInspect: (name: string) => void
 }) {
+  const largestSize = Math.max(...packages.map((p) => p.size ?? 0), 1)
   return (
-    <Table containerClassName="max-h-[calc(100svh-30rem)]">
+    <Table className="table-fixed" containerClassName="max-h-[max(20rem,calc(100svh-26rem))]">
       <TableHeader className={stickyTableHeader}>
         <TableRow>
-          <TableHead>Package</TableHead>
-          <TableHead className="w-full">What it is</TableHead>
-          <TableHead>Version</TableHead>
-          <TableHead className="hidden md:table-cell">Available</TableHead>
-          <TableHead className="hidden text-right md:table-cell">Size</TableHead>
-          <TableHead className="w-px" />
+          <TableHead className="w-[65%] xl:w-[36%]">Package</TableHead>
+          <TableHead className="w-[35%] xl:w-[21%]">Version</TableHead>
+          <TableHead className="hidden w-[21%] xl:table-cell">Available</TableHead>
+          <TableHead className="hidden w-[12%] text-right xl:table-cell">Size</TableHead>
+          <TableHead className="hidden w-[10%] xl:table-cell" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -826,29 +720,52 @@ function PackageTable({
           >
             <TableCell>
               <PackageName name={p.name} section={p.section} onInspect={onInspect} />
-            </TableCell>
-            <TableCell>
-              <p className="max-w-[38rem] truncate text-xs text-muted-foreground">
+              <p className="mt-1 truncate pl-8 text-hint text-muted-foreground" title={p.summary}>
                 {p.summary || "—"}
               </p>
             </TableCell>
-            <TableCell className="font-mono text-muted-foreground">{p.version}</TableCell>
+            <TableCell className="truncate font-mono text-muted-foreground" title={p.version}>
+              {p.version}
+            </TableCell>
             {/* The pending version beside the installed one, its changed part
                 in ink and amber only where it is a security fix: a column that
                 is amber for every behind package says nothing about which
                 ones matter. */}
-            <TableCell className="hidden md:table-cell">
+            <TableCell className="hidden xl:table-cell">
               {p.upgradable && (
-                <VersionTo from={p.version} to={p.upgradable} security={p.security} />
+                <VersionTo
+                  from={p.version}
+                  to={p.upgradable}
+                  security={p.security}
+                  className="block truncate"
+                />
               )}
             </TableCell>
-            <TableCell className="numeric hidden text-right text-muted-foreground md:table-cell">
-              {p.size ? bytes(p.size) : "—"}
+            <TableCell className="numeric hidden text-right text-muted-foreground xl:table-cell">
+              {p.size ? (
+                <span className="inline-flex w-full flex-col items-end gap-1.5">
+                  <span>{bytes(p.size)}</span>
+                  <span
+                    aria-hidden
+                    className="h-0.5 w-14 overflow-hidden rounded-full bg-meter-track"
+                  >
+                    <span
+                      className="block h-full"
+                      style={{
+                        width: `${(p.size / largestSize) * 100}%`,
+                        background: HUE.disk,
+                      }}
+                    />
+                  </span>
+                </span>
+              ) : (
+                "—"
+              )}
             </TableCell>
             {/* The row's fixed properties at its edge, in a column, rather
                 than interrupting the name at ten different points. */}
-            <TableCell className="text-right">
-              <span className="inline-flex items-center gap-2">
+            <TableCell className="hidden text-right xl:table-cell">
+              <span className="inline-flex flex-col items-end gap-1">
                 {p.security && <Tag tone="warning">security</Tag>}
                 {p.essential && <Tag>essential</Tag>}
               </span>

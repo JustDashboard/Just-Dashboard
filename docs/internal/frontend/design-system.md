@@ -163,10 +163,10 @@ taking a frame:
   in a `ChoiceList`, and Security as `FormSection aside`s; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
-  (`tabClasses`) rather than a filled tab list, beneath the host's identity line — each a toolbar
-  and a hairline over a framed table or, for the search, rows on the page's own edge, with what
-  needs acting on (security updates waiting, a reboot owed, a stale index) said as a `Notice` that
-  carries its own button rather than as a framed block with a header and nothing in it, and the Git page's repository list under its four readings (its workspace is one framed
+  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the software-size
+  band beside its update queue — each a toolbar and a hairline over a framed table or, for the
+  catalogue, lit choices on the page's own edge. Security updates carry their command in the queue;
+  a reboot owed and a stale index remain notices, and the Git page's repository list under its four readings (its workspace is one framed
   workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
   drawn);
   the Databases workbenches — Data, Query, Schema, Diagram and Logs on a SQL engine, Keys and Console
@@ -1862,6 +1862,20 @@ The passes, in order. Each one is a diff you can review on its own.
    two tabs for one scroll that opens on four live readings over the process's recent windows,
    which the sampler keeps for every process it measures, so a sheet opened from a table that has
    been open for minutes opens on those minutes.
+
+   Packages took the same exit in 0.7.1 at the operator's request. Installed is a fact in the
+   identity and a count on its view; by-hand and dependencies are scope chips; Updates is its view's
+   count, the security chip and a security-first queue; On disk heads the software band. The band
+   (`components/packages/software-band.tsx`) is Processes' question applied to installed software:
+   the five largest products, or archive sections for packages no product names, as spans of one
+   bar of the installed size in the disk measurement's hue, with every other package in one muted
+   span. Its figures glide on arrival and to a new inventory; a press narrows Installed to that
+   group, including its dependencies. The queue beside it opens a package's readout and carries
+   the security/all-upgrade decisions; no advisory data is said rather than counted as no security
+   updates. The sheet is one scroll, with version changes and size over commands, registered services,
+   file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
+   and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
+   their frame and gain fixed responsive columns and a measured size bar per installed row.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
