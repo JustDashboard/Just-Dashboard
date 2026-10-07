@@ -64,6 +64,9 @@ Description=Just Dashboard network: the devices, routes, gateway and shaping it 
 Documentation=https://github.com/JustDashboard/Just-Dashboard
 Wants=network-online.target
 After=network-online.target systemd-networkd.service NetworkManager.service networking.service docker.service ufw.service firewalld.service
+# systemd-networkd removes routes and rules it did not make when it restarts
+# (netplan apply, an upgrade), so this unit restarts with it and puts them back.
+PartOf=systemd-networkd.service
 
 [Service]
 Type=oneshot
@@ -75,13 +78,18 @@ RemainAfterExit=yes
 	for _, cmd := range admissionCommands(admission) {
 		fmt.Fprintf(&b, "ExecStart=-%s\n", strings.Join(cmd, " "))
 	}
+	// The kernel settings again, now that loading the gateway table has
+	// loaded conntrack: systemd-sysctl ran before the module existed, so
+	// nf_conntrack_max was not there to set, and a later sysctl.d file may
+	// have overridden the rest.
+	fmt.Fprintf(&b, "ExecStart=-sysctl -q -p %s\n", paths.Sysctl)
 	b.WriteString("ExecStop=-nft delete table inet " + gatewayTable + "\n")
 	for _, cmd := range admissionCommands(false) {
 		fmt.Fprintf(&b, "ExecStop=-%s\n", strings.Join(cmd, " "))
 	}
 	b.WriteString(`
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target systemd-networkd.service
 `)
 	return b.String()
 }

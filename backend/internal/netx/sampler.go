@@ -264,7 +264,13 @@ func (s *Sampler) record(ctx context.Context, now time.Time) {
 			txPeak = math.Max(txPeak, p.Tx)
 		}
 		n := float64(len(pts))
-		cur, prev := last[name], prevDrops[name]
+		cur := last[name]
+		// A device with no previous row has no interval to count errors in:
+		// its counters are its whole history, not this interval's.
+		prev, seen := prevDrops[name]
+		if !seen {
+			prev = cur
+		}
 		if _, err := stmt.ExecContext(ctx, ts, name,
 			math.Round(rx/n*10)/10, math.Round(tx/n*10)/10, rxPeak, txPeak,
 			delta(prev.rxErrs, cur.rxErrs), delta(prev.txErrs, cur.txErrs),
@@ -278,8 +284,10 @@ func (s *Sampler) record(ctx context.Context, now time.Time) {
 	}
 }
 
+// delta is a counter's growth over an interval; a counter that went
+// backwards was reset with its device and grew by nothing we can know.
 func delta(prev, cur uint64) uint64 {
-	if cur < prev || prev == 0 {
+	if cur < prev {
 		return 0
 	}
 	return cur - prev

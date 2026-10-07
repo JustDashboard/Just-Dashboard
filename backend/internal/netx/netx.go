@@ -224,6 +224,13 @@ func runOnHostStdin(ctx context.Context, stdin []byte, name string, args ...stri
 		if errors.As(err, &execErr) {
 			return "", &UnavailableError{Tool: name}
 		}
+		// Crossing into the host, a missing tool is not an exec error here
+		// but nsenter failing to exec it, which exits 127 like a shell.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 127 &&
+			strings.Contains(buf.String(), "failed to execute") {
+			return "", &UnavailableError{Tool: name}
+		}
 		return buf.String(), fmt.Errorf("%s: %s", name, strings.TrimSpace(firstLines(buf.String(), 6)))
 	}
 	return buf.String(), nil
