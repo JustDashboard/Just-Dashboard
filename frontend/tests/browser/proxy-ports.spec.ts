@@ -137,7 +137,7 @@ test("a socket on one address can be taken to the firewall", async ({ page }) =>
 
   await page.getByRole("button", { name: "Actions for tcp 100.110.34.31:8443" }).click()
   await page.getByRole("menuitem", { name: "Firewall" }).click()
-  await expect(page).toHaveURL(/\/security\/firewall$/)
+  await expect(page).toHaveURL(/\/network\/firewall$/)
 })
 
 test("the overview counts services and names a public database critical", async ({ page }) => {
