@@ -20,10 +20,10 @@ import (
 // answers with a gigabyte costs sixteen megabytes of this process's time and
 // no more.
 const (
-	maxFeedBytes    = 16 << 20
-	maxListEntries  = 500_000
-	maxManualList   = 10_000
-	maxCountries    = 30
+	maxFeedBytes             = 16 << 20
+	maxListEntries           = 500_000
+	maxManualList            = 10_000
+	maxCountries             = 30
 	blocklistStaleAfter      = 24 * time.Hour
 	blocklistRefreshInterval = time.Hour
 )

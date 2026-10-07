@@ -900,11 +900,11 @@ type GatewayView struct {
 	// Loaded is whether the gateway table is in the kernel. False with
 	// entries in the spec means they are not in force: the host was booted
 	// without the unit, or something deleted the table.
-	Loaded     bool            `json:"loaded"`
+	Loaded     bool              `json:"loaded"`
 	Forwarding GatewayForwarding `json:"forwarding"`
-	Admission  AdmissionState  `json:"admission"`
-	Forwards   []ForwardView   `json:"forwards"`
-	NAT        []NATView       `json:"nat"`
+	Admission  AdmissionState    `json:"admission"`
+	Forwards   []ForwardView     `json:"forwards"`
+	NAT        []NATView         `json:"nat"`
 }
 
 // Gateway reads the port forwards and NAT entries with their live counters.
