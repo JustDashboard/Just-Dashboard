@@ -131,12 +131,13 @@ taking a frame:
   servers, a database's home, its Performance, Advisor, Search and Generate — each a title, a toolbar
   and a hairline, with every database, found server, generator and search hit on them a lit card,
   and every block on the four Processes pages — the live table under its band of workloads, the
-  PM2 applications, the systemd units, and the cron jobs, timers and system cron files on
-  Scheduled, each a title, a toolbar and a hairline, the PM2 applications and the units under four
-  `StatTile` readings and Scheduled's under its next day drawn as one plain band of lanes (what
-  fires next counting down at the end of its identity line), whose Cron log is a plain panel
-  holding the log's `Pane` and whose jobs and timers open sheets of their own — with a detail
-  sheet built from plain panels that opens on the thing's own mark, the unit's journal, a PM2
+  PM2 applications under their band of what PM2 takes of the machine, the systemd units
+  under their band of busy services and recent changes, and the cron jobs, timers and
+  system cron files on Scheduled, each a title, a toolbar and a hairline, Scheduled's
+  under its next day drawn as one plain band of lanes (what fires next counting down
+  at the end of its identity line), whose Cron log is a plain panel holding the log's
+  `Pane` and whose jobs and timers open sheets of their own — with a detail sheet built
+  from plain panels that opens on the thing's own mark, the unit's journal, a PM2
   application's logs, a timer's runs and a job's cron lines a `Pane` in their sheets — and the
   two System pages follow the same shape: on System users four readings (accounts, administrators,
   who can sign in, the last sign-in) over the accounts as lit cards in a plain list, because each
@@ -162,10 +163,10 @@ taking a frame:
   in a `ChoiceList`, and Security as `FormSection aside`s; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
   on the page's ground, no panel around it), under one underlined strip
-  (`tabClasses`) rather than a filled tab list, beneath the host's identity line — each a toolbar
-  and a hairline over a framed table or, for the search, rows on the page's own edge, with what
-  needs acting on (security updates waiting, a reboot owed, a stale index) said as a `Notice` that
-  carries its own button rather than as a framed block with a header and nothing in it, and the Git page's repository list under its four readings (its workspace is one framed
+  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the software-size
+  band beside its update queue — each a toolbar and a hairline over a framed table or, for the
+  catalogue, lit choices on the page's own edge. Security updates carry their command in the queue;
+  a reboot owed and a stale index remain notices, and the Git page's repository list under its four readings (its workspace is one framed
   workbench of three `Pane flush` columns with a strip across the top, the way the terminal page is
   drawn);
   the Databases workbenches — Data, Query, Schema, Diagram and Logs on a SQL engine, Keys and Console
@@ -1270,8 +1271,9 @@ script of the operator's own keeps the clock). Each returns nothing for a name i
 and the tile keeps a glyph: a Tux on an unrecognised distribution, or a guessed logo on `bash` or
 `apt-daily.timer`, would be the drawing lying about the row. A reading that counts products carries
 them after its words (`ProductGlyphs`): the Overview's Docker tile draws the images its running
-containers are, Databases the engines its connections speak, Git the forges its checkouts push to, the live table's Processes tile what
-the machine is running, and the Services page's Active and Failed tiles what is up and what is not.
+containers are, Databases the engines its connections speak, Git the forges its checkouts push to, and the live table's Processes tile what
+the machine is running. The Services page draws each busy service and each recent change as its
+product beside its name, which is where its Active and Failed tiles carried their marks.
 The Live page opens on the machine's identity line — the same one, with the table's cadence and cap
 at its right end where Metrics keeps its range — and PM2 on PM2's own: its mark, the account, the
 Node it runs, the boot hook and the last save as facts, and whether it resurrects as the verdict.
@@ -1861,6 +1863,66 @@ The passes, in order. Each one is a diff you can review on its own.
    two tabs for one scroll that opens on four live readings over the process's recent windows,
    which the sampler keeps for every process it measures, so a sheet opened from a table that has
    been open for minutes opens on those minutes.
+
+   PM2 took the same exit in the same pass, at the operator's request, and for the same reason: four
+   grey figures over a table, and nothing that moved. Online and Not running went to state chips in
+   the table's head, Errored in its tone and drawn only while there is one; Restarts summed every
+   application's counter since PM2 last reset it, so the one worker crash-looping hid inside a
+   number — it is the table's first row now, its unstable restarts in red under the count, which
+   rises when it moves; and Memory, one figure for all of them, is the band's
+   (`components/procs/pm2-band.tsx`): the Processes band drawn for PM2 alone, each application —
+   a cluster summed into one — a span of one bar the size of the host beside everything else in
+   use, a press narrowing the table to it. Each row's uptime ticks between polls, from a start held
+   across them so it never steps back; memory is drawn against the limit PM2 restarts the
+   application at where it has one, because that is its ceiling. The verdict reads the saved list's
+   names, so a list saved before the last start is amber with **Save list** beside it, and each
+   application the list lacks says *not saved*. The sheet kept its Logs tab — the log is a `Pane`
+   that wants the sheet's height — and its overview became the process sheet's one scroll: what is
+   wrong as a `Notice` with the way to the log, four readings from the process table's read of the
+   application's PID over the sampler's windows, a cluster's instances as rows, what it listens on,
+   the command coloured. Its scale dialog is a stepper over the workers themselves, and the start
+   dialog picks the interpreter and the mode as cards with their marks (§16), not two selects.
+
+   Services took the same exit the day after, at the operator's request, because beside Live it
+   was the still page of the two: four grey tiles over a table of names and state words, with no
+   figure on it that moved. Active, failed and inactive are counted state chips in the table's
+   head — failed in its tone, and a Starting chip in amber only while a unit is on its way
+   somewhere — which narrow as well as count; "enabled on boot" is a fact in the identity line and
+   the Enabled startup chip, where the disabled and static its hint named are chips of their own.
+   The line opens on the machine as Live's does, with systemd's version, how many services are
+   active and start on boot, and when it booted as facts, and at its right end the verdict — the
+   failed count, a press of which narrows the table to them — beside Reload unit files and the
+   shortcuts, where a button stood alone over the table. Under it `components/procs/
+   service-band.tsx` answers what the tiles never did: the five services using the most processor
+   and the most memory on Live's bar the size of the machine (`ShareBar`), and a third block of
+   what happened — the last units to start, stop, finish or fail since the boot settled, each with
+   its time, a failure saying why in the same line and a restart in progress shimmering. A row
+   there opens the unit. The figures are systemd's own, read from each unit's cgroup by the list
+   route, so a service's share is every process it started. The table took Live's fixed columns
+   and its figure-beside-a-bar readings, and its state column says how long a unit has been in its
+   state — up for, failed since and why, the restarts it has taken; a unit whose state changed
+   since the last read rises (`useArrivals` keyed on the name and the state). The unit sheet kept
+   its Journal tab, whose pane needs the height, and its overview became the process sheet's
+   readout: four live tiles (CPU over the unit's recent windows, memory against its limit or over
+   its windows, tasks against theirs, automatic restarts with the policy), or the last run's
+   counters when it is not running; a failure or a restart loop said first as a Notice with the
+   way to its journal; the command coloured as a command rather than systemd's record of it; the
+   processes it holds now, each opening Live's sheet; and how it runs, with its type in words and
+   its overrides.
+
+   Packages took the same exit in 0.7.1 at the operator's request. Installed is a fact in the
+   identity and a count on its view; by-hand and dependencies are scope chips; Updates is its view's
+   count, the security chip and a security-first queue; On disk heads the software band. The band
+   (`components/packages/software-band.tsx`) is Processes' question applied to installed software:
+   the five largest products, or archive sections for packages no product names, as spans of one
+   bar of the installed size in the disk measurement's hue, with every other package in one muted
+   span. Its figures glide on arrival and to a new inventory; a press narrows Installed to that
+   group, including its dependencies. The queue beside it opens a package's readout and carries
+   the security/all-upgrade decisions; no advisory data is said rather than counted as no security
+   updates. The sheet is one scroll, with version changes and size over commands, registered services,
+   file links, the manual, inspectable dependencies and metadata. Catalogue suggestions and results,
+   and the sheet's service/file destinations, take the lit choice edge (pass 3). Tables retain
+   their frame and gain fixed responsive columns and a measured size bar per installed row.
 
    Scheduled took the same exit in 0.7.1 and for the same reason: five grey figures over three
    tables, and nothing on the page that showed *when* anything ran without reading row by row.

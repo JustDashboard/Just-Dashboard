@@ -88,6 +88,9 @@ type PM2 struct {
 	mu       sync.Mutex
 	cached   []PM2Process
 	cachedAt time.Time
+
+	dumpMu sync.Mutex
+	dumps  map[string]savedList
 }
 
 func NewPM2() *PM2 { return &PM2{} }

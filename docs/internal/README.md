@@ -71,6 +71,9 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-07-packages-overhaul/README.md`](../audits/2026-10-07-packages-overhaul/README.md)
+  — Packages' software-size band, update queue, catalogue and single-scroll inspector, with screenshots.
+
 - [`../audits/2026-10-04-dropdowns/README.md`](../audits/2026-10-04-dropdowns/README.md) — shared
   select/menu inventory, single-column option layout, opening behavior and verification coverage.
 

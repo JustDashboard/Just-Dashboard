@@ -36,6 +36,7 @@ import {
   ownerName,
   processKey,
   processStateTone,
+  reach,
   uncontrollable,
 } from "@/components/procs/shared"
 
@@ -500,21 +501,14 @@ function Dot() {
   return <span className="text-muted-foreground/40">·</span>
 }
 
-function Counter({ label, children }: { label: string; children: React.ReactNode }) {
+/** A counter in a sheet's grid of them; the unit sheet's last run draws its own the same way. */
+export function Counter({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline py-1">
       <dt className="truncate text-xs text-muted-foreground">{label}</dt>
       <dd className="numeric truncate font-mono text-xs">{children}</dd>
     </div>
   )
-}
-
-/** Who can reach a listening address. */
-function reach(address: string) {
-  if (!address || address === "0.0.0.0" || address === "::" || address === "*")
-    return "every interface"
-  if (address.startsWith("127.") || address === "::1") return "this machine only"
-  return "one address"
 }
 
 function PriorityPanel({

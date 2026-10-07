@@ -123,6 +123,14 @@ export function cpuTone(percent: number): Tone {
   return "default"
 }
 
+/** Who can reach a listening address. */
+export function reach(address: string) {
+  if (!address || address === "0.0.0.0" || address === "::" || address === "*")
+    return "every interface"
+  if (address.startsWith("127.") || address === "::1") return "this machine only"
+  return "one address"
+}
+
 /** One process across polls: a PID alone is reused, the pair is not. */
 export function processKey(process: { pid: number; createTime: string }): string {
   return `${process.pid}-${process.createTime}`
