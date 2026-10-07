@@ -169,3 +169,77 @@ func TestProcessDetailCarriesItsHistory(t *testing.T) {
 		t.Fatalf("second read: cpuReady %v, %d history points, want a measured window", got.CPUReady, len(got.History))
 	}
 }
+
+// The unit list carries each unit's live readings from one `systemctl show`
+// over the loaded units, the manager's state, and a CPU share once a unit has
+// been read twice; the unit files are listed once for both reads.
+func TestUnitListCarriesReadingsAndTheManager(t *testing.T) {
+	s, bin := engineHost(t, map[string]string{"systemctl": `
+case "$1" in
+list-units)
+	echo '[{"unit":"nginx.service","load":"loaded","active":"active","sub":"running","description":"nginx"},{"unit":"ghost.service","load":"not-found","active":"inactive","sub":"dead","description":"ghost.service"}]' ;;
+list-unit-files)
+	echo '[{"unit_file":"nginx.service","state":"enabled"}]' ;;
+show)
+	case "$*" in
+	*Version*) printf 'Version=257.4-1ubuntu3.2\nSystemState=degraded\n' ;;
+	*)
+		n=0; [ -f "$0.n" ] && read n < "$0.n"; n=$((n+1)); echo $n > "$0.n"
+		printf 'Id=nginx.service\nType=forking\nActiveState=active\nInvocationID=a\nMainPID=812\nMemoryCurrent=48234496\nTasksCurrent=5\nCPUUsageNSec=%s000000000\nNRestarts=0\nResult=success\nExecMainCode=0\nExecMainStatus=0\nActiveEnterTimestampMonotonic=1000000\nStateChangeTimestampMonotonic=1000000\nFragmentPath=/usr/lib/systemd/system/nginx.service\n' "$((n*3))" ;;
+	esac ;;
+esac
+`})
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+
+	var body struct {
+		Available  bool
+		RatesReady bool
+		Manager    struct{ Version, State string }
+		Units      []procs.Unit
+	}
+	read := func() {
+		w := c.do(http.MethodGet, "/api/v1/systemd/", "", nil)
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &body) != nil {
+			t.Fatalf("list: %d %s", w.Code, w.Body.String())
+		}
+	}
+	read()
+	if body.Manager.State != "degraded" || body.Manager.Version != "257.4-1ubuntu3.2" {
+		t.Fatalf("manager = %+v", body.Manager)
+	}
+	if body.RatesReady || len(body.Units) != 2 {
+		t.Fatalf("first read: ready %v, %d units", body.RatesReady, len(body.Units))
+	}
+	time.Sleep(1100 * time.Millisecond)
+	read()
+	nginx := body.Units[0]
+	if nginx.Name != "nginx.service" || nginx.MainPID != 812 || nginx.Memory != 48234496 ||
+		nginx.Tasks != 5 || nginx.Fragment == "" || nginx.SinceUnix == 0 {
+		t.Fatalf("nginx = %+v", nginx)
+	}
+	// Three seconds of CPU over a window of a little more than one.
+	if !body.RatesReady || !nginx.CPUReady || nginx.CPUPercent < 150 || nginx.CPUPercent > 300 {
+		t.Fatalf("second read: ready %v, nginx %v%% (%v)", body.RatesReady, nginx.CPUPercent, nginx.CPUReady)
+	}
+	// A unit systemd has no file for is listed, and not asked about.
+	if body.Units[1].Name != "ghost.service" || body.Units[1].CPUReady {
+		t.Fatalf("ghost = %+v", body.Units[1])
+	}
+	log := shimLog(t, bin, "systemctl")
+	if strings.Count(log, "list-unit-files") != 1 {
+		t.Fatalf("unit files listed %d times over two reads", strings.Count(log, "list-unit-files"))
+	}
+	if strings.Contains(log, "ghost.service") {
+		t.Fatalf("a unit that is not loaded was shown: %q", log)
+	}
+
+	// The detail route measures too, and returns the windows kept.
+	w := c.do(http.MethodGet, "/api/v1/systemd/nginx.service", "", nil)
+	var detail struct{ Unit procs.Unit }
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &detail) != nil {
+		t.Fatalf("detail: %d %s", w.Code, w.Body.String())
+	}
+	if len(detail.Unit.History) == 0 {
+		t.Fatalf("detail carried no history: %s", w.Body.String())
+	}
+}

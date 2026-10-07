@@ -130,6 +130,24 @@ socket-activated service's port.
   `EXIT_STATUS` and the cursor, and takes the invocation of the unit a manager line names
   (`INVOCATION_ID`, then `USER_INVOCATION_ID`) over the writer's own: a user manager is
   `user@1000.service`, one run, under which every run of every user unit would otherwise fold into one.
+- `GET /systemd/` carries each unit's live readings and the manager (`Systemd.Inventory`, additive:
+  `units` keeps its shape). One `systemctl show -p … --` over every loaded unit reads its type, main
+  PID, cgroup memory (page cache included) and tasks, automatic restarts (`NRestarts`), result and
+  how its main process last ended (`ExecMainCode`/`ExecMainStatus` as `exitCode`/`exitStatus`), when
+  it became active and when it last changed state (`changedAt`), and its unit file, so a list row
+  offers Open unit file. CPU is `CPUUsageNSec` turned into a share of one core over the window
+  since the unit's last reading, on the process sampler's rules: a window shorter than a second
+  reports the last whole one, a new `InvocationID` or a counter that went backwards starts a new
+  window, `ratesReady` is false until some unit has two readings, and each window appends a point to
+  the unit's history, at most one every two seconds and the last ninety. `GET /systemd/{name}`
+  (`Systemd.Detail`) measures the same way and returns that `history`. An inactive unit's last read
+  is reused for a minute while it stays inactive; a unit that is not loaded is listed but not
+  asked about. The manager is `Version` and `SystemState` (`running`, `degraded`…) with the boot
+  time from the host's uptime — not `FinishTimestamp`, which a job that never finishes holds open.
+  `list-unit-files`, most of a second on a host with two hundred units, is kept thirty seconds and
+  forgotten after enable, disable and daemon-reload run here; the same commands run in a shell are
+  at most that late on the page. Readings are best-effort: a `show` that fails leaves the list
+  without figures rather than failing it.
 - systemd grew `reset-failed` (`service.control`) and `POST /systemd/daemon-reload` (`system.admin`),
   and `GET /systemd/timers` joins `list-timers --all` (schedule) with `list-units --type=timer` (state)
   and `list-unit-files --type=timer` (startup) on the unit name. `next` and `last` are read as

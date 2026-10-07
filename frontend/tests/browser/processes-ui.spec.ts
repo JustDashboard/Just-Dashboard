@@ -949,18 +949,22 @@ test("services list failed units first and the sheet offers reload where it appl
 }) => {
   await mockHost(page)
   await page.goto("/processes/services")
-  await expect(page.getByText("listed first below")).toBeVisible()
+  // No tiles: what they counted is the state chips in the table's head, the
+  // failed one in its tone, and the verdict at the end of the identity line.
+  // This host's backend predates the readings, and the page still opens.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  await expect(
+    page.locator("[aria-label='State']").getByRole("button", { name: /Failed/ }),
+  ).toContainText("1")
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("1 service failed")
+  expect(await framedNonTables(page)).toEqual([])
   const names = await page
     .locator("[data-slot='table-row'] [data-slot='table-cell']:first-child button")
     .allInnerTexts()
   expect(names[0]).toBe("postgresql.service")
-  // A unit is the product it runs, and the Failed tile says what failed
-  // before the table does.
+  // A unit is the product it runs.
   await expect(page.locator("td img[src='/logos/postgresql.svg']")).toBeVisible()
   await expect(page.locator("td img[src='/logos/nginx.svg']")).toBeVisible()
-  await expect(
-    page.locator("[data-slot='stat-tile']").nth(1).locator("img[src='/logos/postgresql.svg']"),
-  ).toBeVisible()
 
   const failed = await menuLabels(page, "postgresql")
   expect(failed).toEqual(

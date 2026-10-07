@@ -188,8 +188,8 @@ function sum<T>(list: T[], value: (item: T) => number) {
 /**
  * One bar as wide as the machine: a span per workload, heaviest first, then
  * everything else the host reports in use, muted, then the track for what is
- * free. Each span eases to its next width rather than jumping. PM2's band
- * draws its applications on the same bar.
+ * free. Each span eases to its next width rather than jumping. PM2 and Services
+ * share this scale for their applications and units.
  */
 export function ShareBar({
   label,
