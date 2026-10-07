@@ -42,7 +42,9 @@ and every value written into them is parsed by type first (`validate.go`).
 `ip -batch` cannot carry `-6`, so IPv6 policy rules are refused (IPv6 routes are fine: the family comes
 from the address).
 
-## Devices, namespaces, routing (`links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`)
+## Devices, namespaces and routing
+
+Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
 
 - `ReadLinks` joins `ip -j -d -s link` and `ip -j addr` with the default routes (the uplink), the client
   path, the spec, each running container's veth (read from `/proc/<pid>/root/sys/class/net/*/iflink`,
@@ -62,7 +64,9 @@ from the address).
   Docker count and Tailscale's state (`TailscaleNeedsForwarding`).
 - BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only.
 
-## Traffic (`sampler.go`, `traffic.go`, `ebpf.go`)
+## Traffic
+
+Files: `sampler.go`, `traffic.go`, `ebpf.go`.
 
 The sampler reads `/proc/net/dev` every two seconds into a fifteen-minute ring per device (the live
 figures and wires) and records a row per device every metrics interval into `metric_interface_samples`
@@ -72,7 +76,9 @@ which `/network/traffic/containers` differences per sample in SQL. Per-program t
 `ss -tinpH`'s per-socket byte counters between reads (TCP only). eBPF is an inventory from `bpftool`
 (programs, XDP and tc attachments), not a probe the dashboard loads.
 
-## Gateway and protection (`gateway*.go`, `blocklists.go`, `protection.go`, `conntrack.go`)
+## Gateway and protection
+
+Files: `gateway*.go`, `blocklists.go`, `protection.go`, `conntrack.go`.
 
 `inet jd_gateway` only ever drops or translates. Chains: `pre` (raw priority: trusted returns, then
 each blocklist set drops, counted), `input` and `forward` (−10: established and trusted return, then
@@ -106,13 +112,17 @@ strict is not offered because it breaks policy routing and tunnels — redirects
 ICMP, SYN backlog and retries, RFC 1337, martians, the conntrack maximum), each with its recommendation
 and why, written to the sysctl drop-in. Conntrack's count against its maximum is read from `/proc`.
 
-## Shaping (`shaping.go`)
+## Shaping
+
+Files: `shaping.go`.
 
 Per device a root discipline (fq_codel, cake, fq) and upload and download limits (htb with fq_codel
 egress, ingress policing), and BBR as a switch (`tcp_congestion_control=bbr`, `default_qdisc=fq`).
 A limit under 1 Mbit/s on the uplink or the client-path device is refused.
 
-## VPN (`wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `qr.go`, `vpn_store.go`, `tailscale.go`, `headscale.go`)
+## VPN
+
+Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `qr.go`, `vpn_store.go`, `tailscale.go`, `headscale.go`.
 
 - **WireGuard** is read from `wg show all dump` joined with `/etc/wireguard/*.conf`; private and
   preshared keys never leave the package. Only files whose first line is `# Managed by Just Dashboard`
@@ -133,7 +143,9 @@ A limit under 1 Mbit/s on the uplink or the client-path device is refused.
   another node as an exit, shields up, down and logout are never run, because each can cut off the
   browser reading the page. **Headscale** is read where its binary or container runs.
 
-## DNS (`dns.go`, `dns_hosts.go`, `dns_lookup.go`)
+## DNS
+
+Files: `dns.go`, `dns_hosts.go`, `dns_lookup.go`.
 
 The resolver chain is `/etc/resolv.conf`'s mode, systemd-resolved's global and per-link scopes and
 statistics, what answers on port 53 (reusing `proxysvc.ListListeners`) and any AdGuard Home or Pi-hole.

@@ -281,6 +281,11 @@ control broken on the commonest server distribution.
 
 ## Firewall: one page, three backends
 
+The page is `/network/firewall` since 0.7.1, in the Network section beside the gateway table the
+[network module](network.md) owns; the routes below are unchanged. A port forward or NAT entry made there
+admits its own connections past these rules by a connection mark, so it needs no rule here
+([forward admission](network.md#gateway-and-protection)).
+
 `netsec/firewall.go` dispatches to ufw, firewalld or iptables (`firewall_{ufw,firewalld,iptables}.go`).
 **Validation and both lockout guards live in the dispatcher**, so a fourth backend cannot be added
 without them — that placement is the reason the refactor was worth doing. The shared `run` is a
