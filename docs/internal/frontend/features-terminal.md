@@ -229,12 +229,26 @@ terminal instead of a package page is that they do not know the name (`postgresq
 `build-essential`, not `gcc`), and a form where you type a guess and press a button to find out you were
 wrong is a form you use once. Install is one press on the row — there was a tray, and it cost a click and
 a concept on every single-package install while protecting against an interruption a job survives anyway.
-The command each button runs is its `title`. `package-sheet.tsx`'s second tab is the whole point of the
-feature; the installed table caps at 400 rendered rows with the count said plainly underneath. The page
-is drawn per design-system §15: the search is a plain panel of hand-laid rows (`ROW_BLEED`) whose
-install verb is an outline button — sixty brand faces in a result list would be sixty commands — and
-a started install is a `Status`, not a disabled button; the sheet's usage sections open with an eyebrow
-alone, and its copyable commands sit on the control ground. The fourth view, **Log**
+The command each install button runs is its `title`. The empty search offers eight software choices
+with product marks; results are `ChoiceRow`s with their install action, so opening a result and starting
+an install remain separate gestures. A pending query hides the previous query's results and says it is
+searching; failed reads say so. A started install is a `Status`, not a disabled button.
+The page is drawn per design-system §15 in the reading register, without summary tiles. Installed and
+by-hand/dependency counts live in the identity, view strip and scope chips. `software-band.tsx` draws the
+five largest software groups as shares of the installed size, in the disk measurement's colour, with
+other packages as one muted span. Products are grouped by `packageProduct`; unnamed packages use the
+archive's section. These sums cover the whole inventory, not the 400-row rendered table. Pressing a
+group opens Installed, clears its search and selects Everything so dependencies appear too; Escape or
+the selected chip clears the group. Beside it is a security-first update queue, version changes,
+advisory coverage and confirmed security/all-upgrade actions. Missing sizes and advisory data are stated;
+a failed update read is an error, never an empty all-clear.
+`package-sheet.tsx` is one scroll: version changes and size, copyable commands coloured as shell words,
+registered services with links to their systemd inspector, configuration and documentation links into
+Files, the manual in a scrollable well, inspectable dependencies, and package metadata. Dependency
+navigation uses `?package=` and browser Back. A usage read that fails reports its reason with Retry,
+instead of leaving a loader. The sheet keeps package protection, install/update/remove/purge actions,
+ordinary confirmations, and the page's resumable jobs. The installed table uses compact columns below 1280 pixels and fixed columns above,
+a size bar per row and a 400-row cap with the count said plainly underneath. The fourth view, **Log**
 (`components/packages/log-view.tsx`), reads what the package manager did from its own logs — apt's
 history with each transaction's command and who asked, dpkg's record, the unattended runs, dnf's — in
 History and Insights only, opening on everything on disk, since a package log is written a few times
