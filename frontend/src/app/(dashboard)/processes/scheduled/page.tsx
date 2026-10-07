@@ -195,7 +195,12 @@ function Scheduled() {
         cron={cron}
       />
 
-      <TimersPanel timers={timers} confirm={confirm} onOpen={selectTimer} />
+      <TimersPanel
+        timers={timers}
+        confirm={confirm}
+        onOpen={selectTimer}
+        detailOpen={timer !== null}
+      />
 
       <Panel plain>
         <PanelHeader title="Cron log" />

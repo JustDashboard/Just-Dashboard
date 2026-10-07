@@ -40,6 +40,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { PM2Band } from "@/components/procs/pm2-band"
 import { PM2DetailSheet } from "@/components/procs/pm2-detail"
 import { PM2StartDialog } from "@/components/procs/pm2-start-dialog"
+import { useInspectionOrder } from "@/components/procs/inspection-order"
 import {
   useDaemonVerbs,
   usePM2Control,
@@ -149,7 +150,7 @@ function PM2Applications() {
     [processes],
   )
   const chosenApp = apps.find((a) => a.key === appFilter)
-  const visible = useMemo(() => {
+  const matching = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return processes.filter((p) => {
       if (state === "online" && p.status !== "online") return false
@@ -164,6 +165,8 @@ function PM2Applications() {
       )
     })
   }, [processes, query, state, appFilter])
+  const inspection = useInspectionOrder(matching, pm2Key, JSON.stringify([query, state, appFilter]))
+  const visible = inspection.rows
 
   const selected = useMemo(() => pm2Select(processes, selectedKey), [processes, selectedKey])
 
@@ -223,7 +226,7 @@ function PM2Applications() {
         return false
       }}
     >
-      <Page className="animate-rise">
+      <Page className="animate-rise" {...inspection.bindings}>
         {header}
 
         {daemons.length > 0 && (

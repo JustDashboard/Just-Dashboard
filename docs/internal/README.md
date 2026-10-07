@@ -74,6 +74,9 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-07-process-refresh/README.md`](../audits/2026-10-07-process-refresh/README.md)
+  — mounted inventory refreshes, stable inspection order, cron focus and interaction recordings.
+
 - [`../audits/2026-10-07-pm2-overhaul/README.md`](../audits/2026-10-07-pm2-overhaul/README.md)
   — PM2 screenshots and the Files history regression found during merge verification, with replays.
 

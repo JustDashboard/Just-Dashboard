@@ -1900,8 +1900,9 @@ The passes, in order. Each one is a diff you can review on its own.
    there opens the unit. The figures are systemd's own, read from each unit's cgroup by the list
    route, so a service's share is every process it started. The table took Live's fixed columns
    and its figure-beside-a-bar readings, and its state column says how long a unit has been in its
-   state — up for, failed since and why, the restarts it has taken; a unit whose state changed
-   since the last read rises (`useArrivals` keyed on the name and the state). The unit sheet kept
+   state — up for, failed since and why, the restarts it has taken. Only a newly listed unit rises
+   (`useArrivals` keyed on its name); starting or stopping an existing unit updates it in place.
+   The unit sheet kept
    its Journal tab, whose pane needs the height, and its overview became the process sheet's
    readout: four live tiles (CPU over the unit's recent windows, memory against its limit or over
    its windows, tasks against theirs, automatic restarts with the policy), or the last run's
