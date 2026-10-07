@@ -251,6 +251,12 @@ restore on failure → reload only then.
 - `AllowUsers`/`DenyUsers` are `kind: "list"`: the value is explicitly checked for a newline (one would
   write a directive of the caller's choosing on the next line) and normalised through `strings.Fields`.
   An emptied list is commented out — sshd refuses to start behind a bare keyword.
+- The bastion directives (`allowtcpforwarding`, `gatewayports`, `allowagentforwarding`, `permittunnel`,
+  `maxsessions`) are in the closed list for the SSH page's jump-host section. `allowtcpforwarding` and
+  `maxsessions` are `AlwaysAcceptable` — a jump host exists to forward TCP, so grading "yes" as insecure
+  would put a permanent warning on a legitimate bastion — with the recommendation ("no, unless this
+  server is a jump host") carried as text. The other three are graded against "no". The posture reads
+  none of them, and `guardSSHLockout` does not either: forwarding cannot cost access to SSH itself.
 - `permitrootlogin` folds `without-password` onto `prohibit-password`, because `sshd -T` still prints the
   deprecated spelling distributions ship as default and a dropdown missing it renders empty.
 - `reloadSSH` tries systemd units, then `rc-service`, then `service`.
