@@ -833,20 +833,43 @@ test("services list failed units first and the sheet offers reload where it appl
 test("scheduled says what each schedule means and builds a new one in words", async ({ page }) => {
   await mockHost(page)
   await page.goto("/processes/scheduled")
-  await expect(page.getByText("Every day at 03:00")).toBeVisible()
-  await expect(page.getByText("Every hour at :17")).toBeVisible()
+  const jobs = page.getByRole("table").first()
+  await expect(jobs.getByText("Every day at 03:00")).toBeVisible()
   await expect(page.getByText("runs certbot.service")).toBeVisible()
 
-  // Five readings over the three lists and cron's log: what fires next
-  // across cron and the timers together, and the counts none of the lists
-  // says alone — among them what cron actually started in the last day.
-  const tiles = page.locator("[data-slot='stat-tile']")
-  await expect(tiles).toHaveCount(5)
-  await expect(tiles.nth(0)).toContainText("Next run")
-  await expect(tiles.nth(1)).toContainText("1 disabled · root")
-  await expect(tiles.nth(2)).toContainText("Cron runs")
-  await expect(tiles.nth(3)).toContainText("of 2 · 1 enabled on boot")
-  await expect(tiles.nth(4)).toContainText("1 file owned by packages")
+  // No tiles: the machine's identity line counts the three places schedules
+  // live, and what fires next counts down at its end.
+  await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("1 cron job for root, 1 disabled")
+  await expect(identity).toContainText("1 of 2 timers armed")
+  await expect(identity).toContainText("1 package cron line")
+  const next = page.locator("[data-slot='next-up']")
+  await expect(next).toContainText("Next run")
+  await expect(next).toContainText(/\d+[smhd]/)
+
+  // The next day of all three on one axis: a lane per schedule that fires in
+  // it, soonest first, each kind a chip that counts and narrows.
+  const band = page.getByRole("list", { name: "Schedules" })
+  await expect(band.locator(":scope > li")).toHaveCount(3)
+  await expect(
+    band.getByRole("img", { name: "run-parts: 24 runs in the next 24 hours" }),
+  ).toBeVisible()
+  const kinds = page.locator("[aria-label='Kind']")
+  await kinds.getByRole("button", { name: /Timers/ }).click()
+  await expect(band.locator(":scope > li")).toHaveCount(1)
+  await expect(band).toContainText("certbot")
+  await kinds.getByRole("button", { name: /Timers/ }).click()
+  // What the axis does not draw is said under it.
+  await expect(page.getByText("2 switched off")).toBeVisible()
+
+  // The crontab's head counts its jobs as chips that narrow the table.
+  const states = page.locator("[aria-label='Job state']")
+  await states.getByRole("button", { name: /Disabled/ }).click()
+  await expect(jobs.getByRole("row", { name: /prune/ })).toBeVisible()
+  await expect(jobs.getByRole("row", { name: /backup/ })).toHaveCount(0)
+  await states.getByRole("button", { name: /All/ }).click()
+
   // certbot's timer is Let's Encrypt's renewal; a script of the operator's
   // own keeps the clock.
   await expect(page.locator("td img[src='/logos/lets-encrypt.svg']")).toBeVisible()
@@ -861,13 +884,30 @@ test("scheduled says what each schedule means and builds a new one in words", as
     page.getByRole("row", { name: /prune/ }).first().getByRole("button", { name: "Enable" }),
   ).toBeVisible()
 
+  // The editor is a sheet that draws the week the schedule makes as it is
+  // written.
   await page.getByRole("button", { name: "Add job" }).click()
-  await page.getByLabel("Command").fill("/usr/local/bin/report")
-  const dialog = page.getByRole("dialog")
-  await expect(dialog.getByText("0 3 * * *", { exact: true })).toBeVisible()
-  await expect(dialog.getByText("Every day at 03:00")).toBeVisible()
-  await expect(dialog.getByText(/^Next: /)).toBeVisible()
+  const editor = page.getByRole("dialog", { name: "Add cron job" })
+  await editor.getByLabel("Command").fill("/usr/local/bin/report")
+  const preview = editor.locator("[data-slot='schedule-preview']")
+  await expect(preview.getByText("0 3 * * *", { exact: true })).toBeVisible()
+  await expect(preview.getByText("Every day at 03:00")).toBeVisible()
+  await expect(preview.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(preview.getByText(/^Next: /)).toBeVisible()
+  await editor.getByRole("radio", { name: "Hourly" }).click()
+  await expect(preview.getByText("0 * * * *", { exact: true })).toBeVisible()
+  await expect(editor.getByRole("button", { name: "Add job" })).toBeEnabled()
   await page.keyboard.press("Escape")
+
+  // A job opens on its week, its command and the runs cron logged for it.
+  await jobs.getByRole("button", { name: "/usr/local/bin/backup" }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/job=cron(%3A|:)3/)
+  await expect(sheet.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  await expect(sheet.getByRole("button", { name: "Disable" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page).not.toHaveURL(/job=/)
 })
 
 const RUN_PREDICATES = [
@@ -1088,16 +1128,17 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
     .filter({ has: page.getByRole("heading", { name: "Cron log", exact: true }) })
   await expect(cronLog.getByLabel("Log lines").getByText(/usr\/local\/bin\/backup/)).toBeVisible()
   await expect(cronLog.getByText("output lost", { exact: true })).toBeVisible()
-  // What cron started in the last day, and the runs whose output went nowhere.
-  const tile = page.locator("[data-slot='stat-tile']").filter({ hasText: "Cron runs" })
-  await expect(tile).toContainText("143")
-  await expect(tile).toContainText("2 runs with their output discarded")
+  // What cron started in the last day, and the runs whose output went
+  // nowhere: the lens's readings are counts on its chips, where a tile stood.
+  await expect(cronLog.getByRole("button", { name: /^Runs/ })).toContainText("143")
+  await expect(cronLog.getByRole("button", { name: /^Output discarded/ })).toContainText("2")
 
-  // A timer opens in place on the runs of the service it fires.
-  const certbot = page.getByRole("button", { name: "certbot.timer", exact: true })
-  await certbot.click()
-  await expect(certbot).toHaveAttribute("aria-expanded", "true")
-  const runs = page.getByRole("list", { name: "Runs" })
+  // A timer opens its sheet on the runs of the service it fires.
+  await page.getByRole("button", { name: "certbot.timer", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(page).toHaveURL(/timer=certbot\.timer/)
+  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  const runs = sheet.getByRole("list", { name: "Runs" })
   const rows = runs.locator(":scope > li")
   await expect(rows).toHaveCount(3)
   const asked = logs.searches.find((s) => s.get("lens") === "systemd")!
@@ -1109,7 +1150,8 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
   await expect(rows.nth(1)).toContainText("failed")
   await expect(rows.nth(1)).toContainText("exit 1")
   await expect(rows.nth(1)).toContainText("2.11s CPU")
-  await certbot.click()
+  await expect(sheet.getByRole("button", { name: "Run now" })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(runs).toHaveCount(0)
 })
 
@@ -1118,7 +1160,12 @@ test.describe("with no hover available", () => {
 
   test("every row's verbs are reachable on a phone", async ({ page }) => {
     await mockHost(page)
-    for (const path of ["/processes", "/processes/pm2", "/processes/services"]) {
+    for (const path of [
+      "/processes",
+      "/processes/pm2",
+      "/processes/services",
+      "/processes/scheduled",
+    ]) {
       await page.goto(path)
       await page.waitForLoadState("networkidle")
       const hidden = await page.evaluate(() => {
