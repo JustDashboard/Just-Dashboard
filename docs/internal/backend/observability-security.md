@@ -63,7 +63,7 @@ container runtime hands out the 64-bit maximum, so nothing divides by it), and `
 or thermal-zone temperature gopsutil can read, hottest first, each with the driver's own high and critical
 marks. A VPS usually reports no sensors, and the UI shows none rather than a cold machine.
 
-Each of the snapshot's `net` rows carries the `kind` the Security network page uses
+Each of the snapshot's `net` rows carries a `kind`
 (`netsec.ClassifyInterface`: physical, tunnel, bridge, virtual) and they arrive in that order, so the
 metrics page can open on the host's own devices and set Docker's veth pairs and bridges aside — a host
 running a dozen containers otherwise lists thirty interfaces with the uplink among them.
@@ -112,7 +112,10 @@ from the allowlist and the host's interfaces. The setting lives in an env file n
 install day, which is exactly why it belongs on screen. The handler adds `Client`, the address the
 request arrived from — `DescribeExposure` stays pure — because every lockout guard on the Security
 pages compares against that address and the pages should say what it is; the jail tuning offers it to
-fail2ban's allowlist by name.
+fail2ban's allowlist by name. The firewall-rule and ban guards are handed `networkClient(r)` instead,
+which for a request on loopback is the address of the SSH session carrying the tunnel
+([`OperatorAddress`](network.md#three-rules)): a rule that refuses that address cuts the tunnel, and
+the browser with it.
 
 `BanHistory` reads at most the last `banLogTailBytes` (8 MB) of each fail2ban log and drops the line
 the seek tears in half. fail2ban writes a "Found" line per failed attempt, so a host under a campaign
@@ -251,6 +254,15 @@ restore on failure → reload only then.
 - `AllowUsers`/`DenyUsers` are `kind: "list"`: the value is explicitly checked for a newline (one would
   write a directive of the caller's choosing on the next line) and normalised through `strings.Fields`.
   An emptied list is commented out — sshd refuses to start behind a bare keyword.
+- The bastion directives (`allowtcpforwarding`, `gatewayports`, `allowagentforwarding`, `permittunnel`,
+  `maxsessions`) are in the closed list for the SSH page's jump-host section. `allowtcpforwarding` and
+  `maxsessions` are `AlwaysAcceptable` — a jump host exists to forward TCP, so grading "yes" as insecure
+  would put a permanent warning on a legitimate bastion — with the recommendation ("no, unless this
+  server is a jump host") carried as text. The other three are graded against "no". The posture reads
+  none of them, and `guardSSHLockout` does not either: forwarding cannot cost access to SSH itself. It
+  can cost access to the dashboard, though: a request arriving on loopback came through an SSH tunnel,
+  which rides on TCP forwarding, so `handleSSHApply` refuses `allowtcpforwarding no` or `remote` from
+  one with `409 would_lock_you_out` (the current tunnel would stay up and the next would be refused).
 - `permitrootlogin` folds `without-password` onto `prohibit-password`, because `sshd -T` still prints the
   deprecated spelling distributions ship as default and a dropdown missing it renders empty.
 - `reloadSSH` tries systemd units, then `rc-service`, then `service`.
@@ -274,6 +286,11 @@ wildcards as fallback. Refusing the move would have been the safe-looking choice
 control broken on the commonest server distribution.
 
 ## Firewall: one page, three backends
+
+The page is `/network/firewall` since 0.7.1, in the Network section beside the gateway table the
+[network module](network.md) owns; the routes below are unchanged. A port forward or NAT entry made there
+admits its own connections past these rules by a connection mark, so it needs no rule here
+([forward admission](network.md#gateway-and-protection)).
 
 `netsec/firewall.go` dispatches to ufw, firewalld or iptables (`firewall_{ufw,firewalld,iptables}.go`).
 **Validation and both lockout guards live in the dispatcher**, so a fourth backend cannot be added

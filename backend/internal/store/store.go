@@ -969,6 +969,45 @@ CREATE TABLE IF NOT EXISTS metric_container_samples (
 -- first) cannot serve.
 CREATE INDEX IF NOT EXISTS idx_container_samples_ts ON metric_container_samples(ts);
 
+-- Per-device traffic, recorded by the network module's sampler at the metrics
+-- interval (netx/sampler.go). Each row is the interval's mean and its busiest
+-- two seconds in each direction, and the errors and drops counted in it.
+-- Docker's veths are left out: each container's traffic is recorded with the
+-- container, and a row per veth per interval would be most of the table.
+CREATE TABLE IF NOT EXISTS metric_interface_samples (
+  ts         INTEGER NOT NULL,
+  iface      TEXT NOT NULL,
+  rx_rate    REAL NOT NULL DEFAULT 0,
+  tx_rate    REAL NOT NULL DEFAULT 0,
+  rx_peak    REAL NOT NULL DEFAULT 0,
+  tx_peak    REAL NOT NULL DEFAULT 0,
+  rx_errors  INTEGER NOT NULL DEFAULT 0,
+  tx_errors  INTEGER NOT NULL DEFAULT 0,
+  rx_dropped INTEGER NOT NULL DEFAULT 0,
+  tx_dropped INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (iface, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_interface_samples_ts ON metric_interface_samples(ts);
+
+-- A WireGuard client's configuration, kept sealed (auth.Sealer) so an
+-- administrator can show its QR code again after the sheet that made it was
+-- closed. The client's private key is in it, which is why it is sealed and
+-- why it can be forgotten (config_sealed emptied) while the peer stays. The
+-- peer itself lives in the interface's own wg-quick file; this is only the
+-- half the server never needs.
+CREATE TABLE IF NOT EXISTS network_vpn_clients (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  iface         TEXT NOT NULL,
+  public_key    TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT 'device',
+  address       TEXT NOT NULL DEFAULT '',
+  config_sealed TEXT NOT NULL DEFAULT '',
+  created_by    TEXT NOT NULL DEFAULT '',
+  created_at    INTEGER NOT NULL,
+  UNIQUE (iface, public_key)
+);
+
 CREATE TABLE IF NOT EXISTS metric_samples (
   ts             INTEGER PRIMARY KEY,
   cpu_percent    REAL NOT NULL DEFAULT 0,

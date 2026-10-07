@@ -176,7 +176,7 @@ test.describe("Domains", () => {
     await expect(page.getByText("This environment binds a public address")).toBeVisible()
     await expect(page.getByRole("link", { name: "firewall" })).toHaveAttribute(
       "href",
-      "/security/firewall",
+      "/network/firewall",
     )
   })
 })

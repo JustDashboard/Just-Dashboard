@@ -1,0 +1,21 @@
+[
+ {
+  "type": "unicast",
+  "dst": "2001:db8::/64",
+  "dev": "eth0",
+  "protocol": "kernel",
+  "metric": 256,
+  "flags": [],
+  "pref": "medium"
+ },
+ {
+  "type": "unicast",
+  "dst": "default",
+  "gateway": "2001:db8::1",
+  "dev": "eth0",
+  "protocol": "ra",
+  "metric": 1024,
+  "flags": [],
+  "pref": "medium"
+ }
+]

@@ -1,0 +1,210 @@
+{
+ "Version": "1.102.4-t3caf7d9e7",
+ "TUN": true,
+ "BackendState": "Running",
+ "HaveNodeKey": true,
+ "AuthURL": "",
+ "TailscaleIPs": [
+  "100.64.10.1",
+  "fd7a:115c:a1e0::1"
+ ],
+ "Self": {
+  "ID": "nSELF1CNTRL",
+  "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+  "HostName": "srv",
+  "DNSName": "srv.tail-example.ts.net.",
+  "OS": "linux",
+  "UserID": 1,
+  "TailscaleIPs": [
+   "100.64.10.1",
+   "fd7a:115c:a1e0::1"
+  ],
+  "AllowedIPs": [
+   "100.64.10.1",
+   "fd7a:115c:a1e0::1"
+  ],
+  "Addrs": null,
+  "CurAddr": "",
+  "Relay": "fra",
+  "PeerRelay": "",
+  "RxBytes": 0,
+  "TxBytes": 0,
+  "Created": "2026-01-01T00:00:00Z",
+  "LastWrite": "0001-01-01T00:00:00Z",
+  "LastSeen": "0001-01-01T00:00:00Z",
+  "LastHandshake": "0001-01-01T00:00:00Z",
+  "Online": true,
+  "ExitNode": false,
+  "ExitNodeOption": true,
+  "Active": true,
+  "InNetworkMap": true,
+  "InMagicSock": true,
+  "InEngine": false,
+  "PrimaryRoutes": [
+   "192.0.2.0/24"
+  ],
+  "Capabilities": [
+   "https"
+  ]
+ },
+ "Health": [
+  "Tailscale is not able to reach the coordination server right now."
+ ],
+ "MagicDNSSuffix": "tail-example.ts.net",
+ "CurrentTailnet": {
+  "Name": "example.org",
+  "MagicDNSSuffix": "tail-example.ts.net",
+  "MagicDNSEnabled": true
+ },
+ "CertDomains": null,
+ "ExtraRecords": null,
+ "Peer": {
+  "nodekey:1111111111111111111111111111111111111111111111111111111111111111": {
+   "ID": "n2",
+   "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+   "HostName": "laptop",
+   "DNSName": "laptop.tail-example.ts.net.",
+   "OS": "macOS",
+   "UserID": 1,
+   "TailscaleIPs": [
+    "100.64.10.2",
+    "fd7a:115c:a1e0::2"
+   ],
+   "AllowedIPs": [
+    "100.64.10.2",
+    "fd7a:115c:a1e0::2"
+   ],
+   "Addrs": null,
+   "CurAddr": "198.51.100.9:41641",
+   "Relay": "fra",
+   "PeerRelay": "",
+   "RxBytes": 123456,
+   "TxBytes": 654321,
+   "Created": "2026-01-01T00:00:00Z",
+   "LastWrite": "0001-01-01T00:00:00Z",
+   "LastSeen": "2026-10-07T09:00:00Z",
+   "LastHandshake": "2026-10-07T09:00:00Z",
+   "Online": true,
+   "ExitNode": false,
+   "ExitNodeOption": false,
+   "Active": true,
+   "InNetworkMap": true,
+   "InMagicSock": true,
+   "InEngine": false
+  },
+  "nodekey:2222222222222222222222222222222222222222222222222222222222222222": {
+   "ID": "n3",
+   "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+   "HostName": "phone",
+   "DNSName": "phone.tail-example.ts.net.",
+   "OS": "iOS",
+   "UserID": 2,
+   "TailscaleIPs": [
+    "100.64.10.3"
+   ],
+   "AllowedIPs": [
+    "100.64.10.3"
+   ],
+   "Addrs": null,
+   "CurAddr": "",
+   "Relay": "ams",
+   "PeerRelay": "",
+   "RxBytes": 0,
+   "TxBytes": 0,
+   "Created": "2026-01-01T00:00:00Z",
+   "LastWrite": "0001-01-01T00:00:00Z",
+   "LastSeen": "2026-10-07T09:01:00Z",
+   "LastHandshake": "0001-01-01T00:00:00Z",
+   "Online": true,
+   "ExitNode": false,
+   "ExitNodeOption": false,
+   "Active": false,
+   "InNetworkMap": true,
+   "InMagicSock": true,
+   "InEngine": false
+  },
+  "nodekey:3333333333333333333333333333333333333333333333333333333333333333": {
+   "ID": "n4",
+   "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+   "HostName": "nas",
+   "DNSName": "nas.tail-example.ts.net.",
+   "OS": "linux",
+   "UserID": 1,
+   "TailscaleIPs": [
+    "100.64.10.4"
+   ],
+   "AllowedIPs": [
+    "100.64.10.4"
+   ],
+   "Addrs": null,
+   "CurAddr": "",
+   "Relay": "",
+   "PeerRelay": "",
+   "RxBytes": 0,
+   "TxBytes": 0,
+   "Created": "2026-01-01T00:00:00Z",
+   "LastWrite": "0001-01-01T00:00:00Z",
+   "LastSeen": "2026-10-01T10:00:00Z",
+   "LastHandshake": "0001-01-01T00:00:00Z",
+   "Online": false,
+   "ExitNode": false,
+   "ExitNodeOption": true,
+   "Active": false,
+   "InNetworkMap": true,
+   "InMagicSock": true,
+   "InEngine": false,
+   "Tags": [
+    "tag:server"
+   ],
+   "PrimaryRoutes": [
+    "203.0.113.128/25"
+   ]
+  },
+  "nodekey:4444444444444444444444444444444444444444444444444444444444444444": {
+   "ID": "n5",
+   "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+   "HostName": "old-tablet",
+   "DNSName": "old-tablet.tail-example.ts.net.",
+   "OS": "android",
+   "UserID": 2,
+   "TailscaleIPs": [
+    "100.64.10.5"
+   ],
+   "AllowedIPs": [
+    "100.64.10.5"
+   ],
+   "Addrs": null,
+   "CurAddr": "",
+   "Relay": "",
+   "PeerRelay": "",
+   "RxBytes": 0,
+   "TxBytes": 0,
+   "Created": "2026-01-01T00:00:00Z",
+   "LastWrite": "0001-01-01T00:00:00Z",
+   "LastSeen": "2026-08-01T10:00:00Z",
+   "LastHandshake": "0001-01-01T00:00:00Z",
+   "Online": false,
+   "ExitNode": false,
+   "ExitNodeOption": false,
+   "Active": false,
+   "InNetworkMap": true,
+   "InMagicSock": true,
+   "InEngine": false,
+   "Expired": true
+  }
+ },
+ "User": {
+  "1": {
+   "ID": 1,
+   "LoginName": "alice@example.com",
+   "DisplayName": "Alice",
+   "ProfilePicURL": ""
+  },
+  "2": {
+   "ID": 2,
+   "LoginName": "bob@example.com",
+   "DisplayName": "Bob",
+   "ProfilePicURL": ""
+  }
+ }
+}

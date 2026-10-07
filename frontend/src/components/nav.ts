@@ -1,5 +1,6 @@
 import {
   Archive,
+  Connection,
   Bell,
   Box,
   ChartActivity,
@@ -37,9 +38,11 @@ import {
   SettingsGear,
   SettingsSliders,
   Shield,
+  ShieldCheck,
   ShieldOff,
   SignIn,
   Terminal,
+  Topology,
   UserSettings,
   Users,
   Warning,
@@ -112,8 +115,10 @@ export type NavEntry = NavItem | NavGroup
  *
  * The top-level list is twelve rows, not seventeen. Metrics, Processes and Logs
  * are one question — how is the machine doing — and sit behind Monitoring; the
- * proxy, packages, system accounts and audit trail are the pages you open to
- * change the server rather than to use it, and sit behind Server configuration.
+ * packages, system accounts and audit trail are the pages you open to change
+ * the server rather than to use it, and sit behind Server configuration. The
+ * network — its devices, routes, gateway, tunnels and resolver, and the proxy
+ * in front of the sites — is a group of its own before Protection.
  */
 export const NAV: { label: string; items: NavEntry[] }[] = [
   {
@@ -207,6 +212,52 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
     ],
   },
   {
+    label: "Network",
+    items: [
+      {
+        // The server as a router: its devices, routes, firewall, gateway,
+        // tunnels, resolver and traffic. These were four pages of Security
+        // until 0.7.1; Security kept what is about who may get in, and the
+        // network became a section that can change the network as well as
+        // read it.
+        title: "Network",
+        href: "/network",
+        icon: Topology,
+        children: [
+          { title: "Overview", href: "/network", icon: GridSquare },
+          { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice },
+          { title: "Routing", href: "/network/routing", icon: Route },
+          { title: "Firewall", href: "/network/firewall", icon: FirewallCheck },
+          { title: "Gateway", href: "/network/gateway", icon: ArrowLeftRight },
+          { title: "Protection", href: "/network/protection", icon: ShieldCheck },
+          { title: "VPN", href: "/network/vpn", icon: LockClosed },
+          { title: "DNS", href: "/network/dns", icon: Globe },
+          { title: "Traffic", href: "/network/traffic", icon: ChartActivity },
+          { title: "Connections", href: "/network/connections", icon: Connection },
+          { title: "Tools", href: "/network/tools", icon: Wrench },
+        ],
+      },
+      // The reverse proxy, its certificates, the TCP/UDP streams and the load
+      // balancing in a site's upstreams are the gateway's other half, so the
+      // section sits beside Network rather than under Server configuration.
+      {
+        title: "Proxy & TLS",
+        href: "/proxy",
+        icon: Globe,
+        children: [
+          { title: "Overview", href: "/proxy", icon: GridSquare },
+          { title: "Sites", href: "/proxy/sites", icon: Globe },
+          { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
+          { title: "TLS report", href: "/proxy/tls", icon: Inspect },
+          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
+          { title: "Ports", href: "/proxy/ports", icon: Router },
+          { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
+          { title: "Configuration", href: "/proxy/config", icon: FileText },
+        ],
+      },
+    ],
+  },
+  {
     label: "Protection",
     items: [
       {
@@ -215,13 +266,9 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         icon: Shield,
         children: [
           { title: "Overview", href: "/security", icon: GridSquare },
-          { title: "Firewall", href: "/security/firewall", icon: FirewallCheck },
           { title: "SSH", href: "/security/ssh", icon: SecureConnection },
           { title: "Intrusion", href: "/security/intrusion", icon: ShieldOff },
-          { title: "Connections", href: "/security/connections", icon: NetworkDevice },
           { title: "Logins", href: "/security/logins", icon: SignIn },
-          { title: "Network", href: "/security/network", icon: Route },
-          { title: "Tools", href: "/security/tools", icon: Wrench },
         ],
       },
       { title: "Backups", href: "/backups", icon: Archive },
@@ -234,21 +281,6 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         title: "Server configuration",
         icon: SettingsSliders,
         children: [
-          {
-            title: "Proxy & TLS",
-            href: "/proxy",
-            icon: Globe,
-            children: [
-              { title: "Overview", href: "/proxy", icon: GridSquare },
-              { title: "Sites", href: "/proxy/sites", icon: Globe },
-              { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
-              { title: "TLS report", href: "/proxy/tls", icon: Inspect },
-              { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
-              { title: "Ports", href: "/proxy/ports", icon: Router },
-              { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
-              { title: "Configuration", href: "/proxy/config", icon: FileText },
-            ],
-          },
           { title: "Packages", href: "/packages", icon: Puzzle },
           {
             title: "System users",

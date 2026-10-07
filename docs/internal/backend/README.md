@@ -1,6 +1,7 @@
 # Backend guides
 
 - [`observability-security.md`](observability-security.md) — metrics, security, sshd, firewall, fail2ban, and packages.
+- [`network.md`](network.md) — the network module: devices, namespaces, routing, forwarding, the gateway table, protections, shaping, WireGuard, Tailscale, the resolver and traffic.
 - [`docker-files-logs.md`](docker-files-logs.md) — Docker, files, archives, previews, and logs.
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.
 - [`git-backups-users.md`](git-backups-users.md) — Git, backup execution/restore, host users, and SSH keys.

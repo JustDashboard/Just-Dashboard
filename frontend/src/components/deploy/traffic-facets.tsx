@@ -593,7 +593,7 @@ function Scanners({
         <p className="mt-2 text-xs text-muted-foreground">
           {blockUnavailable ||
             "Block saves a host firewall deny. Docker-published ingress ports can bypass it."}{" "}
-          <Link href="/security/firewall" className="text-link hover:underline">
+          <Link href="/network/firewall" className="text-link hover:underline">
             Open Firewall
           </Link>
         </p>

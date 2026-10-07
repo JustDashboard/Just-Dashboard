@@ -11,7 +11,7 @@ export function securityRemedy(
       href: can("system.admin") ? "/dashboard/configuration" : "/security",
       label: "Review network allowlist",
     },
-    firewall: { href: "/security/firewall", label: "Review firewall controls" },
+    firewall: { href: "/network/firewall", label: "Review firewall controls" },
     ssh: { href: "/security/ssh", label: "Review SSH controls" },
     intrusion: { href: "/security/intrusion", label: "Review intrusion protection" },
     ports: { href: "/proxy/ports", label: "Inspect listener and owner" },

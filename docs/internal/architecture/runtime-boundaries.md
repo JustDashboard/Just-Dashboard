@@ -6,7 +6,7 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `jobs`, three backup pieces, and deployment components covering legacy
+`linuxUsers`, `netsec`, `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -18,10 +18,11 @@ information (`ErrorState` in `components/state.tsx`), not an error.
 `Server.Start(ctx)` is separate from `New` so failing to schedule background work is reported by `main`
 rather than swallowed in construction. It starts the metrics recorder (here, not lazily — its whole
 purpose is to have been running while nobody was looking), the database activity recorder, the Docker
-event log, the self-update check, the backup scheduler, `selfupdate.Installer.Reconcile`,
+event log, the network module's interface sampler and its daily blocklist refresh, the self-update
+check, the backup scheduler, `selfupdate.Installer.Reconcile`,
 `selfcfg.Applier.Reconcile` and the Tailscale
 certificate keeper. `Shutdown` releases what outlives a request:
-sampler, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
+samplers, scheduler, live PTYs, database pools, Docker client. A held terminal session is let go rather
 than ended — its holder is a systemd unit of its own on the host — and module setup takes every
 running holder back before the first request, including when preparing new holders fails. New direct
 terminals require that protection; an unavailable holder returns a reason instead of silently opening
@@ -154,8 +155,11 @@ blueprint installs, port and queue leases, removals, drafts, schedules, Git watc
 and previews; proxy
 watching (`watched_endpoints`, filled from the older one-port-per-name `watched_domains`); compose deployment history (`docker_stack_deployments` — the file, the
 running digests and the git commit captured before every state-changing action, with environment values
-hashed rather than stored); the general `settings` key/value table; and mount, container, and host metric
-samples. The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
+hashed rather than stored); the general `settings` key/value table; mount, container, interface
+(`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
+configurations (`network_vpn_clients`). What the network module makes on the host is kept in
+`/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
+dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old
 columns; `internal/store/testdata/0.6.6.sql` is the executable upgrade contract.
 

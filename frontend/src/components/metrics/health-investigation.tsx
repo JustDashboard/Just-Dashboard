@@ -168,12 +168,12 @@ function OtherEvidence({ finding }: { finding: HealthFinding }) {
         {target?.kind === "network" && (
           <>
             <Button variant="outline" size="sm" asChild>
-              <Link href={networkInterface ? "/security/network" : "/security/connections"}>
+              <Link href={networkInterface ? "/network/interfaces" : "/network/connections"}>
                 {networkInterface ? "Inspect network" : "Inspect connections"}
               </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/security/tools">Network diagnostics</Link>
+              <Link href="/network/tools">Network diagnostics</Link>
             </Button>
           </>
         )}

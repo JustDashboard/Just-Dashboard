@@ -6,6 +6,7 @@ import {
   Key,
   LockClosed,
   LockOpen,
+  Route,
   SecureConnection,
   UserSettings,
 } from "@/components/icons"
@@ -56,10 +57,15 @@ export function SSHPicture({
   const keys = useRef<HTMLDivElement>(null)
   const passwords = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
+  const jumps = useRef<HTMLDivElement>(null)
 
   const keysOn = (value("pubkeyauthentication") ?? "yes") !== "no"
   const passwordsOn = (value("passwordauthentication") ?? "yes") !== "no"
   const rootLogin = value("permitrootlogin") ?? "prohibit-password"
+  // Absent on a server that does not send the forwarding directives, and then
+  // there is no door to draw rather than a wrong one.
+  const forwarding = value("allowtcpforwarding")
+  const jumpsOn = forwarding !== undefined && forwarding !== "no"
   const ports = config.ports.length > 0 ? config.ports : ["22"]
   const keyCount = config.keyedAccounts.reduce((n, a) => n + a.keys, 0)
   const arriving = (traffic?.accepted ?? 0) + (traffic?.failed ?? 0) > 0
@@ -105,6 +111,16 @@ export function SSHPicture({
             dashed={rootLogin === "no"}
             tone={rootLogin === "yes" ? "danger" : "default"}
           />
+          {forwarding !== undefined && (
+            <AnimatedBeam
+              containerRef={container}
+              fromRef={sshd}
+              toRef={jumps}
+              shape="s"
+              still
+              dashed={!jumpsOn}
+            />
+          )}
         </>
       }
       start={[
@@ -236,10 +252,37 @@ export function SSHPicture({
               }
             />
           </li>
+          {forwarding !== undefined && (
+            <li className="min-w-0">
+              <WireNode
+                nodeRef={jumps}
+                mark={
+                  <WireMark tone={jumpsOn ? "logo" : "neutral"} shape="square" size="md">
+                    <Route aria-hidden />
+                  </WireMark>
+                }
+                title="Forwarding"
+                hint={FORWARDING_WORDS[forwarding] ?? forwarding}
+              />
+            </li>
+          )}
         </ul>
       }
     />
   )
+}
+
+/**
+ * What a login may do once it is in, as the door's own words: forwarding is
+ * what makes a server somebody's jump host, and "remote" is the half that
+ * does not — `ssh -J` needs the local channel.
+ */
+const FORWARDING_WORDS: Record<string, string> = {
+  yes: "may reach other hosts through it",
+  all: "may reach other hosts through it",
+  local: "may reach other hosts through it",
+  remote: "reverse tunnels only",
+  no: "refused",
 }
 
 const ROOT_WORDS: Record<string, string> = {

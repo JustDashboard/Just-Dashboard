@@ -434,6 +434,11 @@ export const Monitoring: Icon = adapt(ComputerDesktopIcon, "Monitoring")
 export const NetworkDevice: Icon = adapt(SignalIcon, "NetworkDevice")
 export const Connection: Icon = adapt(RadioIcon, "Connection")
 export const Router: Icon = adapt(WifiIcon, "Router")
+// The Network section's own mark: nodes joined by lines, which is what the
+// section draws on every page — a topology, not one device or one route.
+export const Topology: Icon = adapt(ShareIcon, "Topology")
+// A bridge is several ports made one network: a group, not a stack.
+export const Bridge: Icon = adapt(RectangleGroupIcon, "Bridge")
 export const Route: Icon = adapt(MapIcon, "Route")
 export const Globe: Icon = adapt(GlobeAltIcon, "Globe")
 export const Database: Icon = adapt(CircleStackIcon, "Database")

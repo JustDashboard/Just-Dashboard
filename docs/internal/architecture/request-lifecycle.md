@@ -93,6 +93,12 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   itself signs in with.
 - **Redis** and **MongoDB** take any command on one route; the two sections below say how each is
   read.
+- **Network.** The gateway and protection PUTs (`/network/gateway/forwards/{id}`, `/gateway/nat/{id}`,
+  `/protection/limits/{id}`, `/protection/blocklists/{id}`) are `system.admin`, and ask for
+  `destructive` and spend `destrLim` by hand when the body disables the entry; `POST
+  /network/protection/settings` does the same when a value weakens a kernel protection. Setting a
+  device down and turning forwarding off are their own paths (`/down`, `/off`) inside `s.destructive`,
+  so the two directions of one switch never share a route ([network module](../backend/network.md#routes)).
 - **Container specs.** Container creation and recreation use `api.authoriseSpec`: privileged mode, added
   capabilities/devices, host/shared network namespaces and bind mounts require `system.admin`. Referenced
   network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a host

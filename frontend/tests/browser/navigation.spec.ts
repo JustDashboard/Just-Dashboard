@@ -266,9 +266,9 @@ test("opening a section replaces the rail with that section's pages", async ({ p
 
 test("a deep link opens with the rail already inside the section", async ({ page }) => {
   await mockShell(page)
-  await page.goto("/security/firewall")
+  await page.goto("/network/firewall")
 
-  await expect(rail(page).getByRole("link", { name: "Intrusion", exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Gateway", exact: true })).toBeVisible()
   await expect(rail(page).getByRole("link", { name: "Backups" })).toHaveCount(0)
   await expectNoStrip(page)
 })
@@ -287,7 +287,7 @@ test("stepping back out shows everything without leaving the page", async ({ pag
   // And navigating drops the step, so the rail follows where you went.
   await rail(page).getByRole("link", { name: "Security", exact: true }).click()
   await expect(page).toHaveURL(/\/security$/)
-  await expect(rail(page).getByRole("link", { name: "Firewall", exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Intrusion", exact: true })).toBeVisible()
 })
 
 test("a group opens its panel without leaving the page", async ({ page }) => {
@@ -318,15 +318,13 @@ test("a deep link inside a group opens every level of it", async ({ page }) => {
 
   await expect(rail(page).getByRole("link", { name: "Certificates", exact: true })).toBeVisible()
 
-  await page.getByRole("button", { name: "Back to Server configuration" }).click()
+  await page.getByRole("button", { name: "Back to All pages" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites$/)
-  for (const name of ["Proxy & TLS", "Packages", "System users", "Audit log"])
+  for (const name of ["Network", "Proxy & TLS"])
     await expect(rail(page).getByRole("link", { name, exact: true })).toBeVisible()
 
-  // Stepping out to the top and pressing the group you are inside puts the
-  // rail back where it was rather than on the group's first level.
-  await page.getByRole("button", { name: "Back to All pages" }).click()
-  await rail(page).getByRole("button", { name: "Server configuration", exact: true }).click()
+  // Pressing the section you are inside puts the rail back where it was.
+  await rail(page).getByRole("link", { name: "Proxy & TLS", exact: true }).click()
   await expect(rail(page).getByRole("link", { name: "Certificates", exact: true })).toBeVisible()
 })
 

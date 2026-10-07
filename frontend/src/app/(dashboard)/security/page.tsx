@@ -124,7 +124,7 @@ export default function SecurityOverviewPage() {
         <AreaTile
           icon={FirewallCheck}
           title="Firewall"
-          href="/security/firewall"
+          href="/network/firewall"
           loading={!firewall}
           value={
             !firewall
@@ -209,7 +209,7 @@ export default function SecurityOverviewPage() {
         <AreaTile
           icon={NetworkDevice}
           title="Connections"
-          href="/security/connections"
+          href="/network/connections"
           loading={connections.loading && !connections.data}
           products={reached}
           value={

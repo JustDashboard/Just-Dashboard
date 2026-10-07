@@ -4221,7 +4221,7 @@ which `install.sh` runs when the terminal is enabled: it installs `zsh`, `zsh-au
 `.env`. A re-run that kept its `.env` asks first, and never touches a file that already names a shell.
 That install is best effort: a failure is a warning, and the terminal opens the account's own shell.
 `jd_install_host_tools` runs on every install and re-run, before any question: the web terminal is a host
-shell, so its git and the Git page's GitHub sign-in need host packages, and Security → Tools runs `whois`
+shell, so its git and the Git page's GitHub sign-in need host packages, and Network → Tools runs `whois`
 and `traceroute` on the host. It installs whichever of `git`, `git-lfs`, `whois` and `traceroute` are
 missing one package at a time, so an unavailable one costs only itself, and `gh` through `jd_install_gh`:
 GitHub's signed apt repository on Debian and Ubuntu (their packaged gh is years behind on an LTS release;

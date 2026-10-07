@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +33,6 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/security/posture", s.handle(s.handleSecurityPosture))
 	r.Method(http.MethodGet, "/security/services", s.handle(s.handleServiceCatalogue))
 	r.Method(http.MethodGet, "/connections", s.handle(s.handleConnections))
-	r.Method(http.MethodGet, "/network", s.handle(s.handleNetworkInfo))
 
 	// Listing the logins and ending one are the same subtree, and they have to
 	// be registered in the same place: chi mounts a Route as a subrouter, so a
@@ -70,13 +70,10 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 		})
 	})
 
-	// Probes make the server emit traffic to an address the caller chose.
-	// That is a scanner if it is handed to everybody, so it sits behind the
-	// capability that already means "this person administers the host".
-	r.Route("/network/probe", func(r chi.Router) {
-		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-		r.Method(http.MethodPost, "/", s.handle(s.handleNetworkProbe))
-	})
+	// The interface summary and the probes moved to mountNetworkRoutes, which
+	// owns everything under /network.
+
+	s.mountSecurityIntrusionRoutes(r)
 }
 
 // handleSecurityPosture gathers every input and grades the host.
@@ -275,6 +272,18 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 	var req sshApplyRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
+	}
+	// A browser on loopback reached the dashboard through an SSH tunnel, the
+	// one way in that rides on sshd's TCP forwarding: turning it off leaves
+	// the current tunnel up and refuses the next one. The jump-host
+	// section's recommendation is "no", so this is the guard that keeps it
+	// from being followed from inside a tunnel.
+	if v, ok := req.Settings["allowtcpforwarding"]; ok && (v == "no" || v == "remote") {
+		if addr, err := netip.ParseAddr(httpx.ClientIP(r)); err == nil && addr.IsLoopback() {
+			httpx.SetAudit(r, "ssh.config", "", map[string]any{"result": "refused_lockout"})
+			return httpx.Err(http.StatusConflict, "would_lock_you_out",
+				"you reach the dashboard through an SSH tunnel, which needs sshd's TCP forwarding; turning it off would refuse your next tunnel")
+		}
 	}
 	plan, err := s.modules.netsec.PlanSSHSettings(r.Context(), req.Settings)
 	if err != nil {

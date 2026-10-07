@@ -1,0 +1,58 @@
+[
+ {
+  "ifindex": 1,
+  "ifname": "lo",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 2,
+  "ifname": "eth0",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 3,
+  "ifname": "docker0",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 4,
+  "ifname": "br-0123456789ab",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 5,
+  "ifname": "tailscale0",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 6,
+  "ifname": "veth6e4f828",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 7,
+  "ifname": "wg2",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ },
+ {
+  "ifindex": 8,
+  "ifname": "dummy7",
+  "flags": [],
+  "mtu": 1500,
+  "operstate": "UP"
+ }
+]

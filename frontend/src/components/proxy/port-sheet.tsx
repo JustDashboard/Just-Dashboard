@@ -256,7 +256,7 @@ function Clients({
       title="Clients"
       actions={
         <Button asChild variant="outline" size="xs">
-          <Link href={`/security/connections?q=${port}`}>
+          <Link href={`/network/connections?q=${port}`}>
             <NetworkDevice />
             Open in Connections
           </Link>
@@ -283,7 +283,7 @@ function Clients({
             {clients.peers.map((peer) => (
               <li key={peer.address} className="flex items-center justify-between gap-3 py-1.5">
                 <Link
-                  href={`/security/connections?q=${encodeURIComponent(peer.address)}`}
+                  href={`/network/connections?q=${encodeURIComponent(peer.address)}`}
                   className="truncate rounded-sm font-mono text-xs underline-offset-2 focus-ring hover:underline"
                 >
                   {peer.address}

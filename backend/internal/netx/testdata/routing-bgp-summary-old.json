@@ -1,0 +1,2 @@
+{"routerId":"192.0.2.1","as":65000,"vrfId":0,"vrfName":"default","tableVersion":2,"ribCount":3,"peerCount":1,
+"peers":{"192.0.2.2":{"remoteAs":"65001","version":4,"msgRcvd":80,"msgSent":81,"tableVersion":0,"outq":0,"inq":0,"peerUptime":"2w3d04h","prefixReceivedCount":3,"state":"Established","idType":"ipv4"}}}
