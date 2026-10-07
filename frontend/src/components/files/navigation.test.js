@@ -1,5 +1,23 @@
 import { expect, test } from "bun:test"
-import { folderHref, matchName, visitFolder } from "./navigation"
+import { folderHref, matchName, preserveFolderMarker, visitFolder } from "./navigation"
+
+test("a router rewrite retains the current folder position and its new router state", () => {
+  const marker = { id: "tab", index: 2 }
+  const state = { __NA: true, tree: ["new router tree"] }
+  expect(preserveFolderMarker(state, marker, true)).toEqual({ ...state, jdFiles: marker })
+  expect(state).not.toHaveProperty("jdFiles")
+})
+
+test("another entry and an explicit folder marker retain their own state", () => {
+  const marker = { id: "tab", index: 2 }
+  const state = { __NA: true }
+  expect(preserveFolderMarker(state, marker, false)).toBe(state)
+  const next = { __NA: true, jdFiles: { id: "other", index: 0 } }
+  expect(preserveFolderMarker(next, marker, true)).toBe(next)
+  const cleared = { jdFiles: null }
+  expect(preserveFolderMarker(cleared, marker, true)).toBe(cleared)
+  expect(preserveFolderMarker(null, marker, true)).toBe(null)
+})
 
 test("folder navigation retains unrelated URL context and clears the old entry", () => {
   expect(

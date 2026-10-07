@@ -2,6 +2,16 @@ import { cleanPath } from "./media"
 
 export type FolderHistory = { id: string; paths: string[]; index: number }
 
+export function preserveFolderMarker(
+  state: unknown,
+  marker: { id: string; index: number } | undefined,
+  sameEntry: boolean,
+): unknown {
+  if (!sameEntry || !marker || !state || typeof state !== "object" || "jdFiles" in state)
+    return state
+  return { ...state, jdFiles: marker }
+}
+
 export function folderHref(path: string, current: string): string {
   const url = new URL(current)
   url.searchParams.set("path", cleanPath(path))

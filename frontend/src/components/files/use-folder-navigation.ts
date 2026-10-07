@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useLayoutEffect, useSyncExternalStore } from "react"
 import { useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import { cleanPath } from "./media"
-import { folderHref, visitFolder, type FolderHistory } from "./navigation"
+import { folderHref, preserveFolderMarker, visitFolder, type FolderHistory } from "./navigation"
 
 const subscribe = () => () => {}
 const client = () => true
@@ -20,6 +20,31 @@ const readPosition = () => {
 const noPosition = () => ""
 
 export function useFolderNavigation(home?: string) {
+  useLayoutEffect(() => {
+    const original = window.history.replaceState
+    let active = true
+    const replace: History["replaceState"] = (state, unused, url) => {
+      // Next can rewrite the current entry after a native traversal and drop
+      // Files' position. Retain only our marker, not an older router state.
+      const sameEntry =
+        active &&
+        window.location.pathname === "/files" &&
+        new URL(url ?? window.location.href, window.location.href).href === window.location.href
+      original.call(
+        window.history,
+        preserveFolderMarker(state, window.history.state?.jdFiles, sameEntry),
+        unused,
+        url,
+      )
+    }
+    window.history.replaceState = replace
+    return () => {
+      // A later router wrapper may have captured ours; it must become inert too.
+      active = false
+      if (window.history.replaceState === replace) window.history.replaceState = original
+    }
+  }, [])
+
   const hydrated = useSyncExternalStore(subscribe, client, server)
   const urlPath = useSearchParams().get("path")
   const [remembered, setRemembered] = useSessionState<string | null>("files.path", null)
