@@ -384,3 +384,155 @@ func TestApplyDirectivesDoesNotAppendAnEmptyList(t *testing.T) {
 		t.Fatalf("wrote a keyword with no argument:\n%s", got)
 	}
 }
+
+// The bastion settings, read from `sshd -T`, which prints every directive
+// lowercased with its effective value. This excerpt is a stock Ubuntu 25.04
+// sshd (OpenSSH 9.9), whose defaults are the ones the recommendations differ
+// from.
+const sshdBastionDump = `port 22
+permitrootlogin without-password
+maxsessions 10
+gatewayports no
+allowtcpforwarding yes
+allowagentforwarding yes
+permittunnel no
+`
+
+func TestBastionDirectivesReadFromSSHDDump(t *testing.T) {
+	values := parseSSHDDump(sshdBastionDump)
+	type want struct {
+		value  string
+		secure bool
+	}
+	for key, w := range map[string]want{
+		// Not graded: a jump host needs it, and the recommendation says so.
+		"allowtcpforwarding":   {"yes", true},
+		"gatewayports":         {"no", true},
+		"allowagentforwarding": {"yes", false},
+		"permittunnel":         {"no", true},
+		"maxsessions":          {"10", true},
+	} {
+		def, ok := sshDirectiveFor(key)
+		if !ok {
+			t.Fatalf("%s is not in the closed list", key)
+		}
+		value := def.canonical(first(values[def.Key], def.Default))
+		if value != w.value || def.secure(value) != w.secure {
+			t.Errorf("%s = %q (secure %v), want %q (secure %v)", key, value, def.secure(value), w.value, w.secure)
+		}
+	}
+}
+
+// An absent line means sshd's default, which is what the setting shows.
+func TestBastionDirectivesFallBackToTheirDefaults(t *testing.T) {
+	for key, want := range map[string]string{
+		"allowtcpforwarding": "yes", "gatewayports": "no", "allowagentforwarding": "yes",
+		"permittunnel": "no", "maxsessions": "10",
+	} {
+		def, _ := sshDirectiveFor(key)
+		if def.Default != want {
+			t.Errorf("%s defaults to %q, want %q", key, def.Default, want)
+		}
+	}
+}
+
+func TestBastionDirectiveValues(t *testing.T) {
+	tests := []struct {
+		key, value string
+		ok         bool
+	}{
+		{"allowtcpforwarding", "no", true},
+		{"allowtcpforwarding", "local", true},
+		{"allowtcpforwarding", "remote", true},
+		{"allowtcpforwarding", "all", true},
+		{"allowtcpforwarding", "yes", true},
+		{"allowtcpforwarding", "sometimes", false},
+		{"gatewayports", "clientspecified", true},
+		{"gatewayports", "no", true},
+		{"gatewayports", "everywhere", false},
+		{"allowagentforwarding", "no", true},
+		{"allowagentforwarding", "local", false},
+		{"permittunnel", "point-to-point", true},
+		{"permittunnel", "ethernet", true},
+		{"permittunnel", "tun", false},
+		{"maxsessions", "1", true},
+		{"maxsessions", "64", true},
+		{"maxsessions", "0", false},
+		{"maxsessions", "65", false},
+		{"maxsessions", "many", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.key+"="+tc.value, func(t *testing.T) {
+			def, ok := sshDirectiveFor(tc.key)
+			if !ok {
+				t.Fatalf("%s is not in the closed list", tc.key)
+			}
+			err := validateSSHValue(def, tc.value)
+			// Every value that is accepted has to reach the file, and the
+			// pattern PlanSSHSettings checks first is what gates that.
+			if tc.ok && !sshValueRe.MatchString(tc.value) {
+				t.Fatalf("%q would be refused before validation", tc.value)
+			}
+			if (err == nil) != tc.ok {
+				t.Fatalf("validateSSHValue(%s, %q) = %v, want ok=%v", tc.key, tc.value, err, tc.ok)
+			}
+		})
+	}
+}
+
+func TestBastionDirectivesAreWrittenInSSHDsSpelling(t *testing.T) {
+	changes := map[string]string{
+		"allowtcpforwarding": "local", "gatewayports": "no", "allowagentforwarding": "no",
+		"permittunnel": "no", "maxsessions": "20",
+	}
+	// A new drop-in, which is where a host that includes sshd_config.d gets
+	// them.
+	got := applyDirectives("", changes, true)
+	for _, line := range []string{
+		"AllowTcpForwarding local", "GatewayPorts no", "AllowAgentForwarding no", "PermitTunnel no", "MaxSessions 20",
+	} {
+		if !strings.Contains(got, line+"\n") {
+			t.Errorf("drop-in lacks %q:\n%s", line, got)
+		}
+	}
+	// In place, in sshd_config itself: the first value wins, so a line that is
+	// already there is replaced where it stands, and a commented default is
+	// not mistaken for a setting.
+	original := "# Defaults\n#AllowTcpForwarding yes\nAllowAgentForwarding yes\nMaxSessions 10\nPort 22\n"
+	got = applyDirectives(original, changes, false)
+	for _, line := range []string{"AllowAgentForwarding no", "MaxSessions 20", "AllowTcpForwarding local", "PermitTunnel no", "GatewayPorts no"} {
+		if !strings.Contains(got, "\n"+line+"\n") {
+			t.Errorf("in-place edit lacks %q:\n%s", line, got)
+		}
+	}
+	if strings.Contains(got, "AllowAgentForwarding yes") || strings.Contains(got, "MaxSessions 10") {
+		t.Errorf("an old value survived:\n%s", got)
+	}
+	if !strings.Contains(got, "#AllowTcpForwarding yes") || !strings.Contains(got, "Port 22") {
+		t.Errorf("unrelated lines changed:\n%s", got)
+	}
+}
+
+// Forwarding settings cannot lock anybody out of SSH, and the guard must not
+// start reading them as if they could.
+func TestGuardSSHLockoutIgnoresBastionSettings(t *testing.T) {
+	current := &SSHDConfig{
+		KeyedAccounts: []KeyedAccount{{User: "deploy", Keys: 1}},
+		Settings: []SSHSetting{
+			{Key: "passwordauthentication", Value: "yes"},
+			{Key: "pubkeyauthentication", Value: "yes"},
+			{Key: "permitrootlogin", Value: "prohibit-password"},
+		},
+	}
+	if err := guardSSHLockout(current, map[string]string{
+		"allowtcpforwarding": "no", "gatewayports": "no", "allowagentforwarding": "no", "permittunnel": "no", "maxsessions": "1",
+	}); err != nil {
+		t.Fatalf("refused a change that cannot cost access: %v", err)
+	}
+	// With the rest of the configuration unchanged, the same verdicts stand.
+	if err := guardSSHLockout(&SSHDConfig{Settings: current.Settings}, map[string]string{
+		"passwordauthentication": "no", "allowtcpforwarding": "no",
+	}); err == nil {
+		t.Fatal("a lockout was let through because it came with a forwarding change")
+	}
+}

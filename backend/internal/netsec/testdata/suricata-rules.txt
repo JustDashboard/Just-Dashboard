@@ -1,0 +1,7 @@
+# Suricata rules, merged by suricata-update
+alert tcp any any -> any 22 (msg:"ET SCAN Potential SSH Scan"; sid:2001219; rev:20;)
+# disabled rule
+#alert tcp any any -> any 23 (msg:"ET POLICY telnet"; sid:2100000; rev:1;)
+
+alert tls any any -> any any (msg:"ET MALWARE Known Malicious JA3 Hash"; sid:2024897; rev:3;)
+drop http any any -> any any (msg:"GPL ATTACK_RESPONSE id check returned root"; sid:2100498; rev:7;)
