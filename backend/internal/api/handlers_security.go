@@ -71,6 +71,8 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 
 	// The interface summary and the probes moved to mountNetworkRoutes, which
 	// owns everything under /network.
+
+	s.mountSecurityIntrusionRoutes(r)
 }
 
 // handleSecurityPosture gathers every input and grades the host.

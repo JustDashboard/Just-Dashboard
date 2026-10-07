@@ -3,6 +3,7 @@ package netsec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"sort"
@@ -23,6 +24,10 @@ import (
 // Everything here goes through cscli's JSON output, because the local API it
 // talks to needs credentials the dashboard has no business holding: cscli
 // already has them, on the host.
+
+// ErrCrowdSecMissing is a ban or a release asked of a host without cscli. The
+// routes answer it as an absent tool rather than as a bad request.
+var ErrCrowdSecMissing = errors.New("cscli is not installed on this host")
 
 // hasTool reports whether a program exists on the host. A variable so tests do
 // not need the program.
@@ -327,7 +332,7 @@ func (s *Service) AddDecision(ctx context.Context, value, duration, reason, call
 		return "", err
 	}
 	if !hasTool("cscli") {
-		return "", fmt.Errorf("cscli is not installed on this host")
+		return "", ErrCrowdSecMissing
 	}
 	return run(ctx, "cscli", "decisions", "add", flag, target, "--duration", duration, "--reason", reason, "--type", "ban")
 }
@@ -390,7 +395,7 @@ func (s *Service) DeleteDecision(ctx context.Context, id int) (string, error) {
 		return "", fmt.Errorf("a decision id is a positive number")
 	}
 	if !hasTool("cscli") {
-		return "", fmt.Errorf("cscli is not installed on this host")
+		return "", ErrCrowdSecMissing
 	}
 	return run(ctx, "cscli", "decisions", "delete", "--id", strconv.Itoa(id))
 }

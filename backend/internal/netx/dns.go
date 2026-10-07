@@ -289,7 +289,7 @@ func resolvedActive(ctx context.Context) bool {
 }
 
 func (s *Service) readResolved(ctx context.Context, stats bool) ResolvedView {
-	v := ResolvedView{Installed: has("resolvectl"), Links: []ResolvedLink{}}
+	v := ResolvedView{Installed: has("resolvectl"), Links: []ResolvedLink{}, Global: ResolvedGlobal{ResolvedScope: emptyScope()}}
 	if !v.Installed {
 		return v
 	}
@@ -433,7 +433,7 @@ func parseResolvedStatus(out string) (ResolvedGlobal, []ResolvedLink, int) {
 		link   *ResolvedLink
 		key    string
 	)
-	global.Protocols, global.Servers, global.Fallback, global.Domains = []string{}, []string{}, []string{}, []string{}
+	global.ResolvedScope = emptyScope()
 	flush := func() {
 		if link == nil {
 			return
@@ -455,8 +455,7 @@ func parseResolvedStatus(out string) (ResolvedGlobal, []ResolvedLink, int) {
 			flush()
 			key = ""
 			if strings.HasPrefix(raw, "Link ") {
-				link = &ResolvedLink{ResolvedScope: ResolvedScope{
-					Protocols: []string{}, Servers: []string{}, Fallback: []string{}, Domains: []string{}}, Scopes: []string{}}
+				link = &ResolvedLink{ResolvedScope: emptyScope(), Scopes: []string{}}
 				fmt.Sscanf(strings.TrimPrefix(raw, "Link "), "%d", &link.Index)
 				if open, end := strings.Index(raw, "("), strings.LastIndex(raw, ")"); open >= 0 && end > open {
 					link.Name = raw[open+1 : end]
@@ -507,6 +506,12 @@ func parseResolvedStatus(out string) (ResolvedGlobal, []ResolvedLink, int) {
 		links = []ResolvedLink{}
 	}
 	return global, links, total
+}
+
+// emptyScope is a scope whose lists are empty rather than null, which is what
+// the page iterates over.
+func emptyScope() ResolvedScope {
+	return ResolvedScope{Protocols: []string{}, Servers: []string{}, Fallback: []string{}, Domains: []string{}}
 }
 
 // isResolvedHeader tells a section header from a label line. Column zero is

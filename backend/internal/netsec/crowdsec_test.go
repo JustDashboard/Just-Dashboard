@@ -272,7 +272,7 @@ func TestAddDecisionValidates(t *testing.T) {
 		t.Fatalf("a reason of 128 characters: %v", err)
 	}
 	newCscliHost(t, false)
-	if _, err := New().AddDecision(t.Context(), "203.0.113.9", "4h", "x", ""); err == nil || !strings.Contains(err.Error(), "not installed") {
+	if _, err := New().AddDecision(t.Context(), "203.0.113.9", "4h", "x", ""); !errors.Is(err, ErrCrowdSecMissing) {
 		t.Fatalf("without cscli: %v", err)
 	}
 }
