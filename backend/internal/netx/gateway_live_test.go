@@ -21,11 +21,11 @@ import (
 // This server is somebody's production machine. Every command the tests run
 // goes through `ip netns exec <namespace>`, where nftables, iptables and tc
 // have state of their own; the Service under test has its run variable
-// replaced by liveRun, which refuses any program that is not one of those and
+// replaced by gwLiveRun, which refuses any program that is not one of those and
 // runs the rest only inside the namespace. Nothing here can change the host's
 // own network.
 
-func liveRequired(t *testing.T) {
+func gwLiveRequired(t *testing.T) {
 	t.Helper()
 	if os.Getenv("JD_NETNS_LIVE") != "1" {
 		t.Skip("set JD_NETNS_LIVE=1 to run against a throwaway network namespace")
@@ -42,62 +42,62 @@ func liveRequired(t *testing.T) {
 	}
 }
 
-func liveCmd(ctx context.Context, args ...string) *exec.Cmd {
+func gwLiveCmd(ctx context.Context, args ...string) *exec.Cmd {
 	if os.Geteuid() != 0 {
 		args = append([]string{"sudo", "-n"}, args...)
 	}
 	return exec.CommandContext(ctx, args[0], args[1:]...)
 }
 
-// liveHost runs a command on the host for the namespace's own setup and
+// gwLiveHost runs a command on the host for the namespace's own setup and
 // teardown only: `ip netns add|del|pids` and the kill of what ran inside.
-func liveHost(t *testing.T, args ...string) string {
+func gwLiveHost(t *testing.T, args ...string) string {
 	t.Helper()
-	out, err := liveCmd(context.Background(), args...).CombinedOutput()
+	out, err := gwLiveCmd(context.Background(), args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return string(out)
 }
 
-// liveNS creates a namespace and deletes it, and what runs in it, at the end
+// gwLiveNS creates a namespace and deletes it, and what runs in it, at the end
 // of the test.
-func liveNS(t *testing.T, role string) string {
+func gwLiveNS(t *testing.T, role string) string {
 	t.Helper()
 	ns := fmt.Sprintf("jdt%d-%s", os.Getpid(), role)
-	liveHost(t, "ip", "netns", "add", ns)
+	gwLiveHost(t, "ip", "netns", "add", ns)
 	t.Cleanup(func() {
-		if out, err := liveCmd(context.Background(), "ip", "netns", "pids", ns).Output(); err == nil {
+		if out, err := gwLiveCmd(context.Background(), "ip", "netns", "pids", ns).Output(); err == nil {
 			for _, pid := range strings.Fields(string(out)) {
-				_ = liveCmd(context.Background(), "kill", "-9", pid).Run() // a process of this test's own namespace
+				_ = gwLiveCmd(context.Background(), "kill", "-9", pid).Run() // a process of this test's own namespace
 			}
 		}
-		_ = liveCmd(context.Background(), "ip", "netns", "del", ns).Run() // the namespace may already be gone
+		_ = gwLiveCmd(context.Background(), "ip", "netns", "del", ns).Run() // the namespace may already be gone
 	})
 	return ns
 }
 
-// inNS runs a command inside a namespace.
-func inNS(t *testing.T, ns string, args ...string) (string, error) {
+// gwInNS runs a command inside a namespace.
+func gwInNS(t *testing.T, ns string, args ...string) (string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := liveCmd(ctx, append([]string{"ip", "netns", "exec", ns}, args...)...).CombinedOutput()
+	out, err := gwLiveCmd(ctx, append([]string{"ip", "netns", "exec", ns}, args...)...).CombinedOutput()
 	return string(out), err
 }
 
-func mustInNS(t *testing.T, ns string, args ...string) string {
+func gwMustInNS(t *testing.T, ns string, args ...string) string {
 	t.Helper()
-	out, err := inNS(t, ns, args...)
+	out, err := gwInNS(t, ns, args...)
 	if err != nil {
 		t.Fatalf("[%s] %s: %v\n%s", ns, strings.Join(args, " "), err, out)
 	}
 	return out
 }
 
-// liveRun is the Service's run, confined to a namespace and to the three
+// gwLiveRun is the Service's run, confined to a namespace and to the three
 // tools the gateway uses.
-func liveRun(ns string) func(context.Context, string, ...string) (string, error) {
+func gwLiveRun(ns string) func(context.Context, string, ...string) (string, error) {
 	return func(ctx context.Context, name string, args ...string) (string, error) {
 		switch name {
 		case "nft", "tc", "ip", "iptables", "ip6tables":
@@ -109,7 +109,7 @@ func liveRun(ns string) func(context.Context, string, ...string) (string, error)
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		var buf bytes.Buffer
-		cmd := liveCmd(ctx, append([]string{"ip", "netns", "exec", ns, name}, args...)...)
+		cmd := gwLiveCmd(ctx, append([]string{"ip", "netns", "exec", ns, name}, args...)...)
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 		if err := cmd.Run(); err != nil {
 			return buf.String(), fmt.Errorf("%s: %s", name, strings.TrimSpace(firstLines(buf.String(), 6)))
@@ -118,7 +118,7 @@ func liveRun(ns string) func(context.Context, string, ...string) (string, error)
 	}
 }
 
-const liveEchoServer = `
+const gwLiveEchoServer = `
 import http.server, socketserver, sys
 class S(http.server.ThreadingHTTPServer):
     # HTTPServer.server_bind reverse-resolves the address it bound, which
@@ -138,7 +138,7 @@ class H(http.server.BaseHTTPRequestHandler):
 S((sys.argv[1], int(sys.argv[2])), H).serve_forever()
 `
 
-const liveHold = `
+const gwLiveHold = `
 import socket, sys
 ok = 0
 keep = []
@@ -154,15 +154,15 @@ for i in range(5):
 print(ok)
 `
 
-// liveServe starts the echo server, which answers every request with the
+// gwLiveServe starts the echo server, which answers every request with the
 // address it saw the request come from, in a namespace.
-func liveServe(t *testing.T, ns, addr string, port int) {
+func gwLiveServe(t *testing.T, ns, addr string, port int) {
 	t.Helper()
 	script := filepath.Join(t.TempDir(), "echo.py")
-	if err := os.WriteFile(script, []byte(liveEchoServer), 0o644); err != nil {
+	if err := os.WriteFile(script, []byte(gwLiveEchoServer), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cmd := liveCmd(context.Background(), "ip", "netns", "exec", ns, "timeout", "300", "python3", script, addr, fmt.Sprint(port))
+	cmd := gwLiveCmd(context.Background(), "ip", "netns", "exec", ns, "timeout", "300", "python3", script, addr, fmt.Sprint(port))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -173,7 +173,7 @@ func liveServe(t *testing.T, ns, addr string, port int) {
 	go func() { exited <- cmd.Wait() }()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		if out, _ := inNS(t, ns, "ss", "-ltn"); strings.Contains(out, fmt.Sprintf("%s:%d", addr, port)) {
+		if out, _ := gwInNS(t, ns, "ss", "-ltn"); strings.Contains(out, fmt.Sprintf("%s:%d", addr, port)) {
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -185,30 +185,30 @@ func liveServe(t *testing.T, ns, addr string, port int) {
 	default:
 		why = "it is still running"
 	}
-	ss, _ := inNS(t, ns, "ss", "-ltnp")
-	br, _ := inNS(t, ns, "ip", "-br", "addr")
+	ss, _ := gwInNS(t, ns, "ss", "-ltnp")
+	br, _ := gwInNS(t, ns, "ip", "-br", "addr")
 	ss += br
 	t.Fatalf("the echo server did not start in %s (%s): %s\n%s", ns, why, stderr.String(), ss)
 }
 
-// fetchFrom is what a curl in a namespace gets, and whether it got anything.
-func fetchFrom(t *testing.T, ns, url string) (string, bool) {
+// gwFetchFrom is what a curl in a namespace gets, and whether it got anything.
+func gwFetchFrom(t *testing.T, ns, url string) (string, bool) {
 	t.Helper()
-	out, err := inNS(t, ns, "curl", "-s", "-m", "3", url)
+	out, err := gwInNS(t, ns, "curl", "-s", "-m", "3", url)
 	return strings.TrimSpace(out), err == nil
 }
 
 func TestLiveGoldenRulesetLoadsAndReadsBack(t *testing.T) {
-	liveRequired(t)
-	ns := liveNS(t, "golden")
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "golden")
 	file, err := filepath.Abs("testdata/gateway-full.nft")
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustInNS(t, ns, "nft", "-c", "-f", file)
-	mustInNS(t, ns, "nft", "-f", file)
-	mustInNS(t, ns, "nft", "-f", file) // the declare/delete/define idiom: a second load replaces, it does not fail
-	out := mustInNS(t, ns, "nft", "-j", "list", "table", "inet", gatewayTable)
+	gwMustInNS(t, ns, "nft", "-c", "-f", file)
+	gwMustInNS(t, ns, "nft", "-f", file)
+	gwMustInNS(t, ns, "nft", "-f", file) // the declare/delete/define idiom: a second load replaces, it does not fail
+	out := gwMustInNS(t, ns, "nft", "-j", "list", "table", "inet", gatewayTable)
 	counters, err := parseGatewayCounters(out)
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestLiveGoldenRulesetLoadsAndReadsBack(t *testing.T) {
 		}
 	}
 	// The Capability check reads the same listing a real ruleset produces.
-	listing := mustInNS(t, ns, "nft", "-j", "list", "ruleset")
+	listing := gwMustInNS(t, ns, "nft", "-j", "list", "ruleset")
 	var l nftListing
 	if err := json.Unmarshal([]byte(listing), &l); err != nil || len(l.Nftables) == 0 {
 		t.Fatalf("nft -j list ruleset did not parse: %v", err)
@@ -236,12 +236,12 @@ func TestLiveGoldenRulesetLoadsAndReadsBack(t *testing.T) {
 }
 
 func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
-	liveRequired(t)
-	gw, cl, sv := liveNS(t, "gw"), liveNS(t, "client"), liveNS(t, "server")
+	gwLiveRequired(t)
+	gw, cl, sv := gwLiveNS(t, "gw"), gwLiveNS(t, "client"), gwLiveNS(t, "server")
 
 	// client(10.77.0.2) -- gwc(10.77.0.1) [gateway] gws(10.88.0.1) -- server(10.88.0.5)
-	mustInNS(t, cl, "ip", "link", "add", "c0", "type", "veth", "peer", "name", "gwc", "netns", gw)
-	mustInNS(t, sv, "ip", "link", "add", "s0", "type", "veth", "peer", "name", "gws", "netns", gw)
+	gwMustInNS(t, cl, "ip", "link", "add", "c0", "type", "veth", "peer", "name", "gwc", "netns", gw)
+	gwMustInNS(t, sv, "ip", "link", "add", "s0", "type", "veth", "peer", "name", "gws", "netns", gw)
 	for _, c := range [][]string{
 		{cl, "ip", "addr", "add", "10.77.0.2/24", "dev", "c0"}, {cl, "ip", "link", "set", "c0", "up"}, {cl, "ip", "link", "set", "lo", "up"},
 		{cl, "ip", "route", "add", "default", "via", "10.77.0.1"},
@@ -258,11 +258,11 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 		{gw, "iptables", "-A", "INPUT", "-i", "lo", "-j", "ACCEPT"},
 		{gw, "iptables", "-P", "INPUT", "DROP"},
 	} {
-		mustInNS(t, c[0], c[1:]...)
+		gwMustInNS(t, c[0], c[1:]...)
 	}
-	liveServe(t, sv, "10.88.0.5", 80)
-	liveServe(t, cl, "10.77.0.2", 8000)
-	liveServe(t, gw, "10.88.0.1", 8000)
+	gwLiveServe(t, sv, "10.88.0.5", 80)
+	gwLiveServe(t, cl, "10.77.0.2", 8000)
+	gwLiveServe(t, gw, "10.88.0.1", 8000)
 
 	sys := t.TempDir()
 	for _, p := range []string{"net/ipv4/ip_forward", "net/ipv6/conf/all/forwarding"} {
@@ -271,7 +271,7 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 		_ = os.WriteFile(full, []byte("1\n"), 0o644)
 	}
 	prevSys, prevClass, prevRun, prevHas := gatewaySysRoot, gatewayClassNet, run, has
-	gatewaySysRoot, gatewayClassNet, run, has = sys, t.TempDir(), liveRun(gw), func(string) bool { return false }
+	gatewaySysRoot, gatewayClassNet, run, has = sys, t.TempDir(), gwLiveRun(gw), func(string) bool { return false }
 	t.Cleanup(func() { gatewaySysRoot, gatewayClassNet, run, has = prevSys, prevClass, prevRun, prevHas })
 
 	svc := testService(t)
@@ -285,14 +285,14 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	}
 
 	// Port forward: blocked by the filter until it is admitted by the mark.
-	if _, ok := fetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
+	if _, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
 		t.Fatal("reached the server before any forward existed")
 	}
 	fwd, err := svc.AddForward(ctx, ForwardRequest{Name: "web", Protocol: "tcp", Ports: "8080", Target: "10.88.0.5", TargetPort: "80", SourceNAT: "always"}, operator, "test", gwProtected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body, ok := fetchFrom(t, cl, "http://10.77.0.1:8080/"); !ok || body != "10.88.0.1" {
+	if body, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); !ok || body != "10.88.0.1" {
 		t.Fatalf("a masqueraded forward: got %q, %v (want the gateway's own address)", body, ok)
 	}
 	// The forward's own packets, counted by comment.
@@ -308,7 +308,7 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if _, err := svc.UpdateForward(ctx, fwd.ID, ForwardRequest{Name: "web", Protocol: "tcp", Ports: "8080", Target: "10.88.0.5", TargetPort: "80", SourceNAT: "never"}, operator, "test", gwProtected); err != nil {
 		t.Fatal(err)
 	}
-	if body, ok := fetchFrom(t, cl, "http://10.77.0.1:8080/"); !ok || body != "10.77.0.2" {
+	if body, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); !ok || body != "10.77.0.2" {
 		t.Fatalf("an unmasqueraded forward: got %q, %v (want the visitor's address)", body, ok)
 	}
 
@@ -316,8 +316,8 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if _, err := svc.AddForward(ctx, ForwardRequest{Name: "range", Protocol: "tcp", Ports: "9000-9010", Target: "10.88.0.5", SourceNAT: "never"}, operator, "test", gwProtected); err != nil {
 		t.Fatal(err)
 	}
-	liveServe(t, sv, "10.88.0.5", 9005)
-	if body, ok := fetchFrom(t, cl, "http://10.77.0.1:9005/"); !ok || body != "10.77.0.2" {
+	gwLiveServe(t, sv, "10.88.0.5", 9005)
+	if body, ok := gwFetchFrom(t, cl, "http://10.77.0.1:9005/"); !ok || body != "10.77.0.2" {
 		t.Fatalf("a range forward: got %q, %v", body, ok)
 	}
 
@@ -328,10 +328,10 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	hold := filepath.Join(t.TempDir(), "hold.py")
-	if err := os.WriteFile(hold, []byte(liveHold), 0o644); err != nil {
+	if err := os.WriteFile(hold, []byte(gwLiveHold), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if out := strings.TrimSpace(mustInNS(t, cl, "python3", hold, "10.77.0.1", "8080")); out != "2" {
+	if out := strings.TrimSpace(gwMustInNS(t, cl, "python3", hold, "10.77.0.1", "8080")); out != "2" {
 		t.Fatalf("five connections against a limit of two: %s connected", out)
 	}
 	pv, err := svc.Protection(ctx, operator)
@@ -353,7 +353,7 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := fetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
+	if _, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
 		t.Fatal("a blocklisted client got through")
 	}
 	if pv, _ = svc.Protection(ctx, operator); pv.Blocklists[0].Packets == 0 {
@@ -363,7 +363,7 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if _, err := svc.AddLimit(ctx, LimitRequest{Name: "anything", Protocol: "tcp", Ports: "7777", Rate: 1, Per: "hour"}, "10.77.0.2", "test"); err != nil {
 		t.Fatal(err)
 	}
-	if body, ok := fetchFrom(t, cl, "http://10.77.0.1:8080/"); !ok || body != "10.77.0.2" {
+	if body, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); !ok || body != "10.77.0.2" {
 		t.Fatalf("a trusted client on a blocklist: got %q, %v", body, ok)
 	}
 	if err := svc.DeleteBlocklist(ctx, bl.ID, "10.77.0.2"); err != nil {
@@ -371,19 +371,19 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	}
 
 	// NAT: the server reaches the client through the gateway, translated.
-	if _, ok := fetchFrom(t, sv, "http://10.77.0.2:8000/"); ok {
+	if _, ok := gwFetchFrom(t, sv, "http://10.77.0.2:8000/"); ok {
 		t.Fatal("the server reached the client through a DROP policy with no NAT entry")
 	}
 	nat, err := svc.AddNAT(ctx, NATRequest{Name: "lab", Source: "10.88.0.0/24", Interface: "gwc"}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body, ok := fetchFrom(t, sv, "http://10.77.0.2:8000/"); !ok || body != "10.77.0.1" {
+	if body, ok := gwFetchFrom(t, sv, "http://10.77.0.2:8000/"); !ok || body != "10.77.0.1" {
 		t.Fatalf("a NAT entry: got %q, %v (want the gateway's address on the way out)", body, ok)
 	}
 	// The mark does not admit the tunnel's traffic to this host's own ports:
 	// the gateway answers on 8000 and its INPUT policy is DROP.
-	if _, ok := fetchFrom(t, sv, "http://10.88.0.1:8000/"); ok {
+	if _, ok := gwFetchFrom(t, sv, "http://10.88.0.1:8000/"); ok {
 		t.Fatal("NAT admission let a source reach a service on the gateway itself")
 	}
 
@@ -397,10 +397,10 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if err := svc.DeleteNAT(ctx, nat.ID); err != nil {
 		t.Fatal(err)
 	}
-	if out := mustInNS(t, gw, "iptables", "-S", "FORWARD"); strings.Contains(out, "just-dashboard-gateway") {
+	if out := gwMustInNS(t, gw, "iptables", "-S", "FORWARD"); strings.Contains(out, "just-dashboard-gateway") {
 		t.Fatalf("the admission rule outlived the last translation:\n%s", out)
 	}
-	if _, ok := fetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
+	if _, ok := gwFetchFrom(t, cl, "http://10.77.0.1:8080/"); ok {
 		t.Fatal("a removed forward still forwards")
 	}
 
@@ -408,19 +408,19 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if err := svc.SetShaping(ctx, "gwc", ShapeRequest{EgressKbit: 5000}, operator, "test"); err == nil || !strings.Contains(err.Error(), "veth") {
 		t.Fatalf("shaping a veth: err = %v", err)
 	}
-	mustInNS(t, gw, "ip", "link", "add", "dm0", "type", "dummy")
-	mustInNS(t, gw, "ip", "link", "set", "dm0", "up")
+	gwMustInNS(t, gw, "ip", "link", "add", "dm0", "type", "dummy")
+	gwMustInNS(t, gw, "ip", "link", "set", "dm0", "up")
 	if err := svc.SetShaping(ctx, "dm0", ShapeRequest{EgressKbit: 5000}, operator, "test"); err != nil {
 		t.Fatalf("shaping a dummy device: %v", err)
 	}
 }
 
 func TestLiveShapingBatchLoadsAndReadsBack(t *testing.T) {
-	liveRequired(t)
-	ns := liveNS(t, "shape")
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "shape")
 	for _, dev := range []string{"dm0", "dm1", "dm2", "dm3"} {
-		mustInNS(t, ns, "ip", "link", "add", dev, "type", "dummy")
-		mustInNS(t, ns, "ip", "link", "set", dev, "up")
+		gwMustInNS(t, ns, "ip", "link", "add", dev, "type", "dummy")
+		gwMustInNS(t, ns, "ip", "link", "set", dev, "up")
 	}
 	sp := emptySpec()
 	sp.Shaping = []ShapeSpec{
@@ -438,7 +438,7 @@ func TestLiveShapingBatchLoadsAndReadsBack(t *testing.T) {
 	load := func() string {
 		// tc exits non-zero under -force when any line failed, and the deletes
 		// of queues that are not there do; the unit's "-" prefix accepts that.
-		out, _ := inNS(t, ns, "tc", "-force", "-batch", batch)
+		out, _ := gwInNS(t, ns, "tc", "-force", "-batch", batch)
 		return out
 	}
 	load()
@@ -446,7 +446,7 @@ func TestLiveShapingBatchLoadsAndReadsBack(t *testing.T) {
 	if strings.Contains(again, "File exists") || strings.Contains(again, "Change operation not supported") || strings.Contains(again, "Cannot find device") {
 		t.Fatalf("the batch is not idempotent:\n%s", again)
 	}
-	out := mustInNS(t, ns, "tc", "-j", "-s", "qdisc", "show")
+	out := gwMustInNS(t, ns, "tc", "-j", "-s", "qdisc", "show")
 	qs, err := parseQdiscs(out)
 	if err != nil {
 		t.Fatal(err)
@@ -470,18 +470,18 @@ func TestLiveShapingBatchLoadsAndReadsBack(t *testing.T) {
 			}
 		}
 	}
-	if f := mustInNS(t, ns, "tc", "filter", "show", "dev", "dm0", "parent", "ffff:"); !strings.Contains(f, "police") || !strings.Contains(f, "100Mbit") {
+	if f := gwMustInNS(t, ns, "tc", "filter", "show", "dev", "dm0", "parent", "ffff:"); !strings.Contains(f, "police") || !strings.Contains(f, "100Mbit") {
 		t.Errorf("no police action at 100Mbit:\n%s", f)
 	}
 
 	// And through the Service: the same commands, one device, then cleared.
 	prevRun, prevHas := run, has
-	run, has = liveRun(ns), func(string) bool { return false }
+	run, has = gwLiveRun(ns), func(string) bool { return false }
 	t.Cleanup(func() { run, has = prevRun, prevHas })
 	svc := testService(t)
 	ctx := context.Background()
-	mustInNS(t, ns, "ip", "link", "add", "dm4", "type", "dummy")
-	mustInNS(t, ns, "ip", "link", "set", "dm4", "up")
+	gwMustInNS(t, ns, "ip", "link", "add", "dm4", "type", "dummy")
+	gwMustInNS(t, ns, "ip", "link", "set", "dm4", "up")
 	if err := svc.SetShaping(ctx, "dm4", ShapeRequest{Qdisc: "cake", EgressKbit: 30000, IngressKbit: 30000}, "192.0.2.1", "test"); err != nil {
 		t.Fatal(err)
 	}
@@ -504,16 +504,16 @@ func TestLiveShapingBatchLoadsAndReadsBack(t *testing.T) {
 	if err := svc.ClearShaping(ctx, "dm4"); err != nil {
 		t.Fatal(err)
 	}
-	if out := mustInNS(t, ns, "tc", "qdisc", "show", "dev", "dm4"); strings.Contains(out, "cake") || strings.Contains(out, "ingress") {
+	if out := gwMustInNS(t, ns, "tc", "qdisc", "show", "dev", "dm4"); strings.Contains(out, "cake") || strings.Contains(out, "ingress") {
 		t.Fatalf("still shaped:\n%s", out)
 	}
 }
 
 func TestLiveCapabilityReadsRealRulesets(t *testing.T) {
-	liveRequired(t)
-	ns := liveNS(t, "cap")
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "cap")
 	prevRun, prevHas := run, has
-	run, has = liveRun(ns), func(string) bool { return false }
+	run, has = gwLiveRun(ns), func(string) bool { return false }
 	t.Cleanup(func() { run, has = prevRun, prevHas })
 	svc := testService(t)
 	ctx := context.Background()
@@ -529,7 +529,7 @@ func TestLiveCapabilityReadsRealRulesets(t *testing.T) {
 	if err := os.WriteFile(rules, []byte("table inet filter {\n\tchain forward {\n\t\ttype filter hook forward priority filter; policy drop;\n\t}\n}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustInNS(t, ns, "nft", "-f", rules)
+	gwMustInNS(t, ns, "nft", "-f", rules)
 	c := svc.GatewayCapability(ctx)
 	if c.Writable || c.Blocker == nil || c.Blocker.Table != "filter" || c.Blocker.Chain != "forward" || c.Firewall != "nftables" {
 		t.Fatalf("a foreign drop-forward table = %+v", c)
@@ -540,10 +540,10 @@ func TestLiveCapabilityReadsRealRulesets(t *testing.T) {
 	if err := os.WriteFile(add, []byte("add rule inet filter forward "+c.Blocker.Rule+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	mustInNS(t, ns, "nft", "-f", add)
+	gwMustInNS(t, ns, "nft", "-f", add)
 	// iptables-nft's own FORWARD policy drop is not a blocker.
-	mustInNS(t, ns, "nft", "delete", "table", "inet", "filter")
-	mustInNS(t, ns, "iptables", "-P", "FORWARD", "DROP")
+	gwMustInNS(t, ns, "nft", "delete", "table", "inet", "filter")
+	gwMustInNS(t, ns, "iptables", "-P", "FORWARD", "DROP")
 	if c := svc.GatewayCapability(ctx); !c.Writable || c.Firewall != "iptables" {
 		t.Fatalf("an iptables-nft host with a drop policy = %+v", c)
 	}
