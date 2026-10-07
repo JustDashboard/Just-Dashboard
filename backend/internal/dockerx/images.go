@@ -306,6 +306,9 @@ type Network struct {
 	// UsedBy names the containers attached, so the delete dialog can say which
 	// ones rather than only how many.
 	UsedBy []string `json:"usedBy"`
+	// Bridge is the host device a bridge network is carried on, which is how
+	// the Network pages put a Docker network's name on br-1a2b3c4d5e6f.
+	Bridge string `json:"bridge,omitempty"`
 }
 
 func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
@@ -351,6 +354,7 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 			nw.UsedBy = []string{}
 		}
 		nw.Containers = len(nw.UsedBy)
+		nw.Bridge = bridgeDevice(n.ID, n.Name, n.Driver, n.Options)
 		if nw.Labels == nil {
 			nw.Labels = map[string]string{}
 		}
@@ -735,4 +739,24 @@ func orEmpty(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// bridgeDevice names the host device a bridge network uses: the name its
+// options give it, docker0 for the default network, and otherwise the br-
+// and the first twelve characters of its id Docker makes for every
+// user-defined one.
+func bridgeDevice(id, name, driver string, options map[string]string) string {
+	if driver != "bridge" {
+		return ""
+	}
+	if dev := options["com.docker.network.bridge.name"]; dev != "" {
+		return dev
+	}
+	if name == "bridge" {
+		return "docker0"
+	}
+	if len(id) < 12 {
+		return ""
+	}
+	return "br-" + id[:12]
 }

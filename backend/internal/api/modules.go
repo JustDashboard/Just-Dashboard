@@ -28,6 +28,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -79,6 +80,10 @@ type moduleSet struct {
 	dbs           *dbx.Manager
 	linuxUsers    *linuxusers.Service
 	netsec        *netsec.Service
+	// network changes the host's network: devices, routes, the gateway
+	// table, shaping, VPN and resolver. netsec keeps reading it for the
+	// posture; this is the half that writes.
+	network *netx.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -201,6 +206,16 @@ func (s *Server) initModules() {
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
+	s.modules.network = netx.New(netx.Options{
+		Paths:       netx.DefaultPaths(),
+		DB:          s.Store.DB,
+		Log:         s.Log,
+		Allowlist:   allowlistStrings(s.Cfg.AllowedCIDRs),
+		Seal:        s.Sealer.Seal,
+		Open:        s.Sealer.Open,
+		SampleEvery: s.Cfg.MetricsInterval,
+		Retention:   s.Cfg.MetricsRetention,
+	})
 	s.modules.jobs = jobs.New(s.Log)
 
 	databaseDumper := &backupDatabaseDumper{server: s}

@@ -32,7 +32,6 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/security/posture", s.handle(s.handleSecurityPosture))
 	r.Method(http.MethodGet, "/security/services", s.handle(s.handleServiceCatalogue))
 	r.Method(http.MethodGet, "/connections", s.handle(s.handleConnections))
-	r.Method(http.MethodGet, "/network", s.handle(s.handleNetworkInfo))
 
 	// Listing the logins and ending one are the same subtree, and they have to
 	// be registered in the same place: chi mounts a Route as a subrouter, so a
@@ -70,13 +69,8 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 		})
 	})
 
-	// Probes make the server emit traffic to an address the caller chose.
-	// That is a scanner if it is handed to everybody, so it sits behind the
-	// capability that already means "this person administers the host".
-	r.Route("/network/probe", func(r chi.Router) {
-		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-		r.Method(http.MethodPost, "/", s.handle(s.handleNetworkProbe))
-	})
+	// The interface summary and the probes moved to mountNetworkRoutes, which
+	// owns everything under /network.
 }
 
 // handleSecurityPosture gathers every input and grades the host.
