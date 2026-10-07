@@ -93,12 +93,14 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
     <div className="flex min-w-0 flex-col gap-5">
       <ChoiceGrid columns={2}>
         <ChoiceCard
+          verb="A VPN to browse through"
           selected={exitNode}
           onClick={() => setExitNode(true)}
           title="A VPN to browse through"
           description="Phones and laptops send all their traffic out through this server"
         />
         <ChoiceCard
+          verb="A private network"
           selected={!exitNode}
           onClick={() => setExitNode(false)}
           title="A private network"
@@ -111,6 +113,7 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
           {RESOLVERS.map((r) => (
             <ChoiceCard
               key={r.id}
+              verb={`Resolve with ${r.name}`}
               selected={resolver === r.id}
               onClick={() => setResolver(r.id)}
               logo={<ProductGlyph id={r.product} />}

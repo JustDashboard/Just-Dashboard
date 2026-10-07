@@ -193,6 +193,7 @@ export function CreateDevice({
             <ChoiceCard
               key={k.kind}
               index={index}
+              verb={`Make a ${k.title}`}
               selected={kind === k.kind}
               onClick={() => setKind(k.kind)}
               mark={k.mark}
