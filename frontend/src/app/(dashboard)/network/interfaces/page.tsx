@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
-import type { NetworkLink } from "@/lib/types"
+import type { NetworkLink, NetworkNamespace } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
 import { ErrorState, LoadingPanel } from "@/components/state"
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { DeviceList, GROUPS } from "@/components/network/interfaces/device-list"
 import { DeviceSheet } from "@/components/network/interfaces/device-sheet"
 import { CreateDevice } from "@/components/network/interfaces/create-device"
+import { Namespaces } from "@/components/network/interfaces/namespaces"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
 
 /**
@@ -24,7 +25,8 @@ import { useLiveTraffic } from "@/components/network/use-live-traffic"
  * opens its sheet, with its in and out live — and, one press away, Docker's
  * veths and the kernel's own fallback devices, which are most of a busy
  * host's list and none of what anybody comes here for. The command to make
- * a device sits with the list it adds to.
+ * a device sits with the list it adds to. Under the devices, the other
+ * network stacks on the machine: the named namespaces, and each container's.
  *
  * Its old figures (devices, up, the default route, public addresses) each
  * went where they are said better: the counts are the filter chips', the
@@ -44,6 +46,10 @@ function Interfaces() {
   const params = useSearchParams()
   const links = usePoll<NetworkLink[]>((signal) => get("/network/links", undefined, signal), 10_000)
   const live = useLiveTraffic()
+  const namespaces = usePoll<NetworkNamespace[]>(
+    (signal) => get("/network/namespaces", undefined, signal),
+    30_000,
+  )
   const [everything, setEverything] = useState(false)
   const [query, setQuery] = useState("")
   const [open, setOpen] = useState<string | undefined>(() => params.get("device") ?? undefined)
@@ -109,6 +115,15 @@ function Interfaces() {
           onOpen={setOpen}
         />
       )}
+
+      <Namespaces
+        namespaces={namespaces.data}
+        links={withRates}
+        onChanged={() => {
+          namespaces.refresh()
+          links.refresh()
+        }}
+      />
 
       <DeviceSheet
         link={chosen}

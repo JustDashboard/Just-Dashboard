@@ -1132,6 +1132,32 @@ export const routing = {
 
 export const bgp = { installed: false, running: false, families: [] }
 
+export const namespaces = [
+  {
+    name: "lab",
+    kind: "named",
+    id: 0,
+    managed: true,
+    devices: [{ name: "lab-n", state: "up", mtu: 1500, addresses: ["192.168.50.20/24"] }],
+  },
+  {
+    name: "postgres",
+    kind: "container",
+    managed: false,
+    image: "postgres:17-alpine",
+    pid: 4412,
+    devices: [{ name: "eth0", state: "up", mtu: 1500, addresses: ["10.0.0.3/24"] }],
+  },
+  {
+    name: "proxy",
+    kind: "container",
+    managed: false,
+    image: "caddy:2-alpine",
+    pid: 5120,
+    devices: [{ name: "eth0", state: "up", mtu: 1500, addresses: ["10.0.4.2/24"] }],
+  },
+]
+
 export function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -1177,6 +1203,8 @@ export async function mockNetwork(
         return json(route, routing)
       case "/network/bgp":
         return json(route, bgp)
+      case "/network/namespaces":
+        return json(route, namespaces)
       case "/ports/meta":
         return json(route, { ephemeralRange: [32768, 60999] })
       case "/network/traffic/live": {

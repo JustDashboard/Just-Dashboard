@@ -176,7 +176,9 @@ function NetworkIdentity({ overview, links }: { overview: NetworkOverview; links
           {primary ? (
             <HostFact>
               <span className="font-mono">{primary.device}</span>
-              {uplink?.speedMbps ? <span className="ml-1.5">· {speed(uplink.speedMbps)}</span> : null}
+              {uplink?.speedMbps ? (
+                <span className="ml-1.5">· {speed(uplink.speedMbps)}</span>
+              ) : null}
               {primary.gateway && (
                 <span className="ml-1.5">
                   via <span className="font-mono">{primary.gateway}</span>

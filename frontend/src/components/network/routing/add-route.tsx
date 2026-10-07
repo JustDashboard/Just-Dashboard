@@ -367,8 +367,8 @@ export function AddRule({
         </Field>
         {!selects && (
           <Notice title="A rule needs something to match">
-            A rule for all traffic would send this browser's replies through the table it names too;
-            give it a source, a destination, a device or a mark.
+            A rule for all traffic would send this browser&rsquo;s replies through the table it
+            names too; give it a source, a destination, a device or a mark.
           </Notice>
         )}
         {error && (
