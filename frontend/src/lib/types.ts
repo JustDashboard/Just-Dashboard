@@ -6677,3 +6677,58 @@ export type NetworkPersistence = {
   made: number
   dir: string
 }
+
+export type NetworkDefaultRoute = {
+  family: "inet" | "inet6"
+  device: string
+  gateway?: string
+  metric?: number
+}
+
+export type NetworkFinding = {
+  id: string
+  level: "critical" | "warning" | "notice"
+  title: string
+  detail: string
+  /** The page that fixes it. */
+  href: string
+}
+
+/** The Network Overview's one read. */
+export type NetworkOverview = {
+  hostname: string
+  client: NetworkPath
+  defaults: NetworkDefaultRoute[]
+  /** The globally routable addresses on the uplinks: what the internet reaches. */
+  publicAddresses: string[]
+  links: NetworkLink[]
+  dockerNetworks: {
+    id: string
+    name: string
+    bridge?: string
+    subnets: string[]
+    containers: { name: string; image: string }[]
+  }[]
+  firewall: {
+    backend?: string
+    available: boolean
+    enabled: boolean
+    incoming?: string
+    rules: number
+  }
+  connections: { total: number; peers: number; fromInternet: number; listening: number }
+  forwarding: { ipv4: boolean; ipv6: boolean }
+  persistence: NetworkPersistence
+  made: {
+    links: number
+    routes: number
+    rules: number
+    forwards: number
+    nat: number
+    limits: number
+    blocklists: number
+    shaping: number
+    namespaces: number
+  }
+  findings: NetworkFinding[]
+}

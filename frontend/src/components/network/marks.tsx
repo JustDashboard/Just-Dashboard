@@ -2,9 +2,9 @@
 
 import {
   Box,
+  Bridge,
   Connection,
   Hash,
-  Layers,
   Linked,
   LockClosed,
   NetworkDevice,
@@ -38,7 +38,7 @@ const KIND_GLYPH: Record<string, Icon> = {
   physical: NetworkDevice,
   bond: NetworkDevice,
   loopback: RotateClockwise,
-  bridge: Layers,
+  bridge: Bridge,
   vlan: Hash,
   macvlan: Hash,
   ipvlan: Hash,
