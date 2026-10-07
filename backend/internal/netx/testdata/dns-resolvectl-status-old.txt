@@ -1,0 +1,34 @@
+Global
+       LLMNR setting: no
+MulticastDNS setting: no
+  DNSOverTLS setting: opportunistic
+      DNSSEC setting: allow-downgrade
+    DNSSEC supported: yes
+  Current DNS Server: 9.9.9.9
+         DNS Servers: 9.9.9.9 149.112.112.112
+                      2620:fe::fe
+Fallback DNS Servers: 1.1.1.1
+          DNSSEC NTA: 10.in-addr.arpa
+                      corp
+          DNS Domain: ~.
+
+Link 2 (eth0)
+      Current Scopes: DNS
+DefaultRoute setting: yes
+       LLMNR setting: yes
+MulticastDNS setting: no
+  DNSOverTLS setting: no
+      DNSSEC setting: no
+    DNSSEC supported: no
+  Current DNS Server: 192.0.2.1
+         DNS Servers: 192.0.2.1 192.0.2.2
+          DNS Domain: example.internal
+
+Link 3 (docker0)
+      Current Scopes: none
+DefaultRoute setting: no
+       LLMNR setting: yes
+MulticastDNS setting: no
+  DNSOverTLS setting: no
+      DNSSEC setting: no
+    DNSSEC supported: no
