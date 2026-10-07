@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { json, mockNetwork, type Mutation } from "./network-fixture"
+import { json, loaded, mockNetwork, type Mutation } from "./network-fixture"
 import { gateway, overrides, protection } from "./network-gateway-fixture"
 
 /**
@@ -29,7 +29,7 @@ test.describe("screenshots", () => {
       for (const path of ["/network/gateway", "/network/protection"]) {
         test(`${path} at ${width}`, async ({ page }) => {
           await open(page, path)
-          await page.waitForLoadState("networkidle")
+          await loaded(page)
           await page.waitForTimeout(1500)
           const name = path.replace(/^\/network\//, "")
           await page.screenshot({ path: `${dir}/${name}-${width}.png`, fullPage: true })

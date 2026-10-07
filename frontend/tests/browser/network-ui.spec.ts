@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { mockNetwork, type Mutation } from "./network-fixture"
+import { loaded, mockNetwork, type Mutation } from "./network-fixture"
 
 /**
  * The Network section against a mocked API (`network-fixture.ts`): every page
@@ -34,7 +34,7 @@ test.describe("screenshots", () => {
         test(`${path} at ${width}`, async ({ page }) => {
           await mockNetwork(page)
           await page.goto(path)
-          await page.waitForLoadState("networkidle")
+          await loaded(page)
           await page.waitForTimeout(1500)
           const name = path.replace(/^\/network\/?/, "") || "overview"
           await page.screenshot({ path: `${dir}/${name}-${width}.png`, fullPage: true })
@@ -105,8 +105,7 @@ for (const path of PAGES) {
   test(`${path} keeps the design system's structural rules`, async ({ page }) => {
     await mockNetwork(page)
     await page.goto(path)
-    await page.waitForLoadState("networkidle")
-    await page.waitForSelector("[data-slot=page]")
+    await loaded(page)
     expect(await unnamedControls(page), "icon-only controls without a name").toEqual([])
     expect(await filledPills(page), "filled pills").toEqual([])
     expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
@@ -119,7 +118,7 @@ test.describe("on a phone", () => {
     test(`${path} never scrolls sideways`, async ({ page }) => {
       await mockNetwork(page)
       await page.goto(path)
-      await page.waitForLoadState("networkidle")
+      await loaded(page)
       const overflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       )

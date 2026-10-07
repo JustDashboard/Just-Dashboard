@@ -169,7 +169,7 @@ describe("diagnosisLinks", () => {
   test("a timeout adds the firewall, and a handshake the sites", () => {
     expect(links({ stage: "connect", reason: "timeout", where: "unknown" })).toEqual([
       ["Listening ports", "/proxy/ports?q=:443"],
-      ["Firewall", "/security/firewall"],
+      ["Firewall", "/network/firewall"],
     ])
     expect(links({ stage: "handshake", reason: "plain-http", where: "here" })).toEqual([
       ["Listening ports", "/proxy/ports?q=:443"],

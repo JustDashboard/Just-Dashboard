@@ -7,6 +7,7 @@ import {
   viewer,
   type Mutation,
 } from "./security-intrusion-fixture"
+import { loaded } from "./network-fixture"
 
 const JUMP_KEYS = [
   "allowtcpforwarding",
@@ -61,7 +62,7 @@ test.describe("screenshots", () => {
       test.use({ viewport: { width, height: 1000 } })
 
       const shoot = async (page: import("@playwright/test").Page, name: string) => {
-        await page.waitForLoadState("networkidle")
+        await loaded(page)
         await page.waitForTimeout(1500)
         await page.screenshot({ path: `${dir}/${name}-${width}.png`, fullPage: true })
         for (let part = 1; part <= 8; part++) {
@@ -321,7 +322,7 @@ test("the jump host's preset stages four values and applies nothing until Test a
   const mutations: Mutation[] = []
   await mockIntrusion(page, mutations)
   await page.goto("/security/ssh")
-  await page.waitForLoadState("networkidle")
+  await loaded(page)
 
   // The saved file refuses forwarding, so the door is drawn shut and the
   // snippet area says jumping is refused.

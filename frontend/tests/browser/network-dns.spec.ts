@@ -1,5 +1,5 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test"
-import { mockNetwork, type Mutation } from "./network-fixture"
+import { loaded, mockNetwork, type Mutation } from "./network-fixture"
 import {
   dnsView,
   dnsViewManaged,
@@ -379,7 +379,7 @@ test.describe("screenshots", () => {
           // The charts have their own capture above; held quiet, the page under
           // them can be walked without the browser being busy drawing them.
           await open(page, path, { charts: path === "/network/dns" })
-          await page.waitForLoadState("networkidle")
+          await loaded(page)
           if (path === "/network/dns") {
             await page.getByLabel("Name", { exact: true }).fill("example.com")
             await page.getByRole("button", { name: "Resolve" }).click()

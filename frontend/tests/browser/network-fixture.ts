@@ -1167,6 +1167,16 @@ export function json(route: Route, body: unknown, status = 200) {
  * `overrides`, keyed by path; every mutation is recorded and answered with
  * success, so a test reads back exactly what a form sent.
  */
+/**
+ * Resolves once the page has drawn its readings: the page frame is there and
+ * nothing in it is still a skeleton. The Network pages poll every couple of
+ * seconds, so the network never goes quiet enough for "networkidle".
+ */
+export async function loaded(page: Page) {
+  await page.waitForSelector("[data-slot=page]")
+  await page.waitForFunction(() => !document.querySelector("[data-slot=page] [data-slot=skeleton]"))
+}
+
 export async function mockNetwork(
   page: Page,
   mutations: Mutation[] = [],
