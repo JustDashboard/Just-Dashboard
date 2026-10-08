@@ -118,25 +118,40 @@ const TERMINAL_FALLBACK: XtermTheme = {
  */
 function resolveTerminalTheme(): XtermTheme {
   if (typeof document === "undefined") return TERMINAL_FALLBACK
-  const ctx = document.createElement("canvas").getContext("2d")
+  const canvas = document.createElement("canvas")
+  canvas.width = 1
+  canvas.height = 1
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })
   if (!ctx) return TERMINAL_FALLBACK
 
-  const probe = document.createElement("span")
-  probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"
-  document.body.appendChild(probe)
-
   const read = (expr: string, fallback: string) => {
+    // A fresh probe for every token. Under reduced motion the root rule gives
+    // every element a 0.01ms transition, so one probe reused for each token
+    // was read on its way from the colour before: the ground came back as the
+    // foreground, and the terminal drew white for anyone who asks for less
+    // motion. A new element has no colour to move from.
+    const probe = document.createElement("span")
+    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none"
     // A sentinel first: an expression the browser rejects outright (a typo in
     // a function name) leaves `color` at the sentinel rather than erroring, so
     // that is the signal to fall back.
     probe.style.color = "rgb(1, 2, 3)"
     probe.style.color = expr
+    document.body.appendChild(probe)
     const raw = getComputedStyle(probe).color
+    probe.remove()
     if (!raw || raw === "rgb(1, 2, 3)") return fallback
     try {
+      // The pixel, not `fillStyle` read back: Chrome 151 keeps an `oklab()`
+      // fill as `oklab()`, which xterm cannot parse and draws as a white
+      // ground, so the colour is painted and its channels read off it.
+      ctx.clearRect(0, 0, 1, 1)
       ctx.fillStyle = "#000"
       ctx.fillStyle = raw
-      return ctx.fillStyle
+      ctx.fillRect(0, 0, 1, 1)
+      const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data
+      const hex = (n: number) => n.toString(16).padStart(2, "0")
+      return `#${hex(r)}${hex(g)}${hex(b)}${a < 255 ? hex(a) : ""}`
     } catch {
       return fallback
     }
@@ -189,7 +204,6 @@ function resolveTerminalTheme(): XtermTheme {
     brightCyan: cyan,
     brightWhite: fg,
   }
-  probe.remove()
   return theme
 }
 
