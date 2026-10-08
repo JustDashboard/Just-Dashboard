@@ -57,6 +57,11 @@ Picking an IPv6 plan opts addressing in and leaves IPv6 exit off. Random/default
 cannot match an explicit selected reservation. Interface/namespace records remain advisory plans
 and provider ranges remain declared plans. A form link or reservation by itself is not evidence that native configuration was applied.
 
+Creation forms treat an incomplete planning response as a failed read. They retain a selected name,
+prefix and planning identity through a later failed refresh and refuse the selected handoff until
+current inventory is readable. The picker accepts only a current reservation or the explicit
+unselected option; synthetic empty form events cannot erase a selected plan.
+
 ## Verification
 
 Focused Go tests cover concurrent IPv4/IPv6 allocation, covering-prefix jumps over enormous IPv6

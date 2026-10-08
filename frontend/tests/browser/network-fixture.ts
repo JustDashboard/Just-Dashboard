@@ -1213,6 +1213,19 @@ export async function mockNetwork(
         return json(route, connections)
       case "/network/vpn":
         return json(route, vpn)
+      case "/network/ipam/":
+        return json(route, {
+          pools: [],
+          reservations: [],
+          utilization: [],
+          limitations: [],
+          inventory: {
+            checkedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+            observations: [],
+            coverage: [],
+          },
+        })
       case "/network/routing":
         return json(route, routing)
       case "/network/bgp":

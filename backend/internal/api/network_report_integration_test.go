@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
@@ -16,14 +18,14 @@ import (
 
 func TestNetworkReportMountedPrivateRoutesAndIndependentMachineAuthentication(t *testing.T) {
 	c, s := newClient(t)
-	for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks"} {
+	for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/dns/evidence/"} {
 		if w := c.do("GET", path, "", nil); w.Code != 200 {
 			t.Fatalf("mounted admin %s=%d %s", path, w.Code, w.Body.String())
 		}
 	}
 	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
 		actor := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "report-mounted-"+string(role), role)}
-		for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/ipam/", "/api/v1/network/captures/", "/api/v1/network/flows/"} {
+		for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/ipam/", "/api/v1/network/captures/", "/api/v1/network/flows/", "/api/v1/network/dns/evidence/"} {
 			if w := actor.do("GET", path, "", nil); w.Code != 403 {
 				t.Errorf("mounted %s %s=%d", role, path, w.Code)
 			}
@@ -52,6 +54,30 @@ func TestNetworkReportMountedPrivateRoutesAndIndependentMachineAuthentication(t 
 	anonymous := &client{t: t, h: s.Routes()}
 	if w := anonymous.do("POST", "/api/v1/probe-agent/enroll", body, nil); w.Code != 200 {
 		t.Fatalf("anonymous proof=%d %s", w.Code, w.Body.String())
+	}
+	queued := c.do("POST", "/api/v1/network/external/checks", `{"vantageId":"`+enrollment.Vantage.ID+`","scopeId":"service","family":"inet","port":443,"tls":true}`, nil)
+	if queued.Code != http.StatusAccepted {
+		t.Fatalf("mounted queue=%d %s", queued.Code, queued.Body.String())
+	}
+	path := "/api/v1/probe-agent/poll"
+	signature := netvantage.SignRequest(key, "POST", path, nil, netvantage.Signature{ServerKey: enrollment.ServerKey, ID: enrollment.Vantage.ID, Sequence: 1, Timestamp: time.Now().Unix()})
+	headers := map[string]string{
+		"X-JD-Vantage": signature.ID, "X-JD-Probe-Server": signature.ServerKey,
+		"X-JD-Probe-Sequence": strconv.FormatInt(signature.Sequence, 10),
+		"X-JD-Probe-Time":     strconv.FormatInt(signature.Timestamp, 10), "X-JD-Probe-Signature": signature.Value,
+	}
+	polled := anonymous.do("POST", path, "", headers)
+	var delivery struct {
+		Job *netvantage.SignedJob `json:"job"`
+	}
+	if polled.Code != http.StatusOK || json.Unmarshal(polled.Body.Bytes(), &delivery) != nil || delivery.Job == nil {
+		t.Fatalf("mounted signed poll=%d %s", polled.Code, polled.Body.String())
+	}
+	if err := netvantage.VerifyJob(*delivery.Job, enrollment.ServerKey); err != nil || delivery.Job.Job.VantageID != enrollment.Vantage.ID {
+		t.Fatalf("mounted job identity or signature invalid: %v", err)
+	}
+	if replay := anonymous.do("POST", path, "", headers); replay.Code != http.StatusUnauthorized {
+		t.Fatalf("mounted signed request replay=%d %s", replay.Code, replay.Body.String())
 	}
 	if w := c.do("POST", "/api/v1/probe-agent/poll", `{}`, nil); w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), "vantage_authentication_failed") {
 		t.Fatalf("human cookie replaced machine proof=%d %s", w.Code, w.Body.String())

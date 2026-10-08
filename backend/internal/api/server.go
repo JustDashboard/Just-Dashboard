@@ -129,6 +129,11 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	dnsCtx, dnsCancel := context.WithTimeout(ctx, 5*time.Second)
+	if err := s.modules.network.ReconcileDNSEvidence(dnsCtx); err != nil {
+		s.Log.Warn("interrupted DNS investigations could not be reconciled", "err", err)
+	}
+	dnsCancel()
 	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket history is unavailable", "err", err)
 	}

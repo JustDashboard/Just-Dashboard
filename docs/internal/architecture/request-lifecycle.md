@@ -128,6 +128,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   cookies/API tokens cannot replace them, and they grant no dashboard capabilities. Human
   `/network/external` management/evidence requires `system.admin`; enrollment/revocation also
   require a session and revocation is destructive. Secrets/raw proofs are excluded from audit.
+- **Private native DNS evidence.** Every `/network/dns/evidence` route requires `system.admin`,
+  including retained questions, answers and exports. Launch and deletion are audited, deletion uses
+  `s.destructive`, and reload/history/export never issue a DNS query. Unsupported or unavailable
+  private policy refuses before fallback. See [resolver evidence](../backend/network-dns-evidence.md).
 - **Address plans and socket history.** `/network/ipam` and `/network/flows` require `system.admin`;
   release/retirement and history/policy erasure use `s.destructive`. A plan grants no native
   ownership. Socket collection needs explicit persisted opt-in; querying/exporting never collect.

@@ -64,7 +64,7 @@ async function setup(page: Page, readonly = false) {
     [],
     readonly
       ? { session: { ...admin, capabilities: ["read"], user: { ...admin.user, role: "readonly" } } }
-      : {},
+      : { overrides: { "/docker/ping": { available: true } } },
   )
   await page.route("**/api/v1/network/ipam/", (route) => json(route, fixture))
 }
@@ -73,8 +73,8 @@ test("shows exact IPv6 counts and retains unresolved owner allocation", async ({
   await page.goto("/network/ipam")
   await expect(page.getByRole("heading", { name: "Shared address pools" })).toBeVisible()
   await expect(page.getByText("65536", { exact: true })).toBeVisible()
-  await expect(page.getByText("Review required · allocation held", { exact: true })).toBeVisible()
-  await expect(page.getByRole("link", { name: "Open creation form" })).toHaveCount(0)
+  await expect(page.getByText("Docker network · Review required · allocation held")).toBeVisible()
+  await expect(page.getByRole("link", { name: /Open (Docker|WireGuard) creation/ })).toHaveCount(0)
   await expect(page.locator('[data-slot="page"]')).toHaveAttribute("data-register", "reading")
   await expect(page.locator('[data-slot="panel"]:not([data-plain])')).toHaveCount(0)
 })
@@ -131,7 +131,9 @@ test("failed preview preserves the prefix", async ({ page }) => {
   await page.goto("/network/ipam")
   await page.getByLabel("Prefix to preview").fill("fd48:abcd:1::/64")
   await page.getByRole("button", { name: "Preview known overlap" }).click()
-  await expect(page.getByRole("alert")).toContainText("Native source unreadable")
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Native source unreadable" }),
+  ).toBeVisible()
   await expect(page.getByLabel("Prefix to preview")).toHaveValue("fd48:abcd:1::/64")
 })
 
@@ -185,6 +187,31 @@ test("editing a filled Docker prefix clears the selected planning identity", asy
   await dialog.getByRole("button", { name: "Create", exact: true }).click()
   await expect.poll(() => calls.length).toBe(1)
   expect(calls[0]).not.toHaveProperty("ipamReservationIds")
+})
+
+test("an incomplete planning refresh keeps the selected Docker draft and blocks its handoff", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  let incomplete = false
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, incomplete ? [] : { ...fixture, reservations: [row] }),
+  )
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  incomplete = true
+  await page.clock.runFor(30_100)
+  await expect(
+    dialog.getByRole("alert").filter({ hasText: "inventory is unavailable" }),
+  ).toBeVisible()
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
 })
 
 test("WireGuard reservation opts IPv6 addressing in while leaving IPv6 exit off", async ({

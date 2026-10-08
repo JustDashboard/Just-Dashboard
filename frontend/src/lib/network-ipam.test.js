@@ -1,12 +1,28 @@
 import { describe, expect, test } from "bun:test"
 import {
   ipamCounts,
+  readIPAMView,
   previewReading,
   reservationLink,
   reservationState,
   selectedReservation,
 } from "./network-ipam"
 describe("shared planning evidence", () => {
+  test("missing inventory is a failed read rather than an empty healthy plan", () => {
+    for (const value of [null, [], {}, { reservations: [] }])
+      expect(() => readIPAMView(value)).toThrow("incomplete response")
+    const empty = {
+      pools: [],
+      reservations: [],
+      utilization: [],
+      limitations: [],
+      inventory: { observations: [], coverage: [] },
+    }
+    expect(readIPAMView(empty)).toBe(empty)
+    expect(() => readIPAMView({ ...empty, inventory: { observations: [] } })).toThrow(
+      "incomplete response",
+    )
+  })
   test("unknown coverage and no known overlap never claim free native/provider space", () => {
     expect(previewReading({ status: "unknown_coverage" }).label).toBe("Coverage incomplete")
     expect(previewReading({ status: "no_known_overlap" }).detail).toContain("does not prove")

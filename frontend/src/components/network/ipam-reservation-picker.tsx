@@ -14,7 +14,7 @@ import {
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
-import { selectedReservation } from "@/lib/network-ipam"
+import { readIPAMView, selectedReservation } from "@/lib/network-ipam"
 import type { IPAMOwner, IPAMReservation, IPAMView } from "@/lib/network-ipam"
 
 export function IPAMReservationPicker({
@@ -39,7 +39,7 @@ export function IPAMReservationPicker({
   const { can } = useAuth()
   const admin = can("system.admin")
   const inventory = usePoll<IPAMView>(
-    (signal) => get("/network/ipam/", undefined, signal),
+    async (signal) => readIPAMView(await get("/network/ipam/", undefined, signal)),
     30000,
     [owner, admin, open, refreshKey],
     { enabled: open && admin },
@@ -82,9 +82,10 @@ export function IPAMReservationPicker({
             <Select
               value={selected.find((row) => row.family === family)?.id ?? "none"}
               disabled={disabled || !inventory.data || Boolean(inventory.error)}
-              onValueChange={(id) =>
-                onSelect(id === "none" ? undefined : selectedReservation(rows, id, owner), family)
-              }
+              onValueChange={(id) => {
+                const row = selectedReservation(rows, id, owner)
+                if (id === "none" || row) onSelect(row, family)
+              }}
             >
               <SelectTrigger id={`ipam-pick-${owner}-${family}`}>
                 <SelectValue />

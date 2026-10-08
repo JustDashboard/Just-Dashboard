@@ -94,6 +94,12 @@ to the contribution terms above, including the additional licence grant to the p
   disposable namespaces, then removes those exact fixtures. It does not install persistent host
   units or reboot the host; timer dispatch and cold-runtime reconstruction are separate from actual
   reboot acceptance.
+- Native resolver evidence changes also run from `backend/`:
+  the private race test binary as root using the commands in
+  [native DNS investigations](docs/internal/backend/network-dns-evidence.md#controlled-validation).
+  This requires root or passwordless sudo and installed resolved/busctl/dbus-daemon/ip. It uses only
+  owned network/mount namespaces, private bus/configuration and a controlled signed TLS DNS fixture;
+  it never changes the host resolver. See [native DNS investigations](docs/internal/backend/network-dns-evidence.md).
 - Controlled probe-agent changes also run from `backend/`:
   `JD_NETVANTAGE_LIVE=1 go test -race ./internal/netvantage -run '^TestControlledVantageSeparateNamespace$' -count=1 -v`.
   This lane uses passwordless sudo to create an owned loopback namespace, then runs as the contributor

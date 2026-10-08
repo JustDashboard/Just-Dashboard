@@ -82,6 +82,20 @@ export type IPAMView = {
   utilization: IPAMUtilization[]
   limitations: string[]
 }
+export function readIPAMView(value: unknown): IPAMView {
+  const view = value as Partial<IPAMView> | null
+  if (
+    !view ||
+    !Array.isArray(view.pools) ||
+    !Array.isArray(view.reservations) ||
+    !Array.isArray(view.utilization) ||
+    !Array.isArray(view.limitations) ||
+    !Array.isArray(view.inventory?.observations) ||
+    !Array.isArray(view.inventory?.coverage)
+  )
+    throw new Error("Shared address inventory returned an incomplete response. Refresh to retry.")
+  return view as IPAMView
+}
 export const reservationState: Record<IPAMReservation["state"], string> = {
   reserved: "Reserved plan",
   handing_off: "Owner response pending · allocation held",

@@ -332,6 +332,7 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |
+| Private DNS evidence | `GET`/`POST /dns/evidence/`, `GET`/`DELETE /dns/evidence/{id}`, `GET /dns/evidence/{id}/export` (admin; deletion destructive) |
 | Traffic | `GET /traffic/processes`, `GET /traffic/containers`, `GET /ebpf` |
 | Diagnostics | `POST /probe` (26 tools) |
 
@@ -356,6 +357,14 @@ terminal record with the destructive gate. Every route requires `system.admin`; 
 job access has the same gate. See [capture lifecycle](network-captures.md) for hard limits and scope.
 
 ## Additional retained observations and planning
+
+[Native DNS investigations](network-dns-evidence.md) pin an active supported systemd-resolved
+owner, retain longest-suffix policy candidates and request fresh network-only record evidence.
+Answering-link, native encryption, strict TLS policy and DNSSEC validation have separate provenance;
+application/NSS, exact upstream and provider scope remain unknown. Unreadable, inactive or empty
+declared private scopes refuse querying before fallback, including in the existing effective lookup.
+`Store.Open` initializes the additive evidence schema; `Server.Start` reconciles lost running rows
+without rerunning questions. History, launch and export require admin; reads never investigate.
 
 [Controlled external checks](network-external-checks.md) enroll rootless outbound-only sources with
 closed immutable target/address/family/port scopes. Management stays admin-only; dedicated signed

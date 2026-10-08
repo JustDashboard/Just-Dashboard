@@ -100,6 +100,13 @@ test("scoped queue acceptance stays unknown and cancellation rejects future acce
   )
   await page.getByRole("button", { name: "Queue bounded check" }).click()
   await expect(page.getByRole("row").filter({ hasText: "queued" })).toContainText("Unknown")
+  expect(state.rows[0].request).toEqual({
+    vantageId: vantage.id,
+    scopeId: "service",
+    family: "inet",
+    port: 443,
+    tls: true,
+  })
   await expect(
     page.getByText(
       "No accepted measurement. Queue, expiry or cancellation states do not establish service reachability.",
@@ -165,7 +172,7 @@ test("one-use enrollment is shown once and keeps a failed draft", async ({ page 
   await page.getByLabel("Service name or address", { exact: true }).fill("service.example")
   await page.getByLabel("Approved literal addresses", { exact: true }).fill("192.0.2.8")
   await page.getByRole("button", { name: "Create one-use enrollment" }).click()
-  await expect(page.getByRole("alert")).toContainText("Approve both families")
+  await expect(page.getByRole("alert").filter({ hasText: "Approve both families" })).toBeVisible()
   await expect(page.getByLabel("Source name", { exact: true })).toHaveValue("New region")
   refused = false
   await page.getByRole("button", { name: "Create one-use enrollment" }).click()

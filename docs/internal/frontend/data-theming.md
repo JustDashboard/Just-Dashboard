@@ -60,14 +60,21 @@ named destinations and acknowledgment that private names leave their usual polic
 `includePublic` flag does not authorize fan-out. Resolver changes may carry a private
 `verificationName` for a network that cannot resolve public names. This verification input is a check
 for that apply, not saved resolver state.
+Native policy investigations retain answering-link, encryption, TLS trust and DNSSEC provenance
+separately from configured switches and classic wire lookup. Failed launches/history reads retain
+dated evidence and the query draft. Reload never reruns a private question or grants direct-query
+disclosure consent.
 WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
 and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
 containment; successful setup says configured when native runtime is not up.
 SQM retains its entire bounded profile after rejected writes and requires pending reconnection
 even when the global preference is off. Failed native shaping polls block edits until fresh reads.
 IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
-review; planning release never deletes a native resource. External check reload/filter/comparison
-never launch probes and retain source/family/time distinctions. Socket history shows decimal-string
+review; planning release never deletes a native resource. Incomplete planning envelopes are failed
+reads: a selected owner draft survives an unreadable refresh and its handoff is blocked until fresh
+inventory is available. External pickers accept only current option identities so synthetic empty
+form events cannot erase dependent scope. External check reload/filter/comparison never launch
+probes and retain source/family/time distinctions. Socket history shows decimal-string
 TCP counters and explicit null/unknown UDP/drop data, with recording separate from page reads.
 
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,

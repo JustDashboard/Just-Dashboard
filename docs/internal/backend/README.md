@@ -9,6 +9,7 @@
 - [`network-external-checks.md`](network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
 - [`network-flow-accounting.md`](network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
 - [`network-ipam.md`](network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
+- [`network-dns-evidence.md`](network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
 - [`network-sqm.md`](network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`wireguard-dual-stack.md`](wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
 - [`network-drift.md`](network-drift.md) — saved/render/runtime comparisons and owned repair review.

@@ -75,8 +75,8 @@ capped at 256 KiB, native server inventory at 256, manager domains at 2048, nati
 64/65535 aggregate wire bytes. Each bus request has a five-second timeout and one investigation a
 twenty-second total budget. These are bounded diagnostics, not a scanning or arbitrary command API.
 
-Startup wiring calls `store.InitializeNetworkDNSEvidence(ctx, db)` before
-`network.ReconcileDNSEvidence(ctx)`. Reconciliation marks a predecessor's running rows interrupted
+`Store.Open` calls `store.InitializeNetworkDNSEvidence(ctx, db)`; schema failure prevents startup.
+`Server.Start` then calls `network.ReconcileDNSEvidence(ctx)` under a five-second context. Reconciliation marks a predecessor's running rows interrupted
 without rerunning their private questions or claiming that a lost process was observed to finish.
 Request cancellation finishes only the result database write under a separate five-second context.
 Failure to save is explicit; it does not retry the query. The existing DNS router mounts the evidence
@@ -117,3 +117,14 @@ refusal, ignoring conflicting
 hosts records for wire queries, and absence of default-scope queries. It requires root namespace
 privileges plus already-installed resolved/busctl/dbus-daemon/ip; absence is an explicit skip. It
 does not restart or configure the production host resolver.
+
+Run from `backend/`, using a task-owned artifact directory:
+
+```bash
+fixture_dir=$(mktemp -d)
+GOMAXPROCS=2 go test -race -c -o "$fixture_dir/dns-evidence.test" ./internal/netx
+sudo env GOMAXPROCS=2 "$fixture_dir/dns-evidence.test" -test.run '^TestDNSEvidenceNativeDisposableResolver$' -test.count=1 -test.v
+```
+
+Running the Go test as an ordinary contributor skips this namespace fixture; the root test binary
+provides the native acceptance. It opens no production resolver configuration.

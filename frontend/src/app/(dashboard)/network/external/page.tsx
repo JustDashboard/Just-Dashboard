@@ -678,7 +678,14 @@ function Picker({
   disabled?: boolean
 }) {
   return (
-    <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
+    <Select
+      value={value}
+      onValueChange={(next) => {
+        // Native form events can report an empty value while dependent options mount.
+        if (options.some((option) => option.value === next)) onChange(next)
+      }}
+      disabled={disabled}
+    >
       <SelectTrigger id={id}>
         <SelectValue placeholder="Select…" />
       </SelectTrigger>

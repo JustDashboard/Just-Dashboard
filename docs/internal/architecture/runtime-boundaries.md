@@ -179,7 +179,8 @@ hashed rather than stored); the general `settings` key/value table; mount, conta
 configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
 packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities
 (`network_probe_vantages`, `network_probe_checks`), shared planning pools/reservations
-(`network_ipam_pools`, `network_ipam_reservations`), and socket-hour/coverage records
+(`network_ipam_pools`, `network_ipam_reservations`), private native DNS investigation records
+(`network_dns_evidence`), and socket-hour/coverage records
 (`network_flow_buckets`, `network_flow_cycles`). What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated

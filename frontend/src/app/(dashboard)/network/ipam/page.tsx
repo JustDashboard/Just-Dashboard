@@ -24,6 +24,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { del, errorMessage, get, post } from "@/lib/api"
 import {
   ipamCounts,
+  readIPAMView,
   ownerLabel,
   previewReading,
   reservationLink,
@@ -43,7 +44,7 @@ export default function SharedAddressPoolsPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const view = usePoll<IPAMView>(
-    (signal) => get("/network/ipam/", undefined, signal),
+    async (signal) => readIPAMView(await get("/network/ipam/", undefined, signal)),
     30000,
     [admin],
     { enabled: admin },
@@ -538,7 +539,13 @@ function Picker({
   disabled?: boolean
 }) {
   return (
-    <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
+    <Select
+      value={value}
+      onValueChange={(next) => {
+        if (options.some((option) => option.value === next)) onChange(next)
+      }}
+      disabled={disabled}
+    >
       <SelectTrigger id={id}>
         <SelectValue placeholder="Select…" />
       </SelectTrigger>

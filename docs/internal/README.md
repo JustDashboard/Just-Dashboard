@@ -43,6 +43,7 @@ strategy, and feature ownership behind those rules.
 - [`backend/network-external-checks.md`](backend/network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
 - [`backend/network-flow-accounting.md`](backend/network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
 - [`backend/network-ipam.md`](backend/network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
+- [`backend/network-dns-evidence.md`](backend/network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
 - [`backend/network-sqm.md`](backend/network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`backend/wireguard-dual-stack.md`](backend/wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
