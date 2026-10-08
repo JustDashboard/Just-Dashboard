@@ -13,7 +13,7 @@ import (
 )
 
 // fakeDNS answers on a local UDP socket, so the lookup race and the
-// verification step run through Go's real resolver against real packets. The
+// verification step run against real DNS packets. The
 // handler decides, per question, what the "server" does: answer, fail, stay
 // silent or take its time.
 type dnsBehavior struct {

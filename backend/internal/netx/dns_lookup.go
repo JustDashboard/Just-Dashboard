@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,7 +51,7 @@ type LookupResult struct {
 	Answers []LookupAnswer `json:"results"`
 }
 
-// lookupTypes are the record types Go's resolver can ask for.
+// lookupTypes are the supported DNS record types.
 var lookupTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "MX": true, "TXT": true, "NS": true, "PTR": true, "SRV": true}
 
 // lookupTarget is a resolver to ask.
@@ -179,72 +178,16 @@ func cleanLookupName(name, rtype string) (string, error) {
 func lookupVia(ctx context.Context, server, name, rtype string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
-	address := server
-	if _, _, err := net.SplitHostPort(server); err != nil {
-		address = net.JoinHostPort(server, "53")
-	}
-	r := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return dnsDial(ctx, network, address)
-		},
-	}
-	fqdn := name + "."
-	switch rtype {
-	case "A", "AAAA":
-		network := "ip4"
-		if rtype == "AAAA" {
-			network = "ip6"
-		}
-		ips, err := r.LookupIP(ctx, network, fqdn)
-		out := make([]string, 0, len(ips))
-		for _, ip := range ips {
-			out = append(out, ip.String())
-		}
-		return out, err
-	case "CNAME":
-		cname, err := r.LookupCNAME(ctx, fqdn)
-		if err != nil {
-			return nil, err
-		}
-		// With no CNAME the resolver hands the name back.
-		if strings.EqualFold(strings.TrimSuffix(cname, "."), name) {
-			return []string{}, nil
-		}
-		return []string{cname}, nil
-	case "MX":
-		mx, err := r.LookupMX(ctx, fqdn)
-		out := make([]string, 0, len(mx))
-		for _, m := range mx {
-			out = append(out, fmt.Sprintf("%d %s", m.Pref, m.Host))
-		}
-		return out, err
-	case "TXT":
-		return r.LookupTXT(ctx, fqdn)
-	case "NS":
-		ns, err := r.LookupNS(ctx, fqdn)
-		out := make([]string, 0, len(ns))
-		for _, n := range ns {
-			out = append(out, n.Host)
-		}
-		sort.Strings(out)
-		return out, err
-	case "PTR":
-		return r.LookupAddr(ctx, name)
-	case "SRV":
-		_, srv, err := r.LookupSRV(ctx, "", "", fqdn)
-		out := make([]string, 0, len(srv))
-		for _, s := range srv {
-			out = append(out, fmt.Sprintf("%d %d %d %s", s.Priority, s.Weight, s.Port, s.Target))
-		}
-		return out, err
-	}
-	return nil, fmt.Errorf("unsupported record type %s", rtype)
+	return lookupDNS(ctx, server, name, rtype)
 }
 
 // lookupError shortens Go's resolver errors to what a table cell can hold. A
 // name that does not exist is an answer, not a fault, and reads as one.
 func lookupError(err error) string {
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "no answer in " + lookupTimeout.String()
+	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
 		switch {
