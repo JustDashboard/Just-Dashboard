@@ -1192,6 +1192,20 @@ export async function mockNetwork(
     }
     const overrides = options.overrides ?? {}
     if (path in overrides) return json(route, overrides[path])
+    if (path.startsWith("/network/native/profiles/")) {
+      return json(route, {
+        checkedAt: new Date().toISOString(),
+        device: decodeURIComponent(path.split("/").at(-1) ?? ""),
+        kind: "physical",
+        owner: "unknown",
+        editable: false,
+        refusal: "No supported existing native profile was verified in this fixture.",
+        contract: { members: [] },
+        configured: { status: "unknown" },
+        runtime: { status: "unknown" },
+        boot: { status: "unknown" },
+      })
+    }
     switch (path) {
       case "/auth/session":
         return json(route, options.session ?? admin)

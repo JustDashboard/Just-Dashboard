@@ -6750,6 +6750,7 @@ export type NetworkChangeStatus = {
   persistence: "not_written" | "written" | "restored" | "unknown" | "not_applicable"
   boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown" | "not_applicable"
   recoveryErrors?: string[]
+  cleanup?: "pending" | "failed" | "complete"
   ownerUserId?: number
   expiresAt?: string
   appliedAt?: string

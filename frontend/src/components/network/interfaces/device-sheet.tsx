@@ -27,6 +27,7 @@ import { ChartPanel } from "@/components/metrics/chart-panel"
 import { Cidr } from "@/components/network/address"
 import { RX, TX } from "@/components/network/rate-pair"
 import { LinkMark, OWNER_LABEL, ROLE_LABEL, kindLabel } from "@/components/network/marks"
+import { NativeProfileEditor } from "./native-profile"
 
 const SERIES = [
   { key: "rx", label: "In", color: RX, kind: "area" as const },
@@ -478,6 +479,15 @@ export function DeviceSheet({
               )}
             </PanelBody>
           </Panel>
+
+          {admin && !link.managed && (
+            <NativeProfileEditor
+              key={link.name}
+              device={link.name}
+              open={open}
+              onChanged={onChanged}
+            />
+          )}
 
           <Panel plain>
             <PanelHeader title="Since it was created" />

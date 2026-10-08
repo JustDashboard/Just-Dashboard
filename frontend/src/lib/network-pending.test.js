@@ -51,3 +51,12 @@ test("the browser must opt in after recovery availability is known", () => {
   expect(networkPendingHeaders("/network/shaping/eth0", "GET")).toEqual({})
   expect(networkPendingHeaders("/network/vpn/tailscale", "POST")).toEqual({})
 })
+
+test("native persistent profile writes always request independent confirmed apply", () => {
+  expect(networkPendingHeaders("/network/native/profiles/eth0", "PUT")).toEqual({
+    "X-JD-Network-Apply": "pending",
+  })
+  expect(networkPendingHeaders("/network/native/profiles/eth0", "GET")).toEqual({})
+  expect(networkPendingHeaders("/network/native/profile-other/eth0", "PUT")).toEqual({})
+  expect(supportsPendingNetworkMutation("/network/changes/one/cleanup", "POST")).toBe(false)
+})

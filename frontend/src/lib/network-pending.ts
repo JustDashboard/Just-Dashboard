@@ -1,10 +1,11 @@
-/** Paths backed by the serialized netx recovery journal. Separate native owners are excluded. */
+/** Paths backed by the serialized netx recovery journal. */
 export function supportsPendingNetworkMutation(path: string, method: string): boolean {
   if (!["POST", "PUT", "DELETE"].includes(method.toUpperCase())) return false
   const clean = path.split("?")[0].replace(/\/$/, "")
   if (clean === "/network/drift/repairs") return method.toUpperCase() === "POST"
   return [
     "/network/links",
+    "/network/native/profiles",
     "/network/routing/routes",
     "/network/routing/rules",
     "/network/forwarding",
@@ -25,7 +26,9 @@ export function setNetworkPendingApply(enabled: boolean) {
 }
 
 export function networkPendingHeaders(path: string, method: string): Record<string, string> {
-  return pendingEnabled && supportsPendingNetworkMutation(path, method)
+  const nativeProfile =
+    method.toUpperCase() === "PUT" && path.startsWith("/network/native/profiles/")
+  return (pendingEnabled || nativeProfile) && supportsPendingNetworkMutation(path, method)
     ? { "X-JD-Network-Apply": "pending" }
     : {}
 }

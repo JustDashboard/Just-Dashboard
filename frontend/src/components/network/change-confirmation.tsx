@@ -39,6 +39,7 @@ export function NetworkChangeConfirmation() {
   const available = state.data?.available === true
   const change = state.data?.change
   const pending = change?.phase === "awaiting_confirmation"
+  const cleanupPending = change?.cleanup === "pending" || change?.cleanup === "failed"
   const owned = state.data?.owned === true
   const deadline = change?.expiresAt ? Date.parse(change.expiresAt) : 0
   const seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
@@ -111,12 +112,27 @@ export function NetworkChangeConfirmation() {
     })
   }
 
+  const cleanup = async () => {
+    if (!change || !owned) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      await post(`/network/changes/${change.id}/cleanup`)
+      refresh()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure))
+      refresh()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   if (!admin) return null
   const outcome =
     change &&
     ["recovered", "degraded", "confirmed"].includes(change.phase) &&
     dismissed !== change.id &&
-    (inNetwork || observed === change.id || change.phase === "degraded")
+    (inNetwork || observed === change.id || change.phase === "degraded" || cleanupPending)
   if (!pending && !outcome && !(observed && state.error) && !(inNetwork && available)) return null
   return (
     <aside aria-label="Network change confirmation" className="mx-4 my-3 min-w-0">
@@ -172,7 +188,7 @@ export function NetworkChangeConfirmation() {
         </Notice>
       ) : outcome && change ? (
         <Notice
-          tone={change.phase === "degraded" ? "warning" : "default"}
+          tone={change.phase === "degraded" || cleanupPending ? "warning" : "default"}
           title={
             change.phase === "confirmed"
               ? "Network change confirmed"
@@ -193,10 +209,34 @@ export function NetworkChangeConfirmation() {
               {failure}
             </p>
           ))}
+          {cleanupPending && (
+            <p className="mt-1">
+              The network decision is saved, but native cleanup remains incomplete. Further
+              journaled changes are blocked until the owned checkpoint and recovery stages are
+              cleaned.
+            </p>
+          )}
+          {cleanupPending && owned && can("destructive") && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              pending={busy}
+              disabled={busy || Boolean(state.error)}
+              onClick={() => void cleanup()}
+            >
+              Retry native cleanup
+            </Button>
+          )}
+          {error && (
+            <p role="alert" className="mt-1">
+              {error}
+            </p>
+          )}
           {state.error && (
             <p className="mt-1">The latest status request failed; this is the last known result.</p>
           )}
-          {change.phase !== "degraded" && (
+          {change.phase !== "degraded" && !cleanupPending && (
             <Button
               size="sm"
               variant="outline"
