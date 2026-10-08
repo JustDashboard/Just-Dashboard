@@ -55,14 +55,19 @@
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
-- `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
+- `cleanup.tsx` and `stack-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
-  volumes, stated whether or not any are affected. The preview's services are a flat list, not
-  collapsibles: a service that changes gets a row with the server's reason and the images before and
-  after, while the unchanged rest collapses to one line naming it — the same rule the attention panel
-  follows when one finding repeats across several containers, and the reason the section is not five
-  copies of "its configuration is identical". The "compose makes the final call" caveat is stated once
-  underneath. A cleanup category is one line — name, size, count, in
+  volumes, stated whether or not any are affected. The preview opens on that decision as one sentence
+  (*Deploy will recreate 2 services and create 1*) over a bar of the stack's services, each in the
+  colour of what happens to it, and lists them as a framed table, most consequential first: the change,
+  why (the keys that changed as tags over the server's reason), the image and the tag it moves to, and
+  what the service is doing now — a running service about to be recreated says it goes down while it
+  is replaced. The unchanged rest stays in the table, quiet, rather than five copies of "its
+  configuration is identical" each with a heading. The file's diff is grouped by the service each hunk
+  changes (`stack-diff.tsx`, the same view the compose editor's review and the history use), beside
+  the volumes, each kept or destroyed, and the "compose makes the final call" caveat is stated once.
+  Deploy and a fresh read sit at the top, where the reader who has just read what will happen can act
+  on it. A cleanup category is one line — name, size, count, in
   fixed columns — with the cost sentence and the example names behind its `?`. It used to be a block
   whose height depended on how far the cost sentence wrapped and whether that category had examples, so
   the six rows came out at three different heights and the size and count, top-aligned against the
@@ -81,10 +86,9 @@ that does something.
   chips as the containers page, because "which of these is down" is the same question asked of the same
   server. A stack's own page follows the same rule as a container's: the compose verbs that are pressed
   daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
-  drawn the same way as the container menu. Its services are a table of live readings (below);
-  the deploy preview's service rows and the deployment history are hairline lists the eye reads down,
-  not stacks of bordered rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
-  the section keeps, and a diff or a captured compose file sits in a `Well`.
+  drawn the same way as the container menu. Its services and the deploy preview's services are framed
+  tables (below), its deployment history a rail beside the record it reads; the network panel's shape
+  diagram is the one `Group tinted` fence the section keeps, and a diff sits in a `Well`.
 - `stack-detail.tsx` is a stack as the application it is. It opens on the stack's identity line — its
   services' products, the compose file, the directory and its checkout (uncommitted changes, how far
   behind, a link to the Git page), how many services run and how many ports it publishes — with the
@@ -99,12 +103,34 @@ that does something.
   command). Under it are the Services page's band for the stack (`stack-usage-band.tsx`: its share of
   the processor and memory, and Recent from `/docker/events?stack=`) and a picture of its published
   ports, services and networks whose wires pulse with each service's traffic (`stack-map.tsx`); the
-  joins and words are `stack-service-readings.ts`, unit-tested. Its other views are the deploy preview,
-  the compose file editable in place (validated before saving — and saving is *not* deploying, which
-  the UI says), a Files view over the stack's directory, the deployment history, and its logs as one
-  source (`stack:<name>`: every container merged by time, each line under its service in that service's
-  hue, the stack's readings over it, and an Events view of what Docker did to the project); the stack's
-  menu opens a shell in its directory. `container-detail.tsx` adds
+  joins and words are `stack-service-readings.ts`, unit-tested. Every other view names a service the
+  same way — its lane, its product, its name (`ServiceLabel`):
+  - the deploy preview (`stack-preview.tsx`, above);
+  - the compose file (`stack-compose.tsx`), editable in place with an outline beside it — each section
+    and the names under it a press from their line, each service with its live state — a state that
+    says whether the screen is the disk and whether compose took it, a status line that says where the
+    cursor is in the stack's terms (*services · api*), Ctrl+S, and a review of an unsaved edit as a diff
+    against the file on disk. An edit survives a look at another view (kept in memory, never written
+    down: a compose file holds passwords). Validation jumps to the line compose names, and saving says
+    it is *not* deploying and offers the preview and Deploy;
+  - the stack's directory (`stack-files.tsx`), read first as what compose takes from it: the compose
+    file, the root `.env`, each build context, bind mount and env file the services name, with the
+    services that read each in their lanes, git's word for any change, and a path that is missing said
+    with what it costs (a build or env file compose cannot start without in red, a mount Docker will
+    create empty in amber). The same words follow the names into the browser under it, which takes the
+    tab's height;
+  - the deployment history (`stack-history.tsx`): a strip from the first record to now, each stretch
+    in the colour of the compose file that was live through it, over the records as a rail (the backup
+    job's runs' shape) and the one picked read whole — who did what from which commit, whether its
+    images are still here, how its file differs from the one on disk now, the digests running just
+    before, and *Edit from this version*, which puts that file in the editor unsaved;
+  - its logs as one source (`stack-logs.tsx`, `stack:<name>`: every container merged by time, each line
+    under its service in that service's hue, the stack's readings over it, and an Events view of what
+    Docker did to the project), under a strip of the services writing into it — each with its state,
+    its lines and errors in the last hour and their shape — where a press narrows the log to one.
+
+  The outline, the line diff, what each service reads from the directory and the history's spans are
+  `stack-views.ts`, unit-tested. The stack's menu opens a shell in its directory. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
   URL), the writable-layer investigator, the failure diagnosis (whose window the Logs tab opens as a
   Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its

@@ -2315,6 +2315,28 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   service moves more than a kilobyte a second, at the Network section's `pulseDuration`; it is
   dashed and red where a port leads to a service that is not running, and amber where a database
   answers on every interface.
+- **The other views took the same vocabulary**, borrowed from the pages that did each job first:
+  every service anywhere on the page is its lane, its product and its name (`ServiceLabel` in
+  `docker/stack-diff.tsx`), and every diff of the compose file is one view grouped by the service
+  each hunk changes, `+N −M` in the colours its lines are drawn in.
+  - *Deploy preview* (`docker/stack-preview.tsx`) opens on Deploy's decision as one sentence over a
+    bar of the services in the colour of what happens to each — amber recreate, blue create, green
+    start, red remove, the quiet rest — then a framed table of them with why, the tag the image moves
+    to and what the service is doing now, then the diff beside the volumes. Its Group-tinted verdict
+    fence and its eyebrow sections are gone.
+  - *Compose file* (`docker/stack-compose.tsx`) is the Files editor's shape: a pane with the path
+    and the file's state (*Saved*, *Unsaved changes*, *Valid · 6 services*, *Compose rejects this*)
+    across the top, an outline beside the editor where each service carries its live state, and a
+    status line naming where the cursor is in the stack's terms.
+  - *Files* (`docker/stack-files.tsx`) puts what compose reads from the directory over the browser
+    as a table, with git's word for each change and a missing path's cost, and lets the browser take
+    the tab's height (`fill`); the browser's rows carry the same words after their names.
+  - *History* (`docker/stack-history.tsx`) is a backup job's shape: a strip of time in the colour of
+    each compose file — the lanes in order of first appearance, so the versions a history holds never
+    share one — over a rail of the records and the one picked read whole.
+  - *Logs* (`docker/stack-logs.tsx`) keeps the log page's workspace and puts the services that write
+    into it over it, the way that page's rail lists its sources: lines and errors in the last hour,
+    their shape in the service's lane, a press narrowing the log to one.
 
 ## 16. Two registers
 
