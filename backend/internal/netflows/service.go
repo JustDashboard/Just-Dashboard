@@ -9,21 +9,23 @@ import (
 )
 
 type Service struct {
-	mu           sync.Mutex
-	exportMu     sync.Mutex
-	store        *Store
-	collector    Collector
-	state        persistedState
-	differ       differencer
-	generation   uint64
-	started      bool
-	stopping     bool
-	cancel       context.CancelFunc
-	activeCancel context.CancelFunc
-	wake         chan struct{}
-	done         chan struct{}
-	lastError    string
-	startedAt    time.Time
+	mu            sync.Mutex
+	exportMu      sync.Mutex
+	store         *Store
+	collector     Collector
+	observer      EventObserver
+	state         persistedState
+	differ        differencer
+	generation    uint64
+	started       bool
+	stopping      bool
+	cancel        context.CancelFunc
+	activeCancel  context.CancelFunc
+	wake          chan struct{}
+	done          chan struct{}
+	lastError     string
+	startedAt     time.Time
+	pendingRecord *observerRecord
 }
 
 func New(store *Store, collector Collector) *Service {
@@ -41,6 +43,17 @@ func (s *Service) Start(ctx context.Context) error {
 	st, err := s.store.state(ctx)
 	if err != nil {
 		return err
+	}
+	if st.Settings.KernelObserverEnabled {
+		st.Settings.KernelObserverEnabled = false
+		if st.Observer == nil {
+			st.Observer = &ObserverEvidence{}
+		}
+		st.Observer.Status = "interrupted"
+		st.Observer.AttachmentsRetained = false
+		st.Observer.BatchID = ""
+		st.Observer.Reason = "The previous kernel session ended without retained shutdown evidence. Explicit opt-in is required to attach again."
+		st.Observer.Quality.ShutdownTailUnknown = true
 	}
 	st, err = s.store.policy(ctx, st, time.Now().UTC())
 	if err != nil {
@@ -81,6 +94,13 @@ func (s *Service) sample(ctx context.Context) {
 		s.mu.Unlock()
 		return
 	}
+	if s.pendingRecord != nil {
+		writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_ = s.saveObserverRecordLocked(writeCtx)
+		cancel()
+		s.mu.Unlock()
+		return
+	}
 	if s.collector == nil {
 		s.lastError = "The native collector is unavailable."
 		s.mu.Unlock()
@@ -102,6 +122,22 @@ func (s *Service) sample(ctx context.Context) {
 	rows := s.differ.observe(&c, interval)
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer writeCancel()
+	if s.state.Settings.KernelObserverEnabled && s.observer != nil {
+		eventRows, evidence, eventErr := s.observer.Drain(writeCtx, c.FinishedAt)
+		if eventErr != nil {
+			evidence.Status = "unavailable"
+			evidence.Reason = clip(eventErr.Error(), 512)
+		} else {
+			rows = append(rows, eventRows...)
+		}
+		c.Observer = &evidence
+		c.DroppedEvents = &evidence.Quality.RingDrops
+		if evidence.BatchID != "" {
+			s.pendingRecord = &observerRecord{cycle: c, rows: rows}
+			_ = s.saveObserverRecordLocked(writeCtx)
+			return
+		}
+	}
 	st, err := s.store.record(writeCtx, s.state, c, rows)
 	if err != nil {
 		s.lastError = "The last sample could not be saved: " + clip(err.Error(), 512)
@@ -110,6 +146,7 @@ func (s *Service) sample(ctx context.Context) {
 	}
 	s.state = st
 	s.lastError = ""
+
 }
 func (s *Service) Shutdown(ctx context.Context) error {
 	s.mu.Lock()
@@ -126,7 +163,9 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.mu.Unlock()
 	select {
 	case <-done:
-		return nil
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return s.stopObserverLocked(ctx)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -145,6 +184,13 @@ func (s *Service) Recording(ctx context.Context, enabled bool) (Settings, error)
 	}
 	st := s.state
 	st.Settings.Enabled = enabled
+	if !enabled {
+		if err := s.stopObserverLocked(ctx); err != nil {
+			return Settings{}, err
+		}
+		st = s.state
+		st.Settings.Enabled = false
+	}
 	if enabled && !s.state.Settings.Enabled {
 		now := time.Now().UTC()
 		st.Since = &now
@@ -198,6 +244,9 @@ func (s *Service) Clear(ctx context.Context) error {
 	if err := s.ready(); err != nil {
 		return err
 	}
+	if err := s.stopObserverLocked(ctx); err != nil {
+		return err
+	}
 	st, err := s.store.clear(ctx, s.state)
 	if err != nil {
 		return err
@@ -237,9 +286,19 @@ func (s *Service) Report(ctx context.Context, q Query) (Report, error) {
 	r.RecordingSince = st.Since
 	r.CollectorStartedAt = s.startedAt
 	r.PrunedRows = st.Pruned
-	r.Coverage = Coverage
-	r.KernelObserver.Status = "unavailable"
-	r.KernelObserver.Reason = "No supported, provenance-checked kernel observer is bundled. UDP bytes, short-lived flows and dropped-event counts remain unknown."
+	r.Coverage = append([]string{}, Coverage...)
+	if st.Settings.KernelObserverEnabled {
+		r.Coverage = append(r.Coverage, "The explicit fixed cgroup observer records bounded TCP/UDP header events, including short sockets; transport payload subtotals include retransmitted packets and do not prove application delivery.", "Each observed byte subtotal carries per-direction packet, known-byte and byte-gap counts. Ring drops, budget omissions, unsupported headers, missing identities, row-cap omissions and unverified owners remain separate quality evidence.", "UTC placement is a checked monotonic projection; a detected wall-clock discontinuity marks affected rows uncertain. Observer opt-in never resumes automatically after process restart.")
+	}
+	if s.observer != nil {
+		r.KernelObserver = s.observer.Status()
+	} else {
+		r.KernelObserver.Status = "unavailable"
+		r.KernelObserver.Reason = "The supported kernel observer is not configured. Native UDP bytes, short-lived flows and dropped-event counts remain unknown."
+	}
+	if st.Observer != nil && !st.Settings.KernelObserverEnabled {
+		r.KernelObserver = *st.Observer
+	}
 	r.Status = "off"
 	if st.Settings.Enabled {
 		r.Status = "waiting"

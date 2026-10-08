@@ -13,6 +13,7 @@ import (
 )
 
 const settingsKey = "network.flows.settings"
+const observerReceiptKey = "network.flows.observer.receipt"
 const maxRowBytes = 8192
 
 var ErrInvalid = errors.New("invalid flow query or policy")
@@ -20,9 +21,10 @@ var ErrUnavailable = errors.New("socket accounting unavailable")
 var fullID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 type persistedState struct {
-	Settings Settings   `json:"settings"`
-	Since    *time.Time `json:"since"`
-	Pruned   int64      `json:"pruned"`
+	Settings Settings          `json:"settings"`
+	Since    *time.Time        `json:"since"`
+	Pruned   int64             `json:"pruned"`
+	Observer *ObserverEvidence `json:"observer,omitempty"`
 }
 type Store struct{ db *sql.DB }
 
@@ -30,14 +32,14 @@ func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 func (s *Store) state(ctx context.Context) (persistedState, error) {
 	st := persistedState{Settings: DefaultSettings}
 	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, settingsKey).Scan(&raw)
+	err := s.db.QueryRowContext(ctx, `SELECT substr(value,1,8193) FROM settings WHERE key=?`, settingsKey).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
 		return st, nil
 	}
 	if err != nil {
 		return st, err
 	}
-	if json.Unmarshal([]byte(raw), &st) != nil || st.Settings.Validate() != nil {
+	if len(raw) > maxRowBytes || json.Unmarshal([]byte(raw), &st) != nil || st.Settings.Validate() != nil {
 		return st, fmt.Errorf("%w: stored recorder policy is unreadable", ErrUnavailable)
 	}
 	return st, nil
@@ -75,7 +77,13 @@ func maximum(a, b *uint64) *uint64 {
 	return a
 }
 func merge(a, b Bucket) Bucket {
-	a.LastSeen, a.Socket.State = b.LastSeen, b.Socket.State
+	if b.FirstSeen.Before(a.FirstSeen) {
+		a.FirstSeen = b.FirstSeen
+	}
+	if b.LastSeen.After(a.LastSeen) {
+		a.LastSeen = b.LastSeen
+	}
+	a.Socket.State = b.Socket.State
 	a.Samples += b.Samples
 	a.TxBytes, a.RxBytes, a.Retransmissions = add(a.TxBytes, b.TxBytes), add(a.RxBytes, b.RxBytes), add(a.Retransmissions, b.Retransmissions)
 	a.LostGaugeMax = maximum(a.LostGaugeMax, b.LostGaugeMax)
@@ -84,6 +92,18 @@ func merge(a, b Bucket) Bucket {
 	a.RxIntervals += b.RxIntervals
 	a.RetransIntervals += b.RetransIntervals
 	a.SkippedIntervals += b.SkippedIntervals
+	a.ObservedTxBytes, a.ObservedRxBytes = add(a.ObservedTxBytes, b.ObservedTxBytes), add(a.ObservedRxBytes, b.ObservedRxBytes)
+	a.ObservedPackets += b.ObservedPackets
+	a.ObservedTxPackets += b.ObservedTxPackets
+	a.ObservedRxPackets += b.ObservedRxPackets
+	a.ObservedTxKnownPackets += b.ObservedTxKnownPackets
+	a.ObservedRxKnownPackets += b.ObservedRxKnownPackets
+	a.ObservedTxByteGaps += b.ObservedTxByteGaps
+	a.ObservedRxByteGaps += b.ObservedRxByteGaps
+	a.TimestampUncertain = a.TimestampUncertain || b.TimestampUncertain
+	a.ObservedSYN += b.ObservedSYN
+	a.ObservedFIN += b.ObservedFIN
+	a.ObservedRST += b.ObservedRST
 	return a
 }
 func (s *Store) record(ctx context.Context, st persistedState, c Cycle, buckets []Bucket) (persistedState, error) {
@@ -92,6 +112,25 @@ func (s *Store) record(ctx context.Context, st persistedState, c Cycle, buckets 
 		return st, err
 	}
 	defer tx.Rollback()
+	if c.Observer != nil && c.Observer.BatchID != "" {
+		var receipt string
+		err = tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, observerReceiptKey).Scan(&receipt)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return st, err
+		}
+		if receipt == c.Observer.BatchID {
+			// The receipt and rows share a transaction. An uncertain commit can
+			// be retried without repeating either its packet or coverage counts.
+			var saved string
+			if err = tx.QueryRowContext(ctx, `SELECT substr(value,1,8193) FROM settings WHERE key=?`, settingsKey).Scan(&saved); err != nil {
+				return st, err
+			}
+			if len(saved) > maxRowBytes || json.Unmarshal([]byte(saved), &st) != nil {
+				return st, ErrUnavailable
+			}
+			return st, nil
+		}
+	}
 	for _, b := range buckets {
 		var oldRaw string
 		err := tx.QueryRowContext(ctx, `SELECT substr(payload,1,8193) FROM network_flow_buckets WHERE id=? AND hour=?`, b.ID, b.Hour.Unix()).Scan(&oldRaw)
@@ -131,6 +170,9 @@ func (s *Store) record(ctx context.Context, st persistedState, c Cycle, buckets 
 	cov.CaptureMillis += c.ElapsedMillis
 	cov.MaxCaptureMillis = max(cov.MaxCaptureMillis, c.ElapsedMillis)
 	cov.LastCycle = c
+	if c.Observer != nil {
+		cov.ObserverQuality = mergeQuality(cov.ObserverQuality, c.Observer.Quality)
+	}
 	for _, src := range c.Sources {
 		if src.Status == "unavailable" {
 			cov.FailedSources++
@@ -153,6 +195,11 @@ func (s *Store) record(ctx context.Context, st persistedState, c Cycle, buckets 
 	}
 	if err = saveState(ctx, tx, st); err != nil {
 		return st, err
+	}
+	if c.Observer != nil && c.Observer.BatchID != "" {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, observerReceiptKey, c.Observer.BatchID); err != nil {
+			return st, err
+		}
 	}
 	return st, tx.Commit()
 }

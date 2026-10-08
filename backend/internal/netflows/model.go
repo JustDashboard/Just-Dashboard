@@ -18,9 +18,10 @@ const (
 )
 
 type Settings struct {
-	Enabled         bool `json:"enabled"`
-	IntervalSeconds int  `json:"intervalSeconds"`
-	RetentionDays   int  `json:"retentionDays"`
+	Enabled               bool `json:"enabled"`
+	KernelObserverEnabled bool `json:"kernelObserverEnabled"`
+	IntervalSeconds       int  `json:"intervalSeconds"`
+	RetentionDays         int  `json:"retentionDays"`
 }
 
 var DefaultSettings = Settings{IntervalSeconds: 30, RetentionDays: 7}
@@ -88,57 +89,74 @@ type Source struct {
 }
 
 type Cycle struct {
-	At                   time.Time `json:"at"`
-	FinishedAt           time.Time `json:"finishedAt"`
-	BootID               string    `json:"bootId,omitempty"`
-	KernelRelease        string    `json:"kernelRelease,omitempty"`
-	Tool                 string    `json:"tool"`
-	ToolVersion          string    `json:"toolVersion,omitempty"`
-	ToolVersionError     string    `json:"toolVersionError,omitempty"`
-	ToolVersionCheckedAt time.Time `json:"toolVersionCheckedAt"`
-	Sources              []Source  `json:"sources"`
-	DockerStatus         string    `json:"dockerStatus"`
-	DockerError          string    `json:"dockerError,omitempty"`
-	OmittedSources       int       `json:"omittedSources"`
-	DiscardedIntervals   int       `json:"discardedIntervals"`
-	ElapsedMillis        int64     `json:"elapsedMillis"`
-	DroppedEvents        *uint64   `json:"droppedEvents,string"`
+	At                   time.Time         `json:"at"`
+	FinishedAt           time.Time         `json:"finishedAt"`
+	BootID               string            `json:"bootId,omitempty"`
+	KernelRelease        string            `json:"kernelRelease,omitempty"`
+	Tool                 string            `json:"tool"`
+	ToolVersion          string            `json:"toolVersion,omitempty"`
+	ToolVersionError     string            `json:"toolVersionError,omitempty"`
+	ToolVersionCheckedAt time.Time         `json:"toolVersionCheckedAt"`
+	Sources              []Source          `json:"sources"`
+	DockerStatus         string            `json:"dockerStatus"`
+	DockerError          string            `json:"dockerError,omitempty"`
+	OmittedSources       int               `json:"omittedSources"`
+	DiscardedIntervals   int               `json:"discardedIntervals"`
+	ElapsedMillis        int64             `json:"elapsedMillis"`
+	DroppedEvents        *uint64           `json:"droppedEvents,string"`
+	Observer             *ObserverEvidence `json:"observer,omitempty"`
 }
 
 type CoverageHour struct {
-	Hour               time.Time `json:"hour"`
-	FirstSampleAt      time.Time `json:"firstSampleAt"`
-	LastSampleAt       time.Time `json:"lastSampleAt"`
-	Samples            int       `json:"samples"`
-	FailedSources      int       `json:"failedSources"`
-	TruncatedSources   int       `json:"truncatedSources"`
-	OmittedSources     int       `json:"omittedSources"`
-	DiscardedIntervals int       `json:"discardedIntervals"`
-	CaptureMillis      int64     `json:"captureMillis"`
-	MaxCaptureMillis   int64     `json:"maxCaptureMillis"`
-	LastCycle          Cycle     `json:"lastCycle"`
+	Hour               time.Time       `json:"hour"`
+	FirstSampleAt      time.Time       `json:"firstSampleAt"`
+	LastSampleAt       time.Time       `json:"lastSampleAt"`
+	Samples            int             `json:"samples"`
+	FailedSources      int             `json:"failedSources"`
+	TruncatedSources   int             `json:"truncatedSources"`
+	OmittedSources     int             `json:"omittedSources"`
+	DiscardedIntervals int             `json:"discardedIntervals"`
+	CaptureMillis      int64           `json:"captureMillis"`
+	MaxCaptureMillis   int64           `json:"maxCaptureMillis"`
+	LastCycle          Cycle           `json:"lastCycle"`
+	ObserverQuality    ObserverQuality `json:"observerQuality"`
 }
 
 type Bucket struct {
-	ID                string    `json:"id"`
-	Hour              time.Time `json:"hour"`
-	FirstSeen         time.Time `json:"firstSeen"`
-	LastSeen          time.Time `json:"lastSeen"`
-	SourceID          string    `json:"sourceId"`
-	SourceName        string    `json:"sourceName"`
-	Namespace         string    `json:"namespace"`
-	BootID            string    `json:"bootId"`
-	Socket            Socket    `json:"socket"`
-	Samples           int       `json:"samples"`
-	TxBytes           *uint64   `json:"txBytes,string"`
-	RxBytes           *uint64   `json:"rxBytes,string"`
-	Retransmissions   *uint64   `json:"retransmissions,string"`
-	LostGaugeMax      *uint64   `json:"lostGaugeMax,string"`
-	MeasuredIntervals int       `json:"measuredIntervals"`
-	TxIntervals       int       `json:"txIntervals"`
-	RxIntervals       int       `json:"rxIntervals"`
-	RetransIntervals  int       `json:"retransIntervals"`
-	SkippedIntervals  int       `json:"skippedIntervals"`
+	ID                     string    `json:"id"`
+	Hour                   time.Time `json:"hour"`
+	FirstSeen              time.Time `json:"firstSeen"`
+	LastSeen               time.Time `json:"lastSeen"`
+	SourceID               string    `json:"sourceId"`
+	SourceName             string    `json:"sourceName"`
+	Namespace              string    `json:"namespace"`
+	BootID                 string    `json:"bootId"`
+	Socket                 Socket    `json:"socket"`
+	Samples                int       `json:"samples"`
+	TxBytes                *uint64   `json:"txBytes,string"`
+	RxBytes                *uint64   `json:"rxBytes,string"`
+	Retransmissions        *uint64   `json:"retransmissions,string"`
+	LostGaugeMax           *uint64   `json:"lostGaugeMax,string"`
+	MeasuredIntervals      int       `json:"measuredIntervals"`
+	TxIntervals            int       `json:"txIntervals"`
+	RxIntervals            int       `json:"rxIntervals"`
+	RetransIntervals       int       `json:"retransIntervals"`
+	SkippedIntervals       int       `json:"skippedIntervals"`
+	Evidence               string    `json:"evidence,omitempty"`
+	SocketCgroup           string    `json:"socketCgroup,omitempty"`
+	ObservedTxBytes        *uint64   `json:"observedTxBytes,string"`
+	ObservedRxBytes        *uint64   `json:"observedRxBytes,string"`
+	ObservedPackets        uint64    `json:"observedPackets,string"`
+	ObservedTxPackets      uint64    `json:"observedTxPackets,string"`
+	ObservedRxPackets      uint64    `json:"observedRxPackets,string"`
+	ObservedTxKnownPackets uint64    `json:"observedTxKnownPackets,string"`
+	ObservedRxKnownPackets uint64    `json:"observedRxKnownPackets,string"`
+	ObservedTxByteGaps     uint64    `json:"observedTxByteGaps,string"`
+	ObservedRxByteGaps     uint64    `json:"observedRxByteGaps,string"`
+	TimestampUncertain     bool      `json:"timestampUncertain"`
+	ObservedSYN            uint64    `json:"observedSyn,string"`
+	ObservedFIN            uint64    `json:"observedFin,string"`
+	ObservedRST            uint64    `json:"observedRst,string"`
 }
 
 type Query struct {
@@ -148,28 +166,70 @@ type Query struct {
 }
 
 type Report struct {
-	CheckedAt          time.Time      `json:"checkedAt"`
-	From               time.Time      `json:"from"`
-	To                 time.Time      `json:"to"`
-	Status             string         `json:"status"`
-	Settings           Settings       `json:"settings"`
-	RecordingSince     *time.Time     `json:"recordingSince"`
-	CollectorStartedAt time.Time      `json:"collectorStartedAt"`
-	LastCycle          *Cycle         `json:"lastCycle"`
-	Rows               []Bucket       `json:"rows"`
-	CoverageHours      []CoverageHour `json:"coverageHours"`
-	Truncated          bool           `json:"truncated"`
-	CoverageTruncated  bool           `json:"coverageTruncated"`
-	RetainedRows       int            `json:"retainedRows"`
-	RetainedBytes      int64          `json:"retainedBytes"`
-	RetainedFrom       *time.Time     `json:"retainedFrom"`
-	PrunedRows         int64          `json:"prunedRows"`
-	Error              string         `json:"error,omitempty"`
-	Coverage           []string       `json:"coverage"`
-	KernelObserver     struct {
-		Status string `json:"status"`
-		Reason string `json:"reason"`
-	} `json:"kernelObserver"`
+	CheckedAt          time.Time        `json:"checkedAt"`
+	From               time.Time        `json:"from"`
+	To                 time.Time        `json:"to"`
+	Status             string           `json:"status"`
+	Settings           Settings         `json:"settings"`
+	RecordingSince     *time.Time       `json:"recordingSince"`
+	CollectorStartedAt time.Time        `json:"collectorStartedAt"`
+	LastCycle          *Cycle           `json:"lastCycle"`
+	Rows               []Bucket         `json:"rows"`
+	CoverageHours      []CoverageHour   `json:"coverageHours"`
+	Truncated          bool             `json:"truncated"`
+	CoverageTruncated  bool             `json:"coverageTruncated"`
+	RetainedRows       int              `json:"retainedRows"`
+	RetainedBytes      int64            `json:"retainedBytes"`
+	RetainedFrom       *time.Time       `json:"retainedFrom"`
+	PrunedRows         int64            `json:"prunedRows"`
+	Error              string           `json:"error,omitempty"`
+	Coverage           []string         `json:"coverage"`
+	KernelObserver     ObserverEvidence `json:"kernelObserver"`
+}
+
+// Quality counters distinguish failure to deliver an event from intentionally
+// omitted work and from bytes/owners that the declared hooks cannot prove.
+type ObserverQuality struct {
+	Events              uint64 `json:"events,string"`
+	RingDrops           uint64 `json:"ringDrops,string"`
+	BudgetOmissions     uint64 `json:"budgetOmissions,string"`
+	HeaderGaps          uint64 `json:"headerGaps,string"`
+	IdentityGaps        uint64 `json:"identityGaps,string"`
+	StateAdmissionGaps  uint64 `json:"stateAdmissionGaps,string"`
+	ParserGaps          uint64 `json:"parserGaps,string"`
+	ByteGaps            uint64 `json:"byteGaps,string"`
+	PendingOmissions    uint64 `json:"pendingOmissions,string"`
+	AttributionGaps     uint64 `json:"attributionGaps,string"`
+	ReaderBudgetPauses  uint64 `json:"readerBudgetPauses,string"`
+	UnsavedEvents       uint64 `json:"unsavedEvents,string"`
+	TimestampGaps       uint64 `json:"timestampGaps,string"`
+	ShutdownTailUnknown bool   `json:"shutdownTailUnknown"`
+}
+type ObserverEvidence struct {
+	BatchID              string          `json:"batchId,omitempty"`
+	AttachmentsRetained  bool            `json:"attachmentsRetained"`
+	DockerStatus         string          `json:"dockerStatus"`
+	DockerError          string          `json:"dockerError,omitempty"`
+	DockerCheckedAt      time.Time       `json:"dockerCheckedAt"`
+	TimestampReason      string          `json:"timestampReason,omitempty"`
+	Status               string          `json:"status"`
+	Reason               string          `json:"reason"`
+	Digest               string          `json:"digest,omitempty"`
+	KernelRelease        string          `json:"kernelRelease,omitempty"`
+	BootID               string          `json:"bootId,omitempty"`
+	TargetCgroup         string          `json:"targetCgroup,omitempty"`
+	StartedAt            *time.Time      `json:"startedAt"`
+	CheckedAt            time.Time       `json:"checkedAt"`
+	StoppedAt            *time.Time      `json:"stoppedAt"`
+	ProgramIDs           []uint32        `json:"programIds"`
+	LinkIDs              []uint32        `json:"linkIds"`
+	RingBytes            int             `json:"ringBytes"`
+	EventsPerSecond      int             `json:"eventsPerSecond"`
+	SocketCapacity       int             `json:"socketCapacity"`
+	PendingCapacity      int             `json:"pendingCapacity"`
+	DockerSources        int             `json:"dockerSources"`
+	OmittedDockerSources int             `json:"omittedDockerSources"`
+	Quality              ObserverQuality `json:"quality"`
 }
 
 var Coverage = []string{

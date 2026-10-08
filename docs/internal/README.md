@@ -46,6 +46,8 @@ strategy, and feature ownership behind those rules.
 - [`backend/network-dns-evidence.md`](backend/network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
 - [`backend/network-sqm.md`](backend/network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`backend/wireguard-dual-stack.md`](backend/wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
+- [`backend/network-flow-observer.md`](backend/network-flow-observer.md) — explicit bounded kernel
+  telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
   measured unit activation and generation-bound repair review.
 - [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.

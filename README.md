@@ -71,6 +71,9 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   settings; per-device speed limits and BBR; a WireGuard server in one step with a QR code per phone,
   site-to-site peers and an exit node; Tailscale's exit node and subnet routes; the resolver's
   upstreams, DNS over TLS and ad-blocking presets; and traffic per device, program and container.
+  Administrator Socket History keeps bounded observations with capped retention and exact JSON
+  export. Its optional fixed kernel observer needs an explicit opt-in and reports TCP/UDP transport
+  byte subtotals, short socket events and coverage gaps; it does not resume automatically after restart.
   Twenty-six diagnostics include route and path-MTU checks, bounded packet snapshots, Wake-on-LAN
   and host prerequisites, with an IPv4/IPv6 subnet
   calculator. The [complete networking inventory and compatibility boundaries](docs/audits/2026-10-08-network-audit/README.md)

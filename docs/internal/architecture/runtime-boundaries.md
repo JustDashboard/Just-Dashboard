@@ -55,6 +55,11 @@ Shutdown cancels its bounded native capture and drains it before closing Docker.
 interrupted native handoffs to held review state at initialization, without replay or native cleanup.
 Controlled vantage checks persist signed single-use leases and expire lost results without repeating
 traffic; no polling listener or scanner is installed on a source by the dashboard.
+The separate Socket History collector stays off by default. Its explicitly opted-in kernel observer
+holds only owned unpinned cgroup links, drains bounded event batches through a durable SQLite receipt,
+and retains failed detach state for retry. Shutdown reports an unsuccessful final write or detach;
+restart records interruption and never automatically reloads the observer. See
+[the observer contract](../backend/network-flow-observer.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops

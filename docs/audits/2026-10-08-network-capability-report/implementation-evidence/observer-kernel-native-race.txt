@@ -1,0 +1,20 @@
+=== RUN   TestLiveFixedObserverVerifierAndOwnedLinks
+    observer_live_test.go:59: programDigest=055fae72bf5671b0f332b549bde5d55e8482d780a1699cc8a036160bfc553529 links=[{fd:12 id:150 program:158745 attach:2 cgroup:301921639} {fd:14 id:151 program:158746 attach:3 cgroup:301921639} {fd:16 id:152 program:158747 attach:0 cgroup:301921639} {fd:18 id:153 program:158748 attach:1 cgroup:301921639} {fd:20 id:154 program:158749 attach:34 cgroup:301921639}] stats=[0 0 0 0 0 0]
+--- PASS: TestLiveFixedObserverVerifierAndOwnedLinks (0.01s)
+=== RUN   TestLiveKernelShortTCPAndUDPByteObservations
+    observer_live_test.go:106: initial events=13
+    observer_live_test.go:157: short TCP observed=32/32 FIN=32/32; UDP tx=8224 rx=8224 datagrams=32/32; stats=[365 0 0 0 99 0]; digest=055fae72bf5671b0f332b549bde5d55e8482d780a1699cc8a036160bfc553529
+--- PASS: TestLiveKernelShortTCPAndUDPByteObservations (0.68s)
+=== RUN   TestLiveKernelRecorderPersistsDistinctShortTCPAndUDPPeers
+    observer_live_test.go:282: digest=055fae72bf5671b0f332b549bde5d55e8482d780a1699cc8a036160bfc553529 storedRows=132 shortSenderFIN=32/32 UDPsender/receiver=32/32 bytes=8224/8224 quality={Events:365 RingDrops:0 BudgetOmissions:0 HeaderGaps:0 IdentityGaps:99 StateAdmissionGaps:0 ParserGaps:0 ByteGaps:0 PendingOmissions:0 AttributionGaps:365 ReaderBudgetPauses:3 UnsavedEvents:0 TimestampGaps:0 ShutdownTailUnknown:false} exportBytes=180180
+--- PASS: TestLiveKernelRecorderPersistsDistinctShortTCPAndUDPPeers (3.02s)
+=== RUN   TestLiveKernelObserverPreservesForeignProgramThroughRefusedDetachAndRetry
+    observer_live_test.go:334: foreignLink=165 foreignProgram=158760 preserved through owned refusal and retry; digest=055fae72bf5671b0f332b549bde5d55e8482d780a1699cc8a036160bfc553529
+--- PASS: TestLiveKernelObserverPreservesForeignProgramThroughRefusedDetachAndRetry (0.02s)
+=== RUN   TestLiveKernelObserverReportsRingSaturationAndBudgetOmissions
+    observer_live_test.go:424: owned 4KiB ring saturation stats=[31 4969 15256 0 20000 0]; 10k-datagram baseline=100613491ns identity-gap=118544993ns saturated observer=169251213ns ratio=1.682; digest=055fae72bf5671b0f332b549bde5d55e8482d780a1699cc8a036160bfc553529
+--- PASS: TestLiveKernelObserverReportsRingSaturationAndBudgetOmissions (0.47s)
+=== RUN   TestLiveNestedBPFBuffersSurviveConcurrentGCAndStackGrowth
+    observer_live_test.go:456: pinned nested info/stat buffers survived 100 reads during 40 concurrent garbage collections
+--- PASS: TestLiveNestedBPFBuffersSurviveConcurrentGCAndStackGrowth (0.03s)
+PASS

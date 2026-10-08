@@ -18,6 +18,7 @@ func (s *Server) initFlowAccounting() {
 		native.Docker = s.modules.docker
 	}
 	s.modules.flowAccounting = netflows.New(netflows.NewStore(s.Store.DB), native)
+	s.modules.flowAccounting.SetObserver(netflows.NewKernelObserver(native.Docker))
 }
 
 // Peer and descriptor-owner history has the same privilege as live process
@@ -29,10 +30,35 @@ func (s *Server) mountNetworkFlowRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/export", s.handle(s.handleFlowExport))
 		r.Method(http.MethodPost, "/recording", s.handle(s.handleFlowRecording))
 		s.destructive(r, func(r chi.Router) {
+			r.Method(http.MethodPost, "/observer", s.handle(s.handleFlowObserver))
 			r.Method(http.MethodPut, "/policy", s.handle(s.handleFlowPolicy))
 			r.Method(http.MethodDelete, "/history", s.handle(s.handleFlowClear))
 		})
 	})
+}
+
+func (s *Server) handleFlowObserver(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "network.flow.observer", "", nil)
+	flowPrivate(w)
+	if err := s.flowReady(); err != nil {
+		return err
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Enabled == nil {
+		return httpx.BadRequest("enabled is required")
+	}
+	httpx.SetAudit(r, "network.flow.observer", "", map[string]any{"enabled": *req.Enabled})
+	evidence, err := s.modules.flowAccounting.KernelRecording(r.Context(), *req.Enabled)
+	if err != nil {
+		return mapFlowError(err)
+	}
+	httpx.JSON(w, http.StatusOK, evidence)
+	return nil
 }
 func mapFlowError(err error) error {
 	switch {

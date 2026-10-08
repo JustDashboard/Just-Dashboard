@@ -88,6 +88,11 @@ to the contribution terms above, including the additional licence grant to the p
   Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
   to compile the narrow test binary and run it as root. It creates a network-none fixture with no
   published ports, verifies private DNS/source/route/TCP and restart identity, then removes it.
+- Kernel flow observer changes also run the targeted `internal/netflows` race suite and the opted-in
+  disposable cgroup/network-namespace fixtures. Build a race binary and invoke it with
+  `JD_NETFLOWS_OBSERVER_LIVE=1` as root in the host cgroup namespace; see the exact command and evidence
+  limits in [the observer contract](docs/internal/backend/network-flow-observer.md). These fixtures
+  never attach a production cgroup, replace a foreign program or migrate an unrelated process.
 - Independent network recovery also has a real systemd timer fixture. On a host with a reachable
   systemd manager, add `JD_SYSTEMD_RECOVERY_LIVE=1` to the network namespace command above. It builds
   the standalone helper and uses uniquely named transient timers with `NetworkNamespacePath` for

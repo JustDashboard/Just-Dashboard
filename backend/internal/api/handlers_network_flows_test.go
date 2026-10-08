@@ -49,7 +49,7 @@ func TestFlowHistoryRequiresAdminAndRecordingPolicyAreAudited(t *testing.T) {
 		role auth.Role
 	}{{"flow-reader", auth.RoleReadOnly}, {"flow-limited", auth.RoleLimited}} {
 		reader := &client{t: t, h: c.h, cookie: signInAs(t, s, actor.name, actor.role)}
-		for _, req := range []struct{ method, path, body string }{{"GET", "/", ""}, {"GET", "/export", ""}, {"POST", "/recording", `{"enabled":true}`}, {"PUT", "/policy", `{"intervalSeconds":30,"retentionDays":1}`}, {"DELETE", "/history", ""}} {
+		for _, req := range []struct{ method, path, body string }{{"GET", "/", ""}, {"GET", "/export", ""}, {"POST", "/recording", `{"enabled":true}`}, {"POST", "/observer", `{"enabled":true}`}, {"PUT", "/policy", `{"intervalSeconds":30,"retentionDays":1}`}, {"DELETE", "/history", ""}} {
 			if w := reader.do(req.method, "/api/v1/network/flows"+req.path, req.body, nil); w.Code != 403 {
 				t.Fatalf("role %s %s=%d", actor.role, req.path, w.Code)
 			}
@@ -63,6 +63,9 @@ func TestFlowHistoryRequiresAdminAndRecordingPolicyAreAudited(t *testing.T) {
 	for _, body := range []string{`{}`, `{"enabled":null}`, `{"enabled":true,"command":"id"}`} {
 		if w := c.do("POST", "/api/v1/network/flows/recording", body, nil); w.Code != 400 {
 			t.Fatalf("invalid recording=%d", w.Code)
+		}
+		if w := c.do("POST", "/api/v1/network/flows/observer", body, nil); w.Code != 400 {
+			t.Fatalf("invalid observer=%d", w.Code)
 		}
 	}
 	if w := c.do("POST", "/api/v1/network/flows/recording", `{"enabled":false}`, nil); w.Code != 200 {
@@ -96,5 +99,57 @@ func TestFlowHistoryRequiresAdminAndRecordingPolicyAreAudited(t *testing.T) {
 	}
 	if w := c.do(http.MethodGet, "/api/v1/network/flows/export", "", map[string]string{"Authorization": "Bearer " + token}); w.Code != 403 {
 		t.Fatalf("narrow token=%d", w.Code)
+	}
+}
+
+type fixtureFlowObserver struct {
+	active bool
+	starts int
+}
+
+func (o *fixtureFlowObserver) Start(context.Context) error { o.active = true; o.starts++; return nil }
+func (o *fixtureFlowObserver) Drain(context.Context, time.Time) ([]netflows.Bucket, netflows.ObserverEvidence, error) {
+	return nil, o.Status(), nil
+}
+func (o *fixtureFlowObserver) Stop(context.Context) (netflows.ObserverEvidence, error) {
+	o.active = false
+	return o.Status(), nil
+}
+func (o *fixtureFlowObserver) Status() netflows.ObserverEvidence {
+	status := "off"
+	if o.active {
+		status = "recording"
+	}
+	return netflows.ObserverEvidence{Status: status, AttachmentsRetained: o.active}
+}
+func (o *fixtureFlowObserver) Acknowledge(string) error { return nil }
+func TestFlowObserverRequiresExplicitAdminOptInAndAuditsEachMutation(t *testing.T) {
+	c, s := newClient(t)
+	c.h = flowTestRoutes(s)
+	observer := &fixtureFlowObserver{}
+	s.modules.flowAccounting = netflows.New(netflows.NewStore(s.Store.DB), nil)
+	s.modules.flowAccounting.SetObserver(observer)
+	if err := s.modules.flowAccounting.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.modules.flowAccounting.Shutdown(context.Background()) })
+	if w := c.do("GET", "/api/v1/network/flows/", "", nil); w.Code != 200 || observer.starts != 0 {
+		t.Fatal("reading history attached programs")
+	}
+	if w := c.do("POST", "/api/v1/network/flows/observer", `{"enabled":true}`, nil); w.Code != 400 || observer.starts != 0 {
+		t.Fatalf("kernel attachment without history recording=%d", w.Code)
+	}
+	if w := c.do("POST", "/api/v1/network/flows/recording", `{"enabled":true}`, nil); w.Code != 200 || observer.starts != 0 {
+		t.Fatal("ordinary recording attached programs")
+	}
+	if w := c.do("POST", "/api/v1/network/flows/observer", `{"enabled":true}`, nil); w.Code != 200 || observer.starts != 1 || !observer.active {
+		t.Fatalf("explicit attach=%d %s", w.Code, w.Body.String())
+	}
+	if w := c.do("POST", "/api/v1/network/flows/observer", `{"enabled":false}`, nil); w.Code != 200 || observer.active {
+		t.Fatalf("explicit stop=%d", w.Code)
+	}
+	var audits int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='network.flow.observer' AND status=200`).Scan(&audits); err != nil || audits != 2 {
+		t.Fatalf("observer mutation audits=%d err=%v", audits, err)
 	}
 }

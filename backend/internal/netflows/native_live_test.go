@@ -15,12 +15,15 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
 
 type fixtureMessage struct {
 	PID, ClientPort, ServerPort, UDPPort, Payload int
 	ShortPorts                                    []int
+	ElapsedNanos                                  int64
 	Error                                         string
 }
 
@@ -30,16 +33,42 @@ func TestFlowFixtureProcess(t *testing.T) {
 	if os.Getenv("JD_NETFLOWS_HELPER") != "1" {
 		t.Skip("fixture subprocess")
 	}
+	if group := os.Getenv("JD_NETFLOWS_TEST_CGROUP"); group != "" {
+		if !strings.HasPrefix(group, "/sys/fs/cgroup/jd-flow-fixture-") || filepath.Clean(group) != group || strings.Contains(strings.TrimPrefix(group, "/sys/fs/cgroup/"), "/") {
+			t.Fatal("invalid observer fixture cgroup")
+		}
+		var err error
+		if os.Getenv("JD_NETFLOWS_TEST_CGROUP_FD") == "3" {
+			var stat unix.Statfs_t
+			if err = unix.Fstatfs(3, &stat); err != nil || stat.Type != unix.CGROUP2_SUPER_MAGIC {
+				t.Fatal("fixture cgroup descriptor is not pinned cgroup v2")
+			}
+			fd, e := unix.Openat(3, "cgroup.procs", unix.O_WRONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+			if e != nil {
+				target, _ := os.Readlink("/proc/self/fd/3")
+				err = fmt.Errorf("openat pinned cgroup target=%s: %w", target, e)
+			} else {
+				_, err = unix.Write(fd, []byte("0"))
+				unix.Close(fd)
+			}
+		} else {
+			err = os.WriteFile(filepath.Join(group, "cgroup.procs"), []byte("0"), 0600)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "observer fixture cgroup:", err)
+			t.Fatal(err)
+		}
+	}
 	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer udp.Close()
+	defer func() { udp.Close() }()
 	peer, err := net.DialUDP("udp4", nil, udp.LocalAddr().(*net.UDPAddr))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer peer.Close()
+	defer func() { peer.Close() }()
 	peer.Write([]byte("fixture"))
 	msg := fixtureMessage{PID: os.Getpid(), UDPPort: peer.LocalAddr().(*net.UDPAddr).Port}
 	var listener net.Listener
@@ -112,6 +141,62 @@ func TestFlowFixtureProcess(t *testing.T) {
 				s.Close()
 			}
 			encoder.Encode(fixtureMessage{ShortPorts: ports})
+		case "datagrams":
+			ports := []int{}
+			for i := 0; i < 32; i++ {
+				c, err := net.DialUDP("udp4", nil, udp.LocalAddr().(*net.UDPAddr))
+				if err != nil {
+					t.Fatal(err)
+				}
+				ports = append(ports, c.LocalAddr().(*net.UDPAddr).Port)
+				if _, err = c.Write(make([]byte, 257)); err != nil {
+					t.Fatal(err)
+				}
+				c.Close()
+				udp.SetReadDeadline(time.Now().Add(time.Second))
+				data := make([]byte, 512)
+				for {
+					n, _, err := udp.ReadFromUDP(data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if n == 257 {
+						break
+					}
+				}
+			}
+			encoder.Encode(fixtureMessage{ShortPorts: ports, Payload: 32 * 257})
+		case "renew":
+			peer.Close()
+			udp.Close()
+			udp, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			peer, err = net.DialUDP("udp4", nil, udp.LocalAddr().(*net.UDPAddr))
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoder.Encode(fixtureMessage{UDPPort: peer.LocalAddr().(*net.UDPAddr).Port})
+		case "burst":
+			started := time.Now()
+			for i := 0; i < 10000; i++ {
+				if _, err = peer.Write(make([]byte, 64)); err != nil {
+					t.Fatal(err)
+				}
+				udp.SetReadDeadline(time.Now().Add(time.Second))
+				data := make([]byte, 512)
+				for {
+					n, _, err := udp.ReadFromUDP(data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if n == 64 {
+						break
+					}
+				}
+			}
+			encoder.Encode(fixtureMessage{Payload: 10000 * 64, ElapsedNanos: time.Since(started).Nanoseconds()})
 		case "quit":
 			return
 		default:
@@ -172,6 +257,19 @@ func (p *fixtureProcess) read(t *testing.T) fixtureMessage {
 	case line, ok := <-p.lines:
 		var msg fixtureMessage
 		if !ok || json.Unmarshal(line, &msg) != nil || msg.Error != "" {
+			if strings.HasPrefix(string(line), "--- FAIL:") {
+				for {
+					select {
+					case next, open := <-p.lines:
+						if !open {
+							t.Fatalf("fixture failure=%s", line)
+						}
+						line = append(append(line, '\n'), next...)
+					case <-time.After(time.Second):
+						t.Fatalf("fixture failure=%s", line)
+					}
+				}
+			}
 			t.Fatalf("fixture response=%s", line)
 		}
 		return msg

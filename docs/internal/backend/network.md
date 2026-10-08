@@ -135,7 +135,10 @@ retention. Disabled retention does not accumulate pending samples; stopping the 
 Docker's veths are not recorded; each container's traffic is in `metric_container_samples`,
 which `/network/traffic/containers` differences per sample in SQL. Per-program traffic differences
 `ss -tinpH`'s per-socket byte counters between reads (TCP only). eBPF is an inventory from `bpftool`
-(programs, XDP and tc attachments), not a probe the dashboard loads.
+(programs, XDP and tc attachments). The separate administrator Socket History recorder can explicitly
+attach the fixed bounded cgroup observer for TCP/UDP and short socket header evidence; see
+[observer ownership, byte subtotals and quality](network-flow-observer.md). Reading traffic or history
+does not attach it, and restart requires a new explicit opt-in.
 
 ## Gateway and protection
 
