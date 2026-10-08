@@ -2,6 +2,7 @@ package netx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -27,9 +28,7 @@ func TestLiveIndependentRecoveryAfterProcessDeath(t *testing.T) {
 				t.Fatal(err)
 			}
 			invoke := func(mode string) *exec.Cmd {
-				cmd := ns.command(context.Background(), os.Args[0], "-test.run=^TestNetworkRecoveryProcessFixture$")
-				cmd.Env = append(os.Environ(), "JD_RECOVERY_FIXTURE_DIR="+filepath.Dir(s.paths.Dir), "JD_RECOVERY_FIXTURE_MODE="+mode, "JD_RECOVERY_FIXTURE_PHASE="+phase)
-				return cmd
+				return ns.command(context.Background(), "env", "JD_RECOVERY_FIXTURE_DIR="+filepath.Dir(s.paths.Dir), "JD_RECOVERY_FIXTURE_MODE="+mode, "JD_RECOVERY_FIXTURE_PHASE="+phase, os.Args[0], "-test.run=^TestNetworkRecoveryProcessFixture$")
 			}
 			out, err := invoke("live_apply").CombinedOutput()
 			var exit *exec.ExitError
@@ -45,13 +44,14 @@ func TestLiveIndependentRecoveryAfterProcessDeath(t *testing.T) {
 			if _, err := ns.run(context.Background(), nil, "ip", "link", "show", "dev", "crash0"); err == nil {
 				t.Fatal("actual candidate device survived recovery")
 			}
-			after, _ := os.ReadFile(s.specPath())
-			if string(after) != string(before) {
+			after := ns.must(t, "cat", s.specPath())
+			if after != string(before) {
 				t.Fatal("prior spec was not recovered")
 			}
-			j, err := readChange(s.paths.Dir)
-			if err != nil || j.Phase != "recovered" {
-				t.Fatalf("journal = %+v, %v", j, err)
+			var journal changeJournal
+			err = json.Unmarshal([]byte(ns.must(t, "cat", filepath.Join(s.paths.Dir, recoveryFile))), &journal)
+			if err != nil || journal.Phase != "recovered" {
+				t.Fatalf("journal = %+v, %v", journal, err)
 			}
 		})
 	}

@@ -289,16 +289,23 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 	}
 	restore := func(ctx context.Context) {
 		if err := undoShaping(ctx, sh, prev); err != nil {
+			recordRecoveryError(ctx, err)
 			s.log.Error("restoring a device's shaping after a failed change", "device", sh.Device, "err", err)
 		}
 		if prev == nil || !prev.hasRoot() {
 			if err := runShapeLines(ctx, baseline); err != nil {
+				recordRecoveryError(ctx, err)
 				s.log.Error("restoring the original queue", "device", sh.Device, "err", err)
 			}
 		}
 
 	}
+	var recovery []recoveryCommand
+	for _, line := range baseline {
+		recovery = append(recovery, recoveryCommand{Tool: "tc", Args: strings.Fields(line)})
+	}
 	return s.commit(ctx, next, step{
+		recovery: recovery,
 		apply: func(ctx context.Context) error {
 			// A half the new entry no longer sets is cleared; a half it sets is
 			// replaced by its own lines.
@@ -359,6 +366,7 @@ func (s *Service) ClearShaping(ctx context.Context, device string) error {
 		},
 		undo: func(ctx context.Context) {
 			if err := runShapeLines(ctx, shapeLines(*prev)); err != nil {
+				recordRecoveryError(ctx, err)
 				s.log.Error("restoring a device's shaping after a failed change", "device", device, "err", err)
 			}
 		},

@@ -804,6 +804,13 @@ func TestLiveShapingLeavesAClsactQueueAlone(t *testing.T) {
 	run, has = gwLiveRun(ns), func(string) bool { return false }
 	t.Cleanup(func() { run, has = prevRun, prevHas })
 	svc := testService(t)
+	owned, err := json.Marshal(sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(svc.specPath(), owned, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	if err := svc.SetShaping(ctx, "dm5", ShapeRequest{IngressKbit: 8000}, "192.0.2.1", "test"); err == nil || !strings.Contains(err.Error(), "clsact") {
 		t.Fatalf("err = %v", err)
