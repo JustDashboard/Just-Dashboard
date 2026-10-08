@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -98,7 +100,7 @@ const (
 	gwLinkVeth  = `[{"ifindex":6,"ifname":"veth6e4f828","flags":["UP"],"mtu":1500,"link_type":"ether","linkinfo":{"info_kind":"veth"}}]`
 	gwLinkLo    = `[{"ifindex":1,"ifname":"lo","flags":["LOOPBACK","UP"],"mtu":65536,"link_type":"loopback"}]`
 	gwLinkWG    = `[{"ifindex":7,"ifname":"wg0","flags":["UP"],"mtu":1420,"link_type":"none","linkinfo":{"info_kind":"wireguard"}}]`
-	gwTcHTB     = `[{"kind":"htb","handle":"1:","dev":"eth0","root":true,"bytes":10,"packets":1,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0},{"kind":"fq_codel","handle":"10:","dev":"eth0","parent":"1:10","bytes":10,"packets":1,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0},{"kind":"ingress","handle":"ffff:","dev":"eth0","parent":"ffff:fff1","bytes":0,"packets":0,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0}]`
+	gwTcHTB     = `[{"kind":"htb","handle":"1:","dev":"eth0","root":true,"options":{"default":"0x10"},"bytes":10,"packets":1,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0},{"kind":"fq_codel","handle":"10:","dev":"eth0","parent":"1:10","bytes":10,"packets":1,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0},{"kind":"ingress","handle":"ffff:","dev":"eth0","parent":"ffff:fff1","bytes":0,"packets":0,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0}]`
 	gwTcFQCodel = `[{"kind":"fq_codel","handle":"0:","dev":"eth0","root":true,"bytes":10,"packets":1,"drops":0,"overlimits":0,"requeues":0,"backlog":0,"qlen":0}]`
 )
 
@@ -114,10 +116,111 @@ func newShapeHost(t *testing.T) *gwHost {
 	h.rec.on("ip -j -d link show dev wg0", gwLinkWG)
 	h.rec.on("ip -j -d link show", fixture(t, "ip-link.json"))
 	h.rec.on("tc -j -s qdisc show", fixture(t, "shaping-qdisc.json"))
-	h.rec.on("tc -j qdisc show dev eth0", gwTcHTB)
-	h.rec.on("tc -j qdisc show dev wg0", `[{"kind":"ingress","handle":"ffff:","dev":"wg0","parent":"ffff:fff1"}]`)
-	h.rec.on("tc -j qdisc show dev tailscale0", `[{"kind":"fq","handle":"0:","dev":"tailscale0","root":true}]`)
+
+	h.rec.on("tc -j qdisc show dev", "$shape")
+	h.rec.on("tc -j class show dev", "$shape")
+	h.rec.on("tc -j filter show dev", "$shape")
+	h.rec.on("tc -r -d filter show dev", "$shape")
 	h.rec.on("tc ", "")
+	states := map[string]ShapeSpec{}
+	hooks := map[string]bool{}
+	prevRun := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := prevRun(ctx, name, args...)
+		if name != "tc" || err != nil {
+			return out, err
+		}
+		line := strings.Join(args, " ")
+		device := ""
+		for i, a := range args {
+			if a == "dev" && i+1 < len(args) {
+				device = args[i+1]
+				break
+			}
+		}
+		sh := states[device]
+		sh.Device = device
+		if out == "$shape" {
+			switch {
+			case strings.Contains(line, "qdisc show"):
+				qs := []map[string]any{{"kind": "noqueue", "handle": "0:", "root": true}}
+				if sh.hasRoot() {
+					kind := sh.Qdisc
+					options := map[string]any{}
+					if sh.EgressKbit > 0 && sh.Qdisc != "cake" {
+						kind = "htb"
+						options["default"] = "0x10"
+					}
+					if kind == "cake" {
+						options["bandwidth"] = shapeBytes(sh.EgressKbit)
+					}
+					qs[0] = map[string]any{"kind": kind, "handle": "1:", "root": true, "options": options}
+					if kind == "htb" {
+						leaf := sh.Qdisc
+						if leaf == "" {
+							leaf = "fq_codel"
+						}
+						qs = append(qs, map[string]any{"kind": leaf, "handle": "10:", "parent": "1:10"})
+					}
+				}
+				if hooks[device] {
+					qs = append(qs, map[string]any{"kind": "ingress", "handle": "ffff:", "parent": "ffff:fff1"})
+				}
+				b, _ := json.Marshal(qs)
+				return string(b), nil
+			case strings.Contains(line, "class show"):
+				if sh.EgressKbit == 0 {
+					return "[]", nil
+				}
+				return fmt.Sprintf(`[{"class":"htb","handle":"1:10","root":true,"rate":%d,"ceil":%d}]`, shapeBytes(sh.EgressKbit), shapeBytes(sh.EgressKbit)), nil
+			case strings.Contains(line, "root"):
+				return "[]", nil
+			case strings.HasPrefix(line, "-j filter show"):
+				if sh.IngressKbit == 0 {
+					return "[]", nil
+				}
+				return `[{"protocol":"all","pref":1,"kind":"matchall","chain":0,"options":{"actions":[{"kind":"police","control_action":{"type":"drop"}}]}}]`, nil
+			default:
+				return fmt.Sprintf("police 0x1 rate %dKbit burst %db mtu 2Kb action drop", sh.IngressKbit, policeBurst(sh.IngressKbit)), nil
+			}
+		}
+		switch {
+		case strings.HasPrefix(line, "qdisc del") && strings.HasSuffix(line, " root"):
+			sh.Qdisc = ""
+			sh.EgressKbit = 0
+		case strings.HasPrefix(line, "qdisc replace") && strings.Contains(line, "root cake"):
+			sh.Qdisc = "cake"
+			for _, a := range args {
+				if strings.HasSuffix(a, "kbit") {
+					sh.EgressKbit, _ = strconv.Atoi(strings.TrimSuffix(a, "kbit"))
+				}
+			}
+		case strings.HasPrefix(line, "qdisc replace") && strings.Contains(line, "parent 1:10"):
+			sh.Qdisc = args[len(args)-1]
+		case strings.HasPrefix(line, "qdisc replace") && strings.Contains(line, " root") && !strings.Contains(line, "htb"):
+			sh.Qdisc = args[len(args)-1]
+		case strings.HasPrefix(line, "class replace"):
+			for _, a := range args {
+				if strings.HasSuffix(a, "kbit") {
+					sh.EgressKbit, _ = strconv.Atoi(strings.TrimSuffix(a, "kbit"))
+				}
+			}
+		case strings.HasPrefix(line, "qdisc replace") && strings.HasSuffix(line, " ingress"):
+			hooks[device] = true
+		case strings.HasPrefix(line, "qdisc del") && strings.HasSuffix(line, " ingress"):
+			hooks[device] = false
+			sh.IngressKbit = 0
+		case strings.HasPrefix(line, "filter replace"):
+			for _, a := range args {
+				if strings.HasSuffix(a, "kbit") {
+					sh.IngressKbit, _ = strconv.Atoi(strings.TrimSuffix(a, "kbit"))
+				}
+			}
+		}
+		states[device] = sh
+		return out, err
+	}
+	t.Cleanup(func() { run = prevRun })
 	return h
 }
 
@@ -147,6 +250,9 @@ func TestSetShapingClearsThenSetsThenVerifiesThenSaves(t *testing.T) {
 		"tc filter del dev eth0 parent ffff: prio 1",
 		"tc filter replace dev eth0 parent ffff: protocol all prio 1 matchall action police rate 100000kbit burst 1250000 drop",
 		"tc -j qdisc show dev eth0",
+		"tc -j class show dev eth0",
+		"tc -j filter show dev eth0 parent ffff:",
+		"tc -r -d filter show dev eth0 parent ffff: pref 1",
 	}
 	if got := h.tcCommands(); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("tc commands:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -209,13 +315,25 @@ func TestSetShapingFirstTimeFailureLeavesTheDeviceUnshaped(t *testing.T) {
 
 func TestSetShapingVerifyMismatchTakesTheChangeBack(t *testing.T) {
 	h := newShapeHost(t)
-	h.first("tc -j qdisc show dev eth0", gwTcFQCodel, nil) // the kernel kept its own queue
+	original := run
+	reads := 0
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := original(ctx, name, args...)
+		if name == "tc" && strings.Join(args, " ") == "-j qdisc show dev eth0" {
+			reads++
+			if reads == 2 {
+				return gwTcFQCodel, nil
+			}
+		}
+		return out, err
+	}
+	t.Cleanup(func() { run = original })
 	err := h.SetShaping(context.Background(), "eth0", ShapeRequest{EgressKbit: 50000}, gwClient, "ops")
 	if err == nil || !strings.Contains(err.Error(), `"fq_codel" as its queue after setting "htb"`) {
-		t.Fatalf("err = %v", err)
+		t.Fatalf("err=%v", err)
 	}
 	if h.saved() {
-		t.Error("saved")
+		t.Fatal("saved")
 	}
 }
 
@@ -273,11 +391,8 @@ func TestClearShaping(t *testing.T) {
 	if err := h.ClearShaping(ctx, "eth0"); err != nil {
 		t.Fatal(err)
 	}
-	cmds := h.tcCommands()
-	n := len(cmds)
-	if cmds[n-3] != "tc qdisc del dev eth0 root" || cmds[n-2] != "tc -j qdisc show dev eth0" || cmds[n-1] != "tc qdisc del dev eth0 ingress" {
-		t.Fatalf("tail of tc commands = %v", cmds[n-3:])
-	}
+	h.order(t, "tc qdisc del dev eth0 root", "tc qdisc del dev eth0 ingress")
+
 	if len(h.spec(t).Shaping) != 0 {
 		t.Fatal("still in the spec")
 	}
@@ -412,7 +527,10 @@ func TestAnIngressLimitIsRefusedOverAClsactQueue(t *testing.T) {
 		t.Error("saved")
 	}
 	// An upload limit on the same device is no business of the clsact queue.
-	h.first("tc -j qdisc show dev eth0", `[{"kind":"htb","handle":"1:","dev":"eth0","root":true},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`, nil)
+	sp := emptySpec()
+	sp.Shaping = []ShapeSpec{{Device: "eth0", EgressKbit: 9000}}
+	h.seed(t, sp)
+	h.first("tc -j qdisc show dev eth0", `[{"kind":"htb","handle":"1:","dev":"eth0","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`, nil)
 	if err := h.SetShaping(context.Background(), "eth0", ShapeRequest{EgressKbit: 9000}, gwClient, "ops"); err != nil {
 		t.Fatalf("an upload limit beside a clsact queue was refused: %v", err)
 	}
@@ -428,7 +546,6 @@ func TestDroppingTheDownloadLimitDeletesOnlyAPlainIngressQueue(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newShapeHost(t)
 			ctx := context.Background()
-			h.first("tc -j qdisc show dev eth0", gwTcHTB, nil)
 			if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000, IngressKbit: 9000}, gwClient, "ops"); err != nil {
 				t.Fatal(err)
 			}
@@ -439,7 +556,7 @@ func TestDroppingTheDownloadLimitDeletesOnlyAPlainIngressQueue(t *testing.T) {
 			h.rec.mu.Unlock()
 			// Verify wants a htb root; add one to the clsact listing.
 			if name == "clsact" {
-				h.first("tc -j qdisc show dev eth0", `[{"kind":"htb","handle":"1:","dev":"eth0","root":true},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`, nil)
+				h.first("tc -j qdisc show dev eth0", `[{"kind":"htb","handle":"1:","dev":"eth0","root":true,"options":{"default":"0x10"}},{"kind":"fq_codel","handle":"10:","parent":"1:10"},{"kind":"clsact","handle":"ffff:","dev":"eth0","parent":"ffff:fff1"}]`, nil)
 			}
 			if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000}, gwClient, "ops"); err != nil {
 				t.Fatal(err)
@@ -473,7 +590,7 @@ func TestClearShapingLeavesAClsactQueueAlone(t *testing.T) {
 	if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000, IngressKbit: 9000}, gwClient, "ops"); err != nil {
 		t.Fatal(err)
 	}
-	h.first("tc -j qdisc show dev eth0", gwTcClsact, nil)
+	h.first("tc -j qdisc show dev eth0", strings.Replace(gwTcHTB, `"kind":"ingress"`, `"kind":"clsact"`, 1), nil)
 	h.rec.mu.Lock()
 	n := len(h.rec.calls)
 	h.rec.mu.Unlock()
@@ -484,5 +601,106 @@ func TestClearShapingLeavesAClsactQueueAlone(t *testing.T) {
 		if strings.Contains(c, "del dev eth0 ingress") {
 			t.Fatalf("deleted a clsact queue: %s", c)
 		}
+	}
+}
+
+func TestVerifyShapingRejectsWrongRatesClassesAndPolicers(t *testing.T) {
+	for _, tc := range []struct {
+		name, command, output string
+		spec                  ShapeSpec
+	}{
+		{"htb rate", "tc -j class show", `[{"class":"htb","handle":"1:10","root":true,"rate":1,"ceil":6250000}]`, ShapeSpec{Device: "eth0", EgressKbit: 50000}},
+		{"htb ceil", "tc -j class show", `[{"class":"htb","handle":"1:10","root":true,"rate":6250000,"ceil":9000000}]`, ShapeSpec{Device: "eth0", EgressKbit: 50000}},
+		{"htb class", "tc -j class show", `[{"class":"htb","handle":"1:20","root":true,"rate":6250000,"ceil":6250000}]`, ShapeSpec{Device: "eth0", EgressKbit: 50000}},
+		{"leaf", "tc -j qdisc show", `[{"kind":"htb","handle":"1:","root":true,"options":{"default":"0x10"}},{"kind":"fq","parent":"1:10","handle":"10:"}]`, ShapeSpec{Device: "eth0", EgressKbit: 50000}},
+		{"cake bandwidth", "tc -j qdisc show", `[{"kind":"cake","root":true,"options":{"bandwidth":1}}]`, ShapeSpec{Device: "eth0", Qdisc: "cake", EgressKbit: 50000}},
+		{"filter pref", "tc -j filter show", `[{"protocol":"all","pref":2,"kind":"matchall","options":{"actions":[{"kind":"police","control_action":{"type":"drop"}}]}}]`, ShapeSpec{Device: "eth0", IngressKbit: 8000}},
+		{"policer rate", "tc -r -d filter show", "police 0x1 rate 7Mbit burst 100000b mtu 2Kb action drop", ShapeSpec{Device: "eth0", IngressKbit: 8000}},
+		{"policer burst", "tc -r -d filter show", "police 0x1 rate 8Mbit burst 50000b mtu 2Kb action drop", ShapeSpec{Device: "eth0", IngressKbit: 8000}},
+		{"policer action", "tc -r -d filter show", "police 0x1 rate 8Mbit burst 100000b mtu 2Kb action pass", ShapeSpec{Device: "eth0", IngressKbit: 8000}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newShapeHost(t)
+			if err := h.SetShaping(context.Background(), tc.spec.Device, ShapeRequest{Qdisc: tc.spec.Qdisc, EgressKbit: tc.spec.EgressKbit, IngressKbit: tc.spec.IngressKbit}, gwClient, "ops"); err != nil {
+				t.Fatal(err)
+			}
+			h.first(tc.command, tc.output, nil)
+			if err := verifyShaping(context.Background(), tc.spec); err == nil {
+				t.Fatal("wrong runtime parameters accepted")
+			}
+		})
+	}
+}
+
+func TestFirstShapingApplyRefusesUnrecoverableForeignQueues(t *testing.T) {
+	for _, listing := range []string{
+		`[{"kind":"htb","handle":"5:","root":true}]`,
+		`[{"kind":"cake","handle":"5:","root":true}]`,
+		`[{"kind":"fq","handle":"0:","root":true}]`,
+		`[{"kind":"fq_codel","handle":"0:","root":true}]`,
+		`[{"kind":"fq_codel","handle":"0:","root":true},{"kind":"fq","parent":"1:10"}]`,
+	} {
+		t.Run(listing, func(t *testing.T) {
+			h := newShapeHost(t)
+			h.first("tc -j qdisc show", listing, nil)
+			if err := h.SetShaping(context.Background(), "eth0", ShapeRequest{EgressKbit: 50000}, gwClient, "ops"); err == nil {
+				t.Fatal("foreign queue overwritten")
+			}
+			for _, command := range h.tcCommands() {
+				if !strings.HasPrefix(command, "tc -j ") {
+					t.Fatalf("refused change ran %s", command)
+				}
+			}
+			if h.saved() {
+				t.Fatal("refused change saved")
+			}
+		})
+	}
+}
+
+const savedFQCoDel = `[{"kind":"fq_codel","handle":"5:","root":true,"options":{"limit":1000,"flows":1024,"quantum":1514,"target":4999,"interval":99999,"memory_limit":33554432,"ecn":false,"drop_batch":64}}]`
+
+func TestFirstShapingFailureRestoresSupportedForeignQueueParameters(t *testing.T) {
+	h := newShapeHost(t)
+	h.first("tc -j qdisc show", savedFQCoDel, nil)
+	h.first("tc qdisc replace dev eth0 root cake", "unsupported cake", errors.New("unsupported cake"))
+	if err := h.SetShaping(context.Background(), "eth0", ShapeRequest{Qdisc: "cake", EgressKbit: 50000}, gwClient, "ops"); err == nil {
+		t.Fatal("expected failure")
+	}
+	want := "tc qdisc replace dev eth0 root handle 5: fq_codel limit 1000 flows 1024 quantum 1514 target 4999us interval 99999us memory_limit 33554432 drop_batch 64 noecn"
+	if !h.rec.ran(want) {
+		t.Fatalf("original queue parameters not restored: %v", h.tcCommands())
+	}
+	if h.saved() {
+		t.Fatal("failed change saved")
+	}
+}
+
+func TestShapingRefusesForeignFiltersAddedToManagedQueues(t *testing.T) {
+	for _, half := range []string{"root", "ingress"} {
+		t.Run(half, func(t *testing.T) {
+			h := newShapeHost(t)
+			ctx := context.Background()
+			if err := h.SetShaping(ctx, "eth0", ShapeRequest{EgressKbit: 50000, IngressKbit: 8000}, gwClient, "ops"); err != nil {
+				t.Fatal(err)
+			}
+			command := "tc -j filter show dev eth0 root"
+			if half == "ingress" {
+				command = "tc -j filter show dev eth0 parent ffff:"
+			}
+			h.first(command, `[{"kind":"bpf","pref":9,"protocol":"all"}]`, nil)
+			before := len(h.tcCommands())
+			if err := h.ClearShaping(ctx, "eth0"); err == nil {
+				t.Fatal("foreign filters removed during clear")
+			}
+			for _, command := range h.tcCommands()[before:] {
+				if !strings.HasPrefix(command, "tc -j ") {
+					t.Fatalf("foreign filters mutated: %s", command)
+				}
+			}
+			if len(h.spec(t).Shaping) != 1 {
+				t.Fatal("refused clear changed spec")
+			}
+		})
 	}
 }

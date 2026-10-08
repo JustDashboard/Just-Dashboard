@@ -247,7 +247,7 @@ export const hostRecords = {
   ],
 }
 
-export const lookup = {
+const comparison = {
   name: "example.com",
   type: "A",
   results: [
@@ -275,6 +275,17 @@ export const lookup = {
       error: "no answer within 2 s",
     },
   ],
+}
+
+export const lookup = {
+  name: "example.com",
+  type: "A",
+  mode: "effective",
+  route: "native resolved default-route policy; resolved selects the upstream",
+  note: "DNS wire response from the native resolved stub; upstream transport is delegated to resolved.",
+  comparisonTargets: comparison.results.map(({ server, label }) => ({ server, label })),
+  omittedTargets: [],
+  results: comparison.results.slice(0, 1),
 }
 
 /** What a good change answers: the name that resolved through the stub afterwards. */
@@ -653,7 +664,26 @@ export async function mockNetworkWrites(
     if (refuse?.path.test(path)) {
       return json(route, { error: { code: refuse.code, message: refuse.message } }, refuse.status)
     }
-    if (path === "/network/dns/lookup") return json(route, options.lookup ?? lookup)
+    if (path === "/network/dns/lookup") {
+      const request = body as { name: string; type: string; mode: string; destinations?: string[] }
+      return json(
+        route,
+        options.lookup ?? {
+          ...lookup,
+          name: request.name,
+          type: request.type,
+          mode: request.mode,
+          ...(request.mode === "compare"
+            ? {
+                note: "Direct classic DNS bypasses split-DNS routing. Private names are disclosed to each selected destination.",
+                results: comparison.results.filter((row) =>
+                  request.destinations?.includes(row.server),
+                ),
+              }
+            : {}),
+        },
+      )
+    }
     if (path.startsWith("/network/dns/hosts")) return json(route, hostRecords)
     if (path.startsWith("/network/dns")) return json(route, applied)
     if (path === "/network/shaping/bbr") {

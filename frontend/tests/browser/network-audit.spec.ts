@@ -132,19 +132,17 @@ test("namespaces and historical traffic show failed reads instead of empty resul
   await expect(page.getByText("Could not read traffic history", { exact: true })).toBeVisible()
 })
 
-test("DNS lookup keeps private names on configured resolvers until public comparison is selected", async ({
-  page,
-}) => {
+test("DNS lookup uses effective policy until named comparison is selected", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations, { overrides })
   await mockNetworkWrites(page, mutations)
   await page.goto("/network/dns")
-  await expect(page.getByRole("switch", { name: "Include public resolvers" })).not.toBeChecked()
+  await expect(page.getByRole("switch", { name: "Compare named resolvers" })).not.toBeChecked()
   await page.getByLabel("Name", { exact: true }).fill("nas.home.arpa")
   await page.getByRole("button", { name: "Resolve", exact: true }).click()
   await expect
     .poll(() => mutations.find((entry) => entry.path === "/network/dns/lookup")?.body)
-    .toEqual({ name: "nas.home.arpa", type: "A", includePublic: false })
+    .toEqual({ name: "nas.home.arpa", type: "A", mode: "effective" })
 })
 
 test("turning off a WireGuard exit requires confirmation before sending its mutation", async ({

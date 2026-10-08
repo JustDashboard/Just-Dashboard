@@ -11,11 +11,8 @@ import (
 	"time"
 )
 
-// A name is asked of the configured resolvers at once, and each
-// one's answer and time are reported side by side. The question this answers
-// is "why is this name slow, or wrong, here" — and the fast way to find out is
-// to see the stub, the upstream it forwards to and a public resolver answer
-// the same question in the same second.
+// Effective lookups use the native resolver policy. Direct comparisons bypass
+// that policy and require explicit destinations and disclosure acknowledgement.
 
 // lookupTimeout is how long each resolver has. Long enough for a resolver on
 // another continent, short enough that one dead server does not hold the page.
@@ -44,11 +41,16 @@ type LookupAnswer struct {
 	Error     string   `json:"error,omitempty"`
 }
 
-// LookupResult is a name asked of every resolver.
+// LookupResult records the native-policy test or an explicitly selected comparison.
 type LookupResult struct {
-	Name    string         `json:"name"`
-	Type    string         `json:"type"`
-	Answers []LookupAnswer `json:"results"`
+	Name    string              `json:"name"`
+	Type    string              `json:"type"`
+	Answers []LookupAnswer      `json:"results"`
+	Mode    string              `json:"mode"`
+	Route   string              `json:"route"`
+	Note    string              `json:"note"`
+	Targets []LookupDestination `json:"comparisonTargets"`
+	Omitted []LookupDestination `json:"omittedTargets"`
 }
 
 // lookupTypes are the supported DNS record types.
@@ -57,97 +59,223 @@ var lookupTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "MX": 
 // lookupTarget is a resolver to ask.
 type lookupTarget struct{ server, label string }
 
-// Lookup asks configured resolvers for name. Public preset resolvers are added
-// only when explicitly requested, since home and split-DNS names are private.
-// The resolvers are the ones this
-// host is configured with — never an address the caller supplies — which is
-// what makes it safe behind the read capability: it cannot be used to make the
-// server send queries to a chosen machine, only to ask its own resolvers and
-// the public ones the presets name.
+// LookupDestination identifies a configured or preset destination; callers can
+// select only these addresses, so comparison cannot become an arbitrary probe.
+type LookupDestination struct {
+	Server string `json:"server"`
+	Label  string `json:"label"`
+	Reason string `json:"reason,omitempty"`
+}
+
+type LookupOptions struct {
+	Mode                  string   `json:"mode"`
+	Destinations          []string `json:"destinations"`
+	AcknowledgeDisclosure bool     `json:"acknowledgeDisclosure"`
+}
+
+// Lookup retains the original entry point but an includePublic flag alone no
+// longer authorizes direct disclosure to every configured/preset resolver.
 func (s *Service) Lookup(ctx context.Context, name, rtype string, includePublic ...bool) (*LookupResult, error) {
+	if len(includePublic) > 0 && includePublic[0] {
+		return nil, errors.New("direct comparison requires named destinations and disclosure acknowledgement")
+	}
+	return s.LookupWithOptions(ctx, name, rtype, LookupOptions{})
+}
+
+func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opts LookupOptions) (*LookupResult, error) {
 	rtype = strings.ToUpper(strings.TrimSpace(rtype))
 	if rtype == "" {
 		rtype = "A"
 	}
 	if !lookupTypes[rtype] {
-		return nil, fmt.Errorf("the record type is one of A, AAAA, CNAME, MX, TXT, NS, PTR or SRV")
+		return nil, errors.New("the record type is one of A, AAAA, CNAME, MX, TXT, NS, PTR or SRV")
 	}
 	name, err := cleanLookupName(name, rtype)
 	if err != nil {
 		return nil, err
 	}
-	targets := s.lookupTargets(ctx, len(includePublic) > 0 && includePublic[0])
-
-	res := &LookupResult{Name: name, Type: rtype, Answers: make([]LookupAnswer, len(targets))}
-	var wg sync.WaitGroup
-	for i, t := range targets {
-		wg.Add(1)
-		// Each goroutine ends when its lookup does, and the lookup ends at
-		// lookupTimeout at the latest.
-		go func() {
-			defer wg.Done()
-			start := time.Now()
-			answers, err := lookupVia(ctx, t.server, name, rtype)
-			a := LookupAnswer{Server: t.server, Label: t.label, Answers: answers, LatencyMS: millis(time.Since(start))}
-			if a.Answers == nil {
-				a.Answers = []string{}
-			}
-			if err != nil {
-				a.Error = lookupError(err)
-			}
-			res.Answers[i] = a
-		}()
+	if opts.Mode == "" {
+		opts.Mode = "effective"
 	}
-	wg.Wait()
+	if opts.Mode != "effective" && opts.Mode != "compare" {
+		return nil, errors.New("lookup mode is effective or compare")
+	}
+	if opts.Mode == "effective" && (len(opts.Destinations) > 0 || opts.AcknowledgeDisclosure) {
+		return nil, errors.New("named destinations and disclosure acknowledgement require comparison mode")
+	}
+	rv := s.readResolved(ctx, false)
+	all, omitted := s.lookupDestinationInventory(rv)
+	res := &LookupResult{Name: name, Type: rtype, Mode: opts.Mode, Answers: []LookupAnswer{}, Targets: all, Omitted: omitted}
+	var targets []lookupTarget
+	if opts.Mode == "compare" {
+		if !opts.AcknowledgeDisclosure || len(opts.Destinations) == 0 {
+			return nil, errors.New("comparison sends this name, including private names, directly to the selected destinations; select destinations and acknowledge disclosure")
+		}
+		if len(opts.Destinations) > maxLookupResolvers {
+			return nil, fmt.Errorf("select at most %d comparison destinations", maxLookupResolvers)
+		}
+		by := map[string]LookupDestination{}
+		for _, d := range all {
+			by[d.Server] = d
+		}
+		seen := map[string]bool{}
+		for _, server := range opts.Destinations {
+			d, ok := by[server]
+			if !ok {
+				return nil, fmt.Errorf("%s is not an available configured or preset resolver", server)
+			}
+			if !seen[server] {
+				targets = append(targets, lookupTarget{d.Server, d.Label})
+				seen[server] = true
+			}
+		}
+		res.Route = "explicit comparison"
+		res.Note = "Direct classic DNS to the selected destinations bypasses split-DNS routing, host records, resolver encryption and DNSSEC validation. Private names are disclosed to each selected destination."
+	} else if rv.Active {
+		// Ask the stub only. resolved owns longest-suffix routing, fallback,
+		// cache, hosts, DNSSEC and transport; reconstructing a fan-out cannot
+		// reproduce that policy and may leak private names. A disabled/unreachable
+		// stub produces a failure, never a bypass to a public upstream.
+		targets = []lookupTarget{{resolvedStub, "systemd-resolved effective policy"}}
+		res.Route = resolvedLookupRoute(rv, name, rtype)
+		res.Note = "DNS wire response from the native resolved stub; routing and upstream transport are delegated to resolved. This is not a complete NSS lookup or independent proof of encryption/DNSSEC."
+	} else {
+		rc := readResolvConf(resolvConfPath)
+		for _, entry := range rc.Nameservers {
+			sv, err := parseDNSServer(entry)
+			if err == nil {
+				targets = append(targets, lookupTarget{sv.lookupServer(), "resolv.conf effective policy"})
+			}
+			if len(targets) == maxLookupResolvers {
+				break
+			}
+		}
+		res.Route = "resolv.conf order"
+		res.Note = "Absolute DNS wire query through resolv.conf servers in order, stopping at the first response. Hosts/NSS and search-domain expansion are not tested."
+	}
+	if len(targets) == 0 {
+		return nil, errors.New("no usable resolver destination is configured")
+	}
+	ask := func(t lookupTarget) LookupAnswer {
+		start := time.Now()
+		answers, err := lookupVia(ctx, t.server, name, rtype)
+		a := LookupAnswer{Server: t.server, Label: t.label, Answers: answers, LatencyMS: millis(time.Since(start))}
+		if a.Answers == nil {
+			a.Answers = []string{}
+		}
+		if err != nil {
+			a.Error = lookupError(err)
+		}
+		return a
+	}
+	if opts.Mode == "effective" {
+		for _, t := range targets {
+			a := ask(t)
+			res.Answers = append(res.Answers, a)
+			if a.Error == "" || a.Error == "no such record" || ctx.Err() != nil {
+				break
+			}
+		}
+	} else {
+		res.Answers = make([]LookupAnswer, len(targets))
+		var wg sync.WaitGroup
+		for i, t := range targets {
+			wg.Add(1)
+			go func() { defer wg.Done(); res.Answers[i] = ask(t) }()
+		}
+		wg.Wait()
+	}
 	return res, nil
 }
 
-// lookupTargets are the resolvers in view: the stub, every server resolved
-// uses (global, then each link's), and each preset's first IPv4 address. A
-// server in two places is asked once, under the first label.
-func (s *Service) lookupTargets(ctx context.Context, includePublic ...bool) []lookupTarget {
-	var out []lookupTarget
+// Inventory is not permission to query it. Invalid/scoped entries are shown as
+// omissions, and the fan-out cap applies to selected destinations, not discovery.
+func (s *Service) lookupDestinationInventory(rv ResolvedView) ([]LookupDestination, []LookupDestination) {
+	out, omitted := []LookupDestination{}, []LookupDestination{}
 	seen := map[string]bool{}
-	add := func(server, label string) {
-		if len(out) >= maxLookupResolvers || seen[server] {
-			return
-		}
-		seen[server] = true
-		out = append(out, lookupTarget{server, label})
-	}
 	addEntries := func(entries []string, label, iface string) {
 		for _, e := range entries {
-			if sv, err := parseDNSServer(e); err == nil {
-				if sv.addr.IsLinkLocalUnicast() && sv.iface == "" {
-					sv.iface = iface
-				}
-				add(sv.lookupServer(), label)
+			sv, err := parseDNSServer(e)
+			if err != nil {
+				omitted = append(omitted, LookupDestination{Server: e, Label: label, Reason: "unsupported or invalid resolver address"})
+				continue
+			}
+			if sv.addr.IsLinkLocalUnicast() && sv.iface == "" {
+				sv.iface = iface
+			}
+			if sv.addr.IsLinkLocalUnicast() && sv.iface == "" {
+				omitted = append(omitted, LookupDestination{Server: e, Label: label, Reason: "link-local resolver has no interface scope"})
+				continue
+			}
+			server := sv.lookupServer()
+			if !seen[server] {
+				seen[server] = true
+				out = append(out, LookupDestination{Server: server, Label: label})
 			}
 		}
 	}
-
-	rv := s.readResolved(ctx, false)
 	if rv.Active {
-		add(resolvedStub, "systemd-resolved stub")
+		addEntries([]string{resolvedStub}, "systemd-resolved stub", "")
 		addEntries(rv.Global.Servers, "global upstream", "")
 		addEntries(rv.Global.Fallback, "global fallback", "")
 		for _, l := range rv.Links {
 			addEntries(l.Servers, l.Name, l.Name)
 		}
+		if rv.Error != "" {
+			omitted = append(omitted, LookupDestination{Label: "resolved scopes", Reason: rv.Error})
+		}
 	} else {
 		addEntries(readResolvConf(resolvConfPath).Nameservers, "resolv.conf", "")
 	}
-	if len(includePublic) > 0 && includePublic[0] {
-		for _, p := range DNSPresets() {
-			for _, sv := range p.Servers {
-				if a, err := netip.ParseAddr(sv); err == nil && a.Is4() {
-					add(sv, p.Name)
-					break
-				}
+	for _, p := range DNSPresets() {
+		for _, sv := range p.Servers {
+			if a, err := netip.ParseAddr(sv); err == nil && a.Is4() {
+				addEntries([]string{sv}, p.Name, "")
+				break
 			}
 		}
 	}
-	return out
+	return out, omitted
+}
+
+func resolvedLookupRoute(rv ResolvedView, name, rtype string) string {
+	if rv.Error != "" {
+		return "native resolved routing; scope evidence unavailable: " + rv.Error
+	}
+	if rtype == "PTR" {
+		a, _ := netip.ParseAddr(name)
+		name = reverseDNSName(a)
+	}
+	name = strings.ToLower(strings.TrimSuffix(name, "."))
+	best := -1
+	labels := []string{}
+	consider := func(domains []string, label string) {
+		for _, domain := range domains {
+			domain = strings.ToLower(strings.TrimSuffix(strings.TrimPrefix(domain, "~"), "."))
+			if domain != "" && name != domain && !strings.HasSuffix(name, "."+domain) {
+				continue
+			}
+			score := 0
+			if domain != "" {
+				score = len(strings.Split(domain, "."))
+			}
+			if score > best {
+				best = score
+				labels = []string{}
+			}
+			if score == best {
+				labels = append(labels, label+" ("+domain+")")
+			}
+		}
+	}
+	consider(rv.Global.Domains, "global")
+	for _, l := range rv.Links {
+		consider(l.Domains, l.Name)
+	}
+	if best >= 0 {
+		return "longest matching domain: " + strings.Join(labels, ", ") + "; resolved selects the upstream"
+	}
+	return "native resolved default-route policy; resolved selects the upstream"
 }
 
 // cleanLookupName validates what will be asked. Everything but PTR takes a

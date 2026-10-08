@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -254,16 +257,6 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 		}
 	}
 
-	if sh.IngressKbit > 0 {
-		qs, err := deviceQdiscs(ctx, sh.Device)
-		if err != nil {
-			return err
-		}
-		if ingressKind(qs) == "clsact" {
-			return fmt.Errorf("%s has a clsact queue, which tc-BPF programs attach to; a download limit needs the ingress queue and would replace it, taking their filters with it. Limit the upload only, or remove the clsact queue yourself first", sh.Device)
-		}
-	}
-
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old, err := s.loadSpec()
@@ -280,6 +273,13 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 			prev = &p
 		}
 	}
+	// A saved spec is ownership evidence only for the half it actually manages.
+	// Capture supported unowned queues before the first destructive command.
+	baseline, err := shapingBaseline(ctx, sh, prev)
+	if err != nil {
+		return err
+	}
+
 	if idx < 0 {
 		sh.Made = gwStamp(actor)
 		next.Shaping = append(next.Shaping, sh)
@@ -291,6 +291,12 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 		if err := undoShaping(ctx, sh, prev); err != nil {
 			s.log.Error("restoring a device's shaping after a failed change", "device", sh.Device, "err", err)
 		}
+		if prev == nil || !prev.hasRoot() {
+			if err := runShapeLines(ctx, baseline); err != nil {
+				s.log.Error("restoring the original queue", "device", sh.Device, "err", err)
+			}
+		}
+
 	}
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
@@ -337,6 +343,10 @@ func (s *Service) ClearShaping(ctx context.Context, device string) error {
 	if prev == nil {
 		return fmt.Errorf("shaping of %s: %w", device, ErrNotFound)
 	}
+	if _, err := shapingBaseline(ctx, ShapeSpec{Device: device}, prev); err != nil {
+		return err
+	}
+
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
 			if prev.hasRoot() {
@@ -357,17 +367,18 @@ func (s *Service) ClearShaping(ctx context.Context, device string) error {
 
 // tcQdisc is one entry of `tc -j -s qdisc show`.
 type tcQdisc struct {
-	Kind       string `json:"kind"`
-	Dev        string `json:"dev"`
-	Handle     string `json:"handle"`
-	Parent     string `json:"parent"`
-	Root       bool   `json:"root"`
-	Bytes      uint64 `json:"bytes"`
-	Packets    uint64 `json:"packets"`
-	Drops      uint64 `json:"drops"`
-	Overlimits uint64 `json:"overlimits"`
-	Requeues   uint64 `json:"requeues"`
-	Backlog    uint64 `json:"backlog"`
+	Kind       string                     `json:"kind"`
+	Dev        string                     `json:"dev"`
+	Handle     string                     `json:"handle"`
+	Parent     string                     `json:"parent"`
+	Root       bool                       `json:"root"`
+	Options    map[string]json.RawMessage `json:"options"`
+	Bytes      uint64                     `json:"bytes"`
+	Packets    uint64                     `json:"packets"`
+	Drops      uint64                     `json:"drops"`
+	Overlimits uint64                     `json:"overlimits"`
+	Requeues   uint64                     `json:"requeues"`
+	Backlog    uint64                     `json:"backlog"`
 }
 
 func parseQdiscs(out string) ([]tcQdisc, error) {
@@ -378,14 +389,179 @@ func parseQdiscs(out string) ([]tcQdisc, error) {
 	return qs, nil
 }
 
-// verifyShaping asks the kernel what the device holds now and compares it
-// with what was asked for.
-func verifyShaping(ctx context.Context, sh ShapeSpec) error {
-	out, err := run(ctx, "tc", "-j", "qdisc", "show", "dev", sh.Device)
+// shapingBaseline refuses structures whose recovery the dashboard cannot reproduce.
+// A classless fq_codel queue is recoverable; an arbitrary hierarchy or attached
+// filter is not. Existing ingress belongs to its creator, even when empty.
+func shapingBaseline(ctx context.Context, sh ShapeSpec, prev *ShapeSpec) ([]string, error) {
+	qs, err := deviceQdiscs(ctx, sh.Device)
 	if err != nil {
-		return fmt.Errorf("reading %s's queue back: %w", sh.Device, err)
+		return nil, err
 	}
-	qs, err := parseQdiscs(out)
+	if sh.IngressKbit > 0 {
+		if ingressKind(qs) == "clsact" {
+			return nil, fmt.Errorf("%s has a clsact queue; its tc-BPF filters must be preserved. Limit upload only", sh.Device)
+		}
+		if ingressKind(qs) != "" && (prev == nil || prev.IngressKbit == 0) {
+			return nil, fmt.Errorf("%s has an unmanaged ingress queue; remove it through its owner before adding a download limit", sh.Device)
+		}
+	}
+	if prev != nil && prev.hasRoot() {
+		expected := prev.Qdisc
+		if prev.EgressKbit > 0 && prev.Qdisc != "cake" {
+			expected = "htb"
+		}
+		rootOK := false
+		for _, q := range qs {
+			if q.Root {
+				rootOK = q.Kind == expected && (expected != "htb" || q.Handle == "1:")
+			} else if q.Kind != "ingress" && q.Kind != "clsact" {
+				leaf := prev.Qdisc
+				if leaf == "" {
+					leaf = "fq_codel"
+				}
+				if expected != "htb" || q.Parent != "1:10" || q.Handle != "10:" || q.Kind != leaf {
+					return nil, fmt.Errorf("%s has a foreign queue beneath its managed root; refusing to replace it", sh.Device)
+				}
+			}
+		}
+		if !rootOK {
+			return nil, fmt.Errorf("%s's managed root has been replaced by another owner; refusing to overwrite it", sh.Device)
+		}
+	}
+	if prev != nil && prev.hasRoot() {
+		out, err := run(ctx, "tc", "-j", "filter", "show", "dev", sh.Device, "root")
+		if err != nil {
+			return nil, fmt.Errorf("reading managed root filters: %w", err)
+		}
+		if !rootFiltersClear(out) {
+			return nil, fmt.Errorf("%s has foreign or unreadable root filters; refusing to remove them", sh.Device)
+		}
+	}
+
+	if prev != nil && prev.IngressKbit > 0 && ingressKind(qs) == "ingress" {
+		out, err := run(ctx, "tc", "-j", "filter", "show", "dev", sh.Device, "parent", "ffff:")
+		if err != nil {
+			return nil, fmt.Errorf("reading ingress ownership: %w", err)
+		}
+		var filters []tcFilter
+		if json.Unmarshal([]byte(out), &filters) != nil {
+			return nil, errors.New("tc printed unreadable ingress ownership")
+		}
+		for _, f := range filters {
+			if f.Pref != 1 || f.Kind != "matchall" || f.Protocol != "all" || f.Chain != 0 || (len(f.Options.Actions) != 0 && (len(f.Options.Actions) != 1 || f.Options.Actions[0].Kind != "police")) {
+				return nil, fmt.Errorf("%s has foreign ingress filters; refusing to remove or replace them", sh.Device)
+			}
+		}
+	}
+	if !sh.hasRoot() || (prev != nil && prev.hasRoot()) {
+		return nil, nil
+	}
+	var root *tcQdisc
+	for i := range qs {
+		q := &qs[i]
+		if q.Root {
+			if root != nil {
+				return nil, fmt.Errorf("%s has multiple root queues", sh.Device)
+			}
+			root = q
+		} else if q.Kind != "ingress" && q.Kind != "clsact" {
+			return nil, fmt.Errorf("%s has an unmanaged queue hierarchy; its owner must remove it before shaping", sh.Device)
+		}
+	}
+	if root == nil || root.Kind == "noqueue" {
+		return nil, nil
+	}
+	refuse := func() ([]string, error) {
+		return nil, fmt.Errorf("%s has an unmanaged %s queue whose recovery is unsupported; change it through its owner before shaping", sh.Device, root.Kind)
+	}
+	if root.Kind != "fq_codel" || !regexp.MustCompile(`^[0-9a-fA-F]+:$`).MatchString(root.Handle) {
+		return refuse()
+	}
+	out, err := run(ctx, "tc", "-j", "filter", "show", "dev", sh.Device, "root")
+	if err != nil {
+		return nil, fmt.Errorf("reading existing queue filters: %w", err)
+	}
+	if !rootFiltersClear(out) {
+		return refuse()
+	}
+	if len(root.Options) == 0 {
+		return refuse()
+	}
+	line := fmt.Sprintf("qdisc replace dev %s root handle %s fq_codel", sh.Device, root.Handle)
+	for _, key := range []string{"limit", "flows", "quantum", "target", "interval", "memory_limit", "drop_batch"} {
+		raw, exists := root.Options[key]
+		if !exists {
+			return refuse()
+		}
+		var value uint64
+		if json.Unmarshal(raw, &value) != nil || value == 0 {
+			return refuse()
+		}
+		suffix := ""
+		if key == "target" || key == "interval" {
+			suffix = "us"
+		}
+		line += fmt.Sprintf(" %s %d%s", key, value, suffix)
+	}
+	var ecn bool
+	ecnRaw, hasECN := root.Options["ecn"]
+	if (hasECN && json.Unmarshal(ecnRaw, &ecn) != nil) || (len(root.Options) != 7 && !hasECN) || (len(root.Options) != 8 && hasECN) {
+		return refuse()
+	}
+	if ecn {
+		line += " ecn"
+	} else {
+		line += " noecn"
+	}
+	return []string{line}, nil
+}
+
+// tc's root listing also includes ingress/clsact filters on some releases.
+// They survive root removal, so only filters attached to the root tree block it.
+func rootFiltersClear(out string) bool {
+	var filters []struct {
+		Parent string `json:"parent"`
+	}
+	if json.Unmarshal([]byte(out), &filters) != nil {
+		return false
+	}
+	for _, filter := range filters {
+		if filter.Parent != "ffff:" && filter.Parent != "ffff:fff2" && filter.Parent != "ffff:fff3" {
+			return false
+		}
+	}
+	return true
+}
+
+type tcClass struct {
+	Kind   string `json:"class"`
+	Handle string `json:"handle"`
+	Root   bool   `json:"root"`
+	Parent string `json:"parent"`
+	Rate   uint64 `json:"rate"`
+	Ceil   uint64 `json:"ceil"`
+}
+
+type tcFilter struct {
+	Protocol string `json:"protocol"`
+	Pref     int    `json:"pref"`
+	Kind     string `json:"kind"`
+	Chain    int    `json:"chain"`
+	Options  struct {
+		Actions []struct {
+			Kind    string `json:"kind"`
+			Control struct {
+				Type string `json:"type"`
+			} `json:"control_action"`
+		} `json:"actions"`
+	} `json:"options"`
+}
+
+// tc expresses rates in bytes/second in JSON; requests use decimal kbit/second.
+func shapeBytes(kbit int) uint64 { return uint64(kbit) * 125 }
+
+func verifyShaping(ctx context.Context, sh ShapeSpec) error {
+	qs, err := deviceQdiscs(ctx, sh.Device)
 	if err != nil {
 		return err
 	}
@@ -393,21 +569,108 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 	if sh.EgressKbit > 0 && sh.Qdisc != "cake" {
 		rootKind = "htb"
 	}
-	var gotRoot string
+	var root *tcQdisc
 	ingress := false
-	for _, q := range qs {
+	leaf := false
+	for i := range qs {
+		q := &qs[i]
 		if q.Root {
-			gotRoot = q.Kind
+			root = q
 		}
-		if q.Kind == "ingress" {
+		if q.Kind == "ingress" && q.Handle == "ffff:" {
 			ingress = true
 		}
+		kind := sh.Qdisc
+		if kind == "" {
+			kind = "fq_codel"
+		}
+		if q.Parent == "1:10" && q.Handle == "10:" && q.Kind == kind {
+			leaf = true
+		}
+	}
+	gotRoot := ""
+	if root != nil {
+		gotRoot = root.Kind
 	}
 	if rootKind != "" && gotRoot != rootKind {
 		return fmt.Errorf("%s has %q as its queue after setting %q", sh.Device, gotRoot, rootKind)
 	}
-	if sh.IngressKbit > 0 && !ingress {
-		return fmt.Errorf("%s has no ingress policer after setting one", sh.Device)
+	if sh.EgressKbit > 0 {
+		if sh.Qdisc == "cake" {
+			var bandwidth uint64
+			if json.Unmarshal(root.Options["bandwidth"], &bandwidth) != nil || bandwidth != shapeBytes(sh.EgressKbit) {
+				return fmt.Errorf("%s CAKE bandwidth does not match %d kbit/s", sh.Device, sh.EgressKbit)
+			}
+		} else {
+			var def string
+			if root.Handle != "1:" || json.Unmarshal(root.Options["default"], &def) != nil || def != "0x10" || !leaf {
+				return fmt.Errorf("%s HTB root/default class or leaf queue does not match the requested shaping", sh.Device)
+			}
+			out, err := run(ctx, "tc", "-j", "class", "show", "dev", sh.Device)
+			if err != nil {
+				return fmt.Errorf("reading shaping classes: %w", err)
+			}
+			var classes []tcClass
+			if json.Unmarshal([]byte(out), &classes) != nil {
+				return errors.New("tc printed unreadable shaping classes")
+			}
+			if len(classes) != 1 || classes[0].Kind != "htb" || classes[0].Handle != "1:10" || (!classes[0].Root && classes[0].Parent != "1:") || classes[0].Rate != shapeBytes(sh.EgressKbit) || classes[0].Ceil != shapeBytes(sh.EgressKbit) {
+				return fmt.Errorf("%s HTB class rate/ceil does not match %d kbit/s", sh.Device, sh.EgressKbit)
+			}
+		}
+	}
+	if sh.IngressKbit > 0 {
+		if !ingress {
+			return fmt.Errorf("%s has no ingress policer after setting one", sh.Device)
+		}
+		out, err := run(ctx, "tc", "-j", "filter", "show", "dev", sh.Device, "parent", "ffff:")
+		if err != nil {
+			return fmt.Errorf("reading ingress filters: %w", err)
+		}
+		var filters []tcFilter
+		if json.Unmarshal([]byte(out), &filters) != nil {
+			return errors.New("tc printed unreadable ingress filters")
+		}
+		found := false
+		for _, f := range filters {
+			if f.Pref == 1 && f.Protocol == "all" && f.Kind == "matchall" && f.Chain == 0 && len(f.Options.Actions) == 1 && f.Options.Actions[0].Kind == "police" && f.Options.Actions[0].Control.Type == "drop" {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("%s ingress matchall/drop policer is missing", sh.Device)
+		}
+		// iproute2 releases omit policer rate/burst from JSON, including 6.14.
+		// Detailed output is required as evidence rather than assuming the write worked.
+		out, err = run(ctx, "tc", "-r", "-d", "filter", "show", "dev", sh.Device, "parent", "ffff:", "pref", "1")
+		if err != nil {
+			return fmt.Errorf("reading ingress policer parameters: %w", err)
+		}
+		if err := verifyPolicer(out, sh.IngressKbit); err != nil {
+			return fmt.Errorf("%s: %w", sh.Device, err)
+		}
+	}
+	return nil
+}
+
+var policeParams = regexp.MustCompile(`police\s+\S+\s+rate\s+([0-9.]+)([KMG]?bit)\s+burst\s+([0-9.]+)([KMG]?b)\s+mtu\s+\S+(?:\s+\[[0-9a-fA-F]+\])?\s+action\s+drop`)
+
+func verifyPolicer(out string, kbit int) error {
+	matches := policeParams.FindAllStringSubmatch(out, -1)
+	if len(matches) != 1 {
+		return errors.New("ingress policer rate/burst/drop parameters are unreadable")
+	}
+	m := matches[0]
+	units := map[string]float64{"bit": 1, "Kbit": 1e3, "Mbit": 1e6, "Gbit": 1e9, "b": 1, "Kb": 1024, "Mb": 1024 * 1024, "Gb": 1024 * 1024 * 1024}
+	rate, _ := strconv.ParseFloat(m[1], 64)
+	rate *= units[m[2]]
+	burst, _ := strconv.ParseFloat(m[3], 64)
+	burst *= units[m[4]]
+	// The kernel converts bucket bytes to clock ticks and back. Permit only
+	// four microseconds of quantization, not an operationally different burst.
+	tolerance := math.Max(16, float64(shapeBytes(kbit))/250000)
+	if rate != float64(kbit)*1000 || math.Abs(burst-float64(policeBurst(kbit))) > tolerance {
+		return fmt.Errorf("ingress policer rate/burst does not match %d kbit/s and %d bytes", kbit, policeBurst(kbit))
 	}
 	return nil
 }

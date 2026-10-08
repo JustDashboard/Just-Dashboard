@@ -163,17 +163,35 @@ test.describe("DNS", () => {
     page,
   }) => {
     const mutations = await open(page, "/network/dns")
-    await page.getByRole("switch", { name: "Include public resolvers" }).check()
     await page.getByLabel("Name", { exact: true }).fill("example.com")
     await page.getByRole("button", { name: "Resolve" }).click()
     const race = page.getByRole("region", { name: "Answers for example.com" })
+    await expect(race.getByRole("listitem")).toHaveCount(1)
+    await page.getByRole("switch", { name: "Compare named resolvers" }).check()
+    const resolve = page.getByRole("button", { name: "Resolve", exact: true })
+    await expect(resolve).toBeDisabled()
+    const destinations = page.getByRole("group", { name: "Destinations" })
+    for (const checkbox of await destinations.getByRole("checkbox").all()) await checkbox.check()
+    await expect(resolve).toBeDisabled()
+    await page.getByRole("checkbox", { name: "Acknowledge private-name disclosure" }).check()
+    await resolve.click()
     await expect(race.getByRole("listitem")).toHaveCount(7)
     await expect(race.getByText("no answer within 2 s")).toBeVisible()
     await expect(race.getByText("6 of 7 answered")).toBeVisible()
-    expect(mutations.find((m) => m.path === "/network/dns/lookup")?.body).toEqual({
+    expect(mutations.filter((m) => m.path === "/network/dns/lookup").at(-1)?.body).toEqual({
       name: "example.com",
       type: "A",
-      includePublic: true,
+      mode: "compare",
+      destinations: [
+        "127.0.0.53",
+        "1.1.1.1",
+        "8.8.8.8",
+        "9.9.9.9",
+        "94.140.14.14",
+        "198.51.100.2",
+        "194.242.2.3",
+      ],
+      acknowledgeDisclosure: true,
     })
   })
 

@@ -213,12 +213,16 @@ func TestNetworkDNSHostsRoundTrip(t *testing.T) {
 func TestNetworkDNSLookupValidation(t *testing.T) {
 	_, viewer, _ := networkClients(t)
 	for name, body := range map[string]string{
-		"an address for an A lookup": `{"name":"192.0.2.1","type":"A"}`,
-		"a name for a PTR":           `{"name":"example.com","type":"PTR"}`,
-		"a record type outside":      `{"name":"example.com","type":"ANY"}`,
-		"a space in the name":        `{"name":"exa mple.com","type":"A"}`,
-		"an empty name":              `{"name":"","type":"A"}`,
-		"a server of the caller's":   `{"name":"example.com","type":"A","server":"192.0.2.9"}`,
+		"an address for an A lookup":       `{"name":"192.0.2.1","type":"A"}`,
+		"a name for a PTR":                 `{"name":"example.com","type":"PTR"}`,
+		"a record type outside":            `{"name":"example.com","type":"ANY"}`,
+		"a space in the name":              `{"name":"exa mple.com","type":"A"}`,
+		"an empty name":                    `{"name":"","type":"A"}`,
+		"a server of the caller's":         `{"name":"example.com","type":"A","server":"192.0.2.9"}`,
+		"legacy public fan-out":            `{"name":"private.corp.example","type":"A","includePublic":true}`,
+		"comparison without destinations":  `{"name":"private.corp.example","type":"A","mode":"compare","acknowledgeDisclosure":true}`,
+		"comparison without disclosure":    `{"name":"private.corp.example","type":"A","mode":"compare","destinations":["1.1.1.1"]}`,
+		"arbitrary comparison destination": `{"name":"private.corp.example","type":"A","mode":"compare","destinations":["127.0.0.1:9999"],"acknowledgeDisclosure":true}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if w := viewer.do(http.MethodPost, "/api/v1/network/dns/lookup", body, nil); w.Code != http.StatusBadRequest {

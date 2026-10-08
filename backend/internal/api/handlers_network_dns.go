@@ -26,8 +26,9 @@ func (s *Server) mountNetworkDNSRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleDNS))
 		r.Method(http.MethodGet, "/hosts", s.handle(s.handleDNSHosts))
 		// A lookup is `read`, though it is a POST and sends packets. It asks
-		// only the resolvers this host is configured with, plus public
-		// presets when explicitly requested — the module takes no address from the
+		// the native resolver policy by default; direct comparison requires named
+		// configured/preset destinations and disclosure acknowledgement. The module
+		// accepts no arbitrary address from the
 		// caller, so it cannot be pointed at a machine of the caller's
 		// choosing the way the probes under /network/probe can, and a
 		// resolver is a service that expects to be asked.
@@ -121,6 +122,7 @@ type dnsLookupRequest struct {
 	Name          string `json:"name"`
 	Type          string `json:"type"`
 	IncludePublic bool   `json:"includePublic"`
+	netx.LookupOptions
 }
 
 func (s *Server) handleDNSLookup(w http.ResponseWriter, r *http.Request) error {
@@ -130,7 +132,10 @@ func (s *Server) handleDNSLookup(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	res, err := s.modules.network.Lookup(ctx, req.Name, req.Type, req.IncludePublic)
+	if req.IncludePublic {
+		return httpx.Err(http.StatusBadRequest, "dns_comparison_disclosure", "Select named comparison destinations and acknowledge private-name disclosure.")
+	}
+	res, err := s.modules.network.LookupWithOptions(ctx, req.Name, req.Type, req.LookupOptions)
 	if err != nil {
 		return mapDNSError(err)
 	}

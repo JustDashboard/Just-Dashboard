@@ -204,7 +204,7 @@ func TestLookupRacesEveryResolver(t *testing.T) {
 	})
 	lookupTimeout = 600 * time.Millisecond
 
-	res, err := s.Lookup(context.Background(), "Example.com", "a", true)
+	res, err := s.LookupWithOptions(context.Background(), "Example.com", "a", LookupOptions{Mode: "compare", AcknowledgeDisclosure: true, Destinations: []string{"127.0.0.53", "203.0.113.53", "100.64.0.53", "fd7a:115c:a1e0::53", "1.1.1.1", "1.1.1.2", "9.9.9.9", "8.8.8.8", "94.140.14.14", "194.242.2.3"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,8 +258,8 @@ func TestLookupRecordTypes(t *testing.T) {
 	routeDNS(t, map[string]string{"198.51.100.53": srv})
 	lookupTimeout = 500 * time.Millisecond
 
-	targets := s.lookupTargets(context.Background())
-	if targets[0].server != "198.51.100.53" || targets[0].label != "resolv.conf" {
+	targets, _ := s.lookupDestinationInventory(s.readResolved(context.Background(), false))
+	if targets[0].Server != "198.51.100.53" || targets[0].Label != "resolv.conf" {
 		t.Fatalf("without resolved the resolv.conf servers are asked: %+v", targets[0])
 	}
 
@@ -302,11 +302,11 @@ func TestLookupDoesNotSendPrivateNamesToPublicPresetsByDefault(t *testing.T) {
 	server := startFakeDNS(t, answerA("192.0.2.7"))
 	routeDNS(t, map[string]string{"198.51.100.53": server})
 	res, err := testService(t).Lookup(context.Background(), "nas.home.arpa", "A")
-	if err != nil || len(res.Answers) != 2 || res.Answers[0].Server != "198.51.100.53" || len(res.Answers[0].Answers) != 1 {
+	if err != nil || len(res.Answers) != 1 || res.Answers[0].Server != "198.51.100.53" || len(res.Answers[0].Answers) != 1 {
 		t.Fatalf("private name lookup = %+v, %v", res, err)
 	}
 	for _, a := range res.Answers {
-		if a.Label != "resolv.conf" {
+		if a.Label != "resolv.conf effective policy" {
 			t.Errorf("private name sent outside configured resolvers: %+v", a)
 		}
 	}
@@ -321,14 +321,116 @@ Link 2 (eth0)
 Link 3 (eth1)
  DNS Servers: fe80::53
 `)
-	targets := testService(t).lookupTargets(context.Background())
+	service := testService(t)
+	targets, _ := service.lookupDestinationInventory(service.readResolved(context.Background(), false))
 	byServer := map[string]string{}
 	for _, target := range targets {
-		byServer[target.server] = target.label
+		byServer[target.Server] = target.Label
 	}
 	for server, label := range map[string]string{"192.0.2.53:5353": "global upstream", "192.0.2.53:1053": "global upstream", "fe80::53%eth0": "eth0", "fe80::53%eth1": "eth1"} {
 		if byServer[server] != label {
 			t.Errorf("%s label = %q, want %q", server, byServer[server], label)
 		}
+	}
+}
+
+func TestEffectiveLookupDelegatesSplitDNSOnlyToNativeStub(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "active\n").on("resolvectl status --no-pager", `Global
+ DNS Servers: 1.1.1.1
+ Fallback DNS Servers: 8.8.8.8
+ DNS Domain: ~.
+Link 2 (eth0)
+ DNS Servers: 9.9.9.9
+ DNS Domain: ~.
+ DefaultRoute: yes
+Link 3 (vpn0)
+ DNS Servers: 10.8.0.53
+ DNS Domain: ~corp.example ~home.arpa
+ DefaultRoute: no
+Link 4 (vpn1)
+ DNS Servers: 10.9.0.53
+ DNS Domain: ~lab.corp.example
+ DefaultRoute: no
+`)
+	stub := startFakeDNS(t, answerA("10.9.0.7"))
+	original := dnsDial
+	var destinations []string
+	dnsDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		destinations = append(destinations, address)
+		if address != "127.0.0.53:53" {
+			return nil, fmt.Errorf("private name leaked to %s", address)
+		}
+		return (&net.Dialer{}).DialContext(ctx, network, stub)
+	}
+	t.Cleanup(func() { dnsDial = original })
+	for _, name := range []string{"db.lab.corp.example", "nas.home.arpa", "lab.corp.example"} {
+		result, err := testService(t).Lookup(context.Background(), name, "A")
+		if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "" || result.Mode != "effective" {
+			t.Fatalf("effective lookup=%+v,%v", result, err)
+		}
+		link := "vpn1"
+		if name == "nas.home.arpa" {
+			link = "vpn0"
+		}
+		if !strings.Contains(result.Route, link) || strings.Contains(result.Route, "global (") {
+			t.Fatalf("incorrect longest-suffix evidence: %s", result.Route)
+		}
+	}
+	if len(destinations) != 3 {
+		t.Fatalf("effective lookup dialed %v", destinations)
+	}
+}
+
+func TestEffectiveLookupDoesNotBypassUnavailableNativeStub(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "active").fail("resolvectl status --no-pager", "scope evidence unavailable")
+	previous := dnsDial
+	calls := []string{}
+	dnsDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		calls = append(calls, address)
+		return nil, errors.New("stub disabled")
+	}
+	t.Cleanup(func() { dnsDial = previous })
+	result, err := testService(t).Lookup(context.Background(), "secret.corp.example", "A")
+	if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "stub disabled" || !strings.Contains(result.Route, "scope evidence unavailable") {
+		t.Fatalf("lookup=%+v,%v", result, err)
+	}
+	if len(calls) != 1 || calls[0] != "127.0.0.53:53" {
+		t.Fatalf("native policy bypassed: %v", calls)
+	}
+}
+
+func TestLookupComparisonRequiresNamedDestinationsAndDisclosure(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive")
+	pointResolvConf(t, "static")
+	for _, opts := range []LookupOptions{
+		{Mode: "compare"},
+		{Mode: "compare", Destinations: []string{"1.1.1.1"}},
+		{Mode: "compare", AcknowledgeDisclosure: true},
+		{Mode: "compare", Destinations: []string{"127.0.0.1:9999"}, AcknowledgeDisclosure: true},
+		{Mode: "effective", Destinations: []string{"1.1.1.1"}, AcknowledgeDisclosure: true},
+		{Mode: "invalid"},
+		{Mode: "compare", Destinations: strings.Fields(strings.Repeat("1.1.1.1 ", maxLookupResolvers+1)), AcknowledgeDisclosure: true},
+	} {
+		if _, err := testService(t).LookupWithOptions(context.Background(), "private.corp.example", "A", opts); err == nil {
+			t.Fatalf("accepted disclosure request %+v", opts)
+		}
+	}
+	if _, err := testService(t).Lookup(context.Background(), "private.corp.example", "A", true); err == nil {
+		t.Fatal("legacy fan-out flag accepted")
+	}
+}
+
+func TestLookupComparisonContactsOnlyNamedDestination(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive")
+	pointResolvConf(t, "static")
+	upstream := startFakeDNS(t, answerA("192.0.2.77"))
+	routeDNS(t, map[string]string{"1.1.1.1": upstream})
+	result, err := testService(t).LookupWithOptions(context.Background(), "nas.home.arpa", "A", LookupOptions{Mode: "compare", Destinations: []string{"1.1.1.1", "1.1.1.1"}, AcknowledgeDisclosure: true})
+	if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "" || result.Answers[0].Server != "1.1.1.1" || !strings.Contains(result.Note, "Private names") {
+		t.Fatalf("named comparison=%+v,%v", result, err)
 	}
 }

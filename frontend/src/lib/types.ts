@@ -7213,6 +7213,11 @@ export type HostRecords = {
 export type DNSLookup = {
   name: string
   type: string
+  mode: "effective" | "compare"
+  route: string
+  note: string
+  comparisonTargets: { server: string; label: string; reason?: string }[]
+  omittedTargets: { server: string; label: string; reason?: string }[]
   results: { server: string; label: string; answers: string[]; latencyMs: number; error?: string }[]
 }
 
