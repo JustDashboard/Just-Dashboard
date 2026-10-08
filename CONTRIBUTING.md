@@ -106,6 +106,12 @@ to the contribution terms above, including the additional licence grant to the p
   their disposable namespace and exact Docker containers with no published ports; native command
   deadlines remain fixed, and a deadline failure is recorded as unavailable evidence. See
   [native socket history](docs/internal/backend/network-flow-accounting.md) for tools and scope.
+- Advanced Docker network changes also run from `backend/`:
+  `JD_DOCKER_NETWORK_LIVE=1 go test -race ./internal/dockerx -run '^TestLiveAdvancedNetwork' -count=1 -v`.
+  The fixture needs the local Docker socket, `ip` and cached `python:3.11-slim`; it never pulls an
+  image or publishes a port. It chooses pools outside observed host routes/Docker allocations,
+  creates an internal uniquely labeled dual-stack bridge and one exact owned container, verifies
+  native fields/alias/allocation/overlap refusal, then removes only its verified IDs.
 - Private PCAP changes also run from `backend/`:
   `JD_NETCAPTURE_LIVE=1 go test -race ./internal/netcapture -run Live -count=1 -v`. The fixture
   needs root or passwordless sudo plus host `ip`, `tcpdump`, `timeout` and Python. It creates and

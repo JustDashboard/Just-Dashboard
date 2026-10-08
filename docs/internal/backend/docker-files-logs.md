@@ -853,3 +853,18 @@ containers with unread inspections increment runtime `unknown`, rather than `noH
 Attention reclaim action uses `imagesAndCacheOnly=true` on `/docker/prune`, removing only unused images
 and build cache. It leaves containers, networks and volumes untouched. The older broad sweep retains
 its original scope; pairing images-only scope with volume removal is refused. Every scope is audited.
+
+### Advanced network native acceptance
+
+`JD_DOCKER_NETWORK_LIVE=1 go test -race ./internal/dockerx -run '^TestLiveAdvancedNetwork' -count=1 -v`
+uses the actual local Engine. The opt-in fixture requires `ip` and a locally cached
+`python:3.11-slim`; it never pulls, starts a public listener or publishes a port. It reads both
+families of host routes and existing Docker pools, then selects nonoverlapping benchmarking/ULA
+pools for a uniquely labeled internal bridge. It verifies exact IPv4/IPv6 subnets, gateways and
+allocation ranges, driver/MTU option, labels, attachable/internal/IPv6 flags, native overlap refusal,
+and one owned full-ID container's both-family addresses and alias through disconnect/reconnect.
+Cleanup rechecks exact names/labels/IDs and never prunes or touches another workload. The fixture
+creates only its own temporary host bridge/routes through Docker; it does not edit existing ones.
+
+This establishes the supported native bridge path. Third-party drivers/options still depend on
+installed Engine plugins and native support; a fixture does not establish provider connectivity.
