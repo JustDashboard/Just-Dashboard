@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import {
   diagnosticCompatible,
+  diagnosticDuration,
   diagnosticFinished,
   diagnosticNameProblem,
   diagnosticReading,
@@ -70,4 +71,70 @@ describe("retained diagnostic readings", () => {
     )
     expect(diagnosticReading({ status: "completed" }).label).toBe("Completed")
   })
+})
+
+test("investigation comparison keeps the exact source tuple and operation", () => {
+  const request = {
+    sourceKind: "container",
+    containerId: "a".repeat(64),
+    sourceAddress: "2001:db8::2",
+    target: "private.test",
+    address: "2001:db8::8",
+    family: "inet6",
+    protocol: "tcp",
+    port: 8443,
+    mark: "",
+    measure: true,
+  }
+  const path = {
+    ...run,
+    kind: "investigation",
+    request: { tool: "", target: "" },
+    investigationRequest: request,
+  }
+  expect(diagnosticCompatible(path, { ...path, id: "two" })).toBe(true)
+  for (const change of [
+    { sourceKind: "host", containerId: "" },
+    { containerId: "b".repeat(64) },
+    { sourceAddress: "2001:db8::3" },
+    { address: "2001:db8::9" },
+    { family: "inet" },
+    { protocol: "udp" },
+    { port: 443 },
+    { mark: "0x1" },
+    { measure: false },
+  ]) {
+    expect(
+      diagnosticCompatible(path, {
+        ...path,
+        id: "two",
+        investigationRequest: { ...request, ...change },
+      }),
+    ).toBe(false)
+  }
+  expect(diagnosticCompatible(path, { ...path, id: "two", investigationRequest: undefined })).toBe(
+    false,
+  )
+  expect(diagnosticCompatible(path, { ...path, id: "two", kind: undefined })).toBe(false)
+  expect(diagnosticReading({ status: "completed", outcome: "completed_with_unknowns" })).toEqual({
+    label: "Report completed with unknowns",
+    tone: "warning",
+  })
+})
+
+test("report collection duration does not imply connection latency or invent absent timing", () => {
+  expect(diagnosticDuration({ result: { duration: "12ms" } })).toBe("12ms")
+  expect(diagnosticDuration({ kind: "investigation" })).toBe("Not recorded")
+  const report = {
+    kind: "investigation",
+    investigation: {
+      startedAt: "2026-10-08T12:00:00.000Z",
+      endedAt: "2026-10-08T12:00:00.175Z",
+    },
+  }
+  expect(diagnosticDuration(report)).toBe("175 ms to collect the report")
+  for (const endedAt of ["unreadable", "2026-10-08T11:59:59.000Z"])
+    expect(
+      diagnosticDuration({ ...report, investigation: { ...report.investigation, endedAt } }),
+    ).toBe("Not recorded")
 })

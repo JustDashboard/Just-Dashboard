@@ -11,6 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netpath"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
@@ -36,13 +37,17 @@ const (
 )
 
 type Scope struct {
-	Vantage     string   `json:"vantage"`
-	Target      string   `json:"target,omitempty"`
-	Family      string   `json:"family"`
-	Protocol    string   `json:"protocol,omitempty"`
-	Port        int      `json:"port,omitempty"`
-	Interface   string   `json:"interface,omitempty"`
-	Limitations []string `json:"limitations"`
+	Vantage       string   `json:"vantage"`
+	Source        string   `json:"source,omitempty"`
+	SourceAddress string   `json:"sourceAddress,omitempty"`
+	Address       string   `json:"address,omitempty"`
+	Mark          string   `json:"mark,omitempty"`
+	Target        string   `json:"target,omitempty"`
+	Family        string   `json:"family"`
+	Protocol      string   `json:"protocol,omitempty"`
+	Port          int      `json:"port,omitempty"`
+	Interface     string   `json:"interface,omitempty"`
+	Limitations   []string `json:"limitations"`
 }
 
 type Stage struct {
@@ -54,25 +59,28 @@ type Stage struct {
 }
 
 type Run struct {
-	ID              string              `json:"id"`
-	Name            string              `json:"name"`
-	Request         netsec.ProbeRequest `json:"request"`
-	Scope           Scope               `json:"scope"`
-	Status          string              `json:"status"`
-	Outcome         string              `json:"outcome,omitempty"`
-	OutcomeSource   string              `json:"outcomeSource,omitempty"`
-	CreatedAt       time.Time           `json:"createdAt"`
-	StartedAt       *time.Time          `json:"startedAt,omitempty"`
-	EndedAt         *time.Time          `json:"endedAt,omitempty"`
-	UpdatedAt       time.Time           `json:"updatedAt"`
-	CreatedBy       string              `json:"createdBy"`
-	RerunOf         string              `json:"rerunOf,omitempty"`
-	JobID           string              `json:"jobId,omitempty"`
-	Stages          []Stage             `json:"stages"`
-	Result          *netsec.ProbeResult `json:"result,omitempty"`
-	HasResult       bool                `json:"hasResult"`
-	ResultTruncated bool                `json:"resultTruncated"`
-	Error           string              `json:"error,omitempty"`
+	ID                   string              `json:"id"`
+	Kind                 string              `json:"kind,omitempty"`
+	InvestigationRequest *netpath.Request    `json:"investigationRequest,omitempty"`
+	Investigation        *netpath.Result     `json:"investigation,omitempty"`
+	Name                 string              `json:"name"`
+	Request              netsec.ProbeRequest `json:"request"`
+	Scope                Scope               `json:"scope"`
+	Status               string              `json:"status"`
+	Outcome              string              `json:"outcome,omitempty"`
+	OutcomeSource        string              `json:"outcomeSource,omitempty"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	StartedAt            *time.Time          `json:"startedAt,omitempty"`
+	EndedAt              *time.Time          `json:"endedAt,omitempty"`
+	UpdatedAt            time.Time           `json:"updatedAt"`
+	CreatedBy            string              `json:"createdBy"`
+	RerunOf              string              `json:"rerunOf,omitempty"`
+	JobID                string              `json:"jobId,omitempty"`
+	Stages               []Stage             `json:"stages"`
+	Result               *netsec.ProbeResult `json:"result,omitempty"`
+	HasResult            bool                `json:"hasResult"`
+	ResultTruncated      bool                `json:"resultTruncated"`
+	Error                string              `json:"error,omitempty"`
 }
 
 type Retention struct {

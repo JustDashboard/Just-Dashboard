@@ -114,6 +114,8 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   so artifact access cannot bypass the feature route. Deletion and retention changes additionally
   use `s.destructive`; all mutations are audited. The connection investigator likewise requires
   `system.admin` and accepts a closed source/target tuple rather than a PID, executable or argv.
+  Retained investigations use that same adapter and privilege boundary; comparison requires the
+  same requested source, family, protocol, port, address, mark and measurement choice.
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything

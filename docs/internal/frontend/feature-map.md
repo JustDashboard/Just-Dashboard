@@ -92,3 +92,7 @@ backup partial/stale evidence stays visible beside the completed findings and th
 Page-owned keyboard commands, history, restoration and polling interactions are specified in
 [`workspace-interactions.md`](workspace-interactions.md). Their shared owner is `components/workspace/`;
 page-specific navigation, confirmations and API capabilities stay with the feature components above.
+
+Connection-path **Run and save** retains a typed source-sensitive report through the existing saved
+run lifecycle. Both quick and saved reports use `network/path-report.tsx`; the exact-scoped comparison
+includes source identity/address, protocol/family/port, selected address/mark and measurement choice.

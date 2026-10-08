@@ -65,3 +65,11 @@ sudo -n env JD_NETPATH_LIVE=1 /tmp/jd-netpath-investigator.test \
 The fixture verifies native resolver selection, literal destination/source agreement, real TCP
 connection evidence, retained host/provider unknowns, and stale-identity rejection after a restart.
 It removes only its own container ID. It does not pull an image or alter the production host network.
+
+## Retaining a scoped report
+
+**Run and save** snapshots the same request into the [retained diagnostics lifecycle](network-diagnostics.md#retained-connection-investigations).
+The named report preserves individual layer evidence and exact source/family/protocol/port/mark,
+uses the same bounded native adapter and does not add a watcher or replay after restart. Rerun is
+explicit and reacquires fresh source identity; comparison refuses different requested tuples.
+Saving report completion never promotes an unknown layer into measured connectivity.

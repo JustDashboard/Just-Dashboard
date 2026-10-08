@@ -84,6 +84,20 @@ func (s *Server) handleNetworkInvestigate(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+func (s *Server) executeNetworkInvestigation(ctx context.Context, request netpath.Request) (*netpath.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := netpath.Validate(request)
+	if err != nil {
+		return nil, err
+	}
+	providers, err := s.networkPathProviders(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return netpath.Investigate(ctx, req, providers)
+}
+
 func (s *Server) networkPathProviders(ctx context.Context, req netpath.Request) (netpath.Providers, error) {
 	var execute netx.TrafficExecutor
 	var command netsec.SourceCommand

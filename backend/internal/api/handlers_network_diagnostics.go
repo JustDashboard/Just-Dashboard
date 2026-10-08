@@ -7,6 +7,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netpath"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/go-chi/chi/v5"
 )
@@ -18,6 +19,7 @@ func (s *Server) mountNetworkDiagnosticRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodGet, "/", s.handle(s.handleDiagnosticList))
 		r.Method(http.MethodPost, "/", s.handle(s.handleDiagnosticCreate))
+		r.Method(http.MethodPost, "/investigate", s.handle(s.handleDiagnosticInvestigation))
 		r.Method(http.MethodGet, "/policy", s.handle(s.handleDiagnosticPolicy))
 		r.Method(http.MethodGet, "/compare", s.handle(s.handleDiagnosticCompare))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDiagnosticGet))
@@ -60,6 +62,7 @@ func (s *Server) handleDiagnosticList(w http.ResponseWriter, r *http.Request) er
 	// Lists carry metadata. Retrieve one run to read its bounded artifact.
 	for i := range runs {
 		runs[i].Result = nil
+		runs[i].Investigation = nil
 	}
 	diagnosticPrivate(w)
 	httpx.JSON(w, http.StatusOK, runs)
@@ -81,6 +84,26 @@ func (s *Server) handleDiagnosticCreate(w http.ResponseWriter, r *http.Request) 
 		return mapDiagnosticError(err)
 	}
 	httpx.SetAudit(r, "network.diagnostic.create", run.ID, map[string]any{"name": run.Name, "tool": run.Request.Tool, "target": run.Request.Target, "jobId": run.JobID})
+	diagnosticPrivate(w)
+	httpx.JSON(w, http.StatusAccepted, run)
+	return nil
+}
+
+func (s *Server) handleDiagnosticInvestigation(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "network.diagnostic.investigate", "", nil)
+	var req struct {
+		Name          string          `json:"name"`
+		Investigation netpath.Request `json:"investigation"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "network.diagnostic.investigate", req.Investigation.Target, map[string]any{"sourceKind": req.Investigation.SourceKind, "family": req.Investigation.Family, "protocol": req.Investigation.Protocol, "port": req.Investigation.Port, "measure": req.Investigation.Measure})
+	run, err := s.modules.diagnostics.CreateInvestigation(r.Context(), req.Name, req.Investigation, httpx.MustPrincipal(r).Username())
+	if err != nil {
+		return mapDiagnosticError(err)
+	}
+	httpx.SetAudit(r, "network.diagnostic.investigate", run.ID, map[string]any{"jobId": run.JobID, "sourceKind": req.Investigation.SourceKind, "family": req.Investigation.Family})
 	diagnosticPrivate(w)
 	httpx.JSON(w, http.StatusAccepted, run)
 	return nil

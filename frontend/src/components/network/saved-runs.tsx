@@ -75,7 +75,7 @@ export function SavedRuns() {
             <StatTile
               label="Completed"
               value={runs.filter((run) => run.status === "completed").length}
-              hint="tool completed; path not guaranteed"
+              hint="diagnostic completed; path not guaranteed"
             />
             <StatTile
               label="Failed"
@@ -117,8 +117,12 @@ export function SavedRuns() {
                           href={`/network/runs?run=${encodeURIComponent(run.id)}`}
                           description={
                             <span className="break-all">
-                              {run.request.tool} · {run.request.target || "this host"} ·{" "}
-                              {new Date(run.createdAt).toLocaleString()}
+                              {run.kind === "investigation" ? "Connection path" : run.request.tool}{" "}
+                              ·{" "}
+                              {run.investigationRequest?.target ||
+                                run.request.target ||
+                                "this host"}{" "}
+                              · {new Date(run.createdAt).toLocaleString()}
                             </span>
                           }
                           trailing={<Status label={reading.label} tone={reading.tone} />}

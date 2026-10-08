@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netpath"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
@@ -26,17 +27,19 @@ type Difference struct {
 }
 
 type Comparison struct {
-	BeforeID        string              `json:"beforeId"`
-	AfterID         string              `json:"afterId"`
-	Request         netsec.ProbeRequest `json:"request"`
-	Status          ValueChange         `json:"status"`
-	Outcome         ValueChange         `json:"outcome"`
-	Duration        ValueChange         `json:"duration"`
-	DurationDeltaMS *float64            `json:"durationDeltaMs,omitempty"`
-	Records         Difference          `json:"records"`
-	Output          Difference          `json:"output"`
-	Partial         bool                `json:"partial"`
-	Limitations     []string            `json:"limitations"`
+	BeforeID             string              `json:"beforeId"`
+	Kind                 string              `json:"kind,omitempty"`
+	InvestigationRequest *netpath.Request    `json:"investigationRequest,omitempty"`
+	AfterID              string              `json:"afterId"`
+	Request              netsec.ProbeRequest `json:"request"`
+	Status               ValueChange         `json:"status"`
+	Outcome              ValueChange         `json:"outcome"`
+	Duration             ValueChange         `json:"duration"`
+	DurationDeltaMS      *float64            `json:"durationDeltaMs,omitempty"`
+	Records              Difference          `json:"records"`
+	Output               Difference          `json:"output"`
+	Partial              bool                `json:"partial"`
+	Limitations          []string            `json:"limitations"`
 }
 
 func (s *Service) Export(ctx context.Context, id string) ([]byte, error) {
@@ -74,24 +77,59 @@ func (s *Service) Compare(ctx context.Context, beforeID, afterID string) (Compar
 	if err != nil {
 		return Comparison{}, err
 	}
-	if a.Request != b.Request || !terminal(a.Status) || !terminal(b.Status) || a.Result == nil || b.Result == nil {
+	if !sameRequest(a, b) || !terminal(a.Status) || !terminal(b.Status) || !a.HasResult || !b.HasResult || (a.Result == nil && a.Investigation == nil) || (b.Result == nil && b.Investigation == nil) {
 		return Comparison{}, ErrIncompatible
 	}
-	c := Comparison{BeforeID: a.ID, AfterID: b.ID, Request: a.Request,
+	ad, ar, ao := comparisonArtifact(a)
+	bd, br, bo := comparisonArtifact(b)
+	c := Comparison{BeforeID: a.ID, AfterID: b.ID, Request: a.Request, Kind: a.Kind, InvestigationRequest: a.InvestigationRequest,
 		Status: ValueChange{a.Status, b.Status}, Outcome: ValueChange{a.Outcome, b.Outcome},
-		Duration:    ValueChange{a.Result.Duration, b.Result.Duration},
-		Records:     difference(a.Result.Records, b.Result.Records),
-		Output:      difference(strings.Split(a.Result.Output, "\n"), strings.Split(b.Result.Output, "\n")),
+		Duration:    ValueChange{ad, bd},
+		Records:     difference(ar, br),
+		Output:      difference(ao, bo),
 		Partial:     a.ResultTruncated || b.ResultTruncated,
 		Limitations: []string{"Record and output differences are sets of retained lines; order and duplicate counts are ignored.", "Tool output may contain changing timestamps or counters. A difference does not establish its cause or every intervening policy layer."}}
-	if x, err := time.ParseDuration(a.Result.Duration); err == nil {
-		if y, err := time.ParseDuration(b.Result.Duration); err == nil {
+	if x, err := time.ParseDuration(ad); err == nil {
+		if y, err := time.ParseDuration(bd); err == nil {
 			delta := float64(y-x) / float64(time.Millisecond)
 			c.DurationDeltaMS = &delta
 		}
 	}
+	if a.Kind == "investigation" {
+		c.Limitations = append(c.Limitations, "Investigation differences compare retained layer evidence, including actual selected source/destination. Unknown layers remain unknown; successful report completion does not prove connectivity.")
+	}
 	c.Partial = c.Partial || c.Records.Truncated || c.Output.Truncated
 	return c, nil
+}
+
+func sameRequest(a, b Run) bool {
+	if a.Kind == "investigation" || b.Kind == "investigation" {
+		return a.Kind == b.Kind && a.InvestigationRequest != nil && b.InvestigationRequest != nil && *a.InvestigationRequest == *b.InvestigationRequest
+	}
+	return a.Request == b.Request
+}
+
+func comparisonArtifact(run Run) (string, []string, []string) {
+	if run.Kind != "investigation" {
+		return run.Result.Duration, run.Result.Records, strings.Split(run.Result.Output, "\n")
+	}
+	report := run.Investigation
+	records := []string{"selected source: " + report.Scope.SourceAddress, "selected destination: " + report.Scope.Address}
+	for _, e := range report.Evidence {
+		prefix := e.ID + " / " + string(e.Basis) + " / " + e.State
+		records = append(records, prefix+": "+e.Summary, prefix+" / owner: "+e.Owner)
+		for _, fact := range e.Facts {
+			records = append(records, prefix+" / "+fact.Label+": "+fact.Value)
+		}
+		for _, limit := range e.Limitations {
+			records = append(records, prefix+" / limitation: "+limit)
+		}
+	}
+	output := []string{report.Comparison}
+	if report.Measurement != nil {
+		output = append(output, strings.Split(report.Measurement.Output, "\n")...)
+	}
+	return report.EndedAt.Sub(report.StartedAt).String(), records, output
 }
 
 func difference(before, after []string) Difference {

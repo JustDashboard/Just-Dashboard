@@ -220,7 +220,7 @@ func (s *Server) initModules() {
 		IndependentRecovery: true,
 	})
 	s.modules.jobs = jobs.New(s.Log)
-	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe)
+	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
 
 	databaseDumper := &backupDatabaseDumper{server: s}
 	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files).

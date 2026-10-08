@@ -1,5 +1,6 @@
 "use client"
 
+import { PathReport } from "./path-report"
 import { useState } from "react"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Field } from "@/components/form"
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input"
 import { usePoll } from "@/hooks/use-poll"
 import { del, get, getText, patch, post } from "@/lib/api"
 import {
+  diagnosticDuration,
   diagnosticFinished,
   diagnosticNameProblem,
   diagnosticReading,
@@ -205,9 +207,13 @@ function RunDetails({
             </Notice>
           )}
           <DetailList>
-            <Detail label="Tool">{run.request.tool}</Detail>
+            <Detail label="Diagnostic">
+              {run.kind === "investigation" ? "Connection path" : run.request.tool}
+            </Detail>
             <Detail label="Target">
-              <span className="font-mono break-all">{run.request.target || "this host"}</span>
+              <span className="font-mono break-all">
+                {run.investigationRequest?.target || run.request.target || "this host"}
+              </span>
             </Detail>
             <Detail label="Vantage">
               {run.scope.vantage === "dashboard_host" ? "This server" : run.scope.vantage}
@@ -223,6 +229,12 @@ function RunDetails({
                       ? "IPv4"
                       : run.scope.family}
             </Detail>
+            {run.scope.source && <Detail label="Source">{run.scope.source}</Detail>}
+            {run.scope.sourceAddress && (
+              <Detail label="Source address">{run.scope.sourceAddress}</Detail>
+            )}
+            {run.scope.address && <Detail label="Selected destination">{run.scope.address}</Detail>}
+            {run.scope.mark && <Detail label="Mark">{run.scope.mark}</Detail>}
             {run.scope.protocol && (
               <Detail label="Protocol">{run.scope.protocol.replaceAll("_", " ")}</Detail>
             )}
@@ -240,7 +252,7 @@ function RunDetails({
               <RunTime value={run.endedAt} />
             </Detail>
             <Detail label="Requested by">{run.createdBy}</Detail>
-            <Detail label="Duration">{run.result?.duration || "Not recorded"}</Detail>
+            <Detail label="Duration">{diagnosticDuration(run)}</Detail>
             <Detail label="Outcome source">
               {run.outcomeSource?.replaceAll("_", " ") || "Awaiting outcome"}
             </Detail>
@@ -264,6 +276,7 @@ function RunDetails({
               </li>
             ))}
           </ol>
+          {run.investigation && <PathReport result={run.investigation} />}
           {Boolean(run.result?.records?.length) && (
             <div aria-label="Structured result">
               <p className="mb-2 text-body font-medium">Structured records</p>

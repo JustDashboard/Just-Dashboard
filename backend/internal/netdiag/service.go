@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netpath"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
@@ -27,6 +28,7 @@ type Service struct {
 	store             *Store
 	jobs              *jobs.Manager
 	runner            Runner
+	investigator      Investigator
 	active            map[string]*activeRun
 	pendingWrites     map[string]Run
 	started, stopping bool
@@ -34,8 +36,12 @@ type Service struct {
 	timeout           time.Duration
 }
 
-func New(store *Store, manager *jobs.Manager, runner Runner) *Service {
-	return &Service{store: store, jobs: manager, runner: runner, active: map[string]*activeRun{}, pendingWrites: map[string]Run{}, now: func() time.Time { return time.Now().UTC() }, timeout: RunTimeout}
+func New(store *Store, manager *jobs.Manager, runner Runner, options ...Option) *Service {
+	s := &Service{store: store, jobs: manager, runner: runner, active: map[string]*activeRun{}, pendingWrites: map[string]Run{}, now: func() time.Time { return time.Now().UTC() }, timeout: RunTimeout}
+	for _, option := range options {
+		option(s)
+	}
+	return s
 }
 
 // Start settles the predecessor's unfinished records. No network work is
@@ -130,6 +136,11 @@ func (s *Service) create(ctx context.Context, name string, req netsec.ProbeReque
 	if err != nil {
 		return Run{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
+	return s.enqueue(ctx, Run{Name: name, Request: req, Scope: scopeFor(req)}, actor, rerunOf)
+}
+
+// Both request kinds share admission, cancellation, storage and retention.
+func (s *Service) enqueue(ctx context.Context, run Run, actor, rerunOf string) (Run, error) {
 	if len(s.active) >= MaxRunning {
 		return Run{}, ErrBusy
 	}
@@ -141,8 +152,13 @@ func (s *Service) create(ctx context.Context, name string, req netsec.ProbeReque
 		return Run{}, err
 	}
 	now := s.now()
-	run := Run{ID: hex.EncodeToString(random[:]), Name: name, Request: req, Scope: scopeFor(req), Status: "queued", CreatedAt: now, UpdatedAt: now, CreatedBy: actor, RerunOf: rerunOf,
-		Stages: []Stage{{ID: "validation", Status: "completed", StartedAt: &now, EndedAt: &now, Outcome: "validated"}, {ID: "probe", Status: "queued"}, {ID: "recording", Status: "queued"}}}
+	run.ID, run.Status = hex.EncodeToString(random[:]), "queued"
+	run.CreatedAt, run.UpdatedAt, run.CreatedBy, run.RerunOf = now, now, actor, rerunOf
+	operation := "probe"
+	if run.Kind == "investigation" {
+		operation = "investigation"
+	}
+	run.Stages = []Stage{{ID: "validation", Status: "completed", StartedAt: &now, EndedAt: &now, Outcome: "validated"}, {ID: operation, Status: "queued"}, {ID: "recording", Status: "queued"}}
 	if err := s.store.insert(ctx, run); err != nil {
 		return Run{}, err
 	}
@@ -151,10 +167,14 @@ func (s *Service) create(ctx context.Context, name string, req netsec.ProbeReque
 	gate := make(chan struct{})
 	// An exclusive job remains running while cancellation drains its process
 	// group. The prefix is unique to this record; four different runs may work.
-	job, _ := s.jobs.StartExclusive(JobPrefix+run.ID+".", jobs.Spec{Kind: JobPrefix + run.ID + "." + req.Tool, Title: name, Target: req.Target, StartedBy: actor, Timeout: s.timeout},
+	jobKind := run.Request.Tool
+	if run.Kind == "investigation" {
+		jobKind = "investigation"
+	}
+	job, _ := s.jobs.StartExclusive(JobPrefix+run.ID+".", jobs.Spec{Kind: JobPrefix + run.ID + "." + jobKind, Title: run.Name, Target: run.Scope.Target, StartedBy: actor, Timeout: s.timeout},
 		func(jobCtx context.Context, out jobs.Emitter) error { <-gate; return s.execute(jobCtx, run, out) })
 	entry.jobID, run.JobID = job.ID, job.ID
-	err = s.store.bindJob(ctx, run.ID, job.ID)
+	err := s.store.bindJob(ctx, run.ID, job.ID)
 	if err != nil {
 		s.jobs.Cancel(job.ID)
 	}
@@ -181,12 +201,18 @@ func (s *Service) execute(ctx context.Context, run Run, out jobs.Emitter) error 
 	startErr := s.store.update(context.Background(), run)
 	s.mu.Unlock()
 	var result *netsec.ProbeResult
+	var investigation *netpath.Result
 	err := startErr
 	if err == nil && ctx.Err() == nil {
-		out.Status("Running %s from this host", run.Request.Tool)
-		result, err = s.runner(ctx, run.Request)
+		if run.Kind == "investigation" {
+			out.Status("Investigating the saved source and tuple")
+			investigation, err = s.investigator(ctx, *run.InvestigationRequest)
+		} else {
+			out.Status("Running %s from this host", run.Request.Tool)
+			result, err = s.runner(ctx, run.Request)
+		}
 	}
-	if err == nil && result == nil && ctx.Err() == nil {
+	if err == nil && result == nil && investigation == nil && ctx.Err() == nil {
 		err = errors.New("the probe returned no result")
 	}
 
@@ -198,12 +224,22 @@ func (s *Service) execute(ctx context.Context, run Run, out jobs.Emitter) error 
 	run.Result, run.ResultTruncated = boundedResult(result)
 	run.HasResult = run.Result != nil
 	run.Outcome, run.OutcomeSource = outcome(ctx.Err(), result, err)
+	succeeded := result != nil && result.OK
+	if run.Kind == "investigation" {
+		run.Investigation, run.ResultTruncated = boundedInvestigation(investigation)
+		run.HasResult = run.Investigation != nil
+		run.Outcome, run.OutcomeSource = investigationOutcome(ctx.Err(), investigation, err)
+		succeeded = investigation != nil
+		if investigation != nil {
+			run.Scope.Source, run.Scope.SourceAddress, run.Scope.Address = investigation.Scope.Source, investigation.Scope.SourceAddress, investigation.Scope.Address
+		}
+	}
 	switch {
 	case entry.shutdown:
 		run.Status, run.Outcome, run.OutcomeSource = "interrupted", "interrupted", "recovery"
 	case ctx.Err() == context.Canceled:
 		run.Status = "cancelled"
-	case ctx.Err() != nil || err != nil || result == nil || !result.OK:
+	case ctx.Err() != nil || err != nil || !succeeded:
 		run.Status = "failed"
 	default:
 		run.Status = "completed"
@@ -293,6 +329,9 @@ func (s *Service) Rerun(ctx context.Context, id, actor string) (Run, error) {
 	}
 	if !terminal(previous.Status) {
 		return Run{}, ErrRunning
+	}
+	if previous.Kind == "investigation" && previous.InvestigationRequest != nil {
+		return s.createInvestigation(ctx, previous.Name, *previous.InvestigationRequest, actor, id)
 	}
 	return s.create(ctx, previous.Name, previous.Request, actor, id)
 }

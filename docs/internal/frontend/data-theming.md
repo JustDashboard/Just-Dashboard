@@ -269,3 +269,8 @@ leaks until dual-stack egress is configured.
   `color-scheme`, and clears the stored light/dark preference from anyone upgrading. `hooks/use-theme.tsx`,
   the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
   `suppressHydrationWarning` because the class is still applied by script.
+
+Saved connection investigations share the `netdiag` lifecycle and exact-source comparison. The
+`kind: "investigation"` record retains its typed request/report; `components/network/path-report.tsx`
+is used by both quick and saved readings. Report-completed-with-unknowns is a dated evidence outcome,
+not a connected/live state. The shared naming dialog snapshots its discriminated request kind.

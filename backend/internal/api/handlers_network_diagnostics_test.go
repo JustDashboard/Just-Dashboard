@@ -144,7 +144,7 @@ func TestDiagnosticArtifactsAndJobsRequireAdminIncludingNarrowedToken(t *testing
 			}
 			for _, request := range []struct{ method, path, body string }{
 				{"GET", "/network/diagnostics/", ""}, {"GET", "/network/diagnostics/policy", ""}, {"GET", "/network/diagnostics/" + run.ID, ""}, {"GET", "/network/diagnostics/" + run.ID + "/export", ""}, {"GET", "/network/diagnostics/compare?before=" + run.ID + "&after=" + run.ID, ""},
-				{"POST", "/network/diagnostics/", `{"name":"unauthorised","request":{"tool":"ping","target":"127.0.0.1"}}`}, {"PATCH", "/network/diagnostics/" + run.ID, `{"name":"changed"}`}, {"POST", "/network/diagnostics/" + run.ID + "/cancel", `{}`}, {"POST", "/network/diagnostics/" + run.ID + "/rerun", `{}`}, {"DELETE", "/network/diagnostics/" + run.ID, ""}, {"PUT", "/network/diagnostics/policy", `{"maxRuns":1,"maxAgeHours":1}`},
+				{"POST", "/network/diagnostics/", `{"name":"unauthorised","request":{"tool":"ping","target":"127.0.0.1"}}`}, {"POST", "/network/diagnostics/investigate", `{"name":"private path","investigation":{"sourceKind":"host","target":"127.0.0.1","family":"inet","protocol":"tcp","port":443,"measure":true}}`}, {"PATCH", "/network/diagnostics/" + run.ID, `{"name":"changed"}`}, {"POST", "/network/diagnostics/" + run.ID + "/cancel", `{}`}, {"POST", "/network/diagnostics/" + run.ID + "/rerun", `{}`}, {"DELETE", "/network/diagnostics/" + run.ID, ""}, {"PUT", "/network/diagnostics/policy", `{"maxRuns":1,"maxAgeHours":1}`},
 				{"GET", "/jobs/" + run.JobID, ""}, {"GET", "/jobs/" + run.JobID + "/stream", ""}, {"POST", "/jobs/" + run.JobID + "/cancel", `{}`},
 			} {
 				if w := client.do(request.method, "/api/v1"+request.path, request.body, headers); w.Code != http.StatusForbidden {

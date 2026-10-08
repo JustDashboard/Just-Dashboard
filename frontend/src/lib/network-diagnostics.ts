@@ -1,4 +1,5 @@
 import type { DotTone } from "@/components/status-dot"
+import type { PathRequest, PathResult } from "@/lib/network-investigator-types"
 import type { ProbeResult } from "@/lib/types"
 
 export type DiagnosticRequest = {
@@ -14,10 +15,17 @@ export type DiagnosticStatus =
 
 export type DiagnosticRun = {
   id: string
+  kind?: "investigation"
+  investigationRequest?: PathRequest
+  investigation?: PathResult
   name: string
   request: DiagnosticRequest
   scope: {
     vantage: string
+    source?: string
+    sourceAddress?: string
+    address?: string
+    mark?: string
     target?: string
     family: string
     protocol?: string
@@ -27,7 +35,7 @@ export type DiagnosticRun = {
   }
   status: DiagnosticStatus
   outcome?: string
-  outcomeSource?: "context" | "tool_result" | "error_text" | "recovery"
+  outcomeSource?: "context" | "tool_result" | "error_text" | "recovery" | "path_evidence"
   createdAt: string
   startedAt?: string
   endedAt?: string
@@ -56,6 +64,8 @@ export type DiagnosticDifference = {
   truncated: boolean
 }
 export type DiagnosticComparison = {
+  kind?: "investigation"
+  investigationRequest?: PathRequest
   beforeId: string
   afterId: string
   request: DiagnosticRequest
@@ -81,14 +91,43 @@ export function diagnosticCompatible(a: DiagnosticRun, b: DiagnosticRun) {
       request.record ?? "",
       request.option ?? "",
     ])
+  const pathKey = (request?: PathRequest) =>
+    request &&
+    JSON.stringify([
+      request.sourceKind,
+      request.containerId ?? "",
+      request.sourceAddress ?? "",
+      request.target,
+      request.address ?? "",
+      request.family,
+      request.protocol,
+      request.port,
+      request.mark ?? "",
+      request.measure,
+    ])
+  const same =
+    a.kind === "investigation" || b.kind === "investigation"
+      ? a.kind === b.kind &&
+        Boolean(a.investigationRequest && b.investigationRequest) &&
+        pathKey(a.investigationRequest) === pathKey(b.investigationRequest)
+      : key(a.request) === key(b.request)
   return (
     a.id !== b.id &&
     diagnosticFinished(a) &&
     diagnosticFinished(b) &&
     a.hasResult &&
     b.hasResult &&
-    key(a.request) === key(b.request)
+    same
   )
+}
+
+export function diagnosticDuration(run: Pick<DiagnosticRun, "kind" | "result" | "investigation">) {
+  if (run.kind !== "investigation") return run.result?.duration || "Not recorded"
+  const report = run.investigation
+  if (!report) return "Not recorded"
+  const elapsed = Date.parse(report.endedAt) - Date.parse(report.startedAt)
+  if (!Number.isFinite(elapsed) || elapsed < 0) return "Not recorded"
+  return `${elapsed} ms to collect the report`
 }
 
 export function diagnosticNameProblem(name: string) {
@@ -106,6 +145,7 @@ export function diagnosticRetentionProblem(runs: string, hours: string) {
 }
 
 const OUTCOMES: Record<string, { label: string; tone: DotTone }> = {
+  completed_with_unknowns: { label: "Report completed with unknowns", tone: "warning" },
   completed: { label: "Completed", tone: "notice" },
   completed_with_findings: { label: "Completed with findings", tone: "warning" },
   unsupported: { label: "Unsupported on this host", tone: "notice" },

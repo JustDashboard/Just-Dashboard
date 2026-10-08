@@ -1,6 +1,6 @@
 # Retained network diagnostics
 
-`internal/netdiag` saves named observations from the existing `netsec` tools. It uses the existing
+`internal/netdiag` saves named observations from the existing `netsec` tools and typed connection-path investigations. It uses the existing
 `jobs.Manager` to schedule and watch work; it does not add a monitoring engine or replay jobs when
 the backend restarts. Quick `POST /network/probe` requests remain synchronous and use the same
 `executeNetworkProbe` dispatcher and `netsec.ValidateProbeRequest` vocabulary as retained runs.
@@ -12,9 +12,9 @@ Recurring watches remain owned by their existing watch scheduler.
 A normalized request, name, actor, scope, and queued lifecycle are written **before** starting a job.
 If that write fails, no probe starts. The generated run ID is independent of its in-memory job ID.
 Names may be changed during or after execution; requests and completed results are immutable.
-Rerun creates a new record with `rerunOf`, using the previous normalized request.
+Rerun creates a new record with `rerunOf`, using the previous normalized request. Additive investigation fields live in the existing bounded JSON payload; existing quick-tool records need no schema migration and retain their request/result format.
 
-The request is the closed quick-tool shape `{tool,target,port?,record?,option?}`. It cannot contain
+The quick-tool request is the closed shape `{tool,target,port?,record?,option?}`. It cannot contain
 shell text, a command, a filesystem path, or an arbitrary capture filter. It validates targets,
 ports, record types, STARTTLS choices, and existing capture/Wake-on-LAN interface restrictions before
 queueing, and the existing tool validates again at execution. The tool vocabulary is ping,
@@ -26,7 +26,7 @@ A run declares `dashboard_host` as its vantage. `family` is `inet`/`inet6` for a
 includes the selected port/protocol/interface where applicable and explains that the legacy tool
 chooses its resolver, route, and source. An observation from this host does not establish inbound
 reachability, a provider firewall's decision, or every intervening policy layer. Container/source
-investigation requires its separate, explicitly scoped measurement adapter.
+investigation uses its separate, explicitly scoped measurement adapter, retained through the same lifecycle described below.
 
 The three timestamped stages are validation, probe, and recording. These are the available lifecycle
 boundaries; they are not invented DNS/TCP/TLS/HTTP timing stages. `status` is queued, running,
@@ -43,6 +43,43 @@ volatile queue retries **only the database write** on later access. The host ope
 repeated. A restart before that write succeeds loses its unsaved result and settles the unfinished
 durable row as interrupted. Cancellation still signals the running context if saving the cancellation
 request fails, and its API error states that the signal was sent but recording failed.
+
+## Retained connection investigations
+
+`POST /diagnostics/investigate` accepts `{name,investigation}` with the same closed `netpath.Request`
+as quick `POST /network/investigate`. It validates source kind/full container ID, explicit family,
+protocol, port, source, selected DNS address and mark before queueing. The run declares
+`kind: "investigation"` and retains `investigationRequest` and a typed `investigation` artifact;
+its unused quick-tool `request` is not treated as an alternate command vocabulary.
+
+The existing four-run admission budget, exclusive jobs, durable recording, cancellation, retention,
+restart interruption, private reads and exports apply to both kinds. Each explicit rerun reacquires
+fresh native inventory and verifies current container identity; a retained record never holds or
+replays a PID or network-namespace descriptor. Provider construction and investigation share a
+30-second operation deadline inside the common 90-second job deadline. No arrival, read, refresh,
+export, comparison or backend restart launches an investigation.
+
+The timestamped lifecycle is validation, investigation, recording. The typed artifact preserves
+individual layer timestamps, facts, observed/modeled/measured/unknown bases and limitations.
+`completed_with_unknowns` and `completed_with_findings`, with `outcomeSource: "path_evidence"`, mean
+the report completed with those observations; they do not claim whole-path connectivity. Cancellation
+and runner/recording errors retain the existing lifecycle semantics. Actual selected source and
+address are copied to the run's scope after execution without changing its immutable request.
+
+Investigation artifacts are capped at 128 KiB of encoded JSON. Bounded text, layer/fact/address
+counts and escaped content are copied and clipped before storage; further omissions set the same
+explicit `resultTruncated` flag. Lists omit both artifact kinds. Export includes the typed request,
+source, evidence and truncation. Compatible comparison requires exactly the same source kind,
+container identity, requested source/destination, family, protocol, port, mark and measurement choice.
+It compares retained layer bases/states, facts, owners and limitations, excluding collection timestamps
+from the line differences. Actual observed source/destination changes remain visible; unknown layers
+remain unknown and differences do not establish a cause.
+
+The investigator's **Run and save** opens the shared naming dialog with an immutable draft snapshot;
+the dialog displays source/family/protocol and whether measurement is requested. Opening it emits no
+network traffic. A rejected launch retains its name and scoped request; acceptance navigates to the
+Saved runs inspector. The inspector uses the same connection-path report renderer as the quick page,
+then offers save name, cancellation, rerun, export, watch and exact-scope comparison.
 
 ## Cancellation and restart
 
@@ -96,7 +133,8 @@ not retained probe output.
 
 | Method | Path | Behavior |
 | --- | --- | --- |
-| POST | `/` | Save `{name,request}` and start an explicit run; return 202 |
+| POST | `/` | Save `{name,request}` and start an explicit quick-tool run; return 202 |
+| POST | `/investigate` | Save `{name,investigation}` and start one explicitly scoped path report; return 202 |
 | GET | `/` | List retained metadata without result bodies |
 | GET | `/{id}` | Read one run and its retained result |
 | PATCH | `/{id}` | Save `{name}` without changing request/result |
@@ -143,6 +181,8 @@ readings in `lib/network-diagnostics.ts`; backend authorization and validation r
 
 ## Verification
 
+`netdiag/investigation_test.go` covers typed source persistence/reopen/export, explicit fresh rerun, exact-scope comparison, cancellation cleanup, validation before queueing and escaped artifact bounds. `api/handlers_network_diagnostic_investigation_test.go` covers the real router and private metadata/artifact split; the shared role tests include the investigation launch route.
+
 `netdiag/service_test.go` covers durable reopen, explicit reruns, interrupted startup without traffic,
 name preservation, cancellation during cleanup, real TERM-ignoring forked descendants, concurrency,
 failed durable writes, timeout provenance, retention and artifact/export/compare bounds.
@@ -167,3 +207,7 @@ go test ./internal/netdiag ./internal/netsec ./internal/store ./internal/api \
   -run 'Test(SavedDiagnostic|StartupInterrupts|CancellationWaits|CancellationSignals|FailedFinalRecording|Diagnostic|RetentionPersists|ConcurrencyValidation|TimeoutAndOutcome|ArtifactExport|ProbeRequest|OpenAddsDiagnostic)'
 go test -race ./internal/netdiag
 ```
+
+The connection-path inspector labels elapsed report collection separately from any retained TCP
+measurement. It does not present collection time as connection latency, and missing or invalid
+report timestamps remain “Not recorded”.

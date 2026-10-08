@@ -7,6 +7,7 @@ import { Modal } from "@/components/modal"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import type { PathRequest } from "@/lib/network-investigator-types"
 import { post } from "@/lib/api"
 import {
   diagnosticNameProblem,
@@ -24,8 +25,21 @@ export function SaveDiagnosticRun({
   label: string
   disabled: boolean
 }) {
+  return <SaveRunSnapshot snapshot={{ kind: "probe", request }} label={label} disabled={disabled} />
+}
+
+export function SaveRunSnapshot({
+  snapshot,
+  label,
+  disabled,
+}: {
+  snapshot:
+    { kind: "probe"; request: DiagnosticRequest } | { kind: "investigation"; request: PathRequest }
+  label: string
+  disabled: boolean
+}) {
   const router = useRouter()
-  const [draft, setDraft] = useState<DiagnosticRequest>()
+  const [draft, setDraft] = useState<typeof snapshot>()
   const [name, setName] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
@@ -35,10 +49,17 @@ export function SaveDiagnosticRun({
     setBusy(true)
     setError(undefined)
     try {
-      const saved = await post<DiagnosticRun>("/network/diagnostics/", {
-        name: name.trim(),
-        request: draft,
-      })
+      const saved = await post<DiagnosticRun>(
+        draft.kind === "investigation"
+          ? "/network/diagnostics/investigate"
+          : "/network/diagnostics/",
+        {
+          name: name.trim(),
+          ...(draft.kind === "investigation"
+            ? { investigation: draft.request }
+            : { request: draft.request }),
+        },
+      )
       router.push(`/network/runs?run=${encodeURIComponent(saved.id)}`)
       setDraft(undefined)
     } catch (err) {
@@ -50,11 +71,16 @@ export function SaveDiagnosticRun({
   return (
     <>
       <Button
+        type="button"
         variant="outline"
         disabled={disabled}
         onClick={() => {
-          setName(`${label} · ${request.target || "this host"}`)
-          setDraft({ ...request })
+          setName(`${label} · ${snapshot.request.target || "this host"}`)
+          setDraft(
+            snapshot.kind === "probe"
+              ? { kind: "probe", request: { ...snapshot.request } }
+              : { kind: "investigation", request: { ...snapshot.request } },
+          )
           setError(undefined)
         }}
       >
@@ -87,15 +113,34 @@ export function SaveDiagnosticRun({
               />
             </Field>
             <p className="text-body text-muted-foreground">
-              {label} · <span className="font-mono break-all">{draft.target || "this host"}</span>
-              {draft.port ? ` · port ${draft.port}` : ""}
-              {draft.record ? ` · ${draft.record}` : ""}
-              {draft.option ? ` · ${draft.option}` : ""}
+              {label} ·{" "}
+              <span className="font-mono break-all">{draft.request.target || "this host"}</span>
+              {draft.request.port ? ` · port ${draft.request.port}` : ""}
+              {draft.kind === "investigation" && (
+                <span>
+                  {" "}
+                  ·{" "}
+                  {draft.request.sourceKind === "container"
+                    ? `container ${draft.request.containerId?.slice(0, 12)}`
+                    : "this host"}{" "}
+                  · {draft.request.family === "inet6" ? "IPv6" : "IPv4"} ·{" "}
+                  {draft.request.protocol.toUpperCase()}
+                  {draft.request.sourceAddress ? ` · source ${draft.request.sourceAddress}` : ""}
+                  {draft.request.mark ? ` · mark ${draft.request.mark}` : ""}
+                  {draft.request.measure
+                    ? " · bounded TCP measurement requested"
+                    : " · evidence without connection measurement"}
+                </span>
+              )}
+              {draft.kind === "probe" && draft.request.record ? ` · ${draft.request.record}` : ""}
+              {draft.kind === "probe" && draft.request.option ? ` · ${draft.request.option}` : ""}
             </p>
             <p className="text-hint text-muted-foreground">
-              Starts one explicit test from this server with a 90-second deadline and retains its
-              bounded result. Leaving the page keeps it running; a backend restart interrupts it
-              without rerunning it.
+              {draft.kind === "investigation"
+                ? "Investigates the selected source and tuple with a 30-second operation deadline, retaining each layer’s evidence and unknowns."
+                : "Starts one explicit test from this server with a 90-second deadline and retains its bounded result."}{" "}
+              Leaving the page keeps it running; a backend restart interrupts it without rerunning
+              it.
             </p>
             {error && <ErrorState error={error} />}
           </div>
