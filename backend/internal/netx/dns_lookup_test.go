@@ -345,10 +345,12 @@ Link 2 (eth0)
  DNS Domain: ~.
  DefaultRoute: yes
 Link 3 (vpn0)
+ Current Scopes: DNS
  DNS Servers: 10.8.0.53
  DNS Domain: ~corp.example ~home.arpa
  DefaultRoute: no
 Link 4 (vpn1)
+ Current Scopes: DNS
  DNS Servers: 10.9.0.53
  DNS Domain: ~lab.corp.example
  DefaultRoute: no
@@ -393,11 +395,34 @@ func TestEffectiveLookupDoesNotBypassUnavailableNativeStub(t *testing.T) {
 	}
 	t.Cleanup(func() { dnsDial = previous })
 	result, err := testService(t).Lookup(context.Background(), "secret.corp.example", "A")
-	if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "stub disabled" || !strings.Contains(result.Route, "scope evidence unavailable") {
+	if err == nil || result != nil || !strings.Contains(err.Error(), "policy is unreadable") {
 		t.Fatalf("lookup=%+v,%v", result, err)
 	}
-	if len(calls) != 1 || calls[0] != "127.0.0.53:53" {
+	if len(calls) != 0 {
 		t.Fatalf("native policy bypassed: %v", calls)
+	}
+}
+
+func TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope(t *testing.T) {
+	for _, policy := range []string{
+		" Current Scopes: none\n DNS Servers: 10.8.0.53\n",
+		" Current Scopes: DNS\n",
+	} {
+		t.Run(strings.TrimSpace(policy), func(t *testing.T) {
+			rec := record(t)
+			rec.on("systemctl is-active systemd-resolved", "active").on("resolvectl status --no-pager", "Global\n DNS Servers: 1.1.1.1\n DNS Domain: ~.\nLink 3 (vpn0)\n"+policy+" DNS Domain: ~corp.example\n")
+			previous := dnsDial
+			calls := 0
+			dnsDial = func(context.Context, string, string) (net.Conn, error) {
+				calls++
+				return nil, errors.New("query must not be sent")
+			}
+			t.Cleanup(func() { dnsDial = previous })
+			result, err := testService(t).Lookup(t.Context(), "secret.corp.example", "A")
+			if err == nil || result != nil || calls != 0 || !strings.Contains(err.Error(), "best-match DNS scope is unavailable") {
+				t.Fatalf("private fallback: %+v %v calls=%d", result, err, calls)
+			}
+		})
 	}
 }
 

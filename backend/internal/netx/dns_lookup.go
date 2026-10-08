@@ -132,6 +132,9 @@ func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opt
 		res.Route = "explicit comparison"
 		res.Note = "Direct classic DNS to the selected destinations bypasses split-DNS routing, host records, resolver encryption and DNSSEC validation. Private names are disclosed to each selected destination."
 	} else if rv.Active {
+		if err := resolvedLookupPolicyAvailable(rv, name, rtype); err != nil {
+			return nil, err
+		}
 		// Ask the stub only. resolved owns longest-suffix routing, fallback,
 		// cache, hosts, DNSSEC and transport; reconstructing a fan-out cannot
 		// reproduce that policy and may leak private names. A disabled/unreachable
@@ -276,6 +279,29 @@ func resolvedLookupRoute(rv ResolvedView, name, rtype string) string {
 		return "longest matching domain: " + strings.Join(labels, ", ") + "; resolved selects the upstream"
 	}
 	return "native resolved default-route policy; resolved selects the upstream"
+}
+
+// A declared private suffix remains a boundary when its link has lost DNS
+// scope. Asking the stub then can invoke resolved's default-scope fallback.
+func resolvedLookupPolicyAvailable(rv ResolvedView, name, rtype string) error {
+	if rv.Error != "" {
+		return errors.New("native resolved policy is unreadable; no query or fallback was used")
+	}
+	if rtype == "PTR" {
+		a, _ := netip.ParseAddr(name)
+		name = reverseDNSName(a)
+	}
+	all := []DNSPolicyScope{{Index: 0, Domains: rv.Global.Domains, Servers: rv.Global.Servers, ActiveDNS: len(rv.Global.Servers) > 0}}
+	for _, link := range rv.Links {
+		all = append(all, DNSPolicyScope{Index: link.Index, Domains: link.Domains, Servers: link.Servers, DefaultRoute: link.DefaultRoute, ActiveDNS: containsString(link.Scopes, "DNS")})
+	}
+	chosen, _ := dnsBestPolicy(name, all)
+	for _, scope := range chosen {
+		if !scope.ActiveDNS || len(scope.Servers) == 0 {
+			return errors.New("a declared best-match DNS scope is unavailable; no query or default-scope fallback was used")
+		}
+	}
+	return nil
 }
 
 // cleanLookupName validates what will be asked. Everything but PTR takes a

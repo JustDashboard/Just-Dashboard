@@ -14,6 +14,7 @@ import { NumberTicker } from "@/components/ui/number-ticker"
 import { Adblock } from "@/components/network/dns/adblock"
 import { HostRecordsEditor } from "@/components/network/dns/host-records"
 import { LookupRace } from "@/components/network/dns/lookup-race"
+import { DNSPolicyEvidence } from "@/components/network/dns/policy-evidence"
 import { ResolverChain, viaStub } from "@/components/network/dns/resolver-chain"
 import { encryptionOf, splitServer } from "@/components/network/dns/resolvers"
 import { UpstreamEditor } from "@/components/network/dns/upstreams"
@@ -139,6 +140,9 @@ export default function NetworkDNSPage() {
       <Section title="Resolve a name">
         <LookupRace />
       </Section>
+      <Section title="Policy investigation">
+        <DNSPolicyEvidence />
+      </Section>
     </Page>
   )
 }
@@ -205,7 +209,7 @@ function Readings({ view }: { view: DNSView }) {
           }
         />
         <StatTile
-          label="Encryption"
+          label="Encryption policy"
           value={
             encryption === "required"
               ? "Required"
@@ -216,8 +220,8 @@ function Readings({ view }: { view: DNSView }) {
           tone={encryption === "plain" ? "warning" : "default"}
           hint={
             resolved.global.servers.length > 0
-              ? `DNS over TLS · ${named} of ${plural(resolved.global.servers.length, "server")} named`
-              : "DNS over TLS · no global servers"
+              ? `Configured DNS over TLS · ${named} of ${plural(resolved.global.servers.length, "server")} named`
+              : "Configured DNS over TLS · no global servers"
           }
         />
       </StatGrid>
