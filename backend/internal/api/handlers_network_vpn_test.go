@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
@@ -202,6 +204,52 @@ func TestTailscaleSetRefusesWhatCannotBeAnExitNodeRoute(t *testing.T) {
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("%s: got %d %s, want 400", name, w.Code, w.Body.String())
 		}
+	}
+}
+
+func TestTailscaleSetHandlerKeepsWithdrawalPermissionErrors(t *testing.T) {
+	dir := t.TempDir()
+	prefsPath, callsPath := filepath.Join(dir, "prefs.json"), filepath.Join(dir, "calls")
+	t.Setenv("JD_TEST_TS_PREFS", prefsPath)
+	t.Setenv("JD_TEST_TS_CALLS", callsPath)
+	vpnFakeBin(t, map[string]string{"tailscale": `case "$1 $2" in "debug prefs") cat "$JD_TEST_TS_PREFS";; *) printf '%s\n' "$*" >> "$JD_TEST_TS_CALLS"; exit 9;; esac`})
+	s := testServer(t)
+	// Route middleware separately requires system.admin. Calling the handler
+	// directly proves its content-dependent check returns 403 through the
+	// module, while routine offers do not need a destructive capability.
+	for _, tc := range []struct {
+		name, prefs, body string
+		withdraw          bool
+	}{
+		{"exit withdrawal", "tailscale-prefs-exit.json", `{"advertiseExitNode":false}`, true},
+		{"route withdrawal", "tailscale-prefs-exit.json", `{"advertiseRoutes":[]}`, true},
+		{"route addition", "tailscale-prefs-plain.json", `{"advertiseRoutes":["192.0.2.0/24"]}`, false},
+		{"already absent exit", "tailscale-prefs-plain.json", `{"advertiseExitNode":false}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(prefsPath, []byte(vpnNetxFixture(t, tc.prefs)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, role := range []auth.Role{auth.RoleLimited, auth.RoleReadOnly} {
+				_ = os.Remove(callsPath)
+				req := httptest.NewRequest(http.MethodPost, "/network/vpn/tailscale", strings.NewReader(tc.body))
+				req.Header.Set("Content-Type", "application/json")
+				p := &httpx.Principal{User: &auth.User{ID: 1, Username: "tester"}, Role: role, Kind: "session", IP: "127.0.0.1"}
+				req = req.WithContext(httpx.WithPrincipal(req.Context(), p))
+				w := httptest.NewRecorder()
+				s.handle(s.handleTailscaleSet).ServeHTTP(w, req)
+				if tc.withdraw {
+					if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"forbidden"`) {
+						t.Fatalf("%s withdrawal: got %d %s, want 403 forbidden", role, w.Code, w.Body.String())
+					}
+					if _, err := os.Stat(callsPath); !os.IsNotExist(err) {
+						t.Fatalf("%s unauthorized withdrawal ran a mutation", role)
+					}
+				} else if w.Code != http.StatusBadRequest && w.Code != http.StatusConflict {
+					t.Fatalf("%s routine offer: got %d %s, want fake tool refusal or forwarding prerequisite", role, w.Code, w.Body.String())
+				}
+			}
+		})
 	}
 }
 
