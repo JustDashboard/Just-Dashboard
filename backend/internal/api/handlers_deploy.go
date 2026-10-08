@@ -1181,7 +1181,11 @@ func (s *Server) handleDeploymentRunStream(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return mapDeployError(err)
 	}
-	defer unsubscribe()
+	defer func() {
+		if unsubscribe != nil {
+			unsubscribe()
+		}
+	}()
 	s.recordAudit(r, "deploy.run.stream.open", fmt.Sprint(runID), map[string]any{"after": after})
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {
@@ -1195,8 +1199,23 @@ func (s *Server) handleDeploymentRunStream(w http.ResponseWriter, r *http.Reques
 	if err := conn.Send("snapshot", snapshot); err != nil {
 		return nil
 	}
-	if len(backlog) > 0 {
-		if err := conn.Send("events", backlog); err != nil {
+	for {
+		if len(backlog) > 0 {
+			if err := conn.Send("events", backlog); err != nil {
+				return nil
+			}
+			after = backlog[len(backlog)-1].Seq
+		}
+		if len(backlog) < deploy.RunEventReplayLimit {
+			break
+		}
+		// A full page is not the end of retained history. Re-subscribe after
+		// the delivered cursor so events committed during replay are read from
+		// the store; only the final page hands off to its live subscription.
+		unsubscribe()
+		backlog, live, unsubscribe, err = s.modules.deployRuns.Subscribe(ctx, runID, after)
+		if err != nil {
+			conn.SendError("could not replay deployment events; reconnect to resume")
 			return nil
 		}
 	}

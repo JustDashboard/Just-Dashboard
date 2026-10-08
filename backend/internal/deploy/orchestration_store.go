@@ -639,6 +639,28 @@ func (s *OrchestrationStore) idempotentRun(ctx context.Context, req RunRequest) 
 	if run.RequestDigest != req.RequestDigest {
 		return nil, ErrIdempotencyConflict
 	}
+	// Shipped request digests omitted manual source overrides. Compare their
+	// persisted request metadata as well so old keys retain their identity.
+	// A ref names the request, while its resolved commit may move on a retry.
+	requestedSource := func(metadata json.RawMessage) (string, string, error) {
+		if len(metadata) == 0 {
+			return "", "", nil
+		}
+		var source struct {
+			Revision string `json:"requestedRevision"`
+			Ref      string `json:"requestedRef"`
+		}
+		err := json.Unmarshal(metadata, &source)
+		if source.Ref != "" {
+			source.Revision = ""
+		}
+		return source.Revision, source.Ref, err
+	}
+	priorRevision, priorRef, priorErr := requestedSource(run.Metadata)
+	nextRevision, nextRef, nextErr := requestedSource(req.Metadata)
+	if priorErr != nil || nextErr != nil || priorRevision != nextRevision || priorRef != nextRef {
+		return nil, ErrIdempotencyConflict
+	}
 	return run, nil
 }
 

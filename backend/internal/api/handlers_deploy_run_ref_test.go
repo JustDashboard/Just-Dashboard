@@ -1,9 +1,12 @@
 package api
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -325,5 +328,88 @@ func TestDeploymentRunCreateRefusesAPullRequestHeadOutsideAPreview(t *testing.T)
 	var runs int
 	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_runs WHERE project_id=?`, projectID).Scan(&runs); err != nil || runs != 0 {
 		t.Fatalf("runs enqueued = %d, %v", runs, err)
+	}
+}
+
+func TestDeploymentRunIdempotencyIncludesRequestedSource(t *testing.T) {
+	for _, field := range []string{"sourceRevision", "ref"} {
+		t.Run(field, func(t *testing.T) {
+			c, s := newClient(t)
+			projectID, environmentID := insertRefDeployFixture(t, s, "idempotent-source", gitSourceFixture(), deploy.BuildDockerfile)
+			first, changed := strings.Repeat("a", 40), strings.Repeat("b", 40)
+			if field == "ref" {
+				first, changed = "main", "release"
+				// Different ref names can resolve to the same commit and must
+				// still be different requests under the same key.
+				fakeGitOnPath(t, "#!/bin/sh\nprintf '%s\\t%s\\n' "+strings.Repeat("a", 40)+" \"$5\"\n")
+			}
+			path := runCreatePath(projectID, environmentID)
+			headers := map[string]string{"Idempotency-Key": "same-source-request"}
+			request := func(value string) *httptest.ResponseRecorder {
+				body, _ := json.Marshal(map[string]string{"operation": "deploy", field: value})
+				return c.do(http.MethodPost, path, string(body), headers)
+			}
+			initial := request(first)
+			if initial.Code != http.StatusAccepted {
+				t.Fatalf("initial request: %d %s", initial.Code, initial.Body.String())
+			}
+			var run deploy.EngineRun
+			if err := json.Unmarshal(initial.Body.Bytes(), &run); err != nil {
+				t.Fatal(err)
+			}
+			// This is the digest persisted by already shipped versions. The
+			// source check must work without rewriting existing run records.
+			digest := sha256.Sum256([]byte(fmt.Sprintf("normalized:%d:%d:deploy:1:0", projectID, environmentID)))
+			if run.RequestDigest != hex.EncodeToString(digest[:]) {
+				t.Fatalf("changed the persisted digest format: %s", run.RequestDigest)
+			}
+			replay := request(first)
+			if replay.Code != http.StatusAccepted {
+				t.Fatalf("identical retry: %d %s", replay.Code, replay.Body.String())
+			}
+			var replayed deploy.EngineRun
+			if err := json.Unmarshal(replay.Body.Bytes(), &replayed); err != nil {
+				t.Fatal(err)
+			}
+			if replayed.ID != run.ID || replayed.SourceRevision != run.SourceRevision {
+				t.Fatalf("retry changed the frozen run: %#v", replayed)
+			}
+			conflict := request(changed)
+			if conflict.Code != http.StatusConflict || decodedAPIError(t, conflict.Body.Bytes()).Code != "idempotency_conflict" {
+				t.Fatalf("changed source: %d %s", conflict.Code, conflict.Body.String())
+			}
+			var count int
+			if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_runs WHERE project_id = ?`, projectID).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("idempotent requests created %d runs", count)
+			}
+		})
+	}
+}
+
+func TestDeploymentRunIdempotentRefKeepsOriginalCommitAfterRefMoves(t *testing.T) {
+	c, s := newClient(t)
+	projectID, environmentID := insertRefDeployFixture(t, s, "moving-idempotent-ref", gitSourceFixture(), deploy.BuildDockerfile)
+	first, next := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	fakeGitOnPath(t, "#!/bin/sh\nprintf '%s\\t%s\\n' "+first+" \"$5\"\n")
+	headers := map[string]string{"Idempotency-Key": "moving-ref"}
+	path := runCreatePath(projectID, environmentID)
+	initial := c.do(http.MethodPost, path, `{"operation":"deploy","ref":"main"}`, headers)
+	if initial.Code != http.StatusAccepted {
+		t.Fatalf("initial request: %d %s", initial.Code, initial.Body.String())
+	}
+	fakeGitOnPath(t, "#!/bin/sh\nprintf '%s\\t%s\\n' "+next+" \"$5\"\n")
+	replay := c.do(http.MethodPost, path, `{"operation":"deploy","ref":"main"}`, headers)
+	if replay.Code != http.StatusAccepted {
+		t.Fatalf("retry after ref moved: %d %s", replay.Code, replay.Body.String())
+	}
+	var run deploy.EngineRun
+	if err := json.Unmarshal(replay.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.SourceRevision != first {
+		t.Fatalf("retry built moved ref %s, want original commit %s", run.SourceRevision, first)
 	}
 }

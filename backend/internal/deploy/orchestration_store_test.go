@@ -981,3 +981,25 @@ func TestRetryCarriesForwardMergedRunMetadata(t *testing.T) {
 		t.Fatalf("retried run metadata = %s, want the original commit carried forward", retry.Metadata)
 	}
 }
+
+func TestEnqueueIdempotencyKeepsRequestsWithoutSourceMetadata(t *testing.T) {
+	f := newOrchestrationFixture(t)
+	environmentID := f.addEnvironment(t, "production", EnvironmentProduction)
+	req := RunRequest{
+		ProjectID: f.projectID, EnvironmentID: environmentID,
+		Operation: OperationDeploy, Trigger: TriggerManual, Actor: "admin",
+		IdempotencyKey: "without-source-metadata", RequestDigest: "existing-digest",
+		PlanRevision: 1, SlotClass: SlotLight,
+	}
+	initial, created, err := f.runs.Enqueue(t.Context(), req)
+	if err != nil || !created {
+		t.Fatalf("initial request: created=%t err=%v", created, err)
+	}
+	for _, metadata := range []json.RawMessage{nil, json.RawMessage(`null`), json.RawMessage(`{}`)} {
+		req.Metadata = metadata
+		replayed, created, err := f.runs.Enqueue(t.Context(), req)
+		if err != nil || created || replayed.ID != initial.ID {
+			t.Fatalf("metadata %s replay: created=%t err=%v run=%#v", metadata, created, err, replayed)
+		}
+	}
+}

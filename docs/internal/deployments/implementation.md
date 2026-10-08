@@ -16,7 +16,12 @@ only renderer/executor/validation authority for their feature.
   replace the live release; ambiguous cutover evidence restores or stops for operator recovery.
 - Events commit before publish and are monotonically sequenced per run. Reconnect resumes after a sequence;
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
-  allowed to stall execution.
+  allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
+  events before handing off to live events, including the terminal tail of an already completed run.
+- Reusing a run's `Idempotency-Key` with a different manual `sourceRevision` or `ref` returns
+  `409 idempotency_conflict`. The comparison includes the persisted source-request metadata alongside
+  the existing digest, so keys created before this check retain their behavior. Retrying the same ref
+  returns the original run and frozen commit even if that ref has since moved.
 - `deploy_projects.id` remains the deployment identity. The additive normalized schema and compatibility
   migration retain legacy route/hook/env/history behavior while the persistent engine and UI replace it.
   `PUT /deploy/{id}` keeps its legacy Compose contract byte for byte for a full body — every field
