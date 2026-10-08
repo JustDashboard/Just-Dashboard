@@ -152,7 +152,7 @@ func parseDNSResponse(packet []byte, id uint16, question dnsmessage.Question) ([
 	if err != nil {
 		return nil, false, err
 	}
-	if len(questions) != 1 || questions[0].Type != question.Type || questions[0].Class != question.Class || !strings.EqualFold(questions[0].Name.String(), question.Name.String()) {
+	if len(questions) != 1 || questions[0].Type != question.Type || questions[0].Class != question.Class || dnsNameKey(questions[0].Name) != dnsNameKey(question.Name) {
 		return nil, false, errors.New("the resolver answered a different question")
 	}
 	if header.Truncated {
@@ -166,9 +166,14 @@ func parseDNSResponse(packet []byte, id uint16, question dnsmessage.Question) ([
 		return nil, false, failure
 	}
 	type record struct {
-		value    string
-		priority uint16
+		owner, value string
+		priority     uint16
 	}
+	type alias struct {
+		target      string
+		conflicting bool
+	}
+	aliases := map[string]alias{}
 	var records []record
 	for {
 		rh, err := parser.AnswerHeader()
@@ -178,13 +183,13 @@ func parseDNSResponse(packet []byte, id uint16, question dnsmessage.Question) ([
 		if err != nil {
 			return nil, false, err
 		}
-		if rh.Type != question.Type || rh.Class != dnsmessage.ClassINET {
+		if rh.Class != dnsmessage.ClassINET || rh.Type != question.Type && rh.Type != dnsmessage.TypeCNAME {
 			if err := parser.SkipAnswer(); err != nil {
 				return nil, false, err
 			}
 			continue
 		}
-		var rec record
+		rec := record{owner: dnsNameKey(rh.Name)}
 		switch rh.Type {
 		case dnsmessage.TypeA:
 			var r dnsmessage.AResource
@@ -198,6 +203,11 @@ func parseDNSResponse(packet []byte, id uint16, question dnsmessage.Question) ([
 			var r dnsmessage.CNAMEResource
 			r, err = parser.CNAMEResource()
 			rec.value = r.CNAME.String()
+			if err == nil {
+				target := dnsNameKey(r.CNAME)
+				previous, exists := aliases[rec.owner]
+				aliases[rec.owner] = alias{target: target, conflicting: previous.conflicting || exists && previous.target != target}
+			}
 		case dnsmessage.TypeMX:
 			var r dnsmessage.MXResource
 			r, err = parser.MXResource()
@@ -222,8 +232,45 @@ func parseDNSResponse(packet []byte, id uint16, question dnsmessage.Question) ([
 		if err != nil {
 			return nil, false, err
 		}
-		records = append(records, rec)
+		if rh.Type == question.Type {
+			records = append(records, rec)
+		}
 	}
+	// Answer order is not significant. First follow the aliases rooted at the
+	// question, then accept only that terminal owner's requested records. A
+	// CNAME question asks for the original alias itself, not its target's data.
+	original := dnsNameKey(question.Name)
+	owner := original
+	visited := map[string]bool{}
+	for {
+		if visited[owner] {
+			return nil, false, errors.New("DNS answer contains a CNAME cycle")
+		}
+		visited[owner] = true
+		a, exists := aliases[owner]
+		if !exists {
+			break
+		}
+		if a.conflicting {
+			return nil, false, errors.New("DNS answer contains conflicting CNAME targets")
+		}
+		owner = a.target
+	}
+	if question.Type == dnsmessage.TypeCNAME {
+		owner = original
+	}
+	filtered := records[:0]
+	for _, rec := range records {
+		if question.Type != dnsmessage.TypeCNAME && visited[rec.owner] {
+			if _, isAlias := aliases[rec.owner]; isAlias {
+				return nil, false, errors.New("DNS answer contains both a CNAME and its requested records")
+			}
+		}
+		if rec.owner == owner {
+			filtered = append(filtered, rec)
+		}
+	}
+	records = filtered
 	sort.SliceStable(records, func(i, j int) bool {
 		if records[i].priority != records[j].priority {
 			return records[i].priority < records[j].priority
@@ -235,4 +282,16 @@ func parseDNSResponse(packet []byte, id uint16, question dnsmessage.Question) ([
 		answers[i] = rec.value
 	}
 	return answers, false, nil
+}
+
+// DNS case folding applies only to ASCII letters (RFC 4343), not Unicode
+// equivalents such as the Kelvin sign. Names from the wire can contain both.
+func dnsNameKey(name dnsmessage.Name) string {
+	key := []byte(name.String())
+	for i, b := range key {
+		if b >= 'A' && b <= 'Z' {
+			key[i] = b + ('a' - 'A')
+		}
+	}
+	return string(key)
 }

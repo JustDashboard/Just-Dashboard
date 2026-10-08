@@ -149,3 +149,123 @@ func TestDNSResponseRejectsMalformedAndUnrelatedAnswers(t *testing.T) {
 		})
 	}
 }
+
+func dnsResponsePacket(t *testing.T, question dnsmessage.Question, answers ...dnsmessage.Resource) []byte {
+	t.Helper()
+	message := dnsmessage.Message{
+		Header:    dnsmessage.Header{ID: 7, Response: true, RecursionAvailable: true},
+		Questions: []dnsmessage.Question{question}, Answers: answers,
+	}
+	packet, err := message.Pack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return packet
+}
+
+func dnsAnswer(owner string, body dnsmessage.ResourceBody) dnsmessage.Resource {
+	return dnsmessage.Resource{
+		Header: dnsmessage.ResourceHeader{Name: dnsmessage.MustNewName(owner), Class: dnsmessage.ClassINET, TTL: 60},
+		Body:   body,
+	}
+}
+
+func dnsAlias(owner, target string) dnsmessage.Resource {
+	return dnsAnswer(owner, &dnsmessage.CNAMEResource{CNAME: dnsmessage.MustNewName(target)})
+}
+
+func TestDNSResponseIgnoresUnrelatedRecordOwners(t *testing.T) {
+	for _, tc := range []struct {
+		qtype dnsmessage.Type
+		body  dnsmessage.ResourceBody
+	}{
+		{dnsmessage.TypeA, &dnsmessage.AResource{A: [4]byte{192, 0, 2, 99}}},
+		{dnsmessage.TypeAAAA, &dnsmessage.AAAAResource{AAAA: netip.MustParseAddr("2001:db8::99").As16()}},
+		{dnsmessage.TypeCNAME, &dnsmessage.CNAMEResource{CNAME: dnsmessage.MustNewName("canonical.example.")}},
+		{dnsmessage.TypeMX, &dnsmessage.MXResource{Pref: 10, MX: dnsmessage.MustNewName("mail.example.")}},
+		{dnsmessage.TypeTXT, &dnsmessage.TXTResource{TXT: []string{"unrelated text"}}},
+		{dnsmessage.TypeNS, &dnsmessage.NSResource{NS: dnsmessage.MustNewName("ns.example.")}},
+		{dnsmessage.TypePTR, &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName("host.example.")}},
+		{dnsmessage.TypeSRV, &dnsmessage.SRVResource{Port: 443, Target: dnsmessage.MustNewName("service.example.")}},
+	} {
+		t.Run(tc.qtype.String(), func(t *testing.T) {
+			question := dnsmessage.Question{Name: dnsmessage.MustNewName("www.example."), Type: tc.qtype, Class: dnsmessage.ClassINET}
+			packet := dnsResponsePacket(t, question, dnsAnswer("unrelated.example.", tc.body))
+			answers, _, err := parseDNSResponse(packet, 7, question)
+			if err != nil || len(answers) != 0 {
+				t.Fatalf("unrelated owner was attributed to the question: %v, %v", answers, err)
+			}
+		})
+	}
+}
+
+func TestDNSResponseFollowsOnlyTheQuestionsCNAMEChain(t *testing.T) {
+	question := dnsmessage.Question{Name: dnsmessage.MustNewName("www.example."), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}
+	packet := dnsResponsePacket(t, question,
+		dnsAnswer("Canonical.Example.", &dnsmessage.AResource{A: [4]byte{192, 0, 2, 7}}),
+		dnsAnswer("unrelated.example.", &dnsmessage.AResource{A: [4]byte{192, 0, 2, 99}}),
+		dnsAlias("intermediate.example.", "canonical.example."),
+		dnsAlias("WWW.Example.", "Intermediate.Example."),
+		// An unrelated cycle must not change the answer for this question.
+		dnsAlias("unrelated.example.", "unrelated.example."),
+	)
+	answers, _, err := parseDNSResponse(packet, 7, question)
+	if err != nil || len(answers) != 1 || answers[0] != "192.0.2.7" {
+		t.Fatalf("canonical answer = %v, %v", answers, err)
+	}
+
+	question.Type = dnsmessage.TypeCNAME
+	packet = dnsResponsePacket(t, question,
+		dnsAlias("intermediate.example.", "canonical.example."),
+		dnsAlias("www.example.", "intermediate.example."),
+	)
+	answers, _, err = parseDNSResponse(packet, 7, question)
+	if err != nil || len(answers) != 1 || answers[0] != "intermediate.example." {
+		t.Fatalf("CNAME question should return its own alias, not subsequent aliases: %v, %v", answers, err)
+	}
+}
+
+func TestDNSResponseRejectsMalformedCNAMEChains(t *testing.T) {
+	question := dnsmessage.Question{Name: dnsmessage.MustNewName("www.example."), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}
+	for _, tc := range []struct {
+		name    string
+		answers []dnsmessage.Resource
+	}{
+		{"self cycle", []dnsmessage.Resource{dnsAlias("www.example.", "www.example.")}},
+		{"two-node cycle", []dnsmessage.Resource{dnsAlias("www.example.", "other.example."), dnsAlias("other.example.", "www.example.")}},
+		{"conflicting targets", []dnsmessage.Resource{dnsAlias("www.example.", "one.example."), dnsAlias("www.example.", "two.example.")}},
+		{"alias also has requested data", []dnsmessage.Resource{dnsAlias("www.example.", "canonical.example."), dnsAnswer("www.example.", &dnsmessage.AResource{A: [4]byte{192, 0, 2, 99}})}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			packet := dnsResponsePacket(t, question, tc.answers...)
+			if answers, _, err := parseDNSResponse(packet, 7, question); err == nil {
+				t.Fatalf("malformed chain accepted: %v", answers)
+			}
+		})
+	}
+}
+
+func TestDNSResponseUsesASCIICaseFolding(t *testing.T) {
+	question := dnsmessage.Question{Name: dnsmessage.MustNewName("k.example."), Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}
+	answer := &dnsmessage.AResource{A: [4]byte{192, 0, 2, 7}}
+	packet := dnsResponsePacket(t, question, dnsAnswer("K.Example.", answer))
+	if answers, _, err := parseDNSResponse(packet, 7, question); err != nil || len(answers) != 1 {
+		t.Fatalf("ASCII case variant rejected: %v, %v", answers, err)
+	}
+	caseQuestion := question
+	caseQuestion.Name = dnsmessage.MustNewName("K.EXAMPLE.")
+	packet = dnsResponsePacket(t, caseQuestion, dnsAnswer("K.Example.", answer))
+	if answers, _, err := parseDNSResponse(packet, 7, question); err != nil || len(answers) != 1 {
+		t.Fatalf("ASCII case variation in response question rejected: %v, %v", answers, err)
+	}
+	packet = dnsResponsePacket(t, question, dnsAnswer("K.example.", answer))
+	if answers, _, err := parseDNSResponse(packet, 7, question); err != nil || len(answers) != 0 {
+		t.Fatalf("Unicode case equivalent treated as DNS equality: %v, %v", answers, err)
+	}
+	otherQuestion := question
+	otherQuestion.Name = dnsmessage.MustNewName("K.example.")
+	packet = dnsResponsePacket(t, otherQuestion)
+	if _, _, err := parseDNSResponse(packet, 7, question); err == nil {
+		t.Fatal("response to a Unicode-equivalent question accepted")
+	}
+}
