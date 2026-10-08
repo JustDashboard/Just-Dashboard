@@ -125,3 +125,101 @@ func TestRestoreInPlaceMapsEachSourceRootBackToItsPath(t *testing.T) {
 		t.Fatalf("a source outside the plan was written: %q", body)
 	}
 }
+
+func TestRestoreInPlaceRestoresIndividualFileSources(t *testing.T) {
+	for _, state := range []string{"existing", "missing", "missing parents", "empty", "directory conflict"} {
+		t.Run(state, func(t *testing.T) {
+			parent := filepath.Join(t.TempDir(), "app")
+			if err := os.Mkdir(parent, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			source := filepath.Join(parent, "app.conf")
+			contents := "backup contents"
+			if state == "empty" {
+				contents = ""
+			}
+			if err := os.WriteFile(source, []byte(contents), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, runner, _, run := manifestFixture(t, []string{source}, nil)
+			if run.Status != StatusSuccess {
+				t.Fatalf("backup failed: %+v", run)
+			}
+			var err error
+			switch state {
+			case "missing":
+				err = os.Remove(source)
+			case "missing parents":
+				err = os.RemoveAll(parent)
+			case "directory conflict":
+				if err := os.Remove(source); err != nil {
+					t.Fatal(err)
+				}
+				err = os.Mkdir(source, 0o700)
+			default:
+				err = os.WriteFile(source, []byte("changed contents"), 0o600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := runner.RestoreInPlace(t.Context(), run.ID)
+			if state == "directory conflict" {
+				if err == nil {
+					t.Fatalf("a file restored onto a directory reported success: %+v", res)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if data, err := os.ReadFile(source); err != nil || string(data) != contents {
+				t.Fatalf("restored file = %q, %v, want %q", data, err, contents)
+			}
+			if res.Entries != 1 || res.Bytes != int64(len(contents)) || len(res.Skipped) != 0 {
+				t.Fatalf("incorrect restore counts: %+v", res)
+			}
+			if res.Destination != "" || len(res.Targets) != 1 || res.Targets[0] != source {
+				t.Fatalf("incorrect in-place destination: %+v", res)
+			}
+		})
+	}
+}
+
+func TestRestoreInPlaceSelectsFileSourcesAlongsideDirectories(t *testing.T) {
+	root := t.TempDir()
+	file, directory := filepath.Join(root, "app.conf"), filepath.Join(root, "data")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for path, data := range map[string]string{file: "conf", filepath.Join(directory, "canary"): "record"} {
+		if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, runner, _, run := manifestFixture(t, []string{file, directory}, nil)
+	if run.Status != StatusSuccess {
+		t.Fatalf("backup failed: %+v", run)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(directory); err != nil {
+		t.Fatal(err)
+	}
+	res, err := runner.RestoreInPlace(t.Context(), run.ID, RestoreOptions{Paths: []string{"source-0001"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(file); err != nil || string(data) != "conf" || res.Entries != 1 || res.Bytes != 4 {
+		t.Fatalf("selected file = %q, %v, result=%+v", data, err, res)
+	}
+	if _, err := os.Stat(directory); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unselected source was created: %v", err)
+	}
+	if _, err := runner.RestoreInPlace(t.Context(), run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(filepath.Join(directory, "canary")); err != nil || string(data) != "record" {
+		t.Fatalf("directory source was not restored: %q, %v", data, err)
+	}
+}

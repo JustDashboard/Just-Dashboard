@@ -174,6 +174,74 @@ func TestUploadIsAtomicAndKeepsTheOriginalMode(t *testing.T) {
 	}
 }
 
+func TestUploadDoesNotReplaceADestinationCreatedDuringTransfer(t *testing.T) {
+	for _, kind := range []string{"file", "upload", "directory", "symlink"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			s := New([]string{root})
+			path := filepath.Join(root, "destination")
+			reader, writer := io.Pipe()
+			t.Cleanup(func() {
+				_ = reader.Close()
+				_ = writer.Close()
+			})
+			result := make(chan error, 1)
+			go func() {
+				defer reader.Close()
+				_, err := s.Upload(path, reader, false)
+				result <- err
+			}()
+			// The first chunk can only be consumed after Upload checked the
+			// destination. Hold EOF until another writer has claimed the name.
+			if _, err := writer.Write([]byte("first upload")); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			switch kind {
+			case "file":
+				err = os.WriteFile(path, []byte("keep"), 0o600)
+			case "upload":
+				_, err = s.Upload(path, strings.NewReader("keep"), false)
+			case "directory":
+				err = os.Mkdir(path, 0o700)
+			case "symlink":
+				err = os.Symlink("other-file", path)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-result; !errors.Is(err, fs.ErrExist) {
+				t.Fatalf("Upload = %v, want ErrExist", err)
+			}
+			st, err := os.Lstat(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "file", "upload":
+				if body, err := os.ReadFile(path); err != nil || string(body) != "keep" {
+					t.Fatalf("destination changed: %q, %v", body, err)
+				}
+			case "directory":
+				if !st.IsDir() {
+					t.Fatalf("destination is no longer a directory: %v", st.Mode())
+				}
+			case "symlink":
+				if target, err := os.Readlink(path); err != nil || target != "other-file" {
+					t.Fatalf("destination symlink changed: %q, %v", target, err)
+				}
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil || len(entries) != 1 {
+				t.Fatalf("upload left temporary files: %v, %v", entries, err)
+			}
+		})
+	}
+}
+
 // An archive this server writes must never carry a "../" entry, and a
 // selected symlink is archived as the link rather than as its target.
 func TestArchiveMembersStayUnderTheBaseAndKeepLinks(t *testing.T) {

@@ -205,7 +205,10 @@ entries (`source-0001/etc`, one file) that narrow the restore to themselves and 
 and `inPlace`, which `Runner.RestoreInPlace` answers by mapping each recorded `source-NNNN` root back
 onto the path the manifest says it came from, resolving every original path through `files.Resolve`
 again so a root restriction added since the backup still holds; it needs a complete manifest, so a
-legacy archive can only be restored into a directory. Database dumps are never
+legacy archive can only be restored into a directory. A recorded source may be an individual file or
+a directory: extraction uses the archive entry's type, restores a file's bytes at its original path,
+and creates missing parents as needed. An existing directory at a file's path is an error, and a
+filtered-out source is not created. Database dumps are never
 written to disk by an in-place restore; they go back through the Databases owner as before.
 `GET /backups/runs/{runID}/download` streams the verified artifact (`Runner.OpenArtifact`: the local
 file, or a private download of a remote one, checksum proven first) as an attachment; it sits with the

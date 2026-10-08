@@ -303,7 +303,11 @@ func (m *Manager) Subscribe(id string, after int) (Job, []Line, <-chan Line, fun
 	// Buffered generously: a slow reader must not stall the command, and the
 	// send below drops rather than blocks for the same reason.
 	ch := make(chan Line, 512)
-	e.subs[ch] = struct{}{}
+	if e.job.EndedAt != nil {
+		close(ch)
+	} else {
+		e.subs[ch] = struct{}{}
+	}
 	unsubscribe := func() {
 		e.mu.Lock()
 		defer e.mu.Unlock()
@@ -374,6 +378,7 @@ func (e *entry) snapshotJob() Job {
 
 func (e *entry) appendLine(stream, text string) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.job.Lines++
 	line := Line{Seq: e.job.Lines, Stream: stream, Text: text, At: time.Now().UTC()}
 	e.lines = append(e.lines, line)
@@ -381,13 +386,9 @@ func (e *entry) appendLine(stream, text string) {
 		e.lines = e.lines[len(e.lines)-maxLines:]
 		e.first = e.lines[0].Seq
 	}
-	subs := make([]chan Line, 0, len(e.subs))
+	// Sending and closing share the lock, so a disconnect cannot close a
+	// channel between selecting its subscriber and delivering this line.
 	for ch := range e.subs {
-		subs = append(subs, ch)
-	}
-	e.mu.Unlock()
-
-	for _, ch := range subs {
 		select {
 		case ch <- line:
 		default:
@@ -414,6 +415,7 @@ func (e *entry) markCancelled() {
 
 func (e *entry) finish(runErr, ctxErr error) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	now := time.Now().UTC()
 	e.job.EndedAt = &now
 	switch {
@@ -431,16 +433,10 @@ func (e *entry) finish(runErr, ctxErr error) {
 	default:
 		e.job.Status = StatusSucceeded
 	}
-	subs := make([]chan Line, 0, len(e.subs))
-	for ch := range e.subs {
-		subs = append(subs, ch)
-		delete(e.subs, ch)
-	}
-	e.mu.Unlock()
-
 	// Closing every subscriber is how a streaming client learns the job is
 	// over without polling for it.
-	for _, ch := range subs {
+	for ch := range e.subs {
+		delete(e.subs, ch)
 		close(ch)
 	}
 }

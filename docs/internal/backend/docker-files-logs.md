@@ -220,10 +220,12 @@ basename. A copy error leaves an existing regular destination intact.
 the a.txt already there. `Move` also refuses a directory into its own subtree with a sentence rather
 than rename's EINVAL, and treats a move onto itself as a no-op. `Touch` and `Mkdir` are the "New file"
 and "New folder" verbs and refuse an existing path the same way (`Mkdir` still creates missing
-parents). Uploads go through `Upload`, which writes to a temporary sibling and renames into place the
-way `Write` does: an interrupted transfer never leaves a truncated file, an existing file keeps its
-owner and mode across the replacement (which is what lets the image editor save over a picture the
-web server owns), and `?overwrite=true` is what permits the replacement at all. The handler sends one
+parents). Uploads go through `Upload`, which writes to a temporary sibling and publishes it atomically:
+without overwrite, a no-replace rename (or a hard link where unsupported) claims the destination only
+if it is still free after the transfer; with overwrite, a rename replaces it. An interrupted transfer
+never leaves a truncated file. An existing file keeps its owner and mode across the replacement
+(which is what lets the image editor save over a picture the web server owns), and `?overwrite=true`
+is what permits the replacement at all. The handler sends one
 request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.

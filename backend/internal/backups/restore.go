@@ -21,8 +21,8 @@ type RestoreResult struct {
 	Entries     int      `json:"entries"`
 	Bytes       int64    `json:"bytes"`
 	Skipped     []string `json:"skipped,omitempty"`
-	// Targets are the directories written to. One for a restore into a
-	// destination; one per recorded source for a restore in place.
+	// Targets are the paths written to. One directory for a restore into a
+	// destination; one file or directory per recorded source in place.
 	Targets []string `json:"targets,omitempty"`
 }
 
@@ -85,9 +85,6 @@ func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...Restor
 		if resolved == "/" {
 			return nil, fmt.Errorf("refusing to restore directly over /")
 		}
-		if err := os.MkdirAll(resolved, 0o755); err != nil {
-			return nil, err
-		}
 		plan.roots[source.ArchivePath] = resolved
 		targets = append(targets, resolved)
 	}
@@ -102,8 +99,8 @@ func (r *Runner) RestoreInPlace(ctx context.Context, runID int64, opts ...Restor
 // restorePlan decides where an entry lands and whether it lands at all.
 type restorePlan struct {
 	filter *pathFilter
-	// roots maps an archive root (source-0001) to the directory it restores
-	// into. Nil means every entry restores under one destination.
+	// roots maps an archive root (source-0001) to its original file or
+	// directory. Nil means every entry restores under one destination.
 	roots map[string]string
 }
 
@@ -193,11 +190,19 @@ func extractArchiveBounded(ctx context.Context, archivePath, dest string, runID 
 		if !wanted {
 			continue
 		}
-		if name == "." {
-			// The source root itself: it exists already, and its recorded
-			// mode belongs to the directory the operator chose.
+		if name == "." && hdr.Typeflag == tar.TypeDir {
+			// Keep the chosen directory's mode, but create a missing source
+			// root only when the archive actually restores it as a directory.
+			if err := safepath.Mkdir(base, 0o755); err != nil {
+				return res, err
+			}
 			res.Entries++
 			continue
+		}
+		if name == "." && plan.roots != nil {
+			// A source can be a single file. Restore that root entry through
+			// the normal extraction path instead of counting it without data.
+			base, name = filepath.Dir(base), filepath.Base(base)
 		}
 		target, err := safepath.Join(base, name)
 		if err != nil {
