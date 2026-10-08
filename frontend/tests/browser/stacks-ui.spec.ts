@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { mockStacks } from "./stacks-fixture"
 
 /**
@@ -7,15 +7,23 @@ import { mockStacks } from "./stacks-fixture"
  * happened, and the stacks as one table of their containers.
  */
 
-const table = (page: import("@playwright/test").Page) => page.getByRole("table")
-const stackRow = (page: import("@playwright/test").Page, name: string) =>
-  page.locator(`[data-stack-row="${name}"]`)
+const table = (page: Page) => page.getByRole("table")
+const stackRow = (page: Page, name: string) => page.locator(`[data-stack-row="${name}"]`)
+
+/** Opens the page and waits for the stacks to land, past the layout's own Docker check. */
+async function open(page: Page) {
+  await page.goto("/docker/stacks")
+  await expect(page.locator("[data-stack-row]").first()).toBeVisible({ timeout: 20_000 })
+}
+
+/** A press that leaves the page loads the next route's code first. */
+const NAVIGATION = { timeout: 15_000 }
 
 test("the page opens on the server, the stacks needing attention and the table worst first", async ({
   page,
 }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity).toContainText("Docker 29.8.0")
@@ -37,7 +45,7 @@ test("the page opens on the server, the stacks needing attention and the table w
 
 test("a container is a row of live readings under its stack", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   const api = table(page).getByRole("row").filter({ hasText: "ghcr.io/acme/shop-api:2.4.1" })
   await expect(api).toContainText("Running")
@@ -67,7 +75,7 @@ test("a container is a row of live readings under its stack", async ({ page }) =
 
 test("the stack's row sums its containers and opens the stack", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   const shop = stackRow(page, "shop")
   await expect(shop).toContainText("4 of 4 services up")
@@ -75,19 +83,19 @@ test("the stack's row sums its containers and opens the stack", async ({ page })
   await expect(shop).toContainText("762.0 MB")
 
   await shop.getByRole("button", { name: "shop", exact: true }).click()
-  await expect(page).toHaveURL(/\/docker\/stacks\/shop$/)
+  await expect(page).toHaveURL(/\/docker\/stacks\/shop$/, NAVIGATION)
 })
 
 test("a container's row opens the container", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
   await table(page).getByRole("button", { name: "clickhouse", exact: true }).click()
-  await expect(page).toHaveURL(/\/docker\/containers\/d2f3b5d9e6a7/)
+  await expect(page).toHaveURL(/\/docker\/containers\/d2f3b5d9e6a7/, NAVIGATION)
 })
 
 test("the band names the heaviest stacks and narrows the table to one", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   const processor = page.getByRole("region", { name: "Processor by stack" })
   await expect(processor.getByRole("button", { name: "Only shop's containers" })).toBeVisible()
@@ -102,21 +110,21 @@ test("the band names the heaviest stacks and narrows the table to one", async ({
 
 test("recent says what Docker did to the stacks, and a line opens its stack", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   const recent = page.getByRole("region", { name: "Recent changes" })
   await expect(recent.getByText("unhealthy")).toBeVisible()
   // The oom and the exit it caused are one line.
   await expect(recent.getByText("killed for memory")).toHaveCount(1)
   await recent.getByRole("button", { name: /^Open monitoring: alertmanager/ }).click()
-  await expect(page).toHaveURL(/\/docker\/stacks\/monitoring$/)
+  await expect(page).toHaveURL(/\/docker\/stacks\/monitoring$/, NAVIGATION)
 })
 
 test("the state chips count and narrow, and the verdict presses the attention chip", async ({
   page,
 }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   const chip = page.getByRole("button", { name: /^Needs attention/ })
   await expect(chip).toContainText("3")
@@ -134,7 +142,7 @@ test("the state chips count and narrow, and the verdict presses the attention ch
 
 test("searching an image narrows each stack to the services running it", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   await page.getByPlaceholder("Stack, service or image").fill("postgres")
   await expect(page.locator("[data-stack-row]")).toHaveCount(2)
@@ -144,18 +152,20 @@ test("searching an image narrows each stack to the services running it", async (
 
 test("a stack folds its containers away and keeps them folded", async ({ page }) => {
   await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   await page.getByRole("button", { name: "Hide shop's containers" }).click()
   await expect(table(page).getByRole("button", { name: "cache", exact: true })).toHaveCount(0)
   await page.reload()
-  await expect(page.getByRole("button", { name: "Show shop's containers" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Show shop's containers" })).toBeVisible({
+    timeout: 20_000,
+  })
   await expect(table(page).getByRole("button", { name: "cache", exact: true })).toHaveCount(0)
 })
 
 test("a stack that is down deploys from the list", async ({ page }) => {
   const mocks = await mockStacks(page)
-  await page.goto("/docker/stacks")
+  await open(page)
 
   // The stack that was never deployed is the one brand command in the table.
   await stackRow(page, "wiki").getByRole("button", { name: "Deploy" }).click()
@@ -166,7 +176,7 @@ test("a stack that is down deploys from the list", async ({ page }) => {
 test("on a phone the stacks are drawn down the row with every reading kept", async ({ page }) => {
   await mockStacks(page)
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto("/docker/stacks")
+  await open(page)
 
   await expect(page.getByRole("table")).toHaveCount(0)
   const api = page.locator("li").filter({ hasText: "ghcr.io/acme/shop-api:2.4.1" })
@@ -181,6 +191,6 @@ test("on a phone the stacks are drawn down the row with every reading kept", asy
 test("a server with no stacks offers to create one", async ({ page }) => {
   await mockStacks(page, { stacks: [], containers: [], stats: [] })
   await page.goto("/docker/stacks")
-  await expect(page.getByText("No compose stacks found")).toBeVisible()
+  await expect(page.getByText("No compose stacks found")).toBeVisible({ timeout: 20_000 })
   await expect(page.getByRole("button", { name: "Create stack" })).toBeVisible()
 })
