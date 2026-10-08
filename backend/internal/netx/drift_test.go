@@ -230,7 +230,7 @@ func TestDriftBootNeedsMeasuredExecutionAndDetectsIgnoredFailure(t *testing.T) {
 			if err := writeFileAtomic(s.paths.Unit, []byte(generatedHeader+"[Service]\nExecStart=-ip -batch fixture\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			record(t).on("systemctl show", "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nFragmentPath="+s.paths.Unit+"\nNeedDaemonReload=no\nResult=success\nExecMainStartTimestamp=Thu 2026-10-08 10:00:00 UTC\nExecMainExitTimestamp=Thu 2026-10-08 10:00:01 UTC\nExecMainStartTimestampMonotonic=1000000\nExecMainExitTimestampMonotonic=2000000\nExecMainStatus=0\nExecStart={ path=/usr/bin/ip ; argv[]=/usr/bin/ip -batch fixture ; ignore_errors=yes ; start_time=[Thu 2026-10-08 10:00:00 UTC] ; stop_time=[Thu 2026-10-08 10:00:01 UTC] ; pid=123 ; code=exited ; status="+status+" }\n")
+			record(t).on("systemctl show", "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nFragmentPath="+s.paths.Unit+"\nDropInPaths=\nNeedDaemonReload=no\nResult=success\nExecMainStartTimestamp=Thu 2026-10-08 10:00:00 UTC\nExecMainExitTimestamp=Thu 2026-10-08 10:00:01 UTC\nExecMainStartTimestampMonotonic=1000000\nExecMainExitTimestampMonotonic=2000000\nExecMainStatus=0\nExecStart={ path=/usr/bin/ip ; argv[]=/usr/bin/ip -batch fixture ; ignore_errors=yes ; start_time=[Thu 2026-10-08 10:00:00 UTC] ; stop_time=[Thu 2026-10-08 10:00:01 UTC] ; pid=123 ; code=exited ; status="+status+" }\n")
 			b := s.driftBoot(context.Background())
 			expected := "succeeded"
 			if status != "0" {
@@ -252,6 +252,26 @@ func TestDriftBootNeedsMeasuredExecutionAndDetectsIgnoredFailure(t *testing.T) {
 			t.Fatalf("partial results claimed success: %+v", b)
 		}
 	})
+}
+
+func TestDriftBootUnreadableMetadataDoesNotInventAnUnrecordedOrOwnedActivation(t *testing.T) {
+	for _, monotonic := range []string{"", "bad", "1"} {
+		t.Run(monotonic, func(t *testing.T) {
+			s := testService(t)
+			if err := writeFileAtomic(s.paths.Unit, []byte(renderUnit(s.paths, false)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := "LoadState=loaded\nUnitFileState=enabled\nActiveState=active\nFragmentPath=" + s.paths.Unit + "\nNeedDaemonReload=no\nResult=success\n"
+			if monotonic != "" {
+				out += "ExecMainStartTimestampMonotonic=" + monotonic + "\n"
+			}
+			record(t).on("systemctl show", out)
+			b := s.driftBoot(context.Background())
+			if b.Status != "unknown" || b.Execution.Status != "unknown" || b.Execution.Result != "" || b.Execution.ExitStatus != nil {
+				t.Fatalf("incomplete metadata fabricated certainty: %+v", b)
+			}
+		})
+	}
 }
 
 func TestDriftGatewayNeverCertifiesRulesFromPreservedComments(t *testing.T) {

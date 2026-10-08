@@ -71,6 +71,7 @@ func (s *Service) driftBoot(ctx context.Context) BootHealth {
 		}
 	}
 	b.LoadState, b.UnitFileState, b.ActiveState, b.FragmentPath, b.DropInPaths, b.NeedDaemonReload = values["LoadState"], values["UnitFileState"], values["ActiveState"], values["FragmentPath"], values["DropInPaths"], values["NeedDaemonReload"]
+	_, dropInsKnown := values["DropInPaths"]
 	unitData, unitErr := readDriftFile(s.paths.Unit)
 	if unitErr == nil {
 		b.Owned = strings.HasPrefix(string(unitData), generatedHeader)
@@ -82,6 +83,8 @@ func (s *Service) driftBoot(ctx context.Context) BootHealth {
 		b.Status, b.Reason = "missing", "The managed boot unit is not loaded."
 	case b.LoadState != "loaded":
 		b.Status, b.Reason = "drift", "The managed boot unit cannot be loaded."
+	case !dropInsKnown:
+		b.Status, b.Reason = "unknown", "systemd did not expose the unit's override paths."
 	case b.FragmentPath != s.paths.Unit || b.DropInPaths != "":
 		b.Status, b.Reason = "drift", "systemd uses a different unit fragment or additional overrides."
 	case errors.Is(unitErr, os.ErrNotExist):
@@ -104,9 +107,16 @@ func (s *Service) driftBoot(ctx context.Context) BootHealth {
 	b.Repairable = b.Owned && (b.Status == "drift" || b.Status == "missing") && (b.FragmentPath == s.paths.Unit || b.LoadState == "not-found") && b.DropInPaths == ""
 	e := &b.Execution
 	e.StartedAt, e.FinishedAt, e.InvocationID, e.Result = values["ExecMainStartTimestamp"], values["ExecMainExitTimestamp"], values["InvocationID"], values["Result"]
-	e.StartedMonotonicUS, _ = strconv.ParseUint(values["ExecMainStartTimestampMonotonic"], 10, 64)
+	startMonotonic, startKnown := values["ExecMainStartTimestampMonotonic"]
+	var startErr error
+	e.StartedMonotonicUS, startErr = strconv.ParseUint(startMonotonic, 10, 64)
 	e.FinishedMonotonicUS, _ = strconv.ParseUint(values["ExecMainExitTimestampMonotonic"], 10, 64)
-	if e.StartedMonotonicUS == 0 || e.StartedAt == "" {
+	if !startKnown || startErr != nil || e.StartedMonotonicUS > 0 && e.StartedAt == "" {
+		e.Status, e.Reason = "unknown", "systemd did not expose readable measured activation timestamps."
+		e.Result = ""
+		return b
+	}
+	if e.StartedMonotonicUS == 0 {
 		e.Status, e.Reason = "unrecorded", "No measured activation is available in this boot; a default Result value proves no execution."
 		// Default exit fields do not describe an execution that never happened.
 		e.StartedAt, e.FinishedAt, e.Result = "", "", ""
@@ -116,7 +126,7 @@ func (s *Service) driftBoot(ctx context.Context) BootHealth {
 		e.ExitStatus = &code
 	}
 	e.Commands = parseBootCommands(values["ExecStart"])
-	failed, complete := false, b.Owned && len(e.Commands) > 0
+	failed, complete := false, b.Owned && b.LoadState == "loaded" && b.FragmentPath == s.paths.Unit && dropInsKnown && b.DropInPaths == "" && b.NeedDaemonReload == "no" && len(e.Commands) > 0
 	if unit, err := readDriftFile(s.paths.Unit); err == nil {
 		expectedCommands := 0
 		for _, line := range strings.Split(string(unit), "\n") {

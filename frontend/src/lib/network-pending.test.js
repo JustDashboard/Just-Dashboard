@@ -16,6 +16,7 @@ test("pending applies enroll only managed netx mutations", () => {
     "/network/shaping/eth0",
     "/network/gateway/nat",
     "/network/protection/settings",
+    "/network/drift/repairs",
   ]) {
     expect(supportsPendingNetworkMutation(path, "POST")).toBe(true)
     expect(supportsPendingNetworkMutation(path, "GET")).toBe(false)
@@ -28,9 +29,17 @@ test("pending applies enroll only managed netx mutations", () => {
     "/network/changes/one/confirm",
     "/network/gateway-foreign",
     "/network/gateway/admission/repair",
+    "/network/drift/repairs/foreign",
+    "/network/drift",
   ]) {
     expect(supportsPendingNetworkMutation(path, "POST")).toBe(false)
   }
+})
+
+test("selected drift repair enrollment is exact and POST only", () => {
+  expect(supportsPendingNetworkMutation("/network/drift/repairs/?review=one", "POST")).toBe(true)
+  expect(supportsPendingNetworkMutation("/network/drift/repairs", "PUT")).toBe(false)
+  expect(supportsPendingNetworkMutation("/network/drift/repairs", "DELETE")).toBe(false)
 })
 
 test("the browser must opt in after recovery availability is known", () => {

@@ -201,6 +201,10 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 // recovery. A host with no IPv6 filtering or Docker has nothing to restore
 // there. Positions/counts retain the exact pre-change owned-rule presence.
 func snapshotAdmissionRecovery(ctx context.Context, old, next *Spec) ([]recoveryCommand, error) {
+	return snapshotSelectedAdmissionRecovery(ctx, old, next, nil)
+}
+
+func snapshotSelectedAdmissionRecovery(ctx context.Context, old, next *Spec, selected map[string]bool) ([]recoveryCommand, error) {
 	families := admissionFamilies(old)
 	for family := range admissionFamilies(next) {
 		families[family] = true
@@ -215,6 +219,9 @@ func snapshotAdmissionRecovery(ctx context.Context, old, next *Spec) ([]recovery
 			continue
 		}
 		for _, chain := range admissionChains {
+			if selected != nil && !selected[family+"/"+chain] {
+				continue
+			}
 			listing, err := run(ctx, tool, "-S", chain)
 			if err != nil {
 				state := inspectAdmissionChain(ctx, tool, chain, family, true)

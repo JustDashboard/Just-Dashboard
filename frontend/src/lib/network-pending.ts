@@ -2,6 +2,7 @@
 export function supportsPendingNetworkMutation(path: string, method: string): boolean {
   if (!["POST", "PUT", "DELETE"].includes(method.toUpperCase())) return false
   const clean = path.split("?")[0].replace(/\/$/, "")
+  if (clean === "/network/drift/repairs") return method.toUpperCase() === "POST"
   return [
     "/network/links",
     "/network/routing/routes",

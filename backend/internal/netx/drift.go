@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -56,9 +57,8 @@ type DriftObservation struct {
 	Dependencies []string          `json:"dependencies,omitempty"`
 }
 
-// OwnedRepairPlan is inspectable advice, not an executable command or an
-// authorization. A later apply must reread evidence and use the existing
-// capability, path guards, audit and durable recovery transaction.
+// OwnedRepairPlan separates executable selected renders/admission rules from
+// wider advice. An item token binds review evidence; it grants no authority.
 type OwnedRepairPlan struct {
 	Generation    string            `json:"generation,omitempty"`
 	CreatedAt     time.Time         `json:"createdAt"`
@@ -79,6 +79,12 @@ type OwnedRepair struct {
 	Reason        string   `json:"reason"`
 	Preconditions []string `json:"preconditions"`
 	Dependencies  []string `json:"dependencies,omitempty"`
+	Executable    bool     `json:"executable"`
+	Blocker       string   `json:"blocker,omitempty"`
+	ReviewToken   string   `json:"reviewToken,omitempty"`
+	Before        string   `json:"before,omitempty"`
+	After         string   `json:"after,omitempty"`
+	Effect        string   `json:"effect,omitempty"`
 }
 
 type RepairExclusion struct {
@@ -130,6 +136,9 @@ func readDriftFile(path string) ([]byte, error) {
 
 func fileObservation(path, domain string, expected []byte, expectedErr error) DriftObservation {
 	o := observation(domain, path)
+	if expectedErr == nil {
+		o.Expected = map[string]string{"sha256": digestBytes(expected)}
+	}
 	data, err := readDriftFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		o.Status, o.Reason, o.Repairable = "missing", "Saved render is absent.", expectedErr == nil
@@ -140,6 +149,10 @@ func fileObservation(path, domain string, expected []byte, expectedErr error) Dr
 		return o
 	}
 	o.Observed = map[string]string{"sha256": digestBytes(data)}
+	if info, err := os.Lstat(path); err == nil {
+		o.Observed["mode"] = fmt.Sprintf("%04o", info.Mode().Perm())
+		o.Observed["identity"] = driftFileIdentity(info)
+	}
 	if !strings.HasPrefix(string(data), generatedHeader) {
 		o.Status, o.Owned, o.Reason = "conflict", false, "The file does not carry the managed render header."
 		return o
@@ -234,7 +247,15 @@ func readDriftSpec(s *Service) (*Spec, DriftObservation, string) {
 // by rereading the spec and journal; observations are a time window, not a
 // claim of an atomic kernel snapshot.
 func (s *Service) Drift(ctx context.Context) DriftReport {
-	s.mu.Lock()
+	return s.drift(ctx, false)
+}
+
+// locked is used only by the selected repair preflight, which already holds
+// both the service mutex and the independent recovery process lock.
+func (s *Service) drift(ctx context.Context, locked bool) DriftReport {
+	if !locked {
+		s.mu.Lock()
+	}
 	r := DriftReport{CheckedAt: time.Now().UTC(), Consistent: true, Status: "unknown",
 		Files: []DriftObservation{}, Runtime: []DriftObservation{}, Blocklists: []BlocklistView{}}
 	sp, specObservation, saved := readDriftSpec(s)
@@ -256,7 +277,9 @@ func (s *Service) Drift(ctx context.Context) DriftReport {
 			r.Journal.Observed = map[string]string{"candidateGeneration": copy.Generation, "phase": copy.Phase}
 		}
 	}
-	s.mu.Unlock()
+	if !locked {
+		s.mu.Unlock()
+	}
 	if sp != nil {
 		canonical, _ := json.MarshalIndent(sp, "", "  ")
 		r.CanonicalGeneration = digestBytes(append(canonical, '\n'))
@@ -293,6 +316,20 @@ func (s *Service) Drift(ctx context.Context) DriftReport {
 		for _, ch := range r.Admission.Chains {
 			o := observation("admission", ch.Family+"/"+ch.Chain)
 			o.Coverage, o.Status, o.Reason = "owned-rule-order", "unknown", ch.Reason
+			o.Expected = map[string]string{"position": "1", "count": "1"}
+			if listing, err := run(ctx, ch.Tool, "-S", ch.Chain); err == nil {
+				o.Observed = map[string]string{"chainSha256": digestBytes([]byte(listing)), "tool": ch.Tool, "status": ch.Status, "needed": fmt.Sprint(ch.Needed)}
+				positions, valid := driftAdmissionPositions(listing, ch.Chain)
+				if valid {
+					parts := make([]string, len(positions))
+					for i, pos := range positions {
+						parts[i] = strconv.Itoa(pos)
+					}
+					o.Observed["ownedPositions"], o.Observed["ownedCount"] = strings.Join(parts, ","), strconv.Itoa(len(positions))
+				} else if ch.Needed {
+					o.Observed["listing"] = "incomplete"
+				}
+			}
 			switch ch.Status {
 			case "present":
 				o.Status = "matching"
@@ -304,6 +341,16 @@ func (s *Service) Drift(ctx context.Context) DriftReport {
 				}
 			case "unreadable":
 				o.Status = "unreadable"
+			}
+			if o.Observed["listing"] == "incomplete" {
+				o.Status, o.Repairable, o.Reason = "unreadable", false, "Filtering chain listing is incomplete; owned positions cannot be established."
+			}
+			if ch.Status == "present" && o.Observed["ownedCount"] != "" && o.Observed["ownedCount"] != "1" {
+				if o.Observed["ownedCount"] == "0" {
+					o.Status, o.Repairable, o.Reason = "unknown", false, "The chain listing and owned-rule check disagree; inspect again."
+				} else {
+					o.Status, o.Repairable, o.Reason = "drift", true, "The chain contains duplicate canonical owned admission rules."
+				}
 			}
 			r.Runtime = append(r.Runtime, o)
 		}
@@ -322,6 +369,7 @@ func (s *Service) Drift(ctx context.Context) DriftReport {
 	r.FinishedAt = time.Now().UTC()
 	r.Status = driftSummary(r)
 	r.RepairPlan = driftRepairPlan(r)
+	s.prepareDriftRepairs(ctx, &r, sp)
 	return r
 }
 

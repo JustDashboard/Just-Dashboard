@@ -2,8 +2,8 @@
 
 `GET /api/v1/network/drift` is a read-only inspection for authenticated accounts
 with `read`. It never installs or enables a unit, fetches a blocklist, creates a
-recovery lock, applies a batch, or reconciles a kernel resource. There is no repair
-mutation endpoint in this checkpoint.
+recovery lock, applies a batch, or reconciles a kernel resource. Selected repairs
+use a separate administrator mutation endpoint described below.
 
 The response keeps four sources separate:
 
@@ -86,7 +86,7 @@ exercised and recorded.
 
 ## Owned repair plan
 
-`repairPlan` is generation-bound, typed advice with `executable=false`. It has
+`repairPlan` is generation-bound, typed advice with per-item execution scope. It has
 stable item and observation IDs, actions, reasons, managed dependency IDs,
 preconditions, exclusions and global blockers. Known missing or changed owned
 renders and runtime resources can be proposed. A missing native dependency must
@@ -94,11 +94,46 @@ be restored through its native owner; an unknown, unreadable or conflicting
 resource is excluded. A pending or degraded recovery journal, unreadable journal,
 unreadable spec or concurrent configuration change blocks the whole plan.
 
-This plan authorizes no command. A future selected repair apply must revalidate
-the saved generation, selected observations and ownership; enforce `system.admin`
-and destructive confirmation where appropriate; audit the mutation; and use the
-existing path guards, durable journal and pending-confirmation recovery model.
-There is no automatic reconcile daemon or foreign-resource cleanup.
+`POST /api/v1/network/drift/repairs` accepts `generation` and `selections`, each
+containing the server-produced item `id` and `reviewToken`. It requires
+`system.admin` and `s.destructive`, and audits `network.drift.repair`. Neither
+client paths nor command argv are accepted. A token grants no authority: apply
+rereads generation, exact expected/observed bytes, file mode/device/inode,
+ownership, unit fragment/overrides and selected chain contents while holding
+both the service mutex and independent recovery flock. Stale, unreadable,
+foreign or duplicate selections are refused.
+
+Execution covers only the six core render files (links, IPv6 rules, shaping,
+gateway, sysctl and ordinary network unit) and selected required admission
+chains. File repairs preserve modes and refuse symlink path components. Their
+exact before/after contents are included in the review. They change saved boot
+inputs; they do not replay the corresponding kernel objects. A selected ordinary
+unit file triggers only a verified daemon reload; enablement remains separately
+observed. Boot-file writes require established ordinary-unit ownership and a
+settled execution; an executing or unreadable unit cannot authorize them.
+Admission repairs remove only the canonical owned mark/comment rule
+and put exactly one at the selected chain's beginning, with authoritative
+gateway-policy and client/anchor-path checks. Unselected chains and families are
+unchanged. Other plan items remain non-executable advice.
+
+An already installed independent recovery helper matching the current backend,
+its private mode, and its loaded enabled owned recovery unit without overrides
+are prerequisites. Apply reuses the existing helper self-check and arms the
+independent watchdog before any attempted selected effect. Snapshots contain
+only selected files and exact selected admission presence/positions. An
+attempted rename followed by a reported sync failure is restored; an
+unattempted foreign replacement detected during preflight is preserved.
+Admission-only selection records `persistence=not_applicable` and
+`boot=not_applicable`. Render selection records written persistence and keeps
+boot execution unverified. The exact saved spec generation is unchanged.
+
+This endpoint alone is added to pending-apply eligibility; direct gateway
+admission repair, DNS, VPN and firewall retain their existing contracts. When
+pending apply is requested, confirmation still requires a fresh authenticated
+reconnection response and the existing deadline recovery. There is no automatic
+reconcile daemon or foreign-resource cleanup. Both locks cover dashboard and
+independent recovery writers; native writers do not take these locks, so
+inspection and immediate pre-effect checks describe an observation window.
 
 ## Reporting page
 
@@ -108,8 +143,8 @@ from reboot attribution. Summary counts include spec, journal, boot-unit and
 enabled blocklist readings. Failed refreshes retain dated evidence and disable
 repair selection. Reviewed selections expire when generation, ownership,
 selected comparison bytes or journal facts change; polling time alone does not
-invalidate identical evidence. The initial page offers ordinary plan review and
-no execution control while the plan is non-executable.
+invalidate identical evidence. The initial reporting page offers ordinary plan
+review; execution controls require the separately integrated selected repair UI.
 
 Focused regression checks:
 
@@ -123,3 +158,8 @@ The live fixture changes and removes managed resources through real `ip` command
 inside a disposable namespace, verifies observed drift, and confirms inspection
 neither recreates the managed resources nor changes a native device. It proves
 read-only CLI drift detection, not reboot or daemon restart acceptance.
+Selected repair regressions also prove exact file identity/mode binding,
+attempted-write rollback, fresh-process file recovery after writer death, cache
+candidate review invalidation, and real selected-chain admission/undo in a
+disposable namespace. The latter records watchdog prerequisites and expires the
+fixture journal explicitly; it does not prove a real systemd timer or reboot.
