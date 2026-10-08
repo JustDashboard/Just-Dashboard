@@ -19,7 +19,11 @@ export function changeStatus(change: NetworkChangeStatus) {
     change.watchdog === "failed_to_arm" ||
     Boolean(change.recoveryErrors?.length)
   const verified =
-    change.phase === "saved" && change.watchdog === "completed" && change.boot === "enabled"
+    change.phase === "saved" &&
+    change.runtime === "applied" &&
+    change.persistence === "written" &&
+    change.watchdog === "completed" &&
+    change.boot === "enabled"
   return {
     label: CHANGE_PHASE[change.phase] ?? "Change state unknown",
     tone: danger ? ("danger" as const) : verified ? ("running" as const) : ("warning" as const),

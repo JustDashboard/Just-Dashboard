@@ -82,25 +82,36 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
           Highlights infer which rule may answer your replies; they do not evaluate every policy
           selector.
         </p>
-        <p className="text-hint break-all text-muted-foreground">
+        <p className="text-hint text-muted-foreground">
           Browser path ({addressFamily(routing.clientPath.address) === "inet6" ? "IPv6" : "IPv4"}):{" "}
-          <span className="font-mono">{routing.clientPath.address}</span>
+          <span className="inline-block max-w-full font-mono break-all">
+            {routing.clientPath.address}
+          </span>
           {routing.clientPath.device && (
             <>
               {" "}
-              · via <span className="font-mono">{routing.clientPath.device}</span>
+              · via{" "}
+              <span className="inline-block max-w-full font-mono break-all">
+                {routing.clientPath.device}
+              </span>
             </>
           )}
           {routing.clientPath.source && (
             <>
               {" "}
-              · source <span className="font-mono">{routing.clientPath.source}</span>
+              · source{" "}
+              <span className="inline-block max-w-full font-mono break-all">
+                {routing.clientPath.source}
+              </span>
             </>
           )}
           {routing.clientPath.gateway && (
             <>
               {" "}
-              · gateway <span className="font-mono">{routing.clientPath.gateway}</span>
+              · gateway{" "}
+              <span className="inline-block max-w-full font-mono break-all">
+                {routing.clientPath.gateway}
+              </span>
             </>
           )}
         </p>

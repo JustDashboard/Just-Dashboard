@@ -32,3 +32,8 @@ test("an armed or unsupported watchdog never looks like a completed protected ch
   expect(changeStatus({ ...saved, watchdog: "unsupported" }).tone).toBe("warning")
   expect(WATCHDOG_STATE.unsupported).toContain("unavailable")
 })
+
+test("a saved label with unknown runtime or persistence never gets a success tone", () => {
+  expect(changeStatus({ ...saved, runtime: "unknown" }).tone).toBe("warning")
+  expect(changeStatus({ ...saved, persistence: "unknown" }).tone).toBe("warning")
+})

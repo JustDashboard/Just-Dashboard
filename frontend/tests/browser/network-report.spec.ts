@@ -138,7 +138,21 @@ for (const reading of [
   }) => {
     let reads = 0
     await mockNetwork(page, [], {
-      overrides: { ...traffic, "/network/traffic/live": { now: 0, series: {} } },
+      overrides: {
+        ...traffic,
+        "/network/traffic/live":
+          reading.name === "link inventory"
+            ? {
+                now: Math.floor(Date.now() / 1000),
+                series: {
+                  ens3: [
+                    { t: Math.floor(Date.now() / 1000) - 2, rx: 100, tx: 200 },
+                    { t: Math.floor(Date.now() / 1000), rx: 150, tx: 250 },
+                  ],
+                },
+              }
+            : { now: 0, series: {} },
+      },
     })
     await page.route(`**/api/v1${reading.path}*`, async (route) => {
       reads++
@@ -159,6 +173,14 @@ for (const reading of [
       .getByRole("alert")
       .filter({ hasText: `Showing the last known ${reading.name}` })
     await expect(warning).toBeVisible()
+    if (reading.name === "link inventory") {
+      const bandwidth = page
+        .getByRole("heading", { name: "Bandwidth by device" })
+        .locator("..")
+        .locator("..")
+        .locator("..")
+      await expect(bandwidth.getByText("Live", { exact: true }).first()).toBeVisible()
+    }
     await expect(warning.getByText(/Last successful read:/)).toBeVisible()
     await expect(warning.locator("time")).toHaveAttribute("datetime", /T/)
     await warning.getByRole("button", { name: "Refresh", exact: true }).click()
