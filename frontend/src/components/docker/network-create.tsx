@@ -39,7 +39,7 @@ export function NewNetworkDialog({
   const [advanced, setAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
   const [reservations, setReservations] = useState<IPAMReservation[]>([])
-  const [ipamUnavailable, setIPAMUnavailable] = useState(false)
+  const [ipamUnavailable, setIPAMUnavailable] = useState(Boolean(initialReservationId))
   const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
   const reading = useMemo(() => {
     try {

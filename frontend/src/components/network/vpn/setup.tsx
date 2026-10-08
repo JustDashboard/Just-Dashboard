@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { WGInterface } from "@/lib/types"
@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { portProblem } from "../tools/tool-input"
 import { wireGuardIPv6Payload, wireGuardIPv6Problem } from "./ipv6-input"
+import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
+import type { IPAMReservation } from "@/lib/network-ipam"
 
 /** What a client is told to resolve names with: a public resolver, or one that also blocks ads. */
 const RESOLVERS = [
@@ -53,7 +55,14 @@ const RESOLVERS = [
  * resolver they are told to use. The server opens the port in the firewall
  * when the firewall would otherwise refuse it, and says so either way.
  */
-export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface) => void }) {
+export function WireGuardSetup({
+  onCreated,
+  initialReservationId,
+}: {
+  onCreated: (tunnel: WGInterface) => void
+  initialReservationId?: string
+}) {
+  const [name, setName] = useState("")
   const [endpoint, setEndpoint] = useState("")
   const [port, setPort] = useState("")
   const [subnet, setSubnet] = useState("")
@@ -64,11 +73,39 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
   const [exit6, setExit6] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [reservations, setReservations] = useState<IPAMReservation[]>([])
+  const [ipamUnavailable, setIPAMUnavailable] = useState(Boolean(initialReservationId))
+  const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
+  const selectReservation = useCallback(
+    (row: IPAMReservation | undefined, family: "inet" | "inet6") => {
+      setReservations((rows) => [
+        ...rows.filter(
+          (existing) => existing.family !== family && (!row || existing.resource === row.resource),
+        ),
+        ...(row ? [row] : []),
+      ])
+      if (!row) return
+      if (name !== row.resource) {
+        setSubnet("")
+        setSubnet6("")
+        setIPv6(false)
+        setExit6(false)
+      }
+      setName(row.resource)
+      if (family === "inet") setSubnet(row.prefix)
+      else {
+        setIPv6(true)
+        setSubnet6(row.prefix)
+        setExit6(false)
+      }
+    },
+    [name],
+  )
   const portError = port ? portProblem(port) : undefined
   const ipv6Error = ipv6 ? wireGuardIPv6Problem(subnet6) : undefined
 
   const submit = async () => {
-    if (busy || portError || ipv6Error) return
+    if (busy || portError || ipv6Error || ipamUnavailable) return
     setBusy(true)
     setError(undefined)
     try {
@@ -77,12 +114,14 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         warnings: string[]
         firewall: { opened: boolean; reason?: string }
       }>("/network/vpn/wireguard", {
+        name: name.trim() || undefined,
         endpoint: endpoint.trim() || undefined,
         port: port ? Number(port.trim()) : undefined,
         subnet: subnet.trim() || undefined,
         dns: RESOLVERS.find((r) => r.id === resolver)?.servers,
         exitNode,
         ipv6: wireGuardIPv6Payload(ipv6, subnet6, exitNode && exit6),
+        ...(reservations.length ? { ipamReservationIds: reservations.map((row) => row.id) } : {}),
       })
       notify.success(`${made.interface.name} is up on udp ${made.interface.listenPort}`, {
         description: made.firewall.opened
@@ -92,6 +131,7 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
       for (const w of made.warnings) notify.warning(w)
       onCreated(made.interface)
     } catch (err) {
+      if (reservations.length) setIPAMRefreshKey((value) => value + 1)
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setBusy(false)
@@ -100,6 +140,32 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
+      <IPAMReservationPicker
+        open
+        owner="wireguard_server"
+        selected={reservations}
+        onSelect={selectReservation}
+        onUnavailable={setIPAMUnavailable}
+        initialId={initialReservationId}
+        disabled={busy}
+        refreshKey={ipamRefreshKey}
+      />
+      <Field
+        label="Tunnel name"
+        htmlFor="wg-name"
+        hint="The first available native name when empty; a selected plan requires its exact name."
+      >
+        <Input
+          id="wg-name"
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value)
+            setReservations([])
+          }}
+          className="font-mono"
+          placeholder="wg0"
+        />
+      </Field>
       <ChoiceGrid columns={2}>
         <ChoiceCard
           verb="A VPN to browse through"
@@ -167,7 +233,14 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         hint="Opt in for new peers. Existing IPv4 client profiles stay unchanged."
       >
         <label className="flex h-9 items-center gap-2 text-body">
-          <Switch checked={ipv6} onCheckedChange={setIPv6} aria-label="IPv6 addressing" />
+          <Switch
+            checked={ipv6}
+            onCheckedChange={(value) => {
+              setIPv6(value)
+              if (!value) setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+            }}
+            aria-label="IPv6 addressing"
+          />
           {ipv6 ? "Dual stack" : "IPv4 only"}
         </label>
       </Field>
@@ -183,7 +256,10 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
               id="wg-subnet6"
               value={subnet6}
               placeholder="fd42:8::/64"
-              onChange={(event) => setSubnet6(event.target.value)}
+              onChange={(event) => {
+                setSubnet6(event.target.value)
+                setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+              }}
               aria-invalid={Boolean(ipv6Error)}
               className="font-mono"
             />
@@ -214,7 +290,10 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
             id="wg-subnet"
             value={subnet}
             placeholder="10.8.0.0/24"
-            onChange={(event) => setSubnet(event.target.value)}
+            onChange={(event) => {
+              setSubnet(event.target.value)
+              setReservations((rows) => rows.filter((row) => row.family !== "inet"))
+            }}
             className="font-mono"
           />
         </Field>
@@ -234,7 +313,7 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         <Button
           onClick={submit}
           pending={busy}
-          disabled={busy || Boolean(portError) || Boolean(ipv6Error)}
+          disabled={busy || Boolean(portError) || Boolean(ipv6Error) || ipamUnavailable}
         >
           Set up WireGuard
         </Button>

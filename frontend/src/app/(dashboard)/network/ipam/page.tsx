@@ -383,7 +383,9 @@ export default function SharedAddressPoolsPage() {
               <div className="flex flex-wrap gap-2">
                 {reservationLink(row) && (
                   <Button asChild variant="outline" size="sm">
-                    <Link href={reservationLink(row)!}>Open Docker creation</Link>
+                    <Link href={reservationLink(row)!}>
+                      Open {row.owner === "docker_network" ? "Docker" : "WireGuard"} creation
+                    </Link>
                   </Button>
                 )}
                 {row.state !== "released" && (
@@ -503,7 +505,7 @@ export default function SharedAddressPoolsPage() {
               >
                 Reserve planning prefix
               </Button>
-              {owner !== "docker_network" && (
+              {owner !== "docker_network" && owner !== "wireguard_server" && (
                 <p className="text-hint text-muted-foreground">
                   This owner currently receives an advisory planning prefix. Its native form remains
                   responsible for validation and applying configuration.

@@ -51,9 +51,11 @@ successful native create must not prompt automatic replay of creation. Review th
 its current identity before explicitly releasing a plan; release never deletes or changes a native
 resource. There is no automatic native retry, cleanup, reconciliation or adoption.
 
-Docker creation is the first complete handoff. WireGuard integration is a separate owner-specific
-change; interface/namespace records are advisory prefill plans and provider ranges are declared
-plans. A form link or reservation by itself is not evidence that native configuration was applied.
+Docker and WireGuard creation use complete owner-specific handoffs. WireGuard reservations must
+fit the native interface-name rules, private IPv4 /16–/29 bounds and unique-local IPv6 /64 bounds.
+Picking an IPv6 plan opts addressing in and leaves IPv6 exit off. Random/default native allocation
+cannot match an explicit selected reservation. Interface/namespace records remain advisory plans
+and provider ranges remain declared plans. A form link or reservation by itself is not evidence that native configuration was applied.
 
 ## Verification
 

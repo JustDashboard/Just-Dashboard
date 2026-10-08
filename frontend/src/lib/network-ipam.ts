@@ -128,6 +128,7 @@ export function reservationLink(row: IPAMReservation): string | undefined {
   if (row.state !== "reserved") return
   if (row.owner === "docker_network")
     return `/docker/networks?ipamReservation=${encodeURIComponent(row.id)}`
-  // WireGuard and interface/namespace owners integrate separately. Their
-  // reservation remains readable advice until a typed creation handoff exists.
+  if (row.owner === "wireguard_server")
+    return `/network/vpn?ipamReservation=${encodeURIComponent(row.id)}`
+  // Interface/namespace owners retain advisory plans until a typed native handoff exists.
 }

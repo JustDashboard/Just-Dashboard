@@ -186,3 +186,40 @@ test("editing a filled Docker prefix clears the selected planning identity", asy
   await expect.poll(() => calls.length).toBe(1)
   expect(calls[0]).not.toHaveProperty("ipamReservationIds")
 })
+
+test("WireGuard reservation opts IPv6 addressing in while leaving IPv6 exit off", async ({
+  page,
+}) => {
+  await setup(page)
+  const row = {
+    ...fixture.reservations[0],
+    owner: "wireguard_server" as const,
+    resource: "wg-ipam",
+    state: "reserved" as const,
+  }
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: [row] }),
+  )
+  const calls: Record<string, unknown>[] = []
+  await page.route("**/api/v1/network/vpn/wireguard", (route) => {
+    calls.push(route.request().postDataJSON())
+    return json(route, {
+      interface: { name: row.resource, listenPort: 51820 },
+      warnings: [],
+      firewall: { opened: false, reason: "Fixture does not alter a firewall" },
+    })
+  })
+  await page.goto(`/network/vpn?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create WireGuard tunnel" })
+  await expect(dialog.getByLabel("Tunnel name")).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 tunnel network", { exact: true })).toHaveValue(row.prefix)
+  await expect(dialog.getByRole("switch", { name: "IPv6 addressing", exact: true })).toBeChecked()
+  await expect(dialog.getByRole("switch", { name: "IPv6 exit", exact: true })).not.toBeChecked()
+  await dialog.getByRole("button", { name: "Set up WireGuard", exact: true }).click()
+  await expect.poll(() => calls.length).toBe(1)
+  expect(calls[0]).toMatchObject({
+    name: row.resource,
+    ipamReservationIds: [row.id],
+    ipv6: { subnet: row.prefix, exitNode: false },
+  })
+})

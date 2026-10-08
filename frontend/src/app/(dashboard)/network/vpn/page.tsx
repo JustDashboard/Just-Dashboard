@@ -1,7 +1,8 @@
 "use client"
 
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { useState } from "react"
+import { Suspense, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { Plus, Trash } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
@@ -25,6 +26,7 @@ import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
 import { WireGuardSetup } from "@/components/network/vpn/setup"
 import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidence"
 import { TailscaleBlock } from "@/components/network/vpn/tailscale"
+import { Modal } from "@/components/modal"
 
 /**
  * The tunnels into and out of this server.
@@ -42,6 +44,20 @@ import { TailscaleBlock } from "@/components/network/vpn/tailscale"
  * as the SSH configuration is.
  */
 export default function NetworkVPNPage() {
+  return (
+    <Suspense
+      fallback={
+        <Page>
+          <PageContext eyebrow="Network" title="VPN" />
+        </Page>
+      }
+    >
+      <NetworkVPNContent />
+    </Suspense>
+  )
+}
+
+function NetworkVPNContent() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const vpn = usePoll<VPNView>((signal) => get("/network/vpn", undefined, signal), 10_000, [], {
@@ -53,6 +69,15 @@ export default function NetworkVPNPage() {
   )
   const [adding, setAdding] = useState<{ tunnel: string; kind: "device" | "site" }>()
   const [opened, setOpened] = useState<{ tunnel: string; key: string }>()
+  const [creating, setCreating] = useState(false)
+  const [dismissedReservationId, setDismissedReservationId] = useState("")
+  const query = useSearchParams().get("ipamReservation") ?? ""
+  const initialReservationId =
+    admin && /^[a-f0-9]{32}$/.test(query) && query !== dismissedReservationId ? query : ""
+  const closeCreation = () => {
+    setCreating(false)
+    if (initialReservationId) setDismissedReservationId(initialReservationId)
+  }
 
   if (!admin) {
     return (
@@ -166,7 +191,16 @@ export default function NetworkVPNPage() {
         />
       </StatGrid>
 
-      <Section title="WireGuard">
+      <Section
+        title="WireGuard"
+        actions={
+          wireguard.installed && wireguard.interfaces.length > 0 ? (
+            <Button variant="outline" size="sm" onClick={() => setCreating(true)}>
+              Create another tunnel
+            </Button>
+          ) : undefined
+        }
+      >
         {wireguard.error && <Notice title="WireGuard could not be read">{wireguard.error}</Notice>}
         {!wireguard.installed ? (
           <InstallHandoff
@@ -180,7 +214,13 @@ export default function NetworkVPNPage() {
           <Panel plain>
             <PanelHeader title="Set up a tunnel" />
             <PanelBody>
-              <WireGuardSetup onCreated={() => vpn.refresh()} />
+              <WireGuardSetup
+                initialReservationId={initialReservationId}
+                onCreated={() => {
+                  closeCreation()
+                  vpn.refresh()
+                }}
+              />
             </PanelBody>
           </Panel>
         ) : (
@@ -195,6 +235,23 @@ export default function NetworkVPNPage() {
           ))
         )}
       </Section>
+      {wireguard.installed && wireguard.interfaces.length > 0 && (
+        <Modal
+          open={creating || Boolean(initialReservationId)}
+          onOpenChange={(open) => (open ? setCreating(true) : closeCreation())}
+          title="Create WireGuard tunnel"
+          description="WireGuard validates and creates its native tunnel. Selected shared plans recheck current ownership and overlap."
+          size="lg"
+        >
+          <WireGuardSetup
+            initialReservationId={initialReservationId}
+            onCreated={() => {
+              closeCreation()
+              vpn.refresh()
+            }}
+          />
+        </Modal>
+      )}
 
       <Section title="Tailscale">
         {tailscale.error ? (

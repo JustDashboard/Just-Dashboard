@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -126,19 +127,59 @@ type wgCreateResponse struct {
 }
 
 func (s *Server) handleWireGuardCreate(w http.ResponseWriter, r *http.Request) error {
-	var req netx.WGServerRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
+	var body struct {
+		netx.WGServerRequest
+		IPAMReservationIDs []string `json:"ipamReservationIds,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &body); err != nil {
+		return err
+	}
+	req := body.WGServerRequest
+	if len(body.IPAMReservationIDs) > 0 {
+		if err := netx.ValidateWireGuardReservation(req); err != nil {
+			return httpx.Wrap(http.StatusBadRequest, "invalid_ipam_tuple", err)
+		}
+	}
+	prefixes := []string{}
+	for _, raw := range []string{req.Subnet, func() string {
+		if req.IPv6 != nil {
+			return req.IPv6.Subnet
+		}
+		return ""
+	}()} {
+		if raw == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(raw)
+		if err != nil {
+			return mapNetworkError(err)
+		}
+		prefixes = append(prefixes, p.Masked().String())
+	}
+	handoff, err := s.beginIPAMOwnerHandoff(r, body.IPAMReservationIDs, "wireguard_server", req.Name, prefixes)
+	if err != nil {
 		return err
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
+	httpx.SetAudit(r, "network.vpn.wireguard.create", req.Name, map[string]any{"ipamReservations": body.IPAMReservationIDs})
 	res, err := s.modules.network.CreateWireGuard(ctx, req, actor(r))
+	warning := s.finishIPAMOwnerHandoff(handoff, func() string {
+		if res != nil {
+			return res.Interface.Name
+		}
+		return ""
+	}(), err)
 	if err != nil {
 		return mapNetworkError(err)
 	}
+	if warning != "" {
+		res.Warnings = append(res.Warnings, warning)
+	}
 	httpx.SetAudit(r, "network.vpn.wireguard.create", res.Interface.Name, map[string]any{
 		"port": res.Interface.ListenPort, "subnet": res.Interface.Subnet, "exitNode": res.Interface.ExitNode,
-		"ipv6": req.IPv6 != nil,
+		"ipv6":             req.IPv6 != nil,
+		"ipamReservations": body.IPAMReservationIDs, "ipamWarning": warning,
 	})
 	httpx.JSON(w, http.StatusOK, wgCreateResponse{
 		Interface: res.Interface,
