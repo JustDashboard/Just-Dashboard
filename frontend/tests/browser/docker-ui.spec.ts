@@ -825,7 +825,7 @@ test("the image, volume and network lists read down the row on a phone", async (
   await expect(networkList.getByRole("button", { name: "bridge" })).toBeVisible()
   await expect(networkList.getByText("172.17.0.0/16")).toBeVisible()
   await expect(networkList.getByText("2 containers")).toBeVisible()
-  await expect(networkList.getByText("Docker system")).toBeVisible()
+  await expect(networkList.getByText(/Docker's own/)).toBeVisible()
 })
 
 /**
