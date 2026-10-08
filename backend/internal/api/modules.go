@@ -29,6 +29,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -84,7 +85,8 @@ type moduleSet struct {
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
-	network *netx.Service
+	network         *netx.Service
+	networkVantages *netvantage.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -208,6 +210,7 @@ func (s *Server) initModules() {
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
+	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
 	s.modules.network = netx.New(netx.Options{
 		Paths:               netx.DefaultPaths(),
 		DB:                  s.Store.DB,
