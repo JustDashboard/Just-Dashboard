@@ -16,6 +16,12 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 )
 
+func TestNetworkReportMountedObserverStopPrerequisite(t *testing.T) {
+	c, s := newClient(t)
+	c.h = s.Routes()
+	assertFlowObserverExplicitStop(t, c, s)
+}
+
 func TestNetworkReportMountedPrivateRoutesAndIndependentMachineAuthentication(t *testing.T) {
 	c, s := newClient(t)
 	for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/dns/evidence/"} {
