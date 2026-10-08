@@ -1,15 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import {
   ArrowCircleUp,
   ArrowLeft,
   Box,
   Code,
+  Cross,
   FloppyDisk,
-  GitBranch,
+  Logs,
   Play,
   RefreshClockwise,
   RotateClockwise,
@@ -19,36 +21,72 @@ import {
   Wrench,
 } from "@/components/icons"
 import { composeRemedy } from "@/lib/docker-remedies"
+import { dedupeEvents } from "@/lib/docker-events"
 import { notify } from "@/lib/toast"
 import { get, post, put, ApiError } from "@/lib/api"
-import type { ComposeService, ComposeValidation, StackDetail } from "@/lib/types"
+import { plural } from "@/lib/format"
+import type {
+  ComposeValidation,
+  Container,
+  ContainerSparkline,
+  ContainerStats,
+  DockerEvent,
+  DockerEventFeed,
+  StackDetail,
+} from "@/lib/types"
 import { stackSource } from "@/lib/log-sources"
-import { useViewState } from "@/lib/view-state"
+import { cn } from "@/lib/utils"
+import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
+import { useMediaQuery } from "@/hooks/use-mobile"
+import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
-import { PortLink } from "@/components/docker/shared"
+import { useSocket, type Envelope } from "@/hooks/use-socket"
+import { useNow } from "@/components/deploy/vocabulary"
 import { containerEventsView } from "@/components/docker/container-events"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
-import { ContainerMenu, type ContainerVerb } from "@/components/docker/container-actions"
 import { Hint, Term } from "@/components/docker/explain"
 import { DeployPreviewPanel, DeploymentHistoryPanel } from "@/components/docker/deploy-preview"
+import { COMPOSE_ACTIONS, type ComposeActionKey } from "@/components/docker/stack-state"
+import { StackMap } from "@/components/docker/stack-map"
+import { ServiceRows } from "@/components/docker/stack-services-table"
+import { StackUsageBand } from "@/components/docker/stack-usage-band"
 import {
-  COMPOSE_ACTIONS,
-  StackStateBadge,
-  type ComposeActionKey,
-} from "@/components/docker/stack-state"
+  bucketCounts,
+  bucketTone,
+  networkRates,
+  serviceChanges,
+  serviceReadings,
+  stackNetworks,
+  stackVerdict,
+  waysIn,
+  type NetRate,
+  type ServiceBucket,
+  type ServiceReading,
+} from "@/components/docker/stack-service-readings"
 import { CodeEditor } from "@/components/code-editor"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Metric, MetricStrip, Page, PageContext } from "@/components/page"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { Page, PageContext } from "@/components/page"
+import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { FileBrowser } from "@/components/files/inline-browser"
-import { ProductLogo, ProductLogos, imageProduct, imageProducts } from "@/components/product-logo"
+import {
+  ProductLogo,
+  ProductLogos,
+  containerProduct,
+  imageProduct,
+  imageProducts,
+} from "@/components/product-logo"
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { TextShimmer } from "@/components/ui/text-shimmer"
+import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 
 /**
  * A stack, as the application it is rather than as five container rows.
@@ -71,10 +109,25 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
  * remote, is exactly the context somebody needs before pressing redeploy — and
  * it is one link away rather than a different product.
  *
- * It was a sheet over the stack list until 2026-09-21. A compose editor, a
- * merged log feed and a watched command are three things you stay with, and
- * none of them wants the list showing behind it — so a stack is its own
- * destination with a breadcrumb back.
+ * It was a sheet over the stack list until 2026-09-21, and until 2026-10-08 a
+ * strip of three facts over a column of grey cards that said only each
+ * service's state word: a worker in a restart loop read "restarting" beside
+ * a database a step from its memory limit reading "running", and nothing on
+ * the page moved. It now takes the Services and PM2 pages' shape (§15):
+ *
+ *   - the stack's identity line — its services' products, the compose file,
+ *     the directory and its checkout, how many services run and how many
+ *     ports it publishes — with the verdict at its end, which counts what is
+ *     failing and narrows the table to it;
+ *   - a picture of how it is reached and what it is wired to (`StackMap`):
+ *     its published ports, its services and their networks, each wire
+ *     pulsing with the traffic the containers socket measures;
+ *   - its services as a table of live readings (`ServiceRows`), each row its
+ *     state with how long or how it went down, its processor's hour, its
+ *     memory against its limit, its traffic, its ports and its compose verbs,
+ *     under state chips that count and narrow;
+ *   - and the Services page's band for its services (`StackUsageBand`): what
+ *     the stack takes of the machine, and what just happened to it.
  */
 export function StackPage() {
   const { name } = useParams<{ name: string }>()
@@ -82,18 +135,84 @@ export function StackPage() {
   return <StackBody key={stack} name={stack} />
 }
 
+/** What each compose verb is doing while it runs, for the row and the line that wait on it. */
+const PARTICIPLE: Record<ComposeActionKey, string> = {
+  up: "Deploying",
+  start: "Starting",
+  pull: "Pulling",
+  build: "Rebuilding",
+  restart: "Restarting",
+  update: "Redeploying",
+  recreate: "Recreating",
+  stop: "Stopping",
+  down: "Removing",
+}
+
+/**
+ * The compose verbs a single service takes, said for one service. The server
+ * runs each with the service's name after it (`composeSteps`), and the
+ * confirmation carries the command as it runs.
+ */
+const SERVICE_ACTIONS = {
+  restart: {
+    label: "Restart",
+    verb: "Restart",
+    command: (s: string) => `docker compose restart ${s}`,
+    blastRadius: (s: string) =>
+      `${s} is stopped and started again, interrupted for as long as it takes to come back. Nothing is recreated and no change to the compose file is applied.`,
+  },
+  stop: {
+    label: "Stop",
+    verb: "Stop",
+    command: (s: string) => `docker compose stop ${s}`,
+    blastRadius: (s: string) =>
+      `${s} stops and its container stays where it is. Nothing is deleted; Start or Deploy brings it back.`,
+  },
+  recreate: {
+    label: "Recreate service",
+    verb: "Recreate",
+    command: (s: string) => `docker compose up -d --force-recreate --remove-orphans ${s}`,
+    blastRadius: (s: string) =>
+      `${s}'s container is replaced with a new one from the compose file, whether or not anything changed. Data written inside the container rather than into a volume is lost; named volumes are untouched.`,
+  },
+  update: {
+    label: "Pull & redeploy",
+    verb: "Redeploy",
+    command: (s: string) =>
+      `docker compose pull ${s} && docker compose up -d --remove-orphans ${s}`,
+    blastRadius: (s: string) =>
+      `A newer image for ${s} is downloaded, and its container is replaced if the image changed. Data written inside the container is lost; named volumes are untouched.`,
+  },
+} as const
+
+type ServiceActionKey = keyof typeof SERVICE_ACTIONS
+
+/** The table's chips, in the order they are asked about; the toned ones only while there is one. */
+const STATES: { value: ServiceBucket; label: string; tone?: "warning" | "danger" }[] = [
+  { value: "running", label: "Running" },
+  { value: "failing", label: "Failing", tone: "danger" },
+  { value: "starting", label: "Starting", tone: "warning" },
+  { value: "missing", label: "Not created", tone: "warning" },
+  { value: "stopped", label: "Stopped" },
+  { value: "paused", label: "Paused" },
+]
+
 function StackBody({ name }: { name: string }) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const query = useSearchParams()
+  const { snapshot } = useMetrics()
   const [rememberedTab, rememberTab] = useViewState("docker.stack.tab", "services")
   const [tab, setRequestedTab] = useState(query.get("tab") ?? rememberedTab)
   const setTab = (value: string) => {
     setRequestedTab(value)
     rememberTab(value)
   }
+  const [state, setState] = useSessionState<ServiceBucket | "">(`docker.stack.${name}.state`, "")
   const runner = useRunConsole()
+  // The verb in flight, and the service it is for: that row says so while it runs.
+  const [pending, setPending] = useState<{ service?: string; label: string }>()
 
   const { data, error, loading, refresh } = usePoll<StackDetail>(
     (signal) => get<StackDetail>(`/docker/stacks/${encodeURIComponent(name)}`, undefined, signal),
@@ -107,12 +226,120 @@ function StackBody({ name }: { name: string }) {
     refresh()
   }, [refresh])
 
-  const run = async (action: string, opts: { confirmPhrase?: string; service?: string } = {}) => {
-    const code = await runner.run(`/docker/stacks/${encodeURIComponent(name)}/run`, {
-      action,
-      service: opts.service,
-      confirm: opts.confirmPhrase,
-    })
+  /*
+    The stack's containers from the socket the containers page reads, which
+    reports a state change the moment Docker makes it and every container's
+    frame every two seconds; the stack poll is ten seconds behind it. Network
+    rates are measured frame against frame.
+  */
+  const [containers, setContainers] = useState<Container[]>()
+  const [stats, setStats] = useState<Record<string, ContainerStats>>({})
+  const [rates, setRates] = useState<Record<string, NetRate>>({})
+  const lastFrame = useRef<Record<string, ContainerStats>>({})
+  const onContainers = useCallback(
+    (envelope: Envelope) => {
+      if (envelope.type === "containers") {
+        setContainers((envelope.data as Container[]).filter((c) => c.composeStack === name))
+      } else if (envelope.type === "stats") {
+        const frame = envelope.data as ContainerStats[]
+        setRates(networkRates(lastFrame.current, frame))
+        lastFrame.current = Object.fromEntries(frame.map((s) => [s.id, s]))
+        setStats(lastFrame.current)
+      }
+    },
+    [name],
+  )
+  useSocket("/docker/containers/stream", { onMessage: onContainers })
+
+  // An hour of shape per container, in one request: this second's reading
+  // says nothing about the ten minutes a service spent pinned before it.
+  const trends = usePoll<ContainerSparkline[]>(
+    (signal) =>
+      get<ContainerSparkline[]>(
+        "/docker/containers/stats/history",
+        { range: "1h", points: 40 },
+        signal,
+      ),
+    120_000,
+    [],
+  )
+  const trendByName = useMemo(
+    () => new Map((trends.data ?? []).map((line) => [line.name, line.cpu])),
+    [trends.data],
+  )
+
+  // What Docker did to the stack's containers: polled, because the polled
+  // copy is the one the server laid against the audit log, and followed.
+  const feed = usePoll<DockerEventFeed>(
+    (signal) => get<DockerEventFeed>("/docker/events", { stack: name, limit: 300 }, signal),
+    15_000,
+    [name],
+  )
+  const [liveEvents, setLiveEvents] = useState<DockerEvent[]>([])
+  const onEvents = useCallback((envelope: Envelope) => {
+    if (envelope.type !== "events") return
+    setLiveEvents((prev) => [...(envelope.data as DockerEvent[])].concat(prev).slice(0, 300))
+  }, [])
+  useSocket("/docker/events/stream", { query: { stack: name }, onMessage: onEvents })
+  const events = useMemo(
+    () => dedupeEvents([...(feed.data?.events ?? []), ...liveEvents]),
+    [feed.data?.events, liveEvents],
+  )
+
+  // Whether a restart loop is still the service's state is read against the clock.
+  const readAt = useNow(30_000)
+
+  const readings = useMemo(
+    () =>
+      data
+        ? serviceReadings({
+            services: data.services,
+            orphans: data.orphans,
+            containers: containers ?? [],
+            stats,
+            rates,
+            trends: trendByName,
+            events,
+            now: readAt,
+          })
+        : [],
+    [data, containers, stats, rates, trendByName, events, readAt],
+  )
+  const changes = useMemo(() => serviceChanges(events), [events])
+  const counts = useMemo(() => bucketCounts(readings), [readings])
+  const verdict = stackVerdict(readings, data?.deployed ?? false)
+  const visible = state ? readings.filter((r) => r.bucket === state) : readings
+
+  const productOf = useCallback(
+    (service: string) => {
+      const reading = readings.find((r) => r.key === service)
+      if (reading?.container) return containerProduct(reading.container)
+      return reading?.service.image ? imageProduct(reading.service.image) : undefined
+    },
+    [readings],
+  )
+  const openService = useCallback(
+    (service: string | ServiceReading) => {
+      const reading =
+        typeof service === "string" ? readings.find((r) => r.key === service) : service
+      if (!reading?.containerId) return
+      router.push(`/docker/containers/${encodeURIComponent(reading.containerId)}`)
+    },
+    [readings, router],
+  )
+
+  const run = async (
+    action: ComposeActionKey,
+    opts: { confirmPhrase?: string; service?: string } = {},
+  ) => {
+    setPending({ service: opts.service, label: PARTICIPLE[action] })
+    const code = await runner
+      .run(`/docker/stacks/${encodeURIComponent(name)}/run`, {
+        action,
+        service: opts.service,
+        confirm: opts.confirmPhrase,
+      })
+      .finally(() => setPending(undefined))
     // `down` removes the containers, and with them the stack this page is
     // about: compose only knows a stack that has some. Staying here would
     // report the disappearance as an error about something the reader just
@@ -122,6 +349,7 @@ function StackBody({ name }: { name: string }) {
       return
     }
     reload()
+    feed.refresh()
     if (code !== 0) throw new Error(`compose ${action} exited with status ${code}`)
   }
 
@@ -132,7 +360,7 @@ function StackBody({ name }: { name: string }) {
    * run several times in an afternoon, and the server narrows the phrase the
    * same way so the two cannot disagree.
    */
-  const confirmRun = (action: string, title: string, description: React.ReactNode) =>
+  const confirmRun = (action: ComposeActionKey, title: string, description: React.ReactNode) =>
     confirm({
       title,
       phrase: action === "down" ? name : undefined,
@@ -141,159 +369,555 @@ function StackBody({ name }: { name: string }) {
       action: (phrase) => run(action, { confirmPhrase: phrase }),
     })
 
+  const control = Boolean(data?.managed) && can("system.admin")
+  const busy = runner.running
+
+  /** One service's verbs: compose's, for that service, and the ways into its container. */
+  const serviceVerbs = (reading: ServiceReading): Verb[] => {
+    const service = reading.key
+    const up = reading.state === "running"
+    const act = (action: ServiceActionKey) => {
+      const meta = SERVICE_ACTIONS[action]
+      confirm({
+        title: `${meta.verb} ${service}`,
+        confirmLabel: meta.verb,
+        description: (
+          <>
+            <p>{meta.blastRadius(service)}</p>
+            <p className="font-mono text-hint text-muted-foreground">{meta.command(service)}</p>
+          </>
+        ),
+        action: (phrase) => run(action, { service, confirmPhrase: phrase }),
+      })
+    }
+    const verbs: Verb[] = []
+    if (control && can("service.control") && !up && reading.state !== "restarting") {
+      verbs.push({
+        key: "start",
+        label: "Start",
+        icon: Play,
+        inline: true,
+        disabled: busy,
+        run: () => void run("start", { service }).catch((err) => notify.error(String(err))),
+      })
+    }
+    if (control && can("destructive") && up) {
+      verbs.push({
+        key: "restart",
+        label: "Restart",
+        icon: RotateClockwise,
+        inline: true,
+        disabled: busy,
+        run: () => act("restart"),
+      })
+    }
+    if (control && can("destructive") && (up || reading.state === "restarting")) {
+      verbs.push({
+        key: "stop",
+        label: "Stop",
+        icon: StopCircle,
+        inline: true,
+        disabled: busy,
+        run: () => act("stop"),
+      })
+    }
+    if (control && can("destructive")) {
+      verbs.push(
+        {
+          key: "recreate",
+          label: "Recreate service",
+          icon: RefreshClockwise,
+          disabled: busy,
+          run: () => act("recreate"),
+        },
+        {
+          key: "update",
+          label: "Pull & redeploy",
+          icon: ArrowCircleUp,
+          disabled: busy,
+          run: () => act("update"),
+        },
+      )
+    }
+    if (reading.containerId) {
+      const container = encodeURIComponent(reading.containerId)
+      verbs.push({
+        key: "logs",
+        label: "Logs",
+        icon: Logs,
+        run: () => router.push(`/docker/containers/${container}?tab=logs`),
+      })
+      if (up && can("terminal")) {
+        verbs.push({
+          key: "shell",
+          label: "Open a shell",
+          icon: Terminal,
+          run: () => router.push(`/docker/containers/${container}?tab=shell`),
+        })
+      }
+    }
+    return verbs
+  }
+
+  const ports = useMemo(() => waysIn(readings).length, [readings])
+  const networks = useMemo(() => stackNetworks(readings).length, [readings])
+  const tabs = [
+    { value: "services", label: "Services", count: data?.services.length },
+    // What a deploy would change, before it changes it.
+    { value: "preview", label: "Deploy preview" },
+    { value: "compose", label: "Compose file" },
+    // The stack's own directory, read where the stack is: the compose file's
+    // neighbours — an `.env`, a mounted config, the data a bind mount writes —
+    // are what a stack is opened to check.
+    ...(data?.workingDir ? [{ value: "files", label: "Files" }] : []),
+    { value: "history", label: "History" },
+    { value: "logs", label: "Logs" },
+  ]
+
   return (
-    <Page fill>
-      <div className="flex min-w-0 shrink-0 flex-col gap-4">
-        <PageContext
-          eyebrow={
-            <Link
-              href="/docker/stacks"
-              className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-            >
-              <ArrowLeft className="size-3" /> Stacks
-            </Link>
-          }
-          title={name}
-          actions={
-            data && (
-              <>
-                <StackStateBadge stack={data} />
-                <StackActions data={data} run={run} confirmRun={confirmRun} runner={runner} />
-              </>
-            )
-          }
-        />
-        {/* What the stack is, as data in the page rather than the sentence
-            the panel read to a screen reader and drew nowhere (§15 pass 8). */}
-        {data && (
-          <MetricStrip className="animate-rise">
-            <Metric
-              label="Stack"
-              value={
-                <span className="inline-flex items-center gap-2">
-                  <StackLogos stack={data} />
-                  {name}
-                </span>
+    <Workspace
+      name="Stack"
+      stateKey={`stack.${name}.${tab}`}
+      refresh={() => {
+        reload()
+        feed.refresh()
+        trends.refresh()
+      }}
+      search={false}
+      escape={() => {
+        if (state) {
+          setState("")
+          return true
+        }
+        return false
+      }}
+      commands={[
+        {
+          id: "failing",
+          label: state === "failing" ? "Show every service" : "Show failing services",
+          run: () => {
+            setTab("services")
+            setState(state === "failing" ? "" : "failing")
+          },
+        },
+      ]}
+    >
+      <Page fill>
+        <div className="flex min-w-0 shrink-0 flex-col gap-4">
+          <PageContext
+            eyebrow={
+              <Link
+                href="/docker/stacks"
+                className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+              >
+                <ArrowLeft className="size-3" /> Stacks
+              </Link>
+            }
+            title={name}
+            actions={
+              data && (
+                <>
+                  <StackActions data={data} confirmRun={confirmRun} run={run} busy={busy} />
+                  <WorkspaceHelp />
+                </>
+              )
+            }
+          />
+          {data && (
+            <HostIdentity
+              className="animate-rise border-b-0 pb-0"
+              logo={<StackMark stack={data} containers={containers} />}
+              title={name}
+              facts={
+                <StackFacts data={data} running={counts.running + counts.starting} ports={ports} />
+              }
+              aside={
+                pending ? (
+                  <span className="flex items-center gap-2 px-1.5 text-xs font-medium">
+                    <Status
+                      tone="notice"
+                      label={<TextShimmer>{`${pending.label}…`}</TextShimmer>}
+                    />
+                  </span>
+                ) : verdict.bucket && verdict.tone !== "running" ? (
+                  <button
+                    type="button"
+                    aria-pressed={state === verdict.bucket}
+                    title="Show only these services"
+                    onClick={() => {
+                      setTab("services")
+                      setState(state === verdict.bucket ? "" : (verdict.bucket ?? ""))
+                    }}
+                    className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+                  >
+                    <Status tone={verdict.tone} label={verdict.label} />
+                  </button>
+                ) : (
+                  <span className="px-1.5 py-1">
+                    <Status
+                      tone={verdict.tone}
+                      live={verdict.tone === "running" && containers !== undefined}
+                      label={verdict.label}
+                    />
+                  </span>
+                )
               }
             />
-            <Metric label="Services" value={data.summary} />
-            <Metric label="Directory" value={data.workingDir} />
-          </MetricStrip>
+          )}
+        </div>
+
+        {query.get("remedy") && (
+          <Notice title="Review the owning service">
+            <p>
+              Change only the affected service, validate and save the file, then bring the stack up
+              to apply it. Replacing a container discards its writable layer and old logs; retained
+              volumes keep their data.
+            </p>
+            <pre className="mt-2 font-mono text-hint whitespace-pre-wrap">
+              {composeRemedy(query.get("remedy") ?? "")}
+            </pre>
+          </Notice>
         )}
-      </div>
+        {error && <ErrorState error={error} />}
+        {loading && !data && <LoadingRows />}
 
-      {query.get("remedy") && (
-        <Notice title="Review the owning service">
-          <p>
-            Change only the affected service, validate and save the file, then bring the stack up to
-            apply it. Replacing a container discards its writable layer and old logs; retained
-            volumes keep their data.
-          </p>
-          <pre className="mt-2 font-mono text-hint whitespace-pre-wrap">
-            {composeRemedy(query.get("remedy") ?? "")}
-          </pre>
-        </Notice>
-      )}
-      {error && <ErrorState error={error} />}
-      {loading && !data && <LoadingRows />}
+        {data && (
+          <>
+            {!data.managed && (
+              <Notice title="Read-only here" icon={Warning}>
+                No compose file for this stack is reachable from the dashboard, so it can be watched
+                but not acted on. Compose records the project directory on the containers it creates
+                — if the stack was started elsewhere, or its directory has moved, that record no
+                longer points at anything.
+              </Notice>
+            )}
+            {data.managed && !can("system.admin") && (
+              <Notice title="Administrator access required">
+                An administrator must create, edit, validate, or run Compose stacks. You can inspect
+                this stack here.
+              </Notice>
+            )}
+            {data.declaredError && (
+              <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
+                {data.declaredError}
+              </Notice>
+            )}
+            <RunConsole
+              lines={runner.lines}
+              state={runner.state}
+              exitCode={runner.exitCode}
+              title={`compose · ${name}`}
+              onDismiss={runner.reset}
+            />
 
-      {data && (
-        <>
-          {!data.managed && (
-            <Notice title="Read-only here" icon={Warning}>
-              No compose file for this stack is reachable from the dashboard, so it can be watched
-              but not acted on. Compose records the project directory on the containers it creates —
-              if the stack was started elsewhere, or its directory has moved, that record no longer
-              points at anything.
-            </Notice>
-          )}
-          {data.managed && !can("system.admin") && (
-            <Notice title="Administrator access required">
-              An administrator must create, edit, validate, or run Compose stacks. You can inspect
-              this stack here.
-            </Notice>
-          )}
-          {data.declaredError && (
-            <Notice title="This stack's compose file does not parse" icon={Warning} tone="danger">
-              {data.declaredError}
-            </Notice>
-          )}
-          <StackLinks data={data} />
-          <RunConsole
-            lines={runner.lines}
-            state={runner.state}
-            exitCode={runner.exitCode}
-            title={`compose · ${name}`}
-            onDismiss={runner.reset}
-          />
-
-          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
-            <TabsList className="w-fit shrink-0">
-              <TabsTrigger value="services">Services</TabsTrigger>
-              {/* What a deploy would change, before it changes it. */}
-              <TabsTrigger value="preview">Deploy preview</TabsTrigger>
-              <TabsTrigger value="compose">Compose file</TabsTrigger>
-              {/* The stack's own directory, read where the stack is: the
-                  compose file's neighbours — an `.env`, a mounted config, the
-                  data a bind mount writes — are what a stack is opened to
-                  check, and a link to another page asked for a second
-                  navigation to see them. */}
-              {data.workingDir && <TabsTrigger value="files">Files</TabsTrigger>}
-              <TabsTrigger value="history">History</TabsTrigger>
-              <TabsTrigger value="logs">Logs</TabsTrigger>
-            </TabsList>
-            <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto">
-              {data.services.length === 0 ? (
-                <EmptyState
-                  icon={Box}
-                  title="Nothing running"
-                  description="This stack has a compose file but no containers. Bring it up to start them."
-                />
-              ) : (
-                /* Cards, because each service is its container to open — the
-                   same lit edge the containers list gives the same container
-                   (§16). A tab panel below the stack facts needs no frame of its
-                   own around them. */
-                <ChoiceList aria-label="Services" className="animate-rise">
-                  {data.services.map((svc) => (
-                    <ServiceRow key={svc.name} service={svc} managed={data.managed} onRun={run} />
-                  ))}
-                </ChoiceList>
-              )}
-            </TabsContent>
-            <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto">
-              {tab === "preview" && <DeployPreviewPanel stack={data.name} />}
-            </TabsContent>
-            <TabsContent value="compose" className="min-h-0 flex-1">
-              <ComposeEditor
-                stack={data}
-                onSaved={reload}
-                canWrite={can("system.admin") && can("file.write")}
-                canValidate={can("system.admin")}
-              />
-            </TabsContent>
-            {data.workingDir && (
-              <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto">
-                {tab === "files" && (
-                  <FileBrowser
-                    root={data.workingDir}
-                    label={data.name}
-                    emptyNote="This stack's directory is empty."
+            <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-0">
+              {/* The same underlined strip every switcher between views of one
+                  page wears (§8): the brand underline says where you are and
+                  the label stays ink. It was a filled tab list, a control with a
+                  face on a page that had stopped drawing boxes. */}
+              <TabsPrimitive.List
+                aria-label="Stack views"
+                className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+              >
+                {tabs.map((entry) => (
+                  <TabsPrimitive.Trigger
+                    key={entry.value}
+                    value={entry.value}
+                    className={tabClasses(tab === entry.value, "h-10")}
+                  >
+                    {entry.label}
+                    {entry.count !== undefined && (
+                      <span className="numeric text-hint font-medium text-muted-foreground">
+                        {entry.count}
+                      </span>
+                    )}
+                  </TabsPrimitive.Trigger>
+                ))}
+              </TabsPrimitive.List>
+              <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto pt-4">
+                {data.services.length === 0 ? (
+                  <EmptyState
+                    icon={Box}
+                    title="Nothing running"
+                    description="This stack has a compose file but no containers. Bring it up to start them."
                   />
+                ) : (
+                  <div className="flex min-w-0 flex-col gap-8 pb-6">
+                    <ServicesPanel
+                      readings={visible}
+                      all={readings.length}
+                      counts={counts}
+                      state={state}
+                      setState={setState}
+                      pending={pending}
+                      verbsFor={serviceVerbs}
+                      onCreate={
+                        control && can("service.control")
+                          ? (reading) =>
+                              void run("up", { service: reading.key }).catch((err) =>
+                                notify.error(String(err)),
+                              )
+                          : undefined
+                      }
+                      onOpen={openService}
+                      busy={busy}
+                    />
+                    {data.deployed && (
+                      <StackUsageBand
+                        readings={readings}
+                        changes={changes}
+                        snapshot={snapshot}
+                        eventsRead={feed.data !== undefined || feed.error !== undefined}
+                        productOf={productOf}
+                        onOpen={openService}
+                      />
+                    )}
+                    {data.deployed && (
+                      /* A plain head over the picture: it is the last block,
+                         under a band of headed readings, and without one it
+                         read as part of Recent. */
+                      <Panel plain aria-label="Ports and networks">
+                        <PanelHeader
+                          title="Ports and networks"
+                          actions={
+                            <span className="numeric flex h-7 items-center text-hint text-muted-foreground">
+                              {plural(ports, "port")} published · {plural(networks, "network")}
+                            </span>
+                          }
+                        />
+                        <PanelBody className="pt-2">
+                          <StackMap
+                            stack={name}
+                            readings={readings}
+                            networksRead={containers !== undefined}
+                            productOf={productOf}
+                            onOpen={openService}
+                          />
+                        </PanelBody>
+                      </Panel>
+                    )}
+                  </div>
                 )}
               </TabsContent>
-            )}
-            <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
-              {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
-            </TabsContent>
-            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
-              {tab === "logs" && <StackLogs stack={data} />}
-            </TabsContent>
-          </Tabs>
+              <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto pt-4">
+                {tab === "preview" && <DeployPreviewPanel stack={data.name} />}
+              </TabsContent>
+              <TabsContent value="compose" className="min-h-0 flex-1 pt-4">
+                <ComposeEditor
+                  stack={data}
+                  onSaved={reload}
+                  canWrite={can("system.admin") && can("file.write")}
+                  canValidate={can("system.admin")}
+                />
+              </TabsContent>
+              {data.workingDir && (
+                <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto pt-4">
+                  {tab === "files" && (
+                    <FileBrowser
+                      root={data.workingDir}
+                      label={data.name}
+                      emptyNote="This stack's directory is empty."
+                    />
+                  )}
+                </TabsContent>
+              )}
+              <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto pt-4">
+                {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
+              </TabsContent>
+              <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-4">
+                {tab === "logs" && <StackLogs stack={data} />}
+              </TabsContent>
+            </Tabs>
+          </>
+        )}
+        {dialog}
+      </Page>
+    </Workspace>
+  )
+}
+
+/**
+ * The stack as what it is made of: its services' products overlapping, the
+ * tile's size the identity line's, or Compose's own mark when none has one.
+ */
+function StackMark({ stack, containers }: { stack: StackDetail; containers?: Container[] }) {
+  const ids =
+    containers && containers.length > 0
+      ? containers.map(containerProduct)
+      : imageProducts(stack.services.map((s) => s.image).filter(Boolean))
+  const products = [...new Set(ids)].filter((id) => id !== "docker")
+  if (products.length > 1) return <ProductLogos ids={products} size="md" />
+  return (
+    <ProductLogo
+      id={products[0] ?? "docker-compose"}
+      className="size-12 rounded-xl [&_img]:size-7"
+    />
+  )
+}
+
+/**
+ * What the stack is, as facts: the compose file it is read from, the
+ * directory and the checkout it is (the git line is the load-bearing part —
+ * uncommitted changes mean compose will deploy something that is in no
+ * commit, and "behind" means a pull would change what deploying does), and
+ * how much of it runs and how much of it is reachable.
+ */
+function StackFacts({
+  data,
+  running,
+  ports,
+}: {
+  data: StackDetail
+  running: number
+  ports: number
+}) {
+  const file = data.configPath?.split("/").pop()
+  return (
+    <>
+      <HostFact product="docker-compose">{file ?? "Compose"}</HostFact>
+      {data.workingDir && (
+        <>
+          <FactDot />
+          <span className="truncate font-mono">{data.workingDir}</span>
         </>
       )}
-      {dialog}
-    </Page>
+      {data.git && (
+        <>
+          <FactDot />
+          <Link
+            href={`/git?repo=${encodeURIComponent(data.git.path)}`}
+            title={data.git.subject}
+            className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
+          >
+            <HostFact product="git">{data.git.branch ?? "repository"}</HostFact>
+            {data.git.dirty && (
+              <span className="numeric" style={{ color: "var(--git-modified)" }}>
+                {data.git.changes} uncommitted
+              </span>
+            )}
+            {data.git.behind > 0 && <span className="numeric">{data.git.behind} behind</span>}
+          </Link>
+        </>
+      )}
+      <FactDot />
+      <span className="numeric">
+        {running} of {plural(data.total || data.services.length, "service")} running
+      </span>
+      {ports > 0 && (
+        <>
+          <FactDot />
+          <span className="numeric">{plural(ports, "port")} published</span>
+        </>
+      )}
+    </>
+  )
+}
+
+/**
+ * The stack's services, as the one framed block on the page: a table owns
+ * its scrolling, and the edge is what says so (§2). The chips count and
+ * narrow; the toned ones are drawn only while something is in them.
+ */
+function ServicesPanel({
+  readings,
+  all,
+  counts,
+  state,
+  setState,
+  busy,
+  ...rows
+}: {
+  readings: ServiceReading[]
+  all: number
+  counts: Record<ServiceBucket, number>
+  state: ServiceBucket | ""
+  setState: (next: ServiceBucket | "") => void
+  busy: boolean
+} & Pick<
+  React.ComponentProps<typeof ServiceRows>,
+  "pending" | "verbsFor" | "onCreate" | "onOpen"
+>) {
+  const wide = useMediaQuery("(min-width: 1280px)")
+  const roomy = useMediaQuery("(min-width: 1536px)")
+  return (
+    <Panel aria-label="Services">
+      <PanelHeader
+        title={
+          <>
+            Services
+            <span className="numeric ml-2 text-body font-normal text-muted-foreground">{all}</span>
+          </>
+        }
+      >
+        <ChipStrip aria-label="State" className="mr-auto">
+          {STATES.map(({ value, label, tone }) => {
+            const count = counts[value]
+            if (count === 0 && state !== value && (tone || value === "paused")) return null
+            return (
+              <FilterChip
+                key={value}
+                selected={state === value}
+                onClick={() => setState(state === value ? "" : value)}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    bucketTone(value) === "danger"
+                      ? "bg-destructive"
+                      : bucketTone(value) === "warning"
+                        ? "bg-warning"
+                        : value === "running"
+                          ? "bg-success"
+                          : "bg-muted-foreground/50",
+                  )}
+                />
+                {label}
+                <ChipCount
+                  className={cn(
+                    tone === "danger" && "text-destructive opacity-100",
+                    tone === "warning" && "text-warning opacity-100",
+                  )}
+                >
+                  {count}
+                </ChipCount>
+              </FilterChip>
+            )
+          })}
+        </ChipStrip>
+        {state && (
+          <FilterChip
+            selected
+            aria-label="Show services in every state"
+            onClick={() => setState("")}
+          >
+            {STATES.find((s) => s.value === state)?.label}
+            <Cross aria-hidden className="size-3" />
+          </FilterChip>
+        )}
+      </PanelHeader>
+      <PanelBody flush>
+        {readings.length === 0 ? (
+          <EmptyState
+            icon={Box}
+            title="No service is in that state"
+            description="Clear the filter to see every service in the stack."
+            className="my-4"
+          />
+        ) : (
+          <ServiceRows rows={readings} wide={wide} roomy={roomy} {...rows} />
+        )}
+      </PanelBody>
+      <PanelFooter className="text-hint text-muted-foreground">
+        <span>failing first, then by name</span>
+        {busy && (
+          <>
+            <span className="text-muted-foreground/40">·</span>
+            <span>the verbs wait for the command above to finish</span>
+          </>
+        )}
+      </PanelFooter>
+    </Panel>
   )
 }
 
@@ -301,16 +925,16 @@ function StackActions({
   data,
   run,
   confirmRun,
-  runner,
+  busy,
 }: {
   data: StackDetail
-  run: (action: string, opts?: { confirmPhrase?: string; service?: string }) => Promise<void>
-  confirmRun: (action: string, title: string, description: React.ReactNode) => void
-  runner: ReturnType<typeof useRunConsole>
+  run: (action: ComposeActionKey) => Promise<void>
+  confirmRun: (action: ComposeActionKey, title: string, description: React.ReactNode) => void
+  busy: boolean
 }) {
   const { can } = useAuth()
+  const router = useRouter()
   if (!data.managed || !can("system.admin")) return null
-  const busy = runner.running
   const quiet = (fn: () => Promise<void>) => () => {
     fn().catch((err) => notify.error(String(err)))
   }
@@ -341,12 +965,13 @@ function StackActions({
     )
   }
 
-  const verbs: ContainerVerb[] = []
+  const verbs: Verb[] = []
   if (can("destructive")) {
     verbs.push({
       key: "update",
       label: COMPOSE_ACTIONS.update.label,
       icon: ArrowCircleUp,
+      disabled: busy,
       run: () => act("update"),
     })
   }
@@ -355,7 +980,16 @@ function StackActions({
       key: "build",
       label: COMPOSE_ACTIONS.build.label,
       icon: Wrench,
+      disabled: busy,
       run: () => act("build"),
+    })
+  }
+  if (can("terminal") && data.workingDir) {
+    verbs.push({
+      key: "shell",
+      label: "Open a shell here",
+      icon: Terminal,
+      run: () => router.push(`/terminal?cwd=${encodeURIComponent(data.workingDir)}`),
     })
   }
   if (can("destructive")) {
@@ -364,6 +998,7 @@ function StackActions({
       label: COMPOSE_ACTIONS.down.label,
       icon: StopCircle,
       danger: true,
+      disabled: busy,
       run: () =>
         act(
           "down",
@@ -392,156 +1027,8 @@ function StackActions({
           {COMPOSE_ACTIONS.restart.label}
         </Button>
       )}
-      {verbs.length > 0 && <ContainerMenu verbs={verbs} disabled={busy} />}
+      {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More actions for ${data.name}`} />}
     </>
-  )
-}
-
-/**
- * The links out.
- *
- * A stack is a directory; this dashboard has a git panel and a terminal that
- * can each be pointed at one. Its files are the Files tab, which opens onto
- * the file manager from there. The git line is the load-bearing
- * part — "uncommitted changes" means compose will deploy something that is in
- * no commit, and "2 behind" means a pull would change what deploying does.
- */
-function StackLinks({ data }: { data: StackDetail }) {
-  const { can } = useAuth()
-  if (!data.workingDir) return null
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {can("terminal") && (
-        <Button size="xs" variant="outline" asChild>
-          <Link href={`/terminal?cwd=${encodeURIComponent(data.workingDir)}`}>
-            <Terminal className="size-3" />
-            Open shell
-          </Link>
-        </Button>
-      )}
-      {data.git && (
-        <Button size="xs" variant="outline" asChild>
-          <Link
-            href={`/git?repo=${encodeURIComponent(data.git.path)}`}
-            className="inline-flex items-center"
-          >
-            <GitBranch className="size-3" />
-            {data.git.branch ?? "repository"}
-            {data.git.dirty && (
-              <span className="numeric inline-flex items-center text-hint leading-none text-warning">
-                {data.git.changes} uncommitted
-              </span>
-            )}
-            {data.git.behind > 0 && (
-              <span className="numeric inline-flex items-center text-hint leading-none text-muted-foreground">
-                {data.git.behind} behind
-              </span>
-            )}
-          </Link>
-        </Button>
-      )}
-    </div>
-  )
-}
-
-/** What a stack is made of, beside its name: its services' products, or Compose. */
-function StackLogos({ stack }: { stack: StackDetail }) {
-  const images = stack.services.map((service) => service.image).filter(Boolean)
-  return (
-    <ProductLogos ids={images.length > 0 ? imageProducts(images) : ["docker-compose"]} size="md" />
-  )
-}
-
-/**
- * One service, as the card that opens its container. A service compose has
- * not created yet has no container to open, and says so where its image would
- * be.
- */
-function ServiceRow({
-  service,
-  managed,
-  onRun,
-}: {
-  service: ComposeService
-  managed: boolean
-  onRun: (action: string, opts?: { confirmPhrase?: string; service?: string }) => Promise<void>
-}) {
-  const { can } = useAuth()
-  const published = service.ports.filter((p) => p.publicPort)
-  const control = managed && can("system.admin") && can("service.control")
-
-  return (
-    <ChoiceRow
-      verb={service.name}
-      disabled={service.missing}
-      href={
-        service.container
-          ? `/docker/containers/${encodeURIComponent(service.container)}`
-          : undefined
-      }
-      leading={
-        <ProductLogo id={service.image ? imageProduct(service.image) : undefined} size="sm" />
-      }
-      title={
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{service.name}</span>
-          {service.missing ? (
-            <Status verdict="warning" label="Not created" />
-          ) : (
-            <Status state={service.state} />
-          )}
-          {service.health && service.health !== "healthy" && (
-            <Status
-              verdict={service.health === "unhealthy" ? "critical" : "notice"}
-              label={service.health.charAt(0).toUpperCase() + service.health.slice(1)}
-            />
-          )}
-        </span>
-      }
-      description={
-        <span className="font-mono">
-          {service.missing
-            ? "defined in the compose file, but no container exists for it"
-            : service.image}
-        </span>
-      }
-      trailing={
-        published.length > 0 && (
-          <span className="hidden flex-wrap justify-end gap-1 sm:flex">
-            {published.map((p, i) => (
-              <PortLink key={i} ip={p.ip} port={p.publicPort ?? 0} target={p.privatePort} />
-            ))}
-          </span>
-        )
-      }
-      actions={
-        control &&
-        (service.missing ? (
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() =>
-              onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
-            }
-          >
-            <Play className="size-3" />
-            Create it
-          </Button>
-        ) : (
-          <Button
-            size="xs"
-            variant="ghost"
-            title="Recreates this service from the compose file without touching the rest of the stack"
-            onClick={() =>
-              onRun("up", { service: service.name }).catch((err) => notify.error(String(err)))
-            }
-          >
-            <RefreshClockwise className="size-3" />
-            Recreate service
-          </Button>
-        ))
-      }
-    />
   )
 }
 
