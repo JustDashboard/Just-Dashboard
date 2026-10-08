@@ -77,9 +77,10 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   at boot by a unit of its own, with or without the dashboard. Managed changes retain a durable undo
   journal and use independent host recovery when systemd is available; the Network overview reports
   apply, save and recovery phases. Covered interactive changes can require a fresh dashboard
-  reconnection and explicit confirmation within ninety seconds. Gateway admission, blocklist sets and shaping expose kernel
-  evidence separately from saved settings. DNS tests follow the host's resolver policy by default;
-  direct comparisons require named destinations and a disclosure acknowledgment.
+  reconnection and explicit confirmation within ninety seconds. Gateway admission, blocklist sets
+  and shaping expose kernel evidence separately from saved settings. DNS tests follow the host's
+  resolver policy by default; direct comparisons require named destinations and a disclosure
+  acknowledgment.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
   the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
   that open beside the listing or in a full workspace with a file tree, and every Git checkout with

@@ -42,10 +42,11 @@ surface; Wake-on-LAN reports that a packet was sent rather than claiming the tar
 packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
 subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. It is available with read access;
 privileged server diagnostics are not mounted for readers and retain their backend admin gate.
-DNS comparison sends a name only to configured resolvers by default; the reader explicitly opts
-into public presets through
-`includePublic`. Resolver changes may carry a private `verificationName` for a network that cannot
-resolve public names. This verification input is a check for that apply, not saved resolver state.
+DNS lookup defaults to the native effective resolver policy. Direct comparison requires selected,
+named destinations and acknowledgment that private names leave their usual policy scope; the old
+`includePublic` flag does not authorize fan-out. Resolver changes may carry a private
+`verificationName` for a network that cannot resolve public names. This verification input is a check
+for that apply, not saved resolver state.
 The managed WireGuard full-tunnel label states its IPv4 egress and the blocking of IPv6 to prevent
 leaks until dual-stack egress is configured.
 

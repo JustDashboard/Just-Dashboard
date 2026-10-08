@@ -171,8 +171,9 @@ stripped of private and reserved ranges (FireHOL level 1 holds them, and droppin
 every container and tailnet peer) and of multicast and the reserved blocks, merged, cached to
 `lists/<id>.txt` and refreshed daily by `StartBlocklistRefresh`, which `Server.Start` runs. A feed's
 entries shorter than /8 (v4) or /19 (v6) are dropped and a feed covering more than 2^28 IPv4 addresses
-is refused: that is a region, not a blocklist. Parsed lists are memoised by path, modification time and
-size, so a poll does not re-read them. Every drop is preceded by the `trusted` sets:
+is refused: that is a region, not a blocklist. Parsed lists are memoised by path, modification time,
+size, mode, change time and inode, so replacing the file or changing its permissions invalidates the
+reading without reparsing an unchanged file on each poll. Every drop is preceded by the `trusted` sets:
 loopback, the allowlist ranges narrower than /8 (v4) and /16 (v6), and the addresses the spec keeps
 (the requester's, added on their first protection entry). A manual entry holding the requester's
 address is refused; a fetched list that holds it is reported (`containsYou`).

@@ -84,6 +84,12 @@ to the contribution terms above, including the additional licence grant to the p
   `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
   passwordless sudo and does everything inside throwaway network namespaces it removes, never on the
   host's own interfaces, firewall or tailscaled.
+- Independent network recovery also has a real systemd timer fixture. On a host with a reachable
+  systemd manager, add `JD_SYSTEMD_RECOVERY_LIVE=1` to the network namespace command above. It builds
+  the standalone helper and uses uniquely named transient timers with `NetworkNamespacePath` for
+  disposable namespaces, then removes those exact fixtures. It does not install persistent host
+  units or reboot the host; timer dispatch and cold-runtime reconstruction are separate from actual
+  reboot acceptance.
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.

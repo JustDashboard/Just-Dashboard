@@ -1,0 +1,55 @@
+Command (from backend/):
+GOMAXPROCS=2 JD_NETNS_LIVE=1 JD_SYSTEMD_RECOVERY_LIVE=1 go test -race ./internal/netx -run Live -count=1 -v
+
+=== RUN   TestLivePendingBackendDeathAndUnavailableNewSource
+--- PASS: TestLivePendingBackendDeathAndUnavailableNewSource (91.29s)
+=== RUN   TestPendingLiveProcessFixture
+--- PASS: TestPendingLiveProcessFixture (0.00s)
+=== RUN   TestLiveGoldenRulesetLoadsAndReadsBack
+--- PASS: TestLiveGoldenRulesetLoadsAndReadsBack (0.25s)
+=== RUN   TestLiveTheFullGatewayThroughTheRealServiceCode
+--- PASS: TestLiveTheFullGatewayThroughTheRealServiceCode (27.98s)
+=== RUN   TestLiveShapingBatchLoadsAndReadsBack
+--- PASS: TestLiveShapingBatchLoadsAndReadsBack (0.83s)
+=== RUN   TestLiveCapabilityReadsRealRulesets
+--- PASS: TestLiveCapabilityReadsRealRulesets (0.29s)
+=== RUN   TestLiveAdmissionDetectsEveryFamilyAndChainAfterPartialReload
+--- PASS: TestLiveAdmissionDetectsEveryFamilyAndChainAfterPartialReload (8.07s)
+=== RUN   TestLiveCapabilityDetectsExplicitDropInAcceptPolicyChain
+--- PASS: TestLiveCapabilityDetectsExplicitDropInAcceptPolicyChain (0.12s)
+=== RUN   TestLiveBlocklistHealthRetainsLoadedDataAfterCacheLossAndDetectsSetDrift
+--- PASS: TestLiveBlocklistHealthRetainsLoadedDataAfterCacheLossAndDetectsSetDrift (0.29s)
+=== RUN   TestLiveShapingLeavesAClsactQueueAlone
+--- PASS: TestLiveShapingLeavesAClsactQueueAlone (0.51s)
+=== RUN   TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies
+=== RUN   TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/cache
+=== RUN   TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/runtime
+--- PASS: TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies (5.04s)
+    --- PASS: TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/cache (2.49s)
+    --- PASS: TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/runtime (2.49s)
+=== RUN   TestLiveBootFileLoadsWithoutOneError
+--- PASS: TestLiveBootFileLoadsWithoutOneError (0.43s)
+=== RUN   TestLiveMutationsAgainstARealKernel
+=== RUN   TestLiveMutationsAgainstARealKernel/refusals
+--- PASS: TestLiveMutationsAgainstARealKernel (12.22s)
+    --- PASS: TestLiveMutationsAgainstARealKernel/refusals (2.05s)
+=== RUN   TestLiveBootRecoveryRecreatesUnchangedManagedDependenciesAfterColdLoss
+--- PASS: TestLiveBootRecoveryRecreatesUnchangedManagedDependenciesAfterColdLoss (2.60s)
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath/runtime
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath/first_file
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath/spec
+--- PASS: TestLiveIndependentRecoveryAfterProcessDeath (3.88s)
+    --- PASS: TestLiveIndependentRecoveryAfterProcessDeath/runtime (1.26s)
+    --- PASS: TestLiveIndependentRecoveryAfterProcessDeath/first_file (1.27s)
+    --- PASS: TestLiveIndependentRecoveryAfterProcessDeath/spec (1.28s)
+=== RUN   TestLiveSystemdTimerRecoversExpiredPendingChangeWithoutTheBackend
+--- PASS: TestLiveSystemdTimerRecoversExpiredPendingChangeWithoutTheBackend (24.70s)
+=== RUN   TestLiveShapingVerifiesEveryRequestedParameter
+--- PASS: TestLiveShapingVerifiesEveryRequestedParameter (0.82s)
+=== RUN   TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree
+--- PASS: TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree (0.32s)
+=== RUN   TestContainersExcludeFutureSamplesAndDoNotReportOldRatesAsLive
+--- PASS: TestContainersExcludeFutureSamplesAndDoNotReportOldRatesAsLive (0.02s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	180.747s
