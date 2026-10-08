@@ -4,21 +4,25 @@ import { N8N, RUNNER, mockContainerPage } from "../../../frontend/tests/browser/
 // Run against a production build of the tree whose appearance is being recorded.
 const base = process.env.JD_BROWSER_BASE_URL ?? "http://127.0.0.1:43219"
 const phase = process.argv[2] ?? "after"
+// Names of the shots to take, when not all of them: `bun capture.ts after usage storage`.
+const only = new Set(process.argv.slice(3))
 if (!["before", "after"].includes(phase)) throw new Error("Use before or after")
 const directory = import.meta.dir
 const browser = await chromium.launch()
 
 async function shot(width: number, address: string, name: string, full = false) {
+  if (only.size > 0 && !only.has(name)) return
+  // The views scroll inside the page rather than the page itself, so a whole
+  // tab is shot through a window tall enough to hold it.
   const page = await browser.newPage({
-    viewport: { width, height: width === 390 ? 844 : 1000 },
+    viewport: { width, height: full ? 2600 : width === 390 ? 844 : 1000 },
     reducedMotion: "reduce",
   })
   await mockContainerPage(page)
-  await page.goto(`${base}${address}`)
-  await page.waitForLoadState("networkidle").catch(() => {})
+  await page.goto(`${base}${address}`, { waitUntil: "domcontentloaded", timeout: 90_000 })
   // A few frames of the live socket, so the readings have moved.
   await page.waitForTimeout(6000)
-  await page.screenshot({ path: `${directory}/${phase}-${name}-${width}.png`, fullPage: full })
+  await page.screenshot({ path: `${directory}/${phase}-${name}-${width}.png` })
   await page.close()
 }
 

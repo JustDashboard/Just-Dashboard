@@ -31,7 +31,14 @@ const user = {
   needsTotp: false,
   needsEnrollment: false,
   require2fa: false,
-  capabilities: ["read", "service.control", "file.write", "terminal", "destructive", "system.admin"],
+  capabilities: [
+    "read",
+    "service.control",
+    "file.write",
+    "terminal",
+    "destructive",
+    "system.admin",
+  ],
   user: {
     id: 1,
     username: "operator",
@@ -235,7 +242,9 @@ function detailOf(container: Listed) {
   const runner = container.id === RUNNER
   return {
     ...container,
-    env: n8n ? ENV : ["PATH=/usr/local/bin:/usr/bin:/bin", "N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679"],
+    env: n8n
+      ? ENV
+      : ["PATH=/usr/local/bin:/usr/bin:/bin", "N8N_RUNNERS_TASK_BROKER_URI=http://n8n:5679"],
     mounts: n8n
       ? [
           {
@@ -309,7 +318,12 @@ const failures: Record<string, unknown> = {
     confidence: "inferred",
     evidence: [
       { label: "Exit code", value: "1 on every exit", source: "docker events", weight: "decisive" },
-      { label: "Ran for", value: "about 2 s each time", source: "docker events", weight: "supporting" },
+      {
+        label: "Ran for",
+        value: "about 2 s each time",
+        source: "docker events",
+        weight: "supporting",
+      },
       {
         label: "Last line",
         value: "Error: connect ECONNREFUSED 172.20.0.4:5679",
@@ -434,6 +448,13 @@ const diagnosis = {
   ],
 }
 
+/** How the server words an event the fixture does not word itself. */
+const SAID: Record<string, string> = {
+  start: "started",
+  create: "was created",
+  die: "exited",
+}
+
 function eventsOf(id: string) {
   const container = inventory.find((one) => one.id === id)!
   const ev = (minutes: number, action: string, extra: Record<string, unknown> = {}) => ({
@@ -445,7 +466,7 @@ function eventsOf(id: string) {
     image: container.image,
     stack: container.composeStack,
     service: container.composeService,
-    message: `${container.name} ${action}`,
+    message: `${container.name} ${SAID[action] ?? action}`,
     level: action === "die" ? "error" : action.startsWith("health_status") ? "notice" : "info",
     source: "daemon",
     ...extra,
@@ -552,7 +573,8 @@ function statOf(id: string, tick: number) {
   const cpu = Math.max(0.2, shape.cpu * (1 + wave))
   const memUsage = shape.mem * MB * (1 + wave * 0.02)
   const elapsed = 4 * 86_400 + tick
-  const received = shape.net * elapsed + Math.max(0, wave) * 80_000 * tick
+  // Cumulative, so never falling: tick + sin(tick / 1.7) only ever rises.
+  const received = shape.net * elapsed + shape.net * 0.6 * (tick + Math.sin(tick / 1.7))
   const sent = received * 0.42
   return {
     id,
@@ -583,7 +605,7 @@ function statOf(id: string, tick: number) {
     networkAvailable: true,
     blockAvailable: true,
     blockRead: 380 * MB + tick * 4_000,
-    blockWrite: 1.2 * GB + tick * (14_000 + wave * 9_000),
+    blockWrite: 1.2 * GB + 14_000 * (tick + Math.sin(tick / 1.3)),
     networks: {
       eth0: {
         rxBytes: received * 0.7,
@@ -636,7 +658,9 @@ export async function mockContainerPage(page: Page, options: { frames?: number }
       socket.send(
         JSON.stringify({
           type: "stats",
-          data: inventory.filter((one) => one.state === "running").map((one) => statOf(one.id, tick)),
+          data: inventory
+            .filter((one) => one.state === "running")
+            .map((one) => statOf(one.id, tick)),
         }),
       )
     send()
@@ -691,6 +715,36 @@ export async function mockContainerPage(page: Page, options: { frames?: number }
         since: ago(7 * 24 * 60),
         buffered: 40,
         events: inventory.some((one) => one.id === id) ? eventsOf(id) : [],
+      })
+    }
+    if (path === "/files/list") {
+      // What n8n keeps in its volume, wherever in the mounts the browser asks.
+      const at = url.searchParams.get("path") ?? "/"
+      const file = (name: string, isDir: boolean, size = 0) => ({
+        name,
+        path: `${at}/${name}`,
+        size,
+        mode: isDir ? "drwxr-xr-x" : "-rw-r--r--",
+        modeOctal: isDir ? "0755" : "0644",
+        isDir,
+        isSymlink: false,
+        modified: ago(42),
+        owner: "node",
+        group: "node",
+        uid: 1000,
+        gid: 1000,
+      })
+      return json(route, {
+        path: at,
+        parent: at.slice(0, at.lastIndexOf("/")) || "/",
+        roots: ["/"],
+        entries: [
+          file("binaryData", true),
+          file("nodes", true),
+          file("config", false, 214),
+          file("database.sqlite", false, 41 * MB),
+          file("n8nEventLog.log", false, 3 * MB),
+        ],
       })
     }
     if (path === "/system/metrics/events") return json(route, [])
