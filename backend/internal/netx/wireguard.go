@@ -94,8 +94,11 @@ type WGInterface struct {
 	// their traffic through this server.
 	ExitNode bool `json:"exitNode"`
 	// Subnet is the tunnel's network, the first address masked.
-	Subnet string   `json:"subnet"`
-	Peers  []WGPeer `json:"peers"`
+	Subnet               string     `json:"subnet"`
+	IPv6Enabled          bool       `json:"ipv6Enabled"`
+	Families             WGFamilies `json:"families"`
+	EndpointReachability string     `json:"endpointReachability"`
+	Peers                []WGPeer   `json:"peers"`
 }
 
 // WGPeer is one far end of a tunnel. It never carries a key but the public one.
@@ -109,6 +112,7 @@ type WGPeer struct {
 	PublicKey string `json:"publicKey"`
 	// Address is the peer's own address inside the tunnel.
 	Address    string   `json:"address"`
+	Address6   string   `json:"address6,omitempty"`
 	AllowedIPs []string `json:"allowedIps"`
 	// Endpoint is where the peer was last seen from, or the address this
 	// server dials when it is configured with one.
@@ -177,6 +181,25 @@ func (s *Service) readWireGuard(ctx context.Context, only string, withStore bool
 		}
 	}
 	sort.Strings(sorted)
+	var host wgHostState
+	var hostErr error
+	var cap Capability
+	var admission AdmissionState
+	uncertain := ""
+	if len(sorted) > 0 {
+		host, hostErr = wgReadHostState(ctx)
+		cap = s.GatewayCapability(ctx)
+		if sp != nil {
+			admission = s.admissionState(ctx, sp)
+		}
+		if change, err := readChange(s.paths.Dir); err == nil {
+			if !changeTerminal(change.Phase) {
+				uncertain = "An unresolved network change prevents a reliable exit-state reading; inspect its recovery status."
+			}
+		} else if !os.IsNotExist(err) {
+			uncertain = "The network recovery journal could not be read; exit state is uncertain."
+		}
+	}
 
 	for _, name := range sorted {
 		ifc := WGInterface{Name: name, Addresses: []string{}, DNS: []string{}, Peers: []WGPeer{}}
@@ -190,6 +213,13 @@ func (s *Service) readWireGuard(ctx context.Context, only string, withStore bool
 		conf := confs[name]
 		l := live[name]
 		s.fillInterface(&ifc, conf, l, clients, sp)
+		s.wgFamilyEvidence(ctx, &ifc, conf, host, hostErr, sp, cap, admission)
+		if uncertain != "" {
+			for _, family := range []*WGFamilyState{&ifc.Families.IPv4, &ifc.Families.IPv6} {
+				family.Exit.Runtime, family.Exit.Reason = "unknown", uncertain
+				family.Exit.Capability.Writable, family.Exit.Capability.Reason = false, uncertain
+			}
+		}
 		if v.Systemd && conf != nil {
 			unit := "wg-quick@" + name
 			enabled, _ := run(ctx, "systemctl", "is-enabled", unit)
@@ -242,16 +272,22 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 		}
 	}
 	for _, a := range ifc.Addresses {
-		if p, err := ParsePrefix(a); err == nil {
+		if p, err := ParsePrefix(a); err == nil && p.Addr().Is4() {
 			ifc.Subnet = p.Masked().String()
 			break
 		}
 	}
 	if sp != nil {
-		for _, n := range sp.NAT {
-			if n.Owner == wgOwner(ifc.Name) && n.Enabled {
-				ifc.ExitNode = true
-			}
+		ifc.ExitNode = wgExitEnabled(sp, ifc.Name, false)
+	}
+	if conf != nil && conf.iface() != nil {
+		ifc.IPv6Enabled = wgIPv6Enabled(conf)
+		v4, v6 := wgInterfacePrefixes(conf)
+		if v4.IsValid() {
+			ifc.Families.IPv4.Subnet = v4.Masked().String()
+		}
+		if v6.IsValid() {
+			ifc.Families.IPv6.Subnet = v6.Masked().String()
 		}
 	}
 
@@ -291,6 +327,12 @@ func (s *Service) fillInterface(ifc *WGInterface, conf *wgConf, live *wgLiveIfac
 			p.Online = lp.handshake > 0 && now-lp.handshake <= wgOnlineWithin
 		}
 		p.Address = wgPeerAddress(p.AllowedIPs, ifc.Subnet)
+		if ifc.Families.IPv6.Subnet != "" {
+			p.Address6 = wgPeerAddress(p.AllowedIPs, ifc.Families.IPv6.Subnet)
+			if !strings.Contains(p.Address6, ":") {
+				p.Address6 = ""
+			}
+		}
 		if c, ok := clients[p.PublicKey]; ok && c.HasConfig && (p.ID == 0 || int(c.ID) == p.ID) {
 			p.HasConfig = true
 		}

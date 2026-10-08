@@ -35,13 +35,14 @@ var wgDefaultDNS = []string{"1.1.1.1", "1.0.0.1"}
 
 // WGServerRequest is the one-click server. Every field has a default.
 type WGServerRequest struct {
-	Name     string   `json:"name"`
-	Port     int      `json:"port"`
-	Subnet   string   `json:"subnet"`
-	Endpoint string   `json:"endpoint"`
-	DNS      []string `json:"dns"`
-	ExitNode bool     `json:"exitNode"`
-	MTU      int      `json:"mtu"`
+	Name     string         `json:"name"`
+	Port     int            `json:"port"`
+	Subnet   string         `json:"subnet"`
+	Endpoint string         `json:"endpoint"`
+	DNS      []string       `json:"dns"`
+	ExitNode bool           `json:"exitNode"`
+	MTU      int            `json:"mtu"`
+	IPv6     *WGIPv6Request `json:"ipv6,omitempty"`
 }
 
 // WGServerResult is a created interface and what the caller should know
@@ -68,6 +69,7 @@ type wgHostState struct {
 	// bridge port, a tunnel that is down, a veth) is invisible in addrs, and a
 	// name picked from addrs alone would collide with it.
 	links map[string]bool
+	kinds map[string]string
 	// uplink is the device the default route leaves through.
 	uplink string
 }
@@ -92,19 +94,23 @@ type wgIPRouteJSON struct {
 // routes are in table 52 and a policy rule's in whatever it names, neither
 // of which `ip route` alone prints.
 func wgReadHostState(ctx context.Context) (wgHostState, error) {
-	st := wgHostState{addrs: map[string][]netip.Prefix{}, links: map[string]bool{}}
-	linkOut, err := run(ctx, "ip", "-j", "link", "show")
+	st := wgHostState{addrs: map[string][]netip.Prefix{}, links: map[string]bool{}, kinds: map[string]string{}}
+	linkOut, err := run(ctx, "ip", "-j", "-d", "link", "show")
 	if err != nil {
 		return st, fmt.Errorf("reading the host's devices: %w", err)
 	}
 	var links []struct {
-		Ifname string `json:"ifname"`
+		Ifname   string `json:"ifname"`
+		Linkinfo struct {
+			Kind string `json:"info_kind"`
+		} `json:"linkinfo"`
 	}
 	if err := json.Unmarshal([]byte(linkOut), &links); err != nil {
 		return st, fmt.Errorf("ip link printed something unreadable")
 	}
 	for _, l := range links {
 		st.links[l.Ifname] = true
+		st.kinds[l.Ifname] = l.Linkinfo.Kind
 	}
 	out, err := run(ctx, "ip", "-j", "addr")
 	if err != nil {
@@ -250,6 +256,13 @@ func wgSubnetsInConfs(confs map[string]*wgConf) []wgHostPrefix {
 			for _, a := range sec.list("address") {
 				if p, err := ParsePrefix(a); err == nil {
 					out = append(out, wgHostPrefix{prefix: p.Masked(), dev: name, what: "the WireGuard tunnel " + name})
+				}
+			}
+		}
+		for _, peer := range c.peers() {
+			for _, raw := range peer.list("allowedips") {
+				if p, err := ParsePrefix(raw); err == nil && p.Bits() > 0 {
+					out = append(out, wgHostPrefix{prefix: p.Masked(), dev: name, what: "a configured WireGuard peer of " + name})
 				}
 			}
 		}
@@ -483,6 +496,44 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 	if err != nil {
 		return nil, err
 	}
+	var subnet6 netip.Prefix
+	if req.IPv6 != nil {
+		if req.IPv6.ExitNode && !req.ExitNode {
+			return nil, fmt.Errorf("IPv6 exit egress accompanies the IPv4 exit; enable exitNode too")
+		}
+		if req.ExitNode && !wgIPForwarding("ipv4") {
+			return nil, fmt.Errorf("IPv4 forwarding must be enabled before creating an opted-in dual-stack exit")
+		}
+		out, err := run(ctx, "wg", "show", "all", "dump")
+		if err != nil {
+			return nil, fmt.Errorf("reading native WireGuard peer networks before IPv6 allocation: %w", err)
+		}
+		inventory, err := wgCheckedDump(out)
+		if err != nil {
+			return nil, err
+		}
+		for dev, live := range inventory {
+			for _, peer := range live.peers {
+				for _, raw := range peer.allowedIPs {
+					if p, err := ParsePrefix(raw); err == nil && p.Bits() > 0 {
+						host.prefixes = append(host.prefixes, wgHostPrefix{prefix: p.Masked(), dev: dev, what: "a live WireGuard peer of " + dev})
+					}
+				}
+			}
+		}
+		subnet6, err = wgIPv6Subnet(req.IPv6.Subnet, host, wgSubnetsInConfs(confs))
+		if err != nil {
+			return nil, err
+		}
+		if req.IPv6.ExitNode && (!wgIPForwarding("ipv4") || !wgIPForwarding("ipv6")) {
+			return nil, fmt.Errorf("dual-stack exit egress requires IPv4 and IPv6 forwarding enabled; use the Routing page first")
+		}
+		if req.IPv6.ExitNode {
+			if err := raForwardingGuard(ctx); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	endpoint := req.Endpoint
 	if endpoint == "" {
@@ -543,6 +594,12 @@ PrivateKey = %s
 MTU = %d
 SaveConfig = false
 `, wgManagedMarker, now.UTC().Format(time.RFC3339), endpoint, strings.Join(dns, ","), serverAddr, port, priv, mtu)
+	if subnet6.IsValid() {
+		c := parseWGConf(text)
+		c.iface().setBodyMeta("ipv6", "ula64")
+		c.iface().set("Address", serverAddr.String()+", "+netip.PrefixFrom(wgFirstHost(subnet6), 64).String())
+		text = c.render()
+	}
 
 	path, err := s.wgConfPath(name)
 	if err != nil {
@@ -570,7 +627,33 @@ SaveConfig = false
 	}
 
 	if req.ExitNode {
-		if err := s.setWGExit(ctx, name, subnet.String(), host.uplink, true, actor); err != nil {
+		networks := []wgExitNetwork{{subnet: subnet, uplink: host.uplink}}
+		if req.IPv6 != nil {
+			if err := wgRefusePeerDrift(ctx, name, parseWGConf(text)); err != nil {
+				undo()
+				return nil, err
+			}
+			fresh, err := wgReadHostState(ctx)
+			if err != nil {
+				undo()
+				return nil, err
+			}
+			v4, err := wgExitUplink(ctx, fresh, name, subnet)
+			if err != nil {
+				undo()
+				return nil, err
+			}
+			networks = []wgExitNetwork{{subnet: subnet, uplink: v4}}
+			if req.IPv6.ExitNode {
+				v6, err := wgExitUplink(ctx, fresh, name, subnet6)
+				if err != nil {
+					undo()
+					return nil, err
+				}
+				networks = append(networks, wgExitNetwork{subnet: subnet6, uplink: v6})
+			}
+		}
+		if err := s.setWGExitNetworks(ctx, name, networks, true, actor); err != nil {
 			var saved *persistenceError
 			if errors.As(err, &saved) {
 				// NAT and its spec already reference this tunnel. Removing its
@@ -692,27 +775,51 @@ func (s *Service) SetWireGuardUp(ctx context.Context, iface string, up bool, cli
 	return nil
 }
 
-// SetWireGuardExit turns a tunnel's exit node on or off: one NAT entry, owned
+// SetWireGuardExit turns a tunnel's exit node on or off: per-family NAT entries, owned
 // by the tunnel, through the same commit as every other change to the
 // network.
 func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, actor string) (*WGServerResult, error) {
+	return s.SetWireGuardExitFamilies(ctx, iface, on, nil, actor)
+}
+
+// A nil IPv6 choice preserves existing family intent. Older API callers cannot
+// silently activate IPv6 merely because a newer server supports it.
+func (s *Service) SetWireGuardExitFamilies(ctx context.Context, iface string, on bool, ipv6 *bool, actor string) (*WGServerResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	conf, err := s.managedWG(iface)
 	if err != nil {
 		return nil, err
 	}
+	if wgIPv6Enabled(conf) {
+		if err := wgRefusePeerDrift(ctx, iface, conf); err != nil {
+			return nil, err
+		}
+	}
 	var warnings []string
 	if on {
-		subnet := ""
-		for _, a := range conf.iface().list("address") {
-			if p, err := ParsePrefix(a); err == nil {
-				subnet = p.Masked().String()
-				break
-			}
-		}
-		if subnet == "" {
+		v4, v6 := wgInterfacePrefixes(conf)
+		if !v4.IsValid() {
 			return nil, fmt.Errorf("%s has no address to translate", iface)
+		}
+		sp, err := s.loadSpec()
+		if err != nil {
+			return nil, err
+		}
+		dual := wgExitEnabled(sp, iface, true)
+		if ipv6 != nil {
+			dual = *ipv6
+		}
+		if dual && (!wgIPv6Enabled(conf) || !v6.IsValid() || v6.Bits() != 64 || !v6.Addr().IsPrivate()) {
+			return nil, fmt.Errorf("%s has no opted-in unique-local IPv6 /64; create a dual-stack server to enable IPv6 egress", iface)
+		}
+		if dual && (!wgIPForwarding("ipv4") || !wgIPForwarding("ipv6")) {
+			return nil, fmt.Errorf("dual-stack exit egress requires IPv4 and IPv6 forwarding enabled; use the Routing page first")
+		}
+		if dual {
+			if err := raForwardingGuard(ctx); err != nil {
+				return nil, err
+			}
 		}
 		host, err := wgReadHostState(ctx)
 		if err != nil {
@@ -721,7 +828,22 @@ func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, a
 		if host.uplink == "" {
 			return nil, fmt.Errorf("an exit node needs a default route to send traffic out through, and this host has none")
 		}
-		if err := s.setWGExit(ctx, iface, subnet, host.uplink, true, actor); err != nil {
+		networks := []wgExitNetwork{{subnet: v4.Masked(), uplink: host.uplink}}
+		if dual || wgIPv6Enabled(conf) {
+			uplink4, err := wgExitUplink(ctx, host, iface, v4.Masked())
+			if err != nil {
+				return nil, err
+			}
+			networks = []wgExitNetwork{{subnet: v4.Masked(), uplink: uplink4}}
+			if dual {
+				uplink6, err := wgExitUplink(ctx, host, iface, v6.Masked())
+				if err != nil {
+					return nil, err
+				}
+				networks = append(networks, wgExitNetwork{subnet: v6.Masked(), uplink: uplink6})
+			}
+		}
+		if err := s.setWGExitNetworks(ctx, iface, networks, true, actor); err != nil {
 			return nil, err
 		}
 		if !wgIPForwarding("ipv4") {
@@ -751,6 +873,23 @@ const wgForwardingWarning = "IPv4 forwarding is off on this host, so clients can
 // way, and a host whose firewall cannot admit it refuses it with the
 // gateway's own reason. The caller holds s.mu.
 func (s *Service) setWGExit(ctx context.Context, iface, subnet, uplink string, on bool, actor string) error {
+	var networks []wgExitNetwork
+	if on {
+		p, err := ParsePrefix(subnet)
+		if err != nil {
+			return err
+		}
+		networks = []wgExitNetwork{{subnet: p.Masked(), uplink: uplink}}
+	}
+	return s.setWGExitNetworks(ctx, iface, networks, on, actor)
+}
+
+type wgExitNetwork struct {
+	subnet netip.Prefix
+	uplink string
+}
+
+func (s *Service) setWGExitNetworks(ctx context.Context, iface string, networks []wgExitNetwork, on bool, actor string) error {
 	old, err := s.loadSpec()
 	if err != nil {
 		return err
@@ -761,7 +900,20 @@ func (s *Service) setWGExit(ctx context.Context, iface, subnet, uplink string, o
 		if _, err := s.requireWritable(ctx); err != nil {
 			return err
 		}
-		upsertOwnedNAT(next, owner, "WireGuard "+iface+" exit", subnet, uplink, actor)
+		for _, network := range networks {
+			upsertOwnedNAT(next, owner, "WireGuard "+iface+" "+wgFamilyName(network.subnet)+" exit", network.subnet.String(), network.uplink, actor)
+		}
+		kept := next.NAT[:0]
+		for _, n := range next.NAT {
+			keep := n.Owner != owner
+			for _, network := range networks {
+				keep = keep || n.Source == network.subnet.String()
+			}
+			if keep {
+				kept = append(kept, n)
+			}
+		}
+		next.NAT = kept
 	} else {
 		had := len(next.NAT)
 		removeOwnedNAT(next, owner)
@@ -769,7 +921,39 @@ func (s *Service) setWGExit(ctx context.Context, iface, subnet, uplink string, o
 			return nil
 		}
 	}
-	return s.commit(ctx, next, s.gatewayStep(old, next))
+	st := s.gatewayStep(old, next)
+	conf, _ := s.readWGConf(iface)
+	strict := conf != nil && conf.iface() != nil && wgIPv6Enabled(conf)
+	if len(networks) > 1 || (strict && len(networks) > 0) {
+		verify := st.verify
+		st.verify = func(ctx context.Context) error {
+			if err := verify(ctx); err != nil {
+				return err
+			}
+			host, err := wgReadHostState(ctx)
+			if err != nil {
+				return err
+			}
+			for _, network := range networks {
+				if !wgFamilyForwarding(network.subnet.Addr().Is6()) {
+					return fmt.Errorf("%s forwarding changed while enabling the exit", wgFamilyName(network.subnet))
+				}
+				dev, err := wgExitUplink(ctx, host, iface, network.subnet)
+				if err != nil || dev != network.uplink {
+					return fmt.Errorf("%s peer-source egress route changed or could not be verified: %v", wgFamilyName(network.subnet), err)
+				}
+				for _, n := range next.NAT {
+					if n.Owner == owner && n.Source == network.subnet.String() {
+						if err := wgExitRules(ctx, n); err != nil {
+							return err
+						}
+					}
+				}
+			}
+			return nil
+		}
+	}
+	return s.commit(ctx, next, st)
 }
 
 // RemoveWireGuard stops and removes a tunnel the dashboard made. Its file is

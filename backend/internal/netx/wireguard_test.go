@@ -131,12 +131,14 @@ func wgInstallConf(t *testing.T, s *Service, name, fixtureName string) string {
 // Tailscale's range in its own table.
 func wgHostReplies(t *testing.T, rec *recorder) {
 	t.Helper()
-	rec.on("ip -j link show", fixture(t, "wg-ip-link.json")).
+	rec.on("ip -j -d link show", fixture(t, "wg-ip-link.json")).
 		on("ip -j addr", fixture(t, "wg-ip-addr.json")).
 		on("ip -j route show table all", fixture(t, "wg-ip-route-all.json")).
 		on("ip -j -6 route show table all", fixture(t, "wg-ip-route6-all.json")).
 		on("ip -j route show default", fixture(t, "wg-ip-route-default.json")).
 		on("ip -j -6 route show default", "[]")
+	rec.on("ip -j route get 1.1.1.1 from", `[{"dev":"eth0"}]`).
+		on("nft -j list table inet "+gatewayTable, `{"nftables":[]}`)
 	// An exit node is a NAT entry the gateway loads and admits, so a host
 	// that makes one answers the gateway's own questions: a plain ruleset
 	// (writable), no firewalld, and every load and admission succeeding.
@@ -307,6 +309,7 @@ func TestWireGuardViewJoinsFilesKernelStoreAndSpec(t *testing.T) {
 		on("systemctl is-enabled wg-quick@wg0", "enabled\n").
 		fail("systemctl is-enabled wg-quick@wg1", "disabled\n").
 		on("systemctl is-active", "active\n")
+	wgHostReplies(t, rec)
 
 	v := wgReadView(t, s)
 	if !v.Installed || !v.Tools.Wg || !v.Tools.WgQuick || !v.Systemd || !v.Kernel || v.Package != "wireguard-tools" {

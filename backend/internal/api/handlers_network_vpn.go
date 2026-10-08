@@ -138,6 +138,7 @@ func (s *Server) handleWireGuardCreate(w http.ResponseWriter, r *http.Request) e
 	}
 	httpx.SetAudit(r, "network.vpn.wireguard.create", res.Interface.Name, map[string]any{
 		"port": res.Interface.ListenPort, "subnet": res.Interface.Subnet, "exitNode": res.Interface.ExitNode,
+		"ipv6": req.IPv6 != nil,
 	})
 	httpx.JSON(w, http.StatusOK, wgCreateResponse{
 		Interface: res.Interface,
@@ -222,7 +223,8 @@ func (s *Server) writeWireGuardInterface(ctx context.Context, w http.ResponseWri
 }
 
 type wgExitRequest struct {
-	On bool `json:"on"`
+	On   bool  `json:"on"`
+	IPv6 *bool `json:"ipv6,omitempty"`
 }
 
 func (s *Server) handleWireGuardExit(w http.ResponseWriter, r *http.Request) error {
@@ -234,15 +236,15 @@ func (s *Server) handleWireGuardExit(w http.ResponseWriter, r *http.Request) err
 	// Turning an exit node on is routine; turning it off cuts every client that
 	// sends its traffic through this server, so that body asks for the
 	// destructive capability and its budget.
-	if !req.On {
+	if !req.On || (req.IPv6 != nil && !*req.IPv6) {
 		if err := s.requireDestructive(r, "wgexit", "turning an exit node off"); err != nil {
 			return err
 		}
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	httpx.SetAudit(r, "network.vpn.wireguard.exit", iface, map[string]any{"on": req.On})
-	res, err := s.modules.network.SetWireGuardExit(ctx, iface, req.On, actor(r))
+	httpx.SetAudit(r, "network.vpn.wireguard.exit", iface, map[string]any{"on": req.On, "ipv6": req.IPv6})
+	res, err := s.modules.network.SetWireGuardExitFamilies(ctx, iface, req.On, req.IPv6, actor(r))
 	if err != nil {
 		return mapNetworkError(err)
 	}

@@ -383,6 +383,17 @@ func TestExitNodeOffAndTailscaleWithdrawalSpendTheDestructiveBudget(t *testing.T
 	}
 }
 
+func TestWireGuardIPv6ExitWithdrawalSpendsTheDestructiveBudget(t *testing.T) {
+	c, _ := newClient(t)
+	const endpoint = "/api/v1/network/vpn/wireguard/wgnone/exit"
+	if n := postUntilLimited(c, endpoint, `{"on":true,"ipv6":true}`, 40); n != 0 {
+		t.Errorf("IPv6 exit enable consumed destructive budget after %d calls", n)
+	}
+	if n := postUntilLimited(c, endpoint, `{"on":true,"ipv6":false}`, 40); n == 0 || n > 15 {
+		t.Errorf("IPv6 withdrawal did not consume destructive budget: %d", n)
+	}
+}
+
 func TestWireGuardRuleNumberFindsOnlyTheRuleTheDashboardWrote(t *testing.T) {
 	t.Parallel()
 	rule := func(n int, comment, action, port, proto string, v6 bool) netsec.Rule {

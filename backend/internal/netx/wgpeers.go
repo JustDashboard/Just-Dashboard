@@ -121,17 +121,31 @@ func wgLastAddr(p netip.Prefix) netip.Addr {
 // starting after the server's.
 func wgNextPeerAddress(subnet netip.Prefix, server netip.Addr, taken []netip.Prefix) (netip.Addr, error) {
 	last := wgLastAddr(subnet)
-	for a := server.Next(); subnet.Contains(a) && a != last; a = a.Next() {
+	a := server.Next()
+	// Jump past covering prefixes. Walking every occupied IPv6 address could
+	// take forever when a native peer already owns half a /64.
+	for range len(taken) + 1 {
+		if !a.IsValid() || !subnet.Contains(a) || a == last {
+			break
+		}
 		free := true
+		next := a.Next()
 		for _, t := range taken {
 			if t.Contains(a) {
 				free = false
-				break
+				end := wgLastAddr(t)
+				if end.Compare(last) >= 0 {
+					return netip.Addr{}, fmt.Errorf("every remaining address in %s is taken", subnet)
+				}
+				if end.Compare(next) >= 0 {
+					next = end.Next()
+				}
 			}
 		}
 		if free {
 			return a, nil
 		}
+		a = next
 	}
 	return netip.Addr{}, fmt.Errorf("every address in %s is taken", subnet)
 }
@@ -141,6 +155,7 @@ func wgNextPeerAddress(subnet netip.Prefix, server netip.Addr, taken []netip.Pre
 type wgClientConfig struct {
 	privateKey string
 	address    netip.Addr
+	address6   netip.Addr
 	dns        []string
 	mtu        int
 	listenPort int
@@ -155,11 +170,11 @@ type wgClientConfig struct {
 func (c wgClientConfig) render() string {
 	var b strings.Builder
 	b.WriteString("[Interface]\n")
-	if c.fullTunnel {
+	if c.fullTunnel && !c.address6.IsValid() {
 		b.WriteString("# This tunnel carries IPv4. IPv6 is routed into it to prevent a native\n# IPv6 leak; IPv6 internet access needs server-side dual-stack configuration.\n")
 	}
 	fmt.Fprintf(&b, "PrivateKey = %s\n", c.privateKey)
-	fmt.Fprintf(&b, "Address = %s/%d\n", c.address, c.address.BitLen())
+	fmt.Fprintf(&b, "Address = %s\n", wgJoinAddresses(c.address, c.address6))
 	if c.listenPort > 0 {
 		fmt.Fprintf(&b, "ListenPort = %d\n", c.listenPort)
 	}
@@ -225,16 +240,14 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	}
 	isec := conf.iface()
 
-	var subnet netip.Prefix
-	var serverAddr netip.Addr
-	for _, a := range isec.list("address") {
-		if p, err := ParsePrefix(a); err == nil && p.Addr().Is4() {
-			subnet, serverAddr = p.Masked(), p.Addr()
-			break
-		}
-	}
+	v4, v6 := wgInterfacePrefixes(conf)
+	subnet, serverAddr := v4.Masked(), v4.Addr()
 	if !subnet.IsValid() {
 		return nil, fmt.Errorf("%s has no IPv4 address to hand clients one from", iface)
+	}
+	dual := wgIPv6Enabled(conf)
+	if dual && (!v6.IsValid() || v6.Bits() != 64 || !v6.Addr().IsPrivate()) {
+		return nil, fmt.Errorf("%s opted into IPv6 but has no usable unique-local /64", iface)
 	}
 	meta := isec.bodyMeta()
 	endpoint := meta["endpoint"]
@@ -260,10 +273,43 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 	taken = append(taken, netip.PrefixFrom(serverAddr, serverAddr.BitLen()))
+	if dual {
+		host, err := wgReadHostState(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range host.addrs[iface] {
+			taken = append(taken, netip.PrefixFrom(p.Addr(), p.Addr().BitLen()))
+		}
+		out, err := run(ctx, "wg", "show", "all", "dump")
+		if err != nil {
+			return nil, fmt.Errorf("reading native peer allocation before provisioning: %w", err)
+		}
+		inventory, err := wgCheckedDump(out)
+		if err != nil {
+			return nil, err
+		}
+		if err := wgPeerDrift(iface, conf, out, inventory); err != nil {
+			return nil, err
+		}
+		if live := inventory[iface]; live != nil {
+			for _, peer := range live.peers {
+				for _, raw := range peer.allowedIPs {
+					if p, err := ParsePrefix(raw); err == nil {
+						taken = append(taken, p.Masked())
+					}
+				}
+			}
+		}
+		taken = append(taken, netip.PrefixFrom(v6.Addr(), 128))
+	}
 
 	for _, r := range remote {
 		if r.Overlaps(subnet) {
 			return nil, fmt.Errorf("remoteNetworks: %s overlaps the tunnel's own network %s", r, subnet)
+		}
+		if dual && r.Overlaps(v6.Masked()) {
+			return nil, fmt.Errorf("remoteNetworks: %s overlaps the tunnel's IPv6 network %s", r, v6.Masked())
 		}
 		for _, t := range taken {
 			if t.Overlaps(r) {
@@ -317,6 +363,13 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	if err != nil {
 		return nil, err
 	}
+	var addr6 netip.Addr
+	if dual {
+		addr6, err = wgNextPeerAddress(v6.Masked(), v6.Addr(), taken)
+		if err != nil {
+			return nil, err
+		}
+	}
 	priv, pub, err := newWGKeyPair()
 	if err != nil {
 		return nil, err
@@ -327,21 +380,27 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	}
 
 	cc := wgClientConfig{
-		privateKey: priv, address: addr, mtu: mtu,
+		privateKey: priv, address: addr, address6: addr6, mtu: mtu,
 		serverKey: serverPub, psk: psk, endpoint: endpoint, keepalive: keepalive,
 		fullTunnel: req.FullTunnel,
 	}
 	cc.allowedIPs = []string{subnet.String()}
+	if dual {
+		cc.allowedIPs = append(cc.allowedIPs, v6.Masked().String())
+	}
 	if req.FullTunnel {
 		cc.allowedIPs = []string{"0.0.0.0/0", "::/0"}
 	}
 	for _, n := range share {
-		if n != subnet && !req.FullTunnel {
+		if n != subnet && (!dual || n != v6.Masked()) && !req.FullTunnel {
 			cc.allowedIPs = append(cc.allowedIPs, n.String())
 		}
 	}
 	settings := [][2]string{{"PublicKey", pub}, {"PresharedKey", psk}}
 	serverAllowed := []string{netip.PrefixFrom(addr, addr.BitLen()).String()}
+	if dual {
+		serverAllowed = append(serverAllowed, netip.PrefixFrom(addr6, 128).String())
+	}
 	serverAllowed = append(serverAllowed, wgPrefixStrings(remote)...)
 	settings = append(settings, [2]string{"AllowedIPs", strings.Join(serverAllowed, ", ")})
 
@@ -374,15 +433,17 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	if !wgIPForwarding("ipv4") && (req.FullTunnel || len(share) > 0 || len(remote) > 0) {
 		warnings = append(warnings, wgForwardingWarning)
 	}
+	if dual && !wgIPForwarding("ipv6") && (req.FullTunnel || len(share) > 0 || len(remote) > 0) {
+		warnings = append(warnings, "IPv6 forwarding is off; IPv6 reaches this server only. Enable it from Routing before using shared networks or exit egress.")
+	}
 	if req.FullTunnel {
-		warnings = append(warnings, "This full tunnel carries IPv4. IPv6 is blocked inside the tunnel to prevent a native IPv6 leak; IPv6 internet access needs server-side dual-stack configuration.")
+		warnings = append(warnings, wgIPv6Containment(dual))
 		if sp, err := s.loadSpec(); err == nil {
-			exit := false
-			for _, n := range sp.NAT {
-				exit = exit || (n.Owner == wgOwner(iface) && n.Enabled)
-			}
-			if !exit {
+			if !wgExitEnabled(sp, iface, false) {
 				warnings = append(warnings, "This device sends all its traffic through "+iface+", which is not an exit node, so it will have no internet until it is made one.")
+			}
+			if dual && !wgExitEnabled(sp, iface, true) {
+				warnings = append(warnings, "IPv6 is captured by this full tunnel, but its IPv6 exit is off; IPv6 internet traffic has no egress through this server.")
 			}
 		}
 	}
