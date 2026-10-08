@@ -1829,6 +1829,9 @@ async function mockUsage(
       ...detail,
       state: options.stopped ? "exited" : "running",
       networkMode: options.host ? "host" : "bridge",
+      // What the frames say it may use, so the limits and the readings agree.
+      memoryLimit: 512 * 1024 * 1024,
+      cpuLimit: 2,
     }),
   )
   await page.route(`**/api/v1/docker/containers/${detail.id}/anomalies`, (route) =>
@@ -1894,58 +1897,72 @@ async function mockUsage(
   return { send, connections: () => connections }
 }
 
-test("usage separates live rates from totals, waits for intervals, and keeps idle history", async ({
+/**
+ * The Usage tab reads a container the way a project's Runtime reads a
+ * release — each chart headed by its reading now — and breaks those
+ * readings down under the charts the way the Metrics page breaks the host
+ * down.
+ */
+test("usage heads each chart with its reading now and breaks the readings down", async ({
   page,
 }) => {
-  const feed = await mockUsage(page, { idle: true })
-  const live = page.getByTestId("container-live-usage")
-  const received = live.locator('[data-slot="stat-tile"]').filter({ hasText: "Network received" })
+  const feed = await mockUsage(page)
+  const usage = page.getByTestId("container-usage")
   await feed.send(0, 1024 * 1024)
-  await expect(received).toContainText("—")
-  await expect(received).toContainText("1.0 MB total received")
   await feed.send(2, 1024 * 1024 + 4096)
-  await expect(received).toContainText("KB/s")
-  await expect(live.getByRole("cell", { name: "eth0", exact: true })).toBeVisible()
-  await expect(live.getByText("150.0%", { exact: true })).toBeVisible()
-  await expect(live.getByText("28.0 MB", { exact: true })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Network throughput", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Pause readings" }).click()
-  await expect(live.getByText("Paused", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Resume readings" }).click()
-  await expect.poll(feed.connections).toBe(2)
-  await feed.send(4, 2000000)
-  await expect(received).toContainText("—")
+  await expect(usage.getByText("Live", { exact: true }).first()).toBeVisible()
+  // The processor's share of a core heads its chart, and a rate needs two frames.
+  await expect(usage.getByText("150.0%", { exact: true })).toBeVisible()
+  await expect(usage.getByText("2.0 KB/s").first()).toBeVisible()
+
+  // Where the memory is: the inactive cache apart from the working set.
+  await expect(usage.getByRole("heading", { name: "Allocation", exact: true })).toBeVisible()
+  await expect(usage.getByText("28.0 MB", { exact: true })).toBeVisible()
+  await expect(usage.getByText("Left to its limit")).toBeVisible()
+
+  // Of the 2-core quota, of the machine, and how often the quota bit.
+  const tile = (name: RegExp) => usage.locator("[data-slot=stat-tile]").filter({ hasText: name })
+  await expect(tile(/of its quota/i)).toContainText("75.0%")
+  await expect(tile(/throttled/i)).toContainText("10.0%")
+
+  // Each interface as a row with its traffic bar.
+  await expect(usage.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible()
+  await expect(usage.getByRole("cell", { name: "eth0", exact: true })).toBeVisible()
+  await expect(usage.getByRole("img", { name: /in, .* out/ }).first()).toBeVisible()
 })
 
-test("usage stays live with history disabled and removes stale figures", async ({ page }) => {
+test("usage keeps its figures with history disabled and says when they go stale", async ({
+  page,
+}) => {
   await page.clock.install()
   const feed = await mockUsage(page, { disabled: true })
   await feed.send(0, 1000)
   await feed.send(2, 3000)
-  const live = page.getByTestId("container-live-usage")
-  await expect(live.getByText("Live", { exact: true })).toBeVisible()
+  const usage = page.getByTestId("container-usage")
+  await expect(usage.getByText("Live", { exact: true }).first()).toBeVisible()
   await expect(page.getByText(/History is not being recorded/)).toBeVisible()
+  await expect(usage.getByText("28.0 MB", { exact: true })).toBeVisible()
   await page.clock.fastForward(12000)
-  await expect(live.getByText("Readings stale", { exact: true })).toBeVisible()
-  await expect(live.getByText("150.0%", { exact: true })).toHaveCount(0)
+  await expect(usage.getByText("Readings stale", { exact: true })).toBeVisible()
 })
 
-test("host networking explains unavailable attribution and stopped containers keep history", async ({
-  page,
-}) => {
+test("a stopped container keeps its history and opens no socket", async ({ page }) => {
+  const stopped = await mockUsage(page, { stopped: true })
+  const usage = page.getByTestId("container-usage")
+  await expect(usage.getByText("Not running", { exact: true })).toBeVisible()
+  await expect(usage.getByRole("heading", { name: "Processor", exact: true })).toBeVisible()
+  await expect(usage.getByText("Not running. These are read while it runs.").first()).toBeVisible()
+  expect(stopped.connections()).toBe(0)
+})
+
+test("host networking says why it has no interfaces and where the traffic is", async ({ page }) => {
   const feed = await mockUsage(page, { host: true })
   await feed.send(0, 0)
   await expect(page.getByRole("link", { name: "View host network usage" })).toHaveAttribute(
     "href",
     "/metrics",
   )
-  await expect(page.getByRole("heading", { name: "Network throughput", exact: true })).toHaveCount(
-    0,
-  )
-  const stopped = await mockUsage(page, { stopped: true })
-  await expect(page.getByText("Container exited", { exact: true })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Usage history", exact: true })).toBeVisible()
-  expect(stopped.connections()).toBe(0)
+  await expect(page.getByRole("cell", { name: "eth0", exact: true })).toHaveCount(0)
 })
 
 for (const width of [1280, 1720, 390]) {
@@ -1956,22 +1973,13 @@ for (const width of [1280, 1720, 390]) {
     const feed = await mockUsage(page)
     await feed.send(0, 1024 * 1024)
     await feed.send(2, 1024 * 1024 + 4096)
-    await expect(
-      page.getByRole("heading", { name: "Network interfaces", exact: true }),
-    ).toBeVisible()
-    await expect(page.getByRole("heading", { name: "Usage history", exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Interfaces", exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Since it started", exact: true })).toBeVisible()
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
     await page.screenshot({
       path: testInfo.outputPath(`container-usage-${width}.png`),
-      fullPage: true,
-    })
-    await page.getByRole("tabpanel", { name: "Usage", exact: true }).evaluate((element) => {
-      element.scrollTop = element.scrollHeight
-    })
-    await page.screenshot({
-      path: testInfo.outputPath(`container-history-${width}.png`),
       fullPage: true,
     })
   })

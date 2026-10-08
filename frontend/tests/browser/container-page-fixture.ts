@@ -1,5 +1,7 @@
 import type { Page, Route } from "@playwright/test"
 import { mockHost } from "./host-fixture"
+import { PG_LINES } from "./logs-lens-fixture"
+import { mockContainerExec } from "./container-shell-fixture"
 
 /**
  * One container's page on a host where it has company: n8n in a compose
@@ -199,7 +201,7 @@ const standalone: Listed = {
   id: STANDALONE,
   names: ["uptime-kuma"],
   name: "uptime-kuma",
-  image: "louislam/uptime-kuma:1.23.16",
+  image: "louislam/uptime-kuma:1",
   command: "/usr/bin/dumb-init -- extra/entrypoint.sh",
   state: "running",
   status: "Up 12 days (healthy)",
@@ -441,6 +443,18 @@ const diagnosis = {
       targetId: N8N,
     },
     {
+      id: `container.latest.${STANDALONE}`,
+      level: "warning",
+      severity: "warning",
+      class: "configuration",
+      title: "uptime-kuma follows the moving tag :1",
+      detail:
+        "Recreating it pulls whatever :1 points at that day, which can be a different release.",
+      scope: "container",
+      target: "uptime-kuma",
+      targetId: STANDALONE,
+    },
+    {
       id: `container.nohealthcheck.${RUNNER}`,
       level: "notice",
       severity: "recommendation",
@@ -637,6 +651,61 @@ function statOf(id: string, tick: number) {
   }
 }
 
+/** What n8n writes in a busy minute: executions, a slow webhook, a failed node, the runner. */
+function n8nLines() {
+  const line = (seconds: number, level: string, text: string) => ({
+    text: `${iso(NOW - seconds * 1000)} | ${level.padEnd(5)} | ${text}`,
+    timestamp: iso(NOW - seconds * 1000),
+    level,
+  })
+  return [
+    line(
+      58,
+      "info",
+      "Version: 1.98.2 · Editor is now accessible via https://automations.example.test",
+    ),
+    line(51, "info", 'Workflow "Shop orders → Slack" (id 14) execution 88421 started'),
+    line(
+      50,
+      "info",
+      'Workflow "Shop orders → Slack" execution 88421 finished successfully in 412ms',
+    ),
+    line(
+      44,
+      "warn",
+      "Webhook /webhook/stripe took 2.31s to respond, longer than the 2s Stripe waits",
+    ),
+    line(38, "info", 'Workflow "Nightly invoices" (id 3) execution 88422 started'),
+    line(
+      36,
+      "error",
+      'Node "Fetch invoices" failed: ECONNRESET reading https://api.billing.example/v2/invoices',
+    ),
+    line(
+      36,
+      "info",
+      'Workflow "Nightly invoices" execution 88422 is retrying in 30s (attempt 2 of 3)',
+    ),
+    line(29, "warn", "Task runner did not register within 10s; JavaScript Code nodes will wait"),
+    line(22, "info", "Pruned 214 executions older than 14 days"),
+    line(
+      12,
+      "info",
+      'Workflow "Shop orders → Slack" execution 88423 finished successfully in 388ms',
+    ),
+    line(6, "error", "Task runner connection refused at 172.20.0.4:5679"),
+    line(2, "info", "Health check ok · queue: 3 waiting, 0 active"),
+  ]
+}
+
+/** A log's last hour in twelve buckets, so the lens's readings carry a shape. */
+function hourOf(matched: number) {
+  return Array.from({ length: 12 }, (_, i) => {
+    const total = Math.round((matched / 12) * (0.6 + Math.abs(Math.sin(i * 1.3))))
+    return { start: iso(NOW - (12 - i) * 300_000), total, counts: { error: Math.round(total / 6) } }
+  })
+}
+
 async function json(route: Route, body: unknown) {
   await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -656,6 +725,7 @@ const notMocked = (route: Route) =>
 export async function mockContainerPage(page: Page, options: { frames?: number } = {}) {
   const frames = options.frames ?? 600
   await mockHost(page)
+  await mockContainerExec(page)
 
   await page.routeWebSocket(/\/api\/v1\/docker\/containers\/stream/, (socket) => {
     socket.send(JSON.stringify({ type: "containers", data: inventory }))
@@ -689,7 +759,23 @@ export async function mockContainerPage(page: Page, options: { frames?: number }
     socket.onClose(() => clearInterval(timer))
   })
   await page.routeWebSocket(/\/api\/v1\/docker\/events\/stream/, () => {})
-  await page.routeWebSocket(/\/api\/v1\/logs\/stream/, () => {})
+  await page.routeWebSocket(/\/api\/v1\/logs\/stream/, (socket) => {
+    const source = new URL(socket.url()).searchParams.get("source") ?? ""
+    const postgres = source === `docker:${POSTGRES}`
+    socket.send(
+      JSON.stringify({
+        type: "meta",
+        data: {
+          kind: "docker",
+          label: source,
+          filtered: false,
+          lens: postgres ? "postgres" : undefined,
+        },
+        ts: NOW,
+      }),
+    )
+    socket.send(JSON.stringify({ type: "logs", data: postgres ? PG_LINES : n8nLines(), ts: NOW }))
+  })
 
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
@@ -755,14 +841,46 @@ export async function mockContainerPage(page: Page, options: { frames?: number }
     }
     if (path === "/system/metrics/events") return json(route, [])
     if (path.startsWith("/logs/")) {
+      const source = url.searchParams.get("source") ?? ""
+      const postgres = source === `docker:${POSTGRES}`
       if (path === "/logs/source") {
         return json(route, {
-          id: url.searchParams.get("source"),
+          id: source,
           kind: "docker",
           status: "running",
+          lens: postgres ? "postgres" : undefined,
         })
       }
-      if (path === "/logs/search") return json(route, { lines: [], scanned: 0, matched: 0 })
+      if (path === "/logs/search") {
+        const lines = postgres ? PG_LINES : n8nLines()
+        // Each reading asks its own question, so each gets its own count.
+        const asked = url.search
+        const matched = !postgres
+          ? 12
+          : /slow/.test(asked)
+            ? 14
+            : /auth/.test(asked)
+              ? 3
+              : /deadlock|lock_wait/.test(asked)
+                ? 1
+                : /startup|ready|shutdown/.test(asked)
+                  ? 2
+                  : /error/.test(asked)
+                    ? 6
+                    : 37
+        return json(route, {
+          lines,
+          scanned: 1200,
+          matched,
+          truncated: false,
+          complete: true,
+          files: [],
+          histogram: hourOf(matched),
+          bucketSeconds: 300,
+          tookMillis: 4,
+          lens: postgres ? "postgres" : undefined,
+        })
+      }
       return json(route, {})
     }
     const match = path.match(/^\/docker\/containers\/([0-9a-f]+)(\/.*)?$/)
@@ -782,6 +900,17 @@ export async function mockContainerPage(page: Page, options: { frames?: number }
           },
         )
       if (rest === "/routes") return json(route, routes[id] ?? [])
+      if (rest === "/spec")
+        return json(route, {
+          name: container.name,
+          image: container.image,
+          env: [{ name: "UPTIME_KUMA_PORT", value: "3001" }],
+          ports: [{ hostIp: "127.0.0.1", hostPort: 3001, containerPort: 3001, protocol: "tcp" }],
+          mounts: [{ type: "volume", source: "uptime-kuma", target: "/app/data" }],
+          limits: {},
+          restartPolicy: "always",
+          start: true,
+        })
       if (rest === "/changes")
         return json(route, id === N8N ? [{ path: "/home/node/.cache/n8n", kind: "added" }] : [])
       if (rest === "/anomalies") return json(route, { anomalies: [] })

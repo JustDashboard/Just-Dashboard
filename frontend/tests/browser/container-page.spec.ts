@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { N8N, POSTGRES, RUNNER, mockContainerPage } from "./container-page-fixture"
+import { N8N, POSTGRES, RUNNER, STANDALONE, mockContainerPage } from "./container-page-fixture"
 
 /**
  * One container's page after the 2026-10-08 overhaul, against n8n in a
@@ -121,12 +121,89 @@ test("the environment is a table that keeps credentials hidden from its filter",
   await expect(page.getByText("correct-horse-battery")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Reveal DB_POSTGRESDB_PASSWORD" })).toBeVisible()
 
+  // The kinds count and narrow, as the deployment Variables page's do.
+  const kinds = page.getByLabel("Kinds of value")
+  await kinds.getByRole("button", { name: /^Credentials/ }).click()
+  await expect(table.getByRole("row")).toHaveCount(5)
+  await kinds.getByRole("button", { name: /^All/ }).click()
+
   const filter = page.getByRole("textbox", { name: "Filter the environment" })
   await filter.fill("redis")
   await expect(table.getByRole("row")).toHaveCount(2)
   // A hidden value is not searched: a match would say what it contains.
   await filter.fill("correct-horse")
   await expect(page.getByText("Nothing in the environment matches.")).toBeVisible()
+})
+
+test("storage is a rail of mounts beside the listing of the one picked", async ({ page }) => {
+  await mockContainerPage(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto(`/docker/containers/${N8N}?tab=mounts`)
+
+  const mounts = page.getByRole("list", { name: "Mounts" })
+  await expect(mounts.getByRole("listitem")).toHaveCount(4)
+  await expect(mounts.getByText("Temporary memory · in RAM")).toBeVisible()
+  await expect(mounts.getByText("not kept")).toBeVisible()
+  await expect(page.getByText("3 of 4 outlive the container")).toBeVisible()
+  // The volume is open with the tab, and a folder is a press away.
+  await expect(mounts.getByRole("button", { pressed: true })).toContainText("/home/node/.n8n")
+  await expect(page.getByRole("button", { name: "database.sqlite" })).toBeVisible()
+  await mounts.getByRole("button").filter({ hasText: "/files" }).click()
+  await expect(mounts.getByRole("button", { pressed: true })).toContainText("/files")
+})
+
+/**
+ * The terminal's palette is read off the page's tokens through a probe. The
+ * root reduced-motion rule gives every element a 0.01ms transition, and one
+ * probe reused for each token was read on its way from the last colour, so
+ * the ground came back as the foreground and the shell drew white.
+ */
+test("the shell keeps its dark ground for a reader who asks for less motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await mockContainerPage(page)
+  await page.goto(`/docker/containers/${N8N}?tab=shell`)
+  const ground = page.locator(".xterm-scrollable-element").first()
+  await expect(ground).toBeVisible()
+  const lightness = await ground.evaluate((el) => {
+    const [r, g, b] = getComputedStyle(el).backgroundColor.match(/\d+/g)!.map(Number)
+    return (r + g + b) / 3
+  })
+  expect(lightness).toBeLessThan(60)
+
+  // A quick command types itself into the session and the session answers.
+  await page.getByRole("button", { name: "Run id" }).click()
+  await expect(page.locator(".xterm-rows")).toContainText("uid=1000(node)")
+})
+
+test("inspect reads the document a section at a time, coloured and still masked", async ({
+  page,
+}) => {
+  await mockContainerPage(page)
+  await page.goto(`/docker/containers/${N8N}?tab=inspect`)
+  await expect(page.getByText(/are hidden here too/)).toBeVisible()
+  await expect(page.getByText("correct-horse-battery")).toHaveCount(0)
+  await expect(page.getByText(/N8N_HOST=automations\.example\.test/)).toBeVisible()
+  await page.getByRole("button", { name: /^State/ }).click()
+  await expect(page.getByText('"running"')).toBeVisible()
+})
+
+test("a standalone container's configuration prepares its fix as a card", async ({ page }) => {
+  await mockContainerPage(page)
+  await page.goto(`/docker/containers/${STANDALONE}?tab=configure`)
+  await expect(page.getByText("uptime-kuma follows the moving tag :1")).toBeVisible()
+  await expect(page.getByLabel("Replacement specification", { exact: true })).toHaveValue(
+    /louislam\/uptime-kuma:1/,
+  )
+  await expect(page.getByText("As it runs now")).toBeVisible()
+})
+
+test("usage marks the restart loop on the runner's charts and says it is not running", async ({
+  page,
+}) => {
+  await mockContainerPage(page)
+  await page.goto(`/docker/containers/${RUNNER}?tab=usage`)
+  await expect(page.getByText("Not running", { exact: true }).first()).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Processor", exact: true })).toBeVisible()
 })
 
 for (const width of [390, 1280]) {
