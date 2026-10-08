@@ -109,6 +109,11 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   explicit address pools that contain the connection's observed client address before Engine I/O.
   Additive IPv4/IPv6 IPAM pools retain the legacy single-pool API; validation and bounded metadata are
   described in [Docker network creation](../backend/docker-files-logs.md#network-creation).
+- **Saved network diagnostics.** Launch, read, export, compare and cancel require `system.admin`.
+  The generic job list/get/stream/cancel routes apply that same gate to `network.diagnostic.*` jobs,
+  so artifact access cannot bypass the feature route. Deletion and retention changes additionally
+  use `s.destructive`; all mutations are audited. The connection investigator likewise requires
+  `system.admin` and accepts a closed source/target tuple rather than a PID, executable or argv.
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything

@@ -81,6 +81,9 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   and shaping expose kernel evidence separately from saved settings. DNS tests follow the host's
   resolver policy by default; direct comparisons require named destinations and a disclosure
   acknowledgment.
+  Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
+  measurement. Saved runs retain diagnostic scope, stages and outcomes across restarts; Drift compares
+  owned saved, rendered and runtime state with measured unit activation and an advisory repair review.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
   the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
   that open beside the listing or in a full workspace with a file tree, and every Git checkout with

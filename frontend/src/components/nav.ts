@@ -225,6 +225,7 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         icon: Topology,
         children: [
           { title: "Overview", href: "/network", icon: GridSquare },
+          { title: "Drift", href: "/network/drift", icon: Monitoring },
           { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice },
           { title: "Routing", href: "/network/routing", icon: Route },
           { title: "Firewall", href: "/network/firewall", icon: FirewallCheck },
@@ -234,7 +235,19 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           { title: "DNS", href: "/network/dns", icon: Globe },
           { title: "Traffic", href: "/network/traffic", icon: ChartActivity },
           { title: "Connections", href: "/network/connections", icon: Connection },
+          {
+            title: "Connection path",
+            href: "/network/investigate",
+            icon: Inspect,
+            capability: "system.admin",
+          },
           { title: "Tools", href: "/network/tools", icon: Wrench },
+          {
+            title: "Saved runs",
+            href: "/network/runs",
+            icon: Notes,
+            capability: "system.admin",
+          },
         ],
       },
       // The reverse proxy, its certificates, the TCP/UDP streams and the load

@@ -42,6 +42,12 @@ surface; Wake-on-LAN reports that a packet was sent rather than claiming the tar
 packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
 subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. It is available with read access;
 privileged server diagnostics are not mounted for readers and retain their backend admin gate.
+Saved runs retain bounded named artifacts with explicit queued/running/completed/failed/cancelled/
+interrupted lifecycle, dated scope, typed outcomes, compatible comparison and administrator-only
+export. They use polled status without a socket-only live halo and can watch the existing job stream.
+The connection investigator retains its previous report and tuple after a failed retry, labeling
+each layer observed, modeled, measured or unknown. Drift readings preserve dated observations on a
+failed refresh and expire an advisory repair selection when compared identities or evidence change.
 DNS lookup defaults to the native effective resolver policy. Direct comparison requires selected,
 named destinations and acknowledgment that private names leave their usual policy scope; the old
 `includePublic` flag does not authorize fan-out. Resolver changes may carry a private

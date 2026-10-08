@@ -33,6 +33,12 @@ strategy, and feature ownership behind those rules.
   dependencies before interrupted-change recovery after a cold start.
 - [`backend/gateway-health.md`](backend/gateway-health.md) — checked firewall layers, per-family
   admission health and blocklist cache/render/runtime evidence.
+- [`backend/network-investigator.md`](backend/network-investigator.md) — source/container connection
+  explanations, pinned native DNS/route/TCP evidence and unknown foreign/provider layers.
+- [`backend/network-diagnostics.md`](backend/network-diagnostics.md) — bounded saved probe runs,
+  cancellation, restart interruption, comparison, export and retention.
+- [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
+  measured unit activation and generation-bound repair review.
 - [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.
 - [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
   posture, login history, sshd, firewall/fail2ban, and six package managers.

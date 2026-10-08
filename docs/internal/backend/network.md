@@ -10,6 +10,13 @@ page and diagnostic, fixed findings, competitor research and actual compatibilit
 The [capability-report implementation ledger](../../audits/2026-10-08-network-capability-report/implementation-status.md)
 tracks the additional work and its acceptance evidence.
 
+The section also offers [connection investigation](network-investigator.md), [saved diagnostic
+runs](network-diagnostics.md) and [owned drift inspection](network-drift.md). The investigator pins a
+typed host/container tuple and distinguishes observed, modeled, measured and unknown layers. The
+diagnostic service retains bounded artifacts and lifecycle state in SQLite; host-network configuration
+remains in the managed spec. Drift compares desired/rendered/runtime identities and measured unit
+activation, with an advisory owned repair plan rather than automatic reconciliation.
+
 ## Three rules
 
 - **One spec, restored by the host.** Every device, address, route, rule, namespace, shaping entry,

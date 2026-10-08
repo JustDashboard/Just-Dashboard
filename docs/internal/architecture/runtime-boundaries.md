@@ -39,6 +39,11 @@ Startup marks interrupted archive runs failed and reconciles owned restore-check
 scheduling new backups. Interrupted restore checks are cleaned and recorded as failed, never promoted
 to recovery proof. Managed database network reconciliation follows retained environment bindings every
 five seconds and stops before deployment engine shutdown.
+Saved network diagnostics settle predecessor runs as interrupted at startup and never replay their
+probes. A recording failure leaves the service unavailable until a bounded pending write can be
+retained; it does not relaunch the probe. Shutdown cancels and drains active diagnostic jobs through
+their existing process-group cancellation. Saved artifacts and generic job views of those artifacts
+remain administrator-only. See [diagnostic lifecycle](../backend/network-diagnostics.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
