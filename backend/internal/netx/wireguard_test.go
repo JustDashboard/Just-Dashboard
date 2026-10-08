@@ -593,6 +593,30 @@ func TestCreateWireGuardServer(t *testing.T) {
 	}
 }
 
+func TestCreateWireGuardRetainsCommittedExitOnBootUnitFailure(t *testing.T) {
+	s := vpnService(t)
+	rec := record(t)
+	wgHostReplies(t, rec)
+	rec.on("systemctl enable --now wg-quick@wg0", "")
+	wgUnitReplies(rec, "wg0")
+	rec.fail("systemctl daemon-reload", "unit manager unavailable")
+	wgCommitReplies(rec)
+	res, err := s.CreateWireGuard(t.Context(), WGServerRequest{ExitNode: true}, "alice")
+	if err != nil || res == nil || len(res.Warnings) == 0 {
+		t.Fatalf("committed tunnel was not returned with warning: %+v %v", res, err)
+	}
+	if rec.ran("systemctl disable --now wg-quick@wg0") {
+		t.Fatal("boot-unit warning removed the committed exit tunnel")
+	}
+	if _, err := os.Stat(filepath.Join(s.paths.WireGuard, "wg0.conf")); err != nil {
+		t.Fatalf("committed tunnel configuration lost: %v", err)
+	}
+	sp := wgMustSpec(t, s)
+	if len(sp.NAT) != 1 || sp.NAT[0].Owner != "wireguard:wg0" || !sp.NAT[0].Enabled {
+		t.Fatalf("committed exit lost: %+v", sp.NAT)
+	}
+}
+
 func wgMustString(t *testing.T, v any) string {
 	t.Helper()
 	b, err := json.Marshal(v)

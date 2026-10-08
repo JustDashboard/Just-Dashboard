@@ -20,7 +20,7 @@ func (s *Server) handleNetworkCapabilities(w http.ResponseWriter, r *http.Reques
 
 func networkSupportProbe(view netx.HostSupport) *netsec.ProbeResult {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Boot persistence: %s\nIPv6 globally enabled: %t\n\nHost tools:\n", view.Persistence, view.IPv6)
+	fmt.Fprintf(&b, "Boot persistence: %s\nIPv6: %s\n\nHost tools:\n", view.Persistence, view.IPv6State)
 	for _, tool := range view.Tools {
 		status := "available"
 		if !tool.Available {

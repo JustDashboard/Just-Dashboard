@@ -13,7 +13,7 @@ import (
 type HostSupport struct {
 	Tools       []ToolSupport `json:"tools"`
 	Persistence string        `json:"persistence"`
-	IPv6        bool          `json:"ipv6"`
+	IPv6State   string        `json:"ipv6State"`
 	Notes       []string      `json:"notes"`
 }
 
@@ -51,7 +51,7 @@ func (s *Service) HostSupport(ctx context.Context) HostSupport {
 		{Tool: "ping", Package: "iputils-ping", Purpose: "ICMP reachability"},
 		{Tool: "traceroute", Package: "traceroute", Purpose: "hop-by-hop reachability (tracepath is a fallback)"},
 		{Tool: "tracepath", Package: "iputils-tracepath", Purpose: "path MTU and traceroute fallback"},
-		{Tool: "tcpdump", Package: "tcpdump", Purpose: "bounded packet metadata snapshots"},
+		{Tool: "tcpdump", Package: "tcpdump", Purpose: "bounded packet summary snapshots"},
 		{Tool: "whois", Package: "whois", Purpose: "registration and autonomous system ownership"},
 		{Tool: "ssh-keyscan", Package: "openssh-client", Purpose: "SSH host key fingerprints"},
 	} {
@@ -70,8 +70,9 @@ func (s *Service) HostSupport(ctx context.Context) HostSupport {
 			view.Persistence = "systemd manager unreachable"
 		}
 	}
+	view.IPv6State = "unavailable"
 	if raw, err := readSysctl("net.ipv6.conf.all.disable_ipv6"); err == nil {
-		view.IPv6 = strings.TrimSpace(raw) == "0"
+		view.IPv6State = "all.disable_ipv6=" + strings.TrimSpace(raw) + " (inspect individual interfaces for their IPv6 state)"
 	}
 	view.Notes = append(view.Notes, "Package names are common Debian/Ubuntu names; use the equivalent package for the host distribution.")
 	return view

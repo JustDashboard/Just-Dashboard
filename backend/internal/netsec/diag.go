@@ -262,9 +262,13 @@ func runProbe(ctx context.Context, limit time.Duration, name string, args ...str
 // A remote registry or a busy capture must not allocate its entire output
 // before the response is truncated. Continue draining once the cap is met.
 type probeOutput struct {
-	bytes.Buffer
+	// A named field prevents io.Copy using bytes.Buffer.ReadFrom and
+	// bypassing the cap enforced by Write.
+	buffer    bytes.Buffer
 	truncated bool
 }
+
+func (b *probeOutput) Len() int { return b.buffer.Len() }
 
 func (b *probeOutput) Write(p []byte) (int, error) {
 	n := len(p)
@@ -273,13 +277,13 @@ func (b *probeOutput) Write(p []byte) (int, error) {
 		p = p[:remaining]
 		b.truncated = true
 	}
-	_, _ = b.Buffer.Write(p)
+	_, _ = b.buffer.Write(p)
 	return n, nil
 }
 
 func (b *probeOutput) String() string {
 	if b.truncated {
-		return b.Buffer.String() + "\n… (truncated)"
+		return b.buffer.String() + "\n… (truncated)"
 	}
-	return b.Buffer.String()
+	return b.buffer.String()
 }

@@ -107,7 +107,7 @@ func TestNetworkDeviceAndRoutingRefuseMalformedRequestsBeforeTouchingTheHost(t *
 		{"a route in the local table", http.MethodPost, "/api/v1/network/routing/routes", `{"destination":"10.0.0.0/24","device":"d0","table":255}`, 409, "would_lock_you_out"},
 		{"a route in Tailscale's table", http.MethodPost, "/api/v1/network/routing/routes", `{"destination":"10.0.0.0/24","device":"d0","table":52}`, 409, "would_lock_you_out"},
 		{"a rule with no selector", http.MethodPost, "/api/v1/network/routing/rules", `{"table":100}`, 409, "would_lock_you_out"},
-		{"an IPv6 rule", http.MethodPost, "/api/v1/network/routing/rules", `{"from":"2001:db8::/32","table":100}`, 400, "bad_request"},
+		{"a mixed-family rule", http.MethodPost, "/api/v1/network/routing/rules", `{"from":"2001:db8::/32","to":"192.0.2.0/24","table":100}`, 400, "bad_request"},
 		{"a route id that is not a number", http.MethodDelete, "/api/v1/network/routing/routes/abc", "", 400, "bad_request"},
 		{"a rule id of zero", http.MethodDelete, "/api/v1/network/routing/rules/0", "", 400, "bad_request"},
 		{"a family nobody has", http.MethodPost, "/api/v1/network/forwarding/ipx/on", "", 400, "bad_request"},

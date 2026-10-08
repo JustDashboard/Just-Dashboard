@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -570,8 +571,15 @@ SaveConfig = false
 
 	if req.ExitNode {
 		if err := s.setWGExit(ctx, name, subnet.String(), host.uplink, true, actor); err != nil {
-			undo()
-			return nil, fmt.Errorf("making %s an exit node: %w", name, err)
+			var saved *persistenceError
+			if errors.As(err, &saved) {
+				// NAT and its spec already reference this tunnel. Removing its
+				// device/file would turn a boot-unit warning into a broken exit.
+				warnings = append(warnings, err.Error())
+			} else {
+				undo()
+				return nil, fmt.Errorf("making %s an exit node: %w", name, err)
+			}
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"reflect"
 	"strings"
@@ -180,5 +181,12 @@ func TestProbeOutputBoundsMemoryWhileDraining(t *testing.T) {
 	}
 	if b.Len() != maxProbeOutput || !strings.HasSuffix(b.String(), "… (truncated)") {
 		t.Fatal("unbounded or unmarked output")
+	}
+	// os/exec drains pipe output with io.Copy. An embedded bytes.Buffer
+	// promotes ReadFrom and silently bypasses Write's cap on this path.
+	var piped probeOutput
+	n, err := io.Copy(&piped, struct{ io.Reader }{bytes.NewReader(payload)})
+	if err != nil || n != int64(len(payload)) || piped.Len() != maxProbeOutput || !piped.truncated {
+		t.Fatalf("pipe output was not capped/drained: n=%d len=%d truncated=%t err=%v", n, piped.Len(), piped.truncated, err)
 	}
 }

@@ -118,7 +118,7 @@ func (s *Service) PacketSnapshot(ctx context.Context, device, protocol string) (
 	if !res.OK && err != nil {
 		res.Error = err.Error()
 	}
-	res.Output = strings.TrimSpace(res.Output + "\nSnapshot ended after at most 50 packets or 15 seconds. This shows packet metadata, not application payloads.")
+	res.Output = strings.TrimSpace(res.Output + "\nSnapshot ended after at most 50 packets or 15 seconds. Summary output can include sensitive decoded protocol fields. No hex or ASCII payload dump is requested.")
 	return res, nil
 }
 
