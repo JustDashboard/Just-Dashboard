@@ -118,7 +118,7 @@ test.describe("DNS", () => {
   }) => {
     const mutations = await open(page, "/network/dns")
     await page
-      .getByRole("textbox", { name: "Servers" })
+      .getByRole("textbox", { name: "Servers", exact: true })
       .fill("9.9.9.9\n149.112.112.112#dns.quad9.net")
     await page.getByRole("button", { name: "DNS over TLS required" }).click()
     await expect(page.getByText("needs a name on every server: 9.9.9.9 has none")).toBeVisible()
