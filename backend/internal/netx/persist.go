@@ -281,6 +281,15 @@ func (e *persistenceError) Unwrap() error { return e.error }
 
 var writeNetworkFile = writeFileAtomic
 
+var syncNetworkDirectory = func(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
 type savedNetworkFile struct {
 	data   []byte
 	perm   os.FileMode
@@ -307,10 +316,21 @@ func (f savedNetworkFile) restore(path string) error {
 		return writeFileAtomic(path, f.data, f.perm)
 	}
 	err := os.Remove(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
-	return err
+	// A terminal journal must not outlive an unlink lost at power failure.
+	// Retry the sync even when an earlier attempt already removed the entry.
+	parent := filepath.Dir(path)
+	if err := syncNetworkDirectory(parent); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			if _, statErr := os.Lstat(parent); errors.Is(statErr, fs.ErrNotExist) {
+				return nil
+			}
+		}
+		return fmt.Errorf("syncing restored absence of %s: %w", path, err)
+	}
+	return nil
 }
 
 // A dropped browser or an expired request must not cancel the work that puts
