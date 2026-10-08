@@ -21,7 +21,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = networkProbeSchema + `
+const schema = networkProbeSchema + networkIPAMSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 

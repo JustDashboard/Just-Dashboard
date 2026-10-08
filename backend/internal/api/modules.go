@@ -28,6 +28,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
@@ -85,8 +86,9 @@ type moduleSet struct {
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
-	network         *netx.Service
+	network *netx.Service
 	networkVantages *netvantage.Service
+	ipam *netipam.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
@@ -222,6 +224,7 @@ func (s *Server) initModules() {
 		Retention:           s.Cfg.MetricsRetention,
 		IndependentRecovery: true,
 	})
+	s.modules.ipam = netipam.New(s.Store, s.ipamInventory)
 	s.modules.jobs = jobs.New(s.Log)
 	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
 
