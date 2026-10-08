@@ -327,5 +327,15 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	// The rename must reach stable storage too: fsync of only the file can
+	// leave a durable journal referring to a directory entry lost at reboot.
+	dir, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }

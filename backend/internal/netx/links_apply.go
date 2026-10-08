@@ -699,6 +699,7 @@ func pathPurpose(l *Link) string {
 // the undo of a change that already failed.
 func (s *Service) best(ctx context.Context, name string, args ...string) {
 	if _, err := run(ctx, name, args...); err != nil {
+		recordRecoveryError(ctx, err)
 		s.log.Warn("network: rollback step failed", "cmd", name+" "+strings.Join(args, " "), "err", err)
 	}
 }
@@ -706,6 +707,7 @@ func (s *Service) best(ctx context.Context, name string, args ...string) {
 // bestBatch is best for a batch of lines.
 func (s *Service) bestBatch(ctx context.Context, lines []string) {
 	if err := applyBatch(ctx, lines); err != nil {
+		recordRecoveryError(ctx, err)
 		s.log.Warn("network: rollback batch failed", "err", err)
 	}
 }
@@ -1022,6 +1024,7 @@ func (s *Service) SetLinkState(ctx context.Context, name string, up bool, client
 	}
 	undo := func(ctx context.Context) { s.best(ctx, "ip", "link", "set", name, was) }
 	stp := step{apply: set(want), undo: undo, verify: verifyPath(st.path)}
+	stp.recovery = []recoveryCommand{{Tool: "ip", Args: []string{"link", "set", name, was}}}
 	if m, ok := next.link(name); ok {
 		m.Up = up
 		if err := s.commit(ctx, next, stp); err != nil {
@@ -1079,8 +1082,9 @@ func (s *Service) SetLinkMTU(ctx context.Context, name string, mtu int, client, 
 			_, err := run(ctx, "ip", "link", "set", name, "mtu", strconv.Itoa(mtu))
 			return err
 		},
-		undo:   func(ctx context.Context) { s.best(ctx, "ip", "link", "set", name, "mtu", strconv.Itoa(prev)) },
-		verify: verifyPath(st.path),
+		undo:     func(ctx context.Context) { s.best(ctx, "ip", "link", "set", name, "mtu", strconv.Itoa(prev)) },
+		verify:   verifyPath(st.path),
+		recovery: []recoveryCommand{{Tool: "ip", Args: []string{"link", "set", name, "mtu", strconv.Itoa(prev)}}},
 	}
 	if m, ok := next.link(name); ok {
 		m.MTU = mtu
@@ -1172,6 +1176,11 @@ func (s *Service) SetLinkMaster(ctx context.Context, name, master, client, actor
 			verify: verifyPath(st.path),
 		}
 	}
+	previousMaster := []string{"link", "set", name, "nomaster"}
+	if prev != "" {
+		previousMaster = []string{"link", "set", name, "master", prev}
+	}
+	stp.recovery = []recoveryCommand{{Tool: "ip", Args: previousMaster}}
 	if m, ok := next.link(name); ok {
 		m.Master = master
 		if err := s.commit(ctx, next, stp); err != nil {

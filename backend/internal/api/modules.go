@@ -207,14 +207,15 @@ func (s *Server) initModules() {
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
 	s.modules.network = netx.New(netx.Options{
-		Paths:       netx.DefaultPaths(),
-		DB:          s.Store.DB,
-		Log:         s.Log,
-		Allowlist:   allowlistStrings(s.Cfg.AllowedCIDRs),
-		Seal:        s.Sealer.Seal,
-		Open:        s.Sealer.Open,
-		SampleEvery: s.Cfg.MetricsInterval,
-		Retention:   s.Cfg.MetricsRetention,
+		Paths:               netx.DefaultPaths(),
+		DB:                  s.Store.DB,
+		Log:                 s.Log,
+		Allowlist:           allowlistStrings(s.Cfg.AllowedCIDRs),
+		Seal:                s.Sealer.Seal,
+		Open:                s.Sealer.Open,
+		SampleEvery:         s.Cfg.MetricsInterval,
+		Retention:           s.Cfg.MetricsRetention,
+		IndependentRecovery: true,
 	})
 	s.modules.jobs = jobs.New(s.Log)
 

@@ -108,9 +108,11 @@ type Service struct {
 	// gateway table may ever match.
 	trustedRanges []netip.Prefix
 
-	sampler *Sampler
-	vpn     *VPNStore
-	flows   *flowSampler
+	sampler             *Sampler
+	vpn                 *VPNStore
+	flows               *flowSampler
+	independentRecovery bool
+	recoveryInstalled   bool
 }
 
 // Paths are where the module reads and writes on the host. Tests point them
@@ -158,6 +160,9 @@ type Options struct {
 	// per-interface history is kept at the same grain and for as long.
 	SampleEvery time.Duration
 	Retention   time.Duration
+	// IndependentRecovery installs this static executable on the host and
+	// arms a systemd timer before managed runtime changes.
+	IndependentRecovery bool
 }
 
 // New builds the module. It touches nothing on the host; Start begins the
@@ -167,10 +172,11 @@ func New(opts Options) *Service {
 		opts.Log = slog.Default()
 	}
 	s := &Service{
-		paths:         opts.Paths,
-		db:            opts.DB,
-		log:           opts.Log,
-		trustedRanges: operatorRanges(opts.Allowlist),
+		paths:               opts.Paths,
+		db:                  opts.DB,
+		log:                 opts.Log,
+		trustedRanges:       operatorRanges(opts.Allowlist),
+		independentRecovery: opts.IndependentRecovery,
 	}
 	// Gateway slice: the renderer reads a fetched blocklist's cache from here
 	// (gateway.go, gatewayListDir).
@@ -184,6 +190,13 @@ func New(opts Options) *Service {
 // Start begins sampling interface counters. It returns once the first read
 // has been taken, so the first page load already has a rate to show.
 func (s *Service) Start(ctx context.Context) {
+	if s.independentRecovery {
+		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		if err := RecoverNetwork(recovery, s.paths.Dir, "pending"); err != nil {
+			s.log.Error("network recovery needs attention", "err", err)
+		}
+		cancel()
+	}
 	s.sampler.Start(ctx)
 }
 

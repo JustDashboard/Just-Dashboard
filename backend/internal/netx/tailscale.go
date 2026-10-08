@@ -45,6 +45,7 @@ type TailscaleView struct {
 	Health         []string `json:"health"`
 	Peers          []TSPeer `json:"peers"`
 	Prefs          TSPrefs  `json:"prefs"`
+	PrefsReadable  bool     `json:"prefsReadable"`
 	ControlServer  string   `json:"controlServer"`
 	ControlURL     string   `json:"controlUrl"`
 	// ClientOnTailnet is the dashboard's reader arriving through the tailnet,
@@ -191,6 +192,8 @@ func (s *Service) Tailscale(ctx context.Context, client string) (*TailscaleView,
 		v.Warnings = append(v.Warnings, "The preferences could not be read: "+err.Error())
 	} else if err := tsApplyPrefs(pout, v); err != nil {
 		v.Warnings = append(v.Warnings, "The preferences could not be read: "+err.Error())
+	} else {
+		v.PrefsReadable = true
 	}
 	v.Forwarding = TSForwarding{IPv4: wgIPForwarding("ipv4"), IPv6: wgIPForwarding("ipv6")}
 	v.ClientOnTailnet = tsClientOnTailnet(client, v)

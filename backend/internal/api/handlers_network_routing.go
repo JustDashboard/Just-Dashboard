@@ -20,6 +20,7 @@ import (
 // on cannot, and s.destructive decides by route.
 func (s *Server) mountNetworkRoutingRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/routing", s.handle(s.handleNetworkRouting))
+	r.Method(http.MethodGet, "/routing/lookup", s.handle(s.handleNetworkRouteLookup))
 	r.Method(http.MethodGet, "/bgp", s.handle(s.handleNetworkBGP))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
@@ -32,6 +33,26 @@ func (s *Server) mountNetworkRoutingRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/forwarding/{family}/off", s.handle(s.handleNetworkForwardingOff))
 		})
 	})
+}
+
+func (s *Server) handleNetworkRouteLookup(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	if _, err := netx.ParseAddr(q.Get("target")); err != nil {
+		return httpx.BadRequest("target must be an IPv4 or IPv6 address")
+	}
+	if source := q.Get("source"); source != "" {
+		if _, err := netx.ParseAddr(source); err != nil {
+			return httpx.BadRequest("source must be an IPv4 or IPv6 address")
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 5*time.Second)
+	defer cancel()
+	view, err := s.modules.network.LookupRoute(ctx, q.Get("target"), q.Get("source"), q.Get("mark"))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, view)
+	return nil
 }
 
 // forwardingNeeds is what depends on this host forwarding traffic, besides
