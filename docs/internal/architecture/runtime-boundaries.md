@@ -6,7 +6,8 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `captures` (`netcapture`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
+`linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
+`ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -49,6 +50,11 @@ drains their native groups; a separate host `timeout` bounds a capture even afte
 A final recording failure retains bounded pending data and blocks new launches until the same write
 can be retried. Capture changes no host network configuration. See
 [capture lifecycle](../backend/network-captures.md).
+Socket history starts independently of page reads and collects only after persisted admin opt-in.
+Shutdown cancels its bounded native capture and drains it before closing Docker. IPAM reconciles
+interrupted native handoffs to held review state at initialization, without replay or native cleanup.
+Controlled vantage checks persist signed single-use leases and expire lost results without repeating
+traffic; no polling listener or scanner is installed on a source by the dashboard.
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
@@ -171,7 +177,10 @@ running digests and the git commit captured before every state-changing action, 
 hashed rather than stored); the general `settings` key/value table; mount, container, interface
 (`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
 configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
-packet capture metadata/artifacts (`network_packet_captures`). What the network module makes on the host is kept in
+packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities
+(`network_probe_vantages`, `network_probe_checks`), shared planning pools/reservations
+(`network_ipam_pools`, `network_ipam_reservations`), and socket-hour/coverage records
+(`network_flow_buckets`, `network_flow_cycles`). What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old

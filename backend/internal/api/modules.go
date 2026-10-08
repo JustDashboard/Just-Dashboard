@@ -29,8 +29,8 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netflows"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
@@ -142,6 +142,7 @@ type moduleSet struct {
 func (s *Server) initModules() {
 	s.modules.sys = sysinfo.NewCollector()
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
+	s.initFlowAccounting()
 	// Callers of the shared sampler arrive when a page asks, not on a cadence,
 	// so a baseline older than this is dropped rather than averaged over.
 	s.modules.dockerStats = s.modules.docker.NewStatsSampler().WithMaxAge(statsMaxAge)

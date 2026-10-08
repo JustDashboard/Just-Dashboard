@@ -94,6 +94,18 @@ to the contribution terms above, including the additional licence grant to the p
   disposable namespaces, then removes those exact fixtures. It does not install persistent host
   units or reboot the host; timer dispatch and cold-runtime reconstruction are separate from actual
   reboot acceptance.
+- Controlled probe-agent changes also run from `backend/`:
+  `JD_NETVANTAGE_LIVE=1 go test -race ./internal/netvantage -run '^TestControlledVantageSeparateNamespace$' -count=1 -v`.
+  This lane uses passwordless sudo to create an owned loopback namespace, then runs as the contributor
+  account. It measures real signed DNS/TCP/TLS in both families and refuses out-of-scope/untrusted
+  outcomes. It proves a separate controlled namespace, not a real external host or region.
+- Opt-in socket collector changes also run from `backend/`:
+  build the private test binary and run its selected fixtures as root using the commands in
+  [native socket history](docs/internal/backend/network-flow-accounting.md#measured-acceptance-and-its-limits).
+  The fixtures own
+  their disposable namespace and exact Docker containers with no published ports; native command
+  deadlines remain fixed, and a deadline failure is recorded as unavailable evidence. See
+  [native socket history](docs/internal/backend/network-flow-accounting.md) for tools and scope.
 - Private PCAP changes also run from `backend/`:
   `JD_NETCAPTURE_LIVE=1 go test -race ./internal/netcapture -run Live -count=1 -v`. The fixture
   needs root or passwordless sudo plus host `ip`, `tcpdump`, `timeout` and Python. It creates and

@@ -129,6 +129,9 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
+		s.Log.Warn("network socket history is unavailable", "err", err)
+	}
 	if err := s.modules.diagnostics.Start(ctx); err != nil {
 		s.Log.Warn("durable network diagnostics are unavailable", "err", err)
 	}
@@ -260,6 +263,11 @@ func (s *Server) Shutdown() {
 	s.modules.certKeeper.Stop()
 	s.modules.term.Shutdown()
 	s.modules.dbs.Shutdown()
+	flowCtx, flowCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.modules.flowAccounting.Shutdown(flowCtx); err != nil && s.Log != nil {
+		s.Log.Warn("network socket collector cleanup is unverified", "err", err)
+	}
+	flowCancel()
 	s.modules.docker.Close()
 	captureCtx, captureCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := s.modules.captures.Shutdown(captureCtx); err != nil && s.Log != nil {

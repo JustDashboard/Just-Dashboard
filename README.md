@@ -31,7 +31,8 @@ cleanup. Resource findings show the processes responsible, their service owner a
 Container configuration remedies can be previewed and applied, with Compose changes kept in their
 owning file. Missing evidence is reported instead of treated as a passed check.
 
-It manages exactly one machine. There is no fleet view, no agents to enrol, no cluster.
+It manages exactly one machine. Optional rootless probe agents can report scoped DNS/TCP/TLS
+measurements from controlled sources; they cannot manage a host. There is no fleet view or cluster.
 
 ## What it does
 
@@ -328,7 +329,7 @@ and changing accounts or settings are `admin`'s, and deleting a whole database a
 | **Processes** | Live table, PM2, systemd services and cron jobs, each with its verbs as words. |
 | **Logs** | Files, container output, compose stacks, PM2 and the journal in one viewer, filtered on the server, each read as what it is — Postgres's slow statements and auth failures, nginx's requests and upstream errors, sshd's logins and attackers — with quick views and insights. Every service's page shows its own log the same way, where the service is. |
 | **Proxy & TLS** | Sites written as ordinary nginx, streams, certificates through certbot including DNS wildcards, and a live TLS report. |
-| **Network** | Topology, interfaces and namespaces, routing and policy rules, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, source-scoped investigation, saved diagnostic runs, bounded private packet captures, drift review, twenty-six network probes, and an IPv4/IPv6 subnet calculator. |
+| **Network** | Topology, interfaces and namespaces, routing and policy rules, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, source-scoped investigation, saved diagnostic runs, bounded private packet captures, drift review and selected owned repair, address planning, controlled external checks, opt-in socket history, download SQM, twenty-six network probes, and an IPv4/IPv6 subnet calculator. |
 | **Security** | A verdict on the host: exposure, sshd (with a jump-host profile), fail2ban, CrowdSec and Suricata where they run, logins and who is attacking. |
 | **Backups** | Scheduled archives to disk, S3 or B2, native database dumps, single-file and in-place restore, and a list of what is not covered. |
 | **Updates** | The dashboard updates itself in one click; host packages on apt, dnf, yum, zypper, pacman or apk. |

@@ -16,7 +16,10 @@ runs](network-diagnostics.md), [bounded packet captures](network-captures.md) an
 typed host/container tuple and distinguishes observed, modeled, measured and unknown layers. The
 diagnostic service retains bounded quick-tool and typed investigation artifacts with lifecycle state in SQLite; host-network configuration
 remains in the managed spec. Drift compares desired/rendered/runtime identities and measured unit
-activation, with an advisory owned repair plan rather than automatic reconciliation.
+activation. A separate reviewed, generation/identity-bound transaction can repair selected owned
+render files and required admission chains; wider resource repairs remain advisory. Nothing
+automatically reconciles a native owner. File recovery binds exact staged/original identities; see
+[file durability](network-file-durability.md).
 
 ## Three rules
 
@@ -206,7 +209,11 @@ are absent, with a small allowance for kernel clock quantization. First replacem
 hierarchies/filters unless a supported classless fq_codel baseline can be captured and restored.
 Managed-device reads report `verification` as verified, observed drift or unreadable/unknown; saved
 limits remain desired values when external commands change the kernel. This verifies configured
-objects, not bandwidth or latency under load, and download limiting remains policing.
+objects, not bandwidth or latency under load. Existing download limits remain policing; the
+explicit [download SQM](network-sqm.md) profile redirects ingress to a provenance-bound IFB/CAKE
+queue, preserves native clsact egress and always requires independent pending recovery plus
+positive reconnection confirmation. Its nonignored packaged boot restore runs after ordinary
+resources. Measured fixture latency is separate from a general production performance claim.
 
 ## VPN
 
@@ -231,8 +238,11 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
   Scoped IPv6 endpoints validate the interface suffix before generating any wg-quick text. Peer
   site routes cannot capture a known literal endpoint of their own or another tunnel. Peer
   removal cleans site host routes too; failed reloads use independent recovery contexts. Managed
-  server/client address allocation and exit egress remain IPv4. Full-tunnel clients capture IPv6 to
-  prevent native-path leaks; the UI and generated config explain the lack of IPv6 egress.
+  servers can explicitly opt in to unique-local IPv6 /64 addressing and /128 peer allocation, with
+  IPv4 preserved. IPv6 internet egress is a separate explicit owned NAT66 intent, with native
+  per-family route/forwarding/admission evidence. Legacy IPv4 full tunnels keep IPv6 capture/block
+  containment; this is neither IPv6 egress nor a general client kill switch. Existing native peer
+  drift prevents unsafe opt-in edits. See [dual-stack WireGuard](wireguard-dual-stack.md).
 - **Tailscale** is read from `tailscale status --json` and `debug prefs`. The only changes offered are
   what this server offers the tailnet — an exit node and subnet routes — through `tailscale set`; using
   another node as an exit, shields up, down and logout are never run, because each can cut off the
@@ -344,3 +354,20 @@ process cleanup. `GET /captures/{id}/pcap` downloads original bytes after integr
 `GET /captures/{id}/support` exports separately redacted metadata. `DELETE /captures/{id}` removes a
 terminal record with the destructive gate. Every route requires `system.admin`; generic capture
 job access has the same gate. See [capture lifecycle](network-captures.md) for hard limits and scope.
+
+## Additional retained observations and planning
+
+[Controlled external checks](network-external-checks.md) enroll rootless outbound-only sources with
+closed immutable target/address/family/port scopes. Management stays admin-only; dedicated signed
+machine requests run behind the network allowlist and authenticate independently. Agent-reported
+DNS/TCP/TLS observations do not establish geography or universal provider reachability.
+
+[Shared IPAM](network-ipam.md) retains exact pools/reservations and fresh per-owner overlap coverage.
+Docker and WireGuard creation atomically claim matching reservations before native work. Lost
+outcomes hold the allocation for explicit review without automatic native retry or deletion.
+Provider/foreign coverage stays unknown; planning does not replace the native owner.
+
+[Native socket history](network-flow-accounting.md) records only after explicit admin opt-in.
+Identity-safe TCP counter deltas, UDP peers, fresh Docker descriptor attribution and period quality
+are bounded and retained. Snapshot gaps, UDP byte counts and short-flow completeness remain unknown;
+page reads and export never collect. This baseline has no supported kernel observer yet.

@@ -5,6 +5,12 @@
 - [`network-investigator.md`](network-investigator.md) — typed host/container path explanations and bounded native measurements.
 - [`network-diagnostics.md`](network-diagnostics.md) — durable diagnostic lifecycle, admin-only artifacts and retention.
 - [`network-captures.md`](network-captures.md) — bounded private PCAP artifacts, native deadlines and retention.
+- [`network-file-durability.md`](network-file-durability.md) — owned file identity and durable restoration of prior absence.
+- [`network-external-checks.md`](network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
+- [`network-flow-accounting.md`](network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
+- [`network-ipam.md`](network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
+- [`network-sqm.md`](network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
+- [`wireguard-dual-stack.md`](wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
 - [`network-drift.md`](network-drift.md) — saved/render/runtime comparisons and owned repair review.
 - [`docker-files-logs.md`](docker-files-logs.md) — Docker, files, archives, previews, and logs.
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.

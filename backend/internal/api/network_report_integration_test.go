@@ -23,7 +23,7 @@ func TestNetworkReportMountedPrivateRoutesAndIndependentMachineAuthentication(t 
 	}
 	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
 		actor := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "report-mounted-"+string(role), role)}
-		for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/ipam/", "/api/v1/network/captures/"} {
+		for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/ipam/", "/api/v1/network/captures/", "/api/v1/network/flows/"} {
 			if w := actor.do("GET", path, "", nil); w.Code != 403 {
 				t.Errorf("mounted %s %s=%d", role, path, w.Code)
 			}

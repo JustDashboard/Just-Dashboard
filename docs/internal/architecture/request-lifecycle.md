@@ -122,6 +122,21 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   are audited, and successful private PCAP/support downloads use `httpx.AuditRead`. Original bytes
   remain sensitive; only the separate support metadata is redacted. See
   [capture lifecycle](../backend/network-captures.md).
+- **Controlled probe identities.** Optional `/probe-agent/{enroll,poll,result}` routes run behind
+  the global allowlist and a dedicated limiter before human authentication. One-use enrollment
+  proofs or durable sequence-bound machine signatures grant only the closed probe protocol;
+  cookies/API tokens cannot replace them, and they grant no dashboard capabilities. Human
+  `/network/external` management/evidence requires `system.admin`; enrollment/revocation also
+  require a session and revocation is destructive. Secrets/raw proofs are excluded from audit.
+- **Address plans and socket history.** `/network/ipam` and `/network/flows` require `system.admin`;
+  release/retirement and history/policy erasure use `s.destructive`. A plan grants no native
+  ownership. Socket collection needs explicit persisted opt-in; querying/exporting never collect.
+  Failed native handoffs hold planning allocations for review without repeating native creation.
+- **Selected drift repair and SQM.** Drift reads retain `read`. The generation-bound selected
+  repair endpoint is admin/destructive/audited with mandatory pending reconnection and pre-effect
+  independent recovery. It can repair only reviewed owned files/canonical required admission;
+  other native repair remains advice. Explicit SQM set/clear also requires mandatory pending
+  reconnection, with a closed private typed undo. Selected drift recovery rejects that vocabulary.
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything

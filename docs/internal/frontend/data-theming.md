@@ -47,7 +47,9 @@ interrupted lifecycle, dated scope, typed outcomes, compatible comparison and ad
 export. They use polled status without a socket-only live halo and can watch the existing job stream.
 The connection investigator retains its previous report and tuple after a failed retry, labeling
 each layer observed, modeled, measured or unknown. Drift readings preserve dated observations on a
-failed refresh and expire an advisory repair selection when compared identities or evidence change.
+failed refresh and expire a selected repair review when compared identities or evidence change.
+Selected executable file/admission repairs require exact review tokens and pending reconnection;
+wider native objects remain advice.
 Packet captures retain dated native observations after poll failures. Their immutable scope uses
 one interface/family and literal filter fields; rejected launches retain the entire bounded draft.
 Original PCAP and redacted support have separate downloads. A cancel remains pending until native
@@ -58,8 +60,15 @@ named destinations and acknowledgment that private names leave their usual polic
 `includePublic` flag does not authorize fan-out. Resolver changes may carry a private
 `verificationName` for a network that cannot resolve public names. This verification input is a check
 for that apply, not saved resolver state.
-The managed WireGuard full-tunnel label states its IPv4 egress and the blocking of IPv6 to prevent
-leaks until dual-stack egress is configured.
+WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
+and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
+containment; successful setup says configured when native runtime is not up.
+SQM retains its entire bounded profile after rejected writes and requires pending reconnection
+even when the global preference is off. Failed native shaping polls block edits until fresh reads.
+IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
+review; planning release never deletes a native resource. External check reload/filter/comparison
+never launch probes and retain source/family/time distinctions. Socket history shows decimal-string
+TCP counters and explicit null/unknown UDP/drop data, with recording separate from page reads.
 
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with

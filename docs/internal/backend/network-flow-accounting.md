@@ -98,11 +98,9 @@ All paths below `/network/flows` require `system.admin`, including exports. Resp
 | `DELETE /network/flows/history` | Audit erasure of observations and coverage; `s.destructive`, ordinary confirmation. |
 
 These paths do not enroll in network pending confirmation and never alter links, policy, shaping,
-DNS or boot inputs. At this isolated source checkpoint, integration owns the hooks: call
-`initFlowAccounting` after the Docker module exists, mount `mountNetworkFlowRoutes` inside Network,
-start `flowAccounting.Start` during server startup and drain `Shutdown` **before** closing Docker.
-No auto-reconcile daemon or kernel program is installed. The reporting page is `/network/flows`;
-the shell/sidebar and production browser build belong to the integrating checkpoint.
+DNS or boot inputs. The server initializes this module after Docker exists, starts its recorder
+during startup and drains it before closing Docker. It mounts the admin-only routes within Network.
+No auto-reconcile daemon or kernel program is installed. The reporting page is `/network/flows`.
 
 ## Measured acceptance and its limits
 
