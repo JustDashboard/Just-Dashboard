@@ -485,6 +485,12 @@ func TestParseWGEndpoint(t *testing.T) {
 		{"vpn.example.com:51000", "vpn.example.com:51000", false},
 		{"2001:db8::5", "[2001:db8::5]:51820", false},
 		{"[2001:db8::5]:51000", "[2001:db8::5]:51000", false},
+		{"[fe80::5%eth0]:51000", "[fe80::5%eth0]:51000", false},
+		{"fe80::5%eth0\nPostUp = touch /tmp/injected", "", true},
+		{"[fe80::5%eth0\nPostUp = id]:51000", "", true},
+		{"[2001:db8::5]51000", "", true},
+		{"0.0.0.0", "", true},
+		{"ff02::1", "", true},
 		{"", "", true},
 		{"vpn.example.com:99999", "", true},
 		{"bad host", "", true},
@@ -814,7 +820,7 @@ func TestAddWireGuardDevice(t *testing.T) {
 		t.Errorf("qr = %.60s…", res.QR)
 	}
 	// A full tunnel on a tunnel that is not an exit node warns.
-	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "not an exit node") {
+	if len(res.Warnings) != 2 || !strings.Contains(strings.Join(res.Warnings, " "), "not an exit node") || !strings.Contains(res.Config, "IPv6 leak") {
 		t.Errorf("warnings = %v", res.Warnings)
 	}
 	// Nothing secret is in what the page lists afterwards.
@@ -968,6 +974,40 @@ func TestAddWireGuardPeerRestoresTheFileWhenReloadFails(t *testing.T) {
 	}
 }
 
+func TestAddWireGuardPeerRestoresKernelAfterRequestCancellation(t *testing.T) {
+	s, _ := wgAddPeerHost(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	previousRun := run
+	reloads := 0
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "systemctl" && len(args) > 0 && args[0] == "reload" {
+			reloads++
+			if reloads == 1 {
+				cancel()
+				return "", context.Canceled
+			}
+			if ctx.Err() != nil {
+				t.Errorf("WireGuard restore inherited cancellation: %v", ctx.Err())
+			}
+			if _, ok := ctx.Deadline(); !ok {
+				t.Error("WireGuard restore has no bounded deadline")
+			}
+		}
+		return previousRun(ctx, name, args...)
+	}
+	_, err := s.AddWireGuardPeer(ctx, "wg0", WGPeerRequest{Name: "Tablet", Kind: "device"}, "", "alice")
+	if err == nil || reloads != 2 {
+		t.Fatalf("canceled change = %v, reloads = %d", err, reloads)
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf")); string(b) != fixture(t, "wg-managed.conf") {
+		t.Error("canceled peer addition did not restore file")
+	}
+	if peers, err := s.vpn.List(context.Background(), "wg0"); err != nil || len(peers) != 0 {
+		t.Fatalf("canceled peer addition retained private config: %v, %v", peers, err)
+	}
+}
+
 func TestAddWireGuardPeerToAStoppedTunnelOnlyWritesTheFile(t *testing.T) {
 	s, rec := wgAddPeerHost(t)
 	rec.replies = append([]reply{{prefix: "systemctl is-active wg-quick@wg0", out: "inactive\n", err: errors.New("inactive")}}, rec.replies...)
@@ -1089,6 +1129,28 @@ func wgContains(cmds []string, want string) bool {
 
 func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 	ctx := context.Background()
+	t.Run("a site's host routes are taken out with it", func(t *testing.T) {
+		s, rec := wgAddPeerHost(t)
+		conf, err := s.readWGConf("wg0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf.peers()[1].set("AllowedIPs", "10.8.0.3/32, 192.168.77.20/32, 2001:db8:77::20/128")
+		if err := s.writeWGConf("wg0", conf); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RemoveWireGuardPeer(ctx, "wg0", 2, ""); err != nil {
+			t.Fatal(err)
+		}
+		for _, route := range []string{"192.168.77.20/32", "2001:db8:77::20/128"} {
+			if !rec.ran("ip route del " + route + " dev wg0") {
+				t.Errorf("removed site left remote host route %s", route)
+			}
+		}
+		if rec.ran("ip route del 10.8.0.3") {
+			t.Error("removed client's tunnel address is carried by the connected subnet")
+		}
+	})
 	t.Run("a site's routes are taken out with it", func(t *testing.T) {
 		s, rec := wgAddPeerHost(t)
 		if err := s.RemoveWireGuardPeer(ctx, "wg0", 2, "198.51.100.7"); err != nil {

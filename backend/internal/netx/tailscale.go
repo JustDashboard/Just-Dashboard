@@ -367,17 +367,17 @@ func (s *Service) TailscaleNeedsForwarding(ctx context.Context) (exitNode, subne
 	if err != nil {
 		// What it offers is unknown, and this answer is what lets forwarding
 		// be turned off, so while the daemon is up a guess has to be the
-		// cautious one. A daemon that is down or logged out offers nothing.
-		if out, serr := run(ctx, "tailscale", "status", "--json"); serr == nil {
-			var st struct{ BackendState string }
-			if json.Unmarshal([]byte(out), &st) == nil && (st.BackendState == "Running" || st.BackendState == "Starting") {
-				return true, true
-			}
-			if json.Unmarshal([]byte(out), &st) != nil {
-				return true, true
+		// cautious one. Only an explicit inactive state proves it offers
+		// nothing: command failures can also mean missing privileges.
+		out, _ := run(ctx, "tailscale", "status", "--json")
+		var st struct{ BackendState string }
+		if json.Unmarshal([]byte(out), &st) == nil {
+			switch st.BackendState {
+			case "Stopped", "NeedsLogin", "NeedsMachineAuth", "NoState":
+				return false, false
 			}
 		}
-		return false, false
+		return true, true
 	}
 	routes, exit := tsSplitAdvertised(p.AdvertiseRoutes)
 	return exit, len(routes) > 0
@@ -499,6 +499,8 @@ func (s *Service) SetTailscale(ctx context.Context, req TailscaleSetRequest, cli
 			return nil, err
 		}
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	current, err := tsReadPrefs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("the current Tailscale preferences could not be read, so nothing was changed: %w", err)

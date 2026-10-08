@@ -1,7 +1,9 @@
 package netx
 
 import (
+	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -44,4 +46,26 @@ func TestSamplerRatesAndRingAndResets(t *testing.T) {
 	if pts := s.Live(t0.Add(2 * time.Second).Unix()); len(pts["eth0"]) != 1 {
 		t.Fatalf("since filters the ring: %v", pts["eth0"])
 	}
+}
+
+func TestSamplerDoesNotAccumulateDisabledHistory(t *testing.T) {
+	s := newSampler(nil, nil, 0, 0)
+	now := time.Unix(1_000_000, 0)
+	for i := 0; i < liveKeep*2; i++ {
+		s.observe(now.Add(time.Duration(i)*liveStep), map[string]devCounters{"eth0": {rxBytes: uint64(i * 100)}})
+	}
+	if len(s.pending) != 0 || len(s.Live(0)["eth0"]) != liveKeep {
+		t.Fatalf("disabled history retained %d pending devices and %d live points", len(s.pending), len(s.Live(0)["eth0"]))
+	}
+}
+
+func TestSamplerStopIsConcurrentAndIdempotent(t *testing.T) {
+	s := newSampler(nil, nil, 0, 0)
+	s.Start(context.Background())
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(s.Stop)
+	}
+	wg.Wait()
+	s.Stop()
 }

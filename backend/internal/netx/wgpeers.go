@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // A peer is one block in a tunnel's file, one row in the VPN store holding the
@@ -135,11 +136,15 @@ type wgClientConfig struct {
 	endpoint   string
 	allowedIPs []string
 	keepalive  int
+	fullTunnel bool
 }
 
 func (c wgClientConfig) render() string {
 	var b strings.Builder
 	b.WriteString("[Interface]\n")
+	if c.fullTunnel {
+		b.WriteString("# This tunnel carries IPv4. IPv6 is routed into it to prevent a native\n# IPv6 leak; IPv6 internet access needs server-side dual-stack configuration.\n")
+	}
 	fmt.Fprintf(&b, "PrivateKey = %s\n", c.privateKey)
 	fmt.Fprintf(&b, "Address = %s/%d\n", c.address, c.address.BitLen())
 	if c.listenPort > 0 {
@@ -288,6 +293,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	cc := wgClientConfig{
 		privateKey: priv, address: addr, mtu: mtu,
 		serverKey: serverPub, psk: psk, endpoint: endpoint, keepalive: keepalive,
+		fullTunnel: req.FullTunnel,
 	}
 	cc.allowedIPs = []string{subnet.String()}
 	if req.FullTunnel {
@@ -333,6 +339,7 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		warnings = append(warnings, wgForwardingWarning)
 	}
 	if req.FullTunnel {
+		warnings = append(warnings, "This full tunnel carries IPv4. IPv6 is blocked inside the tunnel to prevent a native IPv6 leak; IPv6 internet access needs server-side dual-stack configuration.")
 		if sp, err := s.loadSpec(); err == nil {
 			exit := false
 			for _, n := range sp.NAT {
@@ -353,29 +360,31 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 	if err != nil {
 		return nil, err
 	}
-	rollback := func() {
-		cleanup := context.WithoutCancel(ctx)
+	rollback := func(reload bool) {
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		_ = s.vpn.Delete(cleanup, iface, id) // the row may already be gone; either way nothing refers to it
 		if path, err := s.wgConfPath(iface); err == nil {
 			_ = writeFileAtomic(path, []byte(original), 0o600) // best effort; the failure being reported is the first one
+		}
+		if reload {
+			_, _ = s.syncWG(cleanup, iface)
 		}
 	}
 
 	conf.appendPeer(wgNewPeerSection(int(id), name, req.Kind, now, settings))
 	if err := s.writeWGConf(iface, conf); err != nil {
-		rollback()
+		rollback(false)
 		return nil, err
 	}
 	live, err := s.syncWG(ctx, iface)
 	if err != nil {
-		rollback()
-		_, _ = s.syncWG(ctx, iface) // put the kernel back with the file
+		rollback(true)
 		return nil, err
 	}
 	if live && len(remote) > 0 {
 		if err := s.addPeerRoutes(ctx, iface, remote, client); err != nil {
-			rollback()
-			_, _ = s.syncWG(ctx, iface)
+			rollback(true)
 			return nil, err
 		}
 	}
@@ -433,7 +442,10 @@ func (s *Service) saveClient(ctx context.Context, conf *wgConf, c VPNClient, con
 // file when it starts.
 func (s *Service) syncWG(ctx context.Context, iface string) (bool, error) {
 	unit := "wg-quick@" + iface
-	state, _ := run(ctx, "systemctl", "is-active", unit) // a stopped unit exits non-zero; its answer is the output
+	state, err := run(ctx, "systemctl", "is-active", unit)
+	if err != nil && (ctx.Err() != nil || strings.TrimSpace(state) == "") {
+		return false, fmt.Errorf("reading %s state: %w", unit, err)
+	}
 	if strings.TrimSpace(state) != "active" {
 		return false, nil
 	}
@@ -459,7 +471,8 @@ func (s *Service) addPeerRoutes(ctx context.Context, iface string, nets []netip.
 	}
 	var added []netip.Prefix
 	undo := func() {
-		cleanup := context.WithoutCancel(ctx)
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
 		for _, n := range added {
 			_, _ = run(cleanup, "ip", "route", "del", n.String(), "dev", iface) // the route being undone may not have been added
 		}
@@ -520,6 +533,9 @@ func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int,
 	if has("wg-quick") && has("systemctl") {
 		if _, err := s.syncWG(ctx, iface); err != nil {
 			restore()
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			_, _ = s.syncWG(cleanup, iface)
 			return err
 		}
 	} else if has("wg") {
@@ -531,7 +547,16 @@ func (s *Service) RemoveWireGuardPeer(ctx context.Context, iface string, id int,
 	// A reload takes the peer out of the interface but leaves the routes that
 	// carried its networks into the tunnel; they would go on blackholing them.
 	for _, a := range target.allowedIPs {
-		if p, err := ParsePrefix(a); err == nil && p.Bits() < p.Addr().BitLen() {
+		if p, err := ParsePrefix(a); err == nil {
+			peerAddress := false
+			for _, address := range conf.iface().list("address") {
+				if subnet, err := ParsePrefix(address); err == nil && p.Bits() == p.Addr().BitLen() && subnet.Contains(p.Addr()) {
+					peerAddress = true
+				}
+			}
+			if peerAddress {
+				continue
+			}
 			_, _ = run(ctx, "ip", "route", "del", p.Masked().String(), "dev", iface) // absent when the tunnel was down
 		}
 	}

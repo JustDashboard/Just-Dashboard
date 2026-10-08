@@ -334,7 +334,11 @@ func parseWGEndpoint(raw string, defaultPort int) (string, error) {
 			return "", fmt.Errorf("%q is not an endpoint", raw)
 		}
 		host = raw[1:end]
-		portStr = strings.TrimPrefix(raw[end+1:], ":")
+		suffix := raw[end+1:]
+		if suffix != "" && !strings.HasPrefix(suffix, ":") {
+			return "", fmt.Errorf("%q is not an endpoint: a port follows a colon", raw)
+		}
+		portStr = strings.TrimPrefix(suffix, ":")
 	} else if strings.Count(raw, ":") == 1 {
 		host, portStr, _ = strings.Cut(raw, ":")
 	}
@@ -350,6 +354,16 @@ func parseWGEndpoint(raw string, defaultPort int) (string, error) {
 		return "", fmt.Errorf("the endpoint needs a port")
 	}
 	if a, err := netip.ParseAddr(host); err == nil {
+		if a.Zone() != "" {
+			// netip accepts arbitrary zone text, while this endpoint is also
+			// written inside a wg-quick file that can contain shell directives.
+			if err := ValidIfName(a.Zone()); err != nil {
+				return "", fmt.Errorf("the endpoint's IPv6 interface: %w", err)
+			}
+		}
+		if a.IsUnspecified() || a.IsMulticast() {
+			return "", fmt.Errorf("%s cannot be a remote endpoint", a)
+		}
 		if a.Is6() {
 			return "[" + a.String() + "]:" + strconv.Itoa(port), nil
 		}

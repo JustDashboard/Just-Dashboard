@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// A name is asked of every resolver this host knows about at once, and each
+// A name is asked of the configured resolvers at once, and each
 // one's answer and time are reported side by side. The question this answers
 // is "why is this name slow, or wrong, here" — and the fast way to find out is
 // to see the stub, the upstream it forwards to and a public resolver answer
@@ -58,12 +58,14 @@ var lookupTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "MX": 
 // lookupTarget is a resolver to ask.
 type lookupTarget struct{ server, label string }
 
-// Lookup asks every resolver in view for name. The resolvers are the ones this
+// Lookup asks configured resolvers for name. Public preset resolvers are added
+// only when explicitly requested, since home and split-DNS names are private.
+// The resolvers are the ones this
 // host is configured with — never an address the caller supplies — which is
 // what makes it safe behind the read capability: it cannot be used to make the
 // server send queries to a chosen machine, only to ask its own resolvers and
 // the public ones the presets name.
-func (s *Service) Lookup(ctx context.Context, name, rtype string) (*LookupResult, error) {
+func (s *Service) Lookup(ctx context.Context, name, rtype string, includePublic ...bool) (*LookupResult, error) {
 	rtype = strings.ToUpper(strings.TrimSpace(rtype))
 	if rtype == "" {
 		rtype = "A"
@@ -75,7 +77,7 @@ func (s *Service) Lookup(ctx context.Context, name, rtype string) (*LookupResult
 	if err != nil {
 		return nil, err
 	}
-	targets := s.lookupTargets(ctx)
+	targets := s.lookupTargets(ctx, len(includePublic) > 0 && includePublic[0])
 
 	res := &LookupResult{Name: name, Type: rtype, Answers: make([]LookupAnswer, len(targets))}
 	var wg sync.WaitGroup
@@ -104,7 +106,7 @@ func (s *Service) Lookup(ctx context.Context, name, rtype string) (*LookupResult
 // lookupTargets are the resolvers in view: the stub, every server resolved
 // uses (global, then each link's), and each preset's first IPv4 address. A
 // server in two places is asked once, under the first label.
-func (s *Service) lookupTargets(ctx context.Context) []lookupTarget {
+func (s *Service) lookupTargets(ctx context.Context, includePublic ...bool) []lookupTarget {
 	var out []lookupTarget
 	seen := map[string]bool{}
 	add := func(server, label string) {
@@ -114,10 +116,13 @@ func (s *Service) lookupTargets(ctx context.Context) []lookupTarget {
 		seen[server] = true
 		out = append(out, lookupTarget{server, label})
 	}
-	addEntries := func(entries []string, label string) {
+	addEntries := func(entries []string, label, iface string) {
 		for _, e := range entries {
-			if a, ok := serverIP(e); ok {
-				add(a.String(), label)
+			if sv, err := parseDNSServer(e); err == nil {
+				if sv.addr.IsLinkLocalUnicast() && sv.iface == "" {
+					sv.iface = iface
+				}
+				add(sv.lookupServer(), label)
 			}
 		}
 	}
@@ -125,19 +130,21 @@ func (s *Service) lookupTargets(ctx context.Context) []lookupTarget {
 	rv := s.readResolved(ctx, false)
 	if rv.Active {
 		add(resolvedStub, "systemd-resolved stub")
-		addEntries(rv.Global.Servers, "global upstream")
-		addEntries(rv.Global.Fallback, "global fallback")
+		addEntries(rv.Global.Servers, "global upstream", "")
+		addEntries(rv.Global.Fallback, "global fallback", "")
 		for _, l := range rv.Links {
-			addEntries(l.Servers, l.Name)
+			addEntries(l.Servers, l.Name, l.Name)
 		}
 	} else {
-		addEntries(readResolvConf(resolvConfPath).Nameservers, "resolv.conf")
+		addEntries(readResolvConf(resolvConfPath).Nameservers, "resolv.conf", "")
 	}
-	for _, p := range DNSPresets() {
-		for _, sv := range p.Servers {
-			if a, err := netip.ParseAddr(sv); err == nil && a.Is4() {
-				add(sv, p.Name)
-				break
+	if len(includePublic) > 0 && includePublic[0] {
+		for _, p := range DNSPresets() {
+			for _, sv := range p.Servers {
+				if a, err := netip.ParseAddr(sv); err == nil && a.Is4() {
+					add(sv, p.Name)
+					break
+				}
 			}
 		}
 	}
@@ -172,10 +179,14 @@ func cleanLookupName(name, rtype string) (string, error) {
 func lookupVia(ctx context.Context, server, name, rtype string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
+	address := server
+	if _, _, err := net.SplitHostPort(server); err != nil {
+		address = net.JoinHostPort(server, "53")
+	}
 	r := &net.Resolver{
 		PreferGo: true,
 		Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return dnsDial(ctx, network, net.JoinHostPort(server, "53"))
+			return dnsDial(ctx, network, address)
 		},
 	}
 	fqdn := name + "."

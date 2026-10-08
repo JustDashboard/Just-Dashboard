@@ -66,8 +66,9 @@ type Sampler struct {
 	pending map[string][]LivePoint
 	drops   map[string]devCounters
 
-	stop chan struct{}
-	done chan struct{}
+	stop     chan struct{}
+	done     chan struct{}
+	stopOnce sync.Once
 }
 
 // procNetDev is read from the namespace the dashboard runs in, which is the
@@ -111,7 +112,7 @@ func (s *Sampler) Stop() {
 	if stop == nil {
 		return
 	}
-	close(stop)
+	s.stopOnce.Do(func() { close(stop) })
 	<-done
 }
 
@@ -171,7 +172,9 @@ func (s *Sampler) observe(now time.Time, cur map[string]devCounters) {
 				ring = ring[len(ring)-liveKeep:]
 			}
 			s.rings[name] = ring
-			s.pending[name] = append(s.pending[name], p)
+			if s.db != nil && s.retention > 0 {
+				s.pending[name] = append(s.pending[name], p)
+			}
 		}
 	}
 	// A device that went away takes its ring with it; Docker makes and

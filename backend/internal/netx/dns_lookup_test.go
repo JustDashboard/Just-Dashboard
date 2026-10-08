@@ -204,7 +204,7 @@ func TestLookupRacesEveryResolver(t *testing.T) {
 	})
 	lookupTimeout = 600 * time.Millisecond
 
-	res, err := s.Lookup(context.Background(), "Example.com", "a")
+	res, err := s.Lookup(context.Background(), "Example.com", "a", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,5 +284,51 @@ func TestLookupErrorReadsAnAbsentNameAsAnAnswer(t *testing.T) {
 	err := &net.DNSError{Err: "no such host", Name: "x", IsNotFound: true}
 	if got := lookupError(fmt.Errorf("wrapped: %w", err)); got != "no such record" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestLookupUsesConfiguredPort(t *testing.T) {
+	server := startFakeDNS(t, answerA("192.0.2.7"))
+	answers, err := lookupVia(context.Background(), server, "example.com", "A")
+	if err != nil || len(answers) != 1 || answers[0] != "192.0.2.7" {
+		t.Fatalf("lookup at custom port = %v, %v", answers, err)
+	}
+}
+
+func TestLookupDoesNotSendPrivateNamesToPublicPresetsByDefault(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive\n")
+	pointResolvConf(t, "static")
+	server := startFakeDNS(t, answerA("192.0.2.7"))
+	routeDNS(t, map[string]string{"198.51.100.53": server})
+	res, err := testService(t).Lookup(context.Background(), "nas.home.arpa", "A")
+	if err != nil || len(res.Answers) != 2 || res.Answers[0].Server != "198.51.100.53" || len(res.Answers[0].Answers) != 1 {
+		t.Fatalf("private name lookup = %+v, %v", res, err)
+	}
+	for _, a := range res.Answers {
+		if a.Label != "resolv.conf" {
+			t.Errorf("private name sent outside configured resolvers: %+v", a)
+		}
+	}
+}
+
+func TestLookupRetainsLinkLocalScopeAndDistinctPorts(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "active\n").on("resolvectl status --no-pager", `Global
+ DNS Servers: 192.0.2.53:5353 192.0.2.53:1053
+Link 2 (eth0)
+ DNS Servers: fe80::53
+Link 3 (eth1)
+ DNS Servers: fe80::53
+`)
+	targets := testService(t).lookupTargets(context.Background())
+	byServer := map[string]string{}
+	for _, target := range targets {
+		byServer[target.server] = target.label
+	}
+	for server, label := range map[string]string{"192.0.2.53:5353": "global upstream", "192.0.2.53:1053": "global upstream", "fe80::53%eth0": "eth0", "fe80::53%eth1": "eth1"} {
+		if byServer[server] != label {
+			t.Errorf("%s label = %q, want %q", server, byServer[server], label)
+		}
 	}
 }

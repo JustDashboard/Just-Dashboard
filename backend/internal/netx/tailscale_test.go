@@ -358,7 +358,8 @@ func TestTailscaleNeedsForwardingFailsClosedWhenPrefsAreUnreadable(t *testing.T)
 		{"status unreadable", func(r *recorder) { r.on("tailscale status --json", "garbled") }, true, true},
 		{"stopped", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"Stopped"}`) }, false, false},
 		{"needs login", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"NeedsLogin"}`) }, false, false},
-		{"daemon not running", func(r *recorder) { r.fail("tailscale status --json", "failed to connect to local tailscaled") }, false, false},
+		{"both reads fail", func(r *recorder) { r.fail("tailscale status --json", "permission denied") }, true, true},
+		{"state absent", func(r *recorder) { r.on("tailscale status --json", `{}`) }, true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
