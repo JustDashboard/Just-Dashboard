@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useMemo, useState } from "react"
 import { Plus, Trash } from "@/components/icons"
 import { del, post } from "@/lib/api"
@@ -14,6 +15,13 @@ import { Tag } from "@/components/tag"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChartPanel } from "@/components/metrics/chart-panel"
 import { Cidr } from "@/components/network/address"
@@ -49,10 +57,14 @@ export function DeviceSheet({
   onOpenChange: (open: boolean) => void
   onChanged: () => void
 }) {
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const destructive = admin && can("destructive")
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState<string>()
   const [mtu, setMtu] = useState("")
   const [address, setAddress] = useState("")
+  const [bridge, setBridge] = useState<string>()
 
   const rows = useMemo(
     () => (points ?? []).map((p) => ({ ts: p.t * 1000, rx: p.rx, tx: p.tx })),
@@ -67,8 +79,10 @@ export function DeviceSheet({
       await run()
       notify.success(label)
       onChanged()
+      return true
     } catch (err) {
       notify.error(`${link.name}: not changed`, err)
+      return false
     } finally {
       setBusy(undefined)
     }
@@ -138,7 +152,12 @@ export function DeviceSheet({
 
   const up = link.adminUp && (link.carrier || link.state === "unknown")
   const ports = links.filter((l) => l.master === link.name)
-  const canEdit = !link.guard
+  const canEdit = admin && !link.guard
+  const bridgeValue = bridge ?? link.master ?? "__none"
+  const bridges = links.filter(
+    (candidate) =>
+      candidate.kind === "bridge" && candidate.owner !== "docker" && candidate.name !== link.name,
+  )
   return (
     <>
       <SidePanel
@@ -169,7 +188,7 @@ export function DeviceSheet({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={!!link.guard || busy !== undefined}
+                  disabled={!destructive || !!link.guard || busy !== undefined}
                   onClick={() => setState(false)}
                 >
                   Set down
@@ -179,13 +198,13 @@ export function DeviceSheet({
                   size="sm"
                   variant="outline"
                   pending={busy === "state"}
-                  disabled={busy !== undefined}
+                  disabled={!admin || busy !== undefined}
                   onClick={() => setState(true)}
                 >
                   Set up
                 </Button>
               )}
-              {link.managed && (
+              {destructive && link.managed && (
                 <Button size="sm" variant="outline" onClick={remove} disabled={!!link.guard}>
                   <Trash aria-hidden />
                   Delete
@@ -261,7 +280,7 @@ export function DeviceSheet({
                     if (!Number.isInteger(value)) return
                     void act("mtu", `${link.name} MTU is ${value}`, () =>
                       post(`/network/links/${name}/mtu`, { mtu: value }),
-                    ).then(() => setMtu(""))
+                    ).then((changed) => changed && setMtu(""))
                   }}
                 >
                   <label className="min-w-0 flex-1 space-y-1.5">
@@ -288,6 +307,69 @@ export function DeviceSheet({
               )}
             </PanelBody>
           </Panel>
+
+          {canEdit && link.kind !== "bridge" && link.role !== "loopback" && (
+            <Panel plain>
+              <PanelHeader title="Bridge membership" />
+              <PanelBody>
+                <form
+                  className="flex items-end gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    const master = bridgeValue === "__none" ? "" : bridgeValue
+                    confirm({
+                      title: master
+                        ? `Join ${link.name} to ${master}`
+                        : `Remove ${link.name} from its bridge`,
+                      confirmLabel: "Apply",
+                      description: (
+                        <p>
+                          This changes which network receives the device&rsquo;s Ethernet frames.
+                          The server refuses a change that would disturb its uplink, addresses or
+                          your connection.
+                        </p>
+                      ),
+                      action: async () => {
+                        await post(`/network/links/${name}/master`, { master })
+                        setBridge(undefined)
+                        notify.success(
+                          master
+                            ? `${link.name} joined ${master}`
+                            : `${link.name} is no longer a bridge port`,
+                        )
+                        onChanged()
+                      },
+                    })
+                  }}
+                >
+                  <label className="min-w-0 flex-1 space-y-1.5">
+                    <span className="text-body font-medium">Bridge</span>
+                    <Select value={bridgeValue} onValueChange={setBridge}>
+                      <SelectTrigger aria-label="Bridge membership">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">No bridge</SelectItem>
+                        {bridges.map((candidate) => (
+                          <SelectItem key={candidate.name} value={candidate.name}>
+                            {candidate.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy !== undefined || bridgeValue === (link.master ?? "__none")}
+                  >
+                    Apply
+                  </Button>
+                </form>
+              </PanelBody>
+            </Panel>
+          )}
 
           {link.role === "bridge" && (
             <Panel plain>
@@ -339,7 +421,7 @@ export function DeviceSheet({
                       {a.public ? " · public" : ""}
                     </span>
                     <span className="ml-auto flex shrink-0 items-center gap-2">
-                      {a.managed && !a.guard ? (
+                      {destructive && a.managed && !a.guard ? (
                         <Button
                           size="xs"
                           variant="ghost"
@@ -368,7 +450,7 @@ export function DeviceSheet({
                     if (!address.trim()) return
                     void act("address", `${address.trim()} added to ${link.name}`, () =>
                       post(`/network/links/${name}/addresses`, { cidr: address.trim() }),
-                    ).then(() => setAddress(""))
+                    ).then((changed) => changed && setAddress(""))
                   }}
                 >
                   <label className="min-w-0 flex-1 space-y-1.5">

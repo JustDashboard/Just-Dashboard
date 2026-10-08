@@ -363,8 +363,15 @@ func (s *Service) DeleteNamespace(ctx context.Context, name, client, actor strin
 	// namespace, so nothing else in the spec refers to what is removed here.
 	next.Links, next.Namespaces, next.Addresses = kept, nsKept, addrKept
 
+	undo := func(ctx context.Context) {
+		// The name or some pairs may still exist after a partial deletion.
+		// Continue past those so every pair already removed is restored.
+		if _, err := runStdin(ctx, []byte(strings.Join(batchLines(&restore), "\n")+"\n"), "ip", "-force", "-batch", "-"); err != nil {
+			s.log.Warn("network: namespace rollback batch reported failures", "err", err)
+		}
+	}
 	return s.commit(ctx, next, step{
-		apply: func(ctx context.Context) error {
+		apply: applying(func(ctx context.Context) error {
 			for _, l := range gone {
 				if _, err := run(ctx, "ip", "link", "del", l.Name); err != nil && !isGone(err) {
 					return err
@@ -374,8 +381,8 @@ func (s *Service) DeleteNamespace(ctx context.Context, name, client, actor strin
 				return err
 			}
 			return nil
-		},
-		undo:   func(ctx context.Context) { s.bestBatch(ctx, batchLines(&restore)) },
+		}, undo),
+		undo:   undo,
 		verify: verifyPath(st.path),
 	})
 }

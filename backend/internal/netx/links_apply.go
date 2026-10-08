@@ -24,6 +24,22 @@ func renderLinks(sp *Spec) string {
 	return b.String()
 }
 
+// Policy rules need an explicit process family; unlike routes, ip does not
+// infer it from a selector. Keep IPv6 rules in a batch started with -6.
+func renderIPv6Rules(sp *Spec) string {
+	var b strings.Builder
+	b.WriteString(generatedHeader)
+	for _, r := range sp.Rules {
+		if r.Family != "inet6" {
+			continue
+		}
+		if args, err := ruleArgs(r); err == nil {
+			b.WriteString("rule add " + strings.Join(args, " ") + "\n")
+		}
+	}
+	return b.String()
+}
+
 // batchLines is the one place the spec becomes `ip` commands, and it serves
 // both the boot file and the runtime apply of a single change: a device made
 // from the page is made with exactly the lines the next boot would run, so
@@ -113,10 +129,7 @@ func batchLines(sp *Spec) []string {
 		}
 	}
 	for _, r := range sp.Rules {
-		// A rule's family is the one a batch line cannot say: `ip rule add
-		// from 2001:db8::/64` is read as IPv4 unless the process was started
-		// with -6, which the boot file cannot be. Such a rule is never
-		// created (AddRule refuses it), so one found here was written by hand.
+		// IPv6 rules are restored by the separate batch started with -6.
 		if r.Family == "inet6" {
 			continue
 		}
@@ -710,7 +723,7 @@ func applyBatch(ctx context.Context, lines []string) error {
 func applying(do func(ctx context.Context) error, undo func(ctx context.Context)) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if err := do(ctx); err != nil {
-			undo(ctx)
+			rollback(ctx, undo)
 			return err
 		}
 		return nil
@@ -726,9 +739,7 @@ func runtimeOnly(ctx context.Context, st step) error {
 	}
 	if st.verify != nil {
 		if err := st.verify(ctx); err != nil {
-			if st.undo != nil {
-				st.undo(ctx)
-			}
+			rollback(ctx, st.undo)
 			return err
 		}
 	}
@@ -863,6 +874,21 @@ func dependents(sp *Spec, name string) []string {
 			out = append(out, fmt.Sprintf("rule with priority %d", r.Priority))
 		}
 	}
+	for _, sh := range sp.Shaping {
+		if sh.Device == name {
+			out = append(out, "shaping entry")
+		}
+	}
+	for _, f := range sp.Forwards {
+		if f.Interface == name {
+			out = append(out, fmt.Sprintf("port forward %q", f.Name))
+		}
+	}
+	for _, n := range sp.NAT {
+		if n.Interface == name {
+			out = append(out, fmt.Sprintf("NAT entry %q", n.Name))
+		}
+	}
 	return out
 }
 
@@ -904,8 +930,18 @@ func (s *Service) DeleteLink(ctx context.Context, name, client, actor string) er
 			return fmt.Errorf("%s is the parent of %s, which would be deleted with it; delete %s first", name, l.Name, l.Name)
 		}
 	}
+	for _, l := range st.by {
+		if l.Parent == name {
+			return fmt.Errorf("%s is the parent of %s, which would be deleted with it; remove %s through its owner first", name, l.Name, l.Name)
+		}
+	}
 	if dep := dependents(next, name); len(dep) > 0 {
 		return fmt.Errorf("%s is used by a %s; remove that first", name, dep[0])
+	}
+	if gone.Kind == "veth" && gone.PeerNamespace == "" {
+		if dep := dependents(next, gone.Peer); len(dep) > 0 {
+			return fmt.Errorf("%s's peer %s is used by a %s; remove that first", name, gone.Peer, dep[0])
+		}
 	}
 	var kept []LinkSpec
 	for _, l := range next.Links {

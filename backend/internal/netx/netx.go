@@ -219,7 +219,12 @@ func runOnHostStdin(ctx context.Context, stdin []byte, name string, args ...stri
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	if err := cmd.Run(); err != nil {
+	// A host namespace wrapper can fork. Finish canceling its children
+	// before the caller starts recovery, so late mutations cannot race undo.
+	if _, err := hostexec.RunGroup(ctx, cmd, 200*time.Millisecond); err != nil {
+		if ctx.Err() != nil {
+			return buf.String(), fmt.Errorf("%s: %w", name, ctx.Err())
+		}
 		var execErr *exec.Error
 		if errors.As(err, &execErr) {
 			return "", &UnavailableError{Tool: name}

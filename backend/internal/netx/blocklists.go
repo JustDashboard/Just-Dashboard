@@ -395,7 +395,7 @@ func (s *Service) AddBlocklist(ctx context.Context, req BlocklistRequest, client
 		bl.Count, bl.Refreshed = len(fetched), time.Now().UTC()
 	}
 	var wrote int
-	err = s.mutateGateway(ctx, func(old, next *Spec) (bool, error) {
+	err = s.mutateGatewayWithRollback(ctx, func(old, next *Spec) (bool, error) {
 		s.trustClient(next, client)
 		bl.ID, bl.Made = next.takeID(), gwStamp(actor)
 		if fetched != nil {
@@ -406,11 +406,12 @@ func (s *Service) AddBlocklist(ctx context.Context, req BlocklistRequest, client
 		}
 		next.Blocklists = append(next.Blocklists, bl)
 		return false, nil
-	})
-	if err != nil {
+	}, func() {
 		if wrote != 0 {
 			_ = os.Remove(blocklistFile(filepath.Join(s.paths.Dir, "lists"), wrote)) // the list was never saved
 		}
+	})
+	if err != nil {
 		return BlocklistView{}, err
 	}
 	return s.blocklistViewByID(ctx, bl.ID, client)
@@ -447,12 +448,15 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 	dir := filepath.Join(s.paths.Dir, "lists")
 	var prev []byte
 	var cached bool
-	err = s.mutateGateway(ctx, func(old, next *Spec) (bool, error) {
+	err = s.mutateGatewayWithRollback(ctx, func(old, next *Spec) (bool, error) {
 		s.trustClient(next, client)
 		for i := range next.Blocklists {
 			bl := &next.Blocklists[i]
 			if bl.ID != id {
 				continue
+			}
+			if bl.URL != existing.URL || !sameStrings(bl.Countries, existing.Countries) {
+				return false, errors.New("the blocklist changed while this edit was being prepared; reload it and try again")
 			}
 			bl.Name = upd.Name
 			if req.Enabled != nil {
@@ -464,22 +468,27 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 			default:
 				bl.Countries, bl.URL = upd.Countries, upd.URL
 				if fetched != nil {
-					prev, _ = os.ReadFile(blocklistFile(dir, id))
-					cached = true
+					var err error
+					prev, err = readCacheForEdit(dir, id)
+					if err != nil {
+						return false, err
+					}
 					if err := writeBlocklistCache(dir, id, fetched); err != nil {
 						return false, fmt.Errorf("saving the list: %w", err)
 					}
+					cached = true
 					bl.Count, bl.Refreshed, bl.Error = len(fetched), time.Now().UTC(), ""
 				}
 			}
 			return false, nil
 		}
 		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
-	})
-	if err != nil {
+	}, func() {
 		if cached {
 			restoreCache(dir, id, prev)
 		}
+	})
+	if err != nil {
 		return BlocklistView{}, err
 	}
 	return s.blocklistViewByID(ctx, id, client)
@@ -492,6 +501,17 @@ func restoreCache(dir string, id int, prev []byte) {
 		return
 	}
 	_ = writeFileAtomic(blocklistFile(dir, id), prev, 0o644) // best effort on the way out of a failure
+}
+
+func readCacheForEdit(dir string, id int) ([]byte, error) {
+	b, err := os.ReadFile(blocklistFile(dir, id))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the previous list before replacing it: %w", err)
+	}
+	return b, nil
 }
 
 func sameStrings(a, b []string) bool {
@@ -553,23 +573,35 @@ func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
 	}
 	dir := filepath.Join(s.paths.Dir, "lists")
 	var prev []byte
-	err = s.mutateGateway(ctx, func(old, next *Spec) (bool, error) {
+	var cached bool
+	err = s.mutateGatewayWithRollback(ctx, func(old, next *Spec) (bool, error) {
 		for i := range next.Blocklists {
 			bl := &next.Blocklists[i]
 			if bl.ID != id {
 				continue
 			}
-			prev, _ = os.ReadFile(blocklistFile(dir, id))
+			if bl.Kind != kind || bl.URL != url || !sameStrings(bl.Countries, countries) {
+				return false, errors.New("the blocklist changed while it was being fetched; refresh it again")
+			}
+			var err error
+			prev, err = readCacheForEdit(dir, id)
+			if err != nil {
+				return false, err
+			}
 			if err := writeBlocklistCache(dir, id, fetched); err != nil {
 				return false, fmt.Errorf("saving the list: %w", err)
 			}
+			cached = true
 			bl.Count, bl.Refreshed, bl.Error = len(fetched), time.Now().UTC(), ""
 			return false, nil
 		}
 		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
+	}, func() {
+		if cached {
+			restoreCache(dir, id, prev)
+		}
 	})
 	if err != nil {
-		restoreCache(dir, id, prev)
 		s.recordBlocklistError(ctx, id, err)
 	}
 	return err

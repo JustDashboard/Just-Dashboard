@@ -1,10 +1,12 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useMemo, useState } from "react"
 import { post } from "@/lib/api"
 import type { DNSLookup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Field } from "@/components/form"
+import { Switch } from "@/components/ui/switch"
 import {
   InputGroup,
   InputGroupAddon,
@@ -27,8 +29,8 @@ const REPLAY_MS = 1600
 const ms = (value: number) => (value < 10 ? value.toFixed(1) : String(Math.round(value)))
 
 /**
- * One name asked of every resolver at once: the ones this server uses and each
- * public one the presets name, which is why the form says where the name goes
+ * One name asked of the configured resolvers, with public presets only after
+ * the reader opts in, which is why the form says where the name goes
  * before it is sent. The answer comes back as one response, and the rows are
  * let in by how long each took, so the fastest lands first and its bar is the
  * shortest — a race drawn from a measurement, not an animation of one that
@@ -38,8 +40,11 @@ const ms = (value: number) => (value < 10 ? value.toFixed(1) : String(Math.round
  * otherwise make every real latency a hairline.
  */
 export function LookupRace() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const [name, setName] = useState("")
   const [type, setType] = useState("A")
+  const [includePublic, setIncludePublic] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [result, setResult] = useState<DNSLookup>()
@@ -48,7 +53,9 @@ export function LookupRace() {
     setBusy(true)
     setError(undefined)
     try {
-      setResult(await post<DNSLookup>("/network/dns/lookup", { name: name.trim(), type }))
+      setResult(
+        await post<DNSLookup>("/network/dns/lookup", { name: name.trim(), type, includePublic }),
+      )
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -62,14 +69,20 @@ export function LookupRace() {
         className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_9rem] sm:items-start"
         onSubmit={(event) => {
           event.preventDefault()
-          if (name.trim() && !busy) void submit()
+          if (admin && name.trim() && !busy) void submit()
         }}
       >
         <Field
           label="Name"
           htmlFor="lookup-name"
-          hint="Sent to every resolver this server uses, and to each public resolver in the presets above."
           error={error}
+          hint={
+            !admin
+              ? "Running DNS diagnostics requires an administrator."
+              : includePublic
+                ? "This name is also sent to the public third-party resolvers in the presets above."
+                : "Sent only to this server's configured resolvers."
+          }
         >
           <InputGroup>
             <InputGroupInput
@@ -82,7 +95,11 @@ export function LookupRace() {
               placeholder={type === "PTR" ? "192.0.2.10" : "example.com"}
             />
             <InputGroupAddon align="inline-end" className="gap-0 p-0">
-              <InputGroupButton type="submit" disabled={!name.trim()} pending={busy}>
+              <InputGroupButton
+                type="submit"
+                disabled={!admin || busy || !name.trim()}
+                pending={busy}
+              >
                 Resolve
               </InputGroupButton>
             </InputGroupAddon>
@@ -103,6 +120,15 @@ export function LookupRace() {
           </Select>
         </Field>
       </form>
+      <label className="flex items-center gap-3 text-body">
+        <Switch
+          aria-label="Include public resolvers"
+          checked={includePublic}
+          onCheckedChange={setIncludePublic}
+          disabled={!admin || busy}
+        />
+        Include public resolvers
+      </label>
       {result && <Race result={result} />}
     </div>
   )

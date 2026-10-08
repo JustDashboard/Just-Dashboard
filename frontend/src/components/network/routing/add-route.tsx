@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
+import { noteProblem, preferredSourceProblem } from "@/components/network/draft-input"
 import type { NetworkLink, NetworkRouting } from "@/lib/types"
 import { Modal } from "@/components/modal"
 import { Field, FieldRow } from "@/components/form"
@@ -44,13 +45,21 @@ export function AddRoute({
   const [device, setDevice] = useState(NONE)
   const [table, setTable] = useState("254")
   const [metric, setMetric] = useState("")
+  const [source, setSource] = useState("")
   const [comment, setComment] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
   const discards = type !== "unicast"
-  const ready = destination.trim() && (discards || gateway.trim() || device !== NONE)
+  const sourceError = discards ? undefined : preferredSourceProblem(source, destination, gateway)
+  const commentError = noteProblem(comment)
+  const ready =
+    !sourceError &&
+    !commentError &&
+    destination.trim() &&
+    (discards || gateway.trim() || device !== NONE)
   const submit = async () => {
+    if (!ready || busy) return
     setBusy(true)
     setError(undefined)
     try {
@@ -61,6 +70,7 @@ export function AddRoute({
         device: discards || device === NONE ? undefined : device,
         table: Number(table) || 254,
         metric: metric ? Number(metric) : undefined,
+        source: discards ? undefined : source.trim() || undefined,
         comment: comment.trim() || undefined,
       })
       notify.success("Route added", { description: "It is made again at every boot." })
@@ -92,7 +102,11 @@ export function AddRoute({
     >
       <div className="flex flex-col gap-5">
         <FieldRow>
-          <Field label="Destination" htmlFor="route-dest" hint="A network in CIDR form, or default">
+          <Field
+            label="Destination"
+            htmlFor="route-dest"
+            hint="An IPv4 or IPv6 network in CIDR form, or default"
+          >
             <Input
               id="route-dest"
               value={destination}
@@ -145,6 +159,23 @@ export function AddRoute({
             </Field>
           </FieldRow>
         )}
+        {!discards && (
+          <Field
+            label="Preferred source"
+            htmlFor="route-source"
+            hint="Optional: the local address used for traffic this server sends over the route. Leave empty for the kernel to choose."
+            error={sourceError}
+          >
+            <Input
+              id="route-source"
+              value={source}
+              onChange={(event) => setSource(event.target.value)}
+              aria-invalid={Boolean(sourceError)}
+              placeholder={gateway.includes(":") ? "2001:db8::1" : "192.168.60.1"}
+              className="font-mono"
+            />
+          </Field>
+        )}
         <FieldRow>
           <Field
             label="Table"
@@ -176,10 +207,16 @@ export function AddRoute({
             />
           </Field>
         </FieldRow>
-        <Field label="Note" htmlFor="route-comment" hint="Optional: what it is for">
+        <Field
+          label="Note"
+          htmlFor="route-comment"
+          hint="Optional: what it is for"
+          error={commentError}
+        >
           <Input
             id="route-comment"
             value={comment}
+            aria-invalid={Boolean(commentError)}
             placeholder="office LAN through wg0"
             onChange={(event) => setComment(event.target.value)}
           />
@@ -225,30 +262,38 @@ export function AddRule({
   links: NetworkLink[]
   onAdded: () => void
 }) {
+  const [family, setFamily] = useState("inet")
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [iif, setIif] = useState(NONE)
+  const [oif, setOif] = useState(NONE)
   const [fwmark, setFwmark] = useState("")
   const [action, setAction] = useState("lookup")
   const [table, setTable] = useState("")
   const [priority, setPriority] = useState("")
+  const [comment, setComment] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
-  const selects = from.trim() || to.trim() || iif !== NONE || fwmark.trim()
-  const ready = selects && (action !== "lookup" || table.trim())
+  const commentError = noteProblem(comment)
+  const selects = from.trim() || to.trim() || iif !== NONE || oif !== NONE || fwmark.trim()
+  const ready = !commentError && selects && (action !== "lookup" || table.trim())
   const submit = async () => {
+    if (!ready || busy) return
     setBusy(true)
     setError(undefined)
     try {
       await post("/network/routing/rules", {
+        family,
         from: from.trim() || undefined,
         to: to.trim() || undefined,
         iif: iif === NONE ? undefined : iif,
+        oif: oif === NONE ? undefined : oif,
         fwmark: fwmark.trim() || undefined,
         action,
         table: action === "lookup" ? Number(table) : undefined,
         priority: priority ? Number(priority) : undefined,
+        comment: comment.trim() || undefined,
       })
       notify.success("Rule added", { description: "It is made again at every boot." })
       onOpenChange(false)
@@ -277,12 +322,23 @@ export function AddRule({
       }
     >
       <div className="flex flex-col gap-5">
+        <Field label="Address family" htmlFor="rule-family">
+          <Select value={family} onValueChange={setFamily}>
+            <SelectTrigger id="rule-family">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inet">IPv4</SelectItem>
+              <SelectItem value="inet6">IPv6</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         <FieldRow>
           <Field label="From" htmlFor="rule-from" hint="Traffic from this network">
             <Input
               id="rule-from"
               value={from}
-              placeholder="10.8.0.0/24"
+              placeholder={family === "inet6" ? "2001:db8::/64" : "10.8.0.0/24"}
               onChange={(event) => setFrom(event.target.value)}
               className="font-mono"
             />
@@ -297,6 +353,27 @@ export function AddRule({
             />
           </Field>
         </FieldRow>
+        <Field
+          label="Leaving on"
+          htmlFor="rule-oif"
+          hint="Optional: the outgoing device for locally generated traffic"
+        >
+          <Select value={oif} onValueChange={setOif}>
+            <SelectTrigger id="rule-oif" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NONE}>Any device</SelectItem>
+              {links
+                .filter((link) => link.role !== "container" && link.owner !== "kernel")
+                .map((link) => (
+                  <SelectItem key={link.name} value={link.name}>
+                    {link.name}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </Field>
         <FieldRow>
           <Field label="Arriving on" htmlFor="rule-iif">
             <Select value={iif} onValueChange={setIif}>
@@ -363,6 +440,19 @@ export function AddRule({
             inputMode="numeric"
             value={priority}
             onChange={(event) => setPriority(event.target.value)}
+          />
+        </Field>
+        <Field
+          label="Note"
+          htmlFor="rule-comment"
+          hint="Optional: what this rule is for"
+          error={commentError}
+        >
+          <Input
+            id="rule-comment"
+            value={comment}
+            aria-invalid={Boolean(commentError)}
+            onChange={(event) => setComment(event.target.value)}
           />
         </Field>
         {!selects && (

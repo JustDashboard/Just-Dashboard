@@ -303,7 +303,7 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 				removeIngress(ctx, sh.Device)
 			}
 			if err := runShapeLines(ctx, shapeLines(sh)); err != nil {
-				restore(ctx)
+				rollback(ctx, restore)
 				return err
 			}
 			return nil

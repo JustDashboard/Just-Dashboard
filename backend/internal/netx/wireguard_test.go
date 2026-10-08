@@ -485,6 +485,12 @@ func TestParseWGEndpoint(t *testing.T) {
 		{"vpn.example.com:51000", "vpn.example.com:51000", false},
 		{"2001:db8::5", "[2001:db8::5]:51820", false},
 		{"[2001:db8::5]:51000", "[2001:db8::5]:51000", false},
+		{"[fe80::5%eth0]:51000", "[fe80::5%eth0]:51000", false},
+		{"fe80::5%eth0\nPostUp = touch /tmp/injected", "", true},
+		{"[fe80::5%eth0\nPostUp = id]:51000", "", true},
+		{"[2001:db8::5]51000", "", true},
+		{"0.0.0.0", "", true},
+		{"ff02::1", "", true},
 		{"", "", true},
 		{"vpn.example.com:99999", "", true},
 		{"bad host", "", true},
@@ -584,6 +590,30 @@ func TestCreateWireGuardServer(t *testing.T) {
 	)
 	if rec.ran("systemctl disable") {
 		t.Error("a successful create must not undo itself")
+	}
+}
+
+func TestCreateWireGuardRetainsCommittedExitOnBootUnitFailure(t *testing.T) {
+	s := vpnService(t)
+	rec := record(t)
+	wgHostReplies(t, rec)
+	rec.on("systemctl enable --now wg-quick@wg0", "")
+	wgUnitReplies(rec, "wg0")
+	rec.fail("systemctl daemon-reload", "unit manager unavailable")
+	wgCommitReplies(rec)
+	res, err := s.CreateWireGuard(t.Context(), WGServerRequest{ExitNode: true}, "alice")
+	if err != nil || res == nil || len(res.Warnings) == 0 {
+		t.Fatalf("committed tunnel was not returned with warning: %+v %v", res, err)
+	}
+	if rec.ran("systemctl disable --now wg-quick@wg0") {
+		t.Fatal("boot-unit warning removed the committed exit tunnel")
+	}
+	if _, err := os.Stat(filepath.Join(s.paths.WireGuard, "wg0.conf")); err != nil {
+		t.Fatalf("committed tunnel configuration lost: %v", err)
+	}
+	sp := wgMustSpec(t, s)
+	if len(sp.NAT) != 1 || sp.NAT[0].Owner != "wireguard:wg0" || !sp.NAT[0].Enabled {
+		t.Fatalf("committed exit lost: %+v", sp.NAT)
 	}
 }
 
@@ -814,7 +844,7 @@ func TestAddWireGuardDevice(t *testing.T) {
 		t.Errorf("qr = %.60s…", res.QR)
 	}
 	// A full tunnel on a tunnel that is not an exit node warns.
-	if len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "not an exit node") {
+	if len(res.Warnings) != 2 || !strings.Contains(strings.Join(res.Warnings, " "), "not an exit node") || !strings.Contains(res.Config, "IPv6 leak") {
 		t.Errorf("warnings = %v", res.Warnings)
 	}
 	// Nothing secret is in what the page lists afterwards.
@@ -894,6 +924,9 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 		{"remote overlaps a host network", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"172.17.5.0/24"}}, "", "docker0", true},
 		{"remote overlaps the tailnet", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"100.64.200.0/24"}}, "", "tailscale0", true},
 		{"remote holds the client", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"198.51.100.0/24"}}, "198.51.100.7", "your own address", true},
+		{"remote holds an existing endpoint", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"198.51.100.0/24"}}, "", "WireGuard endpoint 198.51.100.50", true},
+		{"remote holds its own endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "192.168.55.1:51820", RemoteNetworks: []string{"192.168.55.0/24"}}, "", "WireGuard endpoint 192.168.55.1", true},
+		{"remote holds its IPv6 endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "[2001:db8:55::1]:51820", RemoteNetworks: []string{"2001:db8:55::/64"}}, "", "WireGuard endpoint 2001:db8:55::1", true},
 		{"bad keepalive", WGPeerRequest{Name: "x", Kind: "device", Keepalive: wgIntp(70000)}, "", "keepalive", false},
 		{"bad site endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "bad host"}, "", "not a host name", false},
 	}
@@ -926,6 +959,22 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 		_, err := s.AddWireGuardPeer(ctx, "wg1", WGPeerRequest{Name: "x", Kind: "device"}, "", "a")
 		if !errors.Is(err, ErrNotManaged) {
 			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("remote subnet cannot capture another tunnel's transport", func(t *testing.T) {
+		s, rec := wgAddPeerHost(t)
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
+		conf, err := s.readWGConf("wg1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf.peers()[0].set("Endpoint", "192.168.55.1:51820")
+		if err := s.writeWGConf("wg1", conf); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.AddWireGuardPeer(ctx, "wg0", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"192.168.55.0/24"}}, "", "a")
+		if !errors.Is(err, ErrGuarded) || !strings.Contains(err.Error(), "WireGuard endpoint") || rec.ran("systemctl reload") || rec.ran("ip route replace") {
+			t.Fatalf("another tunnel's transport was not protected: %v", err)
 		}
 	})
 	t.Run("unknown tunnel", func(t *testing.T) {
@@ -965,6 +1014,40 @@ func TestAddWireGuardPeerRestoresTheFileWhenReloadFails(t *testing.T) {
 	}
 	if list, _ := s.vpn.List(context.Background(), "wg0"); len(list) != 0 {
 		t.Errorf("the row was not removed: %v", list)
+	}
+}
+
+func TestAddWireGuardPeerRestoresKernelAfterRequestCancellation(t *testing.T) {
+	s, _ := wgAddPeerHost(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	previousRun := run
+	reloads := 0
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "systemctl" && len(args) > 0 && args[0] == "reload" {
+			reloads++
+			if reloads == 1 {
+				cancel()
+				return "", context.Canceled
+			}
+			if ctx.Err() != nil {
+				t.Errorf("WireGuard restore inherited cancellation: %v", ctx.Err())
+			}
+			if _, ok := ctx.Deadline(); !ok {
+				t.Error("WireGuard restore has no bounded deadline")
+			}
+		}
+		return previousRun(ctx, name, args...)
+	}
+	_, err := s.AddWireGuardPeer(ctx, "wg0", WGPeerRequest{Name: "Tablet", Kind: "device"}, "", "alice")
+	if err == nil || reloads != 2 {
+		t.Fatalf("canceled change = %v, reloads = %d", err, reloads)
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf")); string(b) != fixture(t, "wg-managed.conf") {
+		t.Error("canceled peer addition did not restore file")
+	}
+	if peers, err := s.vpn.List(context.Background(), "wg0"); err != nil || len(peers) != 0 {
+		t.Fatalf("canceled peer addition retained private config: %v, %v", peers, err)
 	}
 }
 
@@ -1089,6 +1172,28 @@ func wgContains(cmds []string, want string) bool {
 
 func TestRemoveWireGuardPeerRoutesAndGuards(t *testing.T) {
 	ctx := context.Background()
+	t.Run("a site's host routes are taken out with it", func(t *testing.T) {
+		s, rec := wgAddPeerHost(t)
+		conf, err := s.readWGConf("wg0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf.peers()[1].set("AllowedIPs", "10.8.0.3/32, 192.168.77.20/32, 2001:db8:77::20/128")
+		if err := s.writeWGConf("wg0", conf); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.RemoveWireGuardPeer(ctx, "wg0", 2, ""); err != nil {
+			t.Fatal(err)
+		}
+		for _, route := range []string{"192.168.77.20/32", "2001:db8:77::20/128"} {
+			if !rec.ran("ip route del " + route + " dev wg0") {
+				t.Errorf("removed site left remote host route %s", route)
+			}
+		}
+		if rec.ran("ip route del 10.8.0.3") {
+			t.Error("removed client's tunnel address is carried by the connected subnet")
+		}
+	})
 	t.Run("a site's routes are taken out with it", func(t *testing.T) {
 		s, rec := wgAddPeerHost(t)
 		if err := s.RemoveWireGuardPeer(ctx, "wg0", 2, "198.51.100.7"); err != nil {

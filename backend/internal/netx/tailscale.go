@@ -367,17 +367,17 @@ func (s *Service) TailscaleNeedsForwarding(ctx context.Context) (exitNode, subne
 	if err != nil {
 		// What it offers is unknown, and this answer is what lets forwarding
 		// be turned off, so while the daemon is up a guess has to be the
-		// cautious one. A daemon that is down or logged out offers nothing.
-		if out, serr := run(ctx, "tailscale", "status", "--json"); serr == nil {
-			var st struct{ BackendState string }
-			if json.Unmarshal([]byte(out), &st) == nil && (st.BackendState == "Running" || st.BackendState == "Starting") {
-				return true, true
-			}
-			if json.Unmarshal([]byte(out), &st) != nil {
-				return true, true
+		// cautious one. Only an explicit inactive state proves it offers
+		// nothing: command failures can also mean missing privileges.
+		out, _ := run(ctx, "tailscale", "status", "--json")
+		var st struct{ BackendState string }
+		if json.Unmarshal([]byte(out), &st) == nil {
+			switch st.BackendState {
+			case "Stopped", "NeedsLogin", "NeedsMachineAuth", "NoState":
+				return false, false
 			}
 		}
-		return false, false
+		return true, true
 	}
 	routes, exit := tsSplitAdvertised(p.AdvertiseRoutes)
 	return exit, len(routes) > 0
@@ -385,10 +385,10 @@ func (s *Service) TailscaleNeedsForwarding(ctx context.Context) (exitNode, subne
 
 // TailscaleWithdraws reports whether a change takes away something this server
 // offers the tailnet: the exit node, or a subnet route it advertises now. The
-// handler asks for the destructive capability on that content, since the same
-// route also adds offers. A request that cannot be read against the current
-// preferences counts as withdrawing; one that is malformed is refused later
-// and changes nothing, so it does not.
+// result is only a snapshot; authorization for a mutation belongs in
+// SetTailscaleChecked, where it uses the preferences being changed under the
+// mutation lock. Unreadable preferences count as withdrawing; a malformed
+// request changes nothing, so it does not.
 func (s *Service) TailscaleWithdraws(ctx context.Context, req TailscaleSetRequest) bool {
 	if req.AdvertiseExitNode == nil && req.AdvertiseRoutes == nil {
 		return false
@@ -407,7 +407,11 @@ func (s *Service) TailscaleWithdraws(ctx context.Context, req TailscaleSetReques
 	if err != nil {
 		return true
 	}
-	cur, curExit := tsSplitAdvertised(p.AdvertiseRoutes)
+	return tsWithdraws(req, next, p)
+}
+
+func tsWithdraws(req TailscaleSetRequest, next []netip.Prefix, current tsPrefsJSON) bool {
+	cur, curExit := tsSplitAdvertised(current.AdvertiseRoutes)
 	if req.AdvertiseExitNode != nil && !*req.AdvertiseExitNode && curExit {
 		return true
 	}
@@ -486,6 +490,14 @@ func tsParseAdvertiseRoutes(in []string) ([]netip.Prefix, error) {
 // would drop the exit node while "just" changing the subnets, so the flag
 // that was not asked about is sent at the value it already has.
 func (s *Service) SetTailscale(ctx context.Context, req TailscaleSetRequest, client string) (*TailscaleSetResult, error) {
+	return s.SetTailscaleChecked(ctx, req, client, nil)
+}
+
+// SetTailscaleChecked authorizes a withdrawal against the same preferences
+// used by the update, while dashboard mutations are serialized. Additions do
+// not call authorizeWithdrawal; a refusal is returned unchanged before any
+// mutation. SetTailscale is the wrapper for callers that already authorize.
+func (s *Service) SetTailscaleChecked(ctx context.Context, req TailscaleSetRequest, client string, authorizeWithdrawal func() error) (*TailscaleSetResult, error) {
 	if !has("tailscale") {
 		return nil, &UnavailableError{Tool: "tailscale"}
 	}
@@ -499,9 +511,16 @@ func (s *Service) SetTailscale(ctx context.Context, req TailscaleSetRequest, cli
 			return nil, err
 		}
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	current, err := tsReadPrefs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("the current Tailscale preferences could not be read, so nothing was changed: %w", err)
+	}
+	if authorizeWithdrawal != nil && tsWithdraws(req, routes, current) {
+		if err := authorizeWithdrawal(); err != nil {
+			return nil, err
+		}
 	}
 	curRoutes, curExit := tsSplitAdvertised(current.AdvertiseRoutes)
 

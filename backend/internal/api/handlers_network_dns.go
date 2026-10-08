@@ -26,8 +26,8 @@ func (s *Server) mountNetworkDNSRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleDNS))
 		r.Method(http.MethodGet, "/hosts", s.handle(s.handleDNSHosts))
 		// A lookup is `read`, though it is a POST and sends packets. It asks
-		// only the resolvers this host is configured with and the public
-		// ones the presets name — the module takes no address from the
+		// only the resolvers this host is configured with, plus public
+		// presets when explicitly requested — the module takes no address from the
 		// caller, so it cannot be pointed at a machine of the caller's
 		// choosing the way the probes under /network/probe can, and a
 		// resolver is a service that expects to be asked.
@@ -118,8 +118,9 @@ func (s *Server) handleDNSReset(w http.ResponseWriter, r *http.Request) error {
 }
 
 type dnsLookupRequest struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name          string `json:"name"`
+	Type          string `json:"type"`
+	IncludePublic bool   `json:"includePublic"`
 }
 
 func (s *Server) handleDNSLookup(w http.ResponseWriter, r *http.Request) error {
@@ -129,7 +130,7 @@ func (s *Server) handleDNSLookup(w http.ResponseWriter, r *http.Request) error {
 	}
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	res, err := s.modules.network.Lookup(ctx, req.Name, req.Type)
+	res, err := s.modules.network.Lookup(ctx, req.Name, req.Type, req.IncludePublic)
 	if err != nil {
 		return mapDNSError(err)
 	}

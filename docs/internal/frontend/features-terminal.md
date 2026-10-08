@@ -220,12 +220,17 @@ page knows the reader's address. The pages that moved keep their behaviour:
   since the page opened as its trend, and a picture of who is connected (`connections-map.tsx`: the
   callers by network, this server, the programs they reached), then the peers as before — address and
   network in one column, process and ports in another, a socket count and a comparative meter.
-- **Tools** (`/network/tools`): 21 probes plus the browser-only subnet calculator occupy a two-pane
+- **Tools** (`/network/tools`): 26 probes plus the browser-only IPv4/IPv6 subnet calculator occupy a two-pane
   workbench (the four counts that stood over it are gone; where probes are sent from is a fact in the
   result pane's head). The searchable chooser selects one labelled form and result area. Other probes
   stay mounted while hidden, preserving drafts, results and in-flight requests when switching. A new
   query-string arrival reseeds only the requested probe. Arriving with `?tool=asn&target=…` never runs
   it; sending traffic remains an explicit Run action.
+- The tools now include route/path-MTU checks, host prerequisites, bounded packet summaries and
+  local Wake-on-LAN. All server probes remain administrator-only; decoded packet fields may be
+  sensitive. Network forms expose IPv6 GRE/bridge membership, preferred route source, rule outgoing
+  interface/notes and DNS fallback/cache settings. The [complete networking audit](../../audits/2026-10-08-network-audit/README.md)
+  records API-only controls, validation, permission handling and provider/hardware boundaries.
 - The interface list that was `/security/network` is the Interfaces page, rebuilt over
   `GET /network/links`; `/security/network` redirects there.
 

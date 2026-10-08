@@ -684,6 +684,8 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   let requests = 0
   await page.route("**/api/v1/ports", async (route) => {
     requests++
+    // Real requests settle after their timer fires; the virtual clock must allow that too.
+    await new Promise((resolve) => setTimeout(resolve, 100))
     await json(route, hostPorts)
   })
   await page.goto("/proxy/ports")
@@ -694,7 +696,16 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   await page.getByRole("button", { name: "Pause refreshing" }).click()
   await expect(page.getByText("Paused · updated just now")).toBeVisible()
   await expect(page.getByRole("button", { name: "Refresh now" })).toHaveCount(0)
-  await page.clock.runFor(60_001)
+  // Polling schedules its next timer after the response settles. A single minute jump
+  // can outrun network responses and skip the remaining timers on a busy runner.
+  for (let interval = 0; interval < 4; interval++) {
+    const response = page.waitForResponse(
+      (reply) => new URL(reply.url()).pathname === "/api/v1/ports",
+    )
+    await page.clock.runFor(15_001)
+    await (await response).finished()
+    await page.evaluate(() => Promise.resolve())
+  }
   await expect(page.getByText("Paused · updated 1m ago")).toBeVisible()
   // The shared proxy navigation still checks port findings every 15 seconds.
   expect(requests).toBeGreaterThanOrEqual(initialRequests + 3)
@@ -706,6 +717,7 @@ test("refreshing can be paused, resumed at once, and asked for", async ({ page }
   await expect.poll(() => requests).toBe(pausedRequests + 1)
   await page.getByRole("button", { name: "Refresh now" }).click()
   await expect.poll(() => requests).toBe(pausedRequests + 2)
+  await expect(page.getByText("Updated just now")).toBeVisible()
   await page.clock.runFor(15_001)
   await expect.poll(() => requests).toBe(pausedRequests + 4)
 })

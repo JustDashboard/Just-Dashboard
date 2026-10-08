@@ -118,7 +118,7 @@ test.describe("DNS", () => {
   }) => {
     const mutations = await open(page, "/network/dns")
     await page
-      .getByRole("textbox", { name: "Servers" })
+      .getByRole("textbox", { name: "Servers", exact: true })
       .fill("9.9.9.9\n149.112.112.112#dns.quad9.net")
     await page.getByRole("button", { name: "DNS over TLS required" }).click()
     await expect(page.getByText("needs a name on every server: 9.9.9.9 has none")).toBeVisible()
@@ -163,6 +163,7 @@ test.describe("DNS", () => {
     page,
   }) => {
     const mutations = await open(page, "/network/dns")
+    await page.getByRole("switch", { name: "Include public resolvers" }).check()
     await page.getByLabel("Name", { exact: true }).fill("example.com")
     await page.getByRole("button", { name: "Resolve" }).click()
     const race = page.getByRole("region", { name: "Answers for example.com" })
@@ -172,6 +173,7 @@ test.describe("DNS", () => {
     expect(mutations.find((m) => m.path === "/network/dns/lookup")?.body).toEqual({
       name: "example.com",
       type: "A",
+      includePublic: true,
     })
   })
 

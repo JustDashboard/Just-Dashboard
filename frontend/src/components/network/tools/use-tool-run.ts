@@ -5,6 +5,7 @@ import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import type { ProbeResult } from "@/lib/types"
 import type { ToolDef } from "./tool-defs"
+import { portProblem, toolReady } from "./tool-input"
 
 /** What another page hands a tool on arrival: the address it was looking at. */
 export type ToolPrefill = { target?: string; record?: string }
@@ -32,6 +33,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ProbeResult | null>(null)
   const [past, setPast] = useState<ProbeResult[]>([])
+  const [error, setError] = useState<Error>()
 
   // A link can choose a different target without leaving the workbench. Keep
   // the hook mounted so other drafts, results and in-flight requests survive.
@@ -49,22 +51,25 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     }
   }
 
-  const canRun = !def.needsTarget || target.trim().length > 0
+  const portError = def.needsPort && port ? portProblem(port) : undefined
+  const canRun = toolReady(def, target, port, option)
 
   const run = async () => {
     if (busy || !canRun) return
     setBusy(true)
+    setError(undefined)
     try {
       const res = await post<ProbeResult>("/network/probe", {
         tool: def.key,
         target: target.trim(),
-        ...(def.needsPort ? { port: Number(port) || 0 } : {}),
+        ...(def.needsPort ? { port: Number(port.trim()) } : {}),
         ...(def.recordOptions ? { record } : {}),
-        ...(def.optionOptions ? { option } : {}),
+        ...(def.optionOptions || def.optionPlaceholder ? { option: option.trim() } : {}),
       })
       setPast((prev) => (result ? [result, ...prev].slice(0, 3) : prev))
       setResult(res)
     } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
       notify.error(`Could not run ${def.label}`, err)
     } finally {
       setBusy(false)
@@ -77,6 +82,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   }
 
   const clear = () => {
+    setError(undefined)
     setResult(null)
     setPast([])
   }
@@ -91,6 +97,8 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     option,
     setOption,
     busy,
+    error,
+    portError,
     result,
     past,
     canRun,

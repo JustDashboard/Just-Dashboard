@@ -1,6 +1,7 @@
 package netsec
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -49,6 +50,9 @@ var hostRe = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,251}[A-Za-z0-9])?
 // ValidTarget reports whether a probe target is a plain hostname or IP.
 func ValidTarget(target string) bool {
 	target = strings.TrimSpace(target)
+	// An absolute DNS name ends in the root dot; keeping it prevents search
+	// domains from changing the operator's diagnostic target.
+	target = strings.TrimSuffix(target, ".")
 	if target == "" || len(target) > 253 {
 		return false
 	}
@@ -90,7 +94,12 @@ func (s *Service) Traceroute(ctx context.Context, target string) (*ProbeResult, 
 	var err error
 	switch {
 	case hostexec.AvailableOnHost("traceroute"):
-		out, elapsed, err = runProbe(ctx, 60*time.Second, "traceroute", "-n", "-w", "2", "-q", "1", "-m", "20", target)
+		args := []string{"-n", "-w", "2", "-q", "1", "-m", "20"}
+		// traceroute defaults to IPv4 even when given an IPv6 literal.
+		if ip := net.ParseIP(target); ip != nil && ip.To4() == nil {
+			args = append(args, "-6")
+		}
+		out, elapsed, err = runProbe(ctx, 60*time.Second, "traceroute", append(args, target)...)
 	case hostexec.AvailableOnHost("tracepath"):
 		out, elapsed, err = runProbe(ctx, 60*time.Second, "tracepath", "-n", "-m", "20", target)
 	default:
@@ -204,16 +213,15 @@ func (s *Service) PortCheck(ctx context.Context, target string, port int) (*Prob
 	if port < 1 || port > 65535 {
 		return nil, fmt.Errorf("port must be between 1 and 65535")
 	}
-	res := &ProbeResult{Tool: "port", Target: target + ":" + strconv.Itoa(port)}
+	res := &ProbeResult{Tool: "port", Target: net.JoinHostPort(target, strconv.Itoa(port))}
 	start := time.Now()
 	dialer := &net.Dialer{Timeout: 6 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(target, strconv.Itoa(port)))
 	res.Duration = time.Since(start).Round(time.Millisecond).String()
 	if err != nil {
 		res.Error = err.Error()
-		// Refused and timed out mean different things — one is a host saying
-		// no, the other is a firewall saying nothing — and the distinction is
-		// the reason to run the check at all.
+		// Refusal and silence provide different evidence, but neither
+		// identifies which device or policy caused the failure.
 		res.Output = describeDialError(err)
 		return res, nil
 	}
@@ -230,9 +238,9 @@ func describeDialError(err error) string {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "refused"):
-		return "Connection refused: something answered and said no. The host is reachable and nothing is listening on that port."
+		return "Connection refused: the connection was actively rejected. A closed port or a firewall rejection can cause this."
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
-		return "Timed out with no reply, which is what a firewall dropping packets looks like from the outside."
+		return "Timed out with no reply. A firewall dropping packets, an offline host or a broken route can all cause this."
 	case strings.Contains(msg, "no such host"):
 		return "The name did not resolve."
 	}
@@ -243,6 +251,40 @@ func runProbe(ctx context.Context, limit time.Duration, name string, args ...str
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	start := time.Now()
-	raw, err := hostexec.CommandOnHost(ctx, name, args...).CombinedOutput()
-	return strings.TrimSpace(string(raw)), time.Since(start).Round(time.Millisecond).String(), err
+	cmd := hostexec.CommandOnHost(ctx, name, args...)
+	var raw probeOutput
+	cmd.Stdout, cmd.Stderr = &raw, &raw
+	// nsenter may fork a child holding the output pipes. Stop the whole
+	// process group so a timed-out capture cannot survive its request.
+	_, err = hostexec.RunGroup(ctx, cmd, 200*time.Millisecond)
+	return strings.TrimSpace(raw.String()), time.Since(start).Round(time.Millisecond).String(), err
+}
+
+// A remote registry or a busy capture must not allocate its entire output
+// before the response is truncated. Continue draining once the cap is met.
+type probeOutput struct {
+	// A named field prevents io.Copy using bytes.Buffer.ReadFrom and
+	// bypassing the cap enforced by Write.
+	buffer    bytes.Buffer
+	truncated bool
+}
+
+func (b *probeOutput) Len() int { return b.buffer.Len() }
+
+func (b *probeOutput) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := maxProbeOutput - b.Len()
+	if len(p) > remaining {
+		p = p[:remaining]
+		b.truncated = true
+	}
+	_, _ = b.buffer.Write(p)
+	return n, nil
+}
+
+func (b *probeOutput) String() string {
+	if b.truncated {
+		return b.buffer.String() + "\n… (truncated)"
+	}
+	return b.buffer.String()
 }

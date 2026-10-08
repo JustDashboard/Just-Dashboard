@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Box, Layers, Plus, Trash } from "@/components/icons"
 import { del, post } from "@/lib/api"
@@ -43,6 +44,8 @@ export function Namespaces({
   links: NetworkLink[]
   onChanged: () => void
 }) {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const { confirm, dialog } = useConfirm()
   const [creating, setCreating] = useState(false)
   const [showContainers, setShowContainers] = useState(false)
@@ -79,7 +82,7 @@ export function Namespaces({
                 aria-label="Show containers' namespaces"
               />
             </label>
-            <Button size="xs" variant="outline" onClick={() => setCreating(true)}>
+            <Button size="xs" variant="outline" onClick={() => setCreating(true)} disabled={!admin}>
               <Plus aria-hidden />
               New namespace
             </Button>
@@ -113,7 +116,7 @@ export function Namespaces({
                       {ns.pid ? ` · pid ${ns.pid}` : ""}
                     </p>
                   </div>
-                  {ns.managed && (
+                  {admin && can("destructive") && ns.managed && (
                     <Button
                       size="icon-xs"
                       variant="ghost"
@@ -146,7 +149,7 @@ export function Namespaces({
         )}
       </PanelBody>
       <CreateNamespace
-        open={creating}
+        open={creating && admin}
         onOpenChange={setCreating}
         links={links}
         onCreated={onChanged}

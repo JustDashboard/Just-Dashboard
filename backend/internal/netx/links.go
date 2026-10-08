@@ -115,6 +115,8 @@ type Counters struct {
 type Inventory struct {
 	Containers []ContainerNet `json:"-"`
 	Networks   []DockerNet    `json:"-"`
+	// An unreadable Docker inventory is not evidence that forwarding is unused.
+	DockerNetworksUnknown bool `json:"-"`
 }
 
 // ContainerNet is a running container's identity and its init process.
@@ -131,6 +133,7 @@ type DockerNet struct {
 	Name    string
 	Driver  string
 	Bridge  string
+	IPv6    bool
 	Subnets []string
 }
 

@@ -1,6 +1,8 @@
 "use client"
 
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useState } from "react"
+import { useAuth } from "@/hooks/use-auth"
 import { Plus, Trash } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
@@ -39,13 +41,29 @@ import { TailscaleBlock } from "@/components/network/vpn/tailscale"
  * as the SSH configuration is.
  */
 export default function NetworkVPNPage() {
-  const vpn = usePoll<VPNView>((signal) => get("/network/vpn", undefined, signal), 10_000)
+  const { can } = useAuth()
+  const admin = can("system.admin")
+  const vpn = usePoll<VPNView>((signal) => get("/network/vpn", undefined, signal), 10_000, [], {
+    enabled: admin,
+  })
   const overview = usePoll<NetworkOverview>(
     (signal) => get("/network/overview", undefined, signal),
     60_000,
   )
   const [adding, setAdding] = useState<{ tunnel: string; kind: "device" | "site" }>()
   const [opened, setOpened] = useState<{ tunnel: string; key: string }>()
+
+  if (!admin) {
+    return (
+      <Page>
+        <PageContext eyebrow="Network" title="VPN" />
+        <EmptyState
+          title="VPN needs the admin capability"
+          description="Tunnel peers and their client configurations are visible to administrators."
+        />
+      </Page>
+    )
+  }
 
   if (!vpn.data) {
     return (
@@ -78,6 +96,7 @@ export default function NetworkVPNPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="VPN" />
+      {vpn.data && <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} />}
 
       <StatGrid columns={4}>
         <StatTile
@@ -273,11 +292,40 @@ function TunnelBlock({
         </p>
       ),
       action: async () => {
-        await del(base)
-        notify.success(`${tunnel.name} removed`)
+        const result = await del<{ firewall: { removed: boolean; reason?: string } }>(base)
+        notify.success(`${tunnel.name} removed`, {
+          description: result.firewall?.removed
+            ? "Its dashboard-created firewall opening was removed."
+            : result.firewall?.reason,
+        })
         onChanged()
       },
     })
+  const setExit = (on: boolean) => {
+    const apply = () =>
+      act(
+        () => post(`${base}/exit`, { on }),
+        on
+          ? `${tunnel.name} routes its clients' internet`
+          : `${tunnel.name} is a private network only`,
+      )
+    if (on) return void apply()
+    confirm({
+      title: `Stop using ${tunnel.name} as an exit node`,
+      confirmLabel: "Turn off",
+      description: (
+        <p>
+          Clients using this tunnel for internet access lose that access until they change their
+          configuration or this exit is enabled again.
+        </p>
+      ),
+      action: async () => {
+        await post(`${base}/exit`, { on: false })
+        notify.success(`${tunnel.name} is a private network only`)
+        onChanged()
+      },
+    })
+  }
   const online = tunnel.peers.filter((p) => p.online).length
   return (
     <Panel plain>
@@ -302,14 +350,7 @@ function TunnelBlock({
                   <Switch
                     checked={tunnel.exitNode}
                     disabled={busy}
-                    onCheckedChange={(on) =>
-                      void act(
-                        () => post(`${base}/exit`, { on }),
-                        on
-                          ? `${tunnel.name} routes its clients' internet`
-                          : `${tunnel.name} is a private network only`,
-                      )
-                    }
+                    onCheckedChange={setExit}
                     aria-label={`${tunnel.name} as an exit node`}
                   />
                 </label>

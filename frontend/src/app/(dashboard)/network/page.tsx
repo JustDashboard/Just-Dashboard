@@ -7,6 +7,7 @@ import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { Page, PageContext, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatGrid, StatTile } from "@/components/stat-tile"
@@ -91,6 +92,7 @@ export default function NetworkOverviewPage() {
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Network" />
       <NetworkIdentity overview={data} links={links} />
+      <NetworkReadWarning error={overview.error} refresh={overview.refresh} />
 
       <Panel plain>
         <PanelHeader

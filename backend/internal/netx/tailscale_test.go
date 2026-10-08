@@ -2,11 +2,14 @@ package netx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // tsHost answers the two reads a view takes.
@@ -323,6 +326,129 @@ func TestSetTailscaleWithdrawingNeedsNoForwarding(t *testing.T) {
 	}
 }
 
+func TestSetTailscaleCheckedAuthorizesOnlyWithdrawals(t *testing.T) {
+	denied := errors.New("withdrawal denied")
+	for _, tc := range []struct {
+		name     string
+		prefs    string
+		req      TailscaleSetRequest
+		withdraw bool
+	}{
+		{"exit withdrawal", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(false)}, true},
+		{"route withdrawal", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr()}, true},
+		{"route replacement", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("198.51.100.0/24")}, true},
+		{"route addition", "tailscale-prefs-exit.json", TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24", "198.51.100.0/24")}, false},
+		{"exit addition", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(true)}, false},
+		{"already absent exit", "tailscale-prefs-plain.json", TailscaleSetRequest{AdvertiseExitNode: tsBptr(false)}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, rec := tsHost(t, "tailscale-status.json", tc.prefs)
+			rec.on("tailscale set ", "")
+			called := false
+			_, err := s.SetTailscaleChecked(context.Background(), tc.req, "", func() error {
+				called = true
+				if s.mu.TryLock() {
+					s.mu.Unlock()
+					t.Error("withdrawal authorized outside the mutation lock")
+				}
+				return denied
+			})
+			if called != tc.withdraw || errors.Is(err, denied) != tc.withdraw {
+				t.Fatalf("authorization called=%t, err=%v; withdrawal=%t", called, err, tc.withdraw)
+			}
+			if !tc.withdraw && err != nil {
+				t.Fatal(err)
+			}
+			if rec.ran("tailscale set") == tc.withdraw {
+				t.Fatalf("mutation ran=%t after authorization called=%t", rec.ran("tailscale set"), called)
+			}
+		})
+	}
+}
+
+func TestSetTailscaleCheckedRechecksAfterConcurrentAddition(t *testing.T) {
+	s, _ := tsHost(t, "tailscale-status.json", "tailscale-prefs-plain.json")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	firstInSet, releaseFirst := make(chan struct{}), make(chan struct{})
+	var release sync.Once
+	t.Cleanup(func() { release.Do(func() { close(releaseFirst) }) })
+	var stateMu sync.Mutex
+	prefs := tsPrefsJSON{AdvertiseRoutes: []string{"192.0.2.0/24"}}
+	sets := 0
+	fallback := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "tailscale" && strings.Join(args, " ") == "debug prefs" {
+			stateMu.Lock()
+			defer stateMu.Unlock()
+			out, err := json.Marshal(prefs)
+			return string(out), err
+		}
+		if name == "tailscale" && len(args) > 0 && args[0] == "set" {
+			stateMu.Lock()
+			sets++
+			n := sets
+			stateMu.Unlock()
+			if n == 1 {
+				close(firstInSet)
+				select {
+				case <-releaseFirst:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			stateMu.Lock()
+			prefs.AdvertiseRoutes = strings.Split(strings.TrimPrefix(args[2], "--advertise-routes="), ",")
+			stateMu.Unlock()
+			return "", nil
+		}
+		return fallback(ctx, name, args...)
+	}
+	replace := TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24")}
+	if s.TailscaleWithdraws(ctx, replace) {
+		t.Fatal("replacing the initial routes should not withdraw an offer yet")
+	}
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := s.SetTailscaleChecked(ctx, TailscaleSetRequest{AdvertiseRoutes: tsSptr("192.0.2.0/24", "198.51.100.0/24")}, "", func() error {
+			return errors.New("addition incorrectly requires withdrawal authorization")
+		})
+		firstResult <- err
+	}()
+	select {
+	case <-firstInSet:
+	case <-ctx.Done():
+		t.Fatal("addition did not reach tailscale set")
+	}
+	denied := errors.New("withdrawal denied")
+	secondStarted, secondResult := make(chan struct{}), make(chan error, 1)
+	go func() {
+		close(secondStarted)
+		_, err := s.SetTailscaleChecked(ctx, replace, "", func() error { return denied })
+		secondResult <- err
+	}()
+	<-secondStarted
+	release.Do(func() { close(releaseFirst) })
+	for _, result := range []struct {
+		ch   <-chan error
+		want error
+	}{{firstResult, nil}, {secondResult, denied}} {
+		select {
+		case err := <-result.ch:
+			if !errors.Is(err, result.want) {
+				t.Fatalf("mutation returned %v, want %v", err, result.want)
+			}
+		case <-ctx.Done():
+			t.Fatal("concurrent mutation did not finish")
+		}
+	}
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	if sets != 1 || strings.Join(prefs.AdvertiseRoutes, ",") != "192.0.2.0/24,198.51.100.0/24" {
+		t.Fatalf("denied replacement changed offers: sets=%d, routes=%v", sets, prefs.AdvertiseRoutes)
+	}
+}
+
 func TestSetTailscaleWhenPrefsCannotBeReadChangesNothing(t *testing.T) {
 	s := vpnService(t)
 	rec := record(t)
@@ -358,7 +484,8 @@ func TestTailscaleNeedsForwardingFailsClosedWhenPrefsAreUnreadable(t *testing.T)
 		{"status unreadable", func(r *recorder) { r.on("tailscale status --json", "garbled") }, true, true},
 		{"stopped", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"Stopped"}`) }, false, false},
 		{"needs login", func(r *recorder) { r.on("tailscale status --json", `{"BackendState":"NeedsLogin"}`) }, false, false},
-		{"daemon not running", func(r *recorder) { r.fail("tailscale status --json", "failed to connect to local tailscaled") }, false, false},
+		{"both reads fail", func(r *recorder) { r.fail("tailscale status --json", "permission denied") }, true, true},
+		{"state absent", func(r *recorder) { r.on("tailscale status --json", `{}`) }, true, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

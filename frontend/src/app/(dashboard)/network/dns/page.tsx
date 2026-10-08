@@ -1,5 +1,6 @@
 "use client"
 
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useState } from "react"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -76,6 +77,7 @@ export default function NetworkDNSPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="DNS" />
+      {dns.data && <NetworkReadWarning error={dns.error} refresh={dns.refresh} />}
 
       <Panel plain>
         <PanelHeader

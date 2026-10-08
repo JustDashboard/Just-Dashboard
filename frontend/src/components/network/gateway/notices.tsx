@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { ApiError, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -76,6 +77,7 @@ export function ForwardingOff({
   onTurnedOn: () => void
   disabled?: boolean
 }) {
+  const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const name = family === "ipv4" ? "IPv4" : "IPv6"
   const turnOn = async () => {
@@ -100,7 +102,7 @@ export function ForwardingOff({
         className="mt-2"
         onClick={() => void turnOn()}
         pending={busy}
-        disabled={busy || disabled}
+        disabled={!can("system.admin") || busy || disabled}
       >
         Turn on {name} forwarding
       </Button>

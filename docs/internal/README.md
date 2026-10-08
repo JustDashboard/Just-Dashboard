@@ -74,6 +74,9 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
+  — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
+
 - [`../audits/2026-10-07-process-refresh/README.md`](../audits/2026-10-07-process-refresh/README.md)
   — mounted inventory refreshes, stable inspection order, cron focus and interaction recordings.
 

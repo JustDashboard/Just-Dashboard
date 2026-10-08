@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"sort"
+	"strings"
 )
 
 // DefaultRoute is one way off this machine: the device a default route leaves
@@ -119,26 +121,47 @@ func OverviewFindings(in OverviewInput) []Finding {
 		})
 	}
 	if in.Spec != nil {
-		needs := false
+		needs4, needs6 := false, false
 		for _, n := range in.Spec.NAT {
-			needs = needs || n.Enabled
+			p, err := netip.ParsePrefix(n.Source)
+			if n.Enabled && err == nil {
+				if p.Addr().Unmap().Is4() {
+					needs4 = true
+				} else {
+					needs6 = true
+				}
+			}
 		}
 		for _, f := range in.Spec.Forwards {
-			needs = needs || f.Enabled
+			a, err := netip.ParseAddr(f.Target)
+			if f.Enabled && err == nil {
+				if a.Unmap().Is4() {
+					needs4 = true
+				} else {
+					needs6 = true
+				}
+			}
 		}
-		if needs && !in.Forwarding.IPv4 {
-			add(Finding{
-				ID: "forwarding.off", Level: "critical", Href: "/network/routing",
-				Title:  "Forwarding is off, so port forwards and NAT carry nothing",
-				Detail: "The gateway translates traffic for other machines, but the kernel is not routing packets that are not its own.",
-			})
+		for _, family := range []struct {
+			name            string
+			needed, enabled bool
+		}{
+			{"IPv4", needs4, in.Forwarding.IPv4}, {"IPv6", needs6, in.Forwarding.IPv6},
+		} {
+			if family.needed && !family.enabled {
+				add(Finding{
+					ID: "forwarding.off." + strings.ToLower(family.name), Level: "critical", Href: "/network/routing",
+					Title:  family.name + " forwarding is off, so its port forwards and NAT carry nothing",
+					Detail: "The gateway translates traffic for other machines, but the kernel is not routing this family's packets that are not its own.",
+				})
+			}
 		}
 	}
 	if !in.FirewallAvailable {
 		add(Finding{
 			ID: "firewall.none", Level: "warning", Href: "/network/firewall",
-			Title:  "No firewall filters what reaches this server",
-			Detail: "Neither ufw nor firewalld is installed, so every port something listens on is open to whoever can route to it.",
+			Title:  "No supported host firewall manager was detected",
+			Detail: "Neither ufw nor firewalld is available. Custom kernel rules and provider firewalls can still filter traffic; their absence has not been established by this reading.",
 		})
 	} else if !in.FirewallEnabled {
 		add(Finding{

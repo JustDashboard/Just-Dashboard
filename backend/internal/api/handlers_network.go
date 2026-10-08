@@ -47,6 +47,7 @@ func (s *Server) mountNetworkRoutes(r chi.Router) {
 
 		r.Method(http.MethodGet, "/overview", s.handle(s.handleNetworkOverview))
 		r.Method(http.MethodGet, "/links", s.handle(s.handleNetworkLinks))
+		r.Method(http.MethodGet, "/capabilities", s.handle(s.handleNetworkCapabilities))
 		r.Method(http.MethodGet, "/traffic/live", s.handle(s.handleNetworkTrafficLive))
 		r.Method(http.MethodGet, "/traffic/history", s.handle(s.handleNetworkTrafficHistory))
 
@@ -165,9 +166,11 @@ func (s *Server) networkInventory(ctx context.Context) netx.Inventory {
 	if networks, err := s.modules.docker.ListNetworks(ctx); err == nil {
 		for _, n := range networks {
 			inv.Networks = append(inv.Networks, netx.DockerNet{
-				ID: n.ID, Name: n.Name, Driver: n.Driver, Bridge: n.Bridge, Subnets: n.Subnets,
+				ID: n.ID, Name: n.Name, Driver: n.Driver, Bridge: n.Bridge, IPv6: n.IPv6, Subnets: n.Subnets,
 			})
 		}
+	} else {
+		inv.DockerNetworksUnknown = true
 	}
 	return inv
 }

@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -334,7 +335,11 @@ func parseWGEndpoint(raw string, defaultPort int) (string, error) {
 			return "", fmt.Errorf("%q is not an endpoint", raw)
 		}
 		host = raw[1:end]
-		portStr = strings.TrimPrefix(raw[end+1:], ":")
+		suffix := raw[end+1:]
+		if suffix != "" && !strings.HasPrefix(suffix, ":") {
+			return "", fmt.Errorf("%q is not an endpoint: a port follows a colon", raw)
+		}
+		portStr = strings.TrimPrefix(suffix, ":")
 	} else if strings.Count(raw, ":") == 1 {
 		host, portStr, _ = strings.Cut(raw, ":")
 	}
@@ -350,6 +355,16 @@ func parseWGEndpoint(raw string, defaultPort int) (string, error) {
 		return "", fmt.Errorf("the endpoint needs a port")
 	}
 	if a, err := netip.ParseAddr(host); err == nil {
+		if a.Zone() != "" {
+			// netip accepts arbitrary zone text, while this endpoint is also
+			// written inside a wg-quick file that can contain shell directives.
+			if err := ValidIfName(a.Zone()); err != nil {
+				return "", fmt.Errorf("the endpoint's IPv6 interface: %w", err)
+			}
+		}
+		if a.IsUnspecified() || a.IsMulticast() {
+			return "", fmt.Errorf("%s cannot be a remote endpoint", a)
+		}
 		if a.Is6() {
 			return "[" + a.String() + "]:" + strconv.Itoa(port), nil
 		}
@@ -556,8 +571,15 @@ SaveConfig = false
 
 	if req.ExitNode {
 		if err := s.setWGExit(ctx, name, subnet.String(), host.uplink, true, actor); err != nil {
-			undo()
-			return nil, fmt.Errorf("making %s an exit node: %w", name, err)
+			var saved *persistenceError
+			if errors.As(err, &saved) {
+				// NAT and its spec already reference this tunnel. Removing its
+				// device/file would turn a boot-unit warning into a broken exit.
+				warnings = append(warnings, err.Error())
+			} else {
+				undo()
+				return nil, fmt.Errorf("making %s an exit node: %w", name, err)
+			}
 		}
 	}
 

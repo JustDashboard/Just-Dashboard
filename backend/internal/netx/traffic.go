@@ -412,7 +412,9 @@ func (s *Service) containers(ctx context.Context, window time.Duration, now time
 	res.Recording = true
 
 	from := now.Add(-window).Unix()
-	step := int64(window.Seconds()) / seriesPoints
+	// Both ends of the window are included; leave room for a partial bucket
+	// at each end instead of sometimes returning a sixty-first point.
+	step := (int64(window.Seconds()) + seriesPoints - 2) / (seriesPoints - 1)
 	if step < 1 {
 		step = 1
 	}
@@ -480,21 +482,25 @@ func (s *Service) containers(ctx context.Context, window time.Duration, now time
 		  SELECT name, ts, net_rx, net_tx,
 		         ROW_NUMBER() OVER (PARTITION BY name ORDER BY ts DESC) AS n
 		    FROM metric_container_samples
-		   WHERE ts >= ? AND COALESCE(network_available, net_rx > 0 OR net_tx > 0))
-		 WHERE n <= 2 ORDER BY name, ts`, from)
+		   WHERE ts >= ? AND ts <= ? AND COALESCE(network_available, net_rx > 0 OR net_tx > 0))
+		 WHERE n <= 2 ORDER BY name, ts`, from, now.Unix())
 	if err != nil {
 		return nil, fmt.Errorf("reading container samples: %w", err)
 	}
 	defer last.Close()
 	type reading struct{ ts, rx, tx int64 }
 	tail := map[string]reading{}
+	freshFor := staleAfter
+	if s.sampler != nil && 2*s.sampler.every > freshFor {
+		freshFor = 2 * s.sampler.every
+	}
 	for last.Next() {
 		var name string
 		var r reading
 		if err := last.Scan(&name, &r.ts, &r.rx, &r.tx); err != nil {
 			return nil, err
 		}
-		if p, ok := tail[name]; ok && r.ts > p.ts {
+		if p, ok := tail[name]; ok && r.ts > p.ts && now.Sub(time.Unix(r.ts, 0)) <= freshFor {
 			if c := byName[name]; c != nil {
 				dt := float64(r.ts - p.ts)
 				c.RxRate = float64(counterDelta(p.rx, r.rx)) / dt

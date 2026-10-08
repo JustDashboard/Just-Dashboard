@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -363,8 +365,8 @@ func readResolvConf(path string) ResolvConf {
 			continue
 		}
 		header = false
-		key, rest, _ := strings.Cut(line, " ")
-		fields := strings.Fields(rest)
+		parts := strings.Fields(line)
+		key, fields := parts[0], parts[1:]
 		switch key {
 		case "nameserver":
 			if len(fields) > 0 {
@@ -904,6 +906,9 @@ type DNSSettings struct {
 	DNSOverTLS string `json:"dnsOverTLS"`
 	// Cache is yes, no or no-negative.
 	Cache string `json:"cache"`
+	// VerificationName lets an isolated LAN test its own DNS namespace.
+	// It is an apply check, not a persistent resolved setting.
+	VerificationName string `json:"verificationName,omitempty"`
 }
 
 // DNSApplied is what a change did.
@@ -954,19 +959,28 @@ func (s *Service) SetDNS(ctx context.Context, req DNSSettings, who string) (*DNS
 		return nil, err
 	}
 
-	prev, existed := readFileBytes(s.paths.Resolved)
+	prev, existed, err := readFileBytes(s.paths.Resolved)
+	if err != nil {
+		return nil, fmt.Errorf("reading the resolver drop-in before changing it: %w", err)
+	}
 	if err := writeFileAtomic(s.paths.Resolved, []byte(renderResolved(req, who)), 0o644); err != nil {
 		return nil, fmt.Errorf("writing %s: %w", s.paths.Resolved, err)
 	}
 	if _, err := run(ctx, "systemctl", "restart", resolvedUnit); err != nil {
-		s.restoreResolved(ctx, prev, existed)
+		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
+			return nil, fmt.Errorf("systemd-resolved did not restart with the new settings; recovery also failed: %w", errors.Join(err, restoreErr))
+		}
 		return nil, fmt.Errorf("systemd-resolved did not restart with the new settings, so the previous ones were put back: %w", err)
 	}
-	via, took, err := verifyResolution(ctx)
+	via, took, err := verifyResolution(ctx, req.VerificationName)
 	if err != nil {
-		s.restoreResolved(ctx, prev, existed)
-		return nil, &UpstreamError{Reason: "The new upstreams did not answer: " + err.Error() +
-			". The previous settings were put back, and names resolve as they did."}
+		reason := "The new upstreams did not answer: " + err.Error()
+		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
+			reason += ". Recovery also failed: " + restoreErr.Error()
+		} else {
+			reason += ". The previous settings were put back."
+		}
+		return nil, &UpstreamError{Reason: reason}
 	}
 	m := readManagedDNS(s.paths.Resolved)
 	out := &DNSApplied{Verified: true, Via: via, Millis: took, Managed: &m}
@@ -985,7 +999,10 @@ func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 	if err != nil {
 		return nil, err
 	}
-	prev, existed := readFileBytes(s.paths.Resolved)
+	prev, existed, err := readFileBytes(s.paths.Resolved)
+	if err != nil {
+		return nil, fmt.Errorf("reading the resolver drop-in before changing it: %w", err)
+	}
 	out := &DNSApplied{Managed: ptrTo(readManagedDNS(s.paths.Resolved)), Warning: resolvConfWarning(rc)}
 	if !existed {
 		return out, nil
@@ -994,7 +1011,9 @@ func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 		return nil, fmt.Errorf("removing %s: %w", s.paths.Resolved, err)
 	}
 	if _, err := run(ctx, "systemctl", "restart", resolvedUnit); err != nil {
-		s.restoreResolved(ctx, prev, existed)
+		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
+			return nil, fmt.Errorf("systemd-resolved did not restart without the dashboard's settings; recovery also failed: %w", errors.Join(err, restoreErr))
+		}
 		return nil, fmt.Errorf("systemd-resolved did not restart without the dashboard's settings, so they were put back: %w", err)
 	}
 	out.Managed = ptrTo(readManagedDNS(s.paths.Resolved))
@@ -1037,42 +1056,79 @@ func resolvConfWarning(rc ResolvConf) string {
 }
 
 // restoreResolved puts the previous drop-in back (or removes the one that
-// was never there) and restarts resolved once more. A failure here has
-// nowhere left to go but the log.
-func (s *Service) restoreResolved(ctx context.Context, prev []byte, existed bool) {
+// was never there) and restarts resolved once more. Failures must reach
+// the caller as well as the log so it cannot claim recovery succeeded.
+func (s *Service) restoreResolved(ctx context.Context, prev []byte, existed bool) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	var recovery []error
 	if existed {
 		if err := writeFileAtomic(s.paths.Resolved, prev, 0o644); err != nil {
+			recovery = append(recovery, fmt.Errorf("restoring the resolver drop-in: %w", err))
 			s.log.Error("restoring the resolver drop-in", "path", s.paths.Resolved, "err", err)
 		}
 	} else if err := os.Remove(s.paths.Resolved); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		recovery = append(recovery, fmt.Errorf("removing the resolver drop-in: %w", err))
 		s.log.Error("removing the resolver drop-in", "path", s.paths.Resolved, "err", err)
 	}
 	if _, err := run(ctx, "systemctl", "restart", resolvedUnit); err != nil {
+		recovery = append(recovery, fmt.Errorf("restarting the previous resolver: %w", err))
 		s.log.Error("restarting systemd-resolved after a rollback", "err", err)
 	}
+	return errors.Join(recovery...)
 }
 
-func readFileBytes(path string) ([]byte, bool) {
+func readFileBytes(path string) ([]byte, bool, error) {
 	b, err := os.ReadFile(path)
-	return b, err == nil
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	return b, err == nil, err
 }
 
-// verifyResolution resolves a well-known name through the stub. It succeeds
-// when either name does, and reports which and how fast.
-func verifyResolution(ctx context.Context) (string, float64, error) {
-	var last error
-	for _, name := range verifyNames {
-		start := time.Now()
-		answers, err := lookupVia(ctx, resolvedStub, name, "A")
-		if err == nil && len(answers) > 0 {
-			return name, millis(time.Since(start)), nil
-		}
-		if err == nil {
-			err = fmt.Errorf("%s resolved to nothing", name)
-		}
-		last = err
+// Verification accepts either family: an isolated IPv6-only LAN need not
+// publish A records. Each attempt has its own bounded query budget.
+func verifyResolution(ctx context.Context, verificationName ...string) (string, float64, error) {
+	names := verifyNames
+	if len(verificationName) > 0 && verificationName[0] != "" {
+		names = []string{verificationName[0]}
 	}
-	return "", 0, fmt.Errorf("%s could not be resolved through the stub (%v)", verifyNames[0], last)
+	var last error
+	for _, name := range names {
+		start := time.Now()
+		for _, rtype := range []string{"A", "AAAA"} {
+			queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+			answers, err := lookupVia(queryCtx, resolvedStub, name, rtype)
+			if err == nil && len(answers) > 0 {
+				cancel()
+				return name, millis(time.Since(start)), nil
+			}
+			// DNSStubListener=no still has resolved's local query API.
+			if err != nil && (errors.Is(err, syscall.ECONNREFUSED) || lookupError(err) == "connection refused") && has("resolvectl") {
+				out, queryErr := run(queryCtx, "resolvectl", "query", "--type="+rtype, "--legend=no", name+".")
+				if queryErr == nil {
+					for _, field := range strings.Fields(out) {
+						if a, parseErr := netip.ParseAddr(field); parseErr == nil && (rtype == "A" && a.Is4() || rtype == "AAAA" && a.Is6()) {
+							cancel()
+							return name, millis(time.Since(start)), nil
+						}
+					}
+				}
+				if queryErr != nil {
+					err = queryErr
+				}
+			}
+			cancel()
+			if err == nil {
+				err = fmt.Errorf("%s has no %s answers", name, rtype)
+			}
+			last = err
+			if ctx.Err() != nil {
+				return "", 0, ctx.Err()
+			}
+		}
+	}
+	return "", 0, fmt.Errorf("%s could not be resolved through systemd-resolved (%v)", names[0], last)
 }
 
 func millis(d time.Duration) float64 {
@@ -1082,6 +1138,12 @@ func millis(d time.Duration) float64 {
 // cleanDNSSettings validates a request and returns it in the form it is written.
 func cleanDNSSettings(req DNSSettings) (DNSSettings, error) {
 	var err error
+	req.VerificationName = strings.TrimSuffix(strings.TrimSpace(req.VerificationName), ".")
+	if req.VerificationName != "" {
+		if _, err := cleanLookupName(req.VerificationName, "A"); err != nil {
+			return req, fmt.Errorf("verificationName: %w", err)
+		}
+	}
 	if req.Servers, err = cleanDNSServers(req.Servers, "upstream"); err != nil {
 		return req, err
 	}
@@ -1147,8 +1209,7 @@ func oneOf(v, what string, allowed ...string) (string, error) {
 	return "", fmt.Errorf("%s is %s", what, strings.Join(allowed, ", "))
 }
 
-// cleanDNSServers validates addresses with an optional #name, which is the
-// server name DNS over TLS checks the certificate against.
+// cleanDNSServers accepts resolved's address[:port][%interface][#name] syntax.
 func cleanDNSServers(in []string, what string) ([]string, error) {
 	if len(in) > maxDNSServers {
 		return nil, fmt.Errorf("at most %d %s servers", maxDNSServers, what)
@@ -1160,26 +1221,23 @@ func cleanDNSServers(in []string, what string) ([]string, error) {
 		if raw == "" {
 			continue
 		}
-		addr, name, hasName := strings.Cut(raw, "#")
-		a, err := ParseAddr(addr)
+		sv, err := parseDNSServer(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%w (a server is an IP address, optionally followed by #servername)", err)
+			return nil, err
 		}
+		a := sv.addr
 		if a.IsUnspecified() || a.IsMulticast() {
 			return nil, fmt.Errorf("%s cannot be a DNS server", a)
 		}
 		// The stub's own address as an upstream would have resolved ask
 		// itself, and every lookup would wait for its timeout.
-		if a.String() == resolvedStub || a.String() == resolvedStubAlt {
+		if (a.String() == resolvedStub || a.String() == resolvedStubAlt) && (sv.port == "" || sv.port == "53") {
 			return nil, fmt.Errorf("%s is systemd-resolved's own listener; as its upstream it would ask itself", a)
 		}
-		entry := a.String()
-		if hasName {
-			if err := validDNSName(name, false); err != nil {
-				return nil, fmt.Errorf("the server name after # for %s: %w", a, err)
-			}
-			entry += "#" + strings.ToLower(strings.TrimSuffix(name, "."))
+		if a.IsLinkLocalUnicast() && sv.iface == "" {
+			return nil, fmt.Errorf("%s is a link-local DNS server; give its interface after %%", a)
 		}
+		entry := sv.resolvedEntry()
 		if seen[entry] {
 			continue
 		}
@@ -1214,6 +1272,9 @@ func renderResolved(req DNSSettings, who string) string {
 	b.WriteString("[Resolve]\n")
 	list := func(key string, v []string) {
 		if len(v) > 0 {
+			// List assignments accumulate across earlier files. Clear the old
+			// global list so choosing one upstream does not keep another in use.
+			b.WriteString(key + "=\n")
 			b.WriteString(key + "=" + strings.Join(v, " ") + "\n")
 		}
 	}
@@ -1231,17 +1292,75 @@ func renderResolved(req DNSSettings, who string) string {
 // serverIP is the address of a resolved server entry, which may carry a port,
 // a zone and a #name: 1.1.1.1#cloudflare-dns.com, [::1]:5353, fe80::1%eth0.
 func serverIP(entry string) (netip.Addr, bool) {
-	entry, _, _ = strings.Cut(entry, "#")
+	sv, err := parseDNSServer(entry)
+	return sv.addr, err == nil
+}
+
+type dnsServer struct {
+	addr                 netip.Addr
+	port, iface, tlsName string
+}
+
+// parseDNSServer keeps the port and scope separate: resolved puts %interface
+// after the port, while a dialable IPv6 address puts it inside the brackets.
+func parseDNSServer(raw string) (dnsServer, error) {
+	var sv dnsServer
+	entry, name, named := strings.Cut(raw, "#")
+	if named {
+		if err := validDNSName(name, false); err != nil {
+			return sv, fmt.Errorf("the server name after #: %w", err)
+		}
+		sv.tlsName = strings.ToLower(strings.TrimSuffix(name, "."))
+	}
+	entry, sv.iface, _ = strings.Cut(entry, "%")
+	if sv.iface != "" {
+		if before, after, ok := strings.Cut(sv.iface, "]:"); ok && strings.HasPrefix(entry, "[") {
+			sv.iface, entry = before, entry+"]:"+after
+		}
+		if err := ValidIfName(sv.iface); err != nil {
+			return sv, fmt.Errorf("the DNS server interface: %w", err)
+		}
+	} else if strings.Contains(raw, "%") {
+		return sv, fmt.Errorf("give the DNS server's interface after %%")
+	}
 	if ap, err := netip.ParseAddrPort(entry); err == nil {
-		return ap.Addr().WithZone("").Unmap(), true
+		sv.addr, sv.port = ap.Addr().Unmap(), strconv.Itoa(int(ap.Port()))
+		if ap.Port() == 0 {
+			return sv, fmt.Errorf("a DNS server port is 1 to 65535")
+		}
+	} else {
+		a, err := ParseAddr(strings.TrimPrefix(strings.TrimSuffix(entry, "]"), "["))
+		if err != nil {
+			return sv, fmt.Errorf("%w (a server is an IP address with optional :port, %%interface and #servername)", err)
+		}
+		sv.addr = a
 	}
-	entry = strings.Trim(entry, "[]")
-	entry, _, _ = strings.Cut(entry, "%")
-	a, err := netip.ParseAddr(entry)
-	if err != nil {
-		return netip.Addr{}, false
+	return sv, nil
+}
+
+func (sv dnsServer) resolvedEntry() string {
+	entry := sv.addr.String()
+	if sv.port != "" {
+		entry = net.JoinHostPort(entry, sv.port)
 	}
-	return a.Unmap(), true
+	if sv.iface != "" {
+		entry += "%" + sv.iface
+	}
+	if sv.tlsName != "" {
+		entry += "#" + sv.tlsName
+	}
+	return entry
+}
+
+func (sv dnsServer) lookupServer() string {
+	a := sv.addr
+	if a.Is6() && sv.iface != "" {
+		a = a.WithZone(sv.iface)
+	}
+	if sv.port != "" && sv.port != "53" {
+		return net.JoinHostPort(a.String(), sv.port)
+	}
+	return a.String()
 }
 
 // hostFilePath maps a path onto the one this process can write. The dashboard

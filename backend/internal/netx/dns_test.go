@@ -3,10 +3,13 @@ package netx
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -272,6 +275,86 @@ func TestPresetsCarryTheirNames(t *testing.T) {
 	}
 }
 
+func TestReadResolvConfAcceptsTabsAndMixedWhitespace(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "resolv.conf")
+	if err := os.WriteFile(path, []byte("nameserver\t192.0.2.53\nsearch\t home.arpa\tlan.example\noptions\ttimeout:1 attempts:2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rc := readResolvConf(path)
+	if !reflect.DeepEqual(rc.Nameservers, []string{"192.0.2.53"}) || len(rc.Search) != 2 || len(rc.Options) != 2 {
+		t.Fatalf("tab-delimited resolver configuration = %+v", rc)
+	}
+}
+
+func TestDNSServersKeepPortsScopesAndTLSNames(t *testing.T) {
+	tests := []struct{ input, entry, dial string }{
+		{"1.1.1.1:5353", "1.1.1.1:5353", "1.1.1.1:5353"},
+		{"[2001:db8:0::53]:5353#DNS.Example.", "[2001:db8::53]:5353#dns.example", "[2001:db8::53]:5353"},
+		{"[fe80::53]:5353%eth0#dns.example", "[fe80::53]:5353%eth0#dns.example", "[fe80::53%eth0]:5353"},
+		{"[fe80::53%eth0]:5353", "[fe80::53]:5353%eth0", "[fe80::53%eth0]:5353"},
+		{"fe80::53%eth0", "fe80::53%eth0", "fe80::53%eth0"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.input, func(t *testing.T) {
+			clean, err := cleanDNSServers([]string{tc.input}, "upstream")
+			if err != nil || len(clean) != 1 || clean[0] != tc.entry {
+				t.Fatalf("clean = %v, %v", clean, err)
+			}
+			sv, err := parseDNSServer(clean[0])
+			if err != nil || sv.lookupServer() != tc.dial {
+				t.Fatalf("dial = %q, %v", sv.lookupServer(), err)
+			}
+		})
+	}
+}
+
+func TestRestoreResolvedSurvivesCanceledRequest(t *testing.T) {
+	s := testService(t)
+	record(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	called := false
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		called = true
+		if ctx.Err() != nil {
+			t.Errorf("resolver rollback inherited request cancellation: %v", ctx.Err())
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("resolver rollback has no bounded recovery deadline")
+		}
+		return "", nil
+	}
+	s.restoreResolved(ctx, []byte("[Resolve]\nDNS=192.0.2.53\n"), true)
+	if !called {
+		t.Fatal("restored resolver was not restarted")
+	}
+}
+
+func TestSetDNSVerifiesAnIsolatedLANName(t *testing.T) {
+	s, _ := resolvedHost(t, func(name string, qtype uint16) dnsBehavior {
+		if name == "nas.home.arpa" {
+			return answerA("192.168.1.7")(name, qtype)
+		}
+		return dnsBehavior{rcode: 3}
+	})
+	res, err := s.SetDNS(context.Background(), DNSSettings{Servers: []string{"192.168.1.53"}, VerificationName: "nas.home.arpa."}, "alice")
+	if err != nil || !res.Verified || res.Via != "nas.home.arpa" {
+		t.Fatalf("isolated LAN verification = %+v, %v", res, err)
+	}
+}
+
+func TestVerifyDNSWorksWithoutAStubListener(t *testing.T) {
+	rec := record(t)
+	rec.on("resolvectl query --type=A --legend=no nas.home.arpa.", "nas.home.arpa: 192.168.1.7\n")
+	previousDial := dnsDial
+	t.Cleanup(func() { dnsDial = previousDial })
+	dnsDial = func(context.Context, string, string) (net.Conn, error) { return nil, syscall.ECONNREFUSED }
+	name, _, err := verifyResolution(context.Background(), "nas.home.arpa")
+	if err != nil || name != "nas.home.arpa" {
+		t.Fatalf("resolved with stub disabled = %q, %v", name, err)
+	}
+}
+
 func TestCleanDNSSettings(t *testing.T) {
 	t.Parallel()
 	cf := []string{"1.1.1.1#cloudflare-dns.com", "1.0.0.1#cloudflare-dns.com"}
@@ -287,8 +370,11 @@ func TestCleanDNSSettings(t *testing.T) {
 		{"DoT strict needs upstreams", DNSSettings{DNSOverTLS: "yes", DNSSEC: "yes"}, "needs upstreams"},
 		{"opportunistic DoT needs none", DNSSettings{Servers: []string{"1.1.1.1"}, DNSOverTLS: "opportunistic"}, ""},
 		{"not an address", DNSSettings{Servers: []string{"one.one.one.one"}}, "not an IP address"},
-		{"zone refused", DNSSettings{Servers: []string{"fe80::1%eth0"}}, "zone"},
-		{"port refused", DNSSettings{Servers: []string{"1.1.1.1:53"}}, "not an IP address"},
+		{"link-local upstream", DNSSettings{Servers: []string{"fe80::1%eth0"}}, ""},
+		{"custom port", DNSSettings{Servers: []string{"1.1.1.1:5353"}}, ""},
+		{"unscoped link-local", DNSSettings{Servers: []string{"fe80::1"}}, "give its interface"},
+		{"bad interface", DNSSettings{Servers: []string{"fe80::1%eth0\nDNS=8.8.8.8"}}, "interface"},
+		{"zero port", DNSSettings{Servers: []string{"1.1.1.1:0"}}, "port"},
 		{"bad tls name", DNSSettings{Servers: []string{"1.1.1.1#bad name"}}, "server name"},
 		{"tls name with newline", DNSSettings{Servers: []string{"1.1.1.1#a.com\nDNS=6.6.6.6"}}, "server name"},
 		{"stub as upstream", DNSSettings{Servers: []string{"127.0.0.53"}}, "ask itself"},
@@ -336,8 +422,11 @@ func TestRenderResolvedRoundTrips(t *testing.T) {
 # systemd-resolved reads this after resolved.conf. Change it on the dashboard's
 # Network, DNS page; an edit here is overwritten by the next change there.
 [Resolve]
+DNS=
 DNS=1.1.1.1#cloudflare-dns.com 2606:4700:4700::1111#cloudflare-dns.com
+FallbackDNS=
 FallbackDNS=9.9.9.9#dns.quad9.net
+Domains=
 Domains=~. lan.example.com
 DNSSEC=allow-downgrade
 DNSOverTLS=yes
@@ -421,7 +510,7 @@ func TestSetDNSRestoresThePreviousFileWhenTheRestartFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := s.SetDNS(context.Background(), DNSSettings{Servers: []string{"1.1.1.1"}}, "ion")
-	if err == nil || !strings.Contains(err.Error(), "put back") {
+	if err == nil || !strings.Contains(err.Error(), "recovery also failed") {
 		t.Fatalf("error = %v", err)
 	}
 	data, _ := os.ReadFile(s.paths.Resolved)
@@ -624,5 +713,72 @@ func TestServerIP(t *testing.T) {
 	}
 	if _, ok := serverIP("not-an-address"); ok {
 		t.Error("a name read as an address")
+	}
+}
+
+func TestSetDNSVerifiesAnIPv6OnlyLANName(t *testing.T) {
+	s, _ := resolvedHost(t, func(name string, qtype uint16) dnsBehavior {
+		if name == "nas.home.arpa" && qtype == 28 {
+			return dnsBehavior{rdatas: [][]byte{net.ParseIP("fd00::7").To16()}}
+		}
+		return dnsBehavior{}
+	})
+	res, err := s.SetDNS(t.Context(), DNSSettings{Servers: []string{"fd00::53"}, VerificationName: "nas.home.arpa"}, "alice")
+	if err != nil || !res.Verified || res.Via != "nas.home.arpa" {
+		t.Fatalf("IPv6-only LAN verification = %+v, %v", res, err)
+	}
+}
+
+func TestVerifyIPv6DNSWorksWithoutAStubListener(t *testing.T) {
+	rec := record(t)
+	rec.on("resolvectl query --type=A --legend=no nas.home.arpa.", "nas.home.arpa: no A records\n")
+	rec.on("resolvectl query --type=AAAA --legend=no nas.home.arpa.", "nas.home.arpa: fd00::7\n")
+	previousDial := dnsDial
+	t.Cleanup(func() { dnsDial = previousDial })
+	dnsDial = func(context.Context, string, string) (net.Conn, error) { return nil, syscall.ECONNREFUSED }
+	name, _, err := verifyResolution(t.Context(), "nas.home.arpa")
+	if err != nil || name != "nas.home.arpa" {
+		t.Fatalf("IPv6 resolved with stub disabled = %q, %v", name, err)
+	}
+}
+
+func TestDNSRefusesUnreadableBackupBeforeMutation(t *testing.T) {
+	for _, reset := range []bool{false, true} {
+		t.Run(fmt.Sprint(reset), func(t *testing.T) {
+			s, rec := resolvedHost(t, answerA("192.0.2.7"))
+			if err := os.MkdirAll(s.paths.Resolved, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if reset {
+				_, err = s.ResetDNS(t.Context())
+			} else {
+				_, err = s.SetDNS(t.Context(), DNSSettings{Servers: []string{"192.0.2.53"}}, "alice")
+			}
+			if err == nil || !strings.Contains(err.Error(), "reading the resolver drop-in") {
+				t.Fatalf("unreadable backup = %v", err)
+			}
+			if rec.ran("systemctl restart systemd-resolved") {
+				t.Fatal("resolver changed without a readable rollback backup")
+			}
+			if st, statErr := os.Stat(s.paths.Resolved); statErr != nil || !st.IsDir() {
+				t.Fatalf("prior entry changed: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestDNSReportsRecoveryFailure(t *testing.T) {
+	s, _ := resolvedHost(t, answerA("192.0.2.7"))
+	previousRun := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "systemctl" && len(args) > 0 && args[0] == "restart" {
+			return "", errors.New("systemd manager unreachable")
+		}
+		return previousRun(ctx, name, args...)
+	}
+	_, err := s.SetDNS(t.Context(), DNSSettings{Servers: []string{"192.0.2.53"}}, "alice")
+	if err == nil || !strings.Contains(err.Error(), "recovery also failed") || !strings.Contains(err.Error(), "restarting the previous resolver") {
+		t.Fatalf("recovery failure hidden: %v", err)
 	}
 }

@@ -26,7 +26,11 @@ const (
 type ForwardingNeeds struct {
 	// DockerNetworks counts the bridge networks Docker runs; their containers
 	// reach each other and the internet through this host's forwarding.
-	DockerNetworks        int  `json:"dockerNetworks"`
+	DockerNetworks int `json:"dockerNetworks"`
+	// DockerIPv6Networks counts bridges with IPv6 enabled or an IPv6 subnet.
+	DockerIPv6Networks int `json:"dockerIPv6Networks"`
+	// Unknown dependencies guard both families until Docker can be read again.
+	DockerNetworksUnknown bool `json:"dockerNetworksUnknown,omitempty"`
 	TailscaleExitNode     bool `json:"tailscaleExitNode"`
 	TailscaleSubnetRoutes bool `json:"tailscaleSubnetRoutes"`
 }
@@ -79,8 +83,15 @@ func readSysctl(key string) (string, error) {
 // forwardingNeeds lists what needs a family's forwarding.
 func forwardingNeeds(sp *Spec, needs ForwardingNeeds, canon string) []string {
 	out := []string{}
-	if canon == "ipv4" && needs.DockerNetworks > 0 {
-		out = append(out, fmt.Sprintf("%d Docker %s", needs.DockerNetworks, plural(needs.DockerNetworks, "network", "networks")))
+	dockerNetworks := needs.DockerNetworks
+	if canon == "ipv6" {
+		dockerNetworks = needs.DockerIPv6Networks
+	}
+	if dockerNetworks > 0 {
+		out = append(out, fmt.Sprintf("%d Docker %s", dockerNetworks, plural(dockerNetworks, "network", "networks")))
+	}
+	if needs.DockerNetworksUnknown {
+		out = append(out, "Docker's network dependencies are unknown because its networks could not be read")
 	}
 	if needs.TailscaleExitNode {
 		out = append(out, "Tailscale's exit node")
@@ -155,6 +166,9 @@ func (s *Service) SetForwarding(ctx context.Context, family string, on bool, nee
 	}
 	if !on {
 		if by := forwardingNeeds(next, needs, canon); len(by) > 0 {
+			if needs.DockerNetworksUnknown {
+				return nil, guarded("%s forwarding cannot be turned off: Docker's networks could not be read, so forwarding dependencies are unknown.", canon)
+			}
 			return nil, guarded("%s forwarding cannot be turned off: %s would stop working.", canon, strings.Join(by, ", "))
 		}
 	}
@@ -168,19 +182,41 @@ func (s *Service) SetForwarding(ctx context.Context, family string, on bool, nee
 		val = "1"
 	}
 	next.Sysctls[key] = val
-	err = s.commit(ctx, next, step{
-		apply: func(ctx context.Context) error {
-			_, err := run(ctx, "sysctl", "-w", key+"="+val)
-			return err
-		},
-		undo: func(ctx context.Context) { s.best(ctx, "sysctl", "-w", key+"="+prev) },
-		verify: func(context.Context) error {
-			got, err := readSysctl(key)
+	keys := []string{key}
+	want, previous := map[string]string{key: val}, map[string]string{key: prev}
+	// Linux resets this protection when ip_forward changes. Preserve the
+	// dashboard's managed choice immediately as well as in the boot drop-in.
+	redirectKey := "net.ipv4.conf.all.accept_redirects"
+	if canon == "ipv4" && prev != val {
+		if protection, set := next.Sysctls[redirectKey]; set {
+			cur, err := readSysctl(redirectKey)
 			if err != nil {
-				return err
+				return nil, fmt.Errorf("reading the managed redirect policy before changing forwarding: %w", err)
 			}
-			if got != val {
-				return fmt.Errorf("the kernel still reports %s = %s", key, got)
+			keys = append(keys, redirectKey)
+			want[redirectKey], previous[redirectKey] = protection, cur
+		}
+	}
+	undo := func(ctx context.Context) { restoreSysctls(ctx, keys, previous) }
+	err = s.commit(ctx, next, step{
+		apply: applying(func(ctx context.Context) error {
+			for _, k := range keys {
+				if _, err := run(ctx, "sysctl", "-w", k+"="+want[k]); err != nil {
+					return err
+				}
+			}
+			return nil
+		}, undo),
+		undo: undo,
+		verify: func(context.Context) error {
+			for _, k := range keys {
+				got, err := readSysctl(k)
+				if err != nil {
+					return err
+				}
+				if got != want[k] {
+					return fmt.Errorf("the kernel still reports %s = %s", k, got)
+				}
 			}
 			return nil
 		},
@@ -203,6 +239,9 @@ func forwardingFrom(sp *Spec, needs ForwardingNeeds) ForwardingView {
 		_, st.Persisted = sp.Sysctls[key]
 		if len(st.NeededBy) > 0 {
 			st.Guard = "Turned off, " + strings.Join(st.NeededBy, ", ") + " would stop working."
+			if needs.DockerNetworksUnknown {
+				st.Guard = "Docker's networks could not be read, so forwarding dependencies are unknown."
+			}
 		}
 		return st
 	}

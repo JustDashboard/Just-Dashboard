@@ -886,10 +886,10 @@ func (s *Service) Listeners(ctx context.Context) (*ProbeResult, error) {
 	var out, elapsed string
 	var err error
 	switch {
-	case hostexec.AvailableOnHost("ss"):
-		out, elapsed, err = runProbe(ctx, 10*time.Second, "ss", "-tlnp")
-	case hostexec.AvailableOnHost("netstat"):
-		out, elapsed, err = runProbe(ctx, 10*time.Second, "netstat", "-tlnp")
+	case diagnosticHas("ss"):
+		out, elapsed, err = diagnosticRun(ctx, 10*time.Second, "ss", "-tulnp")
+	case diagnosticHas("netstat"):
+		out, elapsed, err = diagnosticRun(ctx, 10*time.Second, "netstat", "-tulnp")
 	default:
 		res.Error = "neither ss nor netstat is installed on this host"
 		return res, nil
@@ -909,32 +909,42 @@ func (s *Service) Listeners(ctx context.Context) (*ProbeResult, error) {
 // targetless — the answer is about this machine, not a destination.
 func (s *Service) Egress(ctx context.Context) (*ProbeResult, error) {
 	res := &ProbeResult{Tool: "egress", Target: "this host", Records: []string{}}
-	if !hostexec.AvailableOnHost("ip") {
+	if !diagnosticHas("ip") {
 		res.Error = "ip is not installed on this host"
 		return res, nil
 	}
-	out, elapsed, err := runProbe(ctx, 10*time.Second, "ip", "route", "get", "8.8.8.8")
-	res.Duration = elapsed
-	if err != nil {
-		res.Error = err.Error()
-		res.Output = strings.TrimSpace(out)
-		return res, nil
-	}
+	start := time.Now()
 	var b strings.Builder
-	b.WriteString(out + "\n")
-	for _, field := range []struct{ key, label string }{{"src", "Source"}, {"dev", "Interface"}} {
-		if v := routeField(out, field.key); v != "" {
-			fmt.Fprintf(&b, "%s: %s\n", field.label, v)
-			if field.key == "src" {
-				res.Records = append(res.Records, v)
+	for _, family := range []struct{ flag, label, target string }{
+		{"-4", "IPv4", "1.1.1.1"},
+		{"-6", "IPv6", "2606:4700:4700::1111"},
+	} {
+		fmt.Fprintf(&b, "%s:\n", family.label)
+		out, _, err := diagnosticRun(ctx, 10*time.Second, "ip", family.flag, "route", "get", family.target)
+		if err != nil {
+			fmt.Fprintf(&b, "No route found: %v\n\n", err)
+			continue
+		}
+		res.OK = true
+		b.WriteString(out + "\n")
+		for _, field := range []struct{ key, label string }{{"src", "Source"}, {"dev", "Interface"}} {
+			if v := routeField(out, field.key); v != "" {
+				fmt.Fprintf(&b, "%s: %s\n", field.label, v)
+				if field.key == "src" {
+					res.Records = append(res.Records, v)
+				}
 			}
 		}
+		if def, _, err := diagnosticRun(ctx, 10*time.Second, "ip", family.flag, "route", "show", "default"); err == nil {
+			fmt.Fprintf(&b, "Default route:\n%s\n", strings.TrimSpace(def))
+		}
+		b.WriteString("\n")
 	}
-	if def, _, derr := runProbe(ctx, 10*time.Second, "ip", "route", "show", "default"); derr == nil {
-		fmt.Fprintf(&b, "\nDefault route:\n%s", strings.TrimSpace(def))
+	if !res.OK {
+		res.Error = "Neither IPv4 nor IPv6 has a route to the diagnostic addresses."
 	}
-	res.OK = true
-	res.Output = strings.TrimSpace(b.String())
+	res.Duration = time.Since(start).Round(time.Millisecond).String()
+	res.Output = strings.TrimSpace(b.String() + "Only the kernel routing table was queried; no internet request was sent. A local source address does not reveal an upstream NAT's public address.")
 	return res, nil
 }
 

@@ -431,13 +431,6 @@ func (s *Server) handleTailscaleSet(w http.ResponseWriter, r *http.Request) erro
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
-	// Adding an offer is routine; taking the exit node or a subnet route away
-	// strands the devices using it, so the body decides which this is.
-	if s.modules.network.TailscaleWithdraws(ctx, req) {
-		if err := s.requireDestructive(r, "tsoffer", "withdrawing an exit node or subnet route"); err != nil {
-			return err
-		}
-	}
 	detail := map[string]any{}
 	if req.AdvertiseExitNode != nil {
 		detail["advertiseExitNode"] = *req.AdvertiseExitNode
@@ -446,7 +439,11 @@ func (s *Server) handleTailscaleSet(w http.ResponseWriter, r *http.Request) erro
 		detail["advertiseRoutes"] = *req.AdvertiseRoutes
 	}
 	httpx.SetAudit(r, "network.vpn.tailscale.set", "", detail)
-	res, err := s.modules.network.SetTailscale(ctx, req, s.networkClient(r))
+	// The module checks the current offers under its mutation lock, so another
+	// request cannot add a route between authorization and its replacement.
+	res, err := s.modules.network.SetTailscaleChecked(ctx, req, s.networkClient(r), func() error {
+		return s.requireDestructive(r, "tsoffer", "withdrawing an exit node or subnet route")
+	})
 	if errors.Is(err, netx.ErrForwardingOff) {
 		return httpx.Err(http.StatusConflict, "forwarding_off",
 			err.Error()+". Turn IP forwarding on from the Routing page, then try again.")

@@ -652,6 +652,35 @@ func TestLinksSetState(t *testing.T) {
 	}
 }
 
+func TestLinksRefuseDeletionWhileGatewayOrShapingDependsOnTheDevice(t *testing.T) {
+	for _, area := range []string{"shaping", "forward", "NAT", "peer route"} {
+		t.Run(area, func(t *testing.T) {
+			rec := rtHost(t)
+			s := testService(t)
+			sp := emptySpec()
+			sp.Links = []LinkSpec{{Name: "vx42", Kind: "vxlan", VNI: 42, Remote: "198.51.100.7", Up: true}}
+			switch area {
+			case "shaping":
+				sp.Shaping = []ShapeSpec{{Device: "vx42", EgressKbit: 5000}}
+			case "forward":
+				sp.Forwards = []ForwardSpec{{ID: 1, Name: "web", Interface: "vx42"}}
+			case "NAT":
+				sp.NAT = []NATSpec{{ID: 1, Name: "LAN", Interface: "vx42"}}
+			case "peer route":
+				sp.Links[0] = LinkSpec{Name: "vx42", Kind: "veth", Peer: "pair1", Up: true}
+				sp.Routes = []RouteSpec{{ID: 1, Device: "pair1", Destination: "10.0.0.0/24"}}
+			}
+			rtSaveSpec(t, s, sp)
+			if err := s.DeleteLink(context.Background(), "vx42", rtClient, "ion"); err == nil || !strings.Contains(err.Error(), "used by") {
+				t.Fatalf("err = %v", err)
+			}
+			if got := rtMutations(rec); len(got) != 0 {
+				t.Fatalf("dependent device was removed: %v", got)
+			}
+		})
+	}
+}
+
 func TestLinksSetStateUpIsNeverRefused(t *testing.T) {
 	rec := rtHost(t).on("ip link set", "")
 	s := testService(t)

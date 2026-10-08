@@ -69,6 +69,7 @@ export function BlocklistList({
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
+  const { can } = useAuth()
   const [refreshing, setRefreshing] = useState<number>()
   const [switching, setSwitching] = useState<number>()
   const refresh = async (list: ProtectionBlocklist) => {
@@ -167,7 +168,7 @@ export function BlocklistList({
                 </span>
                 <Switch
                   checked={list.enabled}
-                  disabled={switching === list.id}
+                  disabled={!can("system.admin") || switching === list.id}
                   onCheckedChange={(next) => toggle(list, next)}
                   aria-label={`${list.name} in force`}
                 />
@@ -179,7 +180,7 @@ export function BlocklistList({
                   <IconAction
                     label={`Refresh ${list.name}`}
                     onClick={() => void refresh(list)}
-                    disabled={refreshing !== undefined}
+                    disabled={!can("system.admin") || refreshing !== undefined}
                   >
                     <RefreshClockwise aria-hidden />
                   </IconAction>
@@ -327,7 +328,12 @@ export function BlocklistModal({
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
               Cancel
             </Button>
-            <Button type="submit" form="blocklist-form" disabled={!ready || busy} pending={busy}>
+            <Button
+              type="submit"
+              form="blocklist-form"
+              disabled={!can("system.admin") || !ready || busy}
+              pending={busy}
+            >
               {list ? "Save list" : "Make list"}
             </Button>
           </>

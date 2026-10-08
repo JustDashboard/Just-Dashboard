@@ -37,14 +37,17 @@ import { useAuth } from "@/hooks/use-auth"
  */
 export function NATList({
   entries,
+  writable = true,
   onOpen,
   onChanged,
 }: {
   entries: GatewayNAT[]
+  writable?: boolean
   onOpen: (entry: GatewayNAT) => void
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
+  const { can } = useAuth()
   const [busy, setBusy] = useState<number>()
   const label = (n: GatewayNAT) => `${n.source} out through ${n.interface}`
   const toggle = (n: GatewayNAT, enabled: boolean) => {
@@ -119,7 +122,12 @@ export function NATList({
                   ) : (
                     <Switch
                       checked={n.enabled}
-                      disabled={busy === n.id}
+                      disabled={
+                        !writable ||
+                        busy === n.id ||
+                        !can("system.admin") ||
+                        (n.enabled && !can("destructive"))
+                      }
                       onCheckedChange={(next) => toggle(n, next)}
                       aria-label={`${label(n)} in force`}
                     />

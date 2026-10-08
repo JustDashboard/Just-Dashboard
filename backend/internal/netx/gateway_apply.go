@@ -51,6 +51,10 @@ func (s *Service) loadGateway(ctx context.Context, sp *Spec) error {
 	if err != nil {
 		return err
 	}
+	return s.loadGatewayRules(ctx, ruleset)
+}
+
+func (s *Service) loadGatewayRules(ctx context.Context, ruleset string) error {
 	if err := os.MkdirAll(s.paths.Dir, 0o755); err != nil {
 		return err
 	}
@@ -156,20 +160,35 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 // fails. commit does not call undo when apply itself fails, so apply cleans up
 // after itself.
 func (s *Service) gatewayStep(old, next *Spec) step {
+	return s.gatewayStepWithRules(old, next, "")
+}
+
+func (s *Service) gatewayStepWithRules(old, next *Spec, previous string) step {
+	restore := func(ctx context.Context) {
+		if previous == "" || gatewayEmpty(old) {
+			s.restoreGateway(ctx, old)
+			return
+		}
+		if err := s.loadGatewayRules(ctx, previous); err != nil {
+			s.log.Error("restoring the gateway ruleset after a failed change", "err", err)
+		}
+	}
 	return step{
 		apply: func(ctx context.Context) error {
 			if err := s.loadGateway(ctx, next); err != nil {
 				return err
 			}
 			if err := s.syncAdmission(ctx, next, old); err != nil {
-				s.restoreGateway(ctx, old)
-				_ = s.syncAdmission(ctx, old, next) // returning to the state before; the error being reported is the first
+				rollback(ctx, func(recovery context.Context) {
+					restore(recovery)
+					_ = s.syncAdmission(recovery, old, next) // returning to the state before; the error being reported is the first
+				})
 				return err
 			}
 			return nil
 		},
 		undo: func(ctx context.Context) {
-			s.restoreGateway(ctx, old)
+			restore(ctx)
 			_ = s.syncAdmission(ctx, old, next) // as above: best effort on the way out
 		},
 		verify: func(ctx context.Context) error {
@@ -190,9 +209,28 @@ func (s *Service) gatewayStep(old, next *Spec) step {
 // permission, so an operator can always clear out what they made, even after
 // the host switched firewalls.
 func (s *Service) mutateGateway(ctx context.Context, edit func(old, next *Spec) (translating bool, err error)) error {
+	return s.mutateGatewayWithRollback(ctx, edit, nil)
+}
+
+// Cache edits share the gateway lock and rollback. Capture the old rendered
+// rules before an edit can replace a feed file, so restoring the old spec
+// cannot accidentally reload the failed candidate's networks.
+func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, next *Spec) (bool, error), undoEdit func()) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer func() {
+		if err != nil && undoEdit != nil {
+			var saved *persistenceError
+			if !errors.As(err, &saved) {
+				undoEdit()
+			}
+		}
+	}()
 	old, err := s.loadSpec()
+	if err != nil {
+		return err
+	}
+	previous, err := renderGateway(old, s.trustedFor(old))
 	if err != nil {
 		return err
 	}
@@ -212,7 +250,7 @@ func (s *Service) mutateGateway(ctx context.Context, edit func(old, next *Spec) 
 	if err := s.resolveAutoNAT(ctx, next); err != nil {
 		return err
 	}
-	return s.commit(ctx, next, s.gatewayStep(old, next))
+	return s.commit(ctx, next, s.gatewayStepWithRules(old, next, previous))
 }
 
 // checkNewForwarding refuses an entry that starts carrying traffic through

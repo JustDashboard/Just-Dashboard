@@ -285,6 +285,10 @@ Addresses are rewritten rather than replaced (a socket bound to one interface st
 wildcards as fallback. Refusing the move would have been the safe-looking choice and would leave the
 control broken on the commonest server distribution.
 
+Network diagnostics, managed networking and the complete probe inventory are documented in
+[the network module guide](network.md#diagnostics-and-host-support). Diagnostics remain administrator-only;
+packet summaries can contain sensitive decoded fields and have bounded time/output.
+
 ## Firewall: one page, three backends
 
 The page is `/network/firewall` since 0.7.1, in the Network section beside the gateway table the

@@ -1,5 +1,7 @@
 "use client"
 
+import { NetworkReadWarning } from "@/components/network/read-warning"
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Plus, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -40,6 +42,8 @@ type Editor =
  * recommendation it is read against.
  */
 export default function NetworkProtectionPage() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const protection = usePoll<ProtectionView>(
     (signal) => get("/network/protection", undefined, signal),
     10_000,
@@ -73,6 +77,9 @@ export default function NetworkProtectionPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Protection" />
+      {protection.data && (
+        <NetworkReadWarning error={protection.error} refresh={protection.refresh} />
+      )}
 
       {entries && !view.loaded && (
         <Notice tone="warning" icon={Warning} title="Protection is not loaded into the kernel">
@@ -132,7 +139,12 @@ export default function NetworkProtectionPage() {
           actions={
             <>
               <span className="numeric text-hint text-muted-foreground">{lists.length}</span>
-              <Button size="xs" variant="outline" onClick={() => setEditor({ kind: "list" })}>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setEditor({ kind: "list" })}
+                disabled={!admin}
+              >
                 <Plus aria-hidden />
                 New blocklist
               </Button>
@@ -171,7 +183,12 @@ export default function NetworkProtectionPage() {
           actions={
             <>
               <span className="numeric text-hint text-muted-foreground">{view.limits.length}</span>
-              <Button size="xs" variant="outline" onClick={() => setEditor({ kind: "limit" })}>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setEditor({ kind: "limit" })}
+                disabled={!admin}
+              >
                 <Plus aria-hidden />
                 New limit
               </Button>

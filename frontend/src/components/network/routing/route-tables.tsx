@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -53,6 +54,8 @@ export function RouteTable({
   onChanged: () => void
   actions?: React.ReactNode
 }) {
+  const { can } = useAuth()
+  const removable = can("system.admin") && can("destructive")
   const { confirm, dialog } = useConfirm()
   const remove = (route: NetworkRoute) =>
     confirm({
@@ -127,7 +130,14 @@ export function RouteTable({
                       <span className="text-muted-foreground">on-link</span>
                     ))}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{route.device ?? "—"}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {route.device ?? "—"}
+                  {route.source && (
+                    <div className="mt-1 text-hint text-muted-foreground">
+                      source {route.source}
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5 text-xs">
                     {OWNER_PRODUCT[route.owner] && (
@@ -143,7 +153,7 @@ export function RouteTable({
                   {route.metric || "—"}
                 </TableCell>
                 <TableCell>
-                  {route.managed && !route.guard && (
+                  {removable && route.managed && !route.guard && (
                     <Button
                       size="icon-xs"
                       variant="ghost"
@@ -184,6 +194,8 @@ export function RuleTable({
   onChanged: () => void
   actions?: React.ReactNode
 }) {
+  const { can } = useAuth()
+  const removable = can("system.admin") && can("destructive")
   const { confirm, dialog } = useConfirm()
   const remove = (rule: NetworkRule) =>
     confirm({
@@ -258,7 +270,7 @@ export function RuleTable({
                   </span>
                 </TableCell>
                 <TableCell>
-                  {rule.managed && !rule.guard && (
+                  {removable && rule.managed && !rule.guard && (
                     <Button
                       size="icon-xs"
                       variant="ghost"

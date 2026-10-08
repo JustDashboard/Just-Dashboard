@@ -1,5 +1,7 @@
 "use client"
 
+import { NetworkReadWarning } from "@/components/network/read-warning"
+import { useAuth } from "@/hooks/use-auth"
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Plus } from "@/components/icons"
@@ -43,6 +45,8 @@ export default function NetworkInterfacesPage() {
 }
 
 function Interfaces() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const params = useSearchParams()
   const links = usePoll<NetworkLink[]>((signal) => get("/network/links", undefined, signal), 10_000)
   const live = useLiveTraffic()
@@ -74,6 +78,7 @@ function Interfaces() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Interfaces" />
+      {links.data && <NetworkReadWarning error={links.error} refresh={links.refresh} />}
       <Toolbar>
         <FilterChip selected={!everything} onClick={() => setEverything(false)}>
           Real devices
@@ -93,7 +98,7 @@ function Interfaces() {
           <span className="hidden text-hint text-muted-foreground sm:inline">
             {plural(withRates.filter((l) => l.managed).length, "device")} made here
           </span>
-          <Button size="sm" onClick={() => setCreating(true)}>
+          <Button size="sm" onClick={() => setCreating(true)} disabled={!admin}>
             <Plus aria-hidden />
             New device
           </Button>
@@ -116,6 +121,7 @@ function Interfaces() {
         />
       )}
 
+      {namespaces.error && <ErrorState error={namespaces.error} onRetry={namespaces.refresh} />}
       <Namespaces
         namespaces={namespaces.data}
         links={withRates}
@@ -126,6 +132,7 @@ function Interfaces() {
       />
 
       <DeviceSheet
+        key={chosen?.name ?? "closed"}
         link={chosen}
         links={withRates}
         points={chosen ? live.series[chosen.name] : undefined}
@@ -134,7 +141,7 @@ function Interfaces() {
         onChanged={links.refresh}
       />
       <CreateDevice
-        open={creating}
+        open={creating && admin}
         onOpenChange={setCreating}
         links={withRates}
         onCreated={(name) => {

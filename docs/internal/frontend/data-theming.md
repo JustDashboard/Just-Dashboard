@@ -1,5 +1,33 @@
 # Frontend data flow and theming
 
+Network pages retain useful readings when a poll fails and mark them with
+`components/network/read-warning.tsx`; a failed initial read stays an error or loading state.
+Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
+the administrator capability, with destructive controls also following the destructive capability;
+backend route checks remain authoritative. VPN peer reads are disabled for a reader without the
+administrator capability. Interface sheets are keyed by device, and address/MTU drafts clear only
+after a successful write. Their bridge selector reaches the existing guarded membership route, and
+the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
+The route form exposes an optional preferred source and shows returned sources in the existing
+table. Policy rules include an outgoing-interface selector and validated note. Resolver fallback
+servers and cache modes are editable through the existing confirmed apply; managed values are
+preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
+custom ports, interface scopes and TLS names.
+
+Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
+submitting. VXLAN creation likewise rejects invalid UDP ports instead of choosing the default.
+WireGuard setup permits an intentionally empty automatic port and rejects any nonempty invalid
+port draft, including whitespace, before submitting.
+Host support, route lookup, path MTU, packet snapshots and Wake-on-LAN use the same probe
+surface; Wake-on-LAN reports that a packet was sent rather than claiming the target is awake. The
+packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
+subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. DNS comparison sends a name
+only to configured resolvers by default; the reader explicitly opts into public presets through
+`includePublic`. Resolver changes may carry a private `verificationName` for a network that cannot
+resolve public names. This verification input is a check for that apply, not saved resolver state.
+The managed WireGuard full-tunnel label states its IPv4 egress and the blocking of IPv6 to prevent
+leaks until dual-stack egress is configured.
+
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
   `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding

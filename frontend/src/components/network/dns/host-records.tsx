@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Plus, Trash } from "@/components/icons"
 import { ApiError, put, refusedIndex } from "@/lib/api"
@@ -52,6 +53,7 @@ export function HostRecordsEditor({
   records: HostRecords
   onSaved: () => void
 }) {
+  const { can } = useAuth()
   const saved = rowsOf(records.managed)
   const [edits, setEdits] = useState<{ rows: Row[]; next: number }>()
   const [busy, setBusy] = useState(false)
@@ -61,7 +63,7 @@ export function HostRecordsEditor({
   // A half-written row is a mistake; an empty one is the one just added.
   const used = rows.filter((r) => r.address.trim() || r.names.trim())
   const dirty = edits !== undefined && !same(used, saved)
-  const locked = Boolean(records.problem)
+  const locked = !can("system.admin") || Boolean(records.problem)
 
   const update = (nextRows: Row[], nextKey = next) => {
     setEdits({ rows: nextRows, next: nextKey })

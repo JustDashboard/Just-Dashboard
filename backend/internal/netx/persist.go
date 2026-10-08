@@ -9,7 +9,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 )
 
 // UnitName is the oneshot unit that restores the dashboard's network at boot.
@@ -18,6 +20,7 @@ const UnitName = "just-dashboard-network.service"
 // The files rendered from the spec, under Paths.Dir.
 const (
 	linksFile   = "links.batch"
+	rules6File  = "rules6.batch"
 	shapingFile = "shaping.batch"
 	gatewayFile = "gateway.nft"
 )
@@ -35,6 +38,7 @@ func (s *Service) renderAll(sp *Spec) (rendered, error) {
 	}
 	out := rendered{
 		filepath.Join(s.paths.Dir, linksFile):   []byte(renderLinks(sp)),
+		filepath.Join(s.paths.Dir, rules6File):  []byte(renderIPv6Rules(sp)),
 		filepath.Join(s.paths.Dir, shapingFile): []byte(renderShaping(sp)),
 		filepath.Join(s.paths.Dir, gatewayFile): []byte(gateway),
 		s.paths.Sysctl:                          []byte(renderSysctl(sp)),
@@ -73,6 +77,7 @@ Type=oneshot
 RemainAfterExit=yes
 `)
 	fmt.Fprintf(&b, "ExecStart=-ip -force -batch %s\n", filepath.Join(dir, linksFile))
+	fmt.Fprintf(&b, "ExecStart=-ip -6 -force -batch %s\n", filepath.Join(dir, rules6File))
 	fmt.Fprintf(&b, "ExecStart=-tc -force -batch %s\n", filepath.Join(dir, shapingFile))
 	fmt.Fprintf(&b, "ExecStart=-nft -f %s\n", filepath.Join(dir, gatewayFile))
 	for _, cmd := range admissionCommands(admission) {
@@ -122,6 +127,32 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 			return err
 		}
 	}
+	b, err := json.MarshalIndent(sp, "", "  ")
+	if err != nil {
+		return err
+	}
+	files[s.specPath()] = append(b, '\n')
+	// Capture every previous file before touching the kernel. A directory or
+	// unreadable target is an error, not a file that can safely be replaced.
+	var paths []string
+	previous := map[string]savedNetworkFile{}
+	for path, data := range files {
+		if !changed(path, data) {
+			continue
+		}
+		before, err := saveNetworkFile(path)
+		if err != nil {
+			return fmt.Errorf("reading %s before changing the network: %w", path, err)
+		}
+		previous[path] = before
+		if path != s.specPath() {
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	if _, changed := previous[s.specPath()]; changed {
+		paths = append(paths, s.specPath())
+	}
 	if st.apply != nil {
 		if err := st.apply(ctx); err != nil {
 			return err
@@ -129,32 +160,86 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 	}
 	if st.verify != nil {
 		if err := st.verify(ctx); err != nil {
-			if st.undo != nil {
-				st.undo(ctx)
-			}
+			rollback(ctx, st.undo)
 			return err
 		}
 	}
 	unitChanged := changed(s.paths.Unit, files[s.paths.Unit])
-	for path, data := range files {
-		if !changed(path, data) {
-			continue
+	var written []string
+	for _, path := range paths {
+		perm := os.FileMode(0o644)
+		if path == s.specPath() {
+			perm = 0o600
 		}
-		if err := writeFileAtomic(path, data, 0o644); err != nil {
-			if st.undo != nil {
-				st.undo(ctx)
+		if err := writeNetworkFile(path, files[path], perm); err != nil {
+			// Restoring only the kernel would leave the next boot applying the
+			// failed candidate. Restore the complete file set before undoing it.
+			for i := len(written) - 1; i >= 0; i-- {
+				p := written[i]
+				if restoreErr := previous[p].restore(p); restoreErr != nil {
+					s.log.Error("restoring network persistence after a failed change", "path", p, "err", restoreErr)
+				}
 			}
+			rollback(ctx, st.undo)
 			return fmt.Errorf("writing %s: %w", path, err)
 		}
+		written = append(written, path)
 	}
-	b, err := json.MarshalIndent(sp, "", "  ")
+	if err := s.ensureUnit(ctx, unitChanged); err != nil {
+		return &persistenceError{err}
+	}
+	return nil
+}
+
+// The kernel and spec are already committed when enabling the boot unit
+// fails. Callers must retain ancillary state that the saved spec references.
+type persistenceError struct{ error }
+
+func (e *persistenceError) Unwrap() error { return e.error }
+
+var writeNetworkFile = writeFileAtomic
+
+type savedNetworkFile struct {
+	data   []byte
+	perm   os.FileMode
+	exists bool
+}
+
+func saveNetworkFile(path string) (savedNetworkFile, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return savedNetworkFile{}, nil
+	}
 	if err != nil {
-		return err
+		return savedNetworkFile{}, err
 	}
-	if err := writeFileAtomic(s.specPath(), append(b, '\n'), 0o600); err != nil {
-		return fmt.Errorf("writing %s: %w", s.specPath(), err)
+	info, err := os.Stat(path)
+	if err != nil {
+		return savedNetworkFile{}, err
 	}
-	return s.ensureUnit(ctx, unitChanged)
+	return savedNetworkFile{data: data, perm: info.Mode().Perm(), exists: true}, nil
+}
+
+func (f savedNetworkFile) restore(path string) error {
+	if f.exists {
+		return writeFileAtomic(path, f.data, f.perm)
+	}
+	err := os.Remove(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+// A dropped browser or an expired request must not cancel the work that puts
+// its network back. Keep request values for logging and a separate deadline.
+func rollback(ctx context.Context, undo func(context.Context)) {
+	if undo == nil {
+		return
+	}
+	recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	undo(recovery)
 }
 
 // changed reports whether a file's contents differ from data. A file that

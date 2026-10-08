@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -43,6 +44,7 @@ function Family({
   state: ForwardingFamily
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState(false)
   const turn = async (on: boolean) => {
@@ -96,7 +98,13 @@ function Family({
         </div>
         <Switch
           checked={state.enabled}
-          disabled={!state.available || busy || locked}
+          disabled={
+            !can("system.admin") ||
+            (state.enabled && !can("destructive")) ||
+            !state.available ||
+            busy ||
+            locked
+          }
           onCheckedChange={(next) => void turn(next)}
           aria-label={`${name} forwarding`}
         />

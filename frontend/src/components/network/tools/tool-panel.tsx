@@ -5,7 +5,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { cn } from "@/lib/utils"
 
 import { Field } from "@/components/form"
-import { EmptyNote } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,11 +52,15 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
         </p>
         <div className="flex min-w-0 flex-wrap items-end gap-3">
           {def.needsTarget && (
-            <Field label="Target" htmlFor={`${base}-target`} className="min-w-48 flex-1">
+            <Field
+              label={def.targetLabel ?? "Target"}
+              htmlFor={`${base}-target`}
+              className="min-w-48 flex-1"
+            >
               <Input
                 ref={targetRef}
                 id={`${base}-target`}
-                aria-label="Target"
+                aria-label={def.targetLabel ?? "Target"}
                 value={t.target}
                 onChange={(e) => t.setTarget(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && t.canRun && t.run()}
@@ -97,11 +101,24 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
               </Select>
             </Field>
           )}
+          {def.optionPlaceholder && (
+            <Field label={def.optionLabel ?? "Option"} htmlFor={`${base}-option`}>
+              <Input
+                id={`${base}-option`}
+                value={t.option}
+                onChange={(event) => t.setOption(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && t.canRun && t.run()}
+                placeholder={def.optionPlaceholder}
+                className="w-36 font-mono"
+              />
+            </Field>
+          )}
           {def.needsPort && (
-            <Field label="Port" htmlFor={`${base}-port`}>
+            <Field label="Port" htmlFor={`${base}-port`} error={t.portError}>
               <Input
                 id={`${base}-port`}
                 aria-label="Port"
+                aria-invalid={Boolean(t.portError)}
                 value={t.port}
                 inputMode="numeric"
                 onChange={(e) => t.setPort(e.target.value)}
@@ -114,12 +131,16 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
           <Button onClick={t.run} disabled={t.busy || !t.canRun} pending={t.busy}>
             Run
           </Button>
-          {(t.result || t.past.length > 0) && (
+          {(t.result || t.error || t.past.length > 0) && (
             <Button size="sm" variant="ghost" onClick={t.clear} disabled={t.busy}>
               Clear
             </Button>
           )}
         </div>
+
+        {t.error && (
+          <ErrorState error={t.error} onRetry={t.canRun && !t.busy ? t.run : undefined} />
+        )}
 
         {!t.result && (
           <EmptyNote className="mt-6 border-t border-hairline py-10">
@@ -128,7 +149,10 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
         )}
         {t.result && (
           <div className="pt-5">
-            <ToolResult result={t.result} />
+            <ToolResult
+              result={t.result}
+              successLabel={def.key === "wol" ? "packet sent" : undefined}
+            />
           </div>
         )}
 

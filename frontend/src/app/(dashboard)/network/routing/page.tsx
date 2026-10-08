@@ -1,5 +1,7 @@
 "use client"
 
+import { NetworkReadWarning } from "@/components/network/read-warning"
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -31,6 +33,8 @@ import { BGPBlock } from "@/components/network/routing/bgp"
  * rule beside the rules.
  */
 export default function NetworkRoutingPage() {
+  const { can } = useAuth()
+  const admin = can("system.admin")
   const routing = usePoll<NetworkRouting>(
     (signal) => get("/network/routing", undefined, signal),
     15_000,
@@ -56,6 +60,7 @@ export default function NetworkRoutingPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Routing" />
+      {routing.data && <NetworkReadWarning error={routing.error} refresh={routing.refresh} />}
 
       <Panel plain>
         <PanelHeader
@@ -84,7 +89,12 @@ export default function NetworkRoutingPage() {
             onChanged={routing.refresh}
             actions={
               index === 0 ? (
-                <Button size="xs" variant="outline" onClick={() => setAdding("route")}>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => setAdding("route")}
+                  disabled={!admin}
+                >
                   <Plus aria-hidden />
                   Add route
                 </Button>
@@ -104,7 +114,7 @@ export default function NetworkRoutingPage() {
         rules={data.rules}
         onChanged={routing.refresh}
         actions={
-          <Button size="xs" variant="outline" onClick={() => setAdding("rule")}>
+          <Button size="xs" variant="outline" onClick={() => setAdding("rule")} disabled={!admin}>
             <Plus aria-hidden />
             Add rule
           </Button>
@@ -114,19 +124,23 @@ export default function NetworkRoutingPage() {
       <Panel plain>
         <PanelHeader title="BGP" />
         <PanelBody>
-          <BGPBlock bgp={bgp.data} />
+          {bgp.error ? (
+            <ErrorState error={bgp.error} onRetry={bgp.refresh} />
+          ) : (
+            <BGPBlock bgp={bgp.data} />
+          )}
         </PanelBody>
       </Panel>
 
       <AddRoute
-        open={adding === "route"}
+        open={admin && adding === "route"}
         onOpenChange={(open) => !open && setAdding(undefined)}
         routing={data}
         links={links.data ?? []}
         onAdded={routing.refresh}
       />
       <AddRule
-        open={adding === "rule"}
+        open={admin && adding === "rule"}
         onOpenChange={(open) => !open && setAdding(undefined)}
         routing={data}
         links={links.data ?? []}

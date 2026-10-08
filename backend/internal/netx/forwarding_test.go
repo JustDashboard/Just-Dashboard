@@ -66,7 +66,7 @@ func TestForwardingReadsBothFamiliesAndWhatNeedsThem(t *testing.T) {
 		{ID: 6, Name: "disabled", Source: "10.9.0.0/24", Enabled: false},
 	}
 	rtSaveSpec(t, s, sp)
-	v := s.Forwarding(context.Background(), ForwardingNeeds{DockerNetworks: 3, TailscaleExitNode: true})
+	v := s.Forwarding(context.Background(), ForwardingNeeds{DockerNetworks: 3, DockerIPv6Networks: 2, TailscaleExitNode: true})
 	if !v.IPv4.Available || !v.IPv4.Enabled || !v.IPv4.Persisted || v.IPv6.Enabled || v.IPv6.Persisted {
 		t.Fatalf("view = %+v", v)
 	}
@@ -74,7 +74,7 @@ func TestForwardingReadsBothFamiliesAndWhatNeedsThem(t *testing.T) {
 	if got := strings.Join(v.IPv4.NeededBy, "|"); got != want4 {
 		t.Fatalf("ipv4 needed by %s, want %s", got, want4)
 	}
-	want6 := `Tailscale's exit node|the port forward "v6web"`
+	want6 := `2 Docker networks|Tailscale's exit node|the port forward "v6web"`
 	if got := strings.Join(v.IPv6.NeededBy, "|"); got != want6 {
 		t.Fatalf("ipv6 needed by %s, want %s", got, want6)
 	}
@@ -105,6 +105,10 @@ func TestForwardingTurningItOffIsRefusedWhileAnythingNeedsIt(t *testing.T) {
 	}{
 		{"Docker's networks", "ipv4", ForwardingNeeds{DockerNetworks: 2}, nil, "2 Docker networks"},
 		{"one Docker network", "ipv4", ForwardingNeeds{DockerNetworks: 1}, nil, "1 Docker network would"},
+		{"Docker's IPv6 networks", "ipv6", ForwardingNeeds{DockerIPv6Networks: 2}, nil, "2 Docker networks"},
+		{"one Docker IPv6 network", "ipv6", ForwardingNeeds{DockerIPv6Networks: 1}, nil, "1 Docker network would"},
+		{"unknown Docker IPv4 dependencies", "ipv4", ForwardingNeeds{DockerNetworksUnknown: true}, nil, "Docker's networks could not be read"},
+		{"unknown Docker IPv6 dependencies", "ipv6", ForwardingNeeds{DockerNetworksUnknown: true}, nil, "Docker's networks could not be read"},
 		{"Tailscale's exit node", "ipv4", ForwardingNeeds{TailscaleExitNode: true}, nil, "Tailscale's exit node"},
 		{"Tailscale's subnet routes on IPv6", "ipv6", ForwardingNeeds{TailscaleSubnetRoutes: true}, nil, "Tailscale's subnet routes"},
 		{"a NAT entry", "ipv4", ForwardingNeeds{}, func(sp *Spec) {
@@ -132,10 +136,22 @@ func TestForwardingTurningItOffIsRefusedWhileAnythingNeedsIt(t *testing.T) {
 			if !strings.Contains(g.Reason, c.want) || !strings.Contains(g.Reason, "cannot be turned off") {
 				t.Fatalf("reason = %q, want it to name %q", g.Reason, c.want)
 			}
-			if len(rtMutations(rec)) != 0 {
-				t.Fatalf("a refused change ran %v", rtMutations(rec))
+			if got := rec.commands(); len(got) != 0 {
+				t.Fatalf("a refused change ran host commands: %v", got)
 			}
 		})
+	}
+}
+
+func TestForwardingUnknownDockerDependenciesAreVisibleForBothFamilies(t *testing.T) {
+	rtProc(t, nil, "1", "1")
+	s := testService(t)
+	v := s.Forwarding(context.Background(), ForwardingNeeds{DockerNetworksUnknown: true})
+	for name, state := range map[string]ForwardingState{"ipv4": v.IPv4, "ipv6": v.IPv6} {
+		if len(state.NeededBy) != 1 || !strings.Contains(state.NeededBy[0], "could not be read") ||
+			!strings.Contains(state.Guard, "dependencies are unknown") {
+			t.Fatalf("%s state = %+v", name, state)
+		}
 	}
 }
 
@@ -196,6 +212,42 @@ func TestForwardingOnWritesTheKey(t *testing.T) {
 		if rtLoad(t, s).Sysctls[c.key] != "1" {
 			t.Fatalf("%s not in the spec", c.key)
 		}
+	}
+}
+
+func TestForwardingPreservesManagedRedirectProtectionNowAndAtBoot(t *testing.T) {
+	rec := rtCommit(record(t)).on("sysctl -w", "")
+	rtProc(t, rec, "1", "0")
+	if err := os.MkdirAll(filepath.Dir(procPath("net.ipv4.conf.all.accept_redirects")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(procPath("net.ipv4.conf.all.accept_redirects"), []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inner := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := inner(ctx, name, args...)
+		if err == nil && name == "sysctl" && len(args) == 2 && args[1] == sysctlForwardV4+"=0" {
+			// Mirror Linux's host-mode reset when forwarding is disabled.
+			if err := os.WriteFile(procPath("net.ipv4.conf.all.accept_redirects"), []byte("1\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out, err
+	}
+	s := testService(t)
+	sp := emptySpec()
+	sp.Sysctls["net.ipv4.conf.all.accept_redirects"] = "0"
+	rtSaveSpec(t, s, sp)
+	if _, err := s.SetForwarding(context.Background(), "ipv4", false, ForwardingNeeds{}, "ion"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := readSysctl("net.ipv4.conf.all.accept_redirects"); got != "0" {
+		t.Fatalf("forwarding reset redirect protection to %q", got)
+	}
+	b, err := os.ReadFile(s.paths.Sysctl)
+	if err != nil || strings.Index(string(b), "net.ipv4.ip_forward") > strings.Index(string(b), "net.ipv4.conf.all.accept_redirects") {
+		t.Fatalf("boot restores forwarding after protection: %q, %v", b, err)
 	}
 }
 

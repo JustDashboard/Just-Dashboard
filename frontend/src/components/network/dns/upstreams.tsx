@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { del, post, ApiError } from "@/lib/api"
 import type { DNSApplied, DNSView } from "@/lib/types"
@@ -20,8 +21,16 @@ import { Textarea } from "@/components/ui/textarea"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Globe } from "@/components/icons"
 import { missingTLSNames, parseList, presetChosen } from "@/components/network/dns/resolvers"
+import { dnsServersProblem } from "@/components/network/draft-input"
 
-type Draft = { servers: string; domains: string; dnssec: string; dot: string }
+type Draft = {
+  servers: string
+  fallback: string
+  domains: string
+  dnssec: string
+  dot: string
+  cache: string
+}
 
 /** DNS over TLS, as the three answers it has. `no` is resolved's word for off. */
 const DOT = [
@@ -51,15 +60,20 @@ const DNSSEC = [
   { value: "yes", label: "Validate, refusing answers that fail" },
 ]
 
+const CACHE = [
+  { value: "default", label: "Resolved's default" },
+  { value: "yes", label: "All answers" },
+  { value: "no-negative", label: "Positive answers only" },
+  { value: "no", label: "Disabled" },
+]
+
 /**
  * What the form starts from: the dashboard's own drop-in when it has written
- * one, otherwise what resolved is running with now, so the first edit changes
- * what is true rather than a blank. The fallback and the cache setting have no
- * field here and are carried through exactly — but only from the drop-in:
- * resolved's compiled-in fallback list is not the operator's choice, and
- * writing it back would pin it.
+ * one, otherwise what resolved is running with now. Fallback and cache defaults
+ * start unset unless the operator chose them in our drop-in; writing compiled-in
+ * defaults back would pin them instead of preserving host behaviour.
  */
-function baseline(view: DNSView): Draft & { fallback: string[]; cache: string } {
+function baseline(view: DNSView): Draft {
   const { managed, resolved } = view
   const source = managed.exists
     ? {
@@ -79,7 +93,7 @@ function baseline(view: DNSView): Draft & { fallback: string[]; cache: string } 
     domains: source.domains.join(" "),
     dnssec: source.dnssec,
     dot: source.dot || "no",
-    fallback: managed.exists ? managed.fallback : [],
+    fallback: managed.exists ? managed.fallback.join("\n") : "",
     cache: managed.exists ? managed.cache : "",
   }
 }
@@ -107,10 +121,12 @@ export function UpstreamEditor({
   readOnly?: string
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const base = baseline(view)
   const [edits, setEdits] = useState<Partial<Draft>>({})
   const [applied, setApplied] = useState<DNSApplied>()
   const [refused, setRefused] = useState<string>()
+  const [verificationName, setVerificationName] = useState("")
   const { confirm, dialog } = useConfirm()
   const draft: Draft = { ...base, ...edits }
   const edit = (patch: Partial<Draft>) => {
@@ -119,15 +135,33 @@ export function UpstreamEditor({
   }
 
   const servers = parseList(draft.servers)
+  const fallback = parseList(draft.fallback)
   const domains = parseList(draft.domains)
   const unnamed = draft.dot === "yes" ? missingTLSNames(servers) : []
+  const unnamedFallback = draft.dot === "yes" ? missingTLSNames(fallback) : []
+  const serversError =
+    dnsServersProblem(servers) ??
+    (draft.dot === "yes" && servers.length === 0
+      ? "DNS over TLS is required, so it needs servers to talk to."
+      : unnamed.length > 0
+        ? `Required DNS over TLS needs a name on every server: ${unnamed[0]} has none.`
+        : undefined)
+  const fallbackError =
+    dnsServersProblem(fallback) ??
+    (unnamedFallback.length > 0
+      ? `Required DNS over TLS needs a name on every fallback server: ${unnamedFallback[0]} has none.`
+      : undefined)
   const dirty =
     servers.join(" ") !== parseList(base.servers).join(" ") ||
+    fallback.join(" ") !== parseList(base.fallback).join(" ") ||
     domains.join(" ") !== parseList(base.domains).join(" ") ||
     draft.dnssec !== base.dnssec ||
-    draft.dot !== base.dot
-  const blocked = readOnly ?? refused
-  const invalid = unnamed.length > 0 || (draft.dot === "yes" && servers.length === 0)
+    draft.dot !== base.dot ||
+    draft.cache !== base.cache
+  const blocked = !can("system.admin")
+    ? "Changing the host resolver requires an administrator."
+    : (readOnly ?? refused)
+  const invalid = Boolean(serversError || fallbackError)
 
   const finish = (result: DNSApplied) => {
     setApplied(result)
@@ -156,6 +190,10 @@ export function UpstreamEditor({
           <p className="font-mono text-xs break-all text-muted-foreground">
             {servers.length > 0 ? servers.join("  ") : "the servers the network hands out"}
           </p>
+          <p className="text-body">
+            Fallback: {fallback.length > 0 ? fallback.join("  ") : "the host's defaults"}. Cache:{" "}
+            {CACHE.find((option) => option.value === (draft.cache || "default"))?.label}.
+          </p>
         </>
       ),
       action: async () => {
@@ -163,11 +201,12 @@ export function UpstreamEditor({
           finish(
             await post<DNSApplied>("/network/dns/", {
               servers,
-              fallback: base.fallback,
+              fallback,
               domains,
               dnssec: draft.dnssec,
               dnsOverTLS: draft.dot,
-              cache: base.cache,
+              cache: draft.cache,
+              ...(verificationName.trim() ? { verificationName: verificationName.trim() } : {}),
             }),
           )
         } catch (err) {
@@ -245,16 +284,24 @@ export function UpstreamEditor({
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           <Field
+            label="Verification name"
+            htmlFor="dns-verification-name"
+            hint="Optional: a name your private network resolves, such as nas.home.arpa. Leave empty to check public names after applying."
+          >
+            <Input
+              id="dns-verification-name"
+              value={verificationName}
+              onChange={(event) => setVerificationName(event.target.value)}
+              disabled={Boolean(blocked)}
+              placeholder="nas.home.arpa"
+              className="font-mono"
+            />
+          </Field>
+          <Field
             label="Servers"
             htmlFor="dns-servers"
             hint="One per line, as 9.9.9.9 or 9.9.9.9#dns.quad9.net. Up to eight; empty uses the servers the network hands out."
-            error={
-              invalid
-                ? servers.length === 0
-                  ? "DNS over TLS is required, so it needs servers to talk to."
-                  : `Required DNS over TLS needs a name on every server: ${unnamed[0]} has none.`
-                : undefined
-            }
+            error={serversError}
           >
             <Textarea
               id="dns-servers"
@@ -263,11 +310,52 @@ export function UpstreamEditor({
               spellCheck={false}
               autoComplete="off"
               disabled={Boolean(blocked)}
-              aria-invalid={invalid || undefined}
+              aria-invalid={Boolean(serversError)}
               onChange={(event) => edit({ servers: event.target.value })}
               className="font-mono"
               placeholder={"1.1.1.1#cloudflare-dns.com\n1.0.0.1#cloudflare-dns.com"}
             />
+          </Field>
+          <Field
+            label="Fallback servers"
+            htmlFor="dns-fallback"
+            hint="Optional, up to eight. Used when no other server is known. Leave empty for the host's fallback defaults. Ports, %interface and #TLS names use the same format as Servers."
+            error={fallbackError}
+          >
+            <Textarea
+              id="dns-fallback"
+              value={draft.fallback}
+              rows={Math.min(Math.max(fallback.length + 1, 2), 9)}
+              spellCheck={false}
+              autoComplete="off"
+              disabled={Boolean(blocked)}
+              aria-invalid={Boolean(fallbackError)}
+              onChange={(event) => edit({ fallback: event.target.value })}
+              className="font-mono"
+              placeholder="192.168.1.53#resolver.home.arpa"
+            />
+          </Field>
+          <Field
+            label="Cache mode"
+            htmlFor="dns-cache"
+            hint="Positive answers only avoids caching a missing name; the default leaves the host's policy in charge."
+          >
+            <Select
+              value={draft.cache || "default"}
+              onValueChange={(value) => edit({ cache: value === "default" ? "" : value })}
+              disabled={Boolean(blocked)}
+            >
+              <SelectTrigger id="dns-cache" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CACHE.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <FieldRow>
             <Field label="DNSSEC" htmlFor="dns-dnssec">
