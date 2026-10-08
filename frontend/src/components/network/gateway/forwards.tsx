@@ -54,14 +54,17 @@ export const arrivalDevices = (links: NetworkLink[]) =>
  */
 export function ForwardList({
   forwards,
+  writable = true,
   onOpen,
   onChanged,
 }: {
   forwards: GatewayForward[]
+  writable?: boolean
   onOpen: (forward: GatewayForward) => void
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
+  const { can } = useAuth()
   const [busy, setBusy] = useState<number>()
   const setEnabled = async (f: GatewayForward, enabled: boolean) => {
     setBusy(f.id)
@@ -117,7 +120,12 @@ export function ForwardList({
                 </span>
                 <Switch
                   checked={f.enabled}
-                  disabled={busy === f.id}
+                  disabled={
+                    !writable ||
+                    busy === f.id ||
+                    !can("system.admin") ||
+                    (f.enabled && !can("destructive"))
+                  }
                   onCheckedChange={(next) => toggle(f, next)}
                   aria-label={`${forwardTitle(f)} in force`}
                 />

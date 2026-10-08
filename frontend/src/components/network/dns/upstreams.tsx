@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { del, post, ApiError } from "@/lib/api"
 import type { DNSApplied, DNSView } from "@/lib/types"
@@ -107,10 +108,12 @@ export function UpstreamEditor({
   readOnly?: string
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const base = baseline(view)
   const [edits, setEdits] = useState<Partial<Draft>>({})
   const [applied, setApplied] = useState<DNSApplied>()
   const [refused, setRefused] = useState<string>()
+  const [verificationName, setVerificationName] = useState("")
   const { confirm, dialog } = useConfirm()
   const draft: Draft = { ...base, ...edits }
   const edit = (patch: Partial<Draft>) => {
@@ -126,7 +129,9 @@ export function UpstreamEditor({
     domains.join(" ") !== parseList(base.domains).join(" ") ||
     draft.dnssec !== base.dnssec ||
     draft.dot !== base.dot
-  const blocked = readOnly ?? refused
+  const blocked = !can("system.admin")
+    ? "Changing the host resolver requires an administrator."
+    : (readOnly ?? refused)
   const invalid = unnamed.length > 0 || (draft.dot === "yes" && servers.length === 0)
 
   const finish = (result: DNSApplied) => {
@@ -168,6 +173,7 @@ export function UpstreamEditor({
               dnssec: draft.dnssec,
               dnsOverTLS: draft.dot,
               cache: base.cache,
+              ...(verificationName.trim() ? { verificationName: verificationName.trim() } : {}),
             }),
           )
         } catch (err) {
@@ -244,6 +250,20 @@ export function UpstreamEditor({
 
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">
+          <Field
+            label="Verification name"
+            htmlFor="dns-verification-name"
+            hint="Optional: a name your private network resolves, such as nas.home.arpa. Leave empty to check public names after applying."
+          >
+            <Input
+              id="dns-verification-name"
+              value={verificationName}
+              onChange={(event) => setVerificationName(event.target.value)}
+              disabled={Boolean(blocked)}
+              placeholder="nas.home.arpa"
+              className="font-mono"
+            />
+          </Field>
           <Field
             label="Servers"
             htmlFor="dns-servers"

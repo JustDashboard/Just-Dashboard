@@ -11,6 +11,7 @@ export type ToolDef = {
   hint: string
   /** False for the host-local tools, which answer about this machine. */
   needsTarget: boolean
+  targetLabel?: string
   targetPlaceholder?: string
   needsPort?: boolean
   portDefault?: string
@@ -18,6 +19,8 @@ export type ToolDef = {
   optionLabel?: string
   optionOptions?: { value: string; label: string }[]
   optionDefault?: string
+  optionPlaceholder?: string
+  optionRequired?: boolean
   /** Reaches outward: proves what the server can reach, never what can reach it. */
   outward?: boolean
 }
@@ -63,6 +66,20 @@ export const TOOL_GROUPS: ToolGroup[] = [
         hint: "What is between them",
         needsTarget: true,
         targetPlaceholder: "example.com or 203.0.113.9",
+      },
+      {
+        key: "route",
+        label: "Route lookup",
+        hint: "Ask the kernel which route, interface and source address it would use",
+        needsTarget: true,
+        targetPlaceholder: "203.0.113.9 or 2001:db8::1",
+      },
+      {
+        key: "mtu",
+        label: "Path MTU",
+        hint: "Find the path's packet size and hops with tracepath",
+        needsTarget: true,
+        targetPlaceholder: "example.com or 2001:db8::1",
       },
     ],
   },
@@ -213,8 +230,31 @@ export const TOOL_GROUPS: ToolGroup[] = [
   },
   {
     title: "This host",
-    hint: "No target — these answer about the machine under the dashboard",
+    hint: "Interfaces, listeners and LAN devices around this server",
     tools: [
+      {
+        key: "capabilities",
+        label: "Host support",
+        hint: "Read the host's networking tools, kernel support and available services",
+        needsTarget: false,
+      },
+      {
+        key: "capture",
+        label: "Packet snapshot",
+        hint: "Read up to 50 packet summaries for 15 seconds without changing the interface's mode",
+        needsTarget: true,
+        targetLabel: "Interface",
+        targetPlaceholder: "eno1",
+        optionLabel: "Protocol",
+        optionOptions: [
+          { value: "all", label: "All" },
+          { value: "tcp", label: "TCP" },
+          { value: "udp", label: "UDP" },
+          { value: "icmp", label: "ICMP" },
+          { value: "icmp6", label: "ICMPv6" },
+        ],
+        optionDefault: "all",
+      },
       {
         key: "listeners",
         label: "Listeners",
@@ -232,6 +272,17 @@ export const TOOL_GROUPS: ToolGroup[] = [
         label: "Neighbours",
         hint: "The LAN neighbours this host knows, and their state",
         needsTarget: false,
+      },
+      {
+        key: "wol",
+        label: "Wake-on-LAN",
+        hint: "Send a magic packet on this server's LAN; sending it does not prove the device woke up",
+        needsTarget: true,
+        targetLabel: "MAC address",
+        targetPlaceholder: "00:11:22:33:44:55",
+        optionLabel: "LAN interface",
+        optionPlaceholder: "eno1",
+        optionRequired: true,
       },
     ],
   },

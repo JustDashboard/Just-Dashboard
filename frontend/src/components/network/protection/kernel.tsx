@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useMemo, useState } from "react"
 import { del, post } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -47,6 +48,7 @@ export function KernelSettings({
   resetNote: string
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [pending, setPending] = useState<Record<string, string>>({})
   const [only, setOnly] = useState<Only>("all")
@@ -178,6 +180,7 @@ export function KernelSettings({
                   <SettingRow
                     key={s.key}
                     setting={s}
+                    readOnly={!can("system.admin")}
                     value={valueOf(s)}
                     edited={edited(s)}
                     onChange={(value) => setPending((p) => ({ ...p, [s.key]: value }))}
@@ -227,7 +230,7 @@ export function KernelSettings({
               <Button
                 size="sm"
                 onClick={apply}
-                disabled={busy || invalid}
+                disabled={!can("system.admin") || busy || invalid}
                 pending={busy}
                 className="max-sm:h-10"
               >
@@ -245,12 +248,14 @@ export function KernelSettings({
 /** One setting: its name and why, what is running against what is recommended, and the control. */
 function SettingRow({
   setting: s,
+  readOnly,
   value,
   edited,
   onChange,
   onLetGo,
 }: {
   setting: ProtectionSetting
+  readOnly: boolean
   value: string
   edited: boolean
   onChange: (value: string) => void
@@ -291,7 +296,7 @@ function SettingRow({
             <span className={behind ? "font-mono text-warning" : "font-mono text-foreground"}>
               {settingWord(s, s.recommended)}
             </span>
-            {s.setHere && (
+            {s.setHere && !readOnly && (
               <>
                 {" · "}
                 <button
@@ -315,7 +320,7 @@ function SettingRow({
             id={id}
             label={s.label}
             value={value}
-            disabled={!s.available}
+            disabled={readOnly || !s.available}
             options={s.allowed.map((a) => ({ value: a, label: choiceWord(s.key, a) }))}
             onChange={onChange}
             fill
@@ -326,7 +331,7 @@ function SettingRow({
               id={id}
               value={value}
               inputMode="numeric"
-              disabled={!s.available}
+              disabled={readOnly || !s.available}
               aria-invalid={!valid || undefined}
               aria-describedby={valid ? undefined : `${id}-range`}
               onChange={(event) => onChange(event.target.value)}

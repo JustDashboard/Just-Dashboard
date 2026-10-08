@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Information } from "@/components/icons"
 import { del, post } from "@/lib/api"
@@ -79,6 +80,7 @@ const num = (value: number) => value.toLocaleString()
  */
 export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () => void }) {
   const [editing, setEditing] = useState<string>()
+  const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const device = view.devices.find((d) => d.name === editing)
 
@@ -155,7 +157,7 @@ export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () 
                       {stat ? bytes(stat.backlog) : "—"}
                     </TableCell>
                     <TableCell>
-                      {d.shapeable && (
+                      {can("system.admin") && d.shapeable && (
                         <span className="flex items-center justify-end gap-1.5">
                           <Button
                             size="xs"
@@ -240,6 +242,7 @@ function DeviceNote({ device, stat }: { device: ShapeDevice; stat: ShapeDevice["
 
 /** The kernel's congestion control as the switch it is, with what is in force and what the host offers. */
 function BBRSwitch({ bbr, onChanged }: { bbr: BBRState; onChanged: () => void }) {
+  const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const toggle = async (on: boolean) => {
     setBusy(true)
@@ -273,7 +276,7 @@ function BBRSwitch({ bbr, onChanged }: { bbr: BBRState; onChanged: () => void })
           )
         }
         checked={bbr.active}
-        disabled={!bbr.available || busy}
+        disabled={!can("system.admin") || !bbr.available || busy}
         onCheckedChange={(on) => void toggle(on)}
       />
     </OptionList>
@@ -305,6 +308,7 @@ function ShapeSheet({
   const [qdisc, setQdisc] = useState(device.qdisc || device.root?.kind || "")
   const [upload, setUpload] = useState(kbitToMbit(device.egressKbit))
   const [download, setDownload] = useState(kbitToMbit(device.ingressKbit))
+  const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string>()
   const uploadProblem = limitProblem(upload, device)
@@ -350,7 +354,7 @@ function ShapeSheet({
           <Button
             onClick={() => void submit()}
             pending={busy}
-            disabled={Boolean(uploadProblem || downloadProblem)}
+            disabled={!can("system.admin") || busy || Boolean(uploadProblem || downloadProblem)}
           >
             Apply
           </Button>

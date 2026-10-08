@@ -39,6 +39,7 @@ export function LimitList({
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
+  const { can } = useAuth()
   const [busy, setBusy] = useState<number>()
   const toggle = (limit: ProtectionLimit, enabled: boolean) => {
     if (!enabled) {
@@ -91,7 +92,7 @@ export function LimitList({
                 </span>
                 <Switch
                   checked={limit.enabled}
-                  disabled={busy === limit.id}
+                  disabled={!can("system.admin") || busy === limit.id}
                   onCheckedChange={(next) => toggle(limit, next)}
                   aria-label={`${limit.name} in force`}
                 />
@@ -223,7 +224,12 @@ export function LimitModal({
             <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
               Cancel
             </Button>
-            <Button type="submit" form="limit-form" disabled={!ready || busy} pending={busy}>
+            <Button
+              type="submit"
+              form="limit-form"
+              disabled={!can("system.admin") || !ready || busy}
+              pending={busy}
+            >
               {limit ? "Save limit" : "Make limit"}
             </Button>
           </>

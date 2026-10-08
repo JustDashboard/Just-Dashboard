@@ -157,10 +157,10 @@ export function AddPeer({
           </Field>
           {kind === "device" ? (
             <Field
-              label="Send all of its traffic here"
+              label="Send its internet traffic here"
               hint={
                 tunnel.exitNode
-                  ? "Full tunnel: its internet goes out through this server."
+                  ? "IPv4 internet goes through this server. IPv6 is blocked to prevent leaks until dual-stack egress is configured."
                   : "Needs the tunnel to be an exit node; without it only this server's networks are reached."
               }
             >
@@ -170,7 +170,7 @@ export function AddPeer({
                   onCheckedChange={setFullTunnel}
                   aria-label="Full tunnel"
                 />
-                {fullTunnel ? "Everything" : "Only this server's networks"}
+                {fullTunnel ? "IPv4 full tunnel" : "Only this server's networks"}
               </label>
             </Field>
           ) : (

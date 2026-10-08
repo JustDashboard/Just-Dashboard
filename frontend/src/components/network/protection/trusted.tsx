@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { ProtectionView } from "@/lib/types"
@@ -31,6 +32,7 @@ export function TrustedList({
   view: Pick<ProtectionView, "trusted" | "client" | "clientTrusted">
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const remove = (address: string, you: boolean) =>
     confirm({
@@ -66,7 +68,7 @@ export function TrustedList({
             trailing={
               <>
                 <Tag>{ORIGIN_WORD[entry.origin]}</Tag>
-                {entry.removable ? (
+                {can("system.admin") && can("destructive") && entry.removable ? (
                   <DimActions>
                     <IconAction
                       label={`Stop trusting ${entry.address}`}

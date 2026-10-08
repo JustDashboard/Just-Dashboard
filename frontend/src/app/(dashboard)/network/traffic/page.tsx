@@ -4,6 +4,7 @@ import { useState } from "react"
 import { get } from "@/lib/api"
 import type { ShapingView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { Page, PageContext, Section } from "@/components/page"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { Bandwidth } from "@/components/network/traffic/bandwidth"
@@ -34,6 +35,7 @@ export default function NetworkTrafficPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Traffic" />
+      {shaping.data && <NetworkReadWarning error={shaping.error} refresh={shaping.refresh} />}
 
       <Bandwidth span={span} onSpan={setSpan} />
 

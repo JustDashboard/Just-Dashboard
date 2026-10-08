@@ -92,7 +92,11 @@ export function AddRoute({
     >
       <div className="flex flex-col gap-5">
         <FieldRow>
-          <Field label="Destination" htmlFor="route-dest" hint="A network in CIDR form, or default">
+          <Field
+            label="Destination"
+            htmlFor="route-dest"
+            hint="An IPv4 or IPv6 network in CIDR form, or default"
+          >
             <Input
               id="route-dest"
               value={destination}
@@ -225,6 +229,7 @@ export function AddRule({
   links: NetworkLink[]
   onAdded: () => void
 }) {
+  const [family, setFamily] = useState("inet")
   const [from, setFrom] = useState("")
   const [to, setTo] = useState("")
   const [iif, setIif] = useState(NONE)
@@ -242,6 +247,7 @@ export function AddRule({
     setError(undefined)
     try {
       await post("/network/routing/rules", {
+        family,
         from: from.trim() || undefined,
         to: to.trim() || undefined,
         iif: iif === NONE ? undefined : iif,
@@ -277,12 +283,23 @@ export function AddRule({
       }
     >
       <div className="flex flex-col gap-5">
+        <Field label="Address family" htmlFor="rule-family">
+          <Select value={family} onValueChange={setFamily}>
+            <SelectTrigger id="rule-family">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inet">IPv4</SelectItem>
+              <SelectItem value="inet6">IPv6</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
         <FieldRow>
           <Field label="From" htmlFor="rule-from" hint="Traffic from this network">
             <Input
               id="rule-from"
               value={from}
-              placeholder="10.8.0.0/24"
+              placeholder={family === "inet6" ? "2001:db8::/64" : "10.8.0.0/24"}
               onChange={(event) => setFrom(event.target.value)}
               className="font-mono"
             />

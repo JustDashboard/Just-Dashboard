@@ -11,21 +11,27 @@ import { Tag } from "@/components/tag"
  * duration, structured records as marks, then the tool's own text verbatim in
  * the recessed well the rest of the product uses for command output.
  */
-export function ToolResult({ result }: { result: ProbeResult }) {
+export function ToolResult({
+  result,
+  successLabel = "answered",
+}: {
+  result: ProbeResult
+  successLabel?: string
+}) {
   return (
     <div className="space-y-2 border-t border-hairline pt-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
         <Status
           verdict={result.ok ? "ok" : "critical"}
-          label={result.ok ? "answered" : "no answer"}
+          label={result.ok ? successLabel : "no answer"}
         />
         <span className="truncate font-mono text-xs">{result.target}</span>
         <span className="numeric text-hint text-muted-foreground">{result.duration}</span>
       </div>
       {result.records && result.records.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {result.records.map((r) => (
-            <Tag key={r} mono>
+          {result.records.map((r, index) => (
+            <Tag key={`${index}:${r}`} mono>
               {r}
             </Tag>
           ))}
@@ -39,6 +45,11 @@ export function ToolResult({ result }: { result: ProbeResult }) {
       >
         {result.output || result.error || "No output."}
       </Well>
+      {result.output && result.error && result.error !== result.output && (
+        <p role="alert" className="text-body text-destructive">
+          {result.error}
+        </p>
+      )}
     </div>
   )
 }

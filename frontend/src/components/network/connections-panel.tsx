@@ -11,6 +11,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
 import { useHeldList } from "@/components/workspace/held-list"
 import { usePoll } from "@/hooks/use-poll"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import { PageContext, SearchInput } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
@@ -116,7 +117,7 @@ export function ConnectionsPanel() {
     return (
       <>
         {header}
-        <ErrorState error={error} />
+        <ErrorState error={error} onRetry={refresh} />
       </>
     )
   }
@@ -151,6 +152,8 @@ export function ConnectionsPanel() {
       }}
     >
       {header}
+
+      <NetworkReadWarning error={error} refresh={refresh} />
 
       {/* The figures, then the addresses they describe. Listening goes to the
           page that names each socket: this page is who arrived, that one is

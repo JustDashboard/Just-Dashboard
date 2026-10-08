@@ -1,5 +1,6 @@
 "use client"
 
+import { useAuth } from "@/hooks/use-auth"
 import Link from "next/link"
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import { Bridge, Globe, Plus, Router, Servers, type Icon } from "@/components/icons"
@@ -89,7 +90,8 @@ export function GatewayPicture({
   const container = useRef<HTMLDivElement>(null)
   const host = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
-  const writable = view.capability.writable
+  const { can } = useAuth()
+  const writable = can("system.admin") && view.capability.writable
 
   const nodes = useMemo(
     () => buildNodes(view, links, moved, { onOpenForward, onOpenNAT }),

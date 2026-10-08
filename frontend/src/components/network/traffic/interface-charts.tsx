@@ -6,7 +6,7 @@ import { bytes, rate } from "@/lib/format"
 import type { NetworkHistory, NetworkLink, NetworkLivePoint } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { ChartPanel } from "@/components/metrics/chart-panel"
-import { Notice } from "@/components/state"
+import { ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { LinkGlyph, ROLE_LABEL } from "@/components/network/marks"
 import { RX, TX } from "@/components/network/rate-pair"
@@ -99,6 +99,14 @@ export function InterfaceCharts({
     }
   }, [span, live, history.data])
 
+  if (span !== "live" && !history.data) {
+    return history.error ? (
+      <ErrorState error={history.error} onRetry={history.refresh} />
+    ) : (
+      <LoadingPanel />
+    )
+  }
+
   if (span !== "live" && history.data && !history.data.recording) {
     return (
       <Notice title="Nothing is recorded">
@@ -111,6 +119,7 @@ export function InterfaceCharts({
   if (!first) return null
   return (
     <div className="flex min-w-0 flex-col gap-8">
+      {history.error && <ErrorState error={history.error} onRetry={history.refresh} />}
       <DeviceChart link={first} rows={rowsFor(first.name)} span={span} height={220} />
       {rest.length > 0 && (
         <div className="grid min-w-0 gap-x-10 gap-y-8 lg:grid-cols-2">

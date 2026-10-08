@@ -1,5 +1,7 @@
 "use client"
 
+import { NetworkReadWarning } from "@/components/network/read-warning"
+import { useAuth } from "@/hooks/use-auth"
 import { useCallback, useState } from "react"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
@@ -43,6 +45,7 @@ type Sheet = { kind: "forward"; forward?: GatewayForward } | { kind: "nat"; entr
  * not here: they are lit cards into Proxy & TLS, where their engine lives.
  */
 export default function NetworkGatewayPage() {
+  const { can } = useAuth()
   const gateway = usePoll<GatewayView>(
     (signal) => get("/network/gateway", undefined, signal),
     5_000,
@@ -69,7 +72,7 @@ export default function NetworkGatewayPage() {
     )
   }
   const view = gateway.data
-  const writable = view.capability.writable
+  const writable = can("system.admin") && view.capability.writable
   const devices = links.data ?? []
   const inForce = (enabled: boolean) => enabled && view.loaded
   const forwardsOn = view.forwards.filter((f) => inForce(f.enabled)).length
@@ -82,6 +85,7 @@ export default function NetworkGatewayPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Gateway" />
+      {gateway.data && <NetworkReadWarning error={gateway.error} refresh={gateway.refresh} />}
 
       <GatewayNotices view={view} />
 
@@ -184,6 +188,7 @@ export default function NetworkGatewayPage() {
           ) : (
             <ForwardList
               forwards={view.forwards}
+              writable={writable}
               onOpen={openForward}
               onChanged={gateway.refresh}
             />
@@ -208,7 +213,12 @@ export default function NetworkGatewayPage() {
           {view.nat.length === 0 ? (
             <EmptyNote>No network is shared out.</EmptyNote>
           ) : (
-            <NATList entries={view.nat} onOpen={openNAT} onChanged={gateway.refresh} />
+            <NATList
+              entries={view.nat}
+              writable={writable}
+              onOpen={openNAT}
+              onChanged={gateway.refresh}
+            />
           )}
         </PanelBody>
       </Panel>

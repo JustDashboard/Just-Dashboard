@@ -20,7 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-type Kind = "bridge" | "vlan" | "vxlan" | "gre" | "gretap" | "dummy" | "macvlan"
+type Kind =
+  "bridge" | "vlan" | "vxlan" | "gre" | "gretap" | "ip6gre" | "ip6gretap" | "dummy" | "macvlan"
 
 const KINDS: { kind: Kind; title: string; mark: Icon; hint: string }[] = [
   {
@@ -58,6 +59,18 @@ const KINDS: { kind: Kind; title: string; mark: Icon; hint: string }[] = [
     title: "Dummy",
     mark: Servers,
     hint: "An address that is always up, for a service to bind to",
+  },
+  {
+    kind: "ip6gre",
+    title: "IPv6 GRE tunnel",
+    mark: Linked,
+    hint: "A routed GRE tunnel between IPv6 endpoints, with no encryption",
+  },
+  {
+    kind: "ip6gretap",
+    title: "IPv6 GRE tap",
+    mark: Linked,
+    hint: "Ethernet frames over GRE between IPv6 endpoints",
   },
   {
     kind: "macvlan",
@@ -132,12 +145,13 @@ export function CreateDevice({
         ? "A device already has this name"
         : undefined
   const needsParent = kind === "vlan" || kind === "macvlan"
+  const tunnel = kind.includes("gre")
   const ready =
     !nameError &&
     (!needsParent || parent) &&
     (kind !== "vlan" || vlanId) &&
     (kind !== "vxlan" || (vni && (remote || parent))) &&
-    (!kind.startsWith("gre") || remote)
+    (!tunnel || remote)
 
   const submit = async () => {
     const body: LinkRequest = { name: finalName, kind, up: true }
@@ -147,7 +161,7 @@ export function CreateDevice({
       body.vni = Number(vni)
       body.port = Number(port) || 4789
     }
-    if (kind === "vxlan" || kind.startsWith("gre")) {
+    if (kind === "vxlan" || tunnel) {
       if (local.trim()) body.local = local.trim()
       if (remote.trim()) body.remote = remote.trim()
     }
@@ -244,7 +258,7 @@ export function CreateDevice({
                 id="device-mtu"
                 inputMode="numeric"
                 value={mtu}
-                placeholder={kind.startsWith("gre") ? "1476" : "1500"}
+                placeholder={tunnel ? "1476" : "1500"}
                 onChange={(event) => setMtu(event.target.value)}
               />
             </Field>
@@ -287,13 +301,13 @@ export function CreateDevice({
             </Field>
           </FieldRow>
         )}
-        {(kind === "vxlan" || kind.startsWith("gre")) && (
+        {(kind === "vxlan" || tunnel) && (
           <FieldRow>
             <Field label="Remote end" htmlFor="device-remote" hint="The other server's address">
               <Input
                 id="device-remote"
                 value={remote}
-                placeholder="198.51.100.7"
+                placeholder={kind.startsWith("ip6") ? "2001:db8::7" : "198.51.100.7"}
                 onChange={(event) => setRemote(event.target.value)}
                 className="font-mono"
               />
@@ -354,7 +368,7 @@ export function CreateDevice({
             </Field>
           )}
         </FieldRow>
-        {kind.startsWith("gre") && (
+        {tunnel && (
           <Notice title="Not encrypted">
             GRE carries the packets as they are. Across the internet, put it inside WireGuard or use
             WireGuard instead.
@@ -381,6 +395,8 @@ function suggestName(kind: Kind, links: NetworkLink[], vlanId: string, vni: stri
     vxlan: "vx",
     gre: "gre-",
     gretap: "gtap",
+    ip6gre: "gre6-",
+    ip6gretap: "gtap6-",
     dummy: "dummy",
     macvlan: "mac",
   }[kind]
