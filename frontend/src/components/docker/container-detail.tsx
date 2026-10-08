@@ -594,13 +594,16 @@ function ContainerShell({ detail }: { detail: ContainerDetail }) {
  */
 function HowItRuns({ detail }: { detail: ContainerDetail }) {
   const running = detail.state === "running"
+  // Docker keeps the entrypoint apart from the command it is handed, and the
+  // process the container runs is the two in that order.
+  const command = [...detail.entrypoint, detail.command].filter(Boolean).join(" ")
   return (
     <Panel plain className="animate-rise">
       <PanelHeader title="How it runs" />
       <div className="flex min-w-0 flex-col gap-4 pt-3">
-        {detail.command && (
+        {command && (
           <Well className="max-h-28 text-xs leading-relaxed break-all whitespace-pre-wrap">
-            <ShellWords command={detail.command} />
+            <ShellWords command={command} />
           </Well>
         )}
         <div className="grid min-w-0 gap-x-8 gap-y-1.5 sm:grid-cols-2">
