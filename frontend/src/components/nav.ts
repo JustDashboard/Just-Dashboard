@@ -246,6 +246,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           { title: "VPN", href: "/network/vpn", icon: LockClosed },
           { title: "DNS", href: "/network/dns", icon: Globe },
           { title: "Traffic", href: "/network/traffic", icon: ChartActivity },
+          {
+            title: "Socket history",
+            href: "/network/flows",
+            icon: ChartActivity,
+            capability: "system.admin",
+          },
           { title: "Connections", href: "/network/connections", icon: Connection },
           {
             title: "Connection path",
