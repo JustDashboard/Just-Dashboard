@@ -94,6 +94,19 @@ func wgPrefixStrings(ps []netip.Prefix) []string {
 	return out
 }
 
+func wgEndpointAddress(endpoint string) netip.Addr {
+	dial, err := parseWGEndpoint(endpoint, wgDefaultPort)
+	if err != nil {
+		return netip.Addr{}
+	}
+	host, _ := splitHostPort(dial)
+	a, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}
+	}
+	return a.WithZone("").Unmap()
+}
+
 // wgLastAddr is a network's last address, its broadcast.
 func wgLastAddr(p netip.Prefix) netip.Addr {
 	b := p.Masked().Addr().AsSlice()
@@ -259,6 +272,24 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 		}
 	}
 	if len(remote) > 0 {
+		// The route to a tunnel's public endpoint must stay outside it.
+		// Default routes do not appear in host.overlap, so a remote LAN can
+		// otherwise capture the very UDP packets that carry that LAN.
+		endpoints := []netip.Addr{}
+		if a := wgEndpointAddress(req.Endpoint); a.IsValid() {
+			endpoints = append(endpoints, a)
+		}
+		confs, err := s.listWGConfs()
+		if err != nil {
+			return nil, err
+		}
+		for _, other := range confs {
+			for _, peer := range other.peers() {
+				if a := wgEndpointAddress(wgPeerOf(peer).endpoint); a.IsValid() {
+					endpoints = append(endpoints, a)
+				}
+			}
+		}
 		host, err := wgReadHostState(ctx)
 		if err != nil {
 			return nil, err
@@ -273,6 +304,11 @@ func (s *Service) AddWireGuardPeer(ctx context.Context, iface string, req WGPeer
 			}
 			if clientAddr.IsValid() && r.Contains(clientAddr) {
 				return nil, guarded("%s contains your own address (%s), so routing it into the tunnel would cut your connection to the dashboard", r, clientAddr)
+			}
+			for _, endpoint := range endpoints {
+				if r.Contains(endpoint) {
+					return nil, guarded("%s contains the WireGuard endpoint %s; routing its transport into %s would disconnect the tunnel", r, endpoint, iface)
+				}
 			}
 		}
 	}

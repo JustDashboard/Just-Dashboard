@@ -924,6 +924,9 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 		{"remote overlaps a host network", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"172.17.5.0/24"}}, "", "docker0", true},
 		{"remote overlaps the tailnet", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"100.64.200.0/24"}}, "", "tailscale0", true},
 		{"remote holds the client", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"198.51.100.0/24"}}, "198.51.100.7", "your own address", true},
+		{"remote holds an existing endpoint", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"198.51.100.0/24"}}, "", "WireGuard endpoint 198.51.100.50", true},
+		{"remote holds its own endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "192.168.55.1:51820", RemoteNetworks: []string{"192.168.55.0/24"}}, "", "WireGuard endpoint 192.168.55.1", true},
+		{"remote holds its IPv6 endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "[2001:db8:55::1]:51820", RemoteNetworks: []string{"2001:db8:55::/64"}}, "", "WireGuard endpoint 2001:db8:55::1", true},
 		{"bad keepalive", WGPeerRequest{Name: "x", Kind: "device", Keepalive: wgIntp(70000)}, "", "keepalive", false},
 		{"bad site endpoint", WGPeerRequest{Name: "x", Kind: "site", Endpoint: "bad host"}, "", "not a host name", false},
 	}
@@ -956,6 +959,22 @@ func TestAddWireGuardPeerRefusals(t *testing.T) {
 		_, err := s.AddWireGuardPeer(ctx, "wg1", WGPeerRequest{Name: "x", Kind: "device"}, "", "a")
 		if !errors.Is(err, ErrNotManaged) {
 			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("remote subnet cannot capture another tunnel's transport", func(t *testing.T) {
+		s, rec := wgAddPeerHost(t)
+		wgInstallConf(t, s, "wg1", "wg-handwritten.conf")
+		conf, err := s.readWGConf("wg1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		conf.peers()[0].set("Endpoint", "192.168.55.1:51820")
+		if err := s.writeWGConf("wg1", conf); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.AddWireGuardPeer(ctx, "wg0", WGPeerRequest{Name: "x", Kind: "site", RemoteNetworks: []string{"192.168.55.0/24"}}, "", "a")
+		if !errors.Is(err, ErrGuarded) || !strings.Contains(err.Error(), "WireGuard endpoint") || rec.ran("systemctl reload") || rec.ran("ip route replace") {
+			t.Fatalf("another tunnel's transport was not protected: %v", err)
 		}
 	})
 	t.Run("unknown tunnel", func(t *testing.T) {
