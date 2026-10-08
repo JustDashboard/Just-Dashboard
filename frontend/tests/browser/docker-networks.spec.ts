@@ -136,7 +136,11 @@ test("a network's sheet is a live readout with its members as a table", async ({
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/docker/networks")
 
-  await page.getByRole("table").first().getByRole("button", { name: "shop_backend" }).click()
+  await page
+    .getByRole("table")
+    .first()
+    .getByRole("button", { name: "shop_backend", exact: true })
+    .click()
   await expect(page).toHaveURL(new RegExp(`network=${id("shop_backend")}`))
   const sheet = page.getByRole("dialog")
   await expect(sheet.getByText("compose · shop")).toBeVisible()
@@ -176,7 +180,7 @@ test("on a phone both lists read down the row and nothing scrolls sideways", asy
 
   await expect(page.getByRole("columnheader")).toHaveCount(0)
   const networks = page.getByRole("list", { name: "Networks" })
-  await expect(networks.getByRole("button", { name: "shop_backend" })).toBeVisible()
+  await expect(networks.getByRole("button", { name: "shop_backend", exact: true })).toBeVisible()
   const containers = page.getByRole("list", { name: "Containers" })
   await expect(containers.getByRole("button", { name: "shop-db-1" })).toBeVisible()
 
