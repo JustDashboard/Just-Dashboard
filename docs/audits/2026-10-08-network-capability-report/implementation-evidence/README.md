@@ -19,6 +19,10 @@ gate and exact unrelated retries are disclosed separately from the upcoming comb
 isolated resolver acceptance, exact v257 flag audit, preserved failed iterations and focused races.
 Its per-question UI still requires the integrated production-build/browser gate.
 
+[Mandatory selected-repair confirmation](drift-required-confirmation.md) records refusal before
+inspection or metadata creation and the final-source native selected repair/recovery fixture.
+Its global-preference-off browser regression remains pending the integrated build at this checkpoint.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

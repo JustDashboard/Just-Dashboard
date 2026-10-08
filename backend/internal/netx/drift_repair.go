@@ -266,6 +266,9 @@ func driftRepairToken(r DriftReport, item OwnedRepair, o DriftObservation) strin
 // RepairDrift accepts server-produced identities, never paths or commands.
 // Both locks bind review evidence to the apply and serialize independent undo.
 func (s *Service) RepairDrift(ctx context.Context, req DriftRepairRequest, client string) (*ChangeStatus, error) {
+	if pendingOwner(ctx) <= 0 {
+		return nil, &ConfirmationError{"Selected owned repairs require pending apply and a successful reconnect confirmation; nothing was applied."}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, path := range []string{s.paths.Dir, filepath.Join(s.paths.Dir, ".change.lock"), filepath.Join(s.paths.Dir, recoveryFile)} {

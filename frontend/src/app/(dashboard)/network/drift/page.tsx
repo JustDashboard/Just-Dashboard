@@ -68,7 +68,9 @@ export default function NetworkDriftPage() {
         throw new Error("The reviewed evidence changed. Close this review and inspect again.")
       }
       requestSent = true
-      const result = await post<NetworkChangeStatus>("/network/drift/repairs", request)
+      const result = await post<NetworkChangeStatus>("/network/drift/repairs", request, {
+        networkApply: "pending",
+      })
       const outcome = driftRepairOutcome(result)
       notify[outcome.tone](outcome.title, { description: outcome.description })
       setReview(false)

@@ -146,9 +146,10 @@ Admission-only selection records `persistence=not_applicable` and
 boot execution unverified. The exact saved spec generation is unchanged.
 
 This endpoint alone is added to pending-apply eligibility; direct gateway
-admission repair, DNS, VPN and firewall retain their existing contracts. When
-pending apply is requested, confirmation still requires a fresh authenticated
-reconnection response and the existing deadline recovery. There is no automatic
+admission repair, DNS, VPN and firewall retain their existing contracts. Pending mode is mandatory:
+the frontend explicitly requests it even when the global preference is off, and the backend refuses
+an immediate request before inspection, metadata creation or effects. Confirmation requires a fresh
+authenticated reconnection response and the existing deadline recovery. There is no automatic
 reconcile daemon or foreign-resource cleanup. Both locks cover dashboard and
 independent recovery writers; native writers do not take these locks, so
 inspection and immediate pre-effect checks describe an observation window.

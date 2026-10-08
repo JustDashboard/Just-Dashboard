@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,6 +61,28 @@ func driftDamage(t *testing.T, path string, mode os.FileMode) []byte {
 	return data
 }
 
+func TestDriftRepairRequiresPendingBeforeReadingOrCreatingMetadata(t *testing.T) {
+	for _, owner := range []int64{0, -1} {
+		t.Run(fmt.Sprint(owner), func(t *testing.T) {
+			h := newGwHost(t)
+			ctx := context.Background()
+			if owner != 0 {
+				ctx = WithPendingConfirmation(ctx, owner)
+			}
+			_, err := h.RepairDrift(ctx, DriftRepairRequest{Generation: strings.Repeat("a", 64), Selections: []DriftRepairSelection{{ID: "reviewed", ReviewToken: "token"}}}, "127.0.0.1")
+			var confirmation *ConfirmationError
+			if !errors.As(err, &confirmation) || len(h.rec.calls) != 0 {
+				t.Fatalf("immediate repair reached native inspection: %v, %v", err, h.rec.calls)
+			}
+			for _, name := range []string{".change.lock", recoveryFile} {
+				if _, err := os.Lstat(filepath.Join(h.paths.Dir, name)); !errors.Is(err, os.ErrNotExist) {
+					t.Fatalf("immediate repair created %s: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
 func TestDriftRepairWritesOnlySelectedOwnedRenderAndPreservesGenerationAndMode(t *testing.T) {
 	h := driftRepairHost(t, emptySpec())
 	path := filepath.Join(h.paths.Dir, linksFile)
@@ -75,11 +98,11 @@ func TestDriftRepairWritesOnlySelectedOwnedRenderAndPreservesGenerationAndMode(t
 	if !item.Executable || !r.RepairPlan.Executable || item.Before == item.After || item.ReviewToken == "" {
 		t.Fatalf("unreviewable item: %+v", item)
 	}
-	j, err := h.RepairDrift(context.Background(), driftRepairRequest(r, item), "127.0.0.1")
+	j, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), driftRepairRequest(r, item), "127.0.0.1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j.Phase != "saved" || j.Persistence != "written" || j.Runtime != "not_applied" || j.Boot != "not_verified" || j.Generation != r.SavedGeneration {
+	if j.Phase != "awaiting_confirmation" || j.Persistence != "written" || j.Runtime != "not_applied" || j.Boot != "not_verified" || j.Generation != r.SavedGeneration {
 		t.Fatalf("wrong phase evidence: %+v", j)
 	}
 	after, _ := os.ReadFile(path)
@@ -112,8 +135,8 @@ func TestDriftRepairRepairsTheBootOwnerLastAndReloadsOnlyItsSelection(t *testing
 			priorReloads++
 		}
 	}
-	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, selected...), "127.0.0.1")
-	if err != nil || status.Phase != "saved" || status.Boot != "not_verified" {
+	status, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), driftRepairRequest(r, selected...), "127.0.0.1")
+	if err != nil || status.Phase != "awaiting_confirmation" || status.Boot != "not_verified" {
 		t.Fatalf("selected file repair failed or invented boot execution: %+v %v", status, err)
 	}
 	j, err := readChange(h.paths.Dir)
@@ -155,7 +178,7 @@ func TestDriftRepairRefusesStaleGenerationAndUnresolvedJournalBeforeHostCommands
 				}
 			}
 			count := len(h.rec.commands())
-			if _, err := h.RepairDrift(context.Background(), req, "127.0.0.1"); err == nil {
+			if _, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), req, "127.0.0.1"); err == nil {
 				t.Fatal("unsafe precondition accepted")
 			}
 			if len(h.rec.commands()) != count {
@@ -199,7 +222,7 @@ func TestDriftRepairRefusesForeignSymlinkAndChangedModeAfterReview(t *testing.T)
 					t.Fatal(err)
 				}
 			}
-			if _, err := h.RepairDrift(context.Background(), req, "127.0.0.1"); err == nil {
+			if _, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), req, "127.0.0.1"); err == nil {
 				t.Fatal("replacement was overwritten")
 			}
 			if h.rec.ran("systemd-run") {
@@ -225,7 +248,7 @@ func TestDriftRepairRestoresAttemptedRenameWhenDirectorySyncFails(t *testing.T) 
 		return nil
 	}
 	t.Cleanup(func() { writeSelectedDriftFile = prior })
-	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
+	status, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
 	if err == nil || status.Phase != "recovered" {
 		t.Fatalf("failed write reported success: %+v %v", status, err)
 	}
@@ -253,7 +276,7 @@ func TestDriftRepairPreservesAnUnattemptedForeignReplacementAfterWatchdogPreflig
 		return out, err
 	}
 	t.Cleanup(func() { run = previousRun })
-	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
+	status, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
 	if err == nil || status.Phase != "recovered" {
 		t.Fatalf("changed precondition accepted: %+v %v", status, err)
 	}
@@ -280,7 +303,7 @@ func TestDriftRepairRefusesChangedBootOwnerIdentityImmediatelyBeforeItsEffect(t 
 		return prior(p, data, mode, beforeRename)
 	}
 	t.Cleanup(func() { writeSelectedDriftFile = prior })
-	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
+	status, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
 	if err == nil || status.Phase != "recovered" || !strings.Contains(err.Error(), "boot owner") {
 		t.Fatalf("new boot owner identity was accepted: %+v %v", status, err)
 	}
@@ -363,7 +386,7 @@ func TestDriftRepairAdmissionAtTheRecoveryBoundRemainsReviewOnly(t *testing.T) {
 	if item.Executable || !strings.Contains(item.Blocker, "bounded") {
 		t.Fatalf("unrecoverable duplicate count was executable: %+v", item)
 	}
-	if _, err := h.RepairDrift(context.Background(), driftRepairRequest(r, item), "127.0.0.1"); err == nil || h.rec.ran("systemd-run") {
+	if _, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), driftRepairRequest(r, item), "127.0.0.1"); err == nil || h.rec.ran("systemd-run") {
 		t.Fatal("non-executable duplicate count armed a mutation")
 	}
 }
@@ -396,7 +419,7 @@ func TestDriftRepairGatewayCacheCandidateInvalidatesReviewedRender(t *testing.T)
 	if err := writeFileAtomic(cache, []byte("198.51.100.0/24\n"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.RepairDrift(context.Background(), req, "127.0.0.1"); err == nil {
+	if _, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), req, "127.0.0.1"); err == nil {
 		t.Fatal("new fetched candidate activated under an old review")
 	}
 	after, _ := os.ReadFile(path)
@@ -423,7 +446,7 @@ func TestDriftRepairBlocksExecutingOrForeignBootOwnerAndIncompleteRecoveryEviden
 			case "incomplete_recovery":
 				h.first("systemctl show just-dashboard-network-recovery.service", "LoadState=loaded\nUnitFileState=enabled\nFragmentPath="+filepath.Join(filepath.Dir(h.paths.Unit), "just-dashboard-network-recovery.service")+"\nNeedDaemonReload=no\n", nil)
 			}
-			if _, err := h.RepairDrift(context.Background(), req, "127.0.0.1"); err == nil {
+			if _, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), req, "127.0.0.1"); err == nil {
 				t.Fatal("unsafe owner or execution accepted")
 			}
 			after, _ := os.ReadFile(path)
@@ -448,7 +471,7 @@ func TestDriftRepairRefusesSymlinkedLockBeforeOpeningForeignMetadata(t *testing.
 		t.Fatal(err)
 	}
 	count := len(h.rec.commands())
-	if _, err := h.RepairDrift(context.Background(), req, "127.0.0.1"); err == nil {
+	if _, err := h.RepairDrift(WithPendingConfirmation(context.Background(), 7), req, "127.0.0.1"); err == nil {
 		t.Fatal("symlinked serialization owner accepted")
 	}
 	if len(h.rec.commands()) != count {

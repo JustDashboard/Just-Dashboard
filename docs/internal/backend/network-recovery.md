@@ -59,9 +59,12 @@ An interactive administrator can request `X-JD-Network-Apply: pending` on covere
 forwarding, shaping, forward/NAT and protection mutations. The browser enables this after reading
 independent-recovery availability; its preference appears in Network, while pending/recovery notices
 remain visible throughout the dashboard. The response body stays compatible and the
-`X-JD-Network-Change` / `X-JD-Network-Expires` headers identify the journal. API/no-header callers keep
-immediate saved behavior. Native-owned link runtime edits are covered; DNS, namespaces, firewall,
-WireGuard/Tailscale and admission-rule repair do not accept pending opt-in.
+`X-JD-Network-Change` / `X-JD-Network-Expires` headers identify the journal. Ordinary covered
+API/no-header callers keep immediate saved behavior. Selected drift repairs and explicit download
+SQM always require pending mode; their UI sends it even when the global preference is off, and
+the backend refuses an immediate request before effects. Native-owned link runtime edits are covered;
+DNS, namespaces, firewall, WireGuard/Tailscale and direct gateway admission-rule repair do not accept
+pending opt-in. Selected drift admission repair uses its separately enrolled transaction.
 
 An opted apply refuses before kernel mutation unless the independent helper and watchdog arm.
 Its ninety-second deadline is recorded before apply, and a late apply rolls back. A pending journal

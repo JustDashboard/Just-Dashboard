@@ -149,13 +149,19 @@ test("a failed refresh retains dated evidence and blocks repair review", async (
   await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeVisible()
 })
 
-test("an administrator reviews exact selected changes and sends only generation and tokens", async ({
+test("an administrator reviews exact changes with pending confirmation when the global preference is off", async ({
   page,
 }) => {
   const mutations: Mutation[] = []
-  await mockNetwork(page, mutations, { overrides: { "/network/drift": executableReport } })
+  await mockNetwork(page, mutations, {
+    overrides: {
+      "/network/drift": executableReport,
+      "/network/changes/current": { available: true, owned: true, change: null },
+    },
+  })
   await page.route("**/api/v1/network/drift/repairs", async (route) => {
     const request = route.request()
+    expect(request.headers()["x-jd-network-apply"]).toBe("pending")
     mutations.push({
       method: request.method(),
       path: "/network/drift/repairs",
@@ -170,6 +176,12 @@ test("an administrator reviews exact selected changes and sends only generation 
     })
   })
   await page.goto("/network/drift")
+  const confirmationPreference = page.getByRole("switch", {
+    name: "Require network reconnection confirmation",
+  })
+  await expect(confirmationPreference).toBeChecked()
+  await confirmationPreference.uncheck()
+  await expect(confirmationPreference).not.toBeChecked()
   await page.getByRole("checkbox", { name: `Select repair for ${resource}` }).check()
   await page.getByRole("button", { name: "Review selected (1)" }).click()
   const dialog = page.getByRole("dialog")

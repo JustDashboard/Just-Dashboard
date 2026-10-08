@@ -22,6 +22,16 @@ func TestNetworkReportMountedObserverStopPrerequisite(t *testing.T) {
 	assertFlowObserverExplicitStop(t, c, s)
 }
 
+func TestNetworkReportMountedDriftRepairRequiresPendingConfirmation(t *testing.T) {
+	c, s := newClient(t)
+	c.h = s.Routes()
+	body := `{"generation":"` + strings.Repeat("a", 64) + `","selections":[{"id":"reviewed-file","reviewToken":"reviewed-token"}]}`
+	w := c.do(http.MethodPost, "/api/v1/network/drift/repairs", body, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "network_confirmation") {
+		t.Fatalf("immediate selected repair = %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestNetworkReportMountedPrivateRoutesAndIndependentMachineAuthentication(t *testing.T) {
 	c, s := newClient(t)
 	for _, path := range []string{"/api/v1/network/external/vantages", "/api/v1/network/external/checks", "/api/v1/network/dns/evidence/"} {

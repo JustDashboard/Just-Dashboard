@@ -88,7 +88,8 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
   measurement. Saved runs retain quick-tool and source-sensitive investigation evidence, stages and
   outcomes across restarts; Drift compares
-  owned saved, rendered and runtime state with measured unit activation and an advisory repair review.
+  owned saved, rendered and runtime state with measured unit activation. Reviewed selected owned
+  repairs require temporary apply and reconnect confirmation; wider native repairs remain advisory.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
   the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
   that open beside the listing or in a full workspace with a file tree, and every Git checkout with
