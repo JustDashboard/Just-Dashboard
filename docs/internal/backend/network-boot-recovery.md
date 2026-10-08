@@ -35,4 +35,16 @@ failures, duplicate handling and generated unit ordering. With `JD_NETNS_LIVE=1`
 and mount namespace. A subprocess dies after writing a candidate that removes an address and route;
 the fixture then removes its unchanged bridge, veth and named namespace. A fresh timer process
 fails visibly without recreating them, while a fresh boot process restores the prior dependencies,
-address, route, spec and healthy recovery phase. No test writes the host's systemd units or network.
+address, route, spec and healthy recovery phase. This cold fixture leaves the host's systemd unit
+files and network untouched; it does not reboot the host.
+
+`JD_NETNS_LIVE=1 JD_SYSTEMD_RECOVERY_LIVE=1 go test -race ./internal/netx -run '^TestLiveSystemdTimer'`
+also exercises a reachable real host systemd manager. It builds a static standalone helper and
+launches uniquely named transient timers with `NetworkNamespacePath` pointing to a disposable
+namespace. An expired pending generation restores its private journal snapshot and removes its
+candidate dummy device without a running backend. Later timers for a completed ID or an older ID
+execute successfully and leave the current runtime and journal untouched. The test cleans its exact
+transient units and namespace; it does not install persistent host units or change host networking.
+The marker is an explicit systemd `ExecStartPost` command, so observing it proves the helper exited
+successfully after timer dispatch. This is timer acceptance, separate from the cold-runtime boot
+fixture and from an actual host reboot.
