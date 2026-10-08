@@ -195,9 +195,11 @@ memory limits, security posture — each with an explanation and, where possible
 Stacks deploy, rebuild and roll back with the compose diff shown first.
 A container's page opens on whether it works — a crash loop or a failing health check is said as
 one — its live readings, a picture of how it is reached and what it keeps, and the rest of its
-compose project as a live table beside it. Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
-history. Inspect per-interface transfer rates, totals, packet errors and drops, memory cache and CPU
-throttling; unavailable readings stay distinct from zero activity.
+compose project as a live table beside it. Its Usage tab heads every chart with its live reading
+and marks the container's crashes and restart loops on them, then breaks memory, CPU quota and
+throttling, limits and each interface down; unavailable readings stay distinct from zero activity.
+Storage is a rail of its mounts beside the file listing of the one picked, Inspect is Docker's
+document a section at a time in colour, and Configuration turns each finding into a prepared fix.
 
 ### Terminal
 

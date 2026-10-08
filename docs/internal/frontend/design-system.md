@@ -2298,6 +2298,20 @@ command coloured by `ShellWords`), and its ports and networks as framed tables. 
 is a framed table with a filter that does not search a hidden value. The page draws every verb the
 container has — it used to draw only the inline three, so pausing or removing it meant the list.
 
+Each of its other views then took the pass of the page it stands in for, so a reader who has learned
+that page has learned the tab. Usage is a project Runtime's (`deploy/runtime-usage.tsx`): every chart
+headed by its reading now, with the container's own crashes and folded restart loops as its markers,
+then the Metrics page's breakdowns of the same frame — memory as one allocation bar, quota, share,
+throttling and tasks as tiles, the limits beside the change that sets them, interfaces as a framed
+table with an in/out bar per row. Storage is the file manager's workbench, a rail of mounts drawn as
+their kinds beside the listing in one frame. Logs is the logs page's own pane. Inspect is the run
+page's Details shape, a rail of the document's sections beside the picked one in the `CODE` hues.
+Configuration is Health's, each finding a lit card on its level's wash that prepares its own change
+and the editor's head naming the edited fields in `--git-modified`. Shell is the deploy Console's,
+its strip saying the account and the directory and its first commands typing themselves in. The
+Environment tab colours each name's namespace in its lane hue and each value in its kind's code hue,
+its kinds chips that count and narrow, as the deployment Variables page's do.
+
 ## 16. Two registers
 
 Everything above §15 describes a page that **reports**. The Overview, the metrics page, the Docker

@@ -107,23 +107,40 @@ that does something.
   containers of its compose project — or of its own networks — as a live table
   (`container-company.tsx`), its recent events with loops folded (`container-recent.tsx`), how it
   runs, and its ports and networks as tables (`container-tables.tsx`, which also draws the
-  Environment tab as a filtered table). Its Storage tab leads with the path
-  *inside* the container — the one the application's own configuration names — states the kind of storage
-  in words rather than as a Docker noun, and puts where it actually lives beside it, one line per mount with
-  the kind at the row's edge (amber for memory, which does not survive a rebuild). Under the mounts, the
-  first volume or bind is already open in `files/inline-browser.tsx` — the same component the volume
-  panel and the stack's Files tab use, drawn as the file manager's own listing in a pane, here in its
-  `fill` form so the listing takes the tab's height — because naming a mount does not answer whether the
-  backup landed or what the application wrote. With more than one to look in, the rows are the switch
-  between them; a tmpfs row never is, since memory has nowhere on this filesystem to look. Storage that looks
-  like a database's own files is named as such above the browser while the container is running
-  (`docker/shared.tsx`). Its Usage tab leads with live CPU, memory working set and network receive/send
-  tiles, then processor/task, memory and block I/O details and a per-interface table of rates, totals,
-  packet rates, errors and drops. Live readings can be paused and remain independent of history
-  retention. Host networking links to host metrics; shared container namespaces are labelled as shared.
-  Recorded charts stay visible for idle interfaces (zero is data); charts with no measurable intervals
-  are omitted with a compact explanation. CPU/memory and network/block charts share one range control,
-  carry measured peaks, and use the reading register's plain surfaces. `build-dialog.tsx` is where the
+  Environment tab: each name's namespace in its lane hue, each value in its kind's code hue, and
+  the kinds — credentials, addresses, paths, switches, numbers — as chips that count and narrow, beside
+  a filter that never searches a hidden value). Each other view is the overhauled page it stands in
+  for. **Usage** (`container-usage-tab.tsx`) is a project Runtime's `deploy/runtime-usage.tsx` — every
+  chart headed by its reading now, a Live range off the stats socket beside the recorded ones, the
+  processes chart and what it has done since it started — with the container's own exits, OOM kills
+  and folded restart loops as the charts' markers (`usage-markers.ts`), then the Metrics page's
+  breakdowns read off the same frame: the memory allocation as one bar of programs, active files,
+  reclaimable cache and headroom, the quota, host share, throttling and task count as tiles, the
+  memory and CPU limits drawn beside the change that sets them, and the interfaces as a framed table
+  with an in/out bar per row. `RuntimeUsage` takes `running={false}` for a stopped container: no
+  socket, the recorded hour, and "Not running" rather than a socket waiting forever. The old Pause
+  button went with the old tiles; a recorded range holds the charts still. **Storage**
+  (`container-storage-tab.tsx`) is the file manager's workbench: one frame around a rail of the mounts
+  — each the path *inside* the container, drawn as its kind in that kind's hue (a database's volume as
+  its engine, Docker's socket in red) with where it really lives under it, a tmpfs marked *not kept* —
+  and beside it the picked mount open in `files/inline-browser.tsx`, flush, at the tab's height; the
+  rail's foot counts how many mounts outlive the container, and the writable-layer investigator stays
+  under the frame. With more than one to look in, the rows are the switch; a tmpfs row never is.
+  Storage that looks like a database's own files is named as such above it while the container runs
+  (`docker/shared.tsx`). **Logs** is the logs page's own `ServiceLogs`, read through the lens the image
+  names, the lens's readings as tiles over the pane where it has them. **Inspect**
+  (`container-inspect-tab.tsx`, logic in `inspect.ts`) is the run page's Details shape: one frame
+  around a rail of the inspect document's sections and the picked one as coloured JSON in the `CODE`
+  hues, folding, filterable, credentials still masked and never matched by the filter.
+  **Configuration** (`configuration-remedy.tsx`) is Health's: each finding a lit card on its level's
+  wash that prepares its change (or, compose-owned, opens the service with its YAML coloured), the
+  settings those findings touch as rows in their tone, and the replacement specification as one framed
+  editor whose head names the edited fields in `--git-modified`, a `BorderBeam` and "Replacing…" while
+  it runs. **Shell** (`container-shell-tab.tsx`) is the deploy Console's: one pane, its strip saying
+  `account@container` (root in amber) and the working directory, the run-as switch where the image
+  declares a user, and read-only first commands (`id`, `ls -la`, `ps aux`, `df -h`, the OS release)
+  that type themselves into the session — no `env`, which would print every credential the
+  Environment tab hides. `build-dialog.tsx` is where the
   git panel and Docker stop being two products: a repository we already pull is a build context.
 
 Four deep links are worth preserving: `/files?path=`, `/git?repo=`, `/terminal?cwd=`, `/audit?action=`.
