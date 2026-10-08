@@ -126,6 +126,13 @@ at **113.671 ms**, **9.013 MB allocated**. They measure package work, independen
 and Docker process-inspection costs. Larger hosts must assess their own reported capture time,
 source caps and retention before shortening the interval.
 
+A later final-source rerun at 20:43 UTC timed out: the isolated native `ss` read exceeded its
+two-second budget, and Docker image inspection exceeded the fixture's 15-second preparation
+deadline before creating any fixture containers. The reader returned unavailable instead of byte
+counters. The earlier measured results remain evidence for their declared fixture; acceptance
+under the later shared-host load is pending. No successful final live replay is inferred from
+static or race checks.
+
 Run targeted tests and declared benchmarks:
 
 ```bash
