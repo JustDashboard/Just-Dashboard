@@ -41,9 +41,11 @@ import type { ContainerTraffic } from "@/components/docker/network-members"
 import {
   bareAddress,
   hostCapacity,
+  isSystem,
   isUnused,
   networkHue,
   networkOwner,
+  refusesAttach,
 } from "@/components/docker/networks"
 
 /** A wire moving less than this is drawn still, as on every Network picture. */
@@ -85,8 +87,11 @@ export function NetworkSheet({
   const detail = usePoll<NetworkDetail>(
     (signal) =>
       get<NetworkDetail>(`/docker/networks/${encodeURIComponent(id ?? "")}`, undefined, signal),
-    15_000,
-    [id],
+    // Read once, and again when the list says its members changed: each read
+    // inspects every member for its aliases, which on a busy default bridge
+    // is forty calls to the daemon.
+    0,
+    [id, listed?.usedBy.join("\n")],
     { enabled: id !== null },
   )
   const data = detail.data?.id === id ? detail.data : undefined
@@ -107,7 +112,7 @@ export function NetworkSheet({
     }
   }
 
-  const system = data?.system ?? false
+  const system = network !== undefined && isSystem(network)
   const canAttach = can("service.control") && !system && network?.driver !== "host"
   const removable = network !== undefined && can("destructive") && isUnused(network)
 
@@ -131,15 +136,15 @@ export function NetworkSheet({
         network && (
           <>
             {canAttach &&
-              (network.attachable ? (
+              (refusesAttach(network) ? (
+                <Hint className="max-w-72">
+                  A swarm network made without --attachable takes only swarm services.
+                </Hint>
+              ) : (
                 <Button size="xs" variant="outline" onClick={() => setAttaching(true)}>
                   <Linked className="size-3" />
                   Attach a container
                 </Button>
-              ) : (
-                <Hint className="max-w-72">
-                  Takes members only from its compose file — add the service there, then deploy.
-                </Hint>
               ))}
             {removable && (
               <Button
@@ -424,7 +429,7 @@ function Picture({
                       hint={
                         <span className="flex min-w-0 items-center gap-2">
                           <span className="truncate font-mono">
-                            {bareAddress(member.ipv4) ??
+                            {bareAddress(member.ipv4 ?? member.ipv6) ??
                               (state === "running" ? "no address" : "stopped")}
                           </span>
                           {t && state === "running" && (
@@ -521,11 +526,11 @@ function Members({
                     </TableCell>
                     <TableCell className="py-2">
                       <p className="truncate font-mono text-xs">
-                        {bareAddress(member.ipv4) ?? (
+                        {bareAddress(member.ipv4 ?? member.ipv6) ?? (
                           <span className="text-muted-foreground">none</span>
                         )}
                       </p>
-                      {member.ipv6 && (
+                      {member.ipv4 && member.ipv6 && (
                         <p
                           className="truncate font-mono text-micro text-muted-foreground"
                           title={member.ipv6}
@@ -597,13 +602,16 @@ function Settings({ network }: { network: NetworkDetail }) {
           {network.internal ? "no — its members reach only each other" : "yes"}
         </Detail>
         {/*
-          Attachable decides whether a running container can join this network
-          afterwards. Compose creates non-attachable networks by default — those
-          only accept members listed in the compose file at creation, which is
-          why attaching sometimes fails on a network that looks ordinary.
+          `docker network connect` works on any local network, compose's
+          included; Docker's attachable flag only lets standalone containers
+          onto a swarm overlay, so it is said only for one.
         */}
         <Detail label="Accepts new members" className="text-body">
-          {network.attachable ? "yes, while running" : "only through its compose file"}
+          {refusesAttach(network)
+            ? "swarm services only"
+            : network.scope === "swarm"
+              ? "yes, standalone containers too"
+              : "yes, while running"}
         </Detail>
         <Detail label="Scope" className="text-body">
           {network.scope || "local"}

@@ -9,6 +9,7 @@ import {
   networkOrder,
   networkOwner,
   parseV4,
+  refusesAttach,
 } from "./networks"
 
 const net = (over) => ({
@@ -61,7 +62,13 @@ test("networks in use come first, then the unused, then Docker's own", () => {
     net({ name: "alpha", usedBy: ["b"] }),
     net({ name: "bridge", usedBy: ["c"] }),
   ]
-  expect(list.sort(networkOrder).map((n) => n.name)).toEqual(["alpha", "zeta", "old", "bridge", "none"])
+  expect(list.sort(networkOrder).map((n) => n.name)).toEqual([
+    "alpha",
+    "zeta",
+    "old",
+    "bridge",
+    "none",
+  ])
 })
 
 describe("parseV4", () => {
@@ -154,8 +161,16 @@ describe("answersTo", () => {
 
 test("each container's networks come from the listing's endpoints, in the page's order", () => {
   const byContainer = endpointsByContainer([
-    net({ name: "zeta", usedBy: ["web"], endpoints: [{ container: "w", name: "web", ipv4: "172.19.0.2/16" }] }),
-    net({ name: "alpha", usedBy: ["web"], endpoints: [{ container: "w", name: "web", ipv4: "172.18.0.2/16" }] }),
+    net({
+      name: "zeta",
+      usedBy: ["web"],
+      endpoints: [{ container: "w", name: "web", ipv4: "172.19.0.2/16" }],
+    }),
+    net({
+      name: "alpha",
+      usedBy: ["web"],
+      endpoints: [{ container: "w", name: "web", ipv4: "172.18.0.2/16" }],
+    }),
   ])
   expect(byContainer.get("w")?.map((e) => e.network.name)).toEqual(["alpha", "zeta"])
 })
@@ -189,4 +204,36 @@ describe("networkChanges", () => {
       ["created", "proxy", undefined],
     ])
   })
+})
+
+test("a subnet wider than a block holds every block it covers, across configured pools", () => {
+  const plan = addressPlan(
+    {
+      DefaultAddressPools: [
+        { Base: "10.10.0.0/22", Size: 24 },
+        { Base: "10.20.0.0/23", Size: 24 },
+      ],
+    },
+    [
+      net({ name: "wide", subnets: ["10.10.0.0/23"] }),
+      net({ name: "b", subnets: ["10.20.1.0/24"] }),
+    ],
+  )
+  expect(plan.total).toBe(6)
+  expect(plan.blocks.map((b) => b.network)).toEqual([
+    "wide",
+    "wide",
+    undefined,
+    undefined,
+    undefined,
+    "b",
+  ])
+  expect(plan.blocks[4].cidr).toBe("10.20.0.0/24")
+  expect(plan.firstFree).toBe("10.10.2.0/24")
+})
+
+test("only a swarm network made without --attachable refuses docker network connect", () => {
+  expect(refusesAttach({ scope: "local", attachable: false })).toBe(false)
+  expect(refusesAttach({ scope: "swarm", attachable: false })).toBe(true)
+  expect(refusesAttach({ scope: "swarm", attachable: true })).toBe(false)
 })

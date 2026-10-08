@@ -132,7 +132,10 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   address from the same summary — `Network.Endpoints` (container id and name, IPv4 and IPv6 with their
   prefix, MAC) and `Network.Gateway` — kept off the containers socket (`Container.Endpoints` is
   `json:"-"`); the summary has no aliases, so the names a member answers to beyond its own are
-  `NetworkDetail`'s, which inspects. The history recorder reads the enriched
+  `NetworkDetail`'s, which inspects. A network's inspect lists endpoints, and a stopped container holds
+  none, so `NetworkDetail` adds every container the summary places on the network that the inspect
+  left out — without an address, with its state and aliases — and counts it: Docker removes a network
+  whose members are all stopped, and they then fail to start. The history recorder reads the enriched
   listing because it persists explicit memory budgets, including a limit equal to host RAM, which the
   stats response alone cannot distinguish from an unlimited container. The shared live table sampler
   reuses the inventory it already collected and samples those IDs without another listing.

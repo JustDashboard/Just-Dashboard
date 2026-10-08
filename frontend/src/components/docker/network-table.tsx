@@ -26,7 +26,13 @@ import type { Container, DockerNetwork } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { memberProducts, type NetworkRate } from "@/components/docker/network-band"
-import { isSystem, isUnused, networkHue, networkOwner } from "@/components/docker/networks"
+import {
+  isSystem,
+  isUnused,
+  networkHue,
+  networkOwner,
+  refusesAttach,
+} from "@/components/docker/networks"
 
 type RowsProps = {
   rates: Map<string, NetworkRate>
@@ -367,12 +373,12 @@ function useNetworkVerbs({
   if (can("service.control") && !system && network.driver !== "host") {
     verbs.push({
       key: "attach",
-      label: network.attachable
-        ? `Attach a container to ${network.name}`
-        : "Takes members only from its compose file",
+      label: refusesAttach(network)
+        ? "A swarm network made without --attachable takes only services"
+        : `Attach a container to ${network.name}`,
       icon: Linked,
       inline: true,
-      disabled: !network.attachable,
+      disabled: refusesAttach(network),
       run: () => onAttach(network),
     })
   }

@@ -45,17 +45,26 @@ export function NetworkBand({
   trafficReady,
   trafficFailed,
   plan,
+  poolsFailed,
   changes,
+  networkIds,
   containers,
+  containersReady,
   now,
   onOpen,
 }: {
   rates: NetworkRate[]
   trafficReady: boolean
   trafficFailed: boolean
-  plan: AddressPlan
+  /** Undefined until `docker info` has said which pools Docker carves from. */
+  plan?: AddressPlan
+  poolsFailed: boolean
   changes: NetworkChange[]
+  /** The networks that exist now: a line about one removed since opens nothing. */
+  networkIds: Set<string>
   containers: Map<string, Container>
+  /** Whether the containers socket has answered, so an unknown id means a removed container. */
+  containersReady: boolean
   now: number
   onOpen: (network: DockerNetwork | string) => void
 }) {
@@ -129,7 +138,7 @@ export function NetworkBand({
         </PanelBody>
       </Panel>
 
-      <AddressBlock plan={plan} />
+      <AddressBlock plan={plan} failed={poolsFailed} />
 
       <Panel plain aria-label="Recent network changes" className="lg:col-span-2 xl:col-span-1">
         <PanelHeader
@@ -148,7 +157,14 @@ export function NetworkBand({
           ) : (
             <ul className="-mx-2">
               {changes.map((change) => (
-                <ChangeLine key={change.key} change={change} now={now} onOpen={onOpen} />
+                <ChangeLine
+                  key={change.key}
+                  change={change}
+                  exists={change.networkId !== undefined && networkIds.has(change.networkId)}
+                  named={containersReady}
+                  now={now}
+                  onOpen={onOpen}
+                />
               ))}
             </ul>
           )}
@@ -176,7 +192,21 @@ export function memberProducts(network: DockerNetwork, containers: Map<string, C
  * so the figure in the head turns amber as the strip fills and red when it is
  * full.
  */
-function AddressBlock({ plan }: { plan: AddressPlan }) {
+function AddressBlock({ plan, failed }: { plan?: AddressPlan; failed: boolean }) {
+  if (!plan) {
+    return (
+      <Panel plain aria-label="Address space">
+        <PanelHeader title="Addresses" />
+        <PanelBody className="pt-4">
+          <p className="py-2 text-body text-muted-foreground">
+            {failed
+              ? "Docker did not say which address pools it carves networks from."
+              : "Reading Docker's address pools…"}
+          </p>
+        </PanelBody>
+      </Panel>
+    )
+  }
   const tone =
     plan.pressure === "full"
       ? "text-destructive"
@@ -341,21 +371,26 @@ const VERB: Record<NetworkChange["action"], string> = {
  */
 function ChangeLine({
   change,
+  exists,
+  named,
   now,
   onOpen,
 }: {
   change: NetworkChange
+  exists: boolean
+  named: boolean
   now: number
   onOpen: (network: string) => void
 }) {
   const hue = networkHue(change.network)
-  const exists = change.action !== "deleted" && change.networkId !== undefined
   const network = (
     <span className="font-medium" style={{ color: hue }}>
       {change.network}
     </span>
   )
-  const who = change.container ?? (change.containerId ? "a removed container" : undefined)
+  const who =
+    change.container ??
+    (change.containerId ? (named ? "a removed container" : "a container") : undefined)
   return (
     <BandLine
       label={`Open ${change.network}`}

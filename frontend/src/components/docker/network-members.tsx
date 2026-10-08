@@ -26,9 +26,17 @@ import { answersTo, bareAddress, networkHue } from "@/components/docker/networks
 
 export type Placement = { network: DockerNetwork; endpoint?: NetworkEndpoint }
 
-export type ContainerTraffic = { rx: number; tx: number; points: NetworkLivePoint[] }
+export type ContainerTraffic = {
+  rx: number
+  tx: number
+  points: NetworkLivePoint[]
+  /** Carried over a frame Docker could not measure; the next such frame drops it. */
+  held?: boolean
+}
 
 type RowsProps = {
+  /** The network the table is narrowed to, whose chips let it go. */
+  focused?: string
   placements: Map<string, Placement[]>
   traffic: Map<string, ContainerTraffic>
   /** Narrows the table to one network. */
@@ -94,6 +102,7 @@ export function ContainerNetworkRows({ rows, ...rest }: RowsProps & { rows: Cont
 function ContainerTableRow({
   container,
   arrived,
+  focused,
   placements,
   traffic,
   onNetwork,
@@ -114,7 +123,7 @@ function ContainerTableRow({
         <ContainerState container={container} />
       </TableCell>
       <TableCell className="py-2.5">
-        <NetworkChips placed={placed} onNetwork={onNetwork} />
+        <NetworkChips placed={placed} focused={focused} onNetwork={onNetwork} />
       </TableCell>
       <TableCell className="py-2.5 whitespace-normal">
         <Names container={container} placed={placed} />
@@ -130,6 +139,7 @@ function ContainerTableRow({
 function ContainerNarrowRow({
   container,
   arrived,
+  focused,
   placements,
   traffic,
   onNetwork,
@@ -155,7 +165,7 @@ function ContainerNarrowRow({
         <ContainerState container={container} />
       </div>
       <div className="pl-11">
-        <NetworkChips placed={placed} onNetwork={onNetwork} />
+        <NetworkChips placed={placed} focused={focused} onNetwork={onNetwork} />
       </div>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 pl-11">
         <Names container={container} placed={placed} />
@@ -204,7 +214,9 @@ function ContainerState({ container }: { container: Container }) {
           ? `up ${duration(container.uptimeSeconds)}`
           : running
             ? " "
-            : "holds no address"}
+            : container.state === "paused"
+              ? "keeps its address"
+              : "holds no address"}
       </p>
     </div>
   )
@@ -217,9 +229,11 @@ function ContainerState({ container }: { container: Container }) {
  */
 function NetworkChips({
   placed,
+  focused,
   onNetwork,
 }: {
   placed: Placement[]
+  focused?: string
   onNetwork: (network: DockerNetwork) => void
 }) {
   if (placed.length === 0) {
@@ -232,8 +246,16 @@ function NetworkChips({
           <button
             type="button"
             onClick={() => onNetwork(network)}
-            aria-label={`Show the containers on ${network.name}`}
-            title={`Show the containers on ${network.name}`}
+            aria-label={
+              network.id === focused
+                ? "Show containers on every network"
+                : `Show the containers on ${network.name}`
+            }
+            title={
+              network.id === focused
+                ? "Show containers on every network"
+                : `Show the containers on ${network.name}`
+            }
             className="-mx-1 inline-flex min-w-0 items-center gap-1.5 rounded-sm px-1 text-body focus-ring transition-colors hover:bg-row-hover"
           >
             <HueKey color={networkHue(network.name)} />
@@ -242,7 +264,7 @@ function NetworkChips({
             </span>
           </button>
           <span className="numeric font-mono text-hint text-muted-foreground">
-            {bareAddress(endpoint?.ipv4) ??
+            {bareAddress(endpoint?.ipv4 ?? endpoint?.ipv6) ??
               (network.driver === "host" ? "host" : network.driver === "null" ? "—" : "no address")}
           </span>
         </li>

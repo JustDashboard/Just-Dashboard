@@ -90,6 +90,11 @@ test("the networks table reads who made each network, its subnet and its members
   ).toBeDisabled()
   const bridge = table.getByRole("row").filter({ hasText: "the default bridge" })
   await expect(bridge.getByRole("button", { name: /Docker's own network/ })).toBeDisabled()
+  // A local network takes `docker network connect` whatever its attachable
+  // flag says; compose's networks included.
+  await expect(
+    backend.getByRole("button", { name: "Attach a container to shop_backend" }),
+  ).toBeEnabled()
   const staging = table.getByRole("row").filter({ hasText: "old-staging" })
   await expect(staging.getByRole("button", { name: "Remove old-staging" })).toBeEnabled()
 
@@ -179,4 +184,20 @@ test("on a phone both lists read down the row and nothing scrolls sideways", asy
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   expect(overflow).toBeLessThanOrEqual(1)
+})
+
+test("a stopped member stays on its network's sheet, which then offers no Remove", async ({
+  page,
+}) => {
+  await mockNetworks(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`/docker/networks?network=${id("monitoring_default")}`)
+
+  const sheet = page.getByRole("dialog")
+  const alertmanager = sheet.getByRole("table").getByRole("row").filter({
+    hasText: "monitoring-alertmanager-1",
+  })
+  await expect(alertmanager.getByText("exited")).toBeVisible()
+  await expect(sheet.getByText("3 running")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Remove" })).toHaveCount(0)
 })

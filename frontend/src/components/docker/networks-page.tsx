@@ -47,6 +47,7 @@ import {
   OWNER_KINDS,
   addressPlan,
   endpointsByContainer,
+  isSystem,
   isUnused,
   networkChanges,
   networkHue,
@@ -76,7 +77,7 @@ const LENSES: { value: Exclude<Lens, "">; label: string; title: string; tone?: "
     title: "Reached only by address: the default bridge has no names",
     tone: "warning",
   },
-  { value: "stopped", label: "Not running", title: "Attached, and holding no address" },
+  { value: "stopped", label: "Stopped", title: "Attached, and holding no address until started" },
 ]
 
 /**
@@ -137,7 +138,10 @@ export function Networks() {
   )
   const traffic = useLiveTraffic()
 
-  const [containers, setContainers] = useState<Container[]>([])
+  // Undefined until the socket's first answer, so an empty host is told
+  // apart from one still being read.
+  const [listed, setContainers] = useState<Container[]>()
+  const containers = useMemo(() => listed ?? [], [listed])
   const [containerTraffic, setContainerTraffic] = useState<Map<string, ContainerTraffic>>(
     () => new Map(),
   )
@@ -162,7 +166,9 @@ export function Networks() {
       for (const { frame, rates } of measured) {
         const prior = held.get(frame.id)
         if (rates.rx === null || rates.tx === null) {
-          if (prior) next.set(frame.id, prior)
+          // One frame Docker could not measure keeps the last reading; a
+          // container that has lost its interfaces stops reading at all.
+          if (prior && !prior.held) next.set(frame.id, { ...prior, held: true })
           continue
         }
         const point: NetworkLivePoint = {
@@ -186,7 +192,7 @@ export function Networks() {
     if (envelope.type !== "events") return
     setEvents((before) => [...(envelope.data as DockerEvent[]), ...before].slice(0, 400))
   }, [])
-  useSocket("/docker/events/stream?kinds=network", { onMessage: onEvents })
+  useSocket("/docker/events/stream", { onMessage: onEvents, query: { kinds: "network" } })
 
   const networks = useMemo(() => [...(list.data ?? [])].sort(networkOrder), [list.data])
   const byContainer = useMemo(() => new Map(containers.map((c) => [c.id, c])), [containers])
@@ -200,7 +206,12 @@ export function Networks() {
     }
     return out
   }, [networks, traffic.series])
-  const plan = useMemo(() => addressPlan(info.data, networks), [info.data, networks])
+  // Docker's built-in pools are an answer only once `docker info` has said
+  // no others are set; before that, or when it fails, the pools are unknown.
+  const plan = useMemo(
+    () => (info.data ? addressPlan(info.data, networks) : undefined),
+    [info.data, networks],
+  )
   const changes = useMemo(() => networkChanges(events, containers), [events, containers])
 
   const placements = useMemo(() => {
@@ -252,7 +263,7 @@ export function Networks() {
       const placed = placements.get(c.id) ?? []
       if (placed.filter((p) => p.network.driver !== "host").length > 1) out.several++
       if (placed.some((p) => p.network.name === "bridge")) out.default++
-      if (c.state !== "running") out.stopped++
+      if (c.state !== "running" && c.state !== "paused") out.stopped++
     }
     return out
   }, [containers, placements])
@@ -266,7 +277,7 @@ export function Networks() {
         return false
       }
       if (lens === "default" && !placed.some((p) => p.network.name === "bridge")) return false
-      if (lens === "stopped" && c.state === "running") return false
+      if (lens === "stopped" && (c.state === "running" || c.state === "paused")) return false
       if (!needle) return true
       return (
         c.name.toLowerCase().includes(needle) ||
@@ -275,7 +286,8 @@ export function Networks() {
         placed.some(
           (p) =>
             p.network.name.toLowerCase().includes(needle) ||
-            (p.endpoint?.ipv4 ?? "").includes(needle),
+            (p.endpoint?.ipv4 ?? "").includes(needle) ||
+            (p.endpoint?.ipv6 ?? "").toLowerCase().includes(needle),
         )
       )
     })
@@ -286,17 +298,38 @@ export function Networks() {
     containersPanel.current?.scrollIntoView({ block: "start", behavior: "smooth" })
   }
 
+  // Docker's prune counts endpoints, and a stopped container holds none, so
+  // it also removes a network whose members are all stopped — which then
+  // fail to start. The confirmation names those too.
+  const stoppedOnly = networks.filter(
+    (n) =>
+      !isUnused(n) &&
+      !isSystem(n) &&
+      (n.endpoints ?? []).every((e) => {
+        const state = byContainer.get(e.container)?.state
+        return state !== undefined && state !== "running" && state !== "paused"
+      }),
+  )
   const prune = () =>
     confirm({
       title: "Remove unused networks",
       confirmLabel: "Remove",
       description: (
-        <p>
-          Removes the {plural(unused.length, "network")} nothing is attached to:{" "}
-          <b>{unused.map((n) => n.name).join(", ")}</b>, and returns{" "}
-          {unused.length === 1 ? "its subnet" : "their subnets"} to the pool. Docker recreates a
-          compose network the next time its stack comes up.
-        </p>
+        <div className="space-y-2">
+          <p>
+            Removes the {plural(unused.length, "network")} nothing is attached to:{" "}
+            <b>{unused.map((n) => n.name).join(", ")}</b>, and returns{" "}
+            {unused.length === 1 ? "its subnet" : "their subnets"} to the pool. Docker recreates a
+            compose network the next time its stack comes up.
+          </p>
+          {stoppedOnly.length > 0 && (
+            <p className="text-warning">
+              Docker also removes networks whose containers are all stopped:{" "}
+              <b>{stoppedOnly.map((n) => n.name).join(", ")}</b>. Those containers will not start
+              until their network is made again.
+            </p>
+          )}
+        </div>
       ),
       action: async () => {
         const rep = await post<{ items: string[] }>("/docker/networks/prune")
@@ -412,7 +445,10 @@ export function Networks() {
           trafficReady={traffic.now > 0}
           trafficFailed={traffic.error !== undefined && traffic.now === 0}
           plan={plan}
+          poolsFailed={info.error !== undefined && !info.data}
           changes={changes}
+          networkIds={new Set(networks.map((n) => n.id))}
+          containersReady={listed !== undefined}
           containers={byContainer}
           now={now}
           onOpen={(network) => select(typeof network === "string" ? network : network.id)}
@@ -593,8 +629,12 @@ export function Networks() {
             {containers.length === 0 ? (
               <EmptyState
                 icon={Box}
-                title="Waiting for the containers"
-                description="They arrive over the same socket as the Containers page."
+                title={listed ? "No containers" : "Reading the containers…"}
+                description={
+                  listed
+                    ? "Nothing on this host is on any network yet."
+                    : "They arrive over the same socket as the Containers page."
+                }
                 className="my-4"
               />
             ) : visibleContainers.length === 0 ? (
@@ -608,6 +648,7 @@ export function Networks() {
               <ContainerNetworkRows
                 key={`${onNetwork}\u0000${lens}\u0000${query}`}
                 rows={visibleContainers}
+                focused={onNetwork || undefined}
                 placements={placements}
                 traffic={containerTraffic}
                 onNetwork={showOn}
@@ -660,15 +701,15 @@ function Verdict({
   pressed,
   onUnused,
 }: {
-  plan: ReturnType<typeof addressPlan>
+  plan?: ReturnType<typeof addressPlan>
   unused: number
   pressed: boolean
   onUnused: () => void
 }) {
-  if (plan.pressure === "full") {
+  if (plan?.pressure === "full") {
     return <Status tone="danger" label="Address pool full" />
   }
-  if (plan.pressure === "warning") {
+  if (plan?.pressure === "warning") {
     return <Status tone="warning" label={`Address pool ${plan.used} of ${plan.total} taken`} />
   }
   if (unused > 0) {

@@ -94,9 +94,11 @@ export function AttachDialog({
     >
       <div className="space-y-3">
         <div className="space-y-1.5">
-          <Label className="text-xs">Container</Label>
+          <Label htmlFor="attach-container" className="text-xs">
+            Container
+          </Label>
           <Select value={picked} onValueChange={setPicked}>
-            <SelectTrigger className="w-full">
+            <SelectTrigger id="attach-container" className="w-full">
               <SelectValue placeholder="Pick one" />
             </SelectTrigger>
             <SelectContent>
@@ -110,8 +112,11 @@ export function AttachDialog({
           {available.length === 0 && <Hint>Every container is already on this network.</Hint>}
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Extra name (optional)</Label>
+          <Label htmlFor="attach-alias" className="text-xs">
+            Extra name (optional)
+          </Label>
           <Input
+            id="attach-alias"
             value={alias}
             spellCheck={false}
             className="font-mono text-xs"

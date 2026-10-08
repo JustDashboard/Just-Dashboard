@@ -76,6 +76,15 @@ export function networkOrder(a: DockerNetwork, b: DockerNetwork) {
   return rank(a) - rank(b) || a.name.localeCompare(b.name)
 }
 
+/**
+ * Whether Docker refuses `docker network connect` here. Only a swarm network
+ * made without `--attachable` does; a local network takes a container at any
+ * time, compose's included, whatever its `attachable` flag says.
+ */
+export function refusesAttach(network: Pick<DockerNetwork, "scope" | "attachable">) {
+  return network.scope === "swarm" && !network.attachable
+}
+
 /** Removable from this page: not Docker's own, and nothing attached (Docker refuses otherwise). */
 export function isUnused(network: DockerNetwork) {
   return !isSystem(network) && network.usedBy.length === 0
@@ -206,7 +215,8 @@ export function addressPlan(
     }
   }
 
-  const lastHeld = Math.max(-1, ...held.keys())
+  let lastHeld = -1
+  for (const index of held.keys()) if (index > lastHeld) lastHeld = index
   const shown =
     total <= SHOWN_BLOCKS
       ? total

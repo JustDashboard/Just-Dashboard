@@ -3,6 +3,7 @@ package dockerx
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -135,5 +136,41 @@ func TestNetworkListingCarriesEachMembersAddress(t *testing.T) {
 	if web.Name != "web" || web.Container != "running" || web.IPv4 != "172.18.0.2/16" ||
 		web.IPv6 != "fd00::2/64" || web.MAC != "02:42:ac:12:00:02" {
 		t.Fatalf("running member = %+v", web)
+	}
+}
+
+// Docker's network inspect lists endpoints, and a stopped container holds
+// none: a network whose only member is stopped read as empty, offered Remove,
+// and Docker would have removed it from under the container.
+func TestNetworkDetailKeepsStoppedMembers(t *testing.T) {
+	c := cacheTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch strings.TrimPrefix(r.URL.Path, "/v1.47") {
+		case "/networks/private":
+			fmt.Fprint(w, `{"Id":"network","Name":"private","Driver":"bridge","IPAM":{"Config":[{"Subnet":"172.18.0.0/16","Gateway":"172.18.0.1"}]},"Containers":{"running":{"Name":"web","IPv4Address":"172.18.0.2/16"}}}`)
+		case "/containers/json":
+			fmt.Fprint(w, `[{"Id":"running","Names":["/web"],"State":"running","NetworkSettings":{"Networks":{"private":{}}}},{"Id":"stopped","Names":["/old"],"State":"exited","Labels":{"com.docker.compose.project":"site"},"NetworkSettings":{"Networks":{"private":{}}}},{"Id":"elsewhere","Names":["/other"],"State":"exited","NetworkSettings":{"Networks":{"bridge":{}}}}]`)
+		case "/containers/running/json":
+			fmt.Fprint(w, `{"Id":"running","NetworkSettings":{"Networks":{"private":{"Aliases":["web","api"]}}}}`)
+		case "/containers/stopped/json":
+			fmt.Fprint(w, `{"Id":"stopped","NetworkSettings":{"Networks":{"private":{"Aliases":["old"],"MacAddress":"02:42:ac:12:00:09"}}}}`)
+		default:
+			t.Errorf("unexpected request: %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+	d, err := c.NetworkDetail(cacheTestContext(t), "private")
+	if err != nil || len(d.Members) != 2 || d.Containers != 2 {
+		t.Fatalf("detail = %+v, %v", d, err)
+	}
+	old, web := d.Members[0], d.Members[1]
+	if old.ID != "stopped" || old.State != "exited" || old.Stack != "site" || old.IPv4 != "" ||
+		old.MAC != "02:42:ac:12:00:09" || !slices.Equal(old.Aliases, []string{"old"}) {
+		t.Fatalf("stopped member = %+v", old)
+	}
+	if web.IPv4 != "172.18.0.2/16" || web.State != "running" || !slices.Equal(web.Aliases, []string{"web", "api"}) {
+		t.Fatalf("running member = %+v", web)
+	}
+	if !slices.Equal(d.UsedBy, []string{"old", "web"}) || d.Gateway != "172.18.0.1" {
+		t.Fatalf("usedBy = %v, gateway = %q", d.UsedBy, d.Gateway)
 	}
 }
