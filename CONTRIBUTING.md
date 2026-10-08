@@ -71,6 +71,8 @@ to the contribution terms above, including the additional licence grant to the p
   Browser tests reuse a running production frontend on loopback port 43117 locally. Start one from
   the worktree under test and rebuild/restart it after source changes. `JD_BROWSER_BASE_URL` selects
   an explicitly managed frontend on another port when worktrees run alongside one another.
+  Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
+  it to use the existing Playwright worker setting.
 - Local server advisor changes also run `scripts/test-server-advisor-linux.sh`, which builds static
   Go test binaries and checks native filesystem/procfs behavior in Ubuntu 22.04/24.04, Debian 12,
   Alpine 3.20 and Fedora 42 containers. Containers use no network during tests and share the host

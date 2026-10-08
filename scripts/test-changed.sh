@@ -37,11 +37,19 @@
 #
 # The browser specs run against the frontend on port 43117, or the one
 # JD_BROWSER_BASE_URL names, which must be serving a build of this tree.
+# JD_BROWSER_WORKERS sets a positive worker count for memory-constrained hosts;
+# unset, the existing Playwright configuration determines concurrency.
 
 set -euo pipefail
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+
+browser_workers=${JD_BROWSER_WORKERS:-}
+if [ -n "$browser_workers" ] && ! [[ "$browser_workers" =~ ^[1-9][0-9]*$ ]]; then
+	echo "JD_BROWSER_WORKERS must be a positive integer" >&2
+	exit 2
+fi
 
 base=${1:-}
 if [ -z "$base" ]; then
@@ -273,7 +281,11 @@ fi
 status=0
 if [ "${#specs[@]}" -gt 0 ]; then
 	echo "Browser specs: ${specs[*]}"
-	(cd frontend && bunx playwright test "${specs[@]}") || status=$?
+	browser_args=()
+	if [ -n "$browser_workers" ]; then
+		browser_args+=("--workers=$browser_workers")
+	fi
+	(cd frontend && bunx playwright test "${specs[@]}" "${browser_args[@]}") || status=$?
 fi
 if [ -n "$gotest" ]; then
 	wait "$gotest" || status=$?
