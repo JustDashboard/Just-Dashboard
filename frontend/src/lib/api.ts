@@ -153,6 +153,8 @@ type RequestOptions = {
   confirm?: string
   signal?: AbortSignal
   query?: Query
+  /** An operation whose recovery contract requires the existing reconnect protocol. */
+  networkApply?: "pending"
 }
 
 function buildUrl(path: string, query?: RequestOptions["query"]) {
@@ -179,6 +181,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const method = options.method ?? "GET"
   if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())) {
     Object.assign(headers, mutationHeaders(), networkPendingHeaders(path, method))
+    if (options.networkApply) headers["X-JD-Network-Apply"] = options.networkApply
   }
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
   if (options.confirm) {

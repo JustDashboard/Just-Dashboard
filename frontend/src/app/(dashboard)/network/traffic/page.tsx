@@ -50,7 +50,7 @@ export default function NetworkTrafficPage() {
       </Section>
 
       {shaping.data ? (
-        <Shaping view={shaping.data} onChanged={shaping.refresh} />
+        <Shaping view={shaping.data} onChanged={shaping.refresh} stale={Boolean(shaping.error)} />
       ) : (
         <Section title="Shaping">
           {shaping.error ? (

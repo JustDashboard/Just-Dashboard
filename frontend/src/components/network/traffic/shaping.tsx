@@ -3,7 +3,7 @@
 import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Information } from "@/components/icons"
-import { del, post } from "@/lib/api"
+import { ApiError, del, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { BBRState, ShapeDevice, ShapingView } from "@/lib/types"
@@ -37,6 +37,8 @@ import {
 } from "@/components/ui/table"
 import { useConfirm } from "@/components/confirm-dialog"
 import { LinkGlyph } from "@/components/network/marks"
+import { SQMFields } from "./sqm-fields"
+import { sqmDraft, sqmProblem, sqmProfile } from "./sqm-profile"
 import {
   formatKbit,
   guarded,
@@ -78,7 +80,15 @@ const num = (value: number) => value.toLocaleString()
  * BBR is above it, as the one switch the kernel has for how TCP paces itself —
  * it is the host's, not a device's — with the algorithm now in force.
  */
-export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () => void }) {
+export function Shaping({
+  view,
+  onChanged,
+  stale = false,
+}: {
+  view: ShapingView
+  onChanged: () => void
+  stale?: boolean
+}) {
   const [editing, setEditing] = useState<string>()
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -95,14 +105,16 @@ export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () 
         </p>
       ),
       action: async () => {
-        await del(`/network/shaping/${encodeURIComponent(d.name)}`)
+        await del(`/network/shaping/${encodeURIComponent(d.name)}`, {
+          ...(d.sqm ? { networkApply: "pending" as const } : {}),
+        })
         onChanged()
       },
     })
 
   return (
     <Section title="Shaping">
-      <BBRSwitch bbr={view.bbr} onChanged={onChanged} />
+      <BBRSwitch bbr={view.bbr} onChanged={onChanged} stale={stale} />
       <Panel>
         <PanelHeader
           title="Queues"
@@ -164,6 +176,7 @@ export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () 
                             variant="outline"
                             aria-label={`Edit the limits on ${d.name}`}
                             onClick={() => setEditing(d.name)}
+                            disabled={stale}
                           >
                             Edit
                           </Button>
@@ -173,6 +186,7 @@ export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () 
                               variant="ghost"
                               aria-label={`Clear the limits on ${d.name}`}
                               onClick={() => clear(d)}
+                              disabled={stale}
                             >
                               Clear
                             </Button>
@@ -194,6 +208,7 @@ export function Shaping({ view, onChanged }: { view: ShapingView; onChanged: () 
           qdiscs={view.qdiscs}
           onClose={() => setEditing(undefined)}
           onSaved={onChanged}
+          stale={stale}
         />
       )}
       {dialog}
@@ -229,6 +244,24 @@ function DeviceNote({ device, stat }: { device: ShapeDevice; stat: ShapeDevice["
           {device.verification.reason && ` · ${device.verification.reason}`}
         </span>
       )}
+      {device.sqm && (
+        <span className="mt-1 block max-w-96 text-hint font-normal whitespace-normal text-muted-foreground">
+          Download SQM · CAKE on <span className="font-mono">{device.sqm.ifb}</span> ·{" "}
+          {formatKbit(device.ingressKbit)} · {device.sqm.diffserv} · {device.sqm.flowMode}
+          {device.sqm.queue && (
+            <span className="block">
+              IFB: {num(device.sqm.queue.packets)} packets · {num(device.sqm.queue.drops)} dropped ·{" "}
+              {bytes(device.sqm.queue.backlog)} held
+            </span>
+          )}
+          <span className="block">
+            Host helper {device.sqm.helper.status} · loaded boot command {device.sqm.boot.status}
+          </span>
+          {(device.sqm.helper.reason || device.sqm.boot.reason) && (
+            <span className="block">{device.sqm.helper.reason || device.sqm.boot.reason}</span>
+          )}
+        </span>
+      )}
       {device.guard && (
         <span className="mt-0.5 flex max-w-96 items-start gap-1 text-hint font-normal whitespace-normal text-muted-foreground">
           <Information aria-hidden className="mt-0.5 size-3 shrink-0" />
@@ -251,7 +284,15 @@ function DeviceNote({ device, stat }: { device: ShapeDevice; stat: ShapeDevice["
 }
 
 /** The kernel's congestion control as the switch it is, with what is in force and what the host offers. */
-function BBRSwitch({ bbr, onChanged }: { bbr: BBRState; onChanged: () => void }) {
+function BBRSwitch({
+  bbr,
+  onChanged,
+  stale,
+}: {
+  bbr: BBRState
+  onChanged: () => void
+  stale: boolean
+}) {
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const toggle = async (on: boolean) => {
@@ -286,7 +327,7 @@ function BBRSwitch({ bbr, onChanged }: { bbr: BBRState; onChanged: () => void })
           )
         }
         checked={bbr.active}
-        disabled={!can("system.admin") || !bbr.available || busy}
+        disabled={!can("system.admin") || !bbr.available || busy || stale}
         onCheckedChange={(on) => void toggle(on)}
       />
     </OptionList>
@@ -309,35 +350,57 @@ function ShapeSheet({
   qdiscs,
   onClose,
   onSaved,
+  stale,
 }: {
   device: ShapeDevice
   qdiscs: string[]
   onClose: () => void
   onSaved: () => void
+  stale: boolean
 }) {
   const [qdisc, setQdisc] = useState(device.qdisc || device.root?.kind || "")
   const [upload, setUpload] = useState(kbitToMbit(device.egressKbit))
   const [download, setDownload] = useState(kbitToMbit(device.ingressKbit))
+  const [downloadSQM, setDownloadSQM] = useState(Boolean(device.sqm))
+  const [profile, setProfile] = useState(() => sqmDraft(device.sqm))
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string>()
   const uploadProblem = limitProblem(upload, device)
   const downloadProblem = limitProblem(download, device)
+  const profileProblem = downloadSQM ? sqmProblem(profile, mbitToKbit(download)) : undefined
 
   const submit = async () => {
     setBusy(true)
     setRefusal(undefined)
     try {
-      await post(`/network/shaping/${encodeURIComponent(device.name)}`, {
-        qdisc: qdiscs.includes(qdisc) ? qdisc : "",
-        egressKbit: mbitToKbit(upload),
-        ingressKbit: mbitToKbit(download),
-      })
-      notify.success(`${device.name} is shaped`)
+      await post(
+        `/network/shaping/${encodeURIComponent(device.name)}`,
+        {
+          qdisc: qdiscs.includes(qdisc) ? qdisc : "",
+          egressKbit: mbitToKbit(upload),
+          ingressKbit: mbitToKbit(download),
+          ...(downloadSQM ? { sqm: sqmProfile(profile) } : {}),
+        },
+        { ...(downloadSQM || device.sqm ? { networkApply: "pending" as const } : {}) },
+      )
+      notify.success(
+        downloadSQM || device.sqm
+          ? `${device.name} applied; reconnect and confirm the network change`
+          : `${device.name} is shaped`,
+      )
       onSaved()
       onClose()
     } catch (err) {
-      setRefusal(err instanceof Error ? err.message : String(err))
+      const message = err instanceof Error ? err.message : String(err)
+      const uncertain =
+        (downloadSQM || device.sqm) &&
+        ((err instanceof ApiError && err.status >= 500) || err instanceof TypeError)
+      setRefusal(
+        uncertain
+          ? `${message} The outcome may be uncertain. Inspect network change status before retrying.`
+          : message,
+      )
     } finally {
       setBusy(false)
     }
@@ -364,7 +427,12 @@ function ShapeSheet({
           <Button
             onClick={() => void submit()}
             pending={busy}
-            disabled={!can("system.admin") || busy || Boolean(uploadProblem || downloadProblem)}
+            disabled={
+              !can("system.admin") ||
+              stale ||
+              busy ||
+              Boolean(uploadProblem || downloadProblem || profileProblem)
+            }
           >
             Apply
           </Button>
@@ -375,7 +443,8 @@ function ShapeSheet({
         className="flex flex-col gap-6"
         onSubmit={(event) => {
           event.preventDefault()
-          if (!uploadProblem && !downloadProblem && !busy) void submit()
+          if (!uploadProblem && !downloadProblem && !profileProblem && !busy && !stale)
+            void submit()
         }}
       >
         <FormFacts>
@@ -419,18 +488,32 @@ function ShapeSheet({
             <Field
               label="Download limit"
               htmlFor="shape-download"
-              hint="Dropped as it arrives, which slows TCP."
+              hint={
+                downloadSQM
+                  ? "Queued on the managed IFB."
+                  : "Policed: excess packets are dropped as they arrive."
+              }
               error={downloadProblem}
             >
               <MbitField id="shape-download" value={download} onChange={setDownload} />
             </Field>
           </FieldRow>
-          {refusal && (
+          <OptionList>
+            <OptionRow
+              title="Use download SQM"
+              hint="CAKE queues downloads on a managed IFB for host and flow fairness. Requires independent recovery and a successful reconnect confirmation."
+              checked={downloadSQM}
+              disabled={busy}
+              onCheckedChange={setDownloadSQM}
+            />
+          </OptionList>
+          {(refusal || profileProblem) && (
             <p role="alert" className="animate-rise text-body text-destructive">
-              {refusal}
+              {refusal || profileProblem}
             </p>
           )}
         </FormSection>
+        {downloadSQM && <SQMFields draft={profile} onChange={setProfile} disabled={busy} />}
       </form>
     </SidePanel>
   )

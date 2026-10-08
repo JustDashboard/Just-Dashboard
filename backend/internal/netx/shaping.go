@@ -31,8 +31,8 @@ const (
 // Egress is htb with one class at the limit and fq_codel under it, so a
 // saturated upload stays fair between flows instead of queueing behind
 // whichever sent first; cake does both jobs itself and takes a bandwidth.
-// Ingress cannot be queued, only policed: packets over the rate are dropped
-// as they arrive, which is what makes TCP slow down.
+// Legacy ingress limits police packets as they arrive. Explicit SQM profiles
+// use the separately owned IFB/CAKE lifecycle instead of these batch lines.
 //
 // Each half starts by clearing what the device had, so the unit can run over a
 // device that is already shaped: htb refuses to be replaced by itself and
@@ -65,7 +65,7 @@ func shapeLines(sh ShapeSpec) []string {
 			fmt.Sprintf("qdisc del dev %s root", d),
 			fmt.Sprintf("qdisc replace dev %s root %s", d, sh.Qdisc))
 	}
-	if sh.IngressKbit > 0 {
+	if sh.IngressKbit > 0 && sh.SQM == nil {
 		out = append(out,
 			fmt.Sprintf("qdisc replace dev %s handle ffff: ingress", d),
 			fmt.Sprintf("filter del dev %s parent ffff: prio 1", d),
@@ -98,6 +98,18 @@ func normShape(sh ShapeSpec) (ShapeSpec, error) {
 		if k < 0 || k > maxShapeKbit {
 			return sh, fmt.Errorf("a speed limit is between 1 kbit/s and %d kbit/s; 0 is no limit", maxShapeKbit)
 		}
+	}
+	if sh.SQM != nil {
+		if sh.IngressKbit == 0 {
+			return sh, errors.New("download SQM needs a positive download limit")
+		}
+		profile, err := normSQMProfile(sh.SQM.SQMProfile)
+		if err != nil {
+			return sh, err
+		}
+		copy := *sh.SQM
+		copy.SQMProfile = profile
+		sh.SQM = &copy
 	}
 	if sh.Qdisc == "" && sh.EgressKbit == 0 && sh.IngressKbit == 0 {
 		return sh, errors.New("set a queue discipline, a speed limit, or both")
@@ -189,7 +201,7 @@ func undoShaping(ctx context.Context, set ShapeSpec, prev *ShapeSpec) error {
 	if set.hasRoot() {
 		removeRoot(ctx, set.Device)
 	}
-	if set.IngressKbit > 0 {
+	if set.IngressKbit > 0 && set.SQM == nil {
 		removeIngress(ctx, set.Device)
 	}
 	if prev == nil {
@@ -204,8 +216,9 @@ type ShapeRequest struct {
 	Qdisc string `json:"qdisc"`
 	// EgressKbit and IngressKbit are the upload and download limits in
 	// kilobits a second; zero is no limit.
-	EgressKbit  int `json:"egressKbit"`
-	IngressKbit int `json:"ingressKbit"`
+	EgressKbit  int         `json:"egressKbit"`
+	IngressKbit int         `json:"ingressKbit"`
+	SQM         *SQMProfile `json:"sqm,omitempty"`
 }
 
 // linkKind reads a device's kernel kind, and so also whether it exists.
@@ -234,7 +247,11 @@ func linkKind(ctx context.Context, device string) (string, error) {
 
 // SetShaping gives a device a queue discipline and speed limits.
 func (s *Service) SetShaping(ctx context.Context, device string, req ShapeRequest, client, actor string) error {
-	sh, err := normShape(ShapeSpec{Device: device, Qdisc: req.Qdisc, EgressKbit: req.EgressKbit, IngressKbit: req.IngressKbit})
+	var sqm *SQMSpec
+	if req.SQM != nil {
+		sqm = &SQMSpec{SQMProfile: *req.SQM}
+	}
+	sh, err := normShape(ShapeSpec{Device: device, Qdisc: req.Qdisc, EgressKbit: req.EgressKbit, IngressKbit: req.IngressKbit, SQM: sqm})
 	if err != nil {
 		return err
 	}
@@ -242,7 +259,7 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 	if err != nil {
 		return err
 	}
-	if kind == "veth" || kind == "loopback" {
+	if kind == "veth" || kind == "loopback" || kind == "ifb" {
 		return fmt.Errorf("%s is a %s device: shape the interface it leads to, not one end of a pair", sh.Device, kind)
 	}
 	if (sh.EgressKbit > 0 && sh.EgressKbit < minGuardedKbit) || (sh.IngressKbit > 0 && sh.IngressKbit < minGuardedKbit) {
@@ -276,9 +293,32 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 	}
 	// A saved spec is ownership evidence only for the half it actually manages.
 	// Capture supported unowned queues before the first destructive command.
-	baseline, err := shapingBaseline(ctx, sh, prev)
+	baselineSet, baselinePrev := sh, prev
+	if sh.SQM != nil {
+		baselineSet.IngressKbit = 0
+	}
+	if prev != nil && prev.SQM != nil {
+		copy := *prev
+		copy.IngressKbit, copy.SQM = 0, nil
+		baselinePrev = &copy
+		if sh.SQM == nil && sh.IngressKbit > 0 {
+			if !prev.SQM.CreatedHook {
+				return errors.New("the existing ingress hook belongs to its native owner; keep download SQM or clear the download limit")
+			}
+			baselineSet.IngressKbit = 0
+		}
+	}
+	baseline, err := shapingBaseline(ctx, baselineSet, baselinePrev)
 	if err != nil {
 		return err
+	}
+	if err := prepareSQM(ctx, &sh, prev); err != nil {
+		return err
+	}
+	if sh.SQM != nil || prev != nil && prev.SQM != nil {
+		if err := s.prepareSQMHelper(ctx); err != nil {
+			return err
+		}
 	}
 
 	if idx < 0 {
@@ -288,7 +328,17 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 		sh.Made = next.Shaping[idx].Made
 		next.Shaping[idx] = sh
 	}
+	sqmUndo, err := sqmRecoveryPlan(old, next)
+	if err != nil {
+		return err
+	}
 	restore := func(ctx context.Context) {
+		for _, command := range sqmUndo {
+			if err := recoverSQM(ctx, command.Args); err != nil {
+				recordRecoveryError(ctx, err)
+				return
+			}
+		}
 		if err := undoShaping(ctx, sh, prev); err != nil {
 			recordRecoveryError(ctx, err)
 			s.log.Error("restoring a device's shaping after a failed change", "device", sh.Device, "err", err)
@@ -305,25 +355,63 @@ func (s *Service) SetShaping(ctx context.Context, device string, req ShapeReques
 	for _, line := range baseline {
 		recovery = append(recovery, recoveryCommand{Tool: "tc", Args: strings.Fields(line)})
 	}
+	var verifyPersistence func(context.Context) error
+	if sh.SQM != nil || prev != nil && prev.SQM != nil {
+		verifyPersistence = func(ctx context.Context) error {
+			if hasSQM(next) {
+				return s.verifySQMBoot(ctx)
+			}
+			return nil
+		}
+	}
 	return s.commit(ctx, next, step{
 		recovery: recovery,
-		apply: func(ctx context.Context) error {
+		apply: func(ctx context.Context) (applyErr error) {
+			touched := false
+			defer func() {
+				if applyErr != nil && touched {
+					rollback(ctx, restore)
+				}
+			}()
+			if prev != nil && prev.SQM != nil {
+				if err := verifySQM(ctx, *prev); err != nil {
+					return err
+				}
+				if sh.SQM == nil {
+					touched = true
+					if err := removeSQM(ctx, *prev, false); err != nil {
+						return err
+					}
+				}
+			} else if sh.SQM != nil && prev != nil && prev.IngressKbit > 0 {
+				if err := verifyShaping(ctx, *prev); err != nil {
+					return err
+				}
+				touched = true
+				removeIngress(ctx, sh.Device)
+			}
+			touched = true
 			// A half the new entry no longer sets is cleared; a half it sets is
 			// replaced by its own lines.
 			if prev != nil && prev.hasRoot() && !sh.hasRoot() {
 				removeRoot(ctx, sh.Device)
 			}
-			if prev != nil && prev.IngressKbit > 0 && sh.IngressKbit == 0 {
+			if prev != nil && prev.SQM == nil && prev.IngressKbit > 0 && sh.IngressKbit == 0 {
 				removeIngress(ctx, sh.Device)
 			}
 			if err := runShapeLines(ctx, shapeLines(sh)); err != nil {
-				rollback(ctx, restore)
 				return err
+			}
+			if sh.SQM != nil {
+				if err := applySQM(ctx, sh, sqmPrevious(prev)); err != nil {
+					return err
+				}
 			}
 			return nil
 		},
-		undo:   restore,
-		verify: func(ctx context.Context) error { return verifyShaping(ctx, sh) },
+		undo:              restore,
+		verify:            func(ctx context.Context) error { return verifyShaping(ctx, sh) },
+		verifyPersistence: verifyPersistence,
 	})
 }
 
@@ -351,26 +439,76 @@ func (s *Service) ClearShaping(ctx context.Context, device string) error {
 	if prev == nil {
 		return fmt.Errorf("shaping of %s: %w", device, ErrNotFound)
 	}
-	if _, err := shapingBaseline(ctx, ShapeSpec{Device: device}, prev); err != nil {
+	baselinePrev := prev
+	if prev.SQM != nil {
+		if err := verifySQM(ctx, *prev); err != nil {
+			return err
+		}
+		if err := s.prepareSQMHelper(ctx); err != nil {
+			return err
+		}
+		copy := *prev
+		copy.SQM, copy.IngressKbit = nil, 0
+		baselinePrev = &copy
+	}
+	if _, err := shapingBaseline(ctx, ShapeSpec{Device: device}, baselinePrev); err != nil {
 		return err
+	}
+	var verifyPersistence func(context.Context) error
+	if prev.SQM != nil {
+		verifyPersistence = func(ctx context.Context) error {
+			if hasSQM(next) {
+				return s.verifySQMBoot(ctx)
+			}
+			return nil
+		}
 	}
 
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
+			if prev.SQM != nil {
+				if err := removeSQM(ctx, *prev, false); err != nil {
+					commands, planErr := sqmRecoveryPlan(old, next)
+					if planErr == nil {
+						for _, command := range commands {
+							recordRecoveryError(ctx, recoverSQM(ctx, command.Args))
+						}
+					} else {
+						recordRecoveryError(ctx, planErr)
+					}
+					return err
+				}
+			}
 			if prev.hasRoot() {
 				removeRoot(ctx, device)
 			}
-			if prev.IngressKbit > 0 {
+			if prev.IngressKbit > 0 && prev.SQM == nil {
 				removeIngress(ctx, device)
 			}
 			return nil
 		},
 		undo: func(ctx context.Context) {
+			if prev.SQM != nil {
+				commands, err := sqmRecoveryPlan(old, next)
+				if err == nil {
+					for _, command := range commands {
+						err = recoverSQM(ctx, command.Args)
+						if err != nil {
+							break
+						}
+					}
+				}
+				if err != nil {
+					recordRecoveryError(ctx, err)
+					return
+				}
+			}
 			if err := runShapeLines(ctx, shapeLines(*prev)); err != nil {
 				recordRecoveryError(ctx, err)
 				s.log.Error("restoring a device's shaping after a failed change", "device", device, "err", err)
 			}
 		},
+		verifyPersistence: verifyPersistence,
 	})
 }
 
@@ -406,7 +544,7 @@ func shapingBaseline(ctx context.Context, sh ShapeSpec, prev *ShapeSpec) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	if sh.IngressKbit > 0 {
+	if sh.IngressKbit > 0 && sh.SQM == nil {
 		if ingressKind(qs) == "clsact" {
 			return nil, fmt.Errorf("%s has a clsact queue; its tc-BPF filters must be preserved. Limit upload only", sh.Device)
 		}
@@ -628,7 +766,7 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 			}
 		}
 	}
-	if sh.IngressKbit > 0 {
+	if sh.IngressKbit > 0 && sh.SQM == nil {
 		if !ingress {
 			return shapingDrift("%s has no ingress policer after setting one", sh.Device)
 		}
@@ -668,6 +806,9 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 		if err := verifyPolicer(out, sh.IngressKbit); err != nil {
 			return fmt.Errorf("%s: %w", sh.Device, err)
 		}
+	}
+	if sh.SQM != nil {
+		return verifySQM(ctx, sh)
 	}
 	return nil
 }
@@ -732,6 +873,7 @@ type ShapeDevice struct {
 	Shapeable    bool               `json:"shapeable"`
 	Guard        string             `json:"guard"`
 	Verification *ShapeVerification `json:"verification,omitempty"`
+	SQM          *SQMView           `json:"sqm,omitempty"`
 }
 
 // BBRState is the kernel's congestion control and default queue.
@@ -803,7 +945,7 @@ func (s *Service) Shaping(ctx context.Context, client string) (*ShapingView, err
 		default:
 			d.Kind = l.LinkInfo.InfoKind
 		}
-		if d.Kind == "loopback" || d.Kind == "veth" {
+		if d.Kind == "loopback" || d.Kind == "veth" || d.Kind == "ifb" {
 			d.Shapeable = false
 			d.Guard = "Shape the interface this one leads to; a loopback or one end of a veth pair carries no traffic of its own to limit."
 		}
@@ -821,6 +963,9 @@ func (s *Service) Shaping(ctx context.Context, client string) (*ShapingView, err
 			d.Managed, d.Qdisc, d.EgressKbit, d.IngressKbit = true, sh.Qdisc, sh.EgressKbit, sh.IngressKbit
 			verifyCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			d.Verification = readShapeVerification(verifyCtx, sh)
+			if sh.SQM != nil {
+				d.SQM = s.sqmView(verifyCtx, sh, byDev[sh.SQM.IFB])
+			}
 			cancel()
 		}
 		v.Devices = append(v.Devices, d)

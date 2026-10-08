@@ -7583,6 +7583,23 @@ export type ShapeDevice = {
   shapeable: boolean
   guard: string
   verification?: { status: "verified" | "drift" | "unknown"; checkedAt: string; reason?: string }
+  sqm?: SQMProfile & {
+    ifb: string
+    queue: QdiscStat | null
+    helper: NonNullable<ShapeDevice["verification"]>
+    boot: NonNullable<ShapeDevice["verification"]>
+  }
+}
+
+export type SQMProfile = {
+  diffserv: "besteffort" | "diffserv3" | "diffserv4"
+  flowMode: "dual-dsthost" | "triple-isolate" | "flows"
+  nat: boolean
+  preserveDscp: boolean
+  overhead: number
+  mpu: number
+  linkLayer: "noatm" | "atm" | "ptm"
+  rttMillis: number
 }
 
 export type BBRState = {

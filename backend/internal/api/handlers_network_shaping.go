@@ -74,6 +74,7 @@ func (s *Server) handleShapingClear(w http.ResponseWriter, r *http.Request) erro
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	if err := s.modules.network.ClearShaping(ctx, device); err != nil {
+		auditChange(r, "network.shaping.clear", device, nil, err)
 		return mapNetworkError(err)
 	}
 	httpx.SetAudit(r, "network.shaping.clear", device, nil)

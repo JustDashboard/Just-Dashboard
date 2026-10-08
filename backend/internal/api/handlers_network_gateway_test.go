@@ -183,6 +183,10 @@ func TestGatewayHandlersRefuseWhatIsMalformedBeforeAnythingRuns(t *testing.T) {
 		{"resetting a key outside the list", "DELETE", "/network/protection/settings/net.ipv4.ip_forward", ``, 400, "bad_request", "not a setting"},
 		{"shaping with nothing asked", "POST", "/network/shaping/eth0", `{}`, 400, "bad_request", "set a queue discipline"},
 		{"shaping with an unknown discipline", "POST", "/network/shaping/eth0", `{"qdisc":"htb"}`, 400, "bad_request", "queue discipline"},
+		{"SQM without a download limit", "POST", "/network/shaping/eth0", `{"egressKbit":5000,"sqm":{}}`, 400, "bad_request", "positive download limit"},
+		{"SQM with unsupported DSCP classes", "POST", "/network/shaping/eth0", `{"ingressKbit":5000,"sqm":{"diffserv":"diffserv8"}}`, 400, "bad_request", "CAKE classes"},
+		{"SQM with fractional intent outside bounds", "POST", "/network/shaping/eth0", `{"ingressKbit":5000,"sqm":{"overhead":257}}`, 400, "bad_request", "overhead"},
+		{"SQM cannot choose an IFB identity", "POST", "/network/shaping/eth0", `{"ingressKbit":5000,"sqm":{"ifb":"foreign0"}}`, 400, "", ""},
 		{"shaping a device with a space in its name", "POST", "/network/shaping/eth%200", `{"egressKbit":5000}`, 400, "bad_request", "interface name"},
 		{"clearing a device with a bad name", "DELETE", "/network/shaping/a%2Fb", ``, 400, "bad_request", "interface name"},
 	}
