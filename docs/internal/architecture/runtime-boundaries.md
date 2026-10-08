@@ -134,7 +134,10 @@ An account has two names. `username` is the sign-in key and the actor every audi
 deployment record names: trimmed, lower-cased, one word, unique. `display_name` is what the account
 shows as — the username as typed at creation, case kept, until it is changed. Both are renamed by the
 holder (`PATCH /account/profile`, session-only) or by a `system.admin` (`PATCH /dashboard-users/{id}`);
-a rename is audited with both spellings, and earlier entries keep the old one. The picture
+a rename is audited with both spellings, and earlier entries keep the old one. Creation validates the
+display name before inserting the account; profile patches validate both names before one update.
+Administrative account edits commit all fields and any required session revocation in one transaction,
+so a rejected request cannot leave behind a rename, a new account, or only part of an edit. The picture
 (`avatar`, `avatar_type`, `avatar_at`, additive columns in 0.6.7) is uploaded as multipart to
 `POST /account/avatar`, bounded by `auth.MaxAvatarBytes`, and stored only after `image.DecodeConfig`
 has proven it a PNG or JPEG of at most 1024px a side under a type sniffed from the bytes — the
