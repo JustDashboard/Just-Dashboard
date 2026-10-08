@@ -122,6 +122,7 @@ export function LookupRace() {
       </form>
       <label className="flex items-center gap-3 text-body">
         <Switch
+          aria-label="Include public resolvers"
           checked={includePublic}
           onCheckedChange={setIncludePublic}
           disabled={!admin || busy}
