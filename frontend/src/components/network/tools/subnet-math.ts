@@ -95,7 +95,12 @@ export function calcSubnet(input: string): SubnetInfo {
     mask: toDotted(mask),
     wildcard: toDotted(~mask >>> 0),
     network: toDotted(network),
-    broadcast: toDotted(broadcast),
+    broadcast:
+      prefix === 32
+        ? "None (a single host route)"
+        : prefix === 31
+          ? "None (point-to-point)"
+          : toDotted(broadcast),
     first,
     last,
     hosts,

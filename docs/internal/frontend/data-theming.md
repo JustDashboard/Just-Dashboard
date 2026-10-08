@@ -12,6 +12,7 @@ the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
 Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
 submitting. Host support, route lookup, path MTU, packet snapshots and Wake-on-LAN use the same probe
 surface; Wake-on-LAN reports that a packet was sent rather than claiming the target is awake. The
+packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
 subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. DNS comparison sends a name
 only to configured resolvers by default; the reader explicitly opts into public presets through
 `includePublic`. Resolver changes may carry a private `verificationName` for a network that cannot

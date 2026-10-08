@@ -241,7 +241,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
       {
         key: "capture",
         label: "Packet snapshot",
-        hint: "Read up to 50 packet summaries for 15 seconds without changing the interface's mode",
+        hint: "Collect up to 50 summaries for 15 seconds; decoded protocol fields may include sensitive data",
         needsTarget: true,
         targetLabel: "Interface",
         targetPlaceholder: "eno1",

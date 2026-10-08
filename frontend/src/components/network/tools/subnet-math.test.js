@@ -7,8 +7,16 @@ test("IPv4 host bits are masked, /31 and /32 preserve point-to-point and host ra
     first: "192.168.1.1",
     last: "192.168.1.254",
   })
-  expect(calcSubnet("10.0.0.3/31")).toMatchObject({ first: "10.0.0.2", last: "10.0.0.3" })
-  expect(calcSubnet("10.0.0.3/32")).toMatchObject({ first: "10.0.0.3", last: "10.0.0.3" })
+  expect(calcSubnet("10.0.0.3/31")).toMatchObject({
+    first: "10.0.0.2",
+    last: "10.0.0.3",
+    broadcast: "None (point-to-point)",
+  })
+  expect(calcSubnet("10.0.0.3/32")).toMatchObject({
+    first: "10.0.0.3",
+    last: "10.0.0.3",
+    broadcast: "None (a single host route)",
+  })
   expect(calcSubnet("10.1.1.1/0").cidr).toBe("0.0.0.0/0")
 })
 
