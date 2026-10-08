@@ -255,7 +255,9 @@ func runProbe(ctx context.Context, limit time.Duration, name string, args ...str
 	cmd := hostexec.CommandOnHost(ctx, name, args...)
 	var raw probeOutput
 	cmd.Stdout, cmd.Stderr = &raw, &raw
-	err = cmd.Run()
+	// nsenter may fork a child holding the output pipes. Stop the whole
+	// process group so a timed-out capture cannot survive its request.
+	_, err = hostexec.RunGroup(ctx, cmd, 200*time.Millisecond)
 	return strings.TrimSpace(raw.String()), time.Since(start).Round(time.Millisecond).String(), err
 }
 

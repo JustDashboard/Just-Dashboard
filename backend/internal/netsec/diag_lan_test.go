@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"os"
 	"reflect"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -188,5 +192,29 @@ func TestProbeOutputBoundsMemoryWhileDraining(t *testing.T) {
 	n, err := io.Copy(&piped, struct{ io.Reader }{bytes.NewReader(payload)})
 	if err != nil || n != int64(len(payload)) || piped.Len() != maxProbeOutput || !piped.truncated {
 		t.Fatalf("pipe output was not capped/drained: n=%d len=%d truncated=%t err=%v", n, piped.Len(), piped.truncated, err)
+	}
+}
+
+func TestRunProbeStopsWrappedDescendantsOnTimeout(t *testing.T) {
+	started := time.Now()
+	out, _, err := runProbe(t.Context(), 100*time.Millisecond, "sh", "-c", "sleep 30 & child=$!; echo $child; wait")
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(started) > 2*time.Second {
+		t.Fatalf("wrapped probe did not stop on its budget: %q, %v", out, err)
+	}
+	pid, parseErr := strconv.Atoi(strings.TrimSpace(out))
+	if parseErr != nil || pid <= 1 {
+		t.Fatalf("missing child PID: %q, %v", out, parseErr)
+	}
+	if killErr := syscall.Kill(pid, 0); errors.Is(killErr, syscall.ESRCH) {
+		return
+	}
+	// A container's PID 1 may reap later; a zombie has stopped executing.
+	stat, readErr := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if errors.Is(readErr, os.ErrNotExist) {
+		return
+	}
+	_, state, ok := strings.Cut(string(stat), ") ")
+	if readErr != nil || !ok || !strings.HasPrefix(state, "Z ") {
+		t.Fatalf("probe left its child executing: %s, %v", stat, readErr)
 	}
 }
