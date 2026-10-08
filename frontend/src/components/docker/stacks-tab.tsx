@@ -322,7 +322,9 @@ export function StacksTab() {
       l.lines.some(
         (s) =>
           s.health === "unhealthy" ||
-          (exitCode(s.container?.status ?? s.service.status) ?? 0) !== 0,
+          (s.state !== "running" &&
+            !s.service.missing &&
+            (exitCode(s.container?.status ?? s.service.status) ?? 0) !== 0),
       ),
   )
   const shown = visible.reduce((n, l) => n + l.lines.length, 0)
