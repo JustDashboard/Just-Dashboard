@@ -43,6 +43,11 @@ func (s *Service) IPAMInventory(ctx context.Context, inv Inventory) IPAMNativeIn
 	prefixLimitReported := false
 	add := func(value, owner, resource, domain, basis string) {
 		p, e := netip.ParsePrefix(value)
+		if e != nil {
+			if address, err := netip.ParseAddr(value); err == nil {
+				p, e = netip.PrefixFrom(address, address.BitLen()), nil
+			}
+		}
 		if e != nil || p.Addr().Is4In6() {
 			source(domain, fmt.Errorf("an owner returned an unreadable prefix"), "")
 			return

@@ -19,13 +19,13 @@ func TestLiveIPAMObservesDualFamilyOwnersWithoutChangingThem(t *testing.T) {
 	ns.must(t, "ip", "link", "add", "native0", "type", "dummy")
 	ns.must(t, "ip", "link", "set", "native0", "up")
 	ns.must(t, "ip", "addr", "add", "10.244.0.1/24", "dev", "native0")
-	ns.must(t, "ip", "addr", "add", "fd48:abcd::1/64", "dev", "native0")
+	ns.must(t, "ip", "addr", "add", "fd48:abcd::1/64", "dev", "native0", "nodad")
 	ns.must(t, "ip", "route", "add", "10.244.1.0/24", "dev", "native0", "table", "100")
 	ns.must(t, "ip", "-6", "route", "add", "fd48:abcd:0:1::/64", "dev", "native0", "table", "100")
 	ns.must(t, "ip", "netns", "add", "tenant")
 	ns.must(t, "ip", "-n", "tenant", "link", "add", "inside0", "type", "dummy")
 	ns.must(t, "ip", "-n", "tenant", "addr", "add", "10.244.2.1/24", "dev", "inside0")
-	ns.must(t, "ip", "-n", "tenant", "addr", "add", "fd48:abcd:0:2::1/64", "dev", "inside0")
+	ns.must(t, "ip", "-n", "tenant", "addr", "add", "fd48:abcd:0:2::1/64", "dev", "inside0", "nodad")
 	before := ns.snapshot(t)
 	nativeRun := run
 	run = func(ctx context.Context, name string, args ...string) (string, error) {

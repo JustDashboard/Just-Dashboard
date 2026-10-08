@@ -67,3 +67,21 @@ func TestIPAMWireGuardUnreadableConfigurationIsCoverageEvidence(t *testing.T) {
 		t.Fatalf("file/native/forwarding distinction lost %#v", got)
 	}
 }
+
+func TestIPAMInventoryReadsNativeHostRouteLiteralsAsAddressPrefixes(t *testing.T) {
+	record(t, "wg", "tailscale").on("ip -j -d link show", "[]").on("ip -j addr show", "[]").on("ip -j route show table all", `[{"dst":"10.244.0.1","type":"local","table":"local","dev":"native0"}]`).on("ip -j -6 route show table all", `[{"dst":"fd48:abcd::1","type":"local","table":"local","dev":"native0"}]`).on("ip -j netns list", "[]")
+	s := testService(t)
+	snapshot := s.IPAMInventory(context.Background(), Inventory{})
+	found := map[string]bool{}
+	for _, p := range snapshot.Prefixes {
+		found[p.Prefix] = true
+	}
+	if !found["10.244.0.1/32"] || !found["fd48:abcd::1/128"] {
+		t.Fatal("valid native host route vanished", snapshot)
+	}
+	for _, source := range snapshot.Sources {
+		if strings.HasPrefix(source.Source, "host_routes/") && source.State != "observed" {
+			t.Fatal("valid local route was mislabeled unreadable", source)
+		}
+	}
+}
