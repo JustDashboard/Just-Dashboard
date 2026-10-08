@@ -69,3 +69,25 @@ func TestSamplerStopIsConcurrentAndIdempotent(t *testing.T) {
 	wg.Wait()
 	s.Stop()
 }
+
+func TestInterfaceHistoryHonorsItsPointLimitAtInclusiveWindowEnds(t *testing.T) {
+	db := containerDB(t)
+	_, err := db.Exec(`CREATE TABLE metric_interface_samples (
+		ts INTEGER, iface TEXT, rx_rate REAL, tx_rate REAL,
+		rx_peak REAL, tx_peak REAL, rx_errors INTEGER, tx_errors INTEGER,
+		rx_dropped INTEGER, tx_dropped INTEGER)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<3600)
+		INSERT INTO metric_interface_samples
+		SELECT ?+i, 'eth0', 100, 10, 100, 10, 0, 0, 0, 0 FROM n`, time.Now().Unix()-3600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSampler(db, nil, liveStep, time.Hour)
+	history, err := s.History(context.Background(), time.Hour, 60, "eth0")
+	if err != nil || len(history.Interfaces["eth0"]) > 60 || len(history.Interfaces["eth0"]) == 0 {
+		t.Fatalf("history exceeds requested point bound: %+v, %v", history, err)
+	}
+}

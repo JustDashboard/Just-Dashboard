@@ -337,7 +337,7 @@ func (s *Sampler) History(ctx context.Context, window time.Duration, maxPoints i
 	if maxPoints < 2 {
 		maxPoints = 2
 	}
-	step := int64(window.Seconds()) / int64(maxPoints)
+	step := (int64(window.Seconds()) + int64(maxPoints) - 2) / int64(maxPoints-1)
 	if min := int64(s.every.Seconds()); step < min {
 		step = min
 	}

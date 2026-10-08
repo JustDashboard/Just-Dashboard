@@ -348,6 +348,58 @@ func TestContainersSeriesIsBounded(t *testing.T) {
 	}
 }
 
+func TestContainersExcludeFutureSamplesAndDoNotReportOldRatesAsLive(t *testing.T) {
+	db := containerDB(t)
+	s := testService(t)
+	s.db = db
+	now := time.Unix(1_800_000_000, 0)
+	addSample(t, db, "web", now.Unix()-60, 1000, 100, true)
+	addSample(t, db, "web", now.Unix()-30, 4000, 400, true)
+	addSample(t, db, "web", now.Unix()+30, 400000, 40000, true)
+	addSample(t, db, "stopped", now.Unix()-600, 1000, 100, true)
+	addSample(t, db, "stopped", now.Unix()-300, 4000, 400, true)
+	res, err := s.containers(context.Background(), time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range res.Containers {
+		switch c.Name {
+		case "web":
+			if c.RxRate != 100 || c.TxRate != 10 || c.LastSeen != now.Unix()-30 {
+				t.Errorf("future samples changed current traffic: %+v", c)
+			}
+		case "stopped":
+			if c.RxRate != 0 || c.TxRate != 0 || c.RxBytes != 3000 {
+				t.Errorf("old historical traffic reported as live: %+v", c)
+			}
+		}
+	}
+}
+
+func TestContainerSeriesIncludesAtMostSixtyPointsAcrossPartialBuckets(t *testing.T) {
+	db := containerDB(t)
+	s := testService(t)
+	s.db = db
+	now := time.Unix(1_800_000_031, 0)
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for i := 0; i <= 3600; i++ {
+		if _, err := tx.Exec(`INSERT INTO metric_container_samples(ts,name,net_rx,net_tx) VALUES(?,?,?,?)`, now.Unix()-3600+int64(i), "web", i*100, i*10); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.containers(context.Background(), time.Hour, now)
+	if err != nil || len(res.Containers) != 1 || len(res.Containers[0].Series) > seriesPoints {
+		t.Fatalf("partial buckets exceed point bound: %+v, %v", res, err)
+	}
+}
+
 func TestContainersWithNothingRecorded(t *testing.T) {
 	s := testService(t)
 	s.db = containerDB(t)
