@@ -45,6 +45,9 @@ func dnsEvidenceRR(name string, kind uint16, body []byte) []byte {
 func dnsEvidenceExecutor(t *testing.T, flags uint64, query *atomic.Int32) TrafficExecutor {
 	t.Helper()
 	return func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "cat" && len(args) == 1 && args[0] == resolvConfPath {
+			return "nameserver 127.0.0.53\n", nil
+		}
 		if name == "readlink" {
 			return "/usr/lib/systemd/systemd-resolved", nil
 		}
@@ -72,8 +75,9 @@ func dnsEvidenceExecutor(t *testing.T, flags uint64, query *atomic.Int32) Traffi
 				return dnsEvidenceJSON("a{sv}", dnsEvidenceProperties(map[string]any{"DNSEx": dnsEvidenceProperty("a(iayqs)", []any{[]any{2, []int{10, 0, 0, 53}, 0, "dns.corp.example"}}), "Domains": dnsEvidenceProperty("a(sb)", []any{[]any{"corp.example", true}})})), nil
 			}
 			return dnsEvidenceJSON("a{sv}", dnsEvidenceProperties(map[string]any{
-				"DNSEx":   dnsEvidenceProperty("a(iiayqs)", []any{[]any{0, 2, []int{8, 8, 8, 8}, 0, "dns.google"}, []any{7, 2, []int{10, 0, 0, 53}, 0, "dns.corp.example"}}),
-				"Domains": dnsEvidenceProperty("a(isb)", []any{[]any{0, ".", true}, []any{7, "corp.example", true}}),
+				"ResolvConfMode": dnsEvidenceProperty("s", "stub"),
+				"DNSEx":          dnsEvidenceProperty("a(iiayqs)", []any{[]any{0, 2, []int{8, 8, 8, 8}, 0, "dns.google"}, []any{7, 2, []int{10, 0, 0, 53}, 0, "dns.corp.example"}}),
+				"Domains":        dnsEvidenceProperty("a(isb)", []any{[]any{0, ".", true}, []any{7, "corp.example", true}}),
 			})), nil
 		case "ResolveRecord":
 			query.Add(1)
@@ -96,6 +100,7 @@ func TestDNSEvidenceNativeRouteTrustAndFreshness(t *testing.T) {
 		{"cached authenticated is not validation", dnsFlagDNS | 1<<20 | dnsFlagAuthenticated | dnsFlagConfidential, "unknown", "unknown", "unknown", "modeled"},
 		{"local synthetic is not TLS or DNSSEC", dnsFlagDNS | 1<<19 | dnsFlagAuthenticated | dnsFlagConfidential, "unknown", "unknown", "unknown", "modeled"},
 		{"network cache mixture is not fresh", dnsFlagDNS | dnsFlagNetwork | 1<<20 | dnsFlagAuthenticated | dnsFlagConfidential, "unknown", "unknown", "unknown", "modeled"},
+		{"unknown native output cannot prove trust", dnsFlagDNS | dnsFlagNetwork | 1<<27 | dnsFlagAuthenticated | dnsFlagConfidential, "unknown", "unknown", "unknown", "modeled"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var queries atomic.Int32

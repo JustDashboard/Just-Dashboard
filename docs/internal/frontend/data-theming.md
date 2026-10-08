@@ -61,7 +61,9 @@ named destinations and acknowledgment that private names leave their usual polic
 `verificationName` for a network that cannot resolve public names. This verification input is a check
 for that apply, not saved resolver state.
 Native policy investigations retain answering-link, encryption, TLS trust and DNSSEC provenance
-separately from configured switches and classic wire lookup. Failed launches/history reads retain
+separately from configured switches and classic direct comparisons. Effective resolved lookup uses
+the same safe native adapter; its optional typed `hops` retain each question, alias edge and complete
+policy fingerprint. Failed launches/history reads retain
 dated evidence and the query draft. Reload never reruns a private question or grants direct-query
 disclosure consent.
 WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft

@@ -18,6 +18,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
+const recordTypes = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SRV"]
+
 /** A reading report: the query form obtains evidence, then flat rows separate
  * native measurements from configuration and unknown application scope. */
 export function DNSPolicyEvidence() {
@@ -112,12 +114,17 @@ export function DNSPolicyEvidence() {
               />
             </Field>
             <Field label="Record type" htmlFor="dns-evidence-type">
-              <Select value={type} onValueChange={setType}>
+              <Select
+                value={type}
+                onValueChange={(value) => {
+                  if (recordTypes.includes(value)) setType(value)
+                }}
+              >
                 <SelectTrigger id="dns-evidence-type">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {["A", "AAAA", "CNAME", "MX", "TXT", "NS", "PTR", "SRV"].map((value) => (
+                  {recordTypes.map((value) => (
                     <SelectItem key={value} value={value}>
                       {value}
                     </SelectItem>
@@ -293,6 +300,73 @@ export function DNSPolicyEvidence() {
                   </div>
                 ))}
               </div>
+              {report.hops && report.hops.length > 0 && (
+                <section className="min-w-0 text-body" aria-label="Native DNS question chain">
+                  <h3 className="font-medium">Question chain</h3>
+                  <p className="text-muted-foreground">
+                    Each target receives a fresh policy check. Accepted-record trust includes every
+                    alias; failed discovery questions have no transport measurement.
+                  </p>
+                  <ol className="divide-panel-border divide-y">
+                    {report.hops.map((hop, index) => (
+                      <li
+                        key={`${index}-${hop.name}-${hop.type}`}
+                        className="min-w-0 space-y-2 py-3"
+                      >
+                        <p className="font-mono break-all">
+                          {index + 1}. {hop.name} · {hop.type}
+                        </p>
+                        <p className="text-hint break-all text-muted-foreground">
+                          Native owner {hop.ownerIdentity} ·{" "}
+                          {hop.policyMatch || "Policy unavailable"}
+                        </p>
+                        {hop.policy.map((scope) => (
+                          <p key={scope.index} className="break-all text-muted-foreground">
+                            {scope.interface} · {scope.domains.join(", ") || "Default route"} · DNS{" "}
+                            {scope.activeDNS && scope.servers.length ? "active" : "unavailable"} ·
+                            configured DoT {scope.dnsOverTLS || "unknown"} · configured DNSSEC{" "}
+                            {scope.dnssec || "unknown"}
+                          </p>
+                        ))}
+                        {hop.aliasTarget && (
+                          <p className="font-mono break-all">CNAME target → {hop.aliasTarget}</p>
+                        )}
+                        <p className="font-mono break-all">
+                          Accepted records: {hop.answers.join(" · ") || "None"}
+                        </p>
+                        <dl className="grid min-w-0 gap-2 sm:grid-cols-2">
+                          {(["transport", "trust", "dnssec"] as const).map((key) => (
+                            <div key={key} className="min-w-0">
+                              <dt className="text-hint text-muted-foreground">
+                                {
+                                  { transport: "Transport", trust: "TLS trust", dnssec: "DNSSEC" }[
+                                    key
+                                  ]
+                                }
+                              </dt>
+                              <dd>
+                                {dnsEvidenceLabel(hop[key])}
+                                <span className="text-hint text-muted-foreground">
+                                  {" "}
+                                  · {hop[key].basis}
+                                </span>
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <p className="text-hint text-muted-foreground">
+                          Answering link indexes: {hop.answerInterfaces.join(", ") || "Unmeasured"}
+                          {" · "}
+                          {hop.policyStable
+                            ? "Stable before/after native policy"
+                            : "Policy changed or completion snapshot unavailable"}
+                        </p>
+                        {hop.error && <p className="break-all text-warning">{hop.error}</p>}
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              )}
               <ul className="list-disc space-y-1 pl-5 text-body text-muted-foreground">
                 {report.limitations.map((limit) => (
                   <li key={limit}>{limit}</li>

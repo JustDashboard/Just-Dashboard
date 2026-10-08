@@ -258,7 +258,8 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
 
 ## DNS
 
-Files: `dns.go`, `dns_hosts.go`, `dns_lookup.go`, `dns_wire.go`.
+Files: `dns.go`, `dns_hosts.go`, `dns_lookup.go`, `dns_wire.go`, `dns_evidence*.go`,
+`dns_alias.go`.
 
 The resolver chain includes `/etc/resolv.conf` (ordinary whitespace, including tabs), global/per-link
 systemd-resolved scopes/statistics, port-53 listeners and existing AdGuard Home/Pi-hole services.
@@ -280,11 +281,16 @@ Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` re
 bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
 writes. This is not a DNS server or an AdGuard/Pi-hole configuration adapter.
 
-`POST /dns/lookup` defaults to `mode: "effective"`. With systemd-resolved it asks the actual local
-stub so resolved chooses the split-DNS link/upstream; an unavailable stub fails without falling back
-to configured public resolvers. On a static resolv.conf host it asks that configured chain
-sequentially. The response includes the relevant routing-domain evidence, named comparison targets,
-omissions and limits. It remains a DNS wire query, distinct from local hosts/NSS lookup.
+`POST /dns/lookup` defaults to `mode: "effective"`. When the actual host chain delegates to a supported
+systemd-resolved stub, it uses the [native policy adapter](network-dns-evidence.md), including explicit
+CNAME checks before each target question. Native stub ownership, version and complete split policy
+must be readable; failure never tries another resolver. Merely running resolved does not establish
+the host chain's ownership. The chain and comparison inventory are read in the host namespace,
+avoiding Docker's overlaid resolver file; unreadable/malformed host chains stop effective lookup.
+Other resolv.conf chains use their configured servers sequentially and
+retain explicit unknowns for split policy and recursive alias disclosure. The response includes
+routing-domain evidence, named comparison targets, omissions and limits. Both paths exclude hosts/NSS
+and search expansion; the native path additionally excludes DNAME and local/cache answers.
 
 `mode: "compare"` requires explicit configured/preset `destinations` and
 `acknowledgeDisclosure: true`; the UI names those destinations and explains that private names leave
@@ -293,7 +299,8 @@ Direct classic DNS supports A/AAAA/CNAME/MX/TXT/NS/PTR/SRV, retaining custom por
 validating response identity/question/answer ownership/canonical chains and retrying truncated UDP
 over TCP. Fan-out is bounded at sixteen and each query at three seconds. CNAME queries return the
 immediate alias; other types use terminal data in that response without a follow-up query. Neither
-mode claims verified DoT/DoH transport or independent DNSSEC signature validation.
+lookup mode claims verified DoT/DoH transport or independent DNSSEC signature validation. Detailed
+retained investigations separately label native-reported encryption, strict TLS policy and DNSSEC.
 
 ## Diagnostics and host support
 

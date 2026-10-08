@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -334,93 +335,82 @@ Link 3 (eth1)
 	}
 }
 
-func TestEffectiveLookupDelegatesSplitDNSOnlyToNativeStub(t *testing.T) {
+func TestEffectiveLookupDelegatesSplitDNSOnlyToSafeguardedNativeOwner(t *testing.T) {
 	rec := record(t)
-	rec.on("systemctl is-active systemd-resolved", "active\n").on("resolvectl status --no-pager", `Global
- DNS Servers: 1.1.1.1
- Fallback DNS Servers: 8.8.8.8
- DNS Domain: ~.
-Link 2 (eth0)
- DNS Servers: 9.9.9.9
- DNS Domain: ~.
- DefaultRoute: yes
-Link 3 (vpn0)
- Current Scopes: DNS
- DNS Servers: 10.8.0.53
- DNS Domain: ~corp.example ~home.arpa
- DefaultRoute: no
-Link 4 (vpn1)
- Current Scopes: DNS
- DNS Servers: 10.9.0.53
- DNS Domain: ~lab.corp.example
- DefaultRoute: no
-`)
-	stub := startFakeDNS(t, answerA("10.9.0.7"))
-	original := dnsDial
-	var destinations []string
-	dnsDial = func(ctx context.Context, network, address string) (net.Conn, error) {
-		destinations = append(destinations, address)
-		if address != "127.0.0.53:53" {
-			return nil, fmt.Errorf("private name leaked to %s", address)
-		}
-		return (&net.Dialer{}).DialContext(ctx, network, stub)
+	rec.on("systemctl is-active systemd-resolved", "active\n").on("resolvectl status --no-pager", fixture(t, "dns-resolvectl-status.txt"))
+	pointResolvConf(t, "stub")
+	previousDial, previousNative := dnsDial, dnsNativeExecutor
+	dnsDial = func(context.Context, string, string) (net.Conn, error) {
+		t.Fatal("effective lookup used an alias-chasing wire stub")
+		return nil, nil
 	}
-	t.Cleanup(func() { dnsDial = original })
-	for _, name := range []string{"db.lab.corp.example", "nas.home.arpa", "lab.corp.example"} {
-		result, err := testService(t).Lookup(context.Background(), name, "A")
-		if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "" || result.Mode != "effective" {
-			t.Fatalf("effective lookup=%+v,%v", result, err)
-		}
-		link := "vpn1"
-		if name == "nas.home.arpa" {
-			link = "vpn0"
-		}
-		if !strings.Contains(result.Route, link) || strings.Contains(result.Route, "global (") {
-			t.Fatalf("incorrect longest-suffix evidence: %s", result.Route)
-		}
-	}
-	if len(destinations) != 3 {
-		t.Fatalf("effective lookup dialed %v", destinations)
+	questions := []string{}
+	dnsNativeExecutor = dnsAliasExecutor(t, map[string]string{"alias.corp.example": "secret.corp.example"}, nil, &questions)
+	t.Cleanup(func() { dnsDial, dnsNativeExecutor = previousDial, previousNative })
+	result, err := testService(t).Lookup(t.Context(), "alias.corp.example", "A")
+	if err != nil || len(result.Answers) != 1 || result.Answers[0].Error != "" || result.Answers[0].Answers[0] != "192.0.2.7" || result.Mode != "effective" || len(questions) != 3 || !strings.Contains(result.Route, "vpn0") {
+		t.Fatalf("effective lookup=%+v,%v questions=%v", result, err, questions)
 	}
 }
 
-func TestEffectiveLookupDoesNotBypassUnavailableNativeStub(t *testing.T) {
+func TestEffectiveLookupDoesNotBypassUnreadableNativePolicy(t *testing.T) {
 	rec := record(t)
 	rec.on("systemctl is-active systemd-resolved", "active").fail("resolvectl status --no-pager", "scope evidence unavailable")
-	previous := dnsDial
-	calls := []string{}
-	dnsDial = func(ctx context.Context, network, address string) (net.Conn, error) {
-		calls = append(calls, address)
+	pointResolvConf(t, "stub")
+	previousDial, previousNative := dnsDial, dnsNativeExecutor
+	calls := 0
+	dnsDial = func(context.Context, string, string) (net.Conn, error) {
+		calls++
 		return nil, errors.New("stub disabled")
 	}
-	t.Cleanup(func() { dnsDial = previous })
-	result, err := testService(t).Lookup(context.Background(), "secret.corp.example", "A")
-	if err == nil || result != nil || !strings.Contains(err.Error(), "policy is unreadable") {
-		t.Fatalf("lookup=%+v,%v", result, err)
+	var queries atomic.Int32
+	base := dnsEvidenceExecutor(t, dnsFlagDNS|dnsFlagNetwork, &queries)
+	dnsNativeExecutor = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "busctl" && len(args) > 7 && args[7] == "GetAll" {
+			return "", errors.New("native policy unavailable")
+		}
+		return base(ctx, name, args...)
 	}
-	if len(calls) != 0 {
-		t.Fatalf("native policy bypassed: %v", calls)
+	t.Cleanup(func() { dnsDial, dnsNativeExecutor = previousDial, previousNative })
+	result, err := testService(t).Lookup(t.Context(), "secret.corp.example", "A")
+	if err == nil || result != nil || !strings.Contains(err.Error(), "policy is unreadable") || calls != 0 || queries.Load() != 0 {
+		t.Fatalf("lookup=%+v,%v wire=%d native=%d", result, err, calls, queries.Load())
 	}
 }
 
 func TestEffectiveLookupRefusesUnavailableDeclaredPrivateScope(t *testing.T) {
-	for _, policy := range []string{
-		" Current Scopes: none\n DNS Servers: 10.8.0.53\n",
-		" Current Scopes: DNS\n",
-	} {
-		t.Run(strings.TrimSpace(policy), func(t *testing.T) {
+	for _, mode := range []string{"inactive", "serverless"} {
+		t.Run(mode, func(t *testing.T) {
 			rec := record(t)
-			rec.on("systemctl is-active systemd-resolved", "active").on("resolvectl status --no-pager", "Global\n DNS Servers: 1.1.1.1\n DNS Domain: ~.\nLink 3 (vpn0)\n"+policy+" DNS Domain: ~corp.example\n")
-			previous := dnsDial
+			rec.on("systemctl is-active systemd-resolved", "active").on("resolvectl status --no-pager", fixture(t, "dns-resolvectl-status.txt"))
+			pointResolvConf(t, "stub")
+			previousDial, previousNative := dnsDial, dnsNativeExecutor
 			calls := 0
 			dnsDial = func(context.Context, string, string) (net.Conn, error) {
 				calls++
 				return nil, errors.New("query must not be sent")
 			}
-			t.Cleanup(func() { dnsDial = previous })
+			var queries atomic.Int32
+			base := dnsEvidenceExecutor(t, dnsFlagDNS|dnsFlagNetwork, &queries)
+			dnsNativeExecutor = func(ctx context.Context, name string, args ...string) (string, error) {
+				out, err := base(ctx, name, args...)
+				if name == "busctl" && len(args) > 7 && args[7] == "GetAll" {
+					if strings.HasSuffix(args[5], "/_37") {
+						if mode == "inactive" {
+							out = strings.ReplaceAll(out, `"ScopesMask":{"data":1,"type":"t"}`, `"ScopesMask":{"data":0,"type":"t"}`)
+						} else {
+							out = strings.ReplaceAll(out, `[[2,[10,0,0,53],0,"dns.corp.example"]]`, `[]`)
+						}
+					} else if mode == "serverless" {
+						out = strings.ReplaceAll(out, `,[7,2,[10,0,0,53],0,"dns.corp.example"]`, "")
+					}
+				}
+				return out, err
+			}
+			t.Cleanup(func() { dnsDial, dnsNativeExecutor = previousDial, previousNative })
 			result, err := testService(t).Lookup(t.Context(), "secret.corp.example", "A")
-			if err == nil || result != nil || calls != 0 || !strings.Contains(err.Error(), "best-match DNS scope is unavailable") {
-				t.Fatalf("private fallback: %+v %v calls=%d", result, err, calls)
+			if err == nil || result != nil || calls != 0 || queries.Load() != 0 || !strings.Contains(err.Error(), "best-match DNS scope is unavailable") {
+				t.Fatalf("private fallback: %+v %v wire=%d native=%d", result, err, calls, queries.Load())
 			}
 		})
 	}

@@ -4,6 +4,10 @@ This directory records scoped acceptance for successive implementation checkpoin
 The [implementation ledger](../implementation-status.md) preserves the full outstanding scope;
 these checks do not turn the historical report scores into 10/10 ratings.
 
+[Native DNS alias safety](dns-alias-safety.md) records P9/F10's bounded explicit walker, signed
+isolated resolver acceptance, exact v257 flag audit, preserved failed iterations and focused races.
+Its per-question UI still requires the integrated production-build/browser gate.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

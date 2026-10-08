@@ -24,6 +24,7 @@ func dnsEvidenceClients(t *testing.T) (*client, *client, *Server, string) {
 	id := strings.Repeat("a", 32)
 	request := netx.DNSInvestigationRequest{Name: "private.corp.example", Type: "AAAA"}
 	result := netx.DNSInvestigation{Version: 1, Request: request, StartedAt: time.Now(), EndedAt: time.Now(), Answers: []string{"2001:db8::7"}}
+	result.Hops = []netx.DNSQueryEvidence{{Name: "alias.corp.example", Type: "CNAME", OwnerIdentity: ":1.42", AliasTarget: "private.corp.example", Answers: []string{"private.corp.example."}, DNSSEC: netx.DNSEvidenceReading{State: "validated", Basis: "native_reply", Summary: "Native authentication for this alias record."}}}
 	req, _ := json.Marshal(request)
 	artifact, _ := json.Marshal(result)
 	if _, err := s.Store.DB.Exec(`INSERT INTO network_dns_evidence(id,request_json,started_at,ended_at,status,artifact_json) VALUES(?,?,?,?,?,?)`, id, string(req), time.Now().UnixMilli(), time.Now().UnixMilli(), "completed", string(artifact)); err != nil {
@@ -47,6 +48,18 @@ func TestDNSEvidenceAPIPrivateCapabilitiesAndAudit(t *testing.T) {
 		}
 		if path == base && strings.Contains(w.Body.String(), "2001:db8::7") {
 			t.Fatal("list exposed artifact body")
+		}
+		if path == base && strings.Contains(w.Body.String(), "alias.corp.example") {
+			t.Fatal("list exposed a private alias edge")
+		}
+		if strings.HasSuffix(path, "/export") {
+			var exported struct {
+				Version       int                   `json:"version"`
+				Investigation netx.SavedDNSEvidence `json:"investigation"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &exported); err != nil || exported.Version != 1 || exported.Investigation.Result == nil || len(exported.Investigation.Result.Hops) != 1 || exported.Investigation.Result.Hops[0].AliasTarget != "private.corp.example" || exported.Investigation.Result.Hops[0].DNSSEC.Basis != "native_reply" {
+				t.Fatalf("export lost immutable private alias provenance: %s %v", w.Body.String(), err)
+			}
 		}
 	}
 	if w := c.do(http.MethodPost, base, `{"name":"bad name","type":"A"}`, nil); w.Code != http.StatusBadRequest {

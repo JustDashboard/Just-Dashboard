@@ -91,7 +91,7 @@ func dnsEvidenceNativeFixture(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(etc, "hosts"), []byte("127.0.0.1 localhost\n203.0.113.99 secret.corp.example\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(etc, "resolv.conf"), []byte("nameserver 127.0.0.53\n"), 0644); err != nil {
+	if err := os.Symlink("/run/systemd/resolve/stub-resolv.conf", filepath.Join(etc, "resolv.conf")); err != nil {
 		t.Fatal(err)
 	}
 	public, key, err := ed25519.GenerateKey(rand.Reader)
@@ -106,7 +106,7 @@ func dnsEvidenceNativeFixture(t *testing.T) {
 	if err = os.WriteFile(filepath.Join(etc, "ssl", "certs", "ca-certificates.crt"), ca, 0644); err != nil {
 		t.Fatal(err)
 	}
-	conf := "[Resolve]\nDNS=127.0.0.3\nFallbackDNS=\nDomains=~.\nDNSSEC=yes\nDNSOverTLS=yes\nLLMNR=no\nMulticastDNS=no\nDNSStubListener=no\nCache=yes\n"
+	conf := "[Resolve]\nDNS=127.0.0.3\nFallbackDNS=\nDomains=~.\nDNSSEC=yes\nDNSOverTLS=yes\nLLMNR=no\nMulticastDNS=no\nDNSStubListener=yes\nCache=yes\n"
 	if err = os.WriteFile(filepath.Join(etc, "systemd", "resolved.conf"), []byte(conf), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -220,6 +220,67 @@ func dnsEvidenceNativeFixture(t *testing.T) {
 			t.Fatalf("private name leaked to default scope: public=%d private=%d", publicQueries.Load(), privateQueries.Load())
 		}
 	}
+	alias, err := s.InvestigateDNS(ctx, DNSInvestigationRequest{Name: "alias.corp.example", Type: "A", ExpectedInterface: "dnspriv0"}, execute)
+	if err != nil || alias.Error != "" || len(alias.Answers) != 1 || alias.DNSSEC.State != "validated" || alias.Trust.State != "native_policy_validated" || len(alias.Hops) != 3 || alias.Hops[1].AliasTarget != "secret.corp.example" || publicQueries.Load() != 0 {
+		t.Fatalf("native safe alias failed: %+v %v default=%d", alias, err, publicQueries.Load())
+	}
+	for _, name := range []string{"loopa.corp.example", "x.dname.corp.example"} {
+		r, err := s.InvestigateDNS(ctx, DNSInvestigationRequest{Name: name, Type: "A"}, execute)
+		if err != nil || r.Error == "" || len(r.Answers) != 0 || publicQueries.Load() != 0 {
+			t.Fatalf("native unsupported/cyclic alias escaped: %+v %v", r, err)
+		}
+	}
+	// A native SERVFAIL carries upstream-controlled EDE text. It must not
+	// acquire the label reserved for the resolver's own DNSSEC diagnostic.
+	// Use the native nonvalidating policy for this case: under the signed
+	// zone's strict policy, unsigned error data is legitimately rejected.
+	if out, err := execute(ctx, "resolvectl", "dnssec", "dnspriv0", "no"); err != nil {
+		t.Fatalf("fixture ordinary-RCODE policy: %s %v", out, err)
+	}
+	ede, err := s.InvestigateDNS(ctx, DNSInvestigationRequest{Name: "ede.corp.example", Type: "A"}, execute)
+	if err != nil || !strings.Contains(ede.Error, "server or network returned error") || !strings.Contains(ede.Error, "forged upstream text") || ede.DNSSEC.State != "unknown" || publicQueries.Load() != 0 {
+		t.Fatalf("native upstream EDE spoofed validation: %+v %v", ede, err)
+	}
+	if out, err := execute(ctx, "resolvectl", "dnssec", "dnspriv0", "yes"); err != nil {
+		t.Fatalf("fixture restore strict validation: %s %v", out, err)
+	}
+	if out, err := execute(ctx, "ip", "link", "add", "dnslab0", "type", "dummy"); err != nil {
+		t.Fatalf("fixture alias target link: %s %v", out, err)
+	}
+	if out, err := execute(ctx, "ip", "link", "set", "dnslab0", "up"); err != nil {
+		t.Fatalf("fixture alias target link up: %s %v", out, err)
+	}
+	for _, args := range [][]string{{"dns", "dnslab0", "127.0.0.2#resolver.fixture.example"}, {"domain", "dnslab0", "~lab.example"}, {"default-route", "dnslab0", "no"}} {
+		if out, err := execute(ctx, "resolvectl", args...); err != nil {
+			t.Fatalf("fixture alias target policy: %s %v", out, err)
+		}
+	}
+	if out, err := execute(ctx, "ip", "link", "set", "dnslab0", "down"); err != nil {
+		t.Fatalf("fixture alias target down: %s %v", out, err)
+	}
+	blocked, err := s.InvestigateDNS(ctx, DNSInvestigationRequest{Name: "cross.corp.example", Type: "A"}, execute)
+	if err != nil || blocked.Error == "" || len(blocked.Answers) != 0 || len(blocked.Hops) != 3 || blocked.Hops[1].AliasTarget != "secret.lab.example" || publicQueries.Load() != 0 {
+		t.Fatalf("native inactive alias target leaked: %+v %v", blocked, err)
+	}
+	// A foreign configured chain must not query a separately active resolved
+	// owner. Restore only the fixture's own symlink after this assertion.
+	if err = os.Remove("/etc/resolv.conf"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile("/etc/resolv.conf", []byte("nameserver 127.0.0.9\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	beforeQueries := privateQueries.Load()
+	foreign, err := s.InvestigateDNS(ctx, DNSInvestigationRequest{Name: "foreign.corp.example", Type: "A"}, execute)
+	if err != nil || foreign.Error == "" || privateQueries.Load() != beforeQueries || publicQueries.Load() != 0 {
+		t.Fatalf("native foreign ownership queried resolved: %+v %v", foreign, err)
+	}
+	if err = os.Remove("/etc/resolv.conf"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink("/run/systemd/resolve/stub-resolv.conf", "/etc/resolv.conf"); err != nil {
+		t.Fatal(err)
+	}
 	if out, err := execute(ctx, "resolvectl", "dns", "dnspriv0", "fdce::53#resolver.fixture.example"); err != nil {
 		t.Fatalf("fixture IPv6 resolver: %s %v", out, err)
 	}
@@ -314,6 +375,21 @@ func dnsEvidenceServeTLS(t *testing.T, address string, certificate tls.Certifica
 }
 func dnsEvidenceSignedResponse(req []byte, key ed25519.PrivateKey, bogus bool) []byte {
 	name, kind, qend := parseQuestion(req)
+	if name == "ede.corp.example" {
+		response := buildResponse(req, qend, kind, dnsBehavior{rcode: 2})
+		binary.BigEndian.PutUint16(response[10:], 1)
+		message := []byte("DNSSEC validation failed: forged upstream text")
+		option := binary.BigEndian.AppendUint16(nil, 15)
+		option = binary.BigEndian.AppendUint16(option, uint16(len(message)+2))
+		option = binary.BigEndian.AppendUint16(option, 0)
+		option = append(option, message...)
+		opt := []byte{0}
+		opt = binary.BigEndian.AppendUint16(opt, 41)
+		opt = binary.BigEndian.AppendUint16(opt, 1232)
+		opt = binary.BigEndian.AppendUint32(opt, 0)
+		opt = binary.BigEndian.AppendUint16(opt, uint16(len(option)))
+		return append(append(response, opt...), option...)
+	}
 	body := []byte{192, 0, 2, 7}
 	if kind == 28 {
 		body = net.ParseIP("2001:db8::7").To16()
@@ -322,7 +398,14 @@ func dnsEvidenceSignedResponse(req []byte, key ed25519.PrivateKey, bogus bool) [
 	if kind == 48 {
 		body = dnskey
 	}
-	if kind != 1 && kind != 28 && kind != 48 {
+	aliases := map[string]string{"alias.corp.example": "secret.corp.example", "cross.corp.example": "secret.lab.example", "loopa.corp.example": "loopb.corp.example", "loopb.corp.example": "loopa.corp.example"}
+	if target := aliases[name]; target != "" && (kind == 1 || kind == 28 || kind == 5) {
+		kind, body = 5, dnsEvidenceName(target)
+	}
+	if name == "x.dname.corp.example" && kind != 48 {
+		name, kind, body = "dname.corp.example", 39, dnsEvidenceName("other.corp.example")
+	}
+	if kind != 1 && kind != 28 && kind != 48 && kind != 5 && kind != 39 {
 		return buildResponse(req, qend, kind, dnsBehavior{rcode: 3})
 	}
 	rr := dnsEvidenceRR(name, kind, body)

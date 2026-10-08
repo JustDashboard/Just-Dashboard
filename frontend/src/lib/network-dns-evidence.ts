@@ -42,6 +42,7 @@ export interface DNSInvestigation {
   answers: string[]
   records: { interfaceIndex: number; owner: string; type: number; ttl: number }[]
   nativeFlags?: string
+  hops?: DNSQueryEvidence[]
   route: DNSEvidenceReading
   transport: DNSEvidenceReading
   trust: DNSEvidenceReading
@@ -49,6 +50,28 @@ export interface DNSInvestigation {
   nss: DNSEvidenceReading
   error?: string
   limitations: string[]
+}
+
+export interface DNSQueryEvidence {
+  name: string
+  type: string
+  ownerIdentity: string
+  policyMatch: string
+  policy: DNSPolicyScope[]
+  policyAfter?: DNSPolicyScope[]
+  snapshotBefore?: string
+  snapshotAfter?: string
+  policyStable: boolean
+  answerInterfaces: number[]
+  records: DNSInvestigation["records"]
+  answers: string[]
+  nativeFlags?: string
+  route: DNSEvidenceReading
+  transport: DNSEvidenceReading
+  trust: DNSEvidenceReading
+  dnssec: DNSEvidenceReading
+  aliasTarget?: string
+  error?: string
 }
 
 export interface SavedDNSEvidence {

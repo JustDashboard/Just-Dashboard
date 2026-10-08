@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/netip"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,16 +21,30 @@ import (
 )
 
 const (
-	dnsNativeService            = "org.freedesktop.resolve1"
-	dnsNativePath               = "/org/freedesktop/resolve1"
-	dnsNativeManager            = "org.freedesktop.resolve1.Manager"
-	dnsFlagDNS           uint64 = 1
+	dnsNativeService = "org.freedesktop.resolve1"
+	dnsNativePath    = "/org/freedesktop/resolve1"
+	dnsNativeManager = "org.freedesktop.resolve1.Manager"
+	// The stable native flag contract is systemd v257 resolved-def.h.
+	dnsFlagDNS           uint64 = 1 << 0
+	dnsFlagOtherProtocol uint64 = 1<<1 | 1<<2 | 1<<3 | 1<<4
+	dnsFlagNoCNAME       uint64 = 1 << 5
 	dnsFlagAuthenticated uint64 = 1 << 9
+	dnsFlagNoValidate    uint64 = 1 << 10
+	dnsFlagNoSynthesize  uint64 = 1 << 11
+	dnsFlagNoCache       uint64 = 1 << 12
+	dnsFlagNoZone        uint64 = 1 << 13
+	dnsFlagNoTrustAnchor uint64 = 1 << 14
 	dnsFlagConfidential  uint64 = 1 << 18
+	dnsFlagSynthetic     uint64 = 1 << 19
+	dnsFlagCache         uint64 = 1 << 20
+	dnsFlagZone          uint64 = 1 << 21
+	dnsFlagTrustAnchor   uint64 = 1 << 22
 	dnsFlagNetwork       uint64 = 1 << 23
+	dnsFlagNoStale       uint64 = 1 << 24
 	// Preserve the owner's DNSSEC/TLS policy; exclude cached and local answers
 	// that can otherwise carry the same authentication/confidentiality flags.
-	dnsFreshFlags     uint64 = dnsFlagDNS | 1<<11 | 1<<12 | 1<<13 | 1<<24
+	// ResolveRecord adds NO_SEARCH internally and refuses it in caller flags.
+	dnsFreshFlags     uint64 = dnsFlagDNS | dnsFlagNoCNAME | dnsFlagNoSynthesize | dnsFlagNoCache | dnsFlagNoZone | dnsFlagNoTrustAnchor | dnsFlagNoStale
 	maxDNSNativeBytes        = 256 << 10
 )
 
@@ -88,6 +101,7 @@ type DNSInvestigation struct {
 	Answers          []string                `json:"answers"`
 	Records          []DNSRecordEvidence     `json:"records"`
 	NativeFlags      string                  `json:"nativeFlags,omitempty"`
+	Hops             []DNSQueryEvidence      `json:"hops,omitempty"`
 	Route            DNSEvidenceReading      `json:"route"`
 	Transport        DNSEvidenceReading      `json:"transport"`
 	Trust            DNSEvidenceReading      `json:"trust"`
@@ -121,7 +135,7 @@ func (s *Service) InvestigateDNS(ctx context.Context, req DNSInvestigationReques
 		return nil, err
 	}
 	if execute == nil {
-		execute = runDNSNative
+		execute = dnsNativeExecutor
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -181,91 +195,12 @@ func (s *Service) InvestigateDNS(ctx context.Context, req DNSInvestigationReques
 		r.Error = "This adapter requires systemd-resolved 256 or newer for fresh network-origin evidence; no query was sent."
 		return r, nil
 	}
-	props, err := dnsBusProperties(ctx, execute, owner, dnsNativePath, "org.freedesktop.DBus.Properties", "GetAll", "s", dnsNativeManager)
-	if err != nil {
-		r.Error = "Native DNS policy is unreadable; no query was sent."
-		return r, nil
-	}
-	all, err := dnsPolicySnapshot(ctx, execute, owner, props)
-	if err != nil {
-		r.Error = err.Error() + "; no query was sent."
-		return r, nil
-	}
 	qname := req.Name
 	if req.Type == "PTR" {
 		ip, _ := netip.ParseAddr(qname)
 		qname = reverseDNSName(ip)
 	}
-	r.Policy, r.PolicyMatch = dnsBestPolicy(qname, all)
-	if len(r.Policy) == 0 {
-		r.Error = "No readable native DNS policy scope applies; no query was sent."
-		return r, nil
-	}
-	for _, p := range r.Policy {
-		if !p.ActiveDNS || len(p.Servers) == 0 {
-			r.Error = "A declared best-match DNS scope is unavailable; no query or default-scope fallback was used."
-			return r, nil
-		}
-	}
-	r.Route = DNSEvidenceReading{"modeled", "native_configuration", "Longest matching routing/search suffix selects the listed candidate scopes. The reply supplies answering link evidence."}
-	ifindex := 0
-	if req.ExpectedInterface != "" {
-		for _, p := range r.Policy {
-			if p.Interface == req.ExpectedInterface {
-				ifindex = p.Index
-			}
-		}
-		if ifindex <= 0 {
-			return nil, fmt.Errorf("the expected interface is not a native best-match DNS policy scope")
-		}
-	}
-	before, err := dnsBusOwner(ctx, execute)
-	if err != nil || before != owner {
-		r.Error = "Native resolver identity changed before the query; no query was sent."
-		return r, nil
-	}
-	out, queryErr := dnsBusCall(ctx, execute, owner, dnsNativePath, dnsNativeManager, "ResolveRecord", "isqqt", strconv.Itoa(ifindex), strings.TrimSuffix(qname, ".")+".", "1", strconv.Itoa(int(wireLookupTypes[req.Type])), strconv.FormatUint(dnsFreshFlags, 10))
-	after, ownerErr := dnsBusOwner(ctx, execute)
-	if ownerErr != nil || after != owner {
-		r.Error = "Native resolver identity changed during the query; its result cannot establish trust or transport."
-		return r, nil
-	}
-	if queryErr != nil {
-		r.Error = firstLines(queryErr.Error(), 3)
-		if len(r.Error) > 2048 {
-			r.Error = r.Error[:2048]
-		}
-		if strings.Contains(strings.ToLower(out), "dnssec validation failed") {
-			r.DNSSEC = DNSEvidenceReading{"validation_failed", "native_error_text", "The native resolver rejected DNSSEC validation. No alternative upstream was tested."}
-		}
-		return r, nil
-	}
-	flags, err := decodeDNSNativeRecords(out, qname, req.Type, r)
-	if err != nil {
-		r.Error = "Native record evidence is malformed: " + err.Error()
-		return r, nil
-	}
-	r.NativeFlags = strconv.FormatUint(flags, 10)
-	// A before-only snapshot cannot establish strict certificate policy at
-	// completion. Compare security/routing configuration, excluding the current
-	// server observation, which can legitimately advance during a query.
-	if post, e := dnsBusProperties(ctx, execute, owner, dnsNativePath, "org.freedesktop.DBus.Properties", "GetAll", "s", dnsNativeManager); e == nil {
-		if scopes, e := dnsPolicySnapshot(ctx, execute, owner, post); e == nil {
-			before, after := append([]DNSPolicyScope{}, all...), append([]DNSPolicyScope{}, scopes...)
-			for i := range before {
-				before[i].CurrentServer = ""
-			}
-			for i := range after {
-				after[i].CurrentServer = ""
-			}
-			r.PolicyStable = reflect.DeepEqual(before, after)
-		}
-	}
-	if !r.PolicyStable {
-		r.Limitations = append(r.Limitations, "Native policy changed or could not be reread after the query. Strict TLS trust cannot be established from the initial snapshot.")
-	}
-	dnsInterpretNative(r, flags)
-	return r, nil
+	return r, dnsWalkNative(ctx, execute, owner, qname, req, r)
 }
 
 func dnsUnknown(summary string) DNSEvidenceReading {
@@ -276,7 +211,11 @@ func dnsInterpretNative(r *DNSInvestigation, flags uint64) {
 	// The same flags also describe synthetic, cache and local-zone answers.
 	// Accept a measurement only when the native service explicitly says DNS
 	// from the network, with none of those local-origin bits.
-	fresh := flags&dnsFlagDNS != 0 && flags&dnsFlagNetwork != 0 && flags&(1<<19|1<<20|1<<21|1<<22|1<<27) == 0 && flags&uint64(30) == 0
+	localOrigin := dnsFlagSynthetic | dnsFlagCache | dnsFlagZone | dnsFlagTrustAnchor
+	knownOutput := dnsFlagDNS | dnsFlagOtherProtocol | dnsFlagAuthenticated | dnsFlagConfidential | localOrigin | dnsFlagNetwork
+	// A future/unknown output bit cannot silently acquire an authentication or
+	// transport meaning that this version of the adapter has not inspected.
+	fresh := flags&dnsFlagDNS != 0 && flags&dnsFlagNetwork != 0 && flags&(localOrigin|dnsFlagOtherProtocol) == 0 && flags&^knownOutput == 0
 	if !fresh {
 		r.Limitations = append(r.Limitations, "The reply did not establish fresh network DNS origin. Authentication/confidentiality flags cannot prove DNSSEC or encrypted upstream transport.")
 		return
@@ -391,6 +330,9 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 		return nil, fmt.Errorf("native routing/server policy is unreadable or exceeds bounds")
 	}
 	global := DNSPolicyScope{Index: 0, Interface: "global", Domains: []string{}, Servers: []string{}, DNSSEC: dnsVariantString(props["DNSSEC"]), DNSOverTLS: dnsVariantString(props["DNSOverTLS"])}
+	if !dnsSecurityPolicyKnown(global.DNSSEC, global.DNSOverTLS) {
+		return nil, fmt.Errorf("native DNS security policy is unreadable")
+	}
 	var err error
 	global.NegativeTrustAnchors, err = dnsVariantStrings(props["DNSSECNegativeTrustAnchors"])
 	if err != nil {
@@ -412,11 +354,17 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 		}
 		remaining = append(remaining, scopedEndpoint{scope, server})
 	}
+	type scopedDomain struct {
+		index   int
+		name    string
+		routing bool
+	}
+	remainingDomains := []scopedDomain{}
 	for _, row := range domains {
 		var index int
 		var domain string
 		var routing bool
-		if len(row) != 3 || json.Unmarshal(row[0], &index) != nil || json.Unmarshal(row[1], &domain) != nil || json.Unmarshal(row[2], &routing) != nil || len(domain) > 253 {
+		if len(row) != 3 || json.Unmarshal(row[0], &index) != nil || index < 0 || json.Unmarshal(row[1], &domain) != nil || json.Unmarshal(row[2], &routing) != nil || !dnsPolicyDomainKnown(domain) {
 			return nil, fmt.Errorf("native domain policy is unreadable")
 		}
 		if index == 0 {
@@ -424,6 +372,8 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 				domain = "~" + domain
 			}
 			global.Domains = append(global.Domains, domain)
+		} else {
+			remainingDomains = append(remainingDomains, scopedDomain{index, domain, routing})
 		}
 	}
 	linksOut, err := execute(ctx, "ip", "-j", "link", "show")
@@ -456,11 +406,13 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 	}
 	sort.Strings(objects)
 	result := []DNSPolicyScope{}
+	seenIndexes := map[int]bool{}
 	for _, path := range objects {
 		index, err := dnsNativeLinkIndex(path)
-		if err != nil || index < 1 {
+		if err != nil || index < 1 || seenIndexes[index] {
 			return nil, fmt.Errorf("native link object identity is unreadable")
 		}
+		seenIndexes[index] = true
 		lp, err := dnsBusProperties(ctx, execute, owner, path, "org.freedesktop.DBus.Properties", "GetAll", "s", "org.freedesktop.resolve1.Link")
 		if err != nil {
 			return nil, err
@@ -512,8 +464,19 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 		for _, row := range localDomains {
 			var domain string
 			var routing bool
-			if len(row) != 2 || json.Unmarshal(row[0], &domain) != nil || len(domain) > 253 || json.Unmarshal(row[1], &routing) != nil {
+			if len(row) != 2 || json.Unmarshal(row[0], &domain) != nil || !dnsPolicyDomainKnown(domain) || json.Unmarshal(row[1], &routing) != nil {
 				return nil, fmt.Errorf("native link domain is unreadable")
+			}
+			found := false
+			for i, declared := range remainingDomains {
+				if declared.index == index && declared.name == domain && declared.routing == routing {
+					remainingDomains = append(remainingDomains[:i], remainingDomains[i+1:]...)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("native domain inventories changed during the snapshot")
 			}
 			if routing {
 				domain = "~" + domain
@@ -524,12 +487,18 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 			return nil, fmt.Errorf("native default-route policy is unreadable")
 		}
 		p.DNSSEC = dnsVariantString(lp["DNSSEC"])
+		if lp["DNSSEC"].Type != "s" || lp["DNSOverTLS"].Type != "s" {
+			return nil, fmt.Errorf("native link DNS security policy is unreadable")
+		}
 		if p.DNSSEC == "" {
 			p.DNSSEC = global.DNSSEC
 		}
 		p.DNSOverTLS = dnsVariantString(lp["DNSOverTLS"])
 		if p.DNSOverTLS == "" {
 			p.DNSOverTLS = global.DNSOverTLS
+		}
+		if !dnsSecurityPolicyKnown(p.DNSSEC, p.DNSOverTLS) {
+			return nil, fmt.Errorf("native link DNS security policy is unreadable")
 		}
 		p.NegativeTrustAnchors, err = dnsVariantStrings(lp["DNSSECNegativeTrustAnchors"])
 		if err != nil {
@@ -546,6 +515,9 @@ func dnsPolicySnapshot(ctx context.Context, execute TrafficExecutor, owner strin
 		if len(p.Servers) > 0 || len(p.Domains) > 0 {
 			result = append(result, p)
 		}
+	}
+	if len(remainingDomains) != 0 {
+		return nil, fmt.Errorf("native declared domain policy has unreadable link ownership")
 	}
 	for _, entry := range remaining {
 		scoped, err := dnsEvidenceScopedServer(entry.endpoint, entry.index, names)
@@ -652,6 +624,9 @@ func dnsBestPolicy(name string, all []DNSPolicyScope) ([]DNSPolicyScope, string)
 		score := -1
 		for _, domain := range p.Domains {
 			domain = strings.ToLower(strings.TrimPrefix(domain, "~"))
+			if domain != "." {
+				domain = strings.TrimSuffix(domain, ".")
+			}
 			if domain == "." {
 				score = max(score, 0)
 			} else if name == domain || strings.HasSuffix(name, "."+domain) {
@@ -677,15 +652,20 @@ func dnsBestPolicy(name string, all []DNSPolicyScope) ([]DNSPolicyScope, string)
 }
 
 func decodeDNSNativeRecords(out, name, rtype string, r *DNSInvestigation) (uint64, error) {
+	flags, _, err := decodeDNSNativeRecordBatch(out, name, rtype, r)
+	return flags, err
+}
+
+func decodeDNSNativeRecordBatch(out, name, rtype string, r *DNSInvestigation) (uint64, int, error) {
 	var reply dnsBusReply
 	var rows [][]json.RawMessage
 	var flags uint64
 	if json.Unmarshal([]byte(out), &reply) != nil || reply.Type != "a(iqqay)t" || len(reply.Data) != 2 || json.Unmarshal(reply.Data[0], &rows) != nil || len(rows) == 0 || len(rows) > 64 || json.Unmarshal(reply.Data[1], &flags) != nil {
-		return 0, fmt.Errorf("invalid native record envelope")
+		return 0, 0, fmt.Errorf("invalid native record envelope")
 	}
 	fqdn, err := dnsmessage.NewName(strings.TrimSuffix(name, ".") + ".")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	q := dnsmessage.Question{Name: fqdn, Type: wireLookupTypes[rtype], Class: dnsmessage.ClassINET}
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 1, Response: true})
@@ -693,36 +673,55 @@ func decodeDNSNativeRecords(out, name, rtype string, r *DNSInvestigation) (uint6
 	_ = b.Question(q)
 	packet, _ := b.Finish()
 	binary.BigEndian.PutUint16(packet[6:8], uint16(len(rows)))
+	records := []DNSRecordEvidence{}
+	interfaces := []int{}
+	wireBytes := 0
 	for _, row := range rows {
 		var index int
 		var class, kind uint16
 		var wire []byte
 		if len(row) != 4 || json.Unmarshal(row[0], &index) != nil || index < 0 || json.Unmarshal(row[1], &class) != nil || class != 1 || json.Unmarshal(row[2], &kind) != nil || json.Unmarshal(row[3], &wire) != nil || len(wire) > 65535 {
-			return 0, fmt.Errorf("invalid native record tuple")
+			return 0, 0, fmt.Errorf("invalid native record tuple")
 		}
 		owner, offset, err := dnsExpandedOwner(wire)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
+		}
+		if !strings.EqualFold(owner, strings.TrimSuffix(name, ".")) || kind != uint16(q.Type) {
+			return 0, 0, fmt.Errorf("native record does not match the exact question owner and type")
 		}
 		if len(wire) < offset+10 || binary.BigEndian.Uint16(wire[offset:]) != kind || binary.BigEndian.Uint16(wire[offset+2:]) != class || len(wire) != offset+10+int(binary.BigEndian.Uint16(wire[offset+8:])) {
-			return 0, fmt.Errorf("native record metadata does not match its wire data")
+			return 0, 0, fmt.Errorf("native record metadata does not match its wire data")
 		}
-		r.Records = append(r.Records, DNSRecordEvidence{index, owner, kind, binary.BigEndian.Uint32(wire[offset+4:])})
-		if !containsInt(r.AnswerInterfaces, index) {
-			r.AnswerInterfaces = append(r.AnswerInterfaces, index)
+		records = append(records, DNSRecordEvidence{index, owner, kind, binary.BigEndian.Uint32(wire[offset+4:])})
+		if !containsInt(interfaces, index) {
+			interfaces = append(interfaces, index)
 		}
+		wireBytes += len(wire)
 		packet = append(packet, wire...)
 		if len(packet) > 65535 {
-			return 0, fmt.Errorf("native record aggregate exceeds bound")
+			return 0, 0, fmt.Errorf("native record aggregate exceeds bound")
 		}
 	}
 	answers, _, err := parseDNSResponse(packet, 1, q)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
+	}
+	if len(answers) == 0 {
+		return 0, 0, fmt.Errorf("native reply contains no exact-owner records")
+	}
+	if rtype == "CNAME" {
+		for _, answer := range answers[1:] {
+			if !strings.EqualFold(answer, answers[0]) {
+				return 0, 0, fmt.Errorf("native reply contains conflicting CNAME targets")
+			}
+		}
+		answers = answers[:1]
 	}
 	r.Answers = answers
+	r.Records, r.AnswerInterfaces = records, interfaces
 	sort.Ints(r.AnswerInterfaces)
-	return flags, nil
+	return flags, wireBytes, nil
 }
 
 func containsInt(values []int, value int) bool {

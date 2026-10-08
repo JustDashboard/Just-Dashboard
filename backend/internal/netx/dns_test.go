@@ -25,7 +25,14 @@ func pointResolvConf(t *testing.T, mode string) string {
 	path := filepath.Join(dir, "resolv.conf")
 	switch mode {
 	case "stub":
-		if err := os.Symlink("../run/systemd/resolve/stub-resolv.conf", path); err != nil {
+		target := filepath.Join(dir, "run/systemd/resolve/stub-resolv.conf")
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(target, []byte("nameserver 127.0.0.53\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, path); err != nil {
 			t.Fatal(err)
 		}
 	case "uplink":

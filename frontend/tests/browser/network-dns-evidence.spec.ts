@@ -75,10 +75,66 @@ function record(): SavedDNSEvidence {
 
 async function setup(
   page: Page,
-  options: { readonly?: boolean; failedLaunch?: boolean; interrupted?: boolean } = {},
+  options: {
+    readonly?: boolean
+    failedLaunch?: boolean
+    interrupted?: boolean
+    alias?: boolean
+  } = {},
 ) {
   const calls: DNSInvestigationRequest[] = []
   const saved = record()
+  if (options.alias && saved.result) {
+    const result = saved.result
+    saved.request = { ...saved.request, name: "alias.corp.example" }
+    result.request = saved.request
+    const unknown = { state: "unknown", basis: "unmeasured", summary: "No accepted native flags." }
+    const common = {
+      ownerIdentity: result.ownerIdentity!,
+      policyMatch: result.policyMatch,
+      policy: result.policy,
+      policyAfter: result.policy,
+      policyStable: true,
+      snapshotBefore: "b".repeat(64),
+      snapshotAfter: "b".repeat(64),
+      answerInterfaces: result.answerInterfaces,
+      records: result.records,
+      route: result.route,
+      transport: result.transport,
+      trust: result.trust,
+      dnssec: result.dnssec,
+      nativeFlags: result.nativeFlags,
+    }
+    result.hops = [
+      {
+        ...common,
+        name: "alias.corp.example",
+        type: "AAAA",
+        answers: [],
+        records: [],
+        answerInterfaces: [],
+        nativeFlags: undefined,
+        transport: unknown,
+        trust: unknown,
+        dnssec: unknown,
+        error: "Call failed: CNAME resolving disabled on 'alias.corp.example'",
+      },
+      {
+        ...common,
+        name: "alias.corp.example",
+        type: "CNAME",
+        answers: ["secret.corp.example."],
+        records: [{ interfaceIndex: 7, owner: "alias.corp.example", type: 5, ttl: 60 }],
+        aliasTarget: "secret.corp.example",
+      },
+      {
+        ...common,
+        name: "secret.corp.example",
+        type: "AAAA",
+        answers: result.answers,
+      },
+    ]
+  }
   if (options.interrupted) {
     saved.status = "interrupted"
     delete saved.result
@@ -137,6 +193,31 @@ test("retained DNS evidence separates answering links, native trust and applicat
     `/api/v1/network/dns/evidence/${id}/export`,
   )
 })
+
+for (const width of [390, 1280]) {
+  test(`retained alias questions expose scope, answers and per-question trust at ${width}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await setup(page, { alias: true })
+    await page
+      .getByRole("button", { name: "alias.corp.example · AAAA · completed", exact: true })
+      .click()
+    const chain = page.getByLabel("Native DNS question chain")
+    await expect(chain).toContainText("failed discovery questions have no transport measurement")
+    const questions = chain.getByRole("listitem")
+    await expect(questions).toHaveCount(3)
+    await expect(questions.nth(0)).toContainText("alias.corp.example · AAAA")
+    await expect(questions.nth(0)).toContainText("Accepted records: None")
+    await expect(questions.nth(0)).toContainText("Unknown")
+    await expect(questions.nth(1)).toContainText("CNAME target → secret.corp.example")
+    await expect(questions.nth(1)).toContainText("vpn0 · ~corp.example · DNS active")
+    await expect(questions.nth(1)).toContainText("Native strict TLS policy")
+    await expect(questions.nth(2)).toContainText("Accepted records: 2001:db8::7")
+    await expect(questions.nth(2)).toContainText("Native reports DNSSEC validation")
+    expect(await chain.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+  })
+}
 
 test("explicit launch sends only the question and expected native policy link", async ({
   page,
