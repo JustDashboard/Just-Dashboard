@@ -100,6 +100,17 @@ and destructive confirmation where appropriate; audit the mutation; and use the
 existing path guards, durable journal and pending-confirmation recovery model.
 There is no automatic reconcile daemon or foreign-resource cleanup.
 
+## Reporting page
+
+`/network/drift` uses the reading register to show dated desired, rendered and
+runtime evidence, ownership conflicts, and measured unit activation separately
+from reboot attribution. Summary counts include spec, journal, boot-unit and
+enabled blocklist readings. Failed refreshes retain dated evidence and disable
+repair selection. Reviewed selections expire when generation, ownership,
+selected comparison bytes or journal facts change; polling time alone does not
+invalidate identical evidence. The initial page offers ordinary plan review and
+no execution control while the plan is non-executable.
+
 Focused regression checks:
 
 ```sh
