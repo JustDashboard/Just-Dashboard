@@ -4,6 +4,17 @@ This directory records scoped acceptance for successive implementation checkpoin
 The [implementation ledger](../implementation-status.md) preserves the full outstanding scope;
 these checks do not turn the historical report scores into 10/10 ratings.
 
+[Kernel observer acceptance](observer-kernel-acceptance.md) records the bounded native observer,
+owned detach/retry, durable batch receipts and actual Docker/process-death fixtures.
+[Observer UI acceptance](observer-ui-acceptance.md) records its separate measurement channels,
+reviewed controls, source-matched checks, exact timeout retries and mobile/desktop inspection.
+[Mounted route acceptance](observer-mounted-stop-prerequisite.md) verifies the explicit stop
+prerequisite through `Server.Routes`. Combined-build acceptance and broader P8 limits remain open.
+
+[IPAM reservation lifecycle acceptance](ipam-reservation-lifecycle.md) records initialization,
+detachment and retained-draft behavior with all 20 IPAM browser cases passing. Its original selected
+gate and exact unrelated retries are disclosed separately from the upcoming combined gate.
+
 [Native DNS alias safety](dns-alias-safety.md) records P9/F10's bounded explicit walker, signed
 isolated resolver acceptance, exact v257 flag audit, preserved failed iterations and focused races.
 Its per-question UI still requires the integrated production-build/browser gate.

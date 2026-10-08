@@ -8,6 +8,7 @@
 - [`network-file-durability.md`](network-file-durability.md) — owned file identity and durable restoration of prior absence.
 - [`network-external-checks.md`](network-external-checks.md) — scoped signed controlled-source DNS/TCP/TLS checks and enrollment.
 - [`network-flow-accounting.md`](network-flow-accounting.md) — opt-in native socket history, counter quality, bounds and attribution.
+- [`network-flow-observer.md`](network-flow-observer.md) — separately reviewed kernel packet observations, owned links, durable batches and explicit quality gaps.
 - [`network-ipam.md`](network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
 - [`network-dns-evidence.md`](network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
 - [`network-sqm.md`](network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
