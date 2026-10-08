@@ -610,6 +610,8 @@ export type DockerVolume = {
   size: number
   refCount: number
   inUse: boolean
+  /** The driver's mount options; a prune skips a local volume that has any. */
+  options?: Record<string, string>
 }
 
 export type DockerNetwork = {
@@ -953,7 +955,6 @@ export type VolumeUser = {
 
 export type VolumeDetail = DockerVolume & {
   usedBy: VolumeUser[]
-  options?: Record<string, string>
 }
 
 export type NetworkMember = {

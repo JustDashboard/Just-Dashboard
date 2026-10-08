@@ -61,8 +61,9 @@ taking a frame:
   activity on the Overview, every chart, list and hardware reading on the
   metrics page, every block on the Docker pages (the
   overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
-  volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
-  images; the attention and storage blocks on a container's page), the
+  networks, stacks and events lists with their toolbars; the disk breakdown above the images; the
+  Volumes page's band of who holds the data and where each volume stands, over its framed table;
+  the attention and storage blocks on a container's page), the
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
@@ -1018,7 +1019,7 @@ table appeared already scrolling inside its own panel, with Issues and the row's
 right edge — a table that arrives broken.
 
 **And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
-containers, images, volumes, networks and stacks lists are cards at every width — the argument
+containers, images, networks and stacks lists are cards at every width — the argument
 `git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
 panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
 paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
@@ -1030,7 +1031,11 @@ frames, which is the stacking this section refuses. System users took the same a
 every account opened its keys, so the eight-column table became cards (`AccountCard` on the page),
 their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. The audit
 log is the counter-example on the next page of the same section: an entry opens nothing, so its
-trail stays a table.
+trail stays a table. The volumes were cards from 2026-09-23 and became a table again on 2026-10-08
+at the operator's request: a volume's card said "1 container" and not which, so the question every
+volume is opened with took a click, and "which is largest, unmounted or not backed up" is asked of a
+column. A row that opens a sheet but is read down its columns is a table of readings with a
+destination on its name, as Processes, Packages and Services are, and it keeps its frame (§2).
 
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
@@ -1965,6 +1970,37 @@ The passes, in order. Each one is a diff you can review on its own.
    Saved credentials header, the In use rule counts what a source reads through and each card names
    the projects that do, one never used says so on its own card in amber, and when each was last
    used is beside its name. The GitHub App's state stays in its own section.
+
+   Docker's Volumes page took the Images page's shape on 2026-10-08, at the operator's request,
+   because it had no life: three chips over a column of grey cards, each a name over "1 container".
+   It opens on Docker's identity line (the engine's version; how many volumes, the bytes they hold,
+   how many are mounted and how many a backup job covers as facts), with the verdict at its right
+   end — how many volumes a prune would delete, a press of which narrows the table to them — beside
+   Create volume. Under it `components/docker/volume-band.tsx` asks two questions the cards left to be
+   added up. Held by is the Processes band asked of storage: the stacks and lone containers holding
+   the most, as spans of one bar the size of every volume, each in the lane hue (`hueFor(name,
+   LANES)`) the Stacks and Containers pages give that name, a stack taken down saying so in amber.
+   Mounts is every volume by where it stands — in use in green, held by stopped containers in
+   `--tag-cyan`, left by a stack in amber, not mounted in `--tag-violet`, anonymous muted — with the
+   part a prune would take hatched inside each span, as the Images band hatches what a prune gives
+   back, and the Prune command beside it naming the bytes; a prune in flight sweeps the bar. A line in
+   either narrows the table. The table's widest column is the containers that mount each volume, by
+   name with their state's dot and the path they see it at, `ro` where they cannot write, each a
+   link to its page; then the volume's state in the band's colour over whether a backup covers it,
+   and its size over a bar against the largest in the Volumes span's colour (`--chart-5`, the Docker
+   overview's). The column heads sort. Container state comes from the containers socket, so a dot
+   changes the moment Docker's does. The sheet (`?volume=`) opens on four readings, says what a
+   prune would do when the answer is to delete it, lists the mounting containers as a table of their
+   own, then the contents and what Docker was told.
+
+   The pass corrected what the page said about prunes. The cards called a volume whose only
+   container was stopped one "prune would delete", and the prune dialog said a stopped stack's data
+   would go. The daemon takes a reference for every container that mounts a volume, running or not,
+   and its prune removes only the local volumes without driver options that nothing references
+   (`volume/service.Prune`, `ByReferenced(false)`). What it does take is a volume whose containers
+   were *removed* — the stack taken down with `docker compose down` is the common case, and its
+   Compose labels still name it, so the page says which stack left it. The list route now carries a
+   volume's driver options so the page can say exactly which volumes a prune would take.
 
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
    on a page you configure is best drawn beside the control that sets it. Version's Installed,
