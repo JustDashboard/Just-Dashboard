@@ -42,12 +42,51 @@ const process = {
   managerName: "batch-worker.service",
 }
 
+const renderers = {
+  key: "name:chrome",
+  manager: "session",
+  name: "chrome",
+  count: 3,
+  cpuPercent: 380,
+  memory: 3221225472,
+  swap: 0,
+  ioRate: 0,
+  handles: 0,
+  users: ["ubuntu"],
+  pid: 5100,
+  cmdline: "/opt/chrome/chrome --type=renderer --lang=en-US",
+  members: [5100, 5101, 5102].map((pid) => ({ pid, createTime: iso(now - 60000 - pid) })),
+  launcher: {
+    pid: 5000,
+    name: "node",
+    cmdline: "node /srv/app/node_modules/.bin/playwright test",
+    createTime: iso(now - 120000),
+    username: "ubuntu",
+  },
+}
+const service = {
+  key: "systemd:batch-worker.service",
+  manager: "systemd",
+  name: "batch-worker.service",
+  count: 1,
+  cpuPercent: 175,
+  memory: 2147483648,
+  swap: 1048576,
+  ioRate: 6000,
+  handles: 0,
+  users: ["worker"],
+  pid: 4200,
+  cmdline: process.cmdline,
+  members: [{ pid: 4200, createTime: process.createTime }],
+}
+
 async function mockAdvisor(
   page: Page,
   options: { reader?: boolean; partial?: boolean; workloads?: boolean; hostMount?: boolean } = {},
 ) {
   await mockHost(page)
   let cleaned = false
+  let stopped = false
   let reads = 0
   const mutations: { path: string; body: unknown }[] = []
   await page.route("**/api/v1/**", async (route) => {
@@ -62,11 +101,17 @@ async function mockAdvisor(
           {
             id: "psi-cpu",
             level: "warning",
-            title: "Tasks are waiting for CPU",
-            detail: "32% of the last 10 seconds stalled",
+            title: "Work is queueing for CPU",
+            detail: "Runnable tasks waited 32% of the last minute and 21% of the last five",
             advice: "Inspect the actual consumers",
             value: 32,
-            threshold: 30,
+            threshold: 25,
+            area: "cpu",
+            evidence: [
+              { label: "Last minute", value: "32%" },
+              { label: "Last 5 minutes", value: "21%" },
+              { label: "Load (5 min)", value: "9.1 on 4 cores" },
+            ],
           },
         ],
       })
@@ -120,12 +165,29 @@ async function mockAdvisor(
     }
     if (path === "/system/advisor/workloads")
       return json(route, {
-        checkedAt: iso(now),
+        checkedAt: new Date().toISOString(),
         sort: url.searchParams.get("sort"),
         processes: [process],
+        groups: stopped ? [service] : [renderers, service],
         total: 184,
         silences: ["CPU intervals unavailable for 2 processes (new, replaced or unreadable)."],
       })
+    if (
+      path === "/system/advisor/workloads/signal" ||
+      path === "/system/advisor/workloads/priority"
+    ) {
+      const body = route.request().postDataJSON()
+      mutations.push({ path, body })
+      if (path.endsWith("/signal")) stopped = true
+      return json(route, {
+        items: body.targets.map((target: { pid: number }) => ({ pid: target.pid, ok: true })),
+        signalled: body.targets.length,
+      })
+    }
+    if (path === "/systemd/batch-worker.service/restart") {
+      mutations.push({ path, body: null })
+      return json(route, { exitCode: 0 })
+    }
     if (path === "/processes/4200/signal" || path === "/processes/4200/priority") {
       mutations.push({ path, body: route.request().postDataJSON() })
       return route.fulfill({ status: 204 })
@@ -137,8 +199,7 @@ async function mockAdvisor(
 
 async function openInvestigation(page: Page, title = "/ is filling up") {
   await page.goto("/metrics")
-  await page.getByRole("button", { name: title, exact: false }).click()
-  await page.getByRole("button", { name: "Investigate", exact: true }).click()
+  await page.getByRole("button", { name: `Fix: ${title}`, exact: true }).click()
   return page.getByRole("dialog", { name: title, exact: true })
 }
 
@@ -147,7 +208,7 @@ test("storage evidence is requested on demand and reviewed cleanup retains a cop
 }) => {
   const state = await mockAdvisor(page)
   await page.goto("/metrics")
-  await expect(page.getByRole("button", { name: "/ is filling up", exact: false })).toBeVisible({
+  await expect(page.getByRole("button", { name: "Fix: / is filling up" })).toBeVisible({
     timeout: 15000,
   })
   expect(state.reads()).toBe(0)
@@ -187,37 +248,159 @@ test("partial scans stay explicit and readers can inspect without cleanup contro
   await expect(sheet.getByText("/var/data", { exact: true }).first()).toBeVisible()
 })
 
-test("workload actions use measured process identity and wait for confirmation", async ({
-  page,
-}) => {
+test("a CPU finding names the workloads and fixes them as groups", async ({ page }) => {
   const state = await mockAdvisor(page, { workloads: true })
-  const sheet = await openInvestigation(page, "Tasks are waiting for CPU")
-  await expect(sheet.getByText("175.0% · 1.2s")).toBeVisible()
-  await expect(sheet.getByRole("link", { name: "Manage systemd" })).toHaveAttribute(
+  const sheet = await openInvestigation(page, "Work is queueing for CPU")
+  // The diagnosis carries the server's own evidence.
+  await expect(sheet.getByText("9.1 on 4 cores")).toBeVisible()
+  // Forty renderers are one culprit, named with what started them.
+  await expect(sheet.getByText("started by node (PID 5000)", { exact: false })).toBeVisible()
+  await expect(sheet.getByText("3.8 cores")).toBeVisible()
+  await expect(sheet.getByRole("link", { name: "Open systemd" })).toHaveAttribute(
     "href",
     "/processes/services?unit=batch-worker.service",
   )
-  await sheet.getByRole("button", { name: "Lower priority" }).click()
+
+  await sheet.getByRole("button", { name: "Stop all 3" }).click()
   expect(state.mutations).toHaveLength(0)
   await page
-    .getByRole("dialog", { name: "Lower process priority" })
-    .getByRole("button", { name: "Lower priority" })
+    .getByRole("dialog", { name: "Stop chrome" })
+    .getByRole("button", { name: "Send SIGTERM" })
     .click()
   await expect.poll(() => state.mutations.length).toBe(1)
   expect(state.mutations[0]).toEqual({
-    path: "/processes/4200/priority",
-    body: { nice: 5, startedAt: process.createTime },
+    path: "/system/advisor/workloads/signal",
+    body: {
+      targets: renderers.members.map((member) => ({
+        pid: member.pid,
+        startedAt: member.createTime,
+      })),
+      signal: "SIGTERM",
+    },
   })
+  // Measured again after the fix: the group is gone and says what it used.
+  await expect(
+    sheet.getByText(/Stopped chrome\. It is gone — it was using 3\.8 cores\./),
+  ).toBeVisible({
+    timeout: 15000,
+  })
+
+  await sheet.getByRole("button", { name: "Lower priority" }).click()
+  await expect.poll(() => state.mutations.length).toBe(2)
+  expect(state.mutations[1]).toEqual({
+    path: "/system/advisor/workloads/priority",
+    body: { targets: [{ pid: 4200, startedAt: process.createTime }], nice: 10 },
+  })
+
+  await sheet.getByRole("button", { name: "Restart service" }).click()
+  await page
+    .getByRole("dialog", { name: "Restart batch-worker" })
+    .getByRole("button", { name: "Restart", exact: true })
+    .click()
+  await expect.poll(() => state.mutations.length).toBe(3)
+  expect(state.mutations[2].path).toBe("/systemd/batch-worker.service/restart")
+
+  // A single process is still reachable, its long command line clamped.
+  await sheet.getByText("Individual processes").click()
   await sheet.getByRole("button", { name: "Terminate", exact: true }).click()
   await page
     .getByRole("dialog", { name: "Terminate process" })
     .getByRole("button", { name: "Send SIGTERM" })
     .click()
-  await expect.poll(() => state.mutations.length).toBe(2)
-  expect(state.mutations[1]).toEqual({
+  await expect.poll(() => state.mutations.length).toBe(4)
+  expect(state.mutations[3]).toEqual({
     path: "/processes/4200/signal",
     body: { signal: "SIGTERM", startedAt: process.createTime },
   })
+})
+
+test("a failed service shows why it stopped and is restarted in place", async ({ page }) => {
+  await mockAdvisor(page)
+  let restarted = false
+  const mutations: string[] = []
+  await page.route("**/api/v1/**", async (route) => {
+    const url = new URL(route.request().url())
+    const path = url.pathname.replace(/^\/api\/v1/, "")
+    if (path === "/system/health")
+      return json(route, {
+        ...health,
+        status: restarted ? "ok" : "warning",
+        findings: restarted
+          ? []
+          : [
+              {
+                id: "systemd.failed",
+                level: "warning",
+                title: "backup-sync.service has failed",
+                detail: "backup-sync.service",
+                advice: "Read why it stopped, then restart it.",
+                value: 1,
+                threshold: 0,
+                area: "services",
+                evidence: [{ label: "Failed", value: "1" }],
+                subjects: [{ kind: "unit", id: "backup-sync.service", name: "Nightly sync" }],
+              },
+            ],
+      })
+    if (path === "/systemd/backup-sync.service")
+      return json(route, {
+        unit: {
+          name: "backup-sync.service",
+          description: "Nightly sync",
+          loadState: "loaded",
+          activeState: restarted ? "active" : "failed",
+          subState: restarted ? "running" : "failed",
+          unitFileState: "enabled",
+          enabled: true,
+          result: restarted ? "success" : "exit-code",
+          exitCode: "exited",
+          exitStatus: 1,
+          changedAt: Math.floor((now - 3 * 3600000) / 1000),
+        },
+        properties: {},
+      })
+    if (path === "/logs/search")
+      return json(route, {
+        lines: [
+          {
+            text: "sync: cannot reach s3.example.test",
+            level: "error",
+            timestamp: iso(now - 3 * 3600000),
+          },
+        ],
+        scanned: 1,
+        matched: 1,
+        truncated: false,
+        complete: true,
+        files: [],
+        histogram: [],
+        tookMillis: 1,
+      })
+    if (path === "/systemd/backup-sync.service/restart") {
+      mutations.push(path)
+      restarted = true
+      return json(route, { exitCode: 0 })
+    }
+    return route.fallback()
+  })
+  await page.goto("/metrics")
+  await page.getByRole("button", { name: "Fix: backup-sync.service has failed" }).click()
+  const sheet = page.getByRole("dialog", { name: "backup-sync.service has failed" })
+  await expect(sheet.getByText("exit 1", { exact: true })).toBeVisible()
+  await expect(sheet.getByText("sync: cannot reach s3.example.test")).toBeVisible()
+  await sheet.getByRole("button", { name: "Restart", exact: true }).click()
+  expect(mutations).toHaveLength(0)
+  await page
+    .getByRole("dialog", { name: "Restart service" })
+    .getByRole("button", { name: "Restart", exact: true })
+    .click()
+  await expect.poll(() => mutations.length).toBe(1)
+  await expect(sheet.getByText("Running again — the failure is gone.")).toBeVisible()
+  // Closed, the list says it was resolved here rather than silently dropping it.
+  await page.keyboard.press("Escape")
+  await expect(
+    page.getByRole("list", { name: "Resolved here" }).getByText("backup-sync.service has failed"),
+  ).toBeVisible()
 })
 
 test("storage investigation fits desktop and mobile widths", async ({ page }, testInfo) => {
@@ -452,9 +635,9 @@ test("Health names unassessed sources instead of claiming every check passed", a
   await expect(assessment.getByText("Partial assessment", { exact: true })).toBeVisible({
     timeout: 15000,
   })
-  await expect(assessment.getByText("Not assessed", { exact: true })).toBeVisible()
+  await expect(assessment.getByText("Not assessed:", { exact: true })).toBeVisible()
   await expect(
-    assessment.getByText("No findings in the completed checks", { exact: true }),
+    assessment.getByText("Every check that could run is within its limits.", { exact: true }),
   ).toBeVisible()
 })
 
@@ -483,9 +666,11 @@ test("an unavailable first Health read stays visible and can be retried", async 
     return route.fallback()
   })
   await page.goto("/metrics")
-  await expect(page.getByText("Health source unavailable", { exact: true })).toBeVisible()
+  await expect(page.getByText("Health source unavailable", { exact: true })).toBeVisible({
+    timeout: 15000,
+  })
   unavailable = false
   await page.getByRole("button", { name: "Try again", exact: true }).click()
-  await expect(page.getByRole("button", { name: "/ is filling up", exact: false })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Fix: / is filling up" })).toBeVisible()
   await expect(page.getByText("Health source unavailable", { exact: true })).toHaveCount(0)
 })

@@ -15,6 +15,9 @@ type WorkloadReport struct {
 	Processes []Process `json:"processes"`
 	Total     int       `json:"total"`
 	Silences  []string  `json:"silences"`
+	// Groups are the heaviest workloads by the same measure, over every
+	// process rather than the twenty listed.
+	Groups []WorkloadGroup `json:"groups"`
 }
 
 // Workloads takes two snapshots so attribution does not depend on another
@@ -35,7 +38,7 @@ func (t *Table) Workloads(ctx context.Context, order string) (*WorkloadReport, e
 	if err != nil {
 		return nil, err
 	}
-	report := &WorkloadReport{CheckedAt: time.Now().UTC(), Sort: order, Total: len(rows), Processes: []Process{}, Silences: []string{}}
+	report := &WorkloadReport{CheckedAt: time.Now().UTC(), Sort: order, Total: len(rows), Processes: []Process{}, Silences: []string{}, Groups: []WorkloadGroup{}}
 	if len(rows) > 4096 {
 		report.Silences = append(report.Silences, "Only the first 4096 processes were inspected; this is partial attribution.")
 		rows = rows[:4096]
@@ -87,6 +90,7 @@ func (t *Table) Workloads(ctx context.Context, order string) (*WorkloadReport, e
 	if order == "io" && missingIO > 0 {
 		report.Silences = append(report.Silences, fmt.Sprintf("Disk I/O intervals unavailable for %d processes.", missingIO))
 	}
+	report.Groups = workloadGroups(rows, order)
 	sortWorkloads(rows, order)
 	report.Processes = append(report.Processes, rows[:min(len(rows), 20)]...)
 	return report, nil

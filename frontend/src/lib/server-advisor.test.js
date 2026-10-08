@@ -17,6 +17,7 @@ describe("host finding investigations", () => {
       "files",
       "timewait",
       "drops:tailscale0",
+      "neterr:eth0",
       "temp:NVMe:1",
       "systemd.failed",
       "docker.unhealthy",
@@ -28,6 +29,11 @@ describe("host finding investigations", () => {
     expect(healthInvestigation("disk:/mnt/a:b").path).toBe("/mnt/a:b")
     expect(healthInvestigation("temp:NVMe:1").kind).toBe("external")
     expect(healthInvestigation("future-check")).toBeUndefined()
+  })
+  test("failed services and containers are fixed in place rather than on another page", () => {
+    expect(healthInvestigation("systemd.failed").kind).toBe("services")
+    expect(healthInvestigation("docker.unhealthy").kind).toBe("containers")
+    expect(healthInvestigation("neterr:eth0").networkInterface).toBe("eth0")
   })
   test("memory, swap and I/O lead to their own consumers", () => {
     expect(healthInvestigation("memory").sort).toBe("memory")

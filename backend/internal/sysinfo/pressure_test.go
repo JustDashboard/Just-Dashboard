@@ -30,6 +30,16 @@ func TestReadPressureParsesBothLines(t *testing.T) {
 	if p.IOSome != 40 || p.IOFull != 33.33 {
 		t.Errorf("io some/full = %v/%v, want 40/33.33", p.IOSome, p.IOFull)
 	}
+	// Health judges on the longer windows, so each must land in its own field.
+	if p.CPUSome60 != 0.8 || p.CPUSome300 != 0.31 {
+		t.Errorf("cpu 60/300 = %v/%v, want 0.8/0.31", p.CPUSome60, p.CPUSome300)
+	}
+	if p.MemSome60 != 4 || p.MemSome300 != 1 || p.MemFull60 != 2 {
+		t.Errorf("memory some60/some300/full60 = %v/%v/%v, want 4/1/2", p.MemSome60, p.MemSome300, p.MemFull60)
+	}
+	if p.IOSome60 != 20 || p.IOSome300 != 8 || p.IOFull60 != 10 {
+		t.Errorf("io some60/some300/full60 = %v/%v/%v, want 20/8/10", p.IOSome60, p.IOSome300, p.IOFull60)
+	}
 }
 
 // A kernel without PSI has no files at all, and that must read as "we cannot
@@ -48,17 +58,18 @@ func TestReadPressureUnsupportedKernel(t *testing.T) {
 	}
 }
 
-// avg10 is the field taken; a parser that grabbed the first number on the line
-// would silently report avg60 or the cumulative total instead.
-func TestReadPressureIgnoresOtherWindows(t *testing.T) {
+// Each average is taken by name; a parser that read them by position would
+// silently swap the windows or report the cumulative total instead.
+func TestReadPressureReadsWindowsByName(t *testing.T) {
 	dir := t.TempDir()
 	write(t, filepath.Join(dir, "cpu"), "some avg300=99.00 avg60=88.00 avg10=2.00 total=123456789\n")
 
 	restore := usePressureRoot(t, dir)
 	defer restore()
 
-	if got := ReadPressure().CPUSome; got != 2 {
-		t.Errorf("cpu some = %v, want 2 (avg10)", got)
+	p := ReadPressure()
+	if p.CPUSome != 2 || p.CPUSome60 != 88 || p.CPUSome300 != 99 {
+		t.Errorf("cpu some 10/60/300 = %v/%v/%v, want 2/88/99", p.CPUSome, p.CPUSome60, p.CPUSome300)
 	}
 }
 

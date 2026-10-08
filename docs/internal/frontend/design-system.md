@@ -2092,7 +2092,7 @@ hypervisor as bare marks among its facts, the verdict at the right end); a Resou
 whose head carries the socket's `Status live` and the way on to Metrics, holding a four-tile
 `StatGrid` of the readings that move — each carrying its last hour in the tile's `trend` slot where a
 meter would be, keyed before its name by its line's colour, its figure gliding to every frame — over
-the Storage band, a capacity bar per filesystem; a plain `Health` list across the full width; the Deployments section; a plain top-processes list beside a
+the Storage band, a capacity bar per filesystem; the `Health` panel across the full width — a strip of every area checked drawn as the release path's own segments, then its findings as lit cards; the Deployments section; a plain top-processes list beside a
 plain activity list; and a `Section` holding a `StatGrid` of eight `StatLink` tiles, one per module,
 each naming what it counts with the products themselves. No frame anywhere on the page — the project
 cards carry the lit edge of a thing you take, which is not one. Everything that arrived, rose.
@@ -2102,7 +2102,19 @@ and three did not. The Health list said only what the recorder measures, so a fa
 backup gone quiet or a certificate past its renewal was a red figure on a tile two screens down with
 no word of what it was; it now carries what every module found (`components/overview/attention.ts`,
 the fleet's own Attention findings among them), worst first, each opening the page that fixes it,
-and the verdict on the list and the identity line is the worst of all of them. With that it took the
+and the verdict on the list and the identity line is the worst of all of them.
+
+The 2026-10-08 Health overhaul answered "no life, no colour" without leaving the vocabulary. A
+finding opens its fix, so it is a thing you take and a `ChoiceRow` with the lit edge (§16), on its
+level's `bg-wash-*` with a short bar of the level's hue before the area's glyph; the figure it was
+judged on is a `Meter` with a `mark` at the threshold it crossed. Above them, every area the server
+checked is a cell under one `Segment` of the release path's bar (`deploy/run-pipeline.tsx`): green,
+amber, red, dashed where the area could not be read, and sweeping while a check the reader asked for
+is in flight — so a healthy host is a line of green with a reading under each segment rather than a
+sentence saying nothing was found. Notices fold under a quiet `Disclosure`. Inside the sheet the
+diagnosis is a banner on the level's wash with the server's evidence as figures, and every fix ends
+on a fresh reading drawn as a success or warning outcome line; a control in flight runs `BorderBeam`
+round its card and names its participle in `TextShimmer`. With that it took the
 row's full width — beside the activity list it was one finding over half a row of nothing. The
 projects, which are why most visits happen, were one figure on one tile; they are the fleet's own
 cards now, worst first and two rows at most, and the tile went to Git. And nothing on the page said
