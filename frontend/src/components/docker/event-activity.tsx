@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo } from "react"
+import { useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
@@ -103,26 +103,48 @@ function tickLabel(time: number) {
  */
 export function LaneAxis({ span, className }: { span: Span; className?: string }) {
   const ticks = useMemo(() => axisTicks(span.from, span.to, 6), [span.from, span.to])
+  const ref = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    setWidth(el.getBoundingClientRect().width)
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  // A label is drawn only where it clears the one before it and "now": in a
+  // narrow column the hairlines stay and every other hour gives way.
+  const shown: number[] = []
+  for (const time of ticks) {
+    const x = (place(time, span) / 100) * width
+    const previous = shown.length ? (place(shown[shown.length - 1], span) / 100) * width : -Infinity
+    if (x < LABEL_PX / 2 || x > width - NOW_PX - LABEL_PX / 2 || x - previous < LABEL_PX) continue
+    shown.push(time)
+  }
   return (
-    <div aria-hidden className={cn("relative h-4 text-micro text-muted-foreground", className)}>
-      {ticks.map((time) => {
-        const left = place(time, span)
-        // A label that would sit on "now" or run off the start is left out.
-        if (left < 4 || left > 88) return null
-        return (
-          <span
-            key={time}
-            className="numeric absolute top-0 -translate-x-1/2 whitespace-nowrap"
-            style={{ left: `${left}%` }}
-          >
-            {tickLabel(time)}
-          </span>
-        )
-      })}
+    <div
+      ref={ref}
+      aria-hidden
+      className={cn("relative h-4 text-micro text-muted-foreground", className)}
+    >
+      {shown.map((time) => (
+        <span
+          key={time}
+          className="numeric absolute top-0 -translate-x-1/2 whitespace-nowrap"
+          style={{ left: `${place(time, span)}%` }}
+        >
+          {tickLabel(time)}
+        </span>
+      ))}
       <span className="absolute top-0 right-0 font-medium text-foreground">now</span>
     </div>
   )
 }
+
+/** The room an axis label takes, and "now" at the axis's end, in pixels. */
+const LABEL_PX = 40
+const NOW_PX = 24
 
 /** How long a mark is new enough to breathe: it is what just happened. */
 const FRESH_MS = 2 * 60_000
@@ -300,16 +322,16 @@ export function ActivityTable({
       <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
         <TableHeader className={stickyTableHeader}>
           <TableRow>
-            <TableHead className="w-60">Container</TableHead>
-            <TableHead className="w-44">State</TableHead>
+            <TableHead className="w-56">Container</TableHead>
+            <TableHead className="w-40">State</TableHead>
             <TableHead>
               <span className="sr-only">Activity</span>
               <LaneAxis span={span} />
             </TableHead>
-            <TableHead className="w-18 text-right">Failed</TableHead>
+            <TableHead className="w-16 text-right">Failed</TableHead>
             <TableHead className="w-20 text-right">Restarts</TableHead>
-            <TableHead className="w-24 text-right">Last</TableHead>
-            <TableHead className="w-36">Who</TableHead>
+            <TableHead className="hidden w-24 text-right 2xl:table-cell">Last</TableHead>
+            <TableHead className="w-32 2xl:w-36">Who</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -337,7 +359,7 @@ export function ActivityTable({
                 <Restarts row={row} />
               </TableCell>
               <TableCell
-                className="numeric py-2 text-right text-hint text-muted-foreground"
+                className="numeric hidden py-2 text-right text-hint text-muted-foreground 2xl:table-cell"
                 title={timestamp(row.last.time)}
               >
                 {relativeTime(row.last.time)}
@@ -360,14 +382,20 @@ export function ActivityTable({
         {rows.map((row) => (
           <li
             key={row.key}
+            tabIndex={0}
             data-state={selected === row.key ? "selected" : undefined}
             className={cn(
-              "min-w-0 cursor-pointer py-3 transition-colors hover:bg-row-hover data-[state=selected]:bg-accent",
+              "group min-w-0 cursor-pointer py-3 focus-ring-inset transition-colors hover:bg-row-hover data-[state=selected]:bg-accent",
               ROW_BLEED,
               arrived.has(row.key) && "animate-rise",
             )}
             onClick={(event) => {
               if ((event.target as HTMLElement).closest("a, button")) return
+              onSelect(row.key)
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.target !== event.currentTarget) return
+              event.preventDefault()
               onSelect(row.key)
             }}
           >

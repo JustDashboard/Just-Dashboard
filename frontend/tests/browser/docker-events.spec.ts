@@ -122,7 +122,7 @@ test("an empty record says why rather than claiming a quiet host", async ({ page
   await expect(page.getByRole("heading", { level: 1 })).toHaveClass(/sr-only/)
 })
 
-for (const width of [390, 768, 1024, 1280]) {
+for (const width of [320, 390, 768, 1024, 1280]) {
   test(`the events page fits ${width}px without scrolling sideways`, async ({ page }) => {
     await mockEvents(page)
     await page.setViewportSize({ width, height: 900 })

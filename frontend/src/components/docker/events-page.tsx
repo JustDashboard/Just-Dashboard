@@ -313,7 +313,7 @@ export function EventsPage() {
                   <FactDot />
                 </>
               )}
-              {since && (
+              {since && listening && (
                 <>
                   <span className="numeric" title={`Listening since ${timestamp(meta?.since)}`}>
                     listening for {duration((to - since) / 1000)}
@@ -370,7 +370,7 @@ export function EventsPage() {
         )}
 
         {all.length === 0 ? (
-          <EmptyState {...quietReading(since, to)} />
+          <EmptyState {...quietReading(since, to, listening)} />
         ) : (
           <>
             <StatGrid columns={4} dense className="animate-rise">
@@ -752,7 +752,15 @@ function changeHint(changes: DockerEvent[]) {
  * a few minutes ago has not seen anything yet — which is not the steadiness
  * "nothing happened" would claim.
  */
-function quietReading(since: number | undefined, now: number) {
+function quietReading(since: number | undefined, now: number, listening: boolean) {
+  if (!listening) {
+    return {
+      icon: Warning,
+      title: "Nothing is being recorded",
+      description:
+        "The dashboard is not connected to Docker's event stream, so nothing Docker does is kept until it is.",
+    }
+  }
   if (since !== undefined && now - since < RECENTLY_STARTED_MS) {
     return {
       icon: ClockRewind,
