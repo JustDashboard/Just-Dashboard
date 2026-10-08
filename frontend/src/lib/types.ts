@@ -895,6 +895,13 @@ export type DockerEventFeed = {
   buffered: number
 }
 
+/** The part of `docker info` a page names the engine by, in Docker's own field names. */
+export type DockerEngineInfo = {
+  ServerVersion: string
+  Driver: string
+  Images: number
+}
+
 /** Whether the tag a container runs still points where it did when pulled. */
 export type ImageUpdateStatus = {
   ref: string
