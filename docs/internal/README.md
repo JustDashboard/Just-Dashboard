@@ -74,6 +74,10 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-08-docker-networks-overhaul/README.md`](../audits/2026-10-08-docker-networks-overhaul/README.md)
+  — the Docker Networks page's band, address pool, two tables and live sheet, with before/after
+  screenshots.
+
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
 

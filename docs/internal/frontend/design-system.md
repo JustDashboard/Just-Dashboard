@@ -61,7 +61,7 @@ taking a frame:
   activity on the Overview, every chart, list and hardware reading on the
   metrics page, every block on the Docker pages (the
   overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
-  volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
+  volumes, stacks and events lists with their toolbars, and the Networks page's band; the disk breakdown above the
   images; the attention and storage blocks on a container's page), the
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
@@ -1032,6 +1032,12 @@ their groups, last sign-in, keys and state beside the name from `lg` and beneath
 log is the counter-example on the next page of the same section: an entry opens nothing, so its
 trail stays a table.
 
+The networks list left the cards on 2026-10-08, at the operator's request, by the argument the
+containers made: eleven networks are compared down their columns — which is busy, which has nothing
+on it, which subnet each holds — far more often than one is opened, and the cards were eleven grey
+copies of one line. It is a table of fixed columns from `xl` whose name is the button and whose row
+takes Enter, without the lit edge, drawn down the row below `xl` (`components/docker/network-table.tsx`).
+
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
 measures where there is room and under it where there is not, chosen once with a media query — and
@@ -1235,7 +1241,8 @@ dolphin and Valkey is not Redis, on a fleet card, a home's identity tile, the st
 rail's head and every engine picker, which are one `EngineCard` (`choice-card.tsx`) rather than three
 shapes that had already drifted. A flavour with no artwork of its own draws the database glyph on
 the same tile and never borrows its driver's logo with its own name beside it.
-Networks have no product and keep a glyph on the same tile, so their titles line up with the rest.
+A network has no product of its own. Its row carries its lane colour down its leading edge and its
+members' products (`ProductLogos`), and its sheet draws its bridge as Docker's mark.
 
 **What a backup covers is a product, and so is what a terminal runs.** A coverage row is drawn as
 the thing it protects — a saved database as its engine, the proxy's configuration as nginx or Caddy,
@@ -1953,6 +1960,25 @@ The passes, in order. Each one is a diff you can review on its own.
    service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
    as well, its frequency a row of toggles rather than a select, drawing the week the schedule
    being written makes as the fields change.
+
+   Docker networks took the same exit on 2026-10-08, at the operator's request, because it was the
+   still page of the section: a column of grey cards, each a name, a subnet and a count, with the
+   members one press away and nothing on it that moved. The page had no tiles to give up; its three
+   chips (all, user-created, Docker system) became owner chips that count and narrow by who made a
+   network — a compose project, this dashboard, standalone or Docker — with Unused in amber beside
+   them. It opens on Docker's identity line, the overview's, whose verdict is the address pool nearly
+   or wholly spent, else the unused networks (a press narrows the table to them), else every network
+   in use. Under it `components/docker/network-band.tsx` answers what the cards never did: which
+   networks carry the traffic, read off their bridges every two seconds and drawn as spans of one bar
+   in each network's colour; how much of the address pool Docker carves networks from is taken, as
+   blocks in the colour of the network holding each — the pool every `compose up` takes a subnet from
+   runs out at thirty-one with the built-in pools; and who joined or left which network, from
+   Docker's events. A network's colour is a lane hue (`networkHue`, slate for Docker's own) and is the
+   same on its row's edge, its span, its blocks and its chips in the containers table, which lists
+   every container with each network it is on, its address there and the names it answers to, so
+   "can the API reach the database" is whether two rows share a colour. The sheet became a live
+   readout: four readings over the bridge's two minutes, the bridge wired to each member in the
+   wiring vocabulary with a pulse while that member moves bytes, the members as a table, the settings.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
