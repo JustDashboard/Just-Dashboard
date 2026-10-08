@@ -4043,7 +4043,10 @@ running and the transcript complete.
   operator out — so a refusal answers the click rather than arriving a minute later as a failed job. That
   is why `certbot.go` exposes `IssueArgs`/`RenewArgs`/`RevokeArgs`, `netsec.PlanSSHSettings` is separate
   from `ApplySSHPlan`, and `updates.UpgradeCommand` returns an argv.
-- `GET /jobs/{id}/stream` sends job, backlog, then batches every 120 ms. Cancelling is `service.control`.
+- `GET /jobs/{id}/stream` sends job, backlog, then batches every 120 ms. Subscribing after a job
+  finishes still returns its retained backlog and closes the live stream immediately. Output delivery,
+  disconnects and completion share the job lock so a closing subscriber cannot interrupt the runner.
+  Cancelling is `service.control`.
 
 **Secrets, four places, one goal.** `main.scrubSecretEnv` unsets boot secrets (`JD_` and `VPSD_`) once
 consumed. `deploy.mergeEnv` strips every `JD_*`/`VPSD_*` from a deploy child's environment — the command
