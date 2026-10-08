@@ -29,6 +29,7 @@ issues, which goes to the list. Under it:
   and health or how it stopped (*killed for memory* rather than a bare 137), its last hour of CPU as
   a sparkline beside the live figure, memory against its limit or the heaviest, its published ports
   and its verbs. Failing containers come first. State chips count and narrow; project chips narrow.
+  [Pressing the failing verdict](after-failing-1440.png) narrows the table to those containers.
   [On a phone](after-page-phone.png) each row is drawn down rather than across, with nothing dropped.
 - **Attention**, unchanged, then the **compose projects** as lit cards, each with its services as a
   strip of their states, beside **Disk**.
