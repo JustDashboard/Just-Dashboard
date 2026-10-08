@@ -64,13 +64,17 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   database listed, one press from a job, with writers frozen while the archive is taken.
 - **The server as a router, drawn live.** Its devices, tunnels and Docker networks as one topology
   whose wires move with their traffic; bridges, VLANs, VXLAN and GRE tunnels and network namespaces
-  made in a form; routing tables and policy rules applied, checked against the path back to your
-  browser and taken back if they would cut you off; port forwarding and NAT that admit their own
+  made in a form; IPv4/IPv6 routing tables and policy rules applied, checked against the path back to
+  your browser and taken back if they would cut you off; port forwarding and NAT that admit their own
   traffic past ufw and Docker; rate limits, country and feed blocklists and the kernel's DDoS-related
   settings; per-device speed limits and BBR; a WireGuard server in one step with a QR code per phone,
   site-to-site peers and an exit node; Tailscale's exit node and subnet routes; the resolver's
   upstreams, DNS over TLS and ad-blocking presets; and traffic per device, program and container.
-  Everything it makes is restored at boot by a unit of its own, with or without the dashboard.
+  Twenty-six diagnostics include route and path-MTU checks, bounded packet snapshots, Wake-on-LAN
+  and host prerequisites, with an IPv4/IPv6 subnet
+  calculator. The [complete networking inventory and compatibility boundaries](docs/audits/2026-10-08-network-audit/README.md)
+  explain supported controls and external requirements. Managed network configuration is restored
+  at boot by a unit of its own, with or without the dashboard.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
   the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
   that open beside the listing or in a full workspace with a file tree, and every Git checkout with
@@ -314,7 +318,7 @@ and changing accounts or settings are `admin`'s, and deleting a whole database a
 | **Processes** | Live table, PM2, systemd services and cron jobs, each with its verbs as words. |
 | **Logs** | Files, container output, compose stacks, PM2 and the journal in one viewer, filtered on the server, each read as what it is — Postgres's slow statements and auth failures, nginx's requests and upstream errors, sshd's logins and attackers — with quick views and insights. Every service's page shows its own log the same way, where the service is. |
 | **Proxy & TLS** | Sites written as ordinary nginx, streams, certificates through certbot including DNS wildcards, and a live TLS report. |
-| **Network** | Topology, interfaces and namespaces, routing and policy rules, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, and twenty-one network probes. |
+| **Network** | Topology, interfaces and namespaces, routing and policy rules, firewall (ufw or firewalld), port forwarding and NAT, protection (rate limits, blocklists, kernel hardening), WireGuard and Tailscale, DNS, traffic and shaping, connections, twenty-six network probes, and an IPv4/IPv6 subnet calculator. |
 | **Security** | A verdict on the host: exposure, sshd (with a jump-host profile), fail2ban, CrowdSec and Suricata where they run, logins and who is attacking. |
 | **Backups** | Scheduled archives to disk, S3 or B2, native database dumps, single-file and in-place restore, and a list of what is not covered. |
 | **Updates** | The dashboard updates itself in one click; host packages on apt, dnf, yum, zypper, pacman or apk. |

@@ -5,13 +5,16 @@ and resolver. `netsec` keeps reading the network for the posture and keeps the f
 fail2ban, CrowdSec and Suricata; this package is the half that writes. The Network section of the
 frontend (`/network/*`) is its only client. The plan it was built from, with the reasoning behind each
 choice, is [`docs/audits/2026-10-07-network-section/`](../../audits/2026-10-07-network-section/README.md).
+The [2026-10-08 audit](../../audits/2026-10-08-network-audit/README.md) inventories every Network
+page and diagnostic, fixed findings, competitor research and actual compatibility boundaries.
 
 ## Three rules
 
 - **One spec, restored by the host.** Every device, address, route, rule, namespace, shaping entry,
   gateway entry and kernel setting the dashboard makes is written into
   `/etc/just-dashboard/network/spec.json` (`spec.go`). It is rendered (pure functions, golden-tested)
-  into `links.batch` (`ip -force -batch`), `shaping.batch` (`tc -force -batch`), `gateway.nft`
+  into `links.batch` (`ip -force -batch`), `rules6.batch` (`ip -6 -force -batch`),
+  `shaping.batch` (`tc -force -batch`), `gateway.nft`
   (`nft -f`, declare–delete–define so loading is an atomic replace) and
   `/etc/sysctl.d/90-just-dashboard.conf`. `just-dashboard-network.service`, a oneshot unit ordered after
   the network managers, Docker, ufw and firewalld, runs them at boot, so what was made survives a
@@ -31,23 +34,31 @@ choice, is [`docs/audits/2026-10-07-network-section/`](../../audits/2026-10-07-n
   really comes from. Guards answer `409 would_lock_you_out` with the sentence saying why.
 - **Only what was made here is removed.** Docker's bridges and veths, Tailscale's device, table 52 and
   rules, the provider's DHCP routes, the kernel's own routes and its fallback tunnel devices (`gre0`,
-  `ip6tnl0`, …) are read and named with their owner, never edited. A change to a device the dashboard
+  `ip6tnl0`, …) are read and named with their owner and excluded from destructive ownership operations.
+  Guarded runtime edits remain possible; non-destructive up is allowed even on protected devices. A change to a device the dashboard
   did not make (state, MTU, bridge membership) is runtime-only and says so (`persisted: false`).
 
 ## Applying a change
 
-`Service.commit` (`persist.go`) is the proxy editor's order: render the new spec, check what can be
-checked (`nft -c -f` on the gateway file whenever it changed and holds an entry, so a host without
-nftables can still make bridges and routes), apply the one runtime change, verify it,
-and only then write the boot files atomically and save the spec. A failure before the files are written
-runs the change's `undo`, so the boot files never describe a network that did not work. `s.mu`
-serialises every mutation. The unit is enabled, not started: everything it would restore was just
-applied. Every host command is `hostexec` with explicit argv (the package variable `run`, which tests
-replace with `record(t)` from `helpers_test.go`); the batch files are data for `ip`, `tc` and `nft`,
-and every value written into them is parsed by type first (`validate.go`).
+`Service.commit` (`persist.go`) renders and validates the candidate, snapshots every changed boot
+file and the spec before applying the runtime change, then verifies the operator path. It writes the
+renders in a deterministic order and the spec last. A synchronous write/verification failure attempts to restore
+previous file contents and modes and undo runtime with a fresh, bounded thirty-second context,
+independent of a canceled request. Partial link, namespace, gateway, shaping and sysctl changes also
+recover with independent contexts. This is rollback for synchronous failures, not a crash-atomic
+transaction across several filesystem files. File/runtime undo is best-effort: failing host tools or
+filesystem writes are logged, and the step undo interface cannot report every recovery error.
 
-`ip -batch` cannot carry `-6`, so IPv6 policy rules are refused (IPv6 routes are fine: the family comes
-from the address).
+`s.mu` serialises mutations. The unit is enabled, not started: everything it would restore was just
+applied. A later unit-enable failure is a `persistenceError`: runtime and spec have committed, so callers
+retain matching blocklist cache and WireGuard exit state and report the boot-restoration failure.
+Host-wrapper commands terminate as a process group before recovery, preventing forked children
+from continuing a mutation after cancellation. Every host command uses `hostexec` with explicit argv; batch files are parsed `ip`, `tc` and `nft` data.
+
+IPv6 policy rules use a separate `rules6.batch`, since `ip -batch` cannot carry `-6` within a line.
+Rules accept optional `family` (`inet`/`inet6`, with IPv4/IPv6 aliases), inferred from address selectors;
+interface/mark-only rules default to IPv4. Mixed selectors are refused. Add, delete, rollback and boot
+restore all select the rule's family explicitly. IPv4-mapped prefixes retain their correct IPv4 width.
 
 ## Devices, namespaces and routing
 
@@ -58,7 +69,7 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   no subprocess, with PIDs cached per container start in the api layer) and the sampler's rates. Each
   device carries a kind, a role (uplink, tunnel, bridge, container, vlan, virtual, physical, loopback),
   an owner and, where it may not be changed, a guard sentence.
-- Create covers bridge, VLAN, VXLAN, GRE/GRETAP/IP6GRE, dummy, macvlan and veth (into a namespace the
+- Create covers bridge, VLAN, VXLAN, GRE/GRETAP/IP6GRE/IP6GRETAP, dummy, macvlan and veth (into a namespace the
   dashboard made). The uplink, the client-path device, loopback, Docker's and Tailscale's devices and
   any device holding an address cannot be set down, deleted or enslaved to a bridge, and neither can
   the parent or bridge such a device rides on; a passthru macvlan on a device that carries one is
@@ -66,14 +77,23 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   and on any device with a global IPv6 address.
 - Routing reads every table in both families with `rt_tables` names (the local table is counted, not
   listed), the policy rules with their owners, and the client path. Added rules take priorities in
-  10000–19999, which no distribution or Tailscale uses; a rule with no selector, a second default route
-  in main, and tables 52, 253 (for routes) and 255 are refused.
+  10000–19999, checking live foreign priorities as well as the spec in that family; a rule with no
+  selector, a second default route
+  in main, and tables 52, 253 (for routes) and 255 are refused. A zero packet-mark mask is refused,
+  and unmarked discard rules are guarded as potential dashboard-reply selectors.
+- Device/namespace removal checks shaping, NAT/forward ingress/egress, routes/rules, foreign children
+  and veth-peer dependencies. A partial namespace failure restores already removed pairs.
 - Forwarding is per family. Turning it off is refused while Docker networks, an enabled forward or NAT
-  entry, a WireGuard exit or Tailscale's exit node or subnet routes need it; the api layer supplies the
-  Docker count and Tailscale's state (`TailscaleNeedsForwarding`, which answers "needed" when
-  Tailscale cannot be read). Turning IPv6 forwarding on is refused while the IPv6 default route was
+  entry, a WireGuard exit or Tailscale's exit node or subnet routes need it. The API supplies separate
+  Docker IPv4/IPv6 bridge counts: IPv6 uses its flag/subnet evidence; IPv4 conservatively counts all
+  bridges because the Docker inventory lacks reliable IPv4-disable/custom-IPAM evidence. A failed
+  Docker network listing blocks shutdown for both families until dependencies can be read.
+  `TailscaleNeedsForwarding` also answers "needed" when Tailscale cannot be read.
+  Turning IPv6 forwarding on is refused while the IPv6 default route was
   learned from a router advertisement on a device whose `accept_ra` is not 2: with forwarding on, the
   kernel ignores those advertisements and the route would expire.
+- IPv4 forwarding resets kernel host settings; managed redirect protections are reasserted after
+  changes and rendered after forwarding in the boot sysctl file.
 - BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only.
 
 ## Traffic
@@ -83,7 +103,8 @@ Files: `sampler.go`, `traffic.go`, `ebpf.go`.
 The sampler reads `/proc/net/dev` every two seconds into a fifteen-minute ring per device (the live
 figures and wires) and records a row per device every metrics interval into `metric_interface_samples`
 (the interval's mean, its busiest two seconds, and its errors and drops), pruned by the metrics
-retention. Docker's veths are not recorded; each container's traffic is in `metric_container_samples`,
+retention. Disabled retention does not accumulate pending samples; stopping the sampler is idempotent.
+Docker's veths are not recorded; each container's traffic is in `metric_container_samples`,
 which `/network/traffic/containers` differences per sample in SQL. Per-program traffic differences
 `ss -tinpH`'s per-socket byte counters between reads (TCP only). eBPF is an inventory from `bpftool`
 (programs, XDP and tc attachments), not a probe the dashboard loads.
@@ -115,6 +136,10 @@ nftables table drops forwarded traffic, naming the chain and the accept to add t
 entry that needs forwarding while it is off is refused with `409 forwarding_off`; the page offers the
 switch.
 
+Cache and kernel rollback retain the prior list under the mutation lock; fetches begun before a
+URL/country edit cannot overwrite newer configuration. Failed boot-unit setup retains the committed
+cache, matching the committed spec and kernel.
+
 Blocklists are manual, country (ipdeny.com aggregated zones, v4 and v6) or feed (Spamhaus DROP,
 FireHOL level 1 or any https URL — http, and a redirect down to it, is refused, since anyone on the way
 could answer with a list of your own networks); fetches are bounded (30 s, 16 MB), parsed with `netip`,
@@ -137,8 +162,8 @@ and why, written to the sysctl drop-in. Conntrack's count against its maximum is
 
 Files: `shaping.go`.
 
-Per device a root discipline (fq_codel, cake, fq) and upload and download limits (htb with fq_codel
-egress, ingress policing), and BBR as a switch (`tcp_congestion_control=bbr`, `default_qdisc=fq`).
+Per device a root discipline (fq_codel, cake, fq) and upload and download limits (CAKE bandwidth or
+HTB with fq/fq_codel egress, ingress policing), and BBR as a switch (`tcp_congestion_control=bbr`, `default_qdisc=fq`).
 A limit under 1 Mbit/s on the uplink or the client-path device is refused. The ingress queue is only
 ever replaced or, at runtime, deleted when it is the plain one; a `clsact` queue (tc-BPF programs) is
 never touched, and a download limit on a device that has one is refused.
@@ -147,8 +172,9 @@ never touched, and a download limit on a device that has one is refused.
 
 Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `qr.go`, `vpn_store.go`, `tailscale.go`, `headscale.go`.
 
-- **WireGuard** is read from `wg show all dump` joined with `/etc/wireguard/*.conf`; private and
-  preshared keys never leave the package. Only files whose first line is `# Managed by Just Dashboard`
+- **WireGuard** is read from `wg show all dump` joined with `/etc/wireguard/*.conf`; inventories omit private and
+  preshared keys. Generated client secrets leave through explicit admin-only config/QR exports and
+  are sealed at rest. Only files whose first line is `# Managed by Just Dashboard`
   are edited; a hand-written tunnel is read-only. A one-step server picks the first free name, UDP port
   and /24, makes keys in Go (`x/crypto/curve25519`), writes the wg-quick file with no `PostUp` (NAT is
   the gateway's job) and enables `wg-quick@<name>`; the handler opens the UDP port in the firewall when
@@ -162,23 +188,72 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
   removed tunnel's file is moved to `.just-dashboard-removed/`, never deleted: the server key exists only
   there; the firewall rule its creation opened is removed with it, and `DELETE` answers
   `{firewall: {removed, reason}}` so the page can say when it was not.
+  Scoped IPv6 endpoints validate the interface suffix before generating any wg-quick text. Peer
+  site routes cannot capture a known literal endpoint of their own or another tunnel. Peer
+  removal cleans site host routes too; failed reloads use independent recovery contexts. Managed
+  server/client address allocation and exit egress remain IPv4. Full-tunnel clients capture IPv6 to
+  prevent native-path leaks; the UI and generated config explain the lack of IPv6 egress.
 - **Tailscale** is read from `tailscale status --json` and `debug prefs`. The only changes offered are
   what this server offers the tailnet — an exit node and subnet routes — through `tailscale set`; using
   another node as an exit, shields up, down and logout are never run, because each can cut off the
-  browser reading the page. **Headscale** is read where its binary or container runs.
+  browser reading the page. Offer updates serialize under the module lock, and unreadable preferences
+  and status block forwarding shutdown. `SetTailscaleChecked` evaluates withdrawal authorization
+  against those same locked preferences before writing; the separate classifier is advisory only.
+  External CLI writers are outside this process lock. **Headscale** is read where its binary or container runs.
 
 ## DNS
 
-Files: `dns.go`, `dns_hosts.go`, `dns_lookup.go`.
+Files: `dns.go`, `dns_hosts.go`, `dns_lookup.go`, `dns_wire.go`.
 
-The resolver chain is `/etc/resolv.conf`'s mode, systemd-resolved's global and per-link scopes and
-statistics, what answers on port 53 (reusing `proxysvc.ListListeners`) and any AdGuard Home or Pi-hole.
-Upstreams, DNS over TLS, DNSSEC, domains and the cache are written to
-`/etc/systemd/resolved.conf.d/90-just-dashboard.conf`; resolved is restarted and a well-known name is
-resolved through the stub, and the previous file is restored if either fails. The host's records are a
-marked block in `/etc/hosts`; in the container that file is Docker's own bind mount, so the host's is
-written through `/host/etc/hosts`. The lookup race asks every configured resolver and every preset, so
-the name typed is sent to those public resolvers.
+The resolver chain includes `/etc/resolv.conf` (ordinary whitespace, including tabs), global/per-link
+systemd-resolved scopes/statistics, port-53 listeners and existing AdGuard Home/Pi-hole services.
+Upstreams support custom ports, scoped IPv6 and TLS names. Nonempty upstream/fallback/domain lists
+reset preceding list assignments, then replace them in
+`/etc/systemd/resolved.conf.d/90-just-dashboard.conf`. Empty lists omit the key and inherit global
+defaults; this API cannot explicitly clear a global list. Each set rewrites the managed drop-in:
+omitted managed DNSSEC/DoT/cache settings inherit defaults, while unrelated host/per-link files are
+untouched. The UI preserves existing managed fallback/cache settings and exposes both as drafts.
+The module restarts resolved and tests resolution; optional `verificationName` selects a private LAN
+name instead of the default public checks. With a disabled port-53 stub it verifies via `resolvectl`.
+Verification accepts A or AAAA within a short per-query budget. Unreadable old drop-ins refuse writes
+before mutation. Set/restart failure attempts to restore the old file and restart with an independent
+thirty-second context; failed recovery is returned to the caller. Reset removes the managed drop-in
+and restores it if restart fails. If default DNS fails verification after a successful restart, reset
+keeps the drop-in removed and reports `verified: false` for the caller to inspect.
+
+Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` reaches the real host;
+bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
+writes. This is not a DNS server or an AdGuard/Pi-hole configuration adapter.
+
+The lookup comparison sends direct classic DNS packets for A/AAAA/CNAME/MX/TXT/NS/PTR/SRV to the
+configured resolvers, retaining custom ports and IPv6 scope. It bypasses local hosts/NSS answers,
+validates response identity/question/answer ownership and canonical chains and retries truncated UDP over TCP. Fan-out is bounded at sixteen
+and each query at three seconds. CNAME queries return the immediate alias; other types use terminal data in that response, without
+a separate follow-up query for a canonical name. Public presets are included only with explicit `includePublic: true`,
+so no extra public preset is contacted without opt-in. The comparison still asks all configured
+global/per-link/fallback resolvers; it does not follow resolved's split-DNS domain-routing policy, so
+a configured public upstream can receive a private name. The diagnostic does not prove DoT/DoH transport or validate
+DNSSEC signatures; these remain separate resolver settings.
+
+## Diagnostics and host support
+
+`GET /capabilities` reports host tool availability/package hints, systemd manager reachability and the
+literal IPv6 sysctl with its per-interface caveat. An installed binary does not prove kernel/NIC/provider
+support. `POST /probe` has [all 26 tools](../../audits/2026-10-08-network-audit/README.md#tools--networktools-all-26-server-diagnostics).
+New tools are route lookup, path MTU, host support, bounded packet snapshot and Wake-on-LAN.
+
+Route lookup emits no traffic; egress independently inspects IPv4/IPv6 kernel routes, including
+IPv6-only hosts, without claiming the selected NIC address equals a provider-NAT public address.
+Listeners includes TCP and UDP. Tracepath availability and ICMP filtering constrain path-MTU results.
+TCP refusal can indicate a closed port or firewall rejection; a timeout does not identify its cause.
+
+Packet snapshot uses fixed, validated tcpdump argv on one up interface: at most fifty packets or
+fifteen seconds, no promiscuous mode, output file or explicit hex/ASCII dump. Summary decoders can
+include sensitive protocol fields. Process output is drained while retained text is capped at 256 KiB. Deadlines terminate the entire
+host-wrapper process group with bounded cleanup, including descendants holding output pipes.
+Wake-on-LAN sends one Ethernet magic frame to a validated unicast MAC on a selected broadcast LAN
+interface. Success confirms the send, not that a remote firmware/NIC woke. Neither tool crosses an
+upstream router/provider restriction. All probes remain admin-only and audited.
 
 ## Routes
 
@@ -191,15 +266,16 @@ handler for the PUTs and posts). No route takes a typed phrase.
 
 | Area | Routes |
 | --- | --- |
-| Overview | `GET /overview`, `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
+| Overview | `GET /`, `GET /capabilities`, `GET /overview`, `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`; `GET`/`POST /namespaces`, `DELETE /namespaces/{name}` |
 | Routing | `GET /routing`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
-| Gateway | `GET /gateway`, `POST`/`PUT`/`DELETE /gateway/forwards[/{id}]`, `/gateway/nat[/{id}]` |
-| Protection | `GET /protection`, `/protection/limits[/{id}]`, `/protection/blocklists[/{id}]`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
+| Gateway | `GET /gateway`, `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
+| Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |
 | Traffic | `GET /traffic/processes`, `GET /traffic/containers`, `GET /ebpf` |
+| Diagnostics | `POST /probe` (26 tools) |
 
 `GET /network` (the old interface summary) and `POST /network/probe` moved into the same `Route`, since a
 `Method` and a `Route` on one prefix in chi make the first one disappear.

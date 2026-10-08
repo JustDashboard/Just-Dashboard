@@ -1,0 +1,77 @@
+{
+  "started": "2026-10-08T13:02:18.733Z",
+  "finished": "2026-10-08T13:02:39.391Z",
+  "baseURL": "http://127.0.0.1:43193",
+  "fixture": "Existing network-fixture and network-dns-fixture; all API writes intercepted locally.",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "video": "network-controls.webm",
+  "screenshots": [
+    {
+      "file": "routing-preferred-source.png",
+      "width": 1440,
+      "height": 1000,
+      "description": "Static route draft with an explicit local preferred source; existing table sources remain visible behind it."
+    },
+    {
+      "file": "routing-outgoing-interface-note.png",
+      "width": 1440,
+      "height": 1000,
+      "description": "Policy rule matched by its outgoing interface, with an optional persisted note."
+    },
+    {
+      "file": "dns-fallback-cache-confirmation.png",
+      "width": 1440,
+      "height": 1000,
+      "description": "Resolver apply confirmation reviews scoped IPv6/custom-port fallback servers and the selected cache policy."
+    }
+  ],
+  "mockedMutations": [
+    {
+      "method": "POST",
+      "path": "/network/routing/routes",
+      "body": {
+        "destination": "192.168.60.0/24",
+        "type": "unicast",
+        "gateway": "10.8.0.2",
+        "table": 254,
+        "source": "10.8.0.1",
+        "comment": "Remote LAN through WireGuard"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/network/routing/rules",
+      "body": {
+        "family": "inet",
+        "oif": "jd-lab",
+        "action": "lookup",
+        "table": 100,
+        "comment": "Local lab replies use their own table"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/network/dns/",
+      "body": {
+        "servers": [
+          "1.1.1.1#cloudflare-dns.com",
+          "1.0.0.1#cloudflare-dns.com"
+        ],
+        "fallback": [
+          "[fe80::53%ens3]:5353#resolver.home.arpa",
+          "192.0.2.53#resolver.home.arpa"
+        ],
+        "domains": [],
+        "dnssec": "allow-downgrade",
+        "dnsOverTLS": "yes",
+        "cache": "no-negative",
+        "verificationName": "nas.home.arpa"
+      }
+    }
+  ],
+  "inspection": "All three screenshots inspected at original size; no clipped controls or action buttons.",
+  "sourceCommit": "0aace309a1c92e2f7621da44ce70cbfa48a4e10b"
+}
