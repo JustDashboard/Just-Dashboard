@@ -192,6 +192,29 @@ test("IPv6 GRE creation reaches the existing endpoint with IPv6 ends", async ({ 
     .toMatchObject({ kind: "ip6gre", remote: "2001:db8::7", local: "2001:db8::1" })
 })
 
+test("invalid VXLAN ports cannot silently create a tunnel on the default port", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockNetwork(page, mutations)
+  await page.goto("/network/interfaces")
+  await page.getByRole("button", { name: "New device", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("button", { name: "Make a VXLAN" }).click()
+  await dialog.getByLabel("VNI", { exact: true }).fill("42")
+  await dialog.getByLabel("Remote end", { exact: true }).fill("198.51.100.7")
+  const create = dialog.getByRole("button", { name: "Create vx42", exact: true })
+  for (const port of ["bad", "0", "65536", ""]) {
+    await dialog.getByLabel("UDP port", { exact: true }).fill(port)
+    await expect(create).toBeDisabled()
+    await expect(dialog.getByText("Use a whole port number from 1 to 65535.")).toBeVisible()
+  }
+  expect(mutations).toEqual([])
+  await dialog.getByLabel("UDP port", { exact: true }).fill("65535")
+  await create.click()
+  await expect.poll(() => mutations.at(-1)?.body).toMatchObject({ kind: "vxlan", port: 65535 })
+})
+
 test("failed interface address writes retain the user's draft", async ({ page }) => {
   await mockNetwork(page)
   await page.route("**/api/v1/network/links/jd-lab/addresses", (route) =>

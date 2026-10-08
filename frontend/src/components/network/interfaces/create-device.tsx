@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { portProblem } from "../tools/tool-input"
 
 type Kind =
   "bridge" | "vlan" | "vxlan" | "gre" | "gretap" | "ip6gre" | "ip6gretap" | "dummy" | "macvlan"
@@ -146,20 +147,23 @@ export function CreateDevice({
         : undefined
   const needsParent = kind === "vlan" || kind === "macvlan"
   const tunnel = kind.includes("gre")
+  const portError = kind === "vxlan" ? portProblem(port) : undefined
   const ready =
     !nameError &&
+    !portError &&
     (!needsParent || parent) &&
     (kind !== "vlan" || vlanId) &&
     (kind !== "vxlan" || (vni && (remote || parent))) &&
     (!tunnel || remote)
 
   const submit = async () => {
+    if (!ready || busy) return
     const body: LinkRequest = { name: finalName, kind, up: true }
     if (needsParent || (kind === "vxlan" && parent)) body.parent = parent
     if (kind === "vlan") body.vlanId = Number(vlanId)
     if (kind === "vxlan") {
       body.vni = Number(vni)
-      body.port = Number(port) || 4789
+      body.port = Number(port.trim())
     }
     if (kind === "vxlan" || tunnel) {
       if (local.trim()) body.local = local.trim()
@@ -291,10 +295,11 @@ export function CreateDevice({
                 onChange={(event) => setVni(event.target.value)}
               />
             </Field>
-            <Field label="UDP port" htmlFor="device-port">
+            <Field label="UDP port" htmlFor="device-port" error={portError}>
               <Input
                 id="device-port"
                 inputMode="numeric"
+                aria-invalid={Boolean(portError)}
                 value={port}
                 onChange={(event) => setPort(event.target.value)}
               />
