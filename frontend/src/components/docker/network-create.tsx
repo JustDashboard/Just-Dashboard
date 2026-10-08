@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useCallback, useMemo, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -13,6 +13,8 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Hint } from "./explain"
 import { EMPTY_NETWORK, networkCreation, type NetworkDraft } from "./network-create-reading"
+import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
+import type { IPAMReservation } from "@/lib/network-ipam"
 
 export function NewNetworkDialog({
   open,
@@ -21,6 +23,7 @@ export function NewNetworkDialog({
   networks,
   inventoryError,
   refreshInventory,
+  initialReservationId,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -28,12 +31,16 @@ export function NewNetworkDialog({
   networks: { name: string; subnets: string[] }[]
   inventoryError?: Error
   refreshInventory: () => void
+  initialReservationId?: string
 }) {
   const { can } = useAuth()
   const admin = can("system.admin")
   const [draft, setDraft] = useState<NetworkDraft>(EMPTY_NETWORK)
   const [advanced, setAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [reservations, setReservations] = useState<IPAMReservation[]>([])
+  const [ipamUnavailable, setIPAMUnavailable] = useState(false)
+  const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
   const reading = useMemo(() => {
     try {
       return { spec: networkCreation(draft, networks), error: "" }
@@ -41,20 +48,64 @@ export function NewNetworkDialog({
       return { spec: undefined, error: (error as Error).message }
     }
   }, [draft, networks])
-  const update = <K extends keyof NetworkDraft>(key: K, value: NetworkDraft[K]) =>
+  const update = <K extends keyof NetworkDraft>(key: K, value: NetworkDraft[K]) => {
+    if (key === "name") setReservations([])
+    if (key === "subnet") setReservations((rows) => rows.filter((row) => row.family !== "inet"))
+    if (key === "ipv6Subnet" || (key === "ipv6" && !value))
+      setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
     setDraft((previous) => ({ ...previous, [key]: value }))
+  }
+  const selectReservation = useCallback(
+    (row: IPAMReservation | undefined, family: "inet" | "inet6") => {
+      setReservations((rows) => [
+        ...rows.filter(
+          (existing) => existing.family !== family && (!row || existing.resource === row.resource),
+        ),
+        ...(row ? [row] : []),
+      ])
+      if (!row) return
+      setDraft((previous) => ({
+        ...previous,
+        ...(previous.name !== row.resource
+          ? {
+              subnet: "",
+              gateway: "",
+              ipRange: "",
+              ipv6: false,
+              ipv6Subnet: "",
+              ipv6Gateway: "",
+              ipv6Range: "",
+            }
+          : {}),
+        name: row.resource,
+        ...(family === "inet"
+          ? { subnet: row.prefix, gateway: "", ipRange: "" }
+          : { ipv6: true, ipv6Subnet: row.prefix, ipv6Gateway: "", ipv6Range: "" }),
+      }))
+      if (family === "inet6") setAdvanced(true)
+    },
+    [],
+  )
 
   const create = async () => {
-    if (!reading.spec || busy || inventoryError || !can("service.control")) return
+    if (!reading.spec || busy || inventoryError || ipamUnavailable || !can("service.control"))
+      return
     setBusy(true)
     try {
-      await post("/docker/networks/", reading.spec)
+      const created = await post<{ ipamWarning?: string }>("/docker/networks/", {
+        ...reading.spec,
+        ...(reservations.length ? { ipamReservationIds: reservations.map((row) => row.id) } : {}),
+      })
       notify.success(`${reading.spec.name} created`)
+      if (created.ipamWarning)
+        notify.error("Review the planning handoff", new Error(created.ipamWarning))
       onCreated()
       onOpenChange(false)
       setDraft(EMPTY_NETWORK)
       setAdvanced(false)
+      setReservations([])
     } catch (error) {
+      if (reservations.length) setIPAMRefreshKey((value) => value + 1)
       notify.error("Could not create the network", error)
     } finally {
       setBusy(false)
@@ -106,7 +157,13 @@ export function NewNetworkDialog({
           </Button>
           <Button
             onClick={create}
-            disabled={busy || !reading.spec || Boolean(inventoryError) || !can("service.control")}
+            disabled={
+              busy ||
+              !reading.spec ||
+              Boolean(inventoryError) ||
+              ipamUnavailable ||
+              !can("service.control")
+            }
             pending={busy}
           >
             Create
@@ -115,6 +172,16 @@ export function NewNetworkDialog({
       }
     >
       <div className="space-y-4">
+        <IPAMReservationPicker
+          open={open}
+          owner="docker_network"
+          selected={reservations}
+          onSelect={selectReservation}
+          onUnavailable={setIPAMUnavailable}
+          initialId={initialReservationId}
+          disabled={busy}
+          refreshKey={ipamRefreshKey}
+        />
         {field("name", "Name", "app-internal")}
         {toggle(
           "internal",

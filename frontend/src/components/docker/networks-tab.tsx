@@ -49,11 +49,13 @@ export function NetworksTab({
   creating: externalCreating,
   onCreatingChange,
   actions,
+  initialReservationId,
 }: {
   confirm: ConfirmFn
   creating?: boolean
   onCreatingChange?: (open: boolean) => void
   actions?: React.ReactNode
+  initialReservationId?: string
 }) {
   const { can } = useAuth()
   const [selected, setSelected] = useSessionState<string | null>("docker.networks.selected", null)
@@ -234,6 +236,7 @@ export function NetworksTab({
         networks={networks}
         inventoryError={error}
         refreshInventory={refresh}
+        initialReservationId={initialReservationId}
       />
     </div>
   )

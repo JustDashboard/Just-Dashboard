@@ -134,3 +134,55 @@ test("failed preview preserves the prefix", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("Native source unreadable")
   await expect(page.getByLabel("Prefix to preview")).toHaveValue("fd48:abcd:1::/64")
 })
+
+test("Docker deep link sends the exact IPv6 reservation through its owner form", async ({
+  page,
+}) => {
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: [row] }),
+  )
+  const calls: unknown[] = []
+  await page.route("**/api/v1/docker/networks/", (route) => {
+    if (route.request().method() === "POST") {
+      calls.push(route.request().postDataJSON())
+      return json(route, { id: "native-created", name: row.resource }, 201)
+    }
+    return json(route, [])
+  })
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await dialog.getByRole("button", { name: "Create", exact: true }).click()
+  await expect.poll(() => calls.length).toBe(1)
+  expect(calls[0]).toMatchObject({
+    name: row.resource,
+    ipv6: true,
+    ipam: [{ subnet: row.prefix }],
+    ipamReservationIds: [row.id],
+  })
+})
+test("editing a filled Docker prefix clears the selected planning identity", async ({ page }) => {
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: [row] }),
+  )
+  const calls: Record<string, unknown>[] = []
+  await page.route("**/api/v1/docker/networks/", (route) => {
+    if (route.request().method() === "POST") {
+      calls.push(route.request().postDataJSON())
+      return json(route, { id: "native-created", name: row.resource }, 201)
+    }
+    return json(route, [])
+  })
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await dialog.getByLabel("IPv6 subnet (optional)").fill("fd49:abcd::/64")
+  await dialog.getByRole("button", { name: "Create", exact: true }).click()
+  await expect.poll(() => calls.length).toBe(1)
+  expect(calls[0]).not.toHaveProperty("ipamReservationIds")
+})

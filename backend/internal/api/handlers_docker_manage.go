@@ -486,23 +486,44 @@ func (s *Server) handleVolumeCreate(w http.ResponseWriter, r *http.Request) erro
 // -------------------------------------------------------------- networks ---
 
 func (s *Server) handleNetworkCreate(w http.ResponseWriter, r *http.Request) error {
-	var spec dockerx.NetworkSpec
-	if err := httpx.DecodeJSON(r, &spec); err != nil {
+	var req struct {
+		dockerx.NetworkSpec
+		IPAMReservationIDs []string `json:"ipamReservationIds,omitempty"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	spec, err := dockerx.NormalizeNetworkSpec(spec)
+	spec, err := dockerx.NormalizeNetworkSpec(req.NetworkSpec)
 	if err != nil {
 		return httpx.Wrap(http.StatusBadRequest, "invalid_network", err)
 	}
 	if err := s.authoriseNetworkSpec(r, spec); err != nil {
 		return err
 	}
+	prefixes := make([]string, 0, len(spec.IPAM))
+	for _, pool := range spec.IPAM {
+		prefixes = append(prefixes, pool.Subnet)
+	}
+	handoff, err := s.beginIPAMOwnerHandoff(r, req.IPAMReservationIDs, "docker_network", spec.Name, prefixes)
+	if err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "docker.network.create", spec.Name, map[string]any{"driver": spec.Driver, "ipamReservations": req.IPAMReservationIDs})
 	net, err := s.modules.docker.CreateNetwork(r.Context(), spec)
+	warning := s.finishIPAMOwnerHandoff(handoff, func() string {
+		if net != nil {
+			return net.ID
+		}
+		return ""
+	}(), err)
 	if err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.create", net.Name, map[string]any{"driver": net.Driver})
-	httpx.JSON(w, http.StatusCreated, net)
+	httpx.SetAudit(r, "docker.network.create", net.Name, map[string]any{"driver": net.Driver, "ipamReservations": req.IPAMReservationIDs, "ipamWarning": warning})
+	httpx.JSON(w, http.StatusCreated, struct {
+		*dockerx.Network
+		IPAMWarning string `json:"ipamWarning,omitempty"`
+	}{net, warning})
 	return nil
 }
 
