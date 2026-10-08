@@ -191,6 +191,11 @@ type Volume struct {
 	Size       int64             `json:"size"`
 	RefCount   int64             `json:"refCount"`
 	InUse      bool              `json:"inUse"`
+	// Options are the driver's mount options. Docker's prune never touches a
+	// local volume that has any — it is a remote filesystem or a bind, and
+	// deleting the definition frees nothing — so the list carries them for
+	// the page to say which volumes a prune would actually take.
+	Options map[string]string `json:"options,omitempty"`
 }
 
 func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
@@ -223,6 +228,7 @@ func (c *Client) ListVolumes(ctx context.Context) ([]Volume, error) {
 		vol := Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
+			Options: v.Options,
 		}
 		if vol.Labels == nil {
 			vol.Labels = map[string]string{}
