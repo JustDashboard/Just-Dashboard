@@ -895,6 +895,24 @@ export type DockerEventFeed = {
   buffered: number
 }
 
+/**
+ * The part of `docker info` the overview's identity line reads. The route
+ * passes the daemon's own document through, so the names are its casing and
+ * every field it adds in a later release is simply not read here.
+ */
+export type DockerInfo = {
+  Name?: string
+  ServerVersion?: string
+  OperatingSystem?: string
+  Architecture?: string
+  /** The storage driver: overlay2, btrfs, zfs. */
+  Driver?: string
+  CgroupVersion?: string
+  NCPU?: number
+  MemTotal?: number
+  Images?: number
+}
+
 /** Whether the tag a container runs still points where it did when pulled. */
 export type ImageUpdateStatus = {
   ref: string
