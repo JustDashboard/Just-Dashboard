@@ -142,6 +142,10 @@ func (s *Service) driftRuntime(ctx context.Context, sp *Spec) []DriftObservation
 		out = append(out, o)
 	}
 	for _, sh := range sp.Shaping {
+		if sh.SQM != nil {
+			out = append(out, driftSQM(ctx, sh))
+			continue
+		}
 		o := observation("shaping", sh.Device)
 		v := readShapeVerification(ctx, sh)
 		o.Status, o.Reason = v.Status, v.Reason

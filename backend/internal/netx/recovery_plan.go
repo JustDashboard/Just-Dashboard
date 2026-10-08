@@ -14,7 +14,10 @@ import (
 // Replaying the entire spec would replace unaffected resources and could
 // overwrite a concurrent native-manager change.
 func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recoveryCommand, error) {
-	var commands []recoveryCommand
+	commands, err := sqmRecoveryPlan(old, next)
+	if err != nil {
+		return nil, err
+	}
 	add := func(tool string, args []string, gone, exists bool) {
 		commands = append(commands, recoveryCommand{Tool: tool, Args: args, AllowGone: gone, AllowExists: exists})
 	}
@@ -168,7 +171,7 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 		if sh.hasRoot() {
 			add("tc", []string{"qdisc", "del", "dev", sh.Device, "root"}, true, false)
 		}
-		if sh.IngressKbit > 0 {
+		if sh.IngressKbit > 0 && sh.SQM == nil {
 			add("tc", []string{"qdisc", "del", "dev", sh.Device, "ingress"}, true, false)
 		}
 	}

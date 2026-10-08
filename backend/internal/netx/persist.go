@@ -52,7 +52,7 @@ func (s *Service) renderAllWithGateway(sp *Spec, candidate *string) (rendered, e
 		filepath.Join(s.paths.Dir, shapingFile): []byte(renderShaping(sp)),
 		filepath.Join(s.paths.Dir, gatewayFile): []byte(gateway),
 		s.paths.Sysctl:                          []byte(renderSysctl(sp)),
-		s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery)),
+		s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery, hasSQM(sp))),
 	}
 	return out, nil
 }
@@ -101,6 +101,11 @@ Type=oneshot
 	// nf_conntrack_max was not there to set, and a later sysctl.d file may
 	// have overridden the rest.
 	fmt.Fprintf(&b, "ExecStart=-sysctl -q -p %s\n", paths.Sysctl)
+	if len(recovery) > 1 && recovery[1] {
+		// Other network resources restore first; a failed optional SQM helper
+		// is visible as a failed unit without blocking their restoration.
+		fmt.Fprintf(&b, "ExecStart=%s --network-sqm-restore %s\n", filepath.Join(dir, recoveryBinary), dir)
+	}
 	b.WriteString("ExecStop=-nft delete table inet " + gatewayTable + "\n")
 	for _, cmd := range admissionCommands(false) {
 		fmt.Fprintf(&b, "ExecStop=-%s\n", strings.Join(cmd, " "))
@@ -115,9 +120,10 @@ WantedBy=multi-user.target systemd-networkd.service
 // step is the runtime half of a change: what to run on the host now, how to
 // take it back, and what to check once it ran.
 type step struct {
-	apply  func(ctx context.Context) error
-	undo   func(ctx context.Context)
-	verify func(ctx context.Context) error
+	apply             func(ctx context.Context) error
+	undo              func(ctx context.Context)
+	verify            func(ctx context.Context) error
+	verifyPersistence func(ctx context.Context) error
 	// recovery carries observed state that cannot be reconstructed from the
 	// previous managed spec, such as an interface's original default MTU.
 	recovery []recoveryCommand
@@ -197,6 +203,15 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 		if undo {
 			rollback(recoveryCtx, st.undo)
 		}
+		if st.verifyPersistence != nil && has("systemctl") {
+			for _, path := range written {
+				if path == s.paths.Unit {
+					_, err := run(recoveryCtx, "systemctl", "daemon-reload")
+					recordRecoveryError(recoveryCtx, err)
+					break
+				}
+			}
+		}
 		journal.RecoveryErrors = append(journal.RecoveryErrors, runtimeFailures...)
 		journal.Phase, journal.Persistence, journal.Runtime = "recovered", "restored", "undo_attempted"
 		if len(journal.RecoveryErrors) > 0 {
@@ -255,6 +270,11 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 			return &persistenceError{errors.Join(err, saveErr)}
 		}
 		return &persistenceError{err}
+	}
+	if st.verifyPersistence != nil {
+		if err := st.verifyPersistence(ctx); err != nil {
+			return finishRecovery(err, written, true)
+		}
 	}
 	journal.Phase, journal.Boot = "saved", "enabled"
 	if journal.Watchdog == "armed" {

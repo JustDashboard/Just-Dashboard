@@ -39,6 +39,23 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--network-sqm-check" {
+		fmt.Println("sqm-v1")
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "--network-sqm-restore" {
+		if len(os.Args) != 3 {
+			fmt.Fprintln(os.Stderr, "SQM restoration needs a directory")
+			os.Exit(2)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := netx.RestoreSQMBootStandalone(ctx, os.Args[2]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--network-recovery-check" {
 		return
 	}

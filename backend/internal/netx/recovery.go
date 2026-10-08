@@ -392,6 +392,13 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 			return fmt.Errorf("selected repair recovery must contain only canonical owned admission undo")
 		}
 		switch c.Tool {
+		case "sqm":
+			if len(c.Input) != 0 || c.AllowGone || c.AllowExists {
+				return fmt.Errorf("invalid SQM recovery envelope")
+			}
+			if _, err := validateSQMRecoveryArgs(c.Args); err != nil {
+				return err
+			}
 		case "ip", "tc", "nft", "sysctl", "iptables", "ip6tables":
 		default:
 			return fmt.Errorf("refused unexpected recovery tool %s", c.Tool)
@@ -426,6 +433,12 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 		commands = append(append([]recoveryCommand(nil), j.BootDependencies...), commands...)
 	}
 	for _, c := range commands {
+		if c.Tool == "sqm" {
+			if err := recoverSQM(ctx, c.Args); err != nil {
+				j.RecoveryErrors = append(j.RecoveryErrors, "restore owned SQM: "+err.Error())
+			}
+			continue
+		}
 		out, err := executeRecovery(ctx, c.Input, c.Tool, c.Args...)
 		if err != nil && !(c.AllowGone && recoveryExpectedAbsence(c.Tool, out, err)) && !(c.AllowExists && recoveryExpectedExistence(c.Tool, c.Args, out, err)) {
 			j.RecoveryErrors = append(j.RecoveryErrors, c.Tool+" "+strings.Join(c.Args, " ")+": "+err.Error())
