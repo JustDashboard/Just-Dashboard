@@ -220,9 +220,8 @@ func (s *Service) PortCheck(ctx context.Context, target string, port int) (*Prob
 	res.Duration = time.Since(start).Round(time.Millisecond).String()
 	if err != nil {
 		res.Error = err.Error()
-		// Refused and timed out mean different things — one is a host saying
-		// no, the other is a firewall saying nothing — and the distinction is
-		// the reason to run the check at all.
+		// Refusal and silence provide different evidence, but neither
+		// identifies which device or policy caused the failure.
 		res.Output = describeDialError(err)
 		return res, nil
 	}
@@ -239,7 +238,7 @@ func describeDialError(err error) string {
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "refused"):
-		return "Connection refused: something answered and said no. The host is reachable and nothing is listening on that port."
+		return "Connection refused: the connection was actively rejected. A closed port or a firewall rejection can cause this."
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline"):
 		return "Timed out with no reply. A firewall dropping packets, an offline host or a broken route can all cause this."
 	case strings.Contains(msg, "no such host"):

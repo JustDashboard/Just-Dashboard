@@ -46,8 +46,9 @@ func TestPortCheckRejectsBadPorts(t *testing.T) {
 }
 
 func TestDescribeDialError(t *testing.T) {
-	if !strings.Contains(describeDialError(errString("connection refused")), "refused") {
-		t.Error("a refusal should be described as one")
+	refused := describeDialError(errString("connection refused"))
+	if !strings.Contains(refused, "refused") || !strings.Contains(refused, "firewall rejection") || strings.Contains(refused, "nothing is listening") {
+		t.Errorf("a refusal cannot prove that the port is closed: %s", refused)
 	}
 	if !strings.Contains(describeDialError(errString("i/o timeout")), "firewall") {
 		t.Error("a timeout is what a drop looks like, and should say so")
