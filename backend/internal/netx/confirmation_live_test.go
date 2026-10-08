@@ -37,10 +37,14 @@ func TestLivePendingBackendDeathAndUnavailableNewSource(t *testing.T) {
 		return ns.command(ctx, "env", "JD_PENDING_LIVE_DIR="+dir, "JD_PENDING_LIVE_MODE="+mode, os.Args[0], "-test.run=^TestPendingLiveProcessFixture$")
 	}
 	backend := invoke("backend")
+	backendReaped := false
 	if err := backend.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		if backendReaped {
+			return
+		}
 		pid, _ := ns.run(context.Background(), nil, "cat", filepath.Join(dir, "backend.pid"))
 		if strings.TrimSpace(pid) != "" {
 			_, _ = ns.run(context.Background(), nil, "kill", "-9", strings.TrimSpace(pid))
@@ -62,10 +66,14 @@ func TestLivePendingBackendDeathAndUnavailableNewSource(t *testing.T) {
 		t.Fatalf("candidate journal=%+v,%v", before, err)
 	}
 	worker := invoke("worker")
+	workerReaped := false
 	if err := worker.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		if workerReaped {
+			return
+		}
 		pid, _ := ns.run(context.Background(), nil, "cat", filepath.Join(dir, "worker.pid"))
 		if strings.TrimSpace(pid) != "" {
 			_, _ = ns.run(context.Background(), nil, "kill", "-9", strings.TrimSpace(pid))
@@ -97,12 +105,16 @@ func TestLivePendingBackendDeathAndUnavailableNewSource(t *testing.T) {
 	}
 	pid := strings.TrimSpace(ns.must(t, "cat", filepath.Join(dir, "backend.pid")))
 	ns.must(t, "kill", "-9", pid)
-	if err := backend.Wait(); err == nil {
+	err := backend.Wait()
+	backendReaped = true
+	if err == nil {
 		t.Fatal("backend fixture survived its kill")
 	}
 	// No API process or its undo closures exist while the independent worker
 	// waits to restore at the captured deadline.
-	if err := worker.Wait(); err != nil {
+	err = worker.Wait()
+	workerReaped = true
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := ns.run(ctx, nil, "ip", "link", "show", "dev", "pending0"); err == nil {
