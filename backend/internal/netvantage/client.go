@@ -202,7 +202,7 @@ func (p *Poller) signed(ctx context.Context, path string, body []byte, out any) 
 	signature := SignRequest(key, "POST", path, body, Signature{ServerKey: p.Config.Manifest.ServerKey, ID: p.Config.Manifest.Vantage.ID, Sequence: p.Config.Sequence, Timestamp: time.Now().Unix()})
 	return exchange(ctx, p.Client, p.Config.URL, path, body, &signature, out)
 }
-func (p *Poller) Once(ctx context.Context) error {
+func (p *Poller) onceUnlocked(ctx context.Context) error {
 	var response struct {
 		Job        *SignedJob `json:"job"`
 		ServerTime time.Time  `json:"serverTime"`
@@ -251,29 +251,77 @@ func (p *Poller) Once(ctx context.Context) error {
 	}
 	return nil
 }
-func (p *Poller) Run(ctx context.Context, notice func(error)) error {
-	f, e := os.OpenFile(p.Path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+
+// WithStateLock serializes every public execution path before a credential,
+// enrollment token or replay sequence can be consumed. The lock is held across
+// HTTP operations and the atomic state save; a competing process fails closed.
+func WithStateLock(path string, action func() error) error {
+	if e := os.MkdirAll(filepath.Dir(path), 0o700); e != nil {
+		return e
+	}
+	f, e := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
 	if e != nil {
 		return e
 	}
 	defer f.Close()
+	info, e := f.Stat()
+	if e != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
+		return fmt.Errorf("agent state lock must be a regular private file")
+	}
 	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-		return fmt.Errorf("another poller owns this private agent state")
+		return fmt.Errorf("another poller or enrollment owns this private agent state")
 	}
 	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	current, e := LoadConfig(p.Path)
+	return action()
+}
+func EnrollState(ctx context.Context, client *http.Client, origin, pin, id, token, serverKey, path string) (AgentConfig, error) {
+	var cfg AgentConfig
+	e := WithStateLock(path, func() error {
+		if _, e := os.Lstat(path); !os.IsNotExist(e) {
+			return fmt.Errorf("agent state already exists or is unreadable; enrollment will not replace it")
+		}
+		enrolled, e := Enroll(ctx, client, origin, pin, id, token, serverKey)
+		if e != nil {
+			return e
+		}
+		if e = SaveConfig(path, enrolled); e != nil {
+			return e
+		}
+		cfg = enrolled
+		return nil
+	})
+	return cfg, e
+}
+func (p *Poller) reload() error {
+	cfg, e := LoadConfig(p.Path)
 	if e != nil {
 		return e
 	}
-	p.Config = current
-	for {
-		if e = p.Once(ctx); e != nil && notice != nil {
-			notice(e)
+	p.Config = cfg
+	return nil
+}
+func (p *Poller) Once(ctx context.Context) error {
+	return WithStateLock(p.Path, func() error {
+		if e := p.reload(); e != nil {
+			return e
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(10 * time.Second):
+		return p.onceUnlocked(ctx)
+	})
+}
+func (p *Poller) Run(ctx context.Context, notice func(error)) error {
+	return WithStateLock(p.Path, func() error {
+		if e := p.reload(); e != nil {
+			return e
 		}
-	}
+		for {
+			if e := p.onceUnlocked(ctx); e != nil && notice != nil {
+				notice(e)
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+		}
+	})
 }

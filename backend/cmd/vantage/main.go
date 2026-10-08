@@ -27,9 +27,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *enroll {
-		if _, e := os.Lstat(*state); !os.IsNotExist(e) {
-			fatal(fmt.Errorf("agent state already exists or is unreadable; enrollment will not replace it"))
-		}
 		token, e := io.ReadAll(io.LimitReader(os.Stdin, 4097))
 		if e != nil || len(token) > 4096 {
 			fatal(fmt.Errorf("read one enrollment token from stdin"))
@@ -41,11 +38,8 @@ func main() {
 		defer client.CloseIdleConnections()
 		deadline, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		cfg, e := netvantage.Enroll(deadline, client, *origin, *tlsPin, *id, string(token), *signingKey)
+		_, e = netvantage.EnrollState(deadline, client, *origin, *tlsPin, *id, string(token), *signingKey, *state)
 		if e != nil {
-			fatal(e)
-		}
-		if e = netvantage.SaveConfig(*state, cfg); e != nil {
 			fatal(e)
 		}
 		fmt.Fprintln(os.Stdout, "Enrolled the controlled vantage. Approved targets and private identity are saved in the private state file.")

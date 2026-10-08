@@ -124,8 +124,9 @@ jd-vantage -state /private/local/path/probe.json
 The state file must be regular, private (`0600`) and at most 32 KiB; its directory must be controlled
 by the agent account. It contains the agent's private identity, pinned manifest and durable sequence.
 Store and back it up as a credential, and remove the one-use token file after successful enrollment.
-Do not clone active agent state into a second process or host. The long-running poller uses an
-exclusive lock; `-once` is intended for a stopped agent's controlled diagnostic run. Run as an
+Do not clone active agent state into a second process or host. Enrollment, the long-running poller and `-once` share an exclusive private-state lock. A second
+process is refused before transmitting or changing the sequence; each execution reloads the durable
+state under that lock. `-once` is intended for a stopped agent's controlled diagnostic run. Run as an
 unprivileged account with only outbound HTTPS, DNS and the approved service access it requires.
 The dashboard neither installs this executable remotely nor persists a remote shell capability.
 
