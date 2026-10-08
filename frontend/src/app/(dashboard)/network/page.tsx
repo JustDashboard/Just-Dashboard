@@ -7,6 +7,7 @@ import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { NetworkChange } from "@/components/network/change-status"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { Page, PageContext, Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -92,7 +93,12 @@ export default function NetworkOverviewPage() {
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Network" />
       <NetworkIdentity overview={data} links={links} />
-      <NetworkReadWarning error={overview.error} refresh={overview.refresh} />
+      <NetworkReadWarning
+        error={overview.error}
+        refresh={overview.refresh}
+        lastSuccess={overview.lastSuccess}
+      />
+      {data.persistence.change && <NetworkChange change={data.persistence.change} />}
 
       <Panel plain>
         <PanelHeader

@@ -33,6 +33,7 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { FirewallPicture } from "@/components/network/firewall-picture"
 import { FIREWALL_LOG } from "@/components/security/host-logs"
 import {
@@ -77,6 +78,7 @@ export function FirewallPanel({
   posture,
   loading,
   error,
+  lastSuccess,
   refresh,
   onFix,
   handoff,
@@ -87,6 +89,7 @@ export function FirewallPanel({
   posture: Posture | undefined
   loading: boolean
   error: Error | undefined
+  lastSuccess?: number
   refresh: () => void
   onFix?: (finding: SecurityFinding) => void
 }) {
@@ -212,7 +215,7 @@ export function FirewallPanel({
     return (
       <>
         {header}
-        <ErrorState error={error} />
+        <ErrorState error={error} onRetry={refresh} />
       </>
     )
   }
@@ -220,6 +223,12 @@ export function FirewallPanel({
     return (
       <>
         {header}
+        <NetworkReadWarning
+          error={error}
+          refresh={refresh}
+          lastSuccess={lastSuccess}
+          reading="firewall state"
+        />
         <EmptyState
           icon={Shield}
           title="No firewall on this host"
@@ -280,6 +289,12 @@ export function FirewallPanel({
       }}
     >
       {header}
+      <NetworkReadWarning
+        error={error}
+        refresh={refresh}
+        lastSuccess={lastSuccess}
+        reading="firewall state"
+      />
 
       {/* What the page is about, as its own row (§15 pass 8): the backend by
           its own name, on the tile a product's mark takes — none of the three

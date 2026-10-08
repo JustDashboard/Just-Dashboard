@@ -6,19 +6,25 @@ import type { NetworkRouting, NetworkRule } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
 import { WireMark, WireNode } from "@/components/deploy/wire"
+import { ChipStrip, FilterChip } from "@/components/tabs"
+import {
+  addressFamily,
+  decisionRules,
+  decisionTables,
+  inferredAnswer,
+  type RouteFamily,
+} from "./decision-reading"
+import { RouteLookup } from "./route-lookup"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-
-/** The rules the kernel writes for itself, which every host has and nobody reads twice. */
-const QUIET = new Set([0])
 
 /**
  * How the kernel picks a route, drawn as the decision it is: the policy rules
  * on the left in the order they are asked — priority first — and the tables
  * they send a packet to on the right, each with how many routes it holds.
  *
- * The rule and table that answer this browser's replies carry a moving wire,
- * so "why does my traffic leave through tailscale0" is answered by following
- * the one line that moves. A rule that discards (blackhole, prohibit,
+ * An inferred rule and table for this browser's replies carry a moving wire.
+ * The separate target lookup asks the kernel; the diagram does not implement
+ * every policy selector. A rule that discards (blackhole, prohibit,
  * unreachable) ends in a mark of its own rather than a table. A rule the
  * dashboard made has its priority in the brand's blue, the colour of where
  * the reader is (§3); Tailscale's take its logo.
@@ -26,26 +32,10 @@ const QUIET = new Set([0])
 export function DecisionMap({ routing }: { routing: NetworkRouting }) {
   const container = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
-  const rules = routing.rules.filter((r) => r.family === "inet" && !QUIET.has(r.priority))
-  // Every table a rule sends to, in the order the rules first name them; one
-  // that holds nothing (the `default` table, usually) is still drawn, empty,
-  // because a rule pointing at it is still asked.
-  const tables = useMemo(() => {
-    const out: NetworkRouting["tables"] = []
-    for (const r of rules) {
-      if (r.action !== "lookup" || r.table === undefined || out.some((t) => t.id === r.table))
-        continue
-      out.push(
-        routing.tables.find((t) => t.id === r.table) ?? {
-          id: r.table,
-          name: r.tableName ?? String(r.table),
-          routes: [],
-        },
-      )
-    }
-    return out
-  }, [routing.tables, rules])
-  const answering = answeringTable(routing)
+  const [family, setFamily] = useState<RouteFamily>(() => addressFamily(routing.clientPath.address))
+  const rules = useMemo(() => decisionRules(routing, family), [routing, family])
+  const tables = useMemo(() => decisionTables(routing, rules, family), [routing, rules, family])
+  const answering = inferredAnswer(routing, family)
 
   const ids = [
     ...rules.map((r) => `r:${r.priority}:${r.id}`),
@@ -67,6 +57,54 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
   return (
     <div className="relative animate-rise py-4">
       <div aria-hidden className="wire-grid pointer-events-none absolute -inset-x-4 inset-y-0" />
+      <div className="relative mb-5 space-y-2">
+        <ChipStrip aria-label="Route diagram family">
+          <FilterChip
+            selected={family === "inet"}
+            onClick={() => {
+              setFamily("inet")
+              setFocus(null)
+            }}
+          >
+            IPv4
+          </FilterChip>
+          <FilterChip
+            selected={family === "inet6"}
+            onClick={() => {
+              setFamily("inet6")
+              setFocus(null)
+            }}
+          >
+            IPv6
+          </FilterChip>
+        </ChipStrip>
+        <p className="text-hint text-muted-foreground">
+          Highlights infer which rule may answer your replies; they do not evaluate every policy
+          selector.
+        </p>
+        <p className="text-hint break-all text-muted-foreground">
+          Browser path ({addressFamily(routing.clientPath.address) === "inet6" ? "IPv6" : "IPv4"}):{" "}
+          <span className="font-mono">{routing.clientPath.address}</span>
+          {routing.clientPath.device && (
+            <>
+              {" "}
+              · via <span className="font-mono">{routing.clientPath.device}</span>
+            </>
+          )}
+          {routing.clientPath.source && (
+            <>
+              {" "}
+              · source <span className="font-mono">{routing.clientPath.source}</span>
+            </>
+          )}
+          {routing.clientPath.gateway && (
+            <>
+              {" "}
+              · gateway <span className="font-mono">{routing.clientPath.gateway}</span>
+            </>
+          )}
+        </p>
+      </div>
       <div ref={container} className="relative">
         {rules.map((rule, index) => {
           const from = refs.get(`r:${rule.priority}:${rule.id}`)
@@ -100,6 +138,11 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
           <section aria-label="Policy rules, in the order they are asked" className="min-w-0">
             <p className="eyebrow mb-4">Asked in this order</p>
             <ol className="flex flex-col gap-4">
+              {rules.length === 0 && (
+                <li className="text-body text-muted-foreground">
+                  No visible {family === "inet6" ? "IPv6" : "IPv4"} policy rules.
+                </li>
+              )}
               {rules.map((rule) => {
                 const id = `r:${rule.priority}:${rule.id}`
                 const carries = answering?.rule === rule
@@ -134,7 +177,7 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
                       eyebrow={
                         <span className={cn(carries && "text-brand")}>
                           {rule.priority}
-                          {carries ? " · your replies" : ""}
+                          {carries ? " · your replies (inferred)" : ""}
                         </span>
                       }
                       title={<span className="font-mono text-xs">{selector(rule)}</span>}
@@ -171,11 +214,11 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
                       eyebrow={
                         <span className={cn(answers && "text-brand")}>
                           table {table.id}
-                          {answers ? " · answers you" : ""}
+                          {answers ? " · answers you (inferred)" : ""}
                         </span>
                       }
                       title={table.name}
-                      hint={`${table.routes.length} route${table.routes.length === 1 ? "" : "s"}${defaultOf(table.routes)}`}
+                      hint={`${table.routes.length} route${table.routes.length === 1 ? "" : "s"}${defaultOf(table.routes, family)}`}
                     />
                   </li>
                 )
@@ -199,6 +242,7 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
           </section>
         </div>
       </div>
+      <RouteLookup />
     </div>
   )
 }
@@ -219,29 +263,8 @@ function selector(rule: NetworkRule) {
   return parts.length ? parts.join(" ") : "everything"
 }
 
-function defaultOf(routes: NetworkRouting["tables"][number]["routes"]) {
-  const d = routes.find((r) => r.destination === "default" && r.family === "inet")
+function defaultOf(routes: NetworkRouting["tables"][number]["routes"], family: RouteFamily) {
+  const d = routes.find((r) => r.destination === "default" && r.family === family)
   if (!d) return ""
   return ` · default via ${d.gateway ?? d.device ?? "—"}`
-}
-
-/**
- * The rule and table that answer the browser's replies: the first rule with
- * no selector beyond the ones a reply cannot match that leads to a table
- * holding a route through the client path's device. A best reading of the
- * kernel's choice, drawn rather than enforced — the guard asks the kernel
- * itself.
- */
-function answeringTable(routing: NetworkRouting): { rule: NetworkRule; table: number } | undefined {
-  const device = routing.clientPath.device
-  if (!device) return undefined
-  for (const rule of routing.rules) {
-    if (rule.family !== "inet" || rule.action !== "lookup" || rule.table === undefined) continue
-    if (rule.fwmark || rule.iif || rule.oif) continue
-    if (rule.to && rule.to !== routing.clientPath.address) continue
-    if (rule.from && rule.from !== routing.clientPath.source) continue
-    const table = routing.tables.find((t) => t.id === rule.table)
-    if (table?.routes.some((r) => r.device === device)) return { rule, table: table.id }
-  }
-  return undefined
 }

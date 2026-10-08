@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { Cross, Plus } from "@/components/icons"
-import { post } from "@/lib/api"
+import { get, post } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { HeadscaleView, TailscaleView } from "@/lib/types"
@@ -55,6 +55,7 @@ export function TailscaleBlock({
 }) {
   const [busy, setBusy] = useState(false)
   const [route, setRoute] = useState("")
+  const [routeError, setRouteError] = useState<Error>()
   const self = tailscale.self
   const apply = async (
     body: { advertiseExitNode?: boolean; advertiseRoutes?: string[] },
@@ -65,8 +66,45 @@ export function TailscaleBlock({
       const res = await post<{ note: string }>("/network/vpn/tailscale", body)
       notify.success(label, { description: res.note })
       onChanged()
+      return true
     } catch (err) {
       notify.error("Tailscale was not changed", err)
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  const offer = async () => {
+    const draft = route.trim()
+    if (!draft || busy) return
+    setBusy(true)
+    setRouteError(undefined)
+    try {
+      // Refresh the preferences before retrying: a lost response may have
+      // accepted the previous offer, and the poll may not have caught up.
+      const latest = await get<{ tailscale: TailscaleView }>("/network/vpn")
+      if (latest.tailscale.prefsReadable === false) {
+        throw new Error(
+          "Tailscale preferences could not be read. Refresh them before offering a network.",
+        )
+      }
+      const current = latest.tailscale.prefs.advertiseRoutes
+      if (current.includes(draft)) {
+        notify.success(`${draft} is already offered`)
+        onChanged()
+        setRoute((held) => (held.trim() === draft ? "" : held))
+        return
+      }
+      const result = await post<{ note: string }>("/network/vpn/tailscale", {
+        advertiseRoutes: [...new Set([...current, draft])],
+      })
+      notify.success(`${draft} offered`, { description: result.note })
+      onChanged()
+      setRoute((held) => (held.trim() === draft ? "" : held))
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err))
+      setRouteError(error)
+      notify.error("Tailscale was not changed", error)
     } finally {
       setBusy(false)
     }
@@ -175,16 +213,16 @@ export function TailscaleBlock({
               className="flex items-center gap-1.5"
               onSubmit={(event) => {
                 event.preventDefault()
-                if (!route.trim()) return
-                void apply(
-                  { advertiseRoutes: [...routes, route.trim()] },
-                  `${route.trim()} offered`,
-                ).then(() => setRoute(""))
+                void offer()
               }}
             >
               <Input
                 value={route}
-                onChange={(event) => setRoute(event.target.value)}
+                onChange={(event) => {
+                  setRoute(event.target.value)
+                  setRouteError(undefined)
+                }}
+                aria-describedby={routeError ? "tailscale-route-error" : undefined}
                 placeholder="10.0.4.0/24"
                 aria-label="A network to offer"
                 className="h-7 w-36 font-mono text-xs"
@@ -200,6 +238,23 @@ export function TailscaleBlock({
               </Button>
             </form>
           </div>
+          {routeError && (
+            <div
+              id="tailscale-route-error"
+              role="alert"
+              className="space-y-2 text-hint text-destructive"
+            >
+              <p>{routeError.message} Your network draft has been kept.</p>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={busy || !route.trim()}
+                onClick={() => void offer()}
+              >
+                Retry offer
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 

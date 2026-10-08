@@ -1,11 +1,12 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
 import { Linked, NetworkDevice, Slash, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
 import type { Container, DockerNetwork, NetworkDetail, NetworkMember } from "@/lib/types"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { EmptyState, ErrorState, LoadingPanel, LoadingRows } from "@/components/state"
@@ -568,19 +569,15 @@ function AttachDialog({
   onAttached: () => void
   attached: Set<string>
 }) {
-  const [containers, setContainers] = useState<Container[]>([])
+  const candidates = usePoll<Container[]>(
+    (signal) => get("/docker/containers/", undefined, signal),
+    30_000,
+    [networkId, open],
+    { enabled: open && Boolean(networkId) },
+  )
   const [picked, setPicked] = useState("")
   const [alias, setAlias] = useState("")
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    const controller = new AbortController()
-    get<Container[]>("/docker/containers/", undefined, controller.signal)
-      .then(setContainers)
-      .catch(() => undefined)
-    return () => controller.abort()
-  }, [open])
 
   const attach = async () => {
     setBusy(true)
@@ -601,7 +598,7 @@ function AttachDialog({
     }
   }
 
-  const available = containers.filter((c) => !attached.has(c.id))
+  const available = candidates.data?.filter((c) => !attached.has(c.id)) ?? []
 
   return (
     <Modal
@@ -620,17 +617,49 @@ function AttachDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={attach} disabled={busy || !picked} pending={busy}>
+          <Button
+            onClick={attach}
+            disabled={
+              busy ||
+              !picked ||
+              Boolean(candidates.error) ||
+              !available.some((c) => c.id === picked)
+            }
+            pending={busy}
+          >
             Attach
           </Button>
         </>
       }
     >
       <div className="space-y-3">
+        {candidates.data && (
+          <NetworkReadWarning
+            error={candidates.error}
+            refresh={candidates.refresh}
+            lastSuccess={candidates.lastSuccess}
+            reading="container candidates"
+          />
+        )}
+        {!candidates.data && candidates.error && (
+          <div className="space-y-2">
+            <ErrorState error={candidates.error} />
+            <Button size="xs" variant="outline" onClick={candidates.refresh}>
+              Try again
+            </Button>
+          </div>
+        )}
+        {candidates.loading && <LoadingRows rows={2} />}
         <div className="space-y-1.5">
-          <Label className="text-xs">Container</Label>
-          <Select value={picked} onValueChange={setPicked}>
-            <SelectTrigger className="w-full">
+          <Label className="text-xs" htmlFor="network-attach-container">
+            Container
+          </Label>
+          <Select
+            value={picked}
+            onValueChange={setPicked}
+            disabled={candidates.loading || Boolean(candidates.error)}
+          >
+            <SelectTrigger id="network-attach-container" className="w-full">
               <SelectValue placeholder="Pick one" />
             </SelectTrigger>
             <SelectContent>
@@ -641,11 +670,16 @@ function AttachDialog({
               ))}
             </SelectContent>
           </Select>
-          {available.length === 0 && <Hint>Every container is already on this network.</Hint>}
+          {candidates.data && !candidates.error && available.length === 0 && (
+            <Hint>Every container is already on this network.</Hint>
+          )}
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Extra name (optional)</Label>
+          <Label className="text-xs" htmlFor="network-attach-alias">
+            Extra name (optional)
+          </Label>
           <Input
+            id="network-attach-alias"
             value={alias}
             spellCheck={false}
             className="font-mono text-xs"

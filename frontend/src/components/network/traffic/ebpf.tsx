@@ -4,6 +4,7 @@ import { useState } from "react"
 import { get } from "@/lib/api"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { EBPFView } from "@/lib/types"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll } from "@/hooks/use-poll"
 import { Section } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -54,6 +55,12 @@ export function EBPFSection() {
   if (!view.installed) {
     return (
       <Section title="eBPF">
+        <NetworkReadWarning
+          error={ebpf.error}
+          refresh={ebpf.refresh}
+          lastSuccess={ebpf.lastSuccess}
+          reading="eBPF inventory"
+        />
         <InstallHandoff
           pkg={view.package ?? "bpftool"}
           products={["linux"]}
@@ -70,6 +77,12 @@ export function EBPFSection() {
 
   return (
     <Section title="eBPF">
+      <NetworkReadWarning
+        error={ebpf.error}
+        refresh={ebpf.refresh}
+        lastSuccess={ebpf.lastSuccess}
+        reading="eBPF inventory"
+      />
       {view.error && <Notice title="bpftool reported a problem">{view.error}</Notice>}
       <StatGrid columns={3}>
         <StatTile

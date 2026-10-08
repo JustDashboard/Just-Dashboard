@@ -2,6 +2,7 @@
 
 import { get } from "@/lib/api"
 import type { NetworkLink } from "@/lib/types"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll } from "@/hooks/use-poll"
 import { Section } from "@/components/page"
 import { ErrorState, LoadingPanel } from "@/components/state"
@@ -44,6 +45,14 @@ export function Bandwidth({
         </span>
       }
     >
+      {links.data && (
+        <NetworkReadWarning
+          error={links.error}
+          refresh={links.refresh}
+          lastSuccess={links.lastSuccess}
+          reading="link inventory"
+        />
+      )}
       {links.data ? (
         <InterfaceCharts links={links.data} live={live.series} span={span} />
       ) : links.error ? (

@@ -12,6 +12,7 @@ export default function NetworkFirewallPage() {
     firewall,
     firewallLoading,
     firewallError,
+    firewallLastSuccess,
     refreshFirewall,
     refreshPosture,
     posture,
@@ -34,6 +35,7 @@ export default function NetworkFirewallPage() {
         posture={posture}
         loading={firewallLoading}
         error={firewallError}
+        lastSuccess={firewallLastSuccess}
         onFix={applyFix}
         handoff={handoff}
         refresh={() => {

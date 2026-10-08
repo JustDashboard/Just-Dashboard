@@ -24,6 +24,7 @@ export type SecurityContextValue = {
   firewall: FirewallStatus | undefined
   firewallLoading: boolean
   firewallError: Error | undefined
+  firewallLastSuccess: number | undefined
   exposure: Exposure | undefined
   refreshPosture: () => void
   refreshFirewall: () => void

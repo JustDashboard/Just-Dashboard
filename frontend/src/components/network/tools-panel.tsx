@@ -6,7 +6,7 @@ import { Crosshair, Globe, NetworkDevice, SecureConnection, Servers } from "@/co
 import { PageContext, SearchInput } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { ChoiceCard } from "@/components/choice-card"
-import { EmptyState } from "@/components/state"
+import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/hooks/use-auth"
 import { SubnetTool } from "./tools/subnet-panel"
@@ -20,10 +20,12 @@ const GROUP_MARK = [NetworkDevice, Crosshair, SecureConnection, Globe, Servers]
 /** One diagnostic in focus. Hidden tools stay mounted so their work and drafts survive a switch. */
 export function ToolsPanel() {
   const { can } = useAuth()
+  const admin = can("system.admin")
+  const availableTools = admin ? tools : []
   const params = useSearchParams()
   const arrival = useMemo(() => {
     const tool = params.get("tool")
-    if (!tools.some((entry) => entry.key === tool)) return null
+    if (tool !== "subnet" && !tools.some((entry) => entry.key === tool)) return null
     return {
       tool: tool!,
       prefill: {
@@ -33,33 +35,30 @@ export function ToolsPanel() {
     }
   }, [params])
   const [choice, setChoice] = useState<{ arrival: typeof arrival; key: string } | null>(null)
-  const active = choice?.arrival === arrival ? choice.key : (arrival?.tool ?? "dns")
+  const active = admin
+    ? choice?.arrival === arrival
+      ? choice.key
+      : (arrival?.tool ?? "dns")
+    : "subnet"
   const [query, setQuery] = useState("")
   const selectedGroup = TOOL_GROUPS.find((group) => group.tools.some((tool) => tool.key === active))
   const groups = TOOL_GROUPS.map((group, index) => ({
     ...group,
     mark: GROUP_MARK[index],
-    tools: group.tools.filter((tool) =>
+    tools: (admin ? group.tools : []).filter((tool) =>
       `${tool.label} ${tool.hint}`.toLowerCase().includes(query.trim().toLowerCase()),
     ),
   }))
   const choose = (key: string) => setChoice({ arrival, key })
 
-  if (!can("system.admin"))
-    return (
-      <>
-        <PageContext eyebrow="Network" title="Tools" />
-        <EmptyState
-          icon={Crosshair}
-          title="Diagnostics need the admin capability"
-          description="These probes send traffic from this server to the target you choose."
-        />
-      </>
-    )
-
   return (
     <>
       <PageContext eyebrow="Network" title="Tools" />
+      {!admin && (
+        <Notice title="Server diagnostics need the admin capability">
+          The subnet calculator runs locally in your browser and is available with read access.
+        </Notice>
+      )}
       {/* The chooser and result own their scrolling; this is one framed workbench. */}
       <div
         data-slot="security-tools"
@@ -136,7 +135,9 @@ export function ToolsPanel() {
                   internet can reach. It was a tile; a fact read with the
                   result belongs beside it. */}
               <span className="hidden truncate text-hint text-muted-foreground sm:inline">
-                sent from this server · {tools.length} diagnostics
+                {active === "subnet"
+                  ? "calculated in this browser"
+                  : `sent from this server · ${tools.length} diagnostics`}
               </span>
             </span>
             <Button
@@ -151,7 +152,7 @@ export function ToolsPanel() {
             </Button>
           </PaneHeader>
           <div className="min-h-0 overflow-y-auto p-5 sm:p-6">
-            {tools.map((tool) => (
+            {availableTools.map((tool) => (
               <div key={tool.key} hidden={active !== tool.key}>
                 <ToolPanel
                   def={tool}

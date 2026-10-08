@@ -2,9 +2,10 @@
 
 import { useState } from "react"
 import { Cpu } from "@/components/icons"
-import { ApiError, get } from "@/lib/api"
+import { get } from "@/lib/api"
 import { bytes, plural, rate } from "@/lib/format"
 import type { ContainerTraffic, ProcessTraffic } from "@/lib/types"
+import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { HUE, LiveBytes } from "@/components/overview/readings"
@@ -12,7 +13,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, imageProduct, processProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { Sparkline } from "@/components/metrics/sparkline"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { RX, TX } from "@/components/network/rate-pair"
 import { BandRow, ShareBar, shade } from "@/components/network/traffic/traffic-band"
@@ -79,16 +80,23 @@ export function TrafficWorkloads({ span }: { span: TrafficWindow }) {
                       suffix="/s"
                     />
                   </span>
-                  right now
+                  {programs.error ? "at the last read" : "right now"}
                 </span>
               )
             }
           />
           <PanelBody className="space-y-3 pt-4">
+            <NetworkReadWarning
+              error={programs.error && programs.data ? programs.error : undefined}
+              refresh={programs.refresh}
+              lastSuccess={programs.lastSuccess}
+              reading="program traffic"
+            />
             <ProgramBand
               data={programs.data}
               admin={admin}
               error={programs.error}
+              refresh={programs.refresh}
               open={open}
               onOpen={setOpen}
             />
@@ -110,7 +118,17 @@ export function TrafficWorkloads({ span }: { span: TrafficWindow }) {
             }
           />
           <PanelBody className="space-y-3 pt-4">
-            <ContainerBand data={containers.data} error={containers.error} />
+            <NetworkReadWarning
+              error={containers.error && containers.data ? containers.error : undefined}
+              refresh={containers.refresh}
+              lastSuccess={containers.lastSuccess}
+              reading="container traffic"
+            />
+            <ContainerBand
+              data={containers.data}
+              error={containers.error}
+              refresh={containers.refresh}
+            />
           </PanelBody>
         </Panel>
       </div>
@@ -162,12 +180,14 @@ function ProgramBand({
   data,
   admin,
   error,
+  refresh,
   open,
   onOpen,
 }: {
   data?: ProcessTraffic
   admin: boolean
   error?: Error
+  refresh: () => void
   open?: string
   onOpen: (name: string | undefined) => void
 }) {
@@ -179,14 +199,7 @@ function ProgramBand({
     )
   }
   if (error && !data) {
-    const refused = error instanceof ApiError && error.status === 403
-    return (
-      <Notice
-        title={refused ? "Programs are an administrator's to see" : "Could not read programs"}
-      >
-        {error.message}
-      </Notice>
-    )
+    return <ErrorState error={error} onRetry={refresh} />
   }
   if (!data || data.warming) {
     return (
@@ -250,9 +263,17 @@ function ProgramBand({
   )
 }
 
-function ContainerBand({ data, error }: { data?: ContainerTraffic; error?: Error }) {
+function ContainerBand({
+  data,
+  error,
+  refresh,
+}: {
+  data?: ContainerTraffic
+  error?: Error
+  refresh: () => void
+}) {
   if (error && !data) {
-    return <Notice title="Could not read containers">{error.message}</Notice>
+    return <ErrorState error={error} onRetry={refresh} />
   }
   if (!data) {
     return (

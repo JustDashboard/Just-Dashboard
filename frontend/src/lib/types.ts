@@ -6729,10 +6729,32 @@ export type NetworkPath = {
   local?: boolean
 }
 
+export type NetworkChangeStatus = {
+  id: string
+  phase:
+    | "prepared"
+    | "runtime_applied"
+    | "persisted"
+    | "saved"
+    | "recovering"
+    | "recovered"
+    | "degraded"
+    | "boot_degraded"
+    | "unreadable"
+  generation: string
+  updatedAt: string
+  watchdog: "unsupported" | "armed" | "completed" | "failed_to_arm" | "recovered"
+  runtime: "not_applied" | "applied" | "undo_attempted" | "restored" | "unknown"
+  persistence: "not_written" | "written" | "restored" | "unknown"
+  boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown"
+  recoveryErrors?: string[]
+}
+
 export type NetworkPersistence = {
   unit: "enabled" | "disabled" | "missing" | "unsupported"
   made: number
   dir: string
+  change?: NetworkChangeStatus
 }
 
 export type NetworkDefaultRoute = {
@@ -7000,6 +7022,7 @@ export type TailscalePeer = {
 }
 
 export type TailscaleView = {
+  prefsReadable?: boolean
   installed: boolean
   running: boolean
   backendState: string

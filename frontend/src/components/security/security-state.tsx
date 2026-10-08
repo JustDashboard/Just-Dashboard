@@ -89,6 +89,7 @@ export function SecurityState({ children }: { children: React.ReactNode }) {
         firewall: firewall.data,
         firewallLoading: firewall.loading,
         firewallError: firewall.error,
+        firewallLastSuccess: firewall.lastSuccess,
         exposure: exposure.data,
         refreshPosture: posture.refresh,
         refreshFirewall: firewall.refresh,
