@@ -2,11 +2,13 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -35,7 +37,18 @@ func (s *Server) mountJobRoutes(r chi.Router) {
 }
 
 func (s *Server) handleJobList(w http.ResponseWriter, r *http.Request) error {
-	httpx.JSON(w, http.StatusOK, s.modules.jobs.List())
+	list := s.modules.jobs.List()
+	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		visible := make([]jobs.Job, 0, len(list))
+		for _, job := range list {
+			if !strings.HasPrefix(job.Kind, netdiag.JobPrefix) {
+				visible = append(visible, job)
+			}
+		}
+		list = visible
+	}
+	diagnosticPrivate(w)
+	httpx.JSON(w, http.StatusOK, list)
 	return nil
 }
 
@@ -44,12 +57,34 @@ func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return httpx.ErrNotFound
 	}
+	if strings.HasPrefix(job.Kind, netdiag.JobPrefix) {
+		if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+			return httpx.ErrForbidden
+		}
+		diagnosticPrivate(w)
+	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"job": job, "lines": lines})
 	return nil
 }
 
 func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) error {
 	id := chi.URLParam(r, "id")
+	job, _, ok := s.modules.jobs.Get(id)
+	if !ok {
+		return httpx.BadRequest("that operation is not running")
+	}
+	if strings.HasPrefix(job.Kind, netdiag.JobPrefix) {
+		if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+			return httpx.ErrForbidden
+		}
+		parts := strings.Split(strings.TrimPrefix(job.Kind, netdiag.JobPrefix), ".")
+		httpx.SetAudit(r, "network.diagnostic.cancel", parts[0], map[string]any{"jobId": id})
+		if _, err := s.modules.diagnostics.Cancel(r.Context(), parts[0]); err != nil {
+			return mapDiagnosticError(err)
+		}
+		httpx.NoContent(w)
+		return nil
+	}
 	if !s.modules.jobs.Cancel(id) {
 		return httpx.BadRequest("that operation is not running")
 	}
@@ -72,6 +107,9 @@ func (s *Server) handleJobStream(w http.ResponseWriter, r *http.Request) error {
 		return httpx.ErrNotFound
 	}
 	defer unsubscribe()
+	if strings.HasPrefix(job.Kind, netdiag.JobPrefix) && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		return httpx.ErrForbidden
+	}
 
 	conn, err := s.WS.Upgrade(w, r)
 	if err != nil {

@@ -129,6 +129,9 @@ func (s *Server) handle(fn httpx.Handler) http.Handler { return fn }
 // New so that a failure to schedule backups is reported by main rather than
 // swallowed during construction.
 func (s *Server) Start(ctx context.Context) error {
+	if err := s.modules.diagnostics.Start(ctx); err != nil {
+		s.Log.Warn("durable network diagnostics are unavailable", "err", err)
+	}
 	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := s.modules.backupRunner.RecoverInterruptedRuns(cleanupCtx); err != nil {
 		s.Log.Warn("interrupted backup runs could not be recovered", "err", err)
@@ -255,7 +258,12 @@ func (s *Server) Shutdown() {
 	s.modules.term.Shutdown()
 	s.modules.dbs.Shutdown()
 	s.modules.docker.Close()
-	// Jobs are deliberately not cancelled: a certificate issuance or a package
+	diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.modules.diagnostics.Shutdown(diagnosticCtx); err != nil && s.Log != nil {
+		s.Log.Warn("network diagnostics did not finish stopping before shutdown", "err", err)
+	}
+	diagnosticCancel()
+	// Other jobs are deliberately not cancelled: a certificate issuance or a package
 	// upgrade interrupted halfway is worse than one that completes into a
 	// dashboard that has restarted. Only the subscribers are released.
 	s.modules.jobs.Shutdown()

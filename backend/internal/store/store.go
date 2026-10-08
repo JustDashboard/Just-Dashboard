@@ -989,6 +989,18 @@ CREATE TABLE IF NOT EXISTS metric_interface_samples (
 );
 CREATE INDEX IF NOT EXISTS idx_interface_samples_ts ON metric_interface_samples(ts);
 
+-- Bounded saved observations from the existing network probe dispatcher.
+CREATE TABLE IF NOT EXISTS network_diagnostic_runs (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  job_id     TEXT NOT NULL DEFAULT '',
+  status     TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  payload    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_network_diagnostic_runs_created ON network_diagnostic_runs(created_at DESC, id);
+
 -- A WireGuard client's configuration, kept sealed (auth.Sealer) so an
 -- administrator can show its QR code again after the sheet that made it was
 -- closed. The client's private key is in it, which is why it is sealed and

@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
@@ -88,6 +89,7 @@ type moduleSet struct {
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.
 	jobs            *jobs.Manager
+	diagnostics     *netdiag.Service
 	backupStore     *backups.Store
 	backupRunner    *backups.Runner
 	backupSched     *backups.Scheduler
@@ -218,6 +220,7 @@ func (s *Server) initModules() {
 		IndependentRecovery: true,
 	})
 	s.modules.jobs = jobs.New(s.Log)
+	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe)
 
 	databaseDumper := &backupDatabaseDumper{server: s}
 	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files).

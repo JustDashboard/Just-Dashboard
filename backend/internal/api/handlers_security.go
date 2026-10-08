@@ -355,25 +355,35 @@ func (s *Server) handleNetworkInfo(w http.ResponseWriter, r *http.Request) error
 	return nil
 }
 
-type probeRequest struct {
-	Tool   string `json:"tool"`
-	Target string `json:"target"`
-	Port   int    `json:"port,omitempty"`
-	Record string `json:"record,omitempty"`
-	// Option carries a tool's closed-set choice — the STARTTLS protocol — and
-	// is ignored by tools that take none, so one shape serves every card.
-	Option string `json:"option,omitempty"`
-}
+type probeRequest = netsec.ProbeRequest
 
 func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) error {
 	var req probeRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	req.Target = strings.TrimSpace(req.Target)
+	var err error
+	req, err = netsec.ValidateProbeRequest(req)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	detail := map[string]any{"target": req.Target}
+	if req.Option != "" {
+		detail["option"] = req.Option
+	}
+	httpx.SetAudit(r, "network.probe", req.Tool, detail)
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
+	res, err := s.executeNetworkProbe(ctx, req)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
 
+// Both quick and retained probes use the same existing tools and explicit argv.
+func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeRequest) (*netsec.ProbeResult, error) {
 	var res *netsec.ProbeResult
 	var err error
 	switch req.Tool {
@@ -430,19 +440,9 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 	case "capabilities":
 		res = networkSupportProbe(s.modules.network.HostSupport(ctx))
 	default:
-		return httpx.BadRequest("tool must be ping, traceroute, dns, port, scan, http, tls, whois, " +
-			"dnsauth, banner, ssh, starttls, tlssurvey, dnsbl, asn, mx, httpsec, siteaudit, listeners, egress, neigh, route, mtu, capture, wol or capabilities")
+		return nil, fmt.Errorf("unknown network diagnostic tool %q", req.Tool)
 	}
-	if err != nil {
-		return httpx.BadRequest("%v", err)
-	}
-	detail := map[string]any{"target": req.Target}
-	if req.Option != "" {
-		detail["option"] = req.Option
-	}
-	httpx.SetAudit(r, "network.probe", req.Tool, detail)
-	httpx.JSON(w, http.StatusOK, res)
-	return nil
+	return res, err
 }
 
 func (s *Server) handleJailConfig(w http.ResponseWriter, r *http.Request) error {
