@@ -9,69 +9,45 @@ import {
   ChevronDown,
   ChevronUp,
   ClockRewind,
-  Copy,
-  Eye,
-  EyeOff,
-  Information,
   Layers,
   Pencil,
-  ShieldOff,
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { get, post, patch, ApiError } from "@/lib/api"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { get, post, ApiError } from "@/lib/api"
+import { relativeTime, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import type {
-  ContainerDetail,
-  DockerDiagnosis,
-  FailureDiagnosis,
-  FileChange,
-  MigrationPlan,
-  PortRoute,
-  WritableEntry,
-  WritableLayerReport,
-} from "@/lib/types"
+import type { ContainerDetail, DockerDiagnosis, FailureDiagnosis, PortRoute } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { dockerSource } from "@/lib/log-sources"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { XtermPane } from "@/components/xterm-pane"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { ContainerUsage } from "@/components/docker/container-usage"
-import { ContainerLiveUsage } from "@/components/docker/container-live-usage"
+import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ContainerUsageTab } from "@/components/docker/container-usage-tab"
+import { ContainerInspectTab } from "@/components/docker/container-inspect-tab"
+import { ContainerShellTab } from "@/components/docker/container-shell-tab"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { useDockerFindingActions } from "@/components/docker/finding-actions"
 import { ConfigurationRemedy } from "@/components/docker/configuration-remedy"
 import { ContainerFindings } from "@/components/docker/attention"
 import { containerEventsView } from "@/components/docker/container-events"
-import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
-import {
-  DatabaseStorageWarning,
-  looksLikeDatabase,
-  type ConfirmFn,
-} from "@/components/docker/shared"
+import { Hint, Term } from "@/components/docker/explain"
+import type { ConfirmFn } from "@/components/docker/shared"
 import { containerVerdict, exitWords, restartWords } from "@/components/docker/container"
 import { ContainerIdentity } from "@/components/docker/container-identity"
 import { ContainerReadings, useContainerFrames } from "@/components/docker/container-readings"
 import { ContainerPicture } from "@/components/docker/container-picture"
 import { ContainerCompany } from "@/components/docker/container-company"
 import { ContainerRecent } from "@/components/docker/container-recent"
-import {
-  EnvironmentTable,
-  NetworksTable,
-  PortsTable,
-  isSecretEnvKey,
-} from "@/components/docker/container-tables"
-import { FileBrowser } from "@/components/files/inline-browser"
+import { ContainerStorageTab } from "@/components/docker/container-storage-tab"
+import { EnvironmentTable, NetworksTable, PortsTable } from "@/components/docker/container-tables"
 import { containerProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { Group, Panel, PanelHeader, Well } from "@/components/panel"
+import { Panel, PanelHeader, Well } from "@/components/panel"
 import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
-import { Tag } from "@/components/tag"
 import { IconAction } from "@/components/icon-action"
 import { VerbMenu } from "@/components/verbs"
 import { ShellWords } from "@/components/deploy/run-evidence"
@@ -79,8 +55,6 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { copyText } from "@/lib/clipboard"
 
 /**
  * One container, as a place of its own.
@@ -434,17 +408,16 @@ function ContainerDetailPanel({
               </div>
             </TabsContent>
 
-            <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto pt-6">
-              <ContainerLiveUsage key={detail.id} detail={detail} />
-              <ResourceLimitsEditor
+            <TabsContent value="usage" className="min-h-0 flex-1 overflow-y-auto pt-6">
+              <ContainerUsageTab
+                key={detail.id}
                 detail={detail}
-                onSaved={() => {
+                onLimitsSaved={() => {
                   health.refresh()
                   setReloads((n) => n + 1)
                   window.dispatchEvent(new Event("jd:health-changed"))
                 }}
               />
-              <ContainerUsage containerId={detail.id} name={detail.name} plain />
             </TabsContent>
 
             {/* Scrolls on a phone, where the readings and a pane worth reading
@@ -466,10 +439,7 @@ function ContainerDetailPanel({
             {/* The listing takes the tab's height and scrolls inside itself, so
               the tab only scrolls once a writable-layer report outgrows it. */}
             <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto pt-4">
-              <div className="flex h-full min-h-0 flex-col gap-3">
-                <MountList detail={detail} />
-                <WritableLayer containerId={detail.id} />
-              </div>
+              <ContainerStorageTab detail={detail} />
             </TabsContent>
 
             <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto pt-4">
@@ -489,12 +459,12 @@ function ContainerDetailPanel({
             </TabsContent>
 
             <TabsContent value="inspect" className="min-h-0 flex-1 pt-4">
-              {tab === "inspect" && <RawInspect containerId={detail.id} />}
+              {tab === "inspect" && <ContainerInspectTab containerId={detail.id} />}
             </TabsContent>
 
             {shell && (
               <TabsContent value="shell" className="min-h-0 flex-1 pt-4">
-                {tab === "shell" && <ContainerShell detail={detail} />}
+                {tab === "shell" && <ContainerShellTab detail={detail} />}
               </TabsContent>
             )}
           </Tabs>
@@ -502,81 +472,6 @@ function ContainerDetailPanel({
         {dialog}
       </Page>
     </Workspace>
-  )
-}
-
-/**
- * A shell *inside* the container — which is the whole point of it, and the
- * thing most easily mistaken for the Terminal page.
- *
- * The two answer different questions. This one lands wherever the image says:
- * as the image's USER, in its WORKDIR. For most images that is root in `/` or
- * `/app`, and that is not a bug to be fixed — a container shell that quietly
- * became a host login would leave no way to look inside a container at all.
- * The Terminal page is the host; this is the box running on it.
- *
- * Docker already honours the image's user by default, so "default" sends no
- * user at all rather than guessing one. Root is offered because the common
- * reason to open this at all is that something needs installing or reading in
- * an image that deliberately runs unprivileged.
- */
-function ContainerShell({ detail }: { detail: ContainerDetail }) {
-  const [asRoot, setAsRoot] = useState(false)
-
-  // Most images declare no USER, so the container already runs as root and
-  // there is no second account to offer. The toggle used to be drawn anyway,
-  // from `detail.user || "root"` — which rendered two buttons both labelled
-  // "root" that switched between a request with no user and a request for
-  // root, i.e. between the same thing twice.
-  const imageUser = detail.user.trim()
-  const runsAsRoot =
-    imageUser === "" || imageUser === "root" || imageUser.startsWith("0:") || imageUser === "0"
-  const account = asRoot || runsAsRoot ? "root" : imageUser
-
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="min-w-0 flex-1">
-          Inside <span className="font-mono text-foreground">{detail.name}</span>, not on the host —
-          the Terminal page is the server itself.
-        </span>
-        {runsAsRoot ? (
-          // Worth stating rather than leaving blank: "which account am I" is
-          // the first thing you need to know in a container shell, and this
-          // one is the answer most people assume without checking.
-          <span className="shrink-0">
-            as <span className="font-mono text-foreground">root</span> — this image sets no user
-          </span>
-        ) : (
-          <ToggleGroup
-            type="single"
-            size="sm"
-            variant="outline"
-            value={asRoot ? "root" : "default"}
-            onValueChange={(v) => v && setAsRoot(v === "root")}
-          >
-            <ToggleGroupItem value="default" className="px-2 text-hint">
-              {imageUser}
-            </ToggleGroupItem>
-            <ToggleGroupItem value="root" className="px-2 text-hint">
-              root
-            </ToggleGroupItem>
-          </ToggleGroup>
-        )}
-      </div>
-      <XtermPane
-        // Keyed on the account, so switching it opens a new exec rather than
-        // leaving you in the previous one with a stale label above it.
-        key={account}
-        path={`/docker/containers/${detail.id}/exec`}
-        // No user at all when the image's own is wanted: Docker already
-        // honours it, and naming it would override a `user:group` form with
-        // just the user half.
-        query={{ rows: 30, cols: 100, user: asRoot && !runsAsRoot ? "root" : undefined }}
-        className="min-h-0 flex-1"
-        subtitle={`${account}@${detail.name} · container shell`}
-      />
-    </div>
   )
 }
 
@@ -927,567 +822,6 @@ function RenameButton({ detail, onRenamed }: { detail: ContainerDetail; onRename
 }
 
 /**
- * What this container's storage actually is, said in the order it is asked
- * about.
- *
- * This tab used to render each mount as a bare fenced block with two small-caps
- * tags above it — `VOLUME` `READ-WRITE` — and one monospace line reading
- * `/var/lib/docker/volumes/bet-bot_tracker-data/_data → /data`. Every word in
- * that is true and none of it answers the question somebody opens this tab
- * with, which is *where does this container's data live and will it survive*.
- * The arrow even pointed the wrong way round for how it is read: the host path
- * is the least interesting half and it was first and widest.
- *
- * So the path inside the container leads — that is the one the application's
- * own configuration refers to — the kind of storage is stated in words rather
- * than as a Docker noun, and where it actually lives follows it. The
- * consequence, which is the whole point, is one sentence per kind and one
- * hover card away.
- */
-const MOUNT_KIND: Record<
-  string,
-  {
-    label: string
-    term: string
-    /** Where the data really is, in the form a person would go looking for it. */
-    where: (mount: ContainerDetail["mounts"][number]) => string
-    /** Whether it outlives the container. The reason anyone reads this tab. */
-    survives: boolean
-  }
-> = {
-  volume: {
-    label: "Managed volume",
-    term: "volume",
-    // The volume's name, not the directory Docker keeps it in. `_data` under
-    // /var/lib/docker/volumes is an implementation detail of the storage
-    // driver; the name is the handle every other screen and command uses.
-    where: (mount) => mount.name || mount.source,
-    survives: true,
-  },
-  bind: {
-    label: "Folder on this server",
-    term: "bind",
-    where: (mount) => mount.source,
-    survives: true,
-  },
-  tmpfs: {
-    label: "Temporary memory",
-    term: "tmpfs",
-    where: () => "in RAM",
-    survives: false,
-  },
-}
-
-/**
- * Only a volume or a bind has somewhere to look. A tmpfs mount is memory: it
- * exists in the container's namespace and nowhere on this filesystem, so its
- * row never grows a control that could only fail.
- */
-function browsable(mount: ContainerDetail["mounts"][number]) {
-  return (mount.type === "volume" || mount.type === "bind") && Boolean(mount.source)
-}
-
-/**
- * The mounts, and what is in one of them — already open.
- *
- * Each mount was a row that had to be expanded before it showed anything, and
- * what it expanded into was a browser indented under the row, capped at a
- * third of the screen, with the rest of the tab empty below it. The question
- * somebody opens this tab with — did the backup land, is this the volume with
- * the database in it — was a click and a scroll away on every visit.
- *
- * So the first mount there is something to look in is open when the tab is,
- * and the browser takes the height the tab has. The mounts sit above it as one
- * line each; with more than one to look in, picking a line is what changes the
- * listing, the way the file manager's sidebar does.
- */
-function MountList({ detail }: { detail: ContainerDetail }) {
-  const mounts = detail.mounts
-  const [selected, setSelected] = useState(() => mounts.findIndex(browsable))
-  const choosing = mounts.filter(browsable).length > 1
-  const mount = mounts[selected]
-
-  if (mounts.length === 0) {
-    return (
-      <EmptyNote>
-        Nothing is attached, so everything this container writes is destroyed when it is replaced.
-      </EmptyNote>
-    )
-  }
-
-  // Writing into a live database's own files is how a volume stops being
-  // restorable. A stopped container is not running that database, and telling
-  // somebody to stop what is already stopped is noise.
-  const databaseFiles =
-    mount &&
-    detail.state === "running" &&
-    looksLikeDatabase(mount.name, mount.destination, mount.source, detail.image)
-
-  return (
-    <>
-      <ul aria-label="Mounts" className="shrink-0 space-y-0.5">
-        {mounts.map((m, i) => (
-          <MountRow
-            key={i}
-            mount={m}
-            selected={choosing && i === selected}
-            onSelect={choosing && browsable(m) ? () => setSelected(i) : undefined}
-          />
-        ))}
-      </ul>
-      {databaseFiles && <DatabaseStorageWarning />}
-      {mount && (
-        <FileBrowser
-          fill
-          className="min-h-80"
-          root={mount.source}
-          label={mount.type === "volume" ? MOUNT_KIND.volume.where(mount) : undefined}
-          emptyNote={
-            mount.type === "volume"
-              ? "Nothing has been written to this volume yet."
-              : "This folder is empty."
-          }
-        />
-      )}
-    </>
-  )
-}
-
-/**
- * One mount on one line: the path the application inside was configured with,
- * where that really is, and what kind of storage it is at the edge.
- */
-function MountRow({
-  mount,
-  selected,
-  onSelect,
-}: {
-  mount: ContainerDetail["mounts"][number]
-  selected: boolean
-  /** Set when there is more than one mount to look in and this is one of them. */
-  onSelect?: () => void
-}) {
-  const kind = MOUNT_KIND[mount.type]
-  const where = kind ? kind.where(mount) : mount.source
-
-  const facts = (
-    <>
-      <span className="min-w-0 truncate font-mono text-body" title={mount.destination}>
-        {mount.destination}
-      </span>
-      <span className="min-w-0 flex-1 truncate text-hint text-muted-foreground" title={where}>
-        {where}
-      </span>
-      {!mount.rw && <Tag>read-only</Tag>}
-      <Tag tone={kind?.survives === false ? "warning" : "default"}>{kind?.label ?? mount.type}</Tag>
-    </>
-  )
-  const row = "flex min-w-0 flex-1 items-baseline gap-3 px-2.5 py-1.5"
-
-  return (
-    <li
-      className={cn(
-        "flex min-w-0 items-center rounded-md pr-2.5 transition-colors",
-        selected ? "bg-accent text-accent-foreground" : onSelect && "hover:bg-row-hover",
-      )}
-    >
-      {onSelect ? (
-        <button
-          type="button"
-          aria-pressed={selected}
-          onClick={onSelect}
-          className={cn(row, "rounded-md text-left focus-ring-inset")}
-        >
-          {facts}
-        </button>
-      ) : (
-        <span className={row}>{facts}</span>
-      )}
-      {kind && <ExplainIcon name={kind.term} />}
-    </li>
-  )
-}
-
-/**
- * Where the writable layer went, and whether any of it matters.
- *
- * "This container has written 38.7 GB into itself" is a true sentence nobody
- * can act on. The questions behind it are which directory holds it, whether
- * that directory looks like data somebody meant to keep, and whether anything
- * is mounted at it — because a writable layer is destroyed by every recreate,
- * so 35 GB under /app/data with no volume there is a database that will vanish
- * on the next image update.
- *
- * The breakdown is measured by running `du` inside the container, which means
- * it needs the container running and needs the image to ship `du`. Both
- * failures are reported as themselves rather than as an empty result: an
- * unmeasurable layer is a different thing from an empty one.
- */
-function WritableLayer({ containerId }: { containerId: string }) {
-  const [analyzing, setAnalyzing] = useState(false)
-  const [report, setReport] = useState<WritableLayerReport | null>(null)
-  const [failed, setFailed] = useState<Error | null>(null)
-
-  const changes = usePoll<FileChange[]>(
-    (signal) => get<FileChange[]>(`/docker/containers/${containerId}/changes`, undefined, signal),
-    0,
-    [containerId],
-  )
-
-  const interesting = useMemo(() => {
-    const noise =
-      /^\/(tmp|run|proc|sys|dev|var\/(run|log|cache|tmp|lib\/(apt|dpkg))|etc\/(hosts|hostname|resolv\.conf|mtab))/
-    return (changes.data ?? []).filter((c) => c.kind !== "deleted" && !noise.test(c.path))
-  }, [changes.data])
-
-  // Directories with children collapse to the directory: fifty files under
-  // /var/lib/postgresql/data is one fact, not fifty.
-  const roots = useMemo(() => {
-    const out: string[] = []
-    for (const change of interesting) {
-      if (!out.some((r) => change.path === r || change.path.startsWith(r + "/"))) {
-        out.push(change.path)
-      }
-    }
-    return out.slice(0, 40)
-  }, [interesting])
-
-  const analyze = async (refresh = false) => {
-    setAnalyzing(true)
-    setFailed(null)
-    try {
-      setReport(
-        await get<WritableLayerReport>(
-          `/docker/containers/${containerId}/writable-layer`,
-          refresh ? { refresh: true } : undefined,
-        ),
-      )
-    } catch (err) {
-      setFailed(err as Error)
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
-  if (changes.loading || (roots.length === 0 && !report)) return null
-
-  return (
-    <div className="space-y-3">
-      <Notice
-        title={`${roots.length} ${roots.length === 1 ? "path is" : "paths are"} written with nothing keeping them`}
-        icon={Warning}
-        tone="warning"
-      >
-        <p>
-          Nothing above is mounted at these, so they are in{" "}
-          <Term name="writableLayer">the container&apos;s own filesystem</Term>. They are not backed
-          up, and they are destroyed the next time this container is recreated — which includes
-          every image update.
-        </p>
-        <div className="mt-2 flex max-h-28 flex-wrap gap-1 overflow-auto">
-          {roots.map((path) => (
-            <Tag key={path} mono className="text-foreground">
-              {path}
-            </Tag>
-          ))}
-        </div>
-        <Button
-          size="xs"
-          variant="outline"
-          className="mt-2"
-          onClick={() => analyze(Boolean(report))}
-          pending={analyzing}
-        >
-          {report ? "Measure again" : "Measure disk usage"}
-        </Button>
-      </Notice>
-
-      {failed && <ErrorState error={failed} />}
-      {report && <WritableLayerReportView report={report} containerId={containerId} />}
-    </div>
-  )
-}
-
-function WritableLayerReportView({
-  report,
-  containerId,
-}: {
-  report: WritableLayerReport
-  containerId: string
-}) {
-  if (report.state !== "measured") {
-    return (
-      <Notice
-        title={
-          report.state === "failed"
-            ? "The breakdown could not be measured"
-            : "The breakdown is not available for this container"
-        }
-        icon={Information}
-      >
-        <p>{report.reason}</p>
-        {report.total > 0 && (
-          <p className="mt-1">
-            Docker still reports the total: <b>{bytes(report.total)}</b>.
-          </p>
-        )}
-      </Notice>
-    )
-  }
-
-  const biggest = report.entries.filter((e) => e.size > 0).slice(0, 8)
-  return (
-    <section className="space-y-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <p className="eyebrow">Where it went</p>
-        <p className="text-hint text-muted-foreground">
-          {report.method} · {relativeTime(report.measuredAt)}
-        </p>
-      </div>
-
-      {/* Eight directories as eight rows of a table read down — path, kind,
-          size — with a hairline between them. Framed one by one they were a
-          stack of eight boxes whose figures could not be compared. */}
-      <ul className="divide-y divide-hairline">
-        {biggest.map((entry) => (
-          <li key={entry.path} className="flex min-w-0 items-center gap-2 py-1.5 text-xs">
-            <span className="min-w-0 flex-1 truncate font-mono text-hint">{entry.path}</span>
-            {entry.mounted ? (
-              <Tag>on a mount</Tag>
-            ) : entry.persistent ? (
-              <Tag tone="warning">not backed by storage</Tag>
-            ) : (
-              <Tag>{entry.kind}</Tag>
-            )}
-            <span className="numeric w-16 shrink-0 text-right font-mono text-hint">
-              {bytes(entry.size)}
-            </span>
-          </li>
-        ))}
-      </ul>
-
-      {/*
-        The two figures come from two different measurements — Docker's diff
-        accounting and `du` counting allocated blocks — so they will not match
-        exactly. Stating the gap is more trustworthy than reconciling it
-        silently.
-      */}
-      <Hint>
-        Docker reports {bytes(report.total)} for the whole layer; the directories above account for{" "}
-        {bytes(report.accounted)}. The two are measured differently — Docker counts the difference
-        from the image, `du` counts allocated blocks — so they agree only approximately.
-      </Hint>
-
-      {report.unbacked.length > 0 && (
-        <MigrationSuggestion containerId={containerId} entries={report.unbacked} />
-      )}
-    </section>
-  )
-}
-
-/**
- * A directory holding real data with no volume under it, and what to do about
- * it — described, never performed.
- *
- * The safe version of this migration stops the service, copies data the
- * operator has just been told they cannot afford to lose, edits the compose
- * file and starts it again, with a rollback if any step fails. That is not a
- * thing to do silently behind a button, so the dashboard produces the exact
- * plan and the exact commands and the operator runs them, able to stop between
- * any two.
- */
-function MigrationSuggestion({
-  containerId,
-  entries,
-}: {
-  containerId: string
-  entries: WritableEntry[]
-}) {
-  const [plan, setPlan] = useState<MigrationPlan | null>(null)
-  const [busy, setBusy] = useState(false)
-  const worst = entries[0]
-
-  const build = async () => {
-    setBusy(true)
-    try {
-      setPlan(
-        await get<MigrationPlan>(`/docker/containers/${containerId}/migration-plan`, {
-          path: worst.path,
-        }),
-      )
-    } catch (err) {
-      notify.error("Could not work out a migration plan", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Notice title="This data will not survive a recreate" icon={Warning} tone="warning">
-      <p>
-        <span className="font-mono">{worst.path}</span> holds {bytes(worst.size)} and nothing is
-        mounted there, so it lives in the container&apos;s own filesystem. Every image update
-        replaces that filesystem.
-      </p>
-      {entries.length > 1 && (
-        <p className="mt-1">
-          {entries.length - 1} other {entries.length === 2 ? "directory is" : "directories are"} in
-          the same position:{" "}
-          {entries
-            .slice(1)
-            .map((e) => e.path)
-            .join(", ")}
-          .
-        </p>
-      )}
-      {!plan ? (
-        <Button size="xs" variant="outline" className="mt-2" onClick={build} pending={busy}>
-          Create a migration plan
-        </Button>
-      ) : (
-        <div className="mt-2 space-y-2">
-          <ol className="space-y-1.5 text-hint">
-            {plan.steps.map((step, i) => (
-              <li key={i}>
-                <b>
-                  {i + 1}. {step.title}
-                </b>
-                <span className="block text-muted-foreground">{step.detail}</span>
-              </li>
-            ))}
-          </ol>
-          <div>
-            <p className="eyebrow mb-1">The commands</p>
-            <Well className="max-h-48 font-mono text-micro whitespace-pre">
-              {plan.commands.join("\n")}
-            </Well>
-          </div>
-          {plan.composePatch && (
-            <div>
-              <p className="eyebrow mb-1">Add to the compose file</p>
-              <Well className="font-mono text-micro whitespace-pre">{plan.composePatch}</Well>
-            </div>
-          )}
-          {plan.warnings.map((warning, i) => (
-            <p key={i} className="text-hint text-warning">
-              {warning}
-            </p>
-          ))}
-        </div>
-      )}
-    </Notice>
-  )
-}
-
-/**
- * Masks credential-shaped environment values inside a decoded inspect document.
- *
- * Mirrors what the server does for anyone below system.admin. For an admin the
- * server sends the real values — correctly, they are allowed to see them — but
- * the Environment tab still puts them behind a deliberate reveal, and one tab
- * over printing the same secrets unprompted made that gesture worthless. The
- * threat here is a screen, not a permission.
- *
- * Only the two places the Engine puts an environment are walked, not every
- * string in the document: a blanket scrub mangles labels and commands that
- * legitimately contain the word "key".
- */
-function maskRawEnv(doc: Record<string, unknown>): {
-  doc: Record<string, unknown>
-  masked: number
-} {
-  let masked = 0
-  const config = doc.Config
-  if (!config || typeof config !== "object") return { doc, masked }
-  const env = (config as Record<string, unknown>).Env
-  if (!Array.isArray(env)) return { doc, masked }
-
-  const maskedEnv = env.map((entry) => {
-    if (typeof entry !== "string") return entry
-    const eq = entry.indexOf("=")
-    if (eq === -1) return entry
-    const name = entry.slice(0, eq)
-    if (!isSecretEnvKey(name)) return entry
-    masked++
-    return `${name}=••••••••••••`
-  })
-  if (masked === 0) return { doc, masked }
-  return {
-    doc: { ...doc, Config: { ...(config as Record<string, unknown>), Env: maskedEnv } },
-    masked,
-  }
-}
-
-/**
- * The Engine's own inspect output.
- *
- * Every panel here is a chosen subset of something, and eventually somebody
- * needs the field nobody chose. This is also the check on the rest of the
- * page: an operator who suspects the dashboard is misreporting something can
- * see what it was reading. Credential-shaped environment values are masked on
- * the server for anyone below system.admin — the raw route is not a way around
- * that — and masked again here for the admin who is allowed to read them, so
- * that opening a tab is never by itself what puts a master key on screen.
- */
-function RawInspect({ containerId }: { containerId: string }) {
-  const { data, error, loading } = usePoll<Record<string, unknown>>(
-    (signal) =>
-      get<Record<string, unknown>>(`/docker/containers/${containerId}/raw`, undefined, signal),
-    0,
-    [containerId],
-  )
-  const [revealed, setRevealed] = useState(false)
-  const { text, masked } = useMemo(() => {
-    if (!data) return { text: "", masked: 0 }
-    const result = maskRawEnv(data)
-    return {
-      text: JSON.stringify(revealed ? data : result.doc, null, 2),
-      masked: result.masked,
-    }
-  }, [data, revealed])
-
-  if (error) return <ErrorState error={error} />
-  if (loading) return <LoadingRows />
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <Hint className="flex-1">
-          What Docker itself reports about this container. Everything above is a reading of this.
-        </Hint>
-        {masked > 0 && (
-          <Button size="xs" variant="ghost" onClick={() => setRevealed((r) => !r)}>
-            {revealed ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-            {revealed ? "Hide" : "Reveal"}
-          </Button>
-        )}
-        {/* Copies what is on screen, masked included: a raw inspect pasted
-            into a ticket is the other way these values get away. */}
-        <Button
-          size="xs"
-          variant="outline"
-          onClick={() =>
-            void copyText(text, revealed || masked === 0 ? "Copied" : "Copied, credentials masked")
-          }
-        >
-          <Copy className="size-3" />
-          Copy
-        </Button>
-      </div>
-      {masked > 0 && (
-        <p className="flex items-start gap-2 text-xs text-muted-foreground">
-          <ShieldOff className="mt-px size-3.5 shrink-0" />
-          <span>
-            {masked} {masked === 1 ? "value looks" : "values look"} like a credential and{" "}
-            {masked === 1 ? "is" : "are"} hidden here too, the same as on the Environment tab.
-          </span>
-        </p>
-      )}
-      <Well className="min-h-0 flex-1 whitespace-pre">{text}</Well>
-    </div>
-  )
-}
-
-/**
  * Why it stopped, and why it keeps stopping.
  *
  * The facts are already on the page and none of them is an answer: a restart
@@ -1566,132 +900,5 @@ function FailurePanel({
         </div>
       )}
     </Notice>
-  )
-}
-
-/**
- * The limits, editable in place.
- *
- * Almost nothing about a container can be changed after it is created — this
- * is the exception, and it is worth surfacing separately for that reason: an
- * operator who set a memory limit and got the number wrong should not have to
- * destroy the container to fix it. Docker applies the change to the running
- * cgroup immediately.
- *
- * It sits next to the usage charts because that is where the mistake becomes
- * visible: a container repeatedly touching its ceiling, or one with no ceiling
- * at all climbing towards the host's.
- */
-function ResourceLimitsEditor({
-  detail,
-  onSaved,
-}: {
-  detail: ContainerDetail
-  onSaved: () => void
-}) {
-  const { can } = useAuth()
-  const [memory, setMemory] = useState("")
-  const [cpus, setCpus] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [open, setOpen] = useState(false)
-
-  if (!can("service.control")) return null
-
-  const save = async () => {
-    setBusy(true)
-    try {
-      const res = await patch<{ warnings: string[] }>(
-        `/docker/containers/${detail.id}/resources`,
-        {
-          memoryMb: Number(memory) || undefined,
-          cpus: Number(cpus) || undefined,
-        },
-        {},
-      )
-      if (res.warnings?.length) {
-        notify.warning("Applied, with a caveat", { description: res.warnings[0] })
-      } else {
-        notify.success("Limits updated")
-      }
-      setOpen(false)
-      onSaved()
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : String(err)
-      notify.error("Could not change the limits", message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (!open) {
-    return (
-      <Group className="flex flex-wrap items-center gap-2">
-        <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-          <Term name="memoryLimit">Limits</Term> can be changed without recreating this container —
-          resource limits can be updated without replacing it.
-        </span>
-        <Button size="xs" variant="outline" onClick={() => setOpen(true)}>
-          <Pencil className="size-3" />
-          Change limits
-        </Button>
-      </Group>
-    )
-  }
-
-  return (
-    <Group className="space-y-2">
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="w-32">
-          <label className="text-micro text-muted-foreground" htmlFor="limit-memory">
-            Memory (MB)
-          </label>
-          <Input
-            id="limit-memory"
-            type="number"
-            value={memory}
-            placeholder="unlimited"
-            onChange={(e) => setMemory(e.target.value)}
-            className="h-8 text-xs"
-          />
-        </div>
-        <div className="w-28">
-          <label className="text-micro text-muted-foreground" htmlFor="limit-cpus">
-            CPU cores
-          </label>
-          <Input
-            id="limit-cpus"
-            type="number"
-            step="0.5"
-            value={cpus}
-            placeholder="unlimited"
-            onChange={(e) => setCpus(e.target.value)}
-            className="h-8 text-xs"
-          />
-        </div>
-        <Button size="sm" onClick={save} pending={busy}>
-          Apply
-        </Button>
-        <Button size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
-          Cancel
-        </Button>
-      </div>
-      {detail.composeStack && (
-        <p className="text-hint text-muted-foreground">
-          This changes the live container.{" "}
-          <Link
-            className="underline"
-            href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}?tab=compose&remedy=nomemorylimit`}
-          >
-            Update the owning Compose service
-          </Link>{" "}
-          too, so the limit survives deployment.
-        </p>
-      )}
-      <Hint>
-        Leaving a field empty means no change. A memory limit is what makes the kernel kill this
-        container rather than choosing a victim across the whole server; the trade is that it will
-        be killed when it exceeds it.
-      </Hint>
-    </Group>
   )
 }

@@ -20,7 +20,17 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Hint, Term } from "@/components/docker/explain"
-import { portRows, reachWords } from "@/components/docker/container"
+import {
+  envKind,
+  envPrefix,
+  ENV_KINDS,
+  portRows,
+  reachWords,
+  type EnvKind,
+} from "@/components/docker/container"
+import { CODE } from "@/components/deploy/run-evidence"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { hueFor, LANES } from "@/lib/hue"
 
 /** What a firewall's verdict means for a port Docker published, in words. */
 function firewallWords(route: PortRoute | undefined): { word: string; tone?: "warning" } {
@@ -230,46 +240,63 @@ export function isSecretEnvKey(name: string) {
   return upper === "KEY" || SECRET_ENV_HINTS.some((hint) => upper.includes(hint))
 }
 
+/** Each kind's value in the hue the product already gives it in code (`CODE`). */
+const KIND_HUE: Record<EnvKind, string> = {
+  credential: "text-muted-foreground",
+  address: CODE.path,
+  path: CODE.path,
+  flag: CODE.literal,
+  number: CODE.number,
+  text: CODE.string,
+}
+
 /**
  * The environment as a table: the name in its own column, the value beside
  * it, and Copy and Reveal at the row's end where a credential has them.
  *
- * It was a column of `NAME= value` lines with the two buttons a screen's
+ * It was a column of grey `NAME= value` lines with the two buttons a screen's
  * width away at the right edge, so which row a Reveal belonged to was a
- * matter of following a line across the page. A filter narrows it, because an
- * application's environment runs to forty names and the one wanted is
- * usually known.
+ * matter of following a line across the page. Each name's namespace — the
+ * `DB` of `DB_POSTGRESDB_HOST` — takes its lane hue, so the variables that
+ * set one part of the application are seen together; each value takes the
+ * hue its kind has in code; and the kinds are chips that count and narrow,
+ * the deployment Variables page's answer, beside a filter that never
+ * searches a hidden value.
  */
 export function EnvironmentTable({ env }: { env: string[] }) {
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
   const [query, setQuery] = useState("")
+  const [only, setOnly] = useState<EnvKind>()
   const rows = useMemo(
     () =>
       env.map((line) => {
         const eq = line.indexOf("=")
         const name = eq === -1 ? line : line.slice(0, eq)
         const value = eq === -1 ? "" : line.slice(eq + 1)
-        return { line, name, value, secret: isSecretEnvKey(name) }
+        const secret = isSecretEnvKey(name)
+        return { line, name, value, secret, kind: envKind(value, secret) }
       }),
     [env],
   )
-  const secretCount = rows.filter((row) => row.secret).length
+  const counts = new Map<EnvKind, number>()
+  for (const row of rows) counts.set(row.kind, (counts.get(row.kind) ?? 0) + 1)
+  const secretCount = counts.get("credential") ?? 0
   const needle = query.trim().toLowerCase()
   // A hidden value is not searched: matching on it would say what it contains.
-  const shown = needle
-    ? rows.filter(
-        (row) =>
-          row.name.toLowerCase().includes(needle) ||
-          (!row.secret && row.value.toLowerCase().includes(needle)),
-      )
-    : rows
+  const shown = rows.filter(
+    (row) =>
+      (!only || row.kind === only) &&
+      (!needle ||
+        row.name.toLowerCase().includes(needle) ||
+        (!row.secret && row.value.toLowerCase().includes(needle))),
+  )
 
   if (rows.length === 0) {
     return <EmptyNote>No environment variables set.</EmptyNote>
   }
 
   return (
-    <Panel className="max-h-full min-h-0">
+    <Panel className="max-h-full min-h-0 animate-rise">
       <PanelHeader
         title="Environment"
         actions={
@@ -278,24 +305,39 @@ export function EnvironmentTable({ env }: { env: string[] }) {
           </span>
         }
       />
-      <PanelToolbar className="flex-wrap">
+      <PanelToolbar className="flex-wrap gap-y-2">
         <SearchInput
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Filter by name or value"
           aria-label="Filter the environment"
         />
-        {secretCount > 0 && (
-          <p className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-            <ShieldOff className="size-3.5 shrink-0" />
-            <span>
-              {secretCount} {secretCount === 1 ? "value looks" : "values look"} like a credential
-              and {secretCount === 1 ? " is" : " are"} hidden. Reveal only when nobody is watching
-              your screen.
-            </span>
-          </p>
-        )}
+        <ChipStrip aria-label="Kinds of value">
+          <FilterChip selected={!only} onClick={() => setOnly(undefined)}>
+            All <ChipCount>{rows.length}</ChipCount>
+          </FilterChip>
+          {ENV_KINDS.filter(({ kind }) => counts.has(kind)).map(({ kind, label }) => (
+            <FilterChip
+              key={kind}
+              selected={only === kind}
+              onClick={() => setOnly(only === kind ? undefined : kind)}
+            >
+              {kind === "credential" && <ShieldOff aria-hidden className="size-3" />}
+              {label} <ChipCount>{counts.get(kind)}</ChipCount>
+            </FilterChip>
+          ))}
+        </ChipStrip>
       </PanelToolbar>
+      {secretCount > 0 && (
+        <p className="flex min-w-0 items-center gap-2 border-b border-hairline px-5 py-2 text-hint text-muted-foreground">
+          <ShieldOff className="size-3.5 shrink-0" />
+          <span>
+            {secretCount} {secretCount === 1 ? "value looks" : "values look"} like a credential and
+            {secretCount === 1 ? " is" : " are"} hidden. Reveal only when nobody is watching your
+            screen.
+          </span>
+        </p>
+      )}
       <Table className="table-fixed" containerClassName="min-h-0">
         <colgroup>
           <col className="w-[34%]" />
@@ -314,12 +356,20 @@ export function EnvironmentTable({ env }: { env: string[] }) {
         <TableBody>
           {shown.map((row) => {
             const show = !row.secret || revealed[row.name]
+            const prefix = envPrefix(row.name)
             return (
               <TableRow key={row.line} className="group">
-                <TableCell className="py-2 pl-5 align-top font-mono break-all whitespace-normal text-muted-foreground">
-                  {row.name}
+                <TableCell className="py-2 pl-5 align-top font-mono break-all whitespace-normal">
+                  <span style={{ color: hueFor(prefix, LANES) }}>{prefix}</span>
+                  <span className="text-muted-foreground">{row.name.slice(prefix.length)}</span>
                 </TableCell>
-                <TableCell className="py-2 align-top font-mono break-all whitespace-normal">
+                <TableCell
+                  className={cn(
+                    "py-2 align-top font-mono break-all whitespace-normal",
+                    show &&
+                      KIND_HUE[row.kind === "credential" ? envKind(row.value, false) : row.kind],
+                  )}
+                >
                   {show ? (
                     row.value || <span className="text-muted-foreground">empty</span>
                   ) : (

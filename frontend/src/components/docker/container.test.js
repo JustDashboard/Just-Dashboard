@@ -3,6 +3,8 @@ import {
   companyOf,
   containerVerdict,
   crashed,
+  envKind,
+  envPrefix,
   exitWords,
   peak,
   portRows,
@@ -207,5 +209,26 @@ describe("sinceWords", () => {
     expect(sinceWords("exited", "Exited (0) About an hour ago")).toBe("stopped about an hour ago")
     expect(sinceWords("restarting", "Restarting (1) 8 seconds ago")).toBe("last exit 8 seconds ago")
     expect(sinceWords("created", "Created")).toBeUndefined()
+  })
+})
+
+describe("envKind", () => {
+  test("reads what a value is, and a credential by its name alone", () => {
+    expect(envKind("https://automations.example.test/", false)).toBe("address")
+    expect(envKind("postgres://n8n@postgres:5432/n8n", false)).toBe("address")
+    expect(envKind("automations.example.test", false)).toBe("address")
+    expect(envKind("redis:6379", false)).toBe("address")
+    expect(envKind("true", false)).toBe("flag")
+    expect(envKind("5678", false)).toBe("number")
+    expect(envKind("/usr/local/bin:/usr/bin", false)).toBe("path")
+    expect(envKind("Europe/Chisinau", false)).toBe("text")
+    expect(envKind("queue", false)).toBe("text")
+    expect(envKind("https://hooks.example/abc", true)).toBe("credential")
+  })
+
+  test("names the namespace a variable opens with", () => {
+    expect(envPrefix("DB_POSTGRESDB_HOST")).toBe("DB")
+    expect(envPrefix("PATH")).toBe("PATH")
+    expect(envPrefix("_HIDDEN")).toBe("_HIDDEN")
   })
 })

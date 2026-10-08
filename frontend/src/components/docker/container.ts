@@ -287,3 +287,42 @@ export function splitImage(image: string): [string, string | undefined] {
   if (colon > slash) return [reference.slice(0, colon), reference.slice(colon + 1)]
   return [reference, at === -1 ? undefined : image.slice(at + 1, at + 20)]
 }
+
+export type EnvKind = "credential" | "address" | "path" | "flag" | "number" | "text"
+
+/** The kinds in the order the Environment's chips draw them. */
+export const ENV_KINDS: { kind: EnvKind; label: string }[] = [
+  { kind: "credential", label: "Credentials" },
+  { kind: "address", label: "Addresses" },
+  { kind: "path", label: "Paths" },
+  { kind: "flag", label: "Switches" },
+  { kind: "number", label: "Numbers" },
+  { kind: "text", label: "Text" },
+]
+
+/**
+ * What an environment value is, read from the value rather than the name —
+ * except for a credential, which is decided by its name (`isSecretEnvKey`)
+ * because a hidden value cannot be read. An address is somewhere the
+ * application connects to: a URL, or a host with or without its port.
+ */
+export function envKind(value: string, secret: boolean): EnvKind {
+  if (secret) return "credential"
+  const v = value.trim()
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return "address"
+  if (/^(true|false|yes|no|on|off)$/i.test(v)) return "flag"
+  if (/^-?\d+(\.\d+)?$/.test(v)) return "number"
+  if (v.startsWith("/") || v.startsWith("./")) return "path"
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?$/i.test(v) || /^[a-z0-9-]+:\d+$/i.test(v)) return "address"
+  return "text"
+}
+
+/**
+ * The namespace a variable's name opens with — `DB` of `DB_POSTGRESDB_HOST`,
+ * `N8N` of `N8N_HOST` — which names the part of the application it sets.
+ * A name with no underscore is its own namespace.
+ */
+export function envPrefix(name: string): string {
+  const at = name.indexOf("_")
+  return at > 0 ? name.slice(0, at) : name
+}
