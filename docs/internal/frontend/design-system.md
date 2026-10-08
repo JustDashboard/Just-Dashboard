@@ -60,9 +60,10 @@ taking a frame:
   body, footer) and drops the border and ground, so a title and a hairline mark the block. Recent
   activity on the Overview, every chart, list and hardware reading on the
   metrics page, every block on the Docker pages (the
-  overview's idle containers, attention, compose projects, cleanup and disk; the containers, images,
-  volumes, networks, stacks and events lists with their toolbars; the disk breakdown above the
-  images; the attention and storage blocks on a container's page), the
+  overview's idle containers, attention, compose projects, cleanup and disk; the containers,
+  volumes, networks, stacks and events lists with their toolbars; the Images page's band of what
+  Docker holds on disk and what the registries say, over its framed table; the attention and
+  storage blocks on a container's page), the
   Security section's exposure facts, area readings, findings, probe forms and the Auth log, Firewall
   log and Activity sections — each a title over the log's `Pane` (its tables, dashboard access
   picture and Tools workbench retain frames), every block on the proxy pages (the overview's engine
@@ -1018,7 +1019,7 @@ table appeared already scrolling inside its own panel, with Issues and the row's
 right edge — a table that arrives broken.
 
 **And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
-containers, images, volumes, networks and stacks lists are cards at every width — the argument
+containers, volumes, networks and stacks lists are cards at every width — the argument
 `git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
 panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
 paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
@@ -1030,7 +1031,10 @@ frames, which is the stacking this section refuses. System users took the same a
 every account opened its keys, so the eight-column table became cards (`AccountCard` on the page),
 their groups, last sign-in, keys and state beside the name from `lg` and beneath it below. The audit
 log is the counter-example on the next page of the same section: an entry opens nothing, so its
-trail stays a table.
+trail stays a table. The images were cards from 2026-09-23 and became a table again on 2026-10-08
+at the operator's request, on the Processes, Packages and Services tables' precedent: a row that
+opens a sheet but is read down its columns — which image is largest, oldest, unused or behind — is
+a table of readings with a destination on its name, and it keeps its frame (§2).
 
 **The deployment section's rows took the same rule, and it moved the breakpoint twice more.** A run
 (`deploy/run-row.tsx`), a runtime service and a channel set their readings beside the name in fixed
@@ -1953,6 +1957,33 @@ The passes, in order. Each one is a diff you can review on its own.
    service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
    as well, its frequency a row of toggles rather than a select, drawing the week the schedule
    being written makes as the fields change.
+
+   Docker's Images page took the same shape on 2026-10-08, at the operator's request, because it
+   had no life: four grey lines of disk figures, a notice and a column of grey cards, nothing on it
+   told apart by anything but its words. It opens on Docker's identity line (the engine's version,
+   how many images, the layers' size, how many are in use and untagged as facts; the registry's
+   verdict at its right end, a press of which narrows the table to what is behind, beside Pull and
+   Build). Under it `components/docker/image-band.tsx` asks Packages' two questions of Docker. On
+   disk is one bar of what Docker holds — images, build cache, containers, volumes, each in the
+   colour the Docker overview's `DiskSummary` gives that kind — with the part a prune would give
+   back hatched inside each span, so the reclaimable share is seen before a figure is read; each
+   line keeps its own Reclaim, which now calls that kind's own route rather than the sweep (the
+   sweep also removes stopped containers and networks, which the Images and Build cache lines'
+   confirmations never said). Registry is one bar of every image by what its registry says —
+   update available in amber, current in green, pinned and built here in `--tag-cyan` and
+   `--tag-violet` because they are choices rather than states, unanswered and unused muted — with a
+   line per answer drawn as the products in it, each narrowing the table; a check the reader asked
+   for sweeps the bar. The images are a framed table again (§12): the image as its product, its
+   registry and tag a step back from the repository; the containers running it by name with their
+   state's dot, each a link to its page; the registry's answer in the band's colours; its age; and
+   its size over a bar against the largest, in the Images span's colour. Below `xl` the containers
+   and the answer join the name's second line as a dot, a count and the word. A pulled image rises
+   into the table (`useArrivals`), and its row says *Pulling…* while its pull runs. The pull dialog
+   draws a row per layer from Docker's stream, received bytes in `--chart-2` and written ones in
+   `--chart-4` (§10), with the raw transcript folded. The sheet (`?image=`) opens on four readings,
+   the containers using the image as lit rows, and where the size went: a bar per layer in build
+   order beside the instruction that wrote it, its verb in a `--tag-*` hue and a RUN's command
+   coloured by `ShellWords`, the metadata-only steps folded.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
