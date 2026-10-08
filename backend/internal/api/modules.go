@@ -87,9 +87,9 @@ type moduleSet struct {
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
-	network *netx.Service
+	network         *netx.Service
 	networkVantages *netvantage.Service
-	ipam *netipam.Service
+	ipam            *netipam.Service
 	// jobs runs the operations that take longer than a request should:
 	// certbot, package upgrades, sshd applies. They outlive the request that
 	// started them and are watched by id rather than by the socket.

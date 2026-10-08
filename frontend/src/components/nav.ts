@@ -226,6 +226,18 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
         children: [
           { title: "Overview", href: "/network", icon: GridSquare },
           { title: "Drift", href: "/network/drift", icon: Monitoring },
+          {
+            title: "Address planning",
+            href: "/network/ipam",
+            icon: NetworkDevice,
+            capability: "system.admin",
+          },
+          {
+            title: "External checks",
+            href: "/network/external",
+            icon: Globe,
+            capability: "system.admin",
+          },
           { title: "Interfaces", href: "/network/interfaces", icon: NetworkDevice },
           { title: "Routing", href: "/network/routing", icon: Route },
           { title: "Firewall", href: "/network/firewall", icon: FirewallCheck },

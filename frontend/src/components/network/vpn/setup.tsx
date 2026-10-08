@@ -123,11 +123,14 @@ export function WireGuardSetup({
         ipv6: wireGuardIPv6Payload(ipv6, subnet6, exitNode && exit6),
         ...(reservations.length ? { ipamReservationIds: reservations.map((row) => row.id) } : {}),
       })
-      notify.success(`${made.interface.name} is up on udp ${made.interface.listenPort}`, {
-        description: made.firewall.opened
-          ? "The firewall now admits its port."
-          : made.firewall.reason,
-      })
+      notify.success(
+        `${made.interface.name} ${made.interface.up ? "is up" : "is configured"} on udp ${made.interface.listenPort}`,
+        {
+          description: made.firewall.opened
+            ? "The firewall now admits its port."
+            : made.firewall.reason,
+        },
+      )
       for (const w of made.warnings) notify.warning(w)
       onCreated(made.interface)
     } catch (err) {
