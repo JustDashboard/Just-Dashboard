@@ -1,6 +1,6 @@
 # Networking implementation evidence
 
-This directory records scoped acceptance for the first implementation checkpoint in PR #173.
+This directory records scoped acceptance for successive implementation checkpoints in PR #173.
 The [implementation ledger](../implementation-status.md) preserves the full outstanding scope;
 these checks do not turn the historical report scores into 10/10 ratings.
 
@@ -65,3 +65,29 @@ The original script exited nonzero. Its failing Go fixtures and browser cases we
 source changes; the independently successful stages above establish the selected acceptance, not
 a fabricated zero exit for that invocation. All current-SHA hosted checks on `58e1089c`, including
 eight browser shards, also passed. Missing broader acceptance remains pending in the ledger.
+
+
+## Integrated investigator, saved runs, drift inspection and Docker editor
+
+The next production build includes the investigator, Saved runs and read-only Drift pages and the
+advanced Docker network editor. All 33 new feature cases passed at the tested desktop/mobile widths
+after correcting API availability fixtures and modal/field locators. Those corrections change only
+tests; the application build is unchanged. They are also included in the selected checks below.
+
+`scripts/test-changed.sh 58e1089c` passed formatting, lint, TypeScript, 3,104 Bun tests with 13,632
+assertions, Go build/vet, and tests in all seven selected packages. Its 11 selected browser specs
+contained 331 cases: 292 passed, 38 optional evidence cases skipped and one database Query alignment
+case failed while the editor was still loading. The exact failed case passed against the unchanged
+production build in 40.1 seconds. All 293 executable cases therefore passed. The original script
+exited 1; this is scoped acceptance with an exact rerun, not a zero exit for that invocation.
+[`integration-selected-checks.txt`](integration-selected-checks.txt) records commands and results.
+
+This checkpoint adds advisory drift inspection; the reviewed executor, dual-stack WireGuard,
+external-vantage agent, shared IPAM and retained path artifacts still require their next integrated
+build and acceptance. The ledger keeps those projects open. Actual reboot and off-host/provider
+proof remain separate acceptance requirements.
+
+Saved runs' reading layout was also inspected at [375 px](saved-runs-375.png),
+[1280 px](saved-runs-1280.png) and [1720 px](saved-runs-1720.png). The focused screenshot cases all
+pass; the desktop workbench separates independently scrolling history and evidence, and the mobile
+layout keeps controls and retained scope within the viewport.

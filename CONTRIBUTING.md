@@ -84,6 +84,10 @@ to the contribution terms above, including the additional licence grant to the p
   `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
   passwordless sudo and does everything inside throwaway network namespaces it removes, never on the
   host's own interfaces, firewall or tailscaled.
+- The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
+  Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
+  to compile the narrow test binary and run it as root. It creates a network-none fixture with no
+  published ports, verifies private DNS/source/route/TCP and restart identity, then removes it.
 - Independent network recovery also has a real systemd timer fixture. On a host with a reachable
   systemd manager, add `JD_SYSTEMD_RECOVERY_LIVE=1` to the network namespace command above. It builds
   the standalone helper and uses uniquely named transient timers with `NetworkNamespacePath` for
