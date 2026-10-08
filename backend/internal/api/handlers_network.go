@@ -54,6 +54,7 @@ func (s *Server) mountNetworkRoutes(r chi.Router) {
 
 		s.mountNetworkDiagnosticRoutes(r)
 		s.mountNetworkChangeRoutes(r)
+		s.mountNetworkDriftRoutes(r)
 		s.mountNetworkLinkRoutes(r)
 		s.mountNetworkRoutingRoutes(r)
 		s.mountNetworkGatewayRoutes(r)
