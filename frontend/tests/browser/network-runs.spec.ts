@@ -251,6 +251,10 @@ test("a cancellation stays pending until cleanup is observed", async ({ page }) 
   })
   const state = await fixture(page, [record])
   await page.goto("/network/runs?run=running")
+  await expect(page.getByRole("region", { name: "Saved diagnostic" })).toContainText("Running")
+  await expect(
+    page.getByRole("region", { name: "Saved diagnostic" }).locator(".animate-breathe"),
+  ).toHaveCount(0)
   await page.getByRole("button", { name: "Cancel run", exact: true }).click()
   await expect(page.getByRole("button", { name: "Stopping…", exact: true })).toBeDisabled()
   await expect(page.getByText("Waiting for the diagnostic to stop")).toBeVisible()

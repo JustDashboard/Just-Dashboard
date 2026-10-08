@@ -57,7 +57,6 @@ export function RunInspector({
         key={id}
         run={poll.data}
         runs={runs}
-        fresh={!poll.error}
         onChanged={() => {
           poll.refresh()
           onChanged()
@@ -71,13 +70,11 @@ export function RunInspector({
 function RunDetails({
   run,
   runs,
-  fresh,
   onChanged,
   onSelected,
 }: {
   run: DiagnosticRun
   runs: DiagnosticRun[]
-  fresh: boolean
   onChanged: () => void
   onSelected: (id: string) => void
 }) {
@@ -116,13 +113,7 @@ function RunDetails({
       <Panel plain aria-label="Saved diagnostic">
         <PanelHeader
           title={run.name}
-          actions={
-            <Status
-              label={reading.label}
-              tone={reading.tone}
-              live={fresh && run.status === "running"}
-            />
-          }
+          actions={<Status label={reading.label} tone={reading.tone} />}
         />
         <PanelBody className="space-y-4">
           <div className="flex flex-wrap gap-2">
