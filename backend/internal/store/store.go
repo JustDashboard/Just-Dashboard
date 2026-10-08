@@ -1010,6 +1010,26 @@ CREATE TABLE IF NOT EXISTS network_packet_captures (
   artifact BLOB NOT NULL DEFAULT X'' CHECK(length(artifact)<=2097152)
 );
 CREATE INDEX IF NOT EXISTS idx_network_packet_captures_created ON network_packet_captures(created_at DESC,id);
+-- Opt-in socket snapshots retain only measured TCP deltas and peer metadata.
+-- Payload bytes, rows, UTC-hour coverage and retention are capped by netflows.
+CREATE TABLE IF NOT EXISTS network_flow_buckets (
+  id TEXT NOT NULL,
+  hour INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  remote_address TEXT NOT NULL DEFAULT '',
+  container_id TEXT NOT NULL DEFAULT '',
+  payload TEXT NOT NULL,
+  payload_bytes INTEGER NOT NULL,
+  PRIMARY KEY (id, hour)
+);
+CREATE INDEX IF NOT EXISTS idx_network_flow_hour ON network_flow_buckets(hour, last_seen);
+CREATE INDEX IF NOT EXISTS idx_network_flow_peer ON network_flow_buckets(remote_address, hour);
+CREATE INDEX IF NOT EXISTS idx_network_flow_container ON network_flow_buckets(container_id, hour);
+CREATE TABLE IF NOT EXISTS network_flow_cycles (
+  hour INTEGER PRIMARY KEY,
+  payload TEXT NOT NULL,
+  payload_bytes INTEGER NOT NULL
+);
 
 -- A WireGuard client's configuration, kept sealed (auth.Sealer) so an
 -- administrator can show its QR code again after the sheet that made it was

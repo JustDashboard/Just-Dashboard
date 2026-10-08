@@ -30,6 +30,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netflows"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
@@ -97,6 +98,7 @@ type moduleSet struct {
 	diagnostics     *netdiag.Service
 	captures        *netcapture.Service
 	captureNative   captureNativeOwner
+	flowAccounting  *netflows.Service
 	backupStore     *backups.Store
 	backupRunner    *backups.Runner
 	backupSched     *backups.Scheduler
