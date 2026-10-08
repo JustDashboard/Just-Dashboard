@@ -69,6 +69,19 @@ export type ContainerVerb = {
   danger?: boolean
 }
 
+/**
+ * Each lifecycle call in the past tense, for the toast that says it happened.
+ * Adding "ed" to the action wrote "stoped" and "pauseed".
+ */
+const DONE: Record<string, string> = {
+  start: "started",
+  stop: "stopped",
+  restart: "restarted",
+  pause: "paused",
+  unpause: "resumed",
+  kill: "killed",
+}
+
 /** Which container is mid-action, and what it is doing — see `useContainerControl`. */
 export type PendingMap = Record<string, string>
 
@@ -91,7 +104,7 @@ export function useContainerControl(onChanged?: () => void) {
         await post(`/docker/containers/${container.id}/${action}`, undefined, {
           confirm: confirmText,
         })
-        notify.success(`${container.name} ${action}ed`)
+        notify.success(`${container.name} ${DONE[action] ?? `${action}ed`}`)
         onChanged?.()
       } catch (err) {
         notify.error(`Could not ${action} ${container.name}`, err)
