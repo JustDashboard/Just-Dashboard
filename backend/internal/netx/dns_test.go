@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -509,7 +510,7 @@ func TestSetDNSRestoresThePreviousFileWhenTheRestartFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := s.SetDNS(context.Background(), DNSSettings{Servers: []string{"1.1.1.1"}}, "ion")
-	if err == nil || !strings.Contains(err.Error(), "put back") {
+	if err == nil || !strings.Contains(err.Error(), "recovery also failed") {
 		t.Fatalf("error = %v", err)
 	}
 	data, _ := os.ReadFile(s.paths.Resolved)
@@ -712,5 +713,72 @@ func TestServerIP(t *testing.T) {
 	}
 	if _, ok := serverIP("not-an-address"); ok {
 		t.Error("a name read as an address")
+	}
+}
+
+func TestSetDNSVerifiesAnIPv6OnlyLANName(t *testing.T) {
+	s, _ := resolvedHost(t, func(name string, qtype uint16) dnsBehavior {
+		if name == "nas.home.arpa" && qtype == 28 {
+			return dnsBehavior{rdatas: [][]byte{net.ParseIP("fd00::7").To16()}}
+		}
+		return dnsBehavior{}
+	})
+	res, err := s.SetDNS(t.Context(), DNSSettings{Servers: []string{"fd00::53"}, VerificationName: "nas.home.arpa"}, "alice")
+	if err != nil || !res.Verified || res.Via != "nas.home.arpa" {
+		t.Fatalf("IPv6-only LAN verification = %+v, %v", res, err)
+	}
+}
+
+func TestVerifyIPv6DNSWorksWithoutAStubListener(t *testing.T) {
+	rec := record(t)
+	rec.on("resolvectl query --type=A --legend=no nas.home.arpa.", "nas.home.arpa: no A records\n")
+	rec.on("resolvectl query --type=AAAA --legend=no nas.home.arpa.", "nas.home.arpa: fd00::7\n")
+	previousDial := dnsDial
+	t.Cleanup(func() { dnsDial = previousDial })
+	dnsDial = func(context.Context, string, string) (net.Conn, error) { return nil, syscall.ECONNREFUSED }
+	name, _, err := verifyResolution(t.Context(), "nas.home.arpa")
+	if err != nil || name != "nas.home.arpa" {
+		t.Fatalf("IPv6 resolved with stub disabled = %q, %v", name, err)
+	}
+}
+
+func TestDNSRefusesUnreadableBackupBeforeMutation(t *testing.T) {
+	for _, reset := range []bool{false, true} {
+		t.Run(fmt.Sprint(reset), func(t *testing.T) {
+			s, rec := resolvedHost(t, answerA("192.0.2.7"))
+			if err := os.MkdirAll(s.paths.Resolved, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			if reset {
+				_, err = s.ResetDNS(t.Context())
+			} else {
+				_, err = s.SetDNS(t.Context(), DNSSettings{Servers: []string{"192.0.2.53"}}, "alice")
+			}
+			if err == nil || !strings.Contains(err.Error(), "reading the resolver drop-in") {
+				t.Fatalf("unreadable backup = %v", err)
+			}
+			if rec.ran("systemctl restart systemd-resolved") {
+				t.Fatal("resolver changed without a readable rollback backup")
+			}
+			if st, statErr := os.Stat(s.paths.Resolved); statErr != nil || !st.IsDir() {
+				t.Fatalf("prior entry changed: %v", statErr)
+			}
+		})
+	}
+}
+
+func TestDNSReportsRecoveryFailure(t *testing.T) {
+	s, _ := resolvedHost(t, answerA("192.0.2.7"))
+	previousRun := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "systemctl" && len(args) > 0 && args[0] == "restart" {
+			return "", errors.New("systemd manager unreachable")
+		}
+		return previousRun(ctx, name, args...)
+	}
+	_, err := s.SetDNS(t.Context(), DNSSettings{Servers: []string{"192.0.2.53"}}, "alice")
+	if err == nil || !strings.Contains(err.Error(), "recovery also failed") || !strings.Contains(err.Error(), "restarting the previous resolver") {
+		t.Fatalf("recovery failure hidden: %v", err)
 	}
 }

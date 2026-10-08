@@ -959,19 +959,28 @@ func (s *Service) SetDNS(ctx context.Context, req DNSSettings, who string) (*DNS
 		return nil, err
 	}
 
-	prev, existed := readFileBytes(s.paths.Resolved)
+	prev, existed, err := readFileBytes(s.paths.Resolved)
+	if err != nil {
+		return nil, fmt.Errorf("reading the resolver drop-in before changing it: %w", err)
+	}
 	if err := writeFileAtomic(s.paths.Resolved, []byte(renderResolved(req, who)), 0o644); err != nil {
 		return nil, fmt.Errorf("writing %s: %w", s.paths.Resolved, err)
 	}
 	if _, err := run(ctx, "systemctl", "restart", resolvedUnit); err != nil {
-		s.restoreResolved(ctx, prev, existed)
+		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
+			return nil, fmt.Errorf("systemd-resolved did not restart with the new settings; recovery also failed: %w", errors.Join(err, restoreErr))
+		}
 		return nil, fmt.Errorf("systemd-resolved did not restart with the new settings, so the previous ones were put back: %w", err)
 	}
 	via, took, err := verifyResolution(ctx, req.VerificationName)
 	if err != nil {
-		s.restoreResolved(ctx, prev, existed)
-		return nil, &UpstreamError{Reason: "The new upstreams did not answer: " + err.Error() +
-			". The previous settings were put back, and names resolve as they did."}
+		reason := "The new upstreams did not answer: " + err.Error()
+		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
+			reason += ". Recovery also failed: " + restoreErr.Error()
+		} else {
+			reason += ". The previous settings were put back."
+		}
+		return nil, &UpstreamError{Reason: reason}
 	}
 	m := readManagedDNS(s.paths.Resolved)
 	out := &DNSApplied{Verified: true, Via: via, Millis: took, Managed: &m}
@@ -990,7 +999,10 @@ func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 	if err != nil {
 		return nil, err
 	}
-	prev, existed := readFileBytes(s.paths.Resolved)
+	prev, existed, err := readFileBytes(s.paths.Resolved)
+	if err != nil {
+		return nil, fmt.Errorf("reading the resolver drop-in before changing it: %w", err)
+	}
 	out := &DNSApplied{Managed: ptrTo(readManagedDNS(s.paths.Resolved)), Warning: resolvConfWarning(rc)}
 	if !existed {
 		return out, nil
@@ -999,7 +1011,9 @@ func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 		return nil, fmt.Errorf("removing %s: %w", s.paths.Resolved, err)
 	}
 	if _, err := run(ctx, "systemctl", "restart", resolvedUnit); err != nil {
-		s.restoreResolved(ctx, prev, existed)
+		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
+			return nil, fmt.Errorf("systemd-resolved did not restart without the dashboard's settings; recovery also failed: %w", errors.Join(err, restoreErr))
+		}
 		return nil, fmt.Errorf("systemd-resolved did not restart without the dashboard's settings, so they were put back: %w", err)
 	}
 	out.Managed = ptrTo(readManagedDNS(s.paths.Resolved))
@@ -1042,30 +1056,38 @@ func resolvConfWarning(rc ResolvConf) string {
 }
 
 // restoreResolved puts the previous drop-in back (or removes the one that
-// was never there) and restarts resolved once more. A failure here has
-// nowhere left to go but the log.
-func (s *Service) restoreResolved(ctx context.Context, prev []byte, existed bool) {
+// was never there) and restarts resolved once more. Failures must reach
+// the caller as well as the log so it cannot claim recovery succeeded.
+func (s *Service) restoreResolved(ctx context.Context, prev []byte, existed bool) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
+	var recovery []error
 	if existed {
 		if err := writeFileAtomic(s.paths.Resolved, prev, 0o644); err != nil {
+			recovery = append(recovery, fmt.Errorf("restoring the resolver drop-in: %w", err))
 			s.log.Error("restoring the resolver drop-in", "path", s.paths.Resolved, "err", err)
 		}
 	} else if err := os.Remove(s.paths.Resolved); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		recovery = append(recovery, fmt.Errorf("removing the resolver drop-in: %w", err))
 		s.log.Error("removing the resolver drop-in", "path", s.paths.Resolved, "err", err)
 	}
 	if _, err := run(ctx, "systemctl", "restart", resolvedUnit); err != nil {
+		recovery = append(recovery, fmt.Errorf("restarting the previous resolver: %w", err))
 		s.log.Error("restarting systemd-resolved after a rollback", "err", err)
 	}
+	return errors.Join(recovery...)
 }
 
-func readFileBytes(path string) ([]byte, bool) {
+func readFileBytes(path string) ([]byte, bool, error) {
 	b, err := os.ReadFile(path)
-	return b, err == nil
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	return b, err == nil, err
 }
 
-// verifyResolution resolves a well-known name through the stub. It succeeds
-// when either name does, and reports which and how fast.
+// Verification accepts either family: an isolated IPv6-only LAN need not
+// publish A records. Each attempt has its own bounded query budget.
 func verifyResolution(ctx context.Context, verificationName ...string) (string, float64, error) {
 	names := verifyNames
 	if len(verificationName) > 0 && verificationName[0] != "" {
@@ -1074,29 +1096,37 @@ func verifyResolution(ctx context.Context, verificationName ...string) (string, 
 	var last error
 	for _, name := range names {
 		start := time.Now()
-		answers, err := lookupVia(ctx, resolvedStub, name, "A")
-		if err == nil && len(answers) > 0 {
-			return name, millis(time.Since(start)), nil
-		}
-		// DNSStubListener=no is a supported resolved configuration. Its
-		// local API can still verify the resolver without a port-53 stub.
-		if err != nil && (errors.Is(err, syscall.ECONNREFUSED) || lookupError(err) == "connection refused") && has("resolvectl") {
-			out, queryErr := run(ctx, "resolvectl", "query", "--type=A", "--legend=no", name+".")
-			if queryErr == nil {
-				for _, field := range strings.Fields(out) {
-					if a, err := netip.ParseAddr(field); err == nil && a.Is4() {
-						return name, millis(time.Since(start)), nil
+		for _, rtype := range []string{"A", "AAAA"} {
+			queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+			answers, err := lookupVia(queryCtx, resolvedStub, name, rtype)
+			if err == nil && len(answers) > 0 {
+				cancel()
+				return name, millis(time.Since(start)), nil
+			}
+			// DNSStubListener=no still has resolved's local query API.
+			if err != nil && (errors.Is(err, syscall.ECONNREFUSED) || lookupError(err) == "connection refused") && has("resolvectl") {
+				out, queryErr := run(queryCtx, "resolvectl", "query", "--type="+rtype, "--legend=no", name+".")
+				if queryErr == nil {
+					for _, field := range strings.Fields(out) {
+						if a, parseErr := netip.ParseAddr(field); parseErr == nil && (rtype == "A" && a.Is4() || rtype == "AAAA" && a.Is6()) {
+							cancel()
+							return name, millis(time.Since(start)), nil
+						}
 					}
 				}
+				if queryErr != nil {
+					err = queryErr
+				}
 			}
-			if queryErr != nil {
-				err = queryErr
+			cancel()
+			if err == nil {
+				err = fmt.Errorf("%s has no %s answers", name, rtype)
+			}
+			last = err
+			if ctx.Err() != nil {
+				return "", 0, ctx.Err()
 			}
 		}
-		if err == nil {
-			err = fmt.Errorf("%s resolved to nothing", name)
-		}
-		last = err
 	}
 	return "", 0, fmt.Errorf("%s could not be resolved through systemd-resolved (%v)", names[0], last)
 }
