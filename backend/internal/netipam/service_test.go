@@ -241,3 +241,11 @@ func TestIPAMUnselectedNativePrefixCannotBorrowHeldPlan(t *testing.T) {
 		t.Fatal("released plan remained active", e)
 	}
 }
+
+func TestIPAMPoolNamesRefuseEveryUnicodeControl(t *testing.T) {
+	for _, name := range []string{"bad\tname", "bad\x7fname", "bad\u0085name", "bad\u0001name", "bad\t", string([]byte{'b', 0xff})} {
+		if _, e := ValidatePool(PoolRequest{Name: name, Prefix: "10.244.0.0/16", AllocationBits: 24}); e == nil {
+			t.Fatalf("accepted control or invalid UTF-8 name %q", name)
+		}
+	}
+}

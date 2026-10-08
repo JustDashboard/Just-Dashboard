@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
 	"github.com/go-chi/chi/v5"
@@ -78,3 +80,46 @@ func TestIPAMPreviewReserveReleaseAreAuditedAndDoNotApplyNativeChanges(t *testin
 	}
 }
 func netipamTestJSON(value any) []byte { raw, _ := json.Marshal(value); return raw }
+
+func TestIPAMDockerAdapterBoundsCollectedObjectsAndReportsUnknown(t *testing.T) {
+	s := testServer(t)
+	oldNetwork := s.modules.network
+	s.modules.network = nil
+	t.Cleanup(func() { s.modules.network = oldNetwork })
+	var networks []map[string]any
+	for n := 0; n < 513; n++ {
+		config := []map[string]string{}
+		if n == 0 {
+			for prefix := 0; prefix < 4100; prefix++ {
+				config = append(config, map[string]string{"Subnet": "fd48:abcd::/64"})
+			}
+		}
+		networks = append(networks, map[string]any{"Id": fmt.Sprintf("native-%d", n), "Name": fmt.Sprintf("native-%d", n), "Driver": "bridge", "IPAM": map[string]any{"Config": config}})
+	}
+	engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/_ping" {
+			w.Header().Set("API-Version", "1.47")
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/containers/json") {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[]`))
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, "/networks") {
+			t.Errorf("unexpected native request %s", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(networks)
+	}))
+	defer engine.Close()
+	original := s.modules.docker
+	s.modules.docker = dockerx.New(engine.URL)
+	t.Cleanup(func() { s.modules.docker.Close(); s.modules.docker = original })
+	result, e := s.ipamInventory(t.Context())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(result.Observations) != netipam.MaxObservations || !hasIPAMCoverage(result.Coverage, "bounded_inventory") || !hasIPAMCoverage(result.Coverage, "bounded_docker_networks") {
+		t.Fatal("large native inventory was treated as complete or unbounded", len(result.Observations), result.Coverage)
+	}
+}

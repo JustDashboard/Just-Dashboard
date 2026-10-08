@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const MaxPools = 64
@@ -130,12 +132,15 @@ func Canonical(value string) (netip.Prefix, error) {
 	return p, nil
 }
 func ValidatePool(in PoolRequest) (PoolRequest, error) {
+	if !utf8.ValidString(in.Name) || strings.IndexFunc(in.Name, unicode.IsControl) >= 0 {
+		return in, fmt.Errorf("pool names cannot contain control characters or invalid UTF-8")
+	}
 	in.Name = strings.TrimSpace(in.Name)
 	p, e := Canonical(in.Prefix)
 	if e != nil {
 		return in, e
 	}
-	if len(in.Name) < 1 || len(in.Name) > 80 || strings.ContainsAny(in.Name, "\r\n\x00") || in.AllocationBits < p.Bits() || in.AllocationBits > p.Addr().BitLen() {
+	if len(in.Name) < 1 || len(in.Name) > 80 || !utf8.ValidString(in.Name) || strings.IndexFunc(in.Name, unicode.IsControl) >= 0 || in.AllocationBits < p.Bits() || in.AllocationBits > p.Addr().BitLen() {
 		return in, fmt.Errorf("provide a pool name and an allocation prefix inside its family width")
 	}
 	if p.Addr().IsMulticast() || p.Addr().IsLoopback() || p.Addr().IsLinkLocalUnicast() {

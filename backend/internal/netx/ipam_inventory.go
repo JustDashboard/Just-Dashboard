@@ -27,6 +27,13 @@ type IPAMNativeSource struct {
 func (s *Service) IPAMInventory(ctx context.Context, inv Inventory) IPAMNativeInventory {
 	result := IPAMNativeInventory{Prefixes: []IPAMNativePrefix{}, Sources: []IPAMNativeSource{}}
 	source := func(name string, e error, detail string) {
+		if len(result.Sources) >= 128 {
+			return
+		}
+		if len(result.Sources) == 127 {
+			result.Sources = append(result.Sources, IPAMNativeSource{"bounded_native_sources", "unknown", "Native source evidence exceeded the 128-item inspection bound", time.Now().UTC()})
+			return
+		}
 		state := "observed"
 		if e != nil {
 			state, detail = "unreadable", e.Error()

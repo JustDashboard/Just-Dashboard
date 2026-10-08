@@ -31,7 +31,7 @@ at mutation time.
 
 The retained bounds are 64 pools, 2,048 reservations, 4,096 observed prefixes and 128 coverage rows.
 Released reservations are eligible for pruning after 30 days; active allocations are never pruned.
-Native inspection bounds named namespaces to 64, WireGuard files to 256, each regular non-symlink
+Native inspection bounds Docker networks to 512, named namespaces to 64, WireGuard files to 256, each regular non-symlink
 file to 1 MiB and total inspected configuration to 8 MiB. Bounds create explicit unknown coverage.
 Retired pool records remain immutable history, including their unique prefix.
 
