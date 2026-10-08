@@ -72,7 +72,7 @@ export function ConnectionsPanel() {
   const setQuery = (q: string) => setFilters((previous) => ({ ...previous, q }))
   const setScope = (scope: string) => setFilters((previous) => ({ ...previous, scope }), true)
   const [blocking, setBlocking] = useState<string | null>(null)
-  const { data, error, loading, refresh } = usePoll<Connections>(
+  const { data, error, loading, refresh, lastSuccess } = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),
     10000,
   )
@@ -153,7 +153,7 @@ export function ConnectionsPanel() {
     >
       {header}
 
-      <NetworkReadWarning error={error} refresh={refresh} />
+      <NetworkReadWarning error={error} refresh={refresh} lastSuccess={lastSuccess} />
 
       {/* The figures, then the addresses they describe. Listening goes to the
           page that names each socket: this page is who arrived, that one is

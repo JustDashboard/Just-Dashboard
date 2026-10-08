@@ -96,7 +96,9 @@ export default function NetworkVPNPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="VPN" />
-      {vpn.data && <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} />}
+      {vpn.data && (
+        <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} lastSuccess={vpn.lastSuccess} />
+      )}
 
       <StatGrid columns={4}>
         <StatTile

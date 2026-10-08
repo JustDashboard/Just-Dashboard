@@ -18,14 +18,17 @@ export function changeStatus(change: NetworkChangeStatus) {
     change.boot === "failed" ||
     change.watchdog === "failed_to_arm" ||
     Boolean(change.recoveryErrors?.length)
+  const runtimeOnly = change.persistence === "not_applicable" && change.boot === "not_applicable"
   const verified =
     change.phase === "saved" &&
     change.runtime === "applied" &&
-    change.persistence === "written" &&
     change.watchdog === "completed" &&
-    change.boot === "enabled"
+    ((change.persistence === "written" && change.boot === "enabled") || runtimeOnly)
   return {
-    label: CHANGE_PHASE[change.phase] ?? "Change state unknown",
+    label:
+      change.phase === "saved" && runtimeOnly
+        ? "Runtime applied"
+        : (CHANGE_PHASE[change.phase] ?? "Change state unknown"),
     tone: danger ? ("danger" as const) : verified ? ("running" as const) : ("warning" as const),
   }
 }
@@ -38,12 +41,14 @@ export const RUNTIME_STATE: Record<NetworkChangeStatus["runtime"], string> = {
   unknown: "Unknown",
 }
 export const PERSISTENCE_STATE: Record<NetworkChangeStatus["persistence"], string> = {
+  not_applicable: "Runtime only; not saved for boot",
   not_written: "Not written",
   written: "Written",
   restored: "Previous files restored",
   unknown: "Unknown",
 }
 export const BOOT_STATE: Record<NetworkChangeStatus["boot"], string> = {
+  not_applicable: "Not applicable to this runtime change",
   not_verified: "Not verified",
   enabled: "Restore unit enabled",
   unsupported: "Not supported on this host",

@@ -78,7 +78,11 @@ export default function NetworkProtectionPage() {
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Protection" />
       {protection.data && (
-        <NetworkReadWarning error={protection.error} refresh={protection.refresh} />
+        <NetworkReadWarning
+          error={protection.error}
+          refresh={protection.refresh}
+          lastSuccess={protection.lastSuccess}
+        />
       )}
 
       {entries && !view.loaded && (

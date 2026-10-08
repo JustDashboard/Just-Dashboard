@@ -6745,8 +6745,8 @@ export type NetworkChangeStatus = {
   updatedAt: string
   watchdog: "unsupported" | "armed" | "completed" | "failed_to_arm" | "recovered"
   runtime: "not_applied" | "applied" | "undo_attempted" | "restored" | "unknown"
-  persistence: "not_written" | "written" | "restored" | "unknown"
-  boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown"
+  persistence: "not_written" | "written" | "restored" | "unknown" | "not_applicable"
+  boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown" | "not_applicable"
   recoveryErrors?: string[]
 }
 

@@ -35,7 +35,13 @@ export default function NetworkTrafficPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Traffic" />
-      {shaping.data && <NetworkReadWarning error={shaping.error} refresh={shaping.refresh} />}
+      {shaping.data && (
+        <NetworkReadWarning
+          error={shaping.error}
+          refresh={shaping.refresh}
+          lastSuccess={shaping.lastSuccess}
+        />
+      )}
 
       <Bandwidth span={span} onSpan={setSpan} />
 

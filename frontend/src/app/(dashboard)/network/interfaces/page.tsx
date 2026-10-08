@@ -78,7 +78,13 @@ function Interfaces() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Interfaces" />
-      {links.data && <NetworkReadWarning error={links.error} refresh={links.refresh} />}
+      {links.data && (
+        <NetworkReadWarning
+          error={links.error}
+          refresh={links.refresh}
+          lastSuccess={links.lastSuccess}
+        />
+      )}
       <Toolbar>
         <FilterChip selected={!everything} onClick={() => setEverything(false)}>
           Real devices

@@ -9,7 +9,8 @@ disable attachment while unreadable, and offer retry instead of claiming the can
 The overview's latest network-change record reports runtime, persistence, boot restoration and
 independent host recovery separately. A saved change means the host apply/save finished; the UI
 explicitly states that this status does not confirm browser reconnect or application reachability.
-Unavailable recovery, unverified boot restoration and recovery errors remain visible.
+Unavailable recovery, unverified boot restoration and recovery errors remain visible. Runtime-only
+changes say they are applied and explicitly state that they are not saved for boot.
 Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
 the administrator capability, with destructive controls also following the destructive capability;
 backend route checks remain authoritative. VPN peer reads are disabled for a reader without the

@@ -85,7 +85,13 @@ export default function NetworkGatewayPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Gateway" />
-      {gateway.data && <NetworkReadWarning error={gateway.error} refresh={gateway.refresh} />}
+      {gateway.data && (
+        <NetworkReadWarning
+          error={gateway.error}
+          refresh={gateway.refresh}
+          lastSuccess={gateway.lastSuccess}
+        />
+      )}
 
       <GatewayNotices view={view} onRefresh={gateway.refresh} />
 

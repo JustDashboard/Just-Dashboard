@@ -37,3 +37,9 @@ test("a saved label with unknown runtime or persistence never gets a success ton
   expect(changeStatus({ ...saved, runtime: "unknown" }).tone).toBe("warning")
   expect(changeStatus({ ...saved, persistence: "unknown" }).tone).toBe("warning")
 })
+
+test("runtime-only changes report applied rather than saved for boot", () => {
+  expect(changeStatus({ ...saved, persistence: "not_applicable", boot: "not_applicable" })).toEqual(
+    { label: "Runtime applied", tone: "running" },
+  )
+})

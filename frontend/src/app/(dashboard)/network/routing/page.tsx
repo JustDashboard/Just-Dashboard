@@ -60,7 +60,13 @@ export default function NetworkRoutingPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="Routing" />
-      {routing.data && <NetworkReadWarning error={routing.error} refresh={routing.refresh} />}
+      {routing.data && (
+        <NetworkReadWarning
+          error={routing.error}
+          refresh={routing.refresh}
+          lastSuccess={routing.lastSuccess}
+        />
+      )}
 
       <Panel plain>
         <PanelHeader

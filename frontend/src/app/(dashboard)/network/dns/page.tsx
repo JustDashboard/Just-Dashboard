@@ -77,7 +77,9 @@ export default function NetworkDNSPage() {
   return (
     <Page className="animate-rise">
       <PageContext eyebrow="Network" title="DNS" />
-      {dns.data && <NetworkReadWarning error={dns.error} refresh={dns.refresh} />}
+      {dns.data && (
+        <NetworkReadWarning error={dns.error} refresh={dns.refresh} lastSuccess={dns.lastSuccess} />
+      )}
 
       <Panel plain>
         <PanelHeader
