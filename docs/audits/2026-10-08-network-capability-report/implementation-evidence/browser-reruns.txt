@@ -1,0 +1,27 @@
+First selected browser invocation: 880 passed / 60 skipped / 15 failed (955 selected).
+
+Command (same unchanged build):
+TMPDIR=/home/ubuntu/jd-network-validation-tmp JD_BROWSER_BASE_URL=http://127.0.0.1:43131 bunx playwright test --last-failed --workers=1
+
+Running 15 tests using 1 worker
+  ✓   1 [chromium] › tests/browser/network-tunnels.spec.ts:43:7 › VXLAN sends multicast 239.1.1.1 with its selected card and no stale unicast end (18.9s)
+  ✓   2 [chromium] › tests/browser/network-tunnels.spec.ts:43:7 › VXLAN sends multicast ff05::42 with its selected card and no stale unicast end (11.6s)
+  ✓   3 [chromium] › tests/browser/network-tunnels.spec.ts:84:5 › invalid multicast groups and mismatched local families cannot submit a VXLAN (7.1s)
+  ✓   4 [chromium] › tests/browser/network-tunnels.spec.ts:119:5 › malformed GRE key and hop limits cannot fall back to kernel defaults (5.1s)
+  ✓   5 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network keeps the design system's structural rules (3.1s)
+  ✓   6 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/vpn keeps the design system's structural rules (3.5s)
+  ✓   7 [chromium] › tests/browser/overview-ui.spec.ts:290:7 › looks right at 1280 (4.6s)
+  ✓   8 [chromium] › tests/browser/processes-ui.spec.ts:556:5 › the live table reads the host and every process verb is a word (5.7s)
+  ✓   9 [chromium] › tests/browser/processes-ui.spec.ts:630:5 › a kernel thread and a zombie are not offered signals they cannot take (6.9s)
+  ✓  10 [chromium] › tests/browser/processes-ui.spec.ts:1489:7 › timers at 1720: a background state change preserves hovered rows and their open menu (6.8s)
+  ✓  11 [chromium] › tests/browser/terminal-ui.spec.ts:820:7 › terminal splits › keeps a successfully created split when the following window listing fails (13.7s)
+  ✓  12 [chromium] › tests/browser/terminal-ui.spec.ts:860:9 › terminal splits › detaches panes and drags windows into dynamic split zones with dom (37.7s)
+  ✓  13 [chromium] › tests/browser/terminal-ui.spec.ts:1005:9 › terminal splits › splits in all four directions without remounting the shell with dom (20.6s)
+  ✓  14 [chromium] › tests/browser/terminal-ui.spec.ts:860:9 › terminal splits › detaches panes and drags windows into dynamic split zones with webgl (55.1s)
+  1 failed
+  14 passed (4.1m)
+
+Running 1 test using 1 worker
+  ✓  1 [chromium] › tests/browser/terminal-ui.spec.ts:1005:9 › terminal splits › splits in all four directions without remounting the shell with webgl (19.3s)
+  1 passed (21.9s)
+

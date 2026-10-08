@@ -54,8 +54,14 @@ five existing deployment preflight fixtures because its temporary data directory
 filesystem with less than 1 GiB available. The exact selected packages then passed with `TMPDIR`
 on the workspace filesystem; [`selected-go.txt`](selected-go.txt) records that command and result.
 
-The selected 955 browser cases are still running on the unchanged production build. Some cases
-have timed out during fixture loading or browser teardown amid shared-host memory pressure; they
-must be rerun and evaluated before this lane is claimed as passing. This checkpoint therefore does
-not claim a successful complete changed-file gate. Missing acceptance evidence remains pending
-in the ledger.
+The unchanged production build completed the selected 955 browser cases: 880 passed, 60 optional
+evidence cases skipped and 15 failed while the shared host was under memory pressure. A one-worker
+rerun with temporary files on the workspace filesystem passed 14 of those 15; the remaining WebGL
+fixture initially lacked its renderer, then passed unchanged in a focused one-case rerun (21.9s).
+All 895 selected executable cases therefore passed, with 60 optional evidence cases skipped.
+[`browser-reruns.txt`](browser-reruns.txt) records the exact focused commands and results.
+
+The original script exited nonzero. Its failing Go fixtures and browser cases were rerun without
+source changes; the independently successful stages above establish the selected acceptance, not
+a fabricated zero exit for that invocation. All current-SHA hosted checks on `58e1089c`, including
+eight browser shards, also passed. Missing broader acceptance remains pending in the ledger.
