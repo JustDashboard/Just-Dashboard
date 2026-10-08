@@ -55,7 +55,8 @@ function ListMark({ list }: { list: Pick<ProtectionBlocklist, "kind" | "countrie
  * dropped, and the switch that puts it in force. A fetched list carries a
  * refresh in its actions, and while one is being fetched its card runs a light
  * round its edge. An error from the last fetch is said on the card in red,
- * because a list that failed to load is a list that is not blocking.
+ * The cache and actual kernel set are reported separately: a failed refresh
+ * does not itself prove that the previously loaded protection disappeared.
  */
 export function BlocklistList({
   lists,
@@ -135,6 +136,15 @@ export function BlocklistList({
                   {list.name}
                 </span>
                 {list.containsYou && <Tag tone="warning">holds your address</Tag>}
+                {list.enabled && list.enforcement && (
+                  <Tag tone={list.enforcement === "verified" ? "success" : "warning"}>
+                    {list.enforcement === "verified"
+                      ? "Verified set"
+                      : list.enforcement === "degraded"
+                        ? "Degraded enforcement"
+                        : "Enforcement unknown"}
+                  </Tag>
+                )}
               </span>
             }
             verb={`Edit ${list.name}`}
@@ -190,6 +200,30 @@ export function BlocklistList({
             onSelect={() => onOpen(list)}
           >
             {list.error && <p className="text-hint text-destructive">{list.error}</p>}
+            {list.cache && (
+              <div
+                className="space-y-1 text-hint text-muted-foreground"
+                aria-label={`${list.name} enforcement evidence`}
+              >
+                <p>
+                  Cache {list.cache.status}: {list.cache.count.toLocaleString()} networks
+                  {list.savedCount !== undefined && list.savedCount !== list.cache.count
+                    ? ` · last fetched count ${list.savedCount.toLocaleString()}`
+                    : ""}
+                  {list.runtime
+                    ? ` · kernel ${list.runtime.status}: ${list.runtime.count === null ? "unknown" : list.runtime.count.toLocaleString()} networks`
+                    : " · kernel unknown"}
+                </p>
+                {list.cache.error && <p role="alert">{list.cache.error}</p>}
+                {list.runtime?.error && <p role="alert">{list.runtime.error}</p>}
+                <details>
+                  <summary className="cursor-pointer focus-ring">Policy generations</summary>
+                  <p className="break-all">Cache: {list.cache.generation || "unavailable"}</p>
+                  <p className="break-all">Render: {list.renderedGeneration || "unavailable"}</p>
+                  <p className="break-all">Kernel: {list.runtime?.generation || "unavailable"}</p>
+                </details>
+              </div>
+            )}
           </ChoiceRow>
         ))}
       </ChoiceList>

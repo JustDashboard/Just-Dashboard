@@ -229,21 +229,20 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 }
 
 func (s *Service) installRecoveryBinary(ctx context.Context) error {
-	if s.recoveryInstalled {
-		return nil
-	}
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	b, err := os.ReadFile(executable)
-	if err != nil {
-		return err
-	}
 	path := filepath.Join(s.paths.Dir, recoveryBinary)
-	if changed(path, b) {
-		if err := writeFileAtomic(path, b, 0o700); err != nil {
-			return fmt.Errorf("installing the independent network recovery executable: %w", err)
+	if !s.recoveryInstalled {
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		b, err := os.ReadFile(executable)
+		if err != nil {
+			return err
+		}
+		if changed(path, b) {
+			if err := writeFileAtomic(path, b, 0o700); err != nil {
+				return fmt.Errorf("installing the independent network recovery executable: %w", err)
+			}
 		}
 	}
 	// Test execution in the host mount namespace before trusting it. The
@@ -346,11 +345,17 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 		}
 	}
 	j.Phase, j.Persistence, j.Runtime = "recovered", "restored", "restored"
+	if len(j.Files) == 0 && j.Boot == "not_applicable" {
+		j.Persistence = "not_applicable"
+	}
 	if j.Watchdog == "armed" {
 		j.Watchdog = "recovered"
 	}
 	if len(j.RecoveryErrors) > 0 {
 		j.Phase, j.Persistence, j.Runtime = "degraded", "unknown", "unknown"
+		if len(j.Files) == 0 && j.Boot == "not_applicable" {
+			j.Persistence = "not_applicable"
+		}
 	}
 	if err := j.save(); err != nil {
 		return err

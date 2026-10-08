@@ -5,6 +5,10 @@ it does not implement the proposed changes. The relevant merged changes are
 [PR #169: Network section](https://github.com/JustDashboard/Just-Dashboard/pull/169) and
 [PR #171: networking audit and recovery hardening](https://github.com/JustDashboard/Just-Dashboard/pull/171).
 
+Implementation is now underway in this same PR. The [implementation ledger](implementation-status.md)
+preserves every finding and proposed capability, records current evidence and identifies unfinished
+acceptance. The assessment below describes the reviewed base; its historical scores are unchanged.
+
 ## The assessment
 
 **Just Dashboard now has a substantial Linux networking control plane. My overall assessment is

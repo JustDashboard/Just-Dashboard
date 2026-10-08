@@ -732,22 +732,6 @@ func applying(do func(ctx context.Context) error, undo func(ctx context.Context)
 	}
 }
 
-// runtimeOnly is commit without the files, for a change to something the
-// dashboard did not make and so does not restore: apply, verify, and put it
-// back if the check fails.
-func runtimeOnly(ctx context.Context, st step) error {
-	if err := st.apply(ctx); err != nil {
-		return err
-	}
-	if st.verify != nil {
-		if err := st.verify(ctx); err != nil {
-			rollback(ctx, st.undo)
-			return err
-		}
-	}
-	return nil
-}
-
 // stamp is the Made record of a new entry.
 func stamp(actor string) Made {
 	return Made{CreatedAt: time.Now().UTC(), CreatedBy: actor}
@@ -1032,7 +1016,7 @@ func (s *Service) SetLinkState(ctx context.Context, name string, up bool, client
 		}
 		return &LinkChange{Persisted: true}, nil
 	}
-	if err := runtimeOnly(ctx, stp); err != nil {
+	if err := s.runtimeOnly(ctx, stp); err != nil {
 		return nil, err
 	}
 	return &LinkChange{Note: notPersisted}, nil
@@ -1093,7 +1077,7 @@ func (s *Service) SetLinkMTU(ctx context.Context, name string, mtu int, client, 
 		}
 		return &LinkChange{Persisted: true}, nil
 	}
-	if err := runtimeOnly(ctx, stp); err != nil {
+	if err := s.runtimeOnly(ctx, stp); err != nil {
 		return nil, err
 	}
 	return &LinkChange{Note: notPersisted}, nil
@@ -1188,7 +1172,7 @@ func (s *Service) SetLinkMaster(ctx context.Context, name, master, client, actor
 		}
 		return &LinkChange{Persisted: true}, nil
 	}
-	if err := runtimeOnly(ctx, stp); err != nil {
+	if err := s.runtimeOnly(ctx, stp); err != nil {
 		return nil, err
 	}
 	return &LinkChange{Note: notPersisted}, nil

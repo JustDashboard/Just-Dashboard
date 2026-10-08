@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The queue disciplines the page offers. fq_codel is the kernel's good
@@ -601,18 +602,18 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 		gotRoot = root.Kind
 	}
 	if rootKind != "" && gotRoot != rootKind {
-		return fmt.Errorf("%s has %q as its queue after setting %q", sh.Device, gotRoot, rootKind)
+		return shapingDrift("%s has %q as its queue after setting %q", sh.Device, gotRoot, rootKind)
 	}
 	if sh.EgressKbit > 0 {
 		if sh.Qdisc == "cake" {
 			var bandwidth uint64
 			if json.Unmarshal(root.Options["bandwidth"], &bandwidth) != nil || bandwidth != shapeBytes(sh.EgressKbit) {
-				return fmt.Errorf("%s CAKE bandwidth does not match %d kbit/s", sh.Device, sh.EgressKbit)
+				return shapingDrift("%s CAKE bandwidth does not match %d kbit/s", sh.Device, sh.EgressKbit)
 			}
 		} else {
 			var def string
 			if root.Handle != "1:" || json.Unmarshal(root.Options["default"], &def) != nil || def != "0x10" || !leaf {
-				return fmt.Errorf("%s HTB root/default class or leaf queue does not match the requested shaping", sh.Device)
+				return shapingDrift("%s HTB root/default class or leaf queue does not match the requested shaping", sh.Device)
 			}
 			out, err := run(ctx, "tc", "-j", "class", "show", "dev", sh.Device)
 			if err != nil {
@@ -623,13 +624,13 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 				return errors.New("tc printed unreadable shaping classes")
 			}
 			if len(classes) != 1 || classes[0].Kind != "htb" || classes[0].Handle != "1:10" || (!classes[0].Root && classes[0].Parent != "1:") || classes[0].Rate != shapeBytes(sh.EgressKbit) || classes[0].Ceil != shapeBytes(sh.EgressKbit) {
-				return fmt.Errorf("%s HTB class rate/ceil does not match %d kbit/s", sh.Device, sh.EgressKbit)
+				return shapingDrift("%s HTB class rate/ceil does not match %d kbit/s", sh.Device, sh.EgressKbit)
 			}
 		}
 	}
 	if sh.IngressKbit > 0 {
 		if !ingress {
-			return fmt.Errorf("%s has no ingress policer after setting one", sh.Device)
+			return shapingDrift("%s has no ingress policer after setting one", sh.Device)
 		}
 		out, err := run(ctx, "tc", "-j", "filter", "show", "dev", sh.Device, "parent", "ffff:")
 		if err != nil {
@@ -646,7 +647,7 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 			}
 		}
 		if !found {
-			return fmt.Errorf("%s ingress matchall/drop policer is missing", sh.Device)
+			return shapingDrift("%s ingress matchall/drop policer is missing", sh.Device)
 		}
 		// iproute2 releases omit policer rate/burst from JSON, including 6.14.
 		// Detailed output is required as evidence rather than assuming the write worked.
@@ -678,7 +679,7 @@ func verifyPolicer(out string, kbit int) error {
 	// four microseconds of quantization, not an operationally different burst.
 	tolerance := math.Max(16, float64(shapeBytes(kbit))/250000)
 	if rate != float64(kbit)*1000 || math.Abs(burst-float64(policeBurst(kbit))) > tolerance {
-		return fmt.Errorf("ingress policer rate/burst does not match %d kbit/s and %d bytes", kbit, policeBurst(kbit))
+		return shapingDrift("ingress policer rate/burst does not match %d kbit/s and %d bytes", kbit, policeBurst(kbit))
 	}
 	return nil
 }
@@ -718,8 +719,9 @@ type ShapeDevice struct {
 	Uplink      bool   `json:"uplink"`
 	ClientPath  bool   `json:"clientPath"`
 	// Shapeable is false for loopback and for container veths; Guard says why.
-	Shapeable bool   `json:"shapeable"`
-	Guard     string `json:"guard"`
+	Shapeable    bool               `json:"shapeable"`
+	Guard        string             `json:"guard"`
+	Verification *ShapeVerification `json:"verification,omitempty"`
 }
 
 // BBRState is the kernel's congestion control and default queue.
@@ -807,6 +809,9 @@ func (s *Service) Shaping(ctx context.Context, client string) (*ShapingView, err
 		}
 		if sh, ok := spec[l.IfName]; ok {
 			d.Managed, d.Qdisc, d.EgressKbit, d.IngressKbit = true, sh.Qdisc, sh.EgressKbit, sh.IngressKbit
+			verifyCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			d.Verification = readShapeVerification(verifyCtx, sh)
+			cancel()
 		}
 		v.Devices = append(v.Devices, d)
 	}

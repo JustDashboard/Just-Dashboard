@@ -7369,6 +7369,18 @@ export type GatewayCapability = {
   reason?: string
   firewall: "ufw" | "firewalld" | "iptables" | "nftables" | "none"
   docker: boolean
+  /** Compatibility is separate from a measured source-to-destination path. */
+  reachability?: "unknown"
+  layers?: {
+    family: string
+    table: string
+    chain: string
+    hook: string
+    policy: string
+    status: "owned" | "admitted" | "checked" | "blocked" | "unknown"
+    reason?: string
+  }[]
+  unknownLayers?: string[]
   /** The drop-forward chain that makes the gateway read-only, and the accept to add there. */
   blocker?: { family: string; table: string; chain: string; rule: string }
 }
@@ -7411,7 +7423,19 @@ export type GatewayView = {
   capability: GatewayCapability
   loaded: boolean
   forwarding: { ipv4: boolean; ipv6: boolean }
-  admission: { needed: boolean; present: boolean }
+  admission: {
+    needed: boolean
+    present: boolean
+    checkedAt?: string
+    chains?: {
+      family: "inet" | "inet6"
+      tool: string
+      chain: string
+      needed: boolean
+      status: "present" | "absent" | "unsupported" | "unreadable"
+      reason?: string
+    }[]
+  }
   forwards: GatewayForward[]
   nat: GatewayNAT[]
 }
@@ -7443,6 +7467,21 @@ export type ProtectionBlocklist = NetworkMade & {
   enabled: boolean
   refreshed: string | null
   count: number
+  savedCount?: number
+  cache?: {
+    status: "ready" | "missing" | "unreadable" | "invalid"
+    count: number
+    generation: string
+    error?: string
+  }
+  renderedGeneration?: string
+  runtime?: {
+    status: "present" | "absent" | "unreadable" | "not_required"
+    count: number | null
+    generation?: string
+    error?: string
+  }
+  enforcement?: "disabled" | "verified" | "degraded" | "unknown"
   error: string
   /** The list holds the reader's own address; the trusted set still lets them in. */
   containsYou: boolean
@@ -7516,6 +7555,7 @@ export type ShapeDevice = {
   clientPath: boolean
   shapeable: boolean
   guard: string
+  verification?: { status: "verified" | "drift" | "unknown"; checkedAt: string; reason?: string }
 }
 
 export type BBRState = {

@@ -124,18 +124,38 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 	}
 	// Snapshot actual kernel values, including keys not owned before this
 	// change. Turning forwarding on also resets a family of kernel settings.
-	var keys []string
+	keySet := map[string]bool{}
 	for key, value := range next.Sysctls {
 		if old.Sysctls[key] != value {
-			keys = append(keys, key)
+			keySet[key] = true
 		}
 	}
 	for key := range old.Sysctls {
 		if _, exists := next.Sysctls[key]; !exists {
-			keys = append(keys, key)
+			keySet[key] = true
 		}
 	}
-	sort.Strings(keys)
+	if keySet[sysctlForwardV4] {
+		// ip_forward resets other IPv4 settings even when their managed
+		// values were unchanged by this edit. Preserve their observed values.
+		for key := range old.Sysctls {
+			keySet[key] = true
+		}
+		for key := range next.Sysctls {
+			keySet[key] = true
+		}
+	}
+	keys := make([]string, 0, len(keySet))
+	for key := range keySet {
+		keys = append(keys, key)
+	}
+	// Restore the resetting switch first, then restore the protections.
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i] == sysctlForwardV4 || keys[j] == sysctlForwardV4 {
+			return keys[i] == sysctlForwardV4
+		}
+		return keys[i] < keys[j]
+	})
 	for _, key := range keys {
 		value, err := readSysctl(key)
 		if err != nil {

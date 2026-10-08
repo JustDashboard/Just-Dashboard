@@ -8,9 +8,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
+	"github.com/go-chi/chi/v5"
 )
+
+func TestKernelRouteLookupIsReadableAndRejectsProbeTargetsBeforeHostExecution(t *testing.T) {
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited, auth.RoleAdmin} {
+		s, router := gatewayRouter(t, role, true)
+		router.Route("/routing-fixture", func(r chi.Router) { s.mountNetworkRoutingRoutes(r) })
+		for _, query := range []string{"", "target=private.example", "target=192.0.2.1&source=other.example", "target=192.0.2.1&source=2001:db8::1", "target=192.0.2.1&mark=1%2F255"} {
+			response := gwDo(router, http.MethodGet, "/routing-fixture/routing/lookup?"+query, "")
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("lookup as %s with %s = %d: %s", role, query, response.Code, response.Body)
+			}
+		}
+		if role != auth.RoleAdmin {
+			response := gwDo(router, http.MethodPost, "/routing-fixture/routing/routes", `{}`)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("read-only kernel explanation enabled route mutation: %d %s", response.Code, response.Body)
+			}
+		}
+	}
+}
 
 func TestNetworkForwardingDockerDependenciesCountEachFamily(t *testing.T) {
 	for _, test := range []struct {

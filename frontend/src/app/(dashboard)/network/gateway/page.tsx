@@ -87,7 +87,7 @@ export default function NetworkGatewayPage() {
       <PageContext eyebrow="Network" title="Gateway" />
       {gateway.data && <NetworkReadWarning error={gateway.error} refresh={gateway.refresh} />}
 
-      <GatewayNotices view={view} />
+      <GatewayNotices view={view} onRefresh={gateway.refresh} />
 
       <Panel plain>
         <PanelHeader
@@ -148,15 +148,19 @@ export default function NetworkGatewayPage() {
             !view.admission.needed
               ? "Nothing to admit"
               : view.admission.present
-                ? "Admitted"
-                : "Missing"
+                ? "Owned rules present"
+                : view.admission.chains?.some(
+                      (chain) => chain.needed && chain.status === "unreadable",
+                    )
+                  ? "Unreadable"
+                  : "Needs attention"
           }
           tone={
             view.admission.needed ? (view.admission.present ? "success" : "warning") : "default"
           }
           hint={
             view.admission.needed
-              ? "translated connections pass the forward chain"
+              ? "owned hooks checked; full connection unverified"
               : "no entry is in force"
           }
         />

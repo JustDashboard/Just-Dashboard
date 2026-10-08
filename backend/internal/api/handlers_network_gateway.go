@@ -45,6 +45,7 @@ func (s *Server) mountNetworkGatewayRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/protection/settings", s.handle(s.handleProtectionSettings))
 
 		s.destructive(r, func(r chi.Router) {
+			r.Method(http.MethodPost, "/gateway/admission/repair", s.handle(s.handleGatewayAdmissionRepair))
 			r.Method(http.MethodDelete, "/gateway/forwards/{id}", s.handle(s.handleForwardDelete))
 			r.Method(http.MethodDelete, "/gateway/nat/{id}", s.handle(s.handleNATDelete))
 			r.Method(http.MethodDelete, "/protection/limits/{id}", s.handle(s.handleLimitDelete))
@@ -53,6 +54,17 @@ func (s *Server) mountNetworkGatewayRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/protection/trusted", s.handle(s.handleTrustedRemove))
 		})
 	})
+}
+
+func (s *Server) handleGatewayAdmissionRepair(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "network.gateway.admission.repair", "owned admission rules", nil)
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	if err := s.modules.network.RepairGatewayAdmission(ctx); err != nil {
+		return mapGatewayError(err)
+	}
+	httpx.JSON(w, http.StatusOK, map[string]bool{"repaired": true})
+	return nil
 }
 
 // mapGatewayError adds the one code the gateway has of its own to the module's

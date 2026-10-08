@@ -74,7 +74,11 @@ It manages exactly one machine. There is no fleet view, no agents to enrol, no c
   and host prerequisites, with an IPv4/IPv6 subnet
   calculator. The [complete networking inventory and compatibility boundaries](docs/audits/2026-10-08-network-audit/README.md)
   explain supported controls and external requirements. Managed network configuration is restored
-  at boot by a unit of its own, with or without the dashboard.
+  at boot by a unit of its own, with or without the dashboard. Managed changes retain a durable undo
+  journal and use independent host recovery when systemd is available; the Network overview reports
+  apply, save and recovery phases. Gateway admission, blocklist sets and shaping expose kernel
+  evidence separately from saved settings. DNS tests follow the host's resolver policy by default;
+  direct comparisons require named destinations and a disclosure acknowledgment.
 - **A real shell, a real file manager, the repositories on the disk.** Host shells that survive
   the tab closing, a compact file manager with name/content search, previews, Monaco and image editors
   that open beside the listing or in a full workspace with a file tree, and every Git checkout with

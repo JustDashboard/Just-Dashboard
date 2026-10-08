@@ -7,6 +7,8 @@ frontend (`/network/*`) is its only client. The plan it was built from, with the
 choice, is [`docs/audits/2026-10-07-network-section/`](../../audits/2026-10-07-network-section/README.md).
 The [2026-10-08 audit](../../audits/2026-10-08-network-audit/README.md) inventories every Network
 page and diagnostic, fixed findings, competitor research and actual compatibility boundaries.
+The [capability-report implementation ledger](../../audits/2026-10-08-network-capability-report/implementation-status.md)
+tracks the additional work and its acceptance evidence.
 
 ## Three rules
 
@@ -33,8 +35,7 @@ page and diagnostic, fixed findings, competitor research and actual compatibilit
   one from elsewhere on a listening port), so an `ssh -L` browser is guarded as the address it
   really comes from. Guards answer `409 would_lock_you_out` with the sentence saying why.
   Path equality compares local/device/gateway and deliberately permits a changed source address;
-  source-selected routing checks add coverage but do not prove application reachability or provide
-  a timed reconnect-confirmation watchdog.
+  source-selected routing checks add coverage but do not prove application reachability.
 - **Only what was made here is removed.** Docker's bridges and veths, Tailscale's device, table 52 and
   rules, the provider's DHCP routes, the kernel's own routes and its fallback tunnel devices (`gre0`,
   `ip6tnl0`, …) are read and named with their owner and excluded from destructive ownership operations.
@@ -48,9 +49,14 @@ file and the spec before applying the runtime change, then verifies the operator
 renders in a deterministic order and the spec last. A synchronous write/verification failure attempts to restore
 previous file contents and modes and undo runtime with a fresh, bounded thirty-second context,
 independent of a canceled request. Partial link, namespace, gateway, shaping and sysctl changes also
-recover with independent contexts. This is rollback for synchronous failures, not a crash-atomic
-transaction across several filesystem files. File/runtime undo is best-effort: failing host tools or
-filesystem writes are logged, and the step undo interface cannot report every recovery error.
+recover with independent contexts. Before runtime mutation, `change.json` durably records changed-file
+snapshots and typed undo commands. Fetched list data is staged until that journal exists. A separate
+host executable can recover a pending journal without the backend, API, database or credentials.
+File writes fsync the file and its containing directory; the journal makes an interrupted sequence
+recoverable rather than pretending several filesystem renames are one atomic transaction. Recovery
+collects failed writes and commands, exposes them as degraded, and blocks further journaled changes.
+Native-owned state/MTU/bridge edits retain observed undo without creating managed boot files.
+See [network recovery](network-recovery.md) for host prerequisites, phases and acceptance boundaries.
 
 `s.mu` serialises mutations. The unit is enabled, not started: everything it would restore was just
 applied. A later unit-enable failure is a `persistenceError`: runtime and spec have committed, so callers
@@ -140,6 +146,11 @@ nothing translates (each `-D` repeats until the kernel has none left, at most ei
 nftables table drops forwarded traffic, naming the chain and the accept to add there. A forward or NAT
 entry that needs forwarding while it is off is refused with `409 forwarding_off`; the page offers the
 switch.
+Health checks inspect every required family and chain and distinguish absent, unsupported and
+unreadable rules. The gateway page shows checked policy layers and offers an admin/destructive-gated
+repair of owned admission rules. Writable policy and owned-rule presence are separate from measured
+reachability; foreign expressions and provider policy can remain unknown. The full response and
+fail-closed cache contract are in [gateway health](gateway-health.md).
 
 Cache and kernel rollback retain the prior list under the mutation lock; fetches begun before a
 URL/country edit cannot overwrite newer configuration. Failed boot-unit setup retains the committed
@@ -172,6 +183,13 @@ HTB with fq/fq_codel egress, ingress policing), and BBR as a switch (`tcp_conges
 A limit under 1 Mbit/s on the uplink or the client-path device is refused. The ingress queue is only
 ever replaced or, at runtime, deleted when it is the plain one; a `clsact` queue (tc-BPF programs) is
 never touched, and a download limit on a device that has one is refused.
+Apply verification reads the exact HTB class/default/leaf and rate/ceil, CAKE bandwidth, and ingress
+matchall/drop policer rate/burst. Detailed policer output supplements iproute2 JSON where its fields
+are absent, with a small allowance for kernel clock quantization. First replacement refuses foreign
+hierarchies/filters unless a supported classless fq_codel baseline can be captured and restored.
+Managed-device reads report `verification` as verified, observed drift or unreadable/unknown; saved
+limits remain desired values when external commands change the kernel. This verifies configured
+objects, not bandwidth or latency under load, and download limiting remains policing.
 
 ## VPN
 
@@ -205,6 +223,8 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
   and status block forwarding shutdown. `SetTailscaleChecked` evaluates withdrawal authorization
   against those same locked preferences before writing; the separate classifier is advisory only.
   External CLI writers are outside this process lock. **Headscale** is read where its binary or container runs.
+  `prefsReadable` explicitly distinguishes failed preference reads from empty advertised routes; the
+  editor retains a rejected subnet draft and retries against refreshed authoritative preferences.
 
 ## DNS
 
@@ -230,15 +250,20 @@ Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` re
 bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
 writes. This is not a DNS server or an AdGuard/Pi-hole configuration adapter.
 
-The lookup comparison sends direct classic DNS packets for A/AAAA/CNAME/MX/TXT/NS/PTR/SRV to the
-configured resolvers, retaining custom ports and IPv6 scope. It bypasses local hosts/NSS answers,
-validates response identity/question/answer ownership and canonical chains and retries truncated UDP over TCP. Fan-out is bounded at sixteen
-and each query at three seconds. CNAME queries return the immediate alias; other types use terminal data in that response, without
-a separate follow-up query for a canonical name. Public presets are included only with explicit `includePublic: true`,
-so no extra public preset is contacted without opt-in. The comparison still asks all configured
-global/per-link/fallback resolvers; it does not follow resolved's split-DNS domain-routing policy, so
-a configured public upstream can receive a private name. The diagnostic does not prove DoT/DoH transport or validate
-DNSSEC signatures; these remain separate resolver settings.
+`POST /dns/lookup` defaults to `mode: "effective"`. With systemd-resolved it asks the actual local
+stub so resolved chooses the split-DNS link/upstream; an unavailable stub fails without falling back
+to configured public resolvers. On a static resolv.conf host it asks that configured chain
+sequentially. The response includes the relevant routing-domain evidence, named comparison targets,
+omissions and limits. It remains a DNS wire query, distinct from local hosts/NSS lookup.
+
+`mode: "compare"` requires explicit configured/preset `destinations` and
+`acknowledgeDisclosure: true`; the UI names those destinations and explains that private names leave
+their normal policy scope. The old `includePublic` fan-out flag no longer authorizes comparison.
+Direct classic DNS supports A/AAAA/CNAME/MX/TXT/NS/PTR/SRV, retaining custom ports and IPv6 scope,
+validating response identity/question/answer ownership/canonical chains and retrying truncated UDP
+over TCP. Fan-out is bounded at sixteen and each query at three seconds. CNAME queries return the
+immediate alias; other types use terminal data in that response without a follow-up query. Neither
+mode claims verified DoT/DoH transport or independent DNSSEC signature validation.
 
 ## Diagnostics and host support
 
@@ -273,8 +298,8 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | --- | --- |
 | Overview | `GET /`, `GET /capabilities`, `GET /overview`, `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`; `GET`/`POST /namespaces`, `DELETE /namespaces/{name}` |
-| Routing | `GET /routing`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
-| Gateway | `GET /gateway`, `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
+| Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
+| Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
 | Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |

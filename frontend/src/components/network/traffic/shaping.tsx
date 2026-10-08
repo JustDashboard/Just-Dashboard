@@ -219,6 +219,16 @@ function DeviceNote({ device, stat }: { device: ShapeDevice; stat: ShapeDevice["
       {facts.length > 0 && (
         <span className="mt-0.5 block text-hint text-muted-foreground">{facts.join(" · ")}</span>
       )}
+      {device.verification && (
+        <span className="mt-0.5 block max-w-96 text-hint font-normal whitespace-normal text-muted-foreground">
+          {device.verification.status === "verified"
+            ? "Kernel shaping matches saved limits"
+            : device.verification.status === "drift"
+              ? "Kernel shaping differs from saved limits"
+              : "Kernel shaping could not be verified"}
+          {device.verification.reason && ` · ${device.verification.reason}`}
+        </span>
+      )}
       {device.guard && (
         <span className="mt-0.5 flex max-w-96 items-start gap-1 text-hint font-normal whitespace-normal text-muted-foreground">
           <Information aria-hidden className="mt-0.5 size-3 shrink-0" />
