@@ -95,9 +95,19 @@ that does something.
   Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its
   image names with an Events view beside them (`container-events.tsx`: the health check's probes,
   Docker's events for the container with crash loops folded and an exit's last lines under it),
-  editable limits, raw inspect, and
-  Update/Duplicate/Rename — the last two behind a statement of consequence when compose owns the
-  container, because the next deploy silently undoes them days later. Its Storage tab leads with the path
+  editable limits, raw inspect, every verb `container-actions.tsx` declares (the lifecycle as words
+  beside the way back; Pause, Update, Copy id and Remove behind its menu) and Rename — behind a
+  statement of consequence when compose owns the container, because the next deploy silently undoes
+  it days later. The page opens on the container's identity line (`container-identity.tsx`: its
+  product with its state in the tile's corner, image, project, ticking uptime, restart policy in
+  words, the id, and the verdict from `container.ts`, which reads a crash loop and a failing health
+  check as failing where Docker says "restarting" and "running"), and its Overview on the failure
+  notice, four live readings off its stats socket with their last hour (`container-readings.tsx`),
+  its findings, a picture of how it is reached and what it keeps (`container-picture.tsx`), the
+  containers of its compose project — or of its own networks — as a live table
+  (`container-company.tsx`), its recent events with loops folded (`container-recent.tsx`), how it
+  runs, and its ports and networks as tables (`container-tables.tsx`, which also draws the
+  Environment tab as a filtered table). Its Storage tab leads with the path
   *inside* the container — the one the application's own configuration names — states the kind of storage
   in words rather than as a Docker noun, and puts where it actually lives beside it, one line per mount with
   the kind at the row's edge (amber for memory, which does not survive a rebuild). Under the mounts, the

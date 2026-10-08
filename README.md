@@ -193,7 +193,9 @@ Create containers from a template, a pasted `docker run` or a form, with the com
 before it runs. Two verdicts: what Docker reports, and what needs attention — exposure, disk,
 memory limits, security posture — each with an explanation and, where possible, a button.
 Stacks deploy, rebuild and roll back with the compose diff shown first.
-Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
+A container's page opens on whether it works — a crash loop or a failing health check is said as
+one — its live readings, a picture of how it is reached and what it keeps, and the rest of its
+compose project as a live table beside it. Each container's Usage tab combines live CPU, memory, network and block I/O readings with recorded
 history. Inspect per-interface transfer rates, totals, packet errors and drops, memory cache and CPU
 throttling; unavailable readings stay distinct from zero activity.
 

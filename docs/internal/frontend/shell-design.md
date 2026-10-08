@@ -291,10 +291,11 @@ layout. [`design-system.md`](design-system.md) states the rules in full; this is
   **stream, a terminal, or an editor** is not that. You stay in it for minutes, the list behind it is
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
   destination with a breadcrumb back: `PageContext` with the parent as an `eyebrow` link and the
-  verbs in `actions`, then the resource name and state among the page's facts — a `MetricStrip` on
-  a container's and a stack's page. The run page (`deploy/run-page.tsx`) goes one step further:
-  since 2026-10-05 it opens on the header its project's pages open on (`run-header.tsx`, the
-  project's tile, the commit, the run's state and how long it took, one line of provenance),
+  verbs in `actions`, then the resource name and state among the page's facts — an identity line
+  (`HostIdentity`) on a container's page and a `MetricStrip` on a stack's. The run page
+  (`deploy/run-page.tsx`) goes one step further: since 2026-10-05 it opens on the header its
+  project's pages open on (`run-header.tsx`, the project's tile, the commit, the run's state and how
+  long it took, one line of provenance),
   because a run is one of the project's Deployments, and that header is the first thing on the
   page — its verbs sit at its far end beside the run's state, and the way back is the rail's panel
   and the menu's Open project rather than an eyebrow. (From 2026-09-24 it opened on the
