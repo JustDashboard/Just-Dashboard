@@ -41,7 +41,9 @@ insertion fails causes rollback, including IPv6. The gateway verifies all requir
 before it reports a successful apply.
 
 `Service.RepairGatewayAdmission` reasserts only the fixed connection-mark/comment rules and verifies
-them afterwards, under the network mutation lock and current gateway compatibility guard. It does
+them afterwards, under the network mutation mutex, independent recovery file lock and current
+gateway compatibility guard. An unresolved pending or degraded journal refuses a repair before
+any host command runs, so reconciliation cannot race the independent helper. It does
 not replace a table or foreign chain policy. The API route must use the existing destructive
 capability, mutation budget and audit wrapper. Boot restoration uses the generated service's existing
 admission commands; a runtime repair does not replace ownership or boot recovery.

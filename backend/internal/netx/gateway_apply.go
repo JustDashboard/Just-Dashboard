@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -1221,6 +1222,18 @@ func admissionFailure(a AdmissionState) string {
 func (s *Service) RepairGatewayAdmission(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := lockChange(s.paths.Dir)
+	if err != nil {
+		return err
+	}
+	defer unlockChange(lock)
+	if prior, err := readChange(s.paths.Dir); err == nil {
+		if !changeTerminal(prior.Phase) {
+			return &ReadOnlyError{Reason: "An earlier network change needs confirmation or recovery before admission can be repaired."}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	sp, err := s.loadSpec()
 	if err != nil {
 		return err

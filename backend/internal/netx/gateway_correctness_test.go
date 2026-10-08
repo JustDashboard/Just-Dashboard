@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestGatewayCapabilityRetainsExplicitDropsAndUnknownPolicyLayers(t *testing.T) {
@@ -137,6 +138,60 @@ func TestActiveIPv6AdmissionFailureRollsBackInsteadOfClaimingSuccess(t *testing.
 	}
 	if h.saved() {
 		t.Fatal("failed IPv6 admission was persisted")
+	}
+}
+
+func TestAdmissionRepairRefusesUnresolvedJournalBeforeHostCommands(t *testing.T) {
+	for _, phase := range []string{"prepared", "runtime_applied", "persisted", "awaiting_confirmation", "recovering", "degraded"} {
+		t.Run(phase, func(t *testing.T) {
+			h := newGwHost(t)
+			h.seed(t, dualStackAdmissionSpec())
+			j := &changeJournal{Paths: h.paths, ChangeStatus: ChangeStatus{ID: "pending", Phase: phase, Generation: strings.Repeat("a", 64)}}
+			if err := j.save(); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.RepairGatewayAdmission(context.Background()); !errors.Is(err, ErrReadOnly) {
+				t.Fatalf("repair during %s = %v", phase, err)
+			}
+			if commands := h.rec.commands(); len(commands) != 0 {
+				t.Fatalf("unresolved journal allowed kernel work: %v", commands)
+			}
+		})
+	}
+}
+
+func TestAdmissionRepairWaitsForIndependentRecoveryLock(t *testing.T) {
+	r := record(t)
+	s := testService(t)
+	lock, err := lockChange(s.paths.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlocked := false
+	defer func() {
+		if !unlocked {
+			unlockChange(lock)
+		}
+	}()
+	done := make(chan error, 1)
+	go func() { done <- s.RepairGatewayAdmission(context.Background()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("repair passed an independent process lock: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if commands := r.commands(); len(commands) != 0 {
+		t.Fatalf("kernel commands ran while recovery owned the lock: %v", commands)
+	}
+	unlockChange(lock)
+	unlocked = true
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("repair did not resume after releasing the independent lock")
 	}
 }
 
