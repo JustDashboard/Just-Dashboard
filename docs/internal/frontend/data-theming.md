@@ -8,6 +8,11 @@ backend route checks remain authoritative. VPN peer reads are disabled for a rea
 administrator capability. Interface sheets are keyed by device, and address/MTU drafts clear only
 after a successful write. Their bridge selector reaches the existing guarded membership route, and
 the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
+The route form exposes an optional preferred source and shows returned sources in the existing
+table. Policy rules include an outgoing-interface selector and validated note. Resolver fallback
+servers and cache modes are editable through the existing confirmed apply; managed values are
+preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
+custom ports, interface scopes and TLS names.
 
 Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
 submitting. VXLAN creation likewise rejects invalid UDP ports instead of choosing the default.

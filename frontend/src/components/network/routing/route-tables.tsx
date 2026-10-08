@@ -130,7 +130,14 @@ export function RouteTable({
                       <span className="text-muted-foreground">on-link</span>
                     ))}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{route.device ?? "—"}</TableCell>
+                <TableCell className="font-mono text-xs">
+                  {route.device ?? "—"}
+                  {route.source && (
+                    <div className="mt-1 text-hint text-muted-foreground">
+                      source {route.source}
+                    </div>
+                  )}
+                </TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5 text-xs">
                     {OWNER_PRODUCT[route.owner] && (

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
-import { overrides as dnsOverrides, mockNetworkWrites } from "./network-dns-fixture"
+import { dnsViewManaged, overrides as dnsOverrides, mockNetworkWrites } from "./network-dns-fixture"
 import { gateway, overrides as gatewayOverrides } from "./network-gateway-fixture"
 
 const overrides = {
@@ -177,6 +177,51 @@ test("IPv6 policy rules carry the selected family to the backend", async ({ page
     .toMatchObject({ family: "inet6", from: "2001:db8::/64", table: 100 })
 })
 
+test("static routes send a validated preferred source and show returned sources", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockNetwork(page, mutations)
+  await page.goto("/network/routing")
+  await expect(page.getByText("source 10.0.0.1", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Add route", exact: true }).first().click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Destination", { exact: true }).fill("2001:db8:60::/64")
+  await dialog.getByLabel("Via", { exact: true }).fill("2001:db8::2")
+  await dialog.getByLabel("Preferred source", { exact: true }).fill("192.0.2.1")
+  await expect(dialog.getByRole("button", { name: "Add route", exact: true })).toBeDisabled()
+  await dialog.getByLabel("Preferred source", { exact: true }).fill(" 2001:db8::1 ")
+  await dialog.getByRole("button", { name: "Add route", exact: true }).click()
+  await expect
+    .poll(() => mutations.at(-1)?.body)
+    .toMatchObject({
+      destination: "2001:db8:60::/64",
+      gateway: "2001:db8::2",
+      source: "2001:db8::1",
+    })
+})
+
+test("an outgoing-interface policy rule sends its selector and note", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockNetwork(page, mutations)
+  await page.goto("/network/routing")
+  await page.getByRole("button", { name: "Add rule", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Leaving on", { exact: true }).click()
+  await page.getByRole("option", { name: "jd-lab", exact: true }).click()
+  await dialog.getByLabel("Table", { exact: true }).fill("100")
+  await dialog.getByLabel("Note", { exact: true }).fill("  Local lab replies  ")
+  await dialog.getByRole("button", { name: "Add rule", exact: true }).click()
+  await expect
+    .poll(() => mutations.at(-1)?.body)
+    .toMatchObject({
+      family: "inet",
+      oif: "jd-lab",
+      table: 100,
+      comment: "Local lab replies",
+    })
+})
+
 test("IPv6 GRE creation reaches the existing endpoint with IPv6 ends", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockNetwork(page, mutations)
@@ -245,6 +290,55 @@ test("private DNS verification names accompany upstream changes", async ({ page 
   await expect
     .poll(() => mutations.find((entry) => entry.path === "/network/dns/")?.body)
     .toMatchObject({ verificationName: "nas.home.arpa" })
+})
+
+test("DNS fallback endpoints and cache policy reach the confirmed resolver apply", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockNetwork(page, mutations, { overrides })
+  await mockNetworkWrites(page, mutations)
+  await page.goto("/network/dns")
+  await page.getByLabel("Fallback servers", { exact: true }).fill("192.0.2.53")
+  await page.getByRole("button", { name: "DNS over TLS required", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Apply", exact: true })).toBeDisabled()
+  await page
+    .getByLabel("Fallback servers", { exact: true })
+    .fill("[fe80::53%ens3]:5353#resolver.home.arpa\n192.0.2.53#resolver.home.arpa")
+  await page.getByLabel("Cache mode", { exact: true }).click()
+  await page.getByRole("option", { name: "Positive answers only", exact: true }).click()
+  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  expect(mutations).toEqual([])
+  await page.getByRole("dialog").getByRole("button", { name: "Apply", exact: true }).click()
+  await expect
+    .poll(() => mutations.at(-1)?.body)
+    .toMatchObject({
+      fallback: ["[fe80::53%ens3]:5353#resolver.home.arpa", "192.0.2.53#resolver.home.arpa"],
+      cache: "no-negative",
+      dnsOverTLS: "yes",
+    })
+})
+
+test("unrelated resolver changes preserve managed fallback and cache choices", async ({ page }) => {
+  const mutations: Mutation[] = []
+  const fallback = ["192.0.2.53#resolver.home.arpa"]
+  await mockNetwork(page, mutations, {
+    overrides: {
+      ...overrides,
+      "/network/dns/": {
+        ...dnsViewManaged,
+        managed: { ...dnsViewManaged.managed, fallback, cache: "no" },
+      },
+    },
+  })
+  await mockNetworkWrites(page, mutations)
+  await page.goto("/network/dns")
+  await expect(page.getByLabel("Fallback servers", { exact: true })).toHaveValue(fallback[0])
+  await expect(page.getByLabel("Cache mode", { exact: true })).toHaveText("Disabled")
+  await page.getByLabel("Domains", { exact: true }).fill("~home.arpa")
+  await page.getByRole("button", { name: "Apply", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "Apply", exact: true }).click()
+  await expect.poll(() => mutations.at(-1)?.body).toMatchObject({ fallback, cache: "no" })
 })
 
 test("failed polling marks retained gateway readings until a fresh read succeeds", async ({
