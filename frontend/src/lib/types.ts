@@ -630,6 +630,36 @@ export type DockerNetwork = {
    * was structurally zero on every host until this was joined in.
    */
   usedBy: string[]
+  /** The host device a bridge network is carried on: `docker0`, `br-1a2b3c4d5e6f`. */
+  bridge?: string
+  /** The host's own address on it, which its containers route through. */
+  gateway?: string
+  /**
+   * Each attached container's address, from the same listing as `usedBy`. The
+   * listing has no aliases; a network's own inspect (`members`) does.
+   */
+  endpoints?: NetworkEndpoint[]
+}
+
+export type NetworkEndpoint = {
+  container: string
+  name: string
+  /** With its prefix, as Docker writes it: `172.18.0.4/16`. Absent while stopped. */
+  ipv4?: string
+  ipv6?: string
+  mac?: string
+}
+
+/**
+ * The part of `docker info` the Networks page reads, in the daemon's own field
+ * names: the engine, and the pools new networks are carved from. Docker
+ * reports no pools unless `default-address-pools` is set, and then allocates
+ * from its built-in ones.
+ */
+export type DockerNetworkingInfo = {
+  Name?: string
+  ServerVersion?: string
+  DefaultAddressPools?: { Base: string; Size: number }[] | null
 }
 
 export type ComposeService = {
@@ -863,6 +893,8 @@ export type DockerEvent = {
   exitCode?: string
   /** The compose service: what a stack's log names the container by (`db`, not `shop-db-1`). */
   service?: string
+  /** The container a network's connect or disconnect moved, by id. */
+  container?: string
   /**
    * The dashboard's own labels off the object this happened to, with the
    * `io.just-dashboard.` prefix stripped — `environment-id`, `release-id`,
@@ -968,7 +1000,6 @@ export type NetworkMember = {
 }
 
 export type NetworkDetail = DockerNetwork & {
-  gateway?: string
   options?: Record<string, string>
   members: NetworkMember[]
   system: boolean
