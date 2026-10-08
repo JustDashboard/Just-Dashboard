@@ -32,6 +32,9 @@ page and diagnostic, fixed findings, competitor research and actual compatibilit
   (`OperatorAddress`, `operator.go`: an sshd process holding a loopback-to-loopback connection and
   one from elsewhere on a listening port), so an `ssh -L` browser is guarded as the address it
   really comes from. Guards answer `409 would_lock_you_out` with the sentence saying why.
+  Path equality compares local/device/gateway and deliberately permits a changed source address;
+  source-selected routing checks add coverage but do not prove application reachability or provide
+  a timed reconnect-confirmation watchdog.
 - **Only what was made here is removed.** Docker's bridges and veths, Tailscale's device, table 52 and
   rules, the provider's DHCP routes, the kernel's own routes and its fallback tunnel devices (`gre0`,
   `ip6tnl0`, …) are read and named with their owner and excluded from destructive ownership operations.
@@ -124,6 +127,8 @@ connections), `nat_pre` (each port forward: `fib daddr type local`, so a connect
 another host's same port is not captured, then `ct mark set` and `dnat`) and `nat_post` (masquerade or
 SNAT per NAT entry, and per forward whose source NAT resolves to masquerade). Every rule carries a
 comment its counters are read back by; the capability and counter reads use `nft -t -j`.
+Packet-rate limits match new-flow packets and can be global or per source; concurrent-connection
+ceilings are always keyed by source address. Established traffic returns before these limits.
 
 **A port forward admits its own traffic.** One table's `accept` cannot override another's `drop`, and
 ufw and Docker drop forwarded traffic by default, so translated connections carry the mark

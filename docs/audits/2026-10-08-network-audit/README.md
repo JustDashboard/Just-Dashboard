@@ -37,8 +37,9 @@ inspection, integrations and missing functionality. No claim of universal VPS or
 - Default-route uplink and operator-path labels; bridge/bond membership and virtual-link parents.
 - Container/veth correlation using Docker init PIDs and `iflink`; Docker network/bridge ownership.
 - Create bridge, VLAN, VXLAN, GRE, GRETAP, IP6GRE, IP6GRETAP, dummy, macvlan and veth devices.
-- Bridge STP; VLAN ID and parent; VXLAN VNI, parent, local/remote or multicast group and UDP port;
-  GRE-family local/remote endpoint (key/TTL are API-only); macvlan parent and mode; veth peer and managed namespace.
+- Bridge STP; VLAN ID and parent; VXLAN VNI, parent, local/remote endpoints and UDP port (multicast
+  group is API-only); GRE-family local/remote endpoint (key/TTL are API-only); macvlan parent and mode;
+  veth peer and managed namespace.
 - Optional initial MTU and address in the creation form, which starts devices up. The API accepts
   multiple initial addresses and an explicit admin-up state. Standalone veth creation is API-only;
   the UI creates veth connections through the namespace form.
@@ -100,8 +101,8 @@ inspection, integrations and missing functionality. No claim of universal VPS or
 
 ### Protection — `/network/protection`
 
-- Per-port TCP/UDP rate limits and maximum concurrent connections, globally or per source, with
-  rate interval, burst, drop/reject action and enabled state.
+- Per-port TCP/UDP new-flow packet-rate limits, globally or per source, and per-source maximum
+  concurrent connections, with rate interval, burst, drop/reject action and enabled state.
 - Forwarded-flow limits apply to translated traffic, rather than every transit packet.
 - Manual IP/CIDR blocklists; country IPv4/IPv6 lists; Spamhaus DROP, FireHOL level 1 and custom HTTPS feeds.
 - Refresh on demand and daily; show entries, status/errors, fetch time and drop counters.
@@ -199,7 +200,8 @@ inspection, integrations and missing functionality. No claim of universal VPS or
 
 ### Connections — `/network/connections`
 
-- Group active sockets by remote peer, with local destinations, protocol/state and socket counts.
+- Group TCP and connected UDP sockets by remote peer, with local ports, processes and socket/
+  established counts. The peer summary does not retain protocol, remote ports or individual states.
 - Address/network origin labels and connection topology.
 - Search/filter and handoff a selected address to a diagnostic without automatically running a probe.
 

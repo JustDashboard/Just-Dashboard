@@ -74,6 +74,10 @@ strategy, and feature ownership behind those rules.
 
 ## Contributor reference
 
+- [`../audits/2026-10-08-network-capability-report/README.md`](../audits/2026-10-08-network-capability-report/README.md)
+  — scored networking feature map, current implementation gaps, official competitor research and
+  prioritized proposals from single-host recovery through an optional future network fabric.
+
 - [`../audits/2026-10-08-network-audit/README.md`](../audits/2026-10-08-network-audit/README.md)
   — complete networking UI/API inventory, fixed findings, competitor research and compatibility limits.
 
