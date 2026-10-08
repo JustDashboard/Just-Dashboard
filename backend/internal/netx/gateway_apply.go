@@ -100,10 +100,14 @@ func gatewayEmpty(sp *Spec) bool {
 // describes. Best effort, because it runs on the way out of a failure.
 func (s *Service) restoreGateway(ctx context.Context, sp *Spec) {
 	if gatewayEmpty(sp) {
-		_, _ = run(ctx, "nft", "delete", "table", "inet", gatewayTable) // absent table is the state being restored to
+		_, err := run(ctx, "nft", "delete", "table", "inet", gatewayTable)
+		if err != nil && !isGone(err) {
+			recordRecoveryError(ctx, err)
+		}
 		return
 	}
 	if err := s.loadGateway(ctx, sp); err != nil {
+		recordRecoveryError(ctx, err)
 		s.log.Error("restoring the gateway ruleset after a failed change", "err", err)
 	}
 }
@@ -176,25 +180,30 @@ func (s *Service) gatewayStep(old, next *Spec) step {
 	return s.gatewayStepWithRules(old, next, "")
 }
 
-func (s *Service) gatewayStepWithRules(old, next *Spec, previous string) step {
+func (s *Service) gatewayStepWithRules(old, next *Spec, previous string, candidate ...string) step {
 	restore := func(ctx context.Context) {
 		if previous == "" || gatewayEmpty(old) {
 			s.restoreGateway(ctx, old)
 			return
 		}
 		if err := s.loadGatewayRules(ctx, previous); err != nil {
+			recordRecoveryError(ctx, err)
 			s.log.Error("restoring the gateway ruleset after a failed change", "err", err)
 		}
 	}
 	return step{
 		apply: func(ctx context.Context) error {
-			if err := s.loadGateway(ctx, next); err != nil {
+			load := func() error { return s.loadGateway(ctx, next) }
+			if len(candidate) > 0 {
+				load = func() error { return s.loadGatewayRules(ctx, candidate[0]) }
+			}
+			if err := load(); err != nil {
 				return err
 			}
 			if err := s.syncAdmission(ctx, next, old); err != nil {
 				rollback(ctx, func(recovery context.Context) {
 					restore(recovery)
-					_ = s.syncAdmission(recovery, old, next) // returning to the state before; the error being reported is the first
+					recordRecoveryError(recovery, s.syncAdmission(recovery, old, next))
 				})
 				return err
 			}
@@ -202,7 +211,7 @@ func (s *Service) gatewayStepWithRules(old, next *Spec, previous string) step {
 		},
 		undo: func(ctx context.Context) {
 			restore(ctx)
-			_ = s.syncAdmission(ctx, old, next) // as above: best effort on the way out
+			recordRecoveryError(ctx, s.syncAdmission(ctx, old, next))
 		},
 		verify: func(ctx context.Context) error {
 			if _, err := run(ctx, "nft", "list", "set", "inet", gatewayTable, "trusted4"); err != nil {
@@ -232,6 +241,33 @@ func (s *Service) mutateGateway(ctx context.Context, edit func(old, next *Spec) 
 // rules before an edit can replace a feed file, so restoring the old spec
 // cannot accidentally reload the failed candidate's networks.
 func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, next *Spec) (bool, error), undoEdit func()) (err error) {
+	return s.mutateGatewayCandidate(ctx, edit, undoEdit, nil)
+}
+
+type gatewayCacheChange struct {
+	before recoverySnapshot
+	nets   []netip.Prefix
+}
+
+func (s *Service) mutateGatewayWithCache(ctx context.Context, edit func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error)) error {
+	var changes []gatewayCacheChange
+	return s.mutateGatewayCandidate(ctx, func(old, next *Spec) (bool, error) {
+		return edit(old, next, func(id int, nets []netip.Prefix) error {
+			path := blocklistFile(filepath.Join(s.paths.Dir, "lists"), id)
+			if err := validateRecoveryBlocklistPath(s.paths.Dir, path); err != nil {
+				return err
+			}
+			previous, err := saveNetworkFile(path)
+			if err != nil {
+				return fmt.Errorf("reading the blocklist cache before replacement: %w", err)
+			}
+			changes = append(changes, gatewayCacheChange{before: recoverySnapshot{Path: path, Data: previous.data, Mode: previous.perm, Exists: previous.exists}, nets: nets})
+			return nil
+		})
+	}, nil, &changes)
+}
+
+func (s *Service) mutateGatewayCandidate(ctx context.Context, edit func(old, next *Spec) (bool, error), undoEdit func(), cacheChanges *[]gatewayCacheChange) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer func() {
@@ -273,7 +309,52 @@ func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, 
 	if err := s.resolveAutoNAT(ctx, next); err != nil {
 		return err
 	}
-	return s.commit(ctx, next, s.gatewayStepWithRules(old, next, previous))
+	if cacheChanges == nil || len(*cacheChanges) == 0 {
+		return s.commit(ctx, next, s.gatewayStepWithRules(old, next, previous))
+	}
+	candidates := map[int][]netip.Prefix{}
+	for _, change := range *cacheChanges {
+		id, parseErr := strconv.Atoi(strings.TrimSuffix(filepath.Base(change.before.Path), ".txt"))
+		if parseErr != nil {
+			return parseErr
+		}
+		candidates[id] = change.nets
+	}
+	rules, err := renderGatewayCandidate(next, s.trustedFor(next), candidates)
+	if err != nil {
+		return err
+	}
+	st := s.gatewayStepWithRules(old, next, previous, rules)
+	st.gatewayRules = &rules
+	for _, change := range *cacheChanges {
+		st.recoveryFiles = append(st.recoveryFiles, change.before)
+	}
+	apply, undo := st.apply, st.undo
+	var wrote []recoverySnapshot
+	restoreCaches := func(ctx context.Context) {
+		for i := len(wrote) - 1; i >= 0; i-- {
+			f := wrote[i]
+			recordRecoveryError(ctx, (savedNetworkFile{data: f.Data, perm: f.Mode, exists: f.Exists}).restore(f.Path))
+		}
+	}
+	st.apply = func(ctx context.Context) error {
+		for _, change := range *cacheChanges {
+			// Rename may have succeeded even when the writer reports a later
+			// fsync error. Every attempted replacement needs its snapshot.
+			wrote = append(wrote, change.before)
+			if err := writeNetworkFile(change.before.Path, blocklistCacheBytes(change.nets), 0o644); err != nil {
+				rollback(ctx, restoreCaches)
+				return fmt.Errorf("saving the fetched list: %w", err)
+			}
+		}
+		if err := apply(ctx); err != nil {
+			rollback(ctx, restoreCaches)
+			return err
+		}
+		return nil
+	}
+	st.undo = func(ctx context.Context) { undo(ctx); restoreCaches(ctx) }
+	return s.commit(ctx, next, st)
 }
 
 // checkNewForwarding refuses an entry that starts carrying traffic through

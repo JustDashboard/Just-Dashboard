@@ -256,12 +256,16 @@ func fetchList(ctx context.Context, kind string, countries []string, url string)
 
 // writeBlocklistCache stores a fetched list, one network per line.
 func writeBlocklistCache(dir string, id int, nets []netip.Prefix) error {
+	return writeFileAtomic(blocklistFile(dir, id), blocklistCacheBytes(nets), 0o644)
+}
+
+func blocklistCacheBytes(nets []netip.Prefix) []byte {
 	var b bytes.Buffer
 	for _, p := range nets {
 		b.WriteString(p.String())
 		b.WriteByte('\n')
 	}
-	return writeFileAtomic(blocklistFile(dir, id), b.Bytes(), 0o644)
+	return b.Bytes()
 }
 
 // BlocklistRequest is the body of a list's create and update.
@@ -394,22 +398,16 @@ func (s *Service) AddBlocklist(ctx context.Context, req BlocklistRequest, client
 		}
 		bl.Count, bl.Refreshed = len(fetched), time.Now().UTC()
 	}
-	var wrote int
-	err = s.mutateGatewayWithRollback(ctx, func(old, next *Spec) (bool, error) {
+	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
 		s.trustClient(next, client)
 		bl.ID, bl.Made = next.takeID(), gwStamp(actor)
 		if fetched != nil {
-			if err := writeBlocklistCache(filepath.Join(s.paths.Dir, "lists"), bl.ID, fetched); err != nil {
+			if err := stage(bl.ID, fetched); err != nil {
 				return false, fmt.Errorf("saving the list: %w", err)
 			}
-			wrote = bl.ID
 		}
 		next.Blocklists = append(next.Blocklists, bl)
 		return false, nil
-	}, func() {
-		if wrote != 0 {
-			_ = os.Remove(blocklistFile(filepath.Join(s.paths.Dir, "lists"), wrote)) // the list was never saved
-		}
 	})
 	if err != nil {
 		return BlocklistView{}, err
@@ -445,10 +443,7 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 			return BlocklistView{}, err
 		}
 	}
-	dir := filepath.Join(s.paths.Dir, "lists")
-	var prev []byte
-	var cached bool
-	err = s.mutateGatewayWithRollback(ctx, func(old, next *Spec) (bool, error) {
+	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
 		s.trustClient(next, client)
 		for i := range next.Blocklists {
 			bl := &next.Blocklists[i]
@@ -468,50 +463,20 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 			default:
 				bl.Countries, bl.URL = upd.Countries, upd.URL
 				if fetched != nil {
-					var err error
-					prev, err = readCacheForEdit(dir, id)
-					if err != nil {
-						return false, err
-					}
-					if err := writeBlocklistCache(dir, id, fetched); err != nil {
+					if err := stage(id, fetched); err != nil {
 						return false, fmt.Errorf("saving the list: %w", err)
 					}
-					cached = true
 					bl.Count, bl.Refreshed, bl.Error = len(fetched), time.Now().UTC(), ""
 				}
 			}
 			return false, nil
 		}
 		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
-	}, func() {
-		if cached {
-			restoreCache(dir, id, prev)
-		}
 	})
 	if err != nil {
 		return BlocklistView{}, err
 	}
 	return s.blocklistViewByID(ctx, id, client)
-}
-
-// restoreCache puts a list's previous cache back after a failed change.
-func restoreCache(dir string, id int, prev []byte) {
-	if prev == nil {
-		_ = os.Remove(blocklistFile(dir, id)) // there was no cache before
-		return
-	}
-	_ = writeFileAtomic(blocklistFile(dir, id), prev, 0o644) // best effort on the way out of a failure
-}
-
-func readCacheForEdit(dir string, id int) ([]byte, error) {
-	b, err := os.ReadFile(blocklistFile(dir, id))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading the previous list before replacing it: %w", err)
-	}
-	return b, nil
 }
 
 func sameStrings(a, b []string) bool {
@@ -571,10 +536,7 @@ func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
 		s.recordBlocklistError(ctx, id, err)
 		return err
 	}
-	dir := filepath.Join(s.paths.Dir, "lists")
-	var prev []byte
-	var cached bool
-	err = s.mutateGatewayWithRollback(ctx, func(old, next *Spec) (bool, error) {
+	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
 		for i := range next.Blocklists {
 			bl := &next.Blocklists[i]
 			if bl.ID != id {
@@ -583,23 +545,13 @@ func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
 			if bl.Kind != kind || bl.URL != url || !sameStrings(bl.Countries, countries) {
 				return false, errors.New("the blocklist changed while it was being fetched; refresh it again")
 			}
-			var err error
-			prev, err = readCacheForEdit(dir, id)
-			if err != nil {
-				return false, err
-			}
-			if err := writeBlocklistCache(dir, id, fetched); err != nil {
+			if err := stage(id, fetched); err != nil {
 				return false, fmt.Errorf("saving the list: %w", err)
 			}
-			cached = true
 			bl.Count, bl.Refreshed, bl.Error = len(fetched), time.Now().UTC(), ""
 			return false, nil
 		}
 		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
-	}, func() {
-		if cached {
-			restoreCache(dir, id, prev)
-		}
 	})
 	if err != nil {
 		s.recordBlocklistError(ctx, id, err)
@@ -613,6 +565,15 @@ func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
 func (s *Service) recordBlocklistError(ctx context.Context, id int, cause error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := lockChange(s.paths.Dir)
+	if err != nil {
+		s.log.Error("locking blocklist failure metadata", "list", id, "err", err)
+		return
+	}
+	defer unlockChange(lock)
+	if pending, readErr := readChange(s.paths.Dir); readErr == nil && !changeTerminal(pending.Phase) {
+		return
+	}
 	sp, err := s.loadSpec()
 	if err != nil {
 		return

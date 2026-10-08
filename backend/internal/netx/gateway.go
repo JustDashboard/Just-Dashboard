@@ -199,9 +199,17 @@ func forgetBlocklist(dir string, id int) {
 // never fails on a host where it does not exist yet), deleted, and defined
 // again whole.
 func renderGateway(sp *Spec, trusted []netip.Prefix) (string, error) {
+	return renderGatewayCandidate(sp, trusted, nil)
+}
+
+func renderGatewayCandidate(sp *Spec, trusted []netip.Prefix, candidate map[int][]netip.Prefix) (string, error) {
 	lists := map[int][]netip.Prefix{}
 	for _, bl := range sp.Blocklists {
 		if !bl.Enabled {
+			continue
+		}
+		if nets, ok := candidate[bl.ID]; ok {
+			lists[bl.ID] = nets
 			continue
 		}
 		nets, health := blocklistData(gatewayListDir, bl)

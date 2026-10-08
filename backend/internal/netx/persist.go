@@ -32,9 +32,19 @@ type rendered map[string][]byte
 // bytes, which is what the golden tests pin and what lets commit write only
 // the files a change actually touched.
 func (s *Service) renderAll(sp *Spec) (rendered, error) {
-	gateway, err := renderGateway(sp, s.trustedFor(sp))
-	if err != nil {
-		return nil, err
+	return s.renderAllWithGateway(sp, nil)
+}
+
+func (s *Service) renderAllWithGateway(sp *Spec, candidate *string) (rendered, error) {
+	var gateway string
+	if candidate != nil {
+		gateway = *candidate
+	} else {
+		var err error
+		gateway, err = renderGateway(sp, s.trustedFor(sp))
+		if err != nil {
+			return nil, err
+		}
 	}
 	out := rendered{
 		filepath.Join(s.paths.Dir, linksFile):   []byte(renderLinks(sp)),
@@ -111,6 +121,9 @@ type step struct {
 	// recovery carries observed state that cannot be reconstructed from the
 	// previous managed spec, such as an interface's original default MTU.
 	recovery []recoveryCommand
+	// Fetched cache replacements are staged until the journal is durable.
+	recoveryFiles []recoverySnapshot
+	gatewayRules  *string
 }
 
 // commit makes a change the proxy editor's way: render the new spec and check
@@ -124,7 +137,7 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 		return err
 	}
 	defer unlockChange(lock)
-	files, err := s.renderAll(sp)
+	files, err := s.renderAllWithGateway(sp, st.gatewayRules)
 	if err != nil {
 		return err
 	}
@@ -164,7 +177,7 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 	if _, changed := previous[s.specPath()]; changed {
 		paths = append(paths, s.specPath())
 	}
-	journal, err := s.prepareChange(ctx, sp, paths, previous, files[s.specPath()], st.recovery)
+	journal, err := s.prepareChange(ctx, sp, paths, previous, files[s.specPath()], st.recovery, st.recoveryFiles)
 	if err != nil {
 		return err
 	}
@@ -215,12 +228,14 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 		if path == s.specPath() {
 			perm = 0o600
 		}
+		// A rename can reach the filesystem before a later fsync reports
+		// failure. Include the attempted path even when the writer fails.
+		written = append(written, path)
 		if err := writeNetworkFile(path, files[path], perm); err != nil {
 			// Restoring only the kernel would leave the next boot applying the
 			// failed candidate. Restore the complete file set before undoing it.
 			return finishRecovery(fmt.Errorf("writing %s: %w", path, err), written, true)
 		}
-		written = append(written, path)
 	}
 	journal.Phase, journal.Persistence = "persisted", "written"
 	if err := journal.save(); err != nil {

@@ -306,7 +306,8 @@ func writeSysctls(ctx context.Context, keys []string, want, prev map[string]stri
 
 func restoreSysctls(ctx context.Context, keys []string, prev map[string]string) {
 	for _, k := range keys {
-		_, _ = run(ctx, "sysctl", "-w", k+"="+prev[k]) // returning to the earlier value on the way out of a failure
+		_, err := run(ctx, "sysctl", "-w", k+"="+prev[k])
+		recordRecoveryError(ctx, err)
 	}
 }
 

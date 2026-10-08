@@ -167,8 +167,61 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 			add("nft", []string{"-f", filepath.Join(s.paths.Dir, gatewayFile)}, false, false)
 		}
 		if needsAdmission(old) || needsAdmission(next) {
-			for _, cmd := range admissionCommands(needsAdmission(old)) {
-				add(cmd[0], cmd[1:], cmd[1] == "-D", false)
+			admission, err := snapshotAdmissionRecovery(ctx, old, next)
+			if err != nil {
+				return nil, err
+			}
+			commands = append(commands, admission...)
+		}
+	}
+	return commands, nil
+}
+
+// Only chains actually present in the affected families participate in
+// recovery. A host with no IPv6 filtering or Docker has nothing to restore
+// there. Positions/counts retain the exact pre-change owned-rule presence.
+func snapshotAdmissionRecovery(ctx context.Context, old, next *Spec) ([]recoveryCommand, error) {
+	families := admissionFamilies(old)
+	for family := range admissionFamilies(next) {
+		families[family] = true
+	}
+	var commands []recoveryCommand
+	for _, tool := range []string{"iptables", "ip6tables"} {
+		family := "inet"
+		if tool == "ip6tables" {
+			family = "inet6"
+		}
+		if !families[family] {
+			continue
+		}
+		for _, chain := range admissionChains {
+			listing, err := run(ctx, tool, "-S", chain)
+			if err != nil {
+				state := inspectAdmissionChain(ctx, tool, chain, family, true)
+				if state.Status == "unsupported" && !state.Needed {
+					continue
+				}
+				return nil, fmt.Errorf("reading original admission in %s/%s for recovery: %s", family, chain, state.Reason)
+			}
+			var positions []int
+			position := 0
+			for _, line := range strings.Split(listing, "\n") {
+				if !strings.HasPrefix(line, "-A "+chain+" ") {
+					continue
+				}
+				position++
+				if strings.ReplaceAll(line, "\"", "") == strings.Join(append([]string{"-A", chain}, admissionRule()...), " ") {
+					positions = append(positions, position)
+				}
+			}
+			if len(positions) >= admissionDeleteCap {
+				return nil, fmt.Errorf("%s/%s has too many duplicate owned admission rules for bounded recovery", family, chain)
+			}
+			for i := 0; i < admissionDeleteCap; i++ {
+				commands = append(commands, recoveryCommand{Tool: tool, Args: append([]string{"-D", chain}, admissionRule()...), AllowGone: true})
+			}
+			for _, pos := range positions {
+				commands = append(commands, recoveryCommand{Tool: tool, Args: append([]string{"-I", chain, strconv.Itoa(pos)}, admissionRule()...)})
 			}
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 
 const recoveryFile = "change.json"
 const recoveryBinary = "network-recovery"
+const maxRecoveryJournalBytes = 32 << 20
 
 type recoveryErrorsKey struct{}
 
@@ -139,8 +141,11 @@ func readChange(dir string) (*changeJournal, error) {
 	if !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
 		return nil, fmt.Errorf("the network recovery journal must be a private regular file")
 	}
+	if info.Size() > maxRecoveryJournalBytes {
+		return nil, errors.New("the network recovery journal exceeds its size limit")
+	}
 	var j changeJournal
-	dec := json.NewDecoder(io.LimitReader(f, 32<<20))
+	dec := json.NewDecoder(io.LimitReader(f, maxRecoveryJournalBytes+1))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&j); err != nil {
 		return nil, fmt.Errorf("reading the network recovery journal: %w", err)
@@ -160,6 +165,9 @@ func (j *changeJournal) save() error {
 	if err != nil {
 		return err
 	}
+	if len(b)+1 > maxRecoveryJournalBytes {
+		return fmt.Errorf("the network recovery snapshot exceeds its %d MB limit; nothing further can be applied safely", maxRecoveryJournalBytes>>20)
+	}
 	return writeFileAtomic(filepath.Join(j.Paths.Dir, recoveryFile), append(b, '\n'), 0o600)
 }
 
@@ -167,7 +175,7 @@ func changeTerminal(phase string) bool {
 	return phase == "saved" || phase == "confirmed" || phase == "recovered" || phase == "boot_degraded"
 }
 
-func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, previous map[string]savedNetworkFile, spec []byte, extra []recoveryCommand) (*changeJournal, error) {
+func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, previous map[string]savedNetworkFile, spec []byte, extra []recoveryCommand, extraFiles []recoverySnapshot) (*changeJournal, error) {
 	if prior, err := readChange(s.paths.Dir); err == nil {
 		if !changeTerminal(prior.Phase) {
 			return nil, &ReadOnlyError{Reason: "An earlier network change needs recovery; its journal has been preserved."}
@@ -197,6 +205,7 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 		f := previous[path]
 		j.Files = append(j.Files, recoverySnapshot{Path: path, Data: f.data, Mode: f.perm, Exists: f.exists})
 	}
+	j.Files = append(j.Files, extraFiles...)
 	if s.independentRecovery && has("systemctl") {
 		if err := s.installRecoveryBinary(ctx); err != nil {
 			return nil, err
@@ -299,8 +308,13 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 		filepath.Join(j.Paths.Dir, "spec.json"): true, j.Paths.Sysctl: true, j.Paths.Unit: true,
 	}
 	for _, f := range j.Files {
-		if !allowed[f.Path] || f.Path == "" {
+		if (!allowed[f.Path] && !recoveryBlocklistPath(j.Paths.Dir, f.Path)) || f.Path == "" {
 			return fmt.Errorf("a recovery snapshot names an unexpected file")
+		}
+		if recoveryBlocklistPath(j.Paths.Dir, f.Path) {
+			if err := validateRecoveryBlocklistPath(j.Paths.Dir, f.Path); err != nil {
+				return err
+			}
 		}
 	}
 	for _, c := range j.Commands {
@@ -322,7 +336,7 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 	}
 	for _, c := range j.Commands {
 		out, err := executeRecovery(ctx, c.Input, c.Tool, c.Args...)
-		if err != nil && !(c.AllowGone && isGone(err)) && !(c.AllowExists && strings.Contains(strings.ToLower(out+err.Error()), "file exists")) {
+		if err != nil && !(c.AllowGone && recoveryExpectedAbsence(c.Tool, out, err)) && !(c.AllowExists && strings.Contains(strings.ToLower(out+err.Error()), "file exists")) {
 			j.RecoveryErrors = append(j.RecoveryErrors, c.Tool+" "+strings.Join(c.Args, " ")+": "+err.Error())
 		}
 	}
@@ -343,6 +357,45 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 	}
 	if len(j.RecoveryErrors) > 0 {
 		return fmt.Errorf("network recovery needs attention: %s", strings.Join(j.RecoveryErrors, "; "))
+	}
+	return nil
+}
+
+func recoveryExpectedAbsence(tool, out string, err error) bool {
+	if isGone(err) {
+		return true
+	}
+	if tool != "iptables" && tool != "ip6tables" {
+		return false
+	}
+	message := out + err.Error()
+	return strings.Contains(message, "Bad rule") || strings.Contains(message, "matching rule") || strings.Contains(message, "No chain/target/match")
+}
+
+func recoveryBlocklistPath(dir, path string) bool {
+	if filepath.Dir(path) != filepath.Join(dir, "lists") {
+		return false
+	}
+	name := filepath.Base(path)
+	id, err := strconv.Atoi(strings.TrimSuffix(name, ".txt"))
+	return err == nil && id > 0 && name == strconv.Itoa(id)+".txt"
+}
+
+func validateRecoveryBlocklistPath(dir, path string) error {
+	if !recoveryBlocklistPath(dir, path) {
+		return errors.New("a cache recovery snapshot must name an owned numeric list file")
+	}
+	for _, entry := range []string{filepath.Dir(path), path} {
+		info, err := os.Lstat(entry)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("a blocklist cache recovery path must not be a symlink")
+		}
 	}
 	return nil
 }

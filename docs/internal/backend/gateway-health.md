@@ -46,6 +46,12 @@ not replace a table or foreign chain policy. The API route must use the existing
 capability, mutation budget and audit wrapper. Boot restoration uses the generated service's existing
 admission commands; a runtime repair does not replace ownership or boot recovery.
 
+Independent recovery snapshots only the observed chains in families affected by the change.
+It records the original owned-rule positions/counts, deletes only the exact mark/comment match,
+and restores that presence. An IPv4-only host or a host without Docker does not acquire fatal
+recovery steps for unsupported chains. Missing-rule deletion is expected; permission failures
+remain recovery errors. Failed gateway or sysctl undo is recorded as degraded rather than healthy.
+
 ## Backing data, saved render and runtime sets
 
 Each protection blocklist exposes independent evidence:
@@ -80,6 +86,15 @@ as its rollback source when the old cache has disappeared. If both the old data 
 unavailable, mutation is refused because recovery cannot be established. Refresh errors persist only
 fetch metadata; recording a failure neither reloads the table nor depends on the lost cache.
 
+Fetched replacements are rendered from explicit candidate prefixes and staged in memory before
+changing the cache. Their previous bytes, mode and existence are included in the durable journal;
+the cache write begins only after that journal and its configured watchdog are prepared. A failed
+write is restored even if rename succeeded before the writer returned an error. Recovery restores
+cache, saved spec/render and kernel sets together, so a later render cannot activate a fetched
+candidate from an interrupted change. Cache snapshots accept only numeric `lists/<id>.txt` paths
+and refuse symlinks. Oversized recovery journals are rejected before an apply. Fetch-error metadata
+shares the host recovery lock and does not overwrite an unresolved recovery journal.
+
 ## Verification
 
 `gateway_correctness_test.go` covers supported/unknown foreign policies, independent family/chain
@@ -94,6 +109,12 @@ partial family-set drift is detected. Live tests run only in disposable namespac
 cd backend
 JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1
 ```
+
+`gateway_recovery_test.go` kills a separate applying process after cache replacement and checks
+restoration from a fresh process. `gateway_recovery_live_test.go` repeats that interruption both
+after cache replacement and after the actual candidate nft table loads, then requires the recovered
+cache/render/kernel generations to agree. The unit fixtures cover writer failures after rename and check
+that failed kernel restoration produces a degraded phase.
 
 These checks establish the supported local policy and resource behavior. They do not measure
 provider filtering, application reachability, or traffic outside the controlled namespace.
