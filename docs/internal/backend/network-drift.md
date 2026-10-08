@@ -121,8 +121,26 @@ its private mode, and its loaded enabled owned recovery unit without overrides
 are prerequisites. Apply reuses the existing helper self-check and arms the
 independent watchdog before any attempted selected effect. Snapshots contain
 only selected files and exact selected admission presence/positions. An
+explicit private journal scope omits unrelated boot dependencies and starts with
+empty undo coverage. Each selected undo is journaled durably immediately before
+its effect; fresh-process recovery leaves unattempted resources outside its
+scope and reloads only a restored selected ordinary unit. The helper refuses
+noncanonical commands, spec/cache snapshots or boot dependency replay in this
+scope. Existing ordinary managed journals retain their previous behavior. An
 attempted rename followed by a reported sync failure is restored; an
-unattempted foreign replacement detected during preflight is preserved.
+unattempted foreign replacement detected during preflight is preserved. File
+undo binds the original identity and the candidate's staged inode, bytes and
+mode before rename. A later replacement, including one with identical bytes,
+is preserved and leaves recovery degraded. Restoration similarly records its
+staged inode before effect so a retry can recognize its own already restored
+file. Selected repair requires the containing directory to exist and creates no
+parent directories. A process killed while staging may leave a temporary staging
+file; recovery does not remove an unproven staging entry.
+The saved generation, expected render, settled boot-owner identity and selected
+file identity are rechecked after intent is durable and immediately before
+rename. A selected ordinary-unit file is repaired last, preserving that reviewed
+owner through the other selected file effects. An owned admission count at or
+above the bounded undo limit remains review-only.
 Admission-only selection records `persistence=not_applicable` and
 `boot=not_applicable`. Render selection records written persistence and keeps
 boot execution unverified. The exact saved spec generation is unchanged.

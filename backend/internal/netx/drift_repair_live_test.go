@@ -13,6 +13,8 @@ import (
 func TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline(t *testing.T) {
 	liveRequired(t)
 	ns := newLiveNS(t)
+	ns.must(t, "ip", "link", "add", "native0", "type", "dummy")
+	beforeNative := ns.must(t, "ip", "-j", "-d", "link", "show", "dev", "native0")
 	ns.must(t, "iptables", "-P", "FORWARD", "DROP")
 	ns.must(t, "iptables", "-A", "FORWARD", "-s", "198.51.100.0/24", "-j", "DROP")
 	ns.must(t, "iptables", "-A", "INPUT", "-s", "192.0.2.0/24", "-j", "DROP")
@@ -22,11 +24,12 @@ func TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline(t
 	beforeInput := ns.must(t, "iptables", "-S", "INPUT")
 	beforeIPv6 := ns.must(t, "ip6tables", "-S", "INPUT")
 	sp := emptySpec()
+	sp.Links = []LinkSpec{{Name: "unrelated0", Kind: "dummy", Up: true}}
 	sp.Forwards = []ForwardSpec{{ID: 1, Name: "web", Protocol: "tcp", Ports: "8080", Target: "10.0.0.5", TargetPort: "80", SourceNAT: "never", Enabled: true}}
 	h := driftRepairHost(t, sp)
 	priorRun, priorStdin := run, runStdin
 	run = func(ctx context.Context, name string, args ...string) (string, error) {
-		if name == "nft" || name == "iptables" || name == "ip6tables" {
+		if name == "nft" || name == "iptables" || name == "ip6tables" || name == "ip" {
 			return ns.run(ctx, nil, name, args...)
 		}
 		return priorRun(ctx, name, args...)
@@ -63,8 +66,17 @@ func TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline(t
 	if err := j.save(); err != nil {
 		t.Fatal(err)
 	}
-	if err := RecoverNetwork(context.Background(), h.paths.Dir, status.ID); err != nil {
+	if len(j.BootDependencies) != 0 || !j.SelectedDriftRepair {
+		t.Fatal("selected admission journal includes unrelated boot replay")
+	}
+	if err := RecoverNetworkBoot(context.Background(), h.paths.Dir, status.ID); err != nil {
 		t.Fatal(err)
+	}
+	if ns.must(t, "ip", "-j", "-d", "link", "show", "dev", "native0") != beforeNative {
+		t.Fatal("boot-context selected undo changed a native device")
+	}
+	if _, err := ns.run(context.Background(), nil, "ip", "link", "show", "dev", "unrelated0"); err == nil {
+		t.Fatal("boot-context selected undo recreated an unselected managed link")
 	}
 	if ns.must(t, "iptables", "-S", "FORWARD") != beforeForward || ns.must(t, "iptables", "-S", "INPUT") != beforeInput || ns.must(t, "ip6tables", "-S", "INPUT") != beforeIPv6 {
 		t.Fatal("targeted recovery did not restore exact owned presence and preserve unselected chains")

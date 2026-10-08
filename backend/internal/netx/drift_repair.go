@@ -17,6 +17,8 @@ import (
 
 const maxDriftReviewBytes = 512 << 10
 
+type selectedDriftRecoveryKey struct{}
+
 type DriftRepairSelection struct {
 	ID          string `json:"id"`
 	ReviewToken string `json:"reviewToken"`
@@ -142,6 +144,10 @@ func (s *Service) prepareDriftRepairs(ctx context.Context, r *DriftReport, sp *S
 				item.Blocker = err.Error()
 				continue
 			}
+			if info, err := os.Stat(filepath.Dir(item.Resource)); err != nil || !info.IsDir() {
+				item.Blocker = "The containing directory must already exist for selected file repair."
+				continue
+			}
 			if !driftBootFilesWritable(r.Boot, s.paths.Unit) {
 				item.Blocker = "The ordinary boot unit must have a settled execution and established ownership before changing its inputs."
 				continue
@@ -167,6 +173,11 @@ func (s *Service) prepareDriftRepairs(ctx context.Context, r *DriftReport, sp *S
 		case "reconcile_owned_admission":
 			if o.Observed["needed"] != "true" || o.Observed["chainSha256"] == "" {
 				item.Blocker = "A readable required filtering chain is needed."
+				continue
+			}
+			count, err := strconv.Atoi(o.Observed["ownedCount"])
+			if err != nil || count >= admissionDeleteCap {
+				item.Blocker = "The owned rule count exceeds bounded selected repair recovery."
 				continue
 			}
 			item.Before = "Owned rule count: " + o.Observed["ownedCount"] + "\nOwned positions: " + o.Observed["ownedPositions"] + "\nObserved chain SHA-256: " + o.Observed["chainSha256"] + "\n" + o.Reason
@@ -217,14 +228,31 @@ func driftBootFilesWritable(b BootHealth, path string) bool {
 	return driftUnitRepairOwned(b, path) && (b.ActiveState == "active" || b.ActiveState == "inactive" || b.ActiveState == "failed")
 }
 
+func driftBootReviewEvidence(r DriftReport) map[string]string {
+	boot := map[string]string{
+		"status": r.Boot.Status, "owned": fmt.Sprint(r.Boot.Owned),
+		"fragment": r.Boot.FragmentPath, "dropins": r.Boot.DropInPaths,
+		"load": r.Boot.LoadState, "reload": r.Boot.NeedDaemonReload,
+		"enabled": r.Boot.UnitFileState, "active": r.Boot.ActiveState,
+		"bootId": r.Boot.Execution.BootID, "invocationId": r.Boot.Execution.InvocationID,
+		"startedMonotonicUs": strconv.FormatUint(r.Boot.Execution.StartedMonotonicUS, 10),
+	}
+	for _, file := range r.Files {
+		if file.Resource == r.Boot.FragmentPath || file.Domain == "render" && filepath.Base(file.Resource) == r.Boot.Unit {
+			boot["ownerFileSha256"], boot["ownerFileIdentity"] = file.Observed["sha256"], file.Observed["identity"]
+		}
+	}
+	return boot
+}
+
 func driftRepairToken(r DriftReport, item OwnedRepair, o DriftObservation) string {
 	var journal map[string]string
 	if r.Change != nil {
 		journal = map[string]string{"id": r.Change.ID, "phase": r.Change.Phase, "generation": r.Change.Generation}
 	}
 	var boot map[string]string
-	if item.Resource == r.Boot.FragmentPath || item.Resource == r.Boot.Unit || item.Domain == "render" && strings.HasSuffix(item.Resource, "/"+UnitName) {
-		boot = map[string]string{"status": r.Boot.Status, "owned": fmt.Sprint(r.Boot.Owned), "fragment": r.Boot.FragmentPath, "dropins": r.Boot.DropInPaths, "load": r.Boot.LoadState, "reload": r.Boot.NeedDaemonReload, "enabled": r.Boot.UnitFileState}
+	if item.Domain == "render" {
+		boot = driftBootReviewEvidence(r)
 	}
 	data, _ := json.Marshal(struct {
 		Generation                        string
@@ -285,7 +313,14 @@ func (s *Service) RepairDrift(ctx context.Context, req DriftRepairRequest, clien
 		seen[selection.ID] = true
 		selected = append(selected, item)
 	}
-	sort.Slice(selected, func(i, j int) bool { return selected[i].ID < selected[j].ID })
+	sort.Slice(selected, func(i, j int) bool {
+		// Keep the reviewed boot owner unchanged through the other selected
+		// inputs; its own file is repaired last and then reloaded explicitly.
+		if (selected[i].Resource == s.paths.Unit) != (selected[j].Resource == s.paths.Unit) {
+			return selected[j].Resource == s.paths.Unit
+		}
+		return selected[i].ID < selected[j].ID
+	})
 	files := s.driftRenderFiles(sp)
 	previous := map[string]savedNetworkFile{}
 	identities := map[string]string{}
@@ -317,16 +352,13 @@ func (s *Service) RepairDrift(ctx context.Context, req DriftRepairRequest, clien
 	if err != nil {
 		return nil, err
 	}
-	extra, err := snapshotSelectedAdmissionRecovery(ctx, sp, sp, chains)
-	if err != nil {
-		return nil, err
-	}
 	// Preserve the saved generation exactly, including harmless formatting.
 	spec, err := readDriftFile(s.specPath())
 	if err != nil || digestBytes(spec) != req.Generation {
 		return nil, guarded("the saved configuration changed during preflight")
 	}
-	j, err := s.prepareChange(ctx, sp, paths, previous, spec, extra, nil)
+	preparedCtx := context.WithValue(ctx, selectedDriftRecoveryKey{}, true)
+	j, err := s.prepareChange(preparedCtx, sp, nil, nil, spec, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -380,24 +412,73 @@ func (s *Service) RepairDrift(ctx context.Context, req DriftRepairRequest, clien
 		return recover(guarded("the boot unit began executing or changed ownership after review"))
 	}
 	for _, item := range selected {
+		_, currentSpec, currentGeneration := readDriftSpec(s)
+		if currentSpec.Status != "matching" || currentGeneration != req.Generation {
+			return recover(guarded("the saved configuration changed immediately before a selected effect"))
+		}
 		if item.Action == "regenerate_owned_file" {
 			f, err := driftSnapshotFile(item.Resource)
 			old := previous[item.Resource]
 			if err != nil || f.exists != old.exists || f.perm != old.perm || f.identity != identities[item.Resource] || string(f.data) != string(old.data) {
 				return recover(guarded("a selected file changed after watchdog preparation"))
 			}
+			if string(s.driftRenderFiles(sp)[item.Resource]) != item.After {
+				return recover(guarded("the selected expected render changed immediately before its effect"))
+			}
+			if !driftBootFilesWritable(s.driftBoot(ctx), s.paths.Unit) {
+				return recover(guarded("the boot unit began executing or changed ownership before a selected file effect"))
+			}
 			mode := old.perm
 			if !old.exists {
 				mode = 0o644
 			}
-			// Its snapshot is already durable, including a write that succeeds
-			// at rename and then reports a directory-sync failure.
-			attemptedPaths[item.Resource] = true
-			if err := writeNetworkFile(item.Resource, []byte(item.After), mode); err != nil {
+			if err := writeSelectedDriftFile(item.Resource, []byte(item.After), mode, func(candidateIdentity string) error {
+				// The staged inode is known before rename. Recovery can distinguish
+				// this candidate from a native replacement, including identical bytes.
+				j.Files = append(j.Files, recoverySnapshot{
+					Path: item.Resource, Data: old.data, Mode: old.perm, Exists: old.exists,
+					BeforeIdentity: f.identity, CandidateIdentity: candidateIdentity,
+					CandidateSHA256: digestBytes([]byte(item.After)), CandidateMode: mode,
+				})
+				j.Persistence, j.Boot = "not_written", "not_verified"
+				if err := j.save(); err != nil {
+					return err
+				}
+				_, latestSpec, latestGeneration := readDriftSpec(s)
+				if latestSpec.Status != "matching" || latestGeneration != req.Generation || string(s.driftRenderFiles(sp)[item.Resource]) != item.After {
+					return guarded("the selected expected generation or render changed immediately before rename")
+				}
+				current := DriftReport{Boot: s.driftBoot(ctx), Files: []DriftObservation{fileObservation(s.paths.Unit, "render", nil, nil)}}
+				beforeBoot, _ := json.Marshal(driftBootReviewEvidence(r))
+				afterBoot, _ := json.Marshal(driftBootReviewEvidence(current))
+				if !driftBootFilesWritable(current.Boot, s.paths.Unit) || string(beforeBoot) != string(afterBoot) {
+					return guarded("the reviewed boot owner or execution changed immediately before rename")
+				}
+				fresh, err := driftSnapshotFile(item.Resource)
+				if err != nil || fresh.exists != old.exists || fresh.perm != old.perm || fresh.identity != identities[item.Resource] || string(fresh.data) != string(old.data) {
+					return guarded("a selected file changed immediately before rename")
+				}
+				attemptedPaths[item.Resource] = true
+				return nil
+			}); err != nil {
 				return recover(err)
 			}
 		} else {
-			if err := repairSelectedAdmission(ctx, item, r, func() { attemptedChains[item.Resource] = true }); err != nil {
+			if _, err := s.requireWritable(ctx); err != nil {
+				return recover(err)
+			}
+			if err := repairSelectedAdmission(ctx, item, r, func(ch AdmissionChainState, listing string) error {
+				undo, err := driftAdmissionUndo(ch, listing)
+				if err != nil {
+					return err
+				}
+				j.Commands = append(j.Commands, undo...)
+				if err := j.save(); err != nil {
+					return err
+				}
+				attemptedChains[item.Resource] = true
+				return nil
+			}); err != nil {
 				return recover(err)
 			}
 		}
@@ -483,7 +564,7 @@ func driftSnapshotFile(path string) (driftOwnedFile, error) {
 	return driftOwnedFile{savedNetworkFile: savedNetworkFile{data: data, perm: info.Mode().Perm(), exists: true}, identity: driftFileIdentity(info)}, nil
 }
 
-func repairSelectedAdmission(ctx context.Context, item OwnedRepair, r DriftReport, beforeEffect func()) error {
+func repairSelectedAdmission(ctx context.Context, item OwnedRepair, r DriftReport, beforeEffect func(AdmissionChainState, string) error) error {
 	var ch *AdmissionChainState
 	for i := range r.Admission.Chains {
 		candidate := &r.Admission.Chains[i]
@@ -504,7 +585,9 @@ func repairSelectedAdmission(ctx context.Context, item OwnedRepair, r DriftRepor
 			return guarded("the selected filtering chain changed after review")
 		}
 	}
-	beforeEffect()
+	if err := beforeEffect(*ch, listing); err != nil {
+		return err
+	}
 	for i := 0; i < admissionDeleteCap; i++ {
 		out, err := run(ctx, ch.Tool, append([]string{"-D", ch.Chain}, admissionRule()...)...)
 		if err == nil {
@@ -523,4 +606,19 @@ func repairSelectedAdmission(ctx context.Context, item OwnedRepair, r DriftRepor
 		return nil
 	}
 	return fmt.Errorf("selected admission exceeds the bounded duplicate rule limit %s", strconv.Itoa(admissionDeleteCap))
+}
+
+func driftAdmissionUndo(ch AdmissionChainState, listing string) ([]recoveryCommand, error) {
+	positions, valid := driftAdmissionPositions(listing, ch.Chain)
+	if !valid || len(positions) >= admissionDeleteCap {
+		return nil, fmt.Errorf("selected owned admission snapshot is incomplete or exceeds bounded recovery")
+	}
+	commands := []recoveryCommand{}
+	for i := 0; i < admissionDeleteCap; i++ {
+		commands = append(commands, recoveryCommand{Tool: ch.Tool, Args: append([]string{"-D", ch.Chain}, admissionRule()...), AllowGone: true})
+	}
+	for _, pos := range positions {
+		commands = append(commands, recoveryCommand{Tool: ch.Tool, Args: append([]string{"-I", ch.Chain, strconv.Itoa(pos)}, admissionRule()...)})
+	}
+	return commands, nil
 }

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -99,10 +100,15 @@ type ChangeStatus struct {
 }
 
 type recoverySnapshot struct {
-	Path   string      `json:"path"`
-	Data   []byte      `json:"data,omitempty"`
-	Mode   os.FileMode `json:"mode"`
-	Exists bool        `json:"exists"`
+	Path              string      `json:"path"`
+	Data              []byte      `json:"data,omitempty"`
+	Mode              os.FileMode `json:"mode"`
+	Exists            bool        `json:"exists"`
+	BeforeIdentity    string      `json:"beforeIdentity,omitempty"`
+	CandidateIdentity string      `json:"candidateIdentity,omitempty"`
+	CandidateSHA256   string      `json:"candidateSha256,omitempty"`
+	CandidateMode     os.FileMode `json:"candidateMode,omitempty"`
+	RestoredIdentity  string      `json:"restoredIdentity,omitempty"`
 }
 
 type recoveryCommand struct {
@@ -119,6 +125,7 @@ type changeJournal struct {
 	Files                 []recoverySnapshot `json:"files"`
 	Commands              []recoveryCommand  `json:"commands"`
 	BootDependencies      []recoveryCommand  `json:"bootDependencies,omitempty"`
+	SelectedDriftRepair   bool               `json:"selectedDriftRepair,omitempty"`
 	VerificationDigest    string             `json:"verificationDigest,omitempty"`
 	VerificationSession   string             `json:"verificationSession,omitempty"`
 	VerificationTransport string             `json:"verificationTransport,omitempty"`
@@ -209,24 +216,31 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 	if err != nil {
 		return nil, err
 	}
-	commands, err := s.recoveryPlan(ctx, old, sp)
-	if err != nil {
-		return nil, fmt.Errorf("preparing independent network recovery: %w", err)
+	selectedDrift, _ := ctx.Value(selectedDriftRecoveryKey{}).(bool)
+	var commands, dependencies []recoveryCommand
+	if !selectedDrift {
+		commands, err = s.recoveryPlan(ctx, old, sp)
+		if err != nil {
+			return nil, fmt.Errorf("preparing independent network recovery: %w", err)
+		}
+		dependencies, err = bootRecoveryDependencies(old)
+		if err != nil {
+			return nil, fmt.Errorf("preparing managed dependencies for boot recovery: %w", err)
+		}
 	}
 	commands = append(commands, extra...)
-	dependencies, err := bootRecoveryDependencies(old)
-	if err != nil {
-		return nil, fmt.Errorf("preparing managed dependencies for boot recovery: %w", err)
-	}
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(spec)
-	j := &changeJournal{Paths: s.paths, Commands: commands, BootDependencies: dependencies, ChangeStatus: ChangeStatus{
+	j := &changeJournal{Paths: s.paths, Commands: commands, BootDependencies: dependencies, SelectedDriftRepair: selectedDrift, ChangeStatus: ChangeStatus{
 		ID: hex.EncodeToString(id[:]), Phase: "prepared", Generation: hex.EncodeToString(sum[:]),
 		Watchdog: "unsupported", Runtime: "not_applied", Persistence: "not_written", Boot: "not_verified",
 	}}
+	if selectedDrift {
+		j.Persistence, j.Boot = "not_applicable", "not_applicable"
+	}
 	for _, path := range paths {
 		f := previous[path]
 		j.Files = append(j.Files, recoverySnapshot{Path: path, Data: f.data, Mode: f.perm, Exists: f.exists})
@@ -354,8 +368,14 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 		filepath.Join(j.Paths.Dir, shapingFile): true, filepath.Join(j.Paths.Dir, gatewayFile): true,
 		filepath.Join(j.Paths.Dir, "spec.json"): true, j.Paths.Sysctl: true, j.Paths.Unit: true,
 	}
+	if j.SelectedDriftRepair {
+		delete(allowed, filepath.Join(j.Paths.Dir, "spec.json"))
+		if len(j.BootDependencies) > 0 {
+			return fmt.Errorf("selected repair recovery must not replay unselected boot dependencies")
+		}
+	}
 	for _, f := range j.Files {
-		if (!allowed[f.Path] && !recoveryBlocklistPath(j.Paths.Dir, f.Path)) || f.Path == "" {
+		if (!allowed[f.Path] && (j.SelectedDriftRepair || !recoveryBlocklistPath(j.Paths.Dir, f.Path))) || f.Path == "" {
 			return fmt.Errorf("a recovery snapshot names an unexpected file")
 		}
 		if recoveryBlocklistPath(j.Paths.Dir, f.Path) {
@@ -363,8 +383,14 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 				return err
 			}
 		}
+		if j.SelectedDriftRepair && !validSelectedFileSnapshot(f) {
+			return fmt.Errorf("selected repair recovery has incomplete file identity evidence")
+		}
 	}
 	for _, c := range j.Commands {
+		if j.SelectedDriftRepair && !validSelectedAdmissionUndo(c) {
+			return fmt.Errorf("selected repair recovery must contain only canonical owned admission undo")
+		}
 		switch c.Tool {
 		case "ip", "tc", "nft", "sysctl", "iptables", "ip6tables":
 		default:
@@ -380,10 +406,19 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 	if err := j.save(); err != nil {
 		return err
 	}
+	reload := !j.SelectedDriftRepair
 	for i := len(j.Files) - 1; i >= 0; i-- {
 		f := j.Files[i]
-		if err := (savedNetworkFile{data: f.Data, perm: f.Mode, exists: f.Exists}).restore(f.Path); err != nil {
+		var err error
+		if j.SelectedDriftRepair {
+			err = restoreSelectedDriftFile(j, i)
+		} else {
+			err = (savedNetworkFile{data: f.Data, perm: f.Mode, exists: f.Exists}).restore(f.Path)
+		}
+		if err != nil {
 			j.RecoveryErrors = append(j.RecoveryErrors, "restore "+f.Path+": "+err.Error())
+		} else if f.Path == j.Paths.Unit {
+			reload = true
 		}
 	}
 	commands := j.Commands
@@ -396,7 +431,7 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 			j.RecoveryErrors = append(j.RecoveryErrors, c.Tool+" "+strings.Join(c.Args, " ")+": "+err.Error())
 		}
 	}
-	if has("systemctl") {
+	if reload && has("systemctl") {
 		if _, err := executeRecovery(ctx, nil, "systemctl", "daemon-reload"); err != nil {
 			j.RecoveryErrors = append(j.RecoveryErrors, "reload restored boot unit: "+err.Error())
 		}
@@ -421,6 +456,23 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 		return fmt.Errorf("network recovery needs attention: %s", strings.Join(j.RecoveryErrors, "; "))
 	}
 	return nil
+}
+
+func validSelectedAdmissionUndo(c recoveryCommand) bool {
+	if c.Tool != "iptables" && c.Tool != "ip6tables" || len(c.Args) < 2 || len(c.Input) > 0 || !slices.Contains(admissionChains, c.Args[1]) {
+		return false
+	}
+	switch c.Args[0] {
+	case "-D":
+		return slices.Equal(c.Args[2:], admissionRule()) && !c.AllowExists
+	case "-I":
+		if len(c.Args) < 3 {
+			return false
+		}
+		pos, err := strconv.Atoi(c.Args[2])
+		return err == nil && pos > 0 && slices.Equal(c.Args[3:], admissionRule()) && !c.AllowGone && !c.AllowExists
+	}
+	return false
 }
 
 func recoveryExpectedAbsence(tool, out string, err error) bool {

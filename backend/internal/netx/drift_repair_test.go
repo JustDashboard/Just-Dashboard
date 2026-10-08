@@ -98,6 +98,46 @@ func TestDriftRepairWritesOnlySelectedOwnedRenderAndPreservesGenerationAndMode(t
 	}
 }
 
+func TestDriftRepairRepairsTheBootOwnerLastAndReloadsOnlyItsSelection(t *testing.T) {
+	h := driftRepairHost(t, emptySpec())
+	links, rules := filepath.Join(h.paths.Dir, linksFile), filepath.Join(h.paths.Dir, rules6File)
+	for _, path := range []string{links, rules, h.paths.Unit} {
+		driftDamage(t, path, 0o640)
+	}
+	r := h.Drift(context.Background())
+	selected := []OwnedRepair{driftRepairItem(t, r, h.paths.Unit), driftRepairItem(t, r, links), driftRepairItem(t, r, rules)}
+	priorReloads := 0
+	for _, command := range h.rec.commands() {
+		if command == "systemctl daemon-reload" {
+			priorReloads++
+		}
+	}
+	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, selected...), "127.0.0.1")
+	if err != nil || status.Phase != "saved" || status.Boot != "not_verified" {
+		t.Fatalf("selected file repair failed or invented boot execution: %+v %v", status, err)
+	}
+	j, err := readChange(h.paths.Dir)
+	if err != nil || len(j.Files) != 3 || j.Files[2].Path != h.paths.Unit {
+		t.Fatalf("boot owner was not the final selected file: %+v %v", j, err)
+	}
+	for _, item := range selected {
+		data, err := os.ReadFile(item.Resource)
+		info, statErr := os.Stat(item.Resource)
+		if err != nil || statErr != nil || string(data) != item.After || info.Mode().Perm() != 0o640 {
+			t.Fatalf("wrong selected content or mode for %s", item.Resource)
+		}
+	}
+	reloads := 0
+	for _, command := range h.rec.commands() {
+		if command == "systemctl daemon-reload" {
+			reloads++
+		}
+	}
+	if reloads != priorReloads+1 {
+		t.Fatalf("selected boot owner did not cause exactly one verified reload: %v", h.rec.commands())
+	}
+}
+
 func TestDriftRepairRefusesStaleGenerationAndUnresolvedJournalBeforeHostCommands(t *testing.T) {
 	for _, phase := range []string{"stale", "awaiting_confirmation", "degraded"} {
 		t.Run(phase, func(t *testing.T) {
@@ -174,9 +214,9 @@ func TestDriftRepairRestoresAttemptedRenameWhenDirectorySyncFails(t *testing.T) 
 	path := filepath.Join(h.paths.Dir, linksFile)
 	before := driftDamage(t, path, 0o640)
 	r := h.Drift(context.Background())
-	prior := writeNetworkFile
-	writeNetworkFile = func(p string, data []byte, mode os.FileMode) error {
-		if err := prior(p, data, mode); err != nil {
+	prior := writeSelectedDriftFile
+	writeSelectedDriftFile = func(p string, data []byte, mode os.FileMode, beforeRename func(string) error) error {
+		if err := prior(p, data, mode, beforeRename); err != nil {
 			return err
 		}
 		if p == path {
@@ -184,7 +224,7 @@ func TestDriftRepairRestoresAttemptedRenameWhenDirectorySyncFails(t *testing.T) 
 		}
 		return nil
 	}
-	t.Cleanup(func() { writeNetworkFile = prior })
+	t.Cleanup(func() { writeSelectedDriftFile = prior })
 	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
 	if err == nil || status.Phase != "recovered" {
 		t.Fatalf("failed write reported success: %+v %v", status, err)
@@ -220,6 +260,34 @@ func TestDriftRepairPreservesAnUnattemptedForeignReplacementAfterWatchdogPreflig
 	after, _ := os.ReadFile(path)
 	if string(after) != string(foreign) {
 		t.Fatal("rollback overwrote an unattempted replacement")
+	}
+}
+
+func TestDriftRepairRefusesChangedBootOwnerIdentityImmediatelyBeforeItsEffect(t *testing.T) {
+	h := driftRepairHost(t, emptySpec())
+	path := filepath.Join(h.paths.Dir, linksFile)
+	before := driftDamage(t, path, 0o640)
+	r := h.Drift(context.Background())
+	prior := writeSelectedDriftFile
+	writeSelectedDriftFile = func(p string, data []byte, mode os.FileMode, beforeRename func(string) error) error {
+		unit, err := os.ReadFile(h.paths.Unit)
+		if err != nil {
+			return err
+		}
+		if err := writeFileAtomic(h.paths.Unit, unit, 0o644); err != nil {
+			return err
+		}
+		return prior(p, data, mode, beforeRename)
+	}
+	t.Cleanup(func() { writeSelectedDriftFile = prior })
+	status, err := h.RepairDrift(context.Background(), driftRepairRequest(r, driftRepairItem(t, r, path)), "127.0.0.1")
+	if err == nil || status.Phase != "recovered" || !strings.Contains(err.Error(), "boot owner") {
+		t.Fatalf("new boot owner identity was accepted: %+v %v", status, err)
+	}
+	after, _ := os.ReadFile(path)
+	j, err := readChange(h.paths.Dir)
+	if string(after) != string(before) || err != nil || len(j.Files) != 0 {
+		t.Fatalf("unattempted file changed or entered undo coverage: %+v %v", j, err)
 	}
 }
 
@@ -270,6 +338,33 @@ func TestDriftRepairAdmissionOnlyUsesRuntimePhasesAndSelectedChainUndo(t *testin
 		if strings.Contains(cmd, " -I INPUT ") || strings.Contains(cmd, " -D INPUT ") || strings.Contains(cmd, " -I DOCKER-USER ") || strings.Contains(cmd, " -D DOCKER-USER ") || strings.HasPrefix(cmd, "ip6tables -I") {
 			t.Fatalf("unselected chain mutation: %s", cmd)
 		}
+	}
+}
+
+func TestDriftRepairAdmissionAtTheRecoveryBoundRemainsReviewOnly(t *testing.T) {
+	sp := emptySpec()
+	sp.Forwards = []ForwardSpec{{ID: 1, Name: "web", Protocol: "tcp", Ports: "8080", Target: "10.0.0.5", TargetPort: "80", SourceNAT: "never", Enabled: true}}
+	h := driftRepairHost(t, sp)
+	previousRun := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "iptables" && len(args) > 1 && args[1] == "FORWARD" {
+			switch args[0] {
+			case "-S":
+				return "-P FORWARD DROP\n" + strings.Repeat("-A FORWARD "+strings.Join(admissionRule(), " ")+"\n", admissionDeleteCap), nil
+			case "-C":
+				return "", nil
+			}
+		}
+		return previousRun(ctx, name, args...)
+	}
+	t.Cleanup(func() { run = previousRun })
+	r := h.Drift(context.Background())
+	item := driftRepairItem(t, r, "inet/FORWARD")
+	if item.Executable || !strings.Contains(item.Blocker, "bounded") {
+		t.Fatalf("unrecoverable duplicate count was executable: %+v", item)
+	}
+	if _, err := h.RepairDrift(context.Background(), driftRepairRequest(r, item), "127.0.0.1"); err == nil || h.rec.ran("systemd-run") {
+		t.Fatal("non-executable duplicate count armed a mutation")
 	}
 }
 
