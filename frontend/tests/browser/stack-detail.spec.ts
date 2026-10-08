@@ -171,3 +171,134 @@ test("a stack nothing has been created for says so", async ({ page }) => {
   await expect(page.locator("[data-slot='stack-map']")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Create it" }).first()).toBeVisible()
 })
+
+test("Deploy preview says what Deploy will do to each service, and deploys", async ({ page }) => {
+  const mocks = await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/stacks/shop?tab=preview")
+
+  await expect(
+    page.getByRole("heading", { name: "Deploy will recreate 2 services and create 1" }),
+  ).toBeVisible()
+  await expect(page.getByText("No volume is removed")).toBeVisible()
+  // Most consequential first, each with what it is doing now.
+  const rows = page.locator("tr[data-change]")
+  expect(await rows.evaluateAll((r) => r.map((row) => row.getAttribute("data-change")))).toEqual([
+    "recreate",
+    "recreate",
+    "create",
+    "unchanged",
+    "unchanged",
+    "unchanged",
+  ])
+  const worker = rows.filter({ hasText: "worker" })
+  await expect(worker.getByText("3.11-slim")).toBeVisible()
+  await expect(worker.getByText("3.12-slim")).toBeVisible()
+  await expect(rows.filter({ hasText: "api" }).getByText("down while it is replaced")).toBeVisible()
+  // The file's changes are headed by the service they change.
+  const changes = page.getByRole("region", { name: "Compose file changes" })
+  await expect(changes.getByRole("region", { name: "api" })).toContainText("mem_limit: 1g")
+  await expect(changes.getByRole("region", { name: "worker" })).toContainText("QUEUE_CONCURRENCY")
+  await expect(page.getByText("shop_pgdata")).toBeVisible()
+
+  await page.getByRole("button", { name: "Deploy", exact: true }).last().click()
+  await expect.poll(() => mocks.runs).toEqual(["up"])
+})
+
+test("the compose file has an outline of its services and keeps an edit across views", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/stacks/shop?tab=compose")
+
+  const outline = page.getByRole("navigation", { name: "Outline" })
+  for (const service of ["web", "api", "worker", "db", "cache", "search"]) {
+    await expect(outline.getByRole("button", { name: new RegExp(`^${service}`) })).toBeVisible()
+  }
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible()
+
+  // Jumping to a service puts the cursor on its line and says where it is.
+  await outline.getByRole("button", { name: /^db/ }).click()
+  await expect(page.getByText(/^Ln \d+, Col 1/)).toBeVisible()
+  await expect(page.locator("[data-slot='pane-footer']").getByText("services · db")).toBeVisible()
+
+  // An edit is reviewable as a diff and survives a look at another view.
+  await page.evaluate(() => {
+    type Editor = { getValue(): string; setValue(v: string): void }
+    const editor = (
+      window as unknown as { monaco: { editor: { getEditors(): Editor[] } } }
+    ).monaco.editor.getEditors()[0]
+    editor.setValue(editor.getValue().replace("\n  db:\n", "\n  db:  # pinned\n"))
+  })
+  await expect(page.getByText("Unsaved changes")).toBeVisible()
+  await page.getByRole("button", { name: /Review changes/ }).click()
+  await expect(page.getByRole("region", { name: "db" })).toContainText("# pinned")
+  await page.getByRole("tab", { name: /^Deploy preview/ }).click()
+  await page.getByRole("tab", { name: /^Compose file/ }).click()
+  await expect(page.getByText("Unsaved changes")).toBeVisible()
+})
+
+test("History lays the deployments on time and reads one against the file now", async ({
+  page,
+}) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/stacks/shop?tab=history")
+
+  await expect(page.getByText("6 deployments")).toBeVisible()
+  await expect(page.getByText(/of 3 compose files/)).toBeVisible()
+  const rail = page.getByRole("list", { name: "Deployments" })
+  await expect(rail.getByRole("button")).toHaveCount(6)
+  await expect(page.getByRole("heading", { name: /^Restarted/ })).toBeVisible()
+  // The newest record ran the worker on 3.11; the file on disk has moved on.
+  const since = page.getByRole("region", { name: "Since then" })
+  await expect(since).toContainText("python:3.12-slim")
+  await expect(page.getByText(/can be brought back exactly/)).toBeVisible()
+
+  // An older one lost an image; its file goes into the editor, unsaved.
+  await rail.getByRole("button", { name: /Recreated/ }).click()
+  await expect(page.getByText(/api is no longer on this server/)).toBeVisible()
+  await page.getByRole("button", { name: "Edit from this version" }).click()
+  await expect(page.getByRole("tab", { name: /^Compose file/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  )
+  await expect(page.getByText(/^This is the file from the deployment/)).toBeVisible()
+  await expect(page.getByText("Unsaved changes")).toBeVisible()
+})
+
+test("Files says what compose reads from the stack's directory", async ({ page }) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/stacks/shop?tab=files")
+
+  const reads = page.getByRole("region", { name: "What compose reads here" })
+  const row = (path: string) => reads.locator(`[data-path='${path}']`)
+  await expect(row("compose.yaml")).toContainText("every service is defined here")
+  await expect(row("compose.yaml")).toContainText("modified")
+  await expect(row("app")).toContainText("built from it")
+  await expect(row("nginx")).toContainText("/etc/nginx/conf.d")
+  await expect(row(".env")).toContainText("reads its variables")
+  await expect(row("uploads")).toContainText("Missing: Docker creates it empty")
+  // The same words follow the names into the browser below.
+  await expect(page.getByRole("row", { name: /backups/ })).toContainText("untracked")
+})
+
+test("Logs lists the services that write into it and narrows to one", async ({ page }) => {
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/docker/stacks/shop?tab=logs")
+
+  const strip = page.getByRole("navigation", { name: "Services in this log" })
+  await expect(strip.getByRole("button", { name: "Only worker" })).toContainText("46 errors")
+  await expect(strip.getByRole("button", { name: "Every service" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await strip.getByRole("button", { name: "Only worker" }).click()
+  await expect(strip.getByRole("button", { name: "Only worker" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+})

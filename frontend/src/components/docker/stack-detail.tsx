@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
@@ -8,9 +8,7 @@ import {
   ArrowCircleUp,
   ArrowLeft,
   Box,
-  Code,
   Cross,
-  FloppyDisk,
   Logs,
   Play,
   RefreshClockwise,
@@ -23,10 +21,9 @@ import {
 import { composeRemedy } from "@/lib/docker-remedies"
 import { dedupeEvents } from "@/lib/docker-events"
 import { notify } from "@/lib/toast"
-import { get, post, put, ApiError } from "@/lib/api"
+import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import type {
-  ComposeValidation,
   Container,
   ContainerSparkline,
   ContainerStats,
@@ -34,7 +31,6 @@ import type {
   DockerEventFeed,
   StackDetail,
 } from "@/lib/types"
-import { stackSource } from "@/lib/log-sources"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
@@ -43,12 +39,14 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/components/deploy/vocabulary"
-import { containerEventsView } from "@/components/docker/container-events"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
-import { Hint, Term } from "@/components/docker/explain"
-import { DeployPreviewPanel, DeploymentHistoryPanel } from "@/components/docker/deploy-preview"
 import { COMPOSE_ACTIONS, type ComposeActionKey } from "@/components/docker/stack-state"
+import { StackCompose, useComposeDraft } from "@/components/docker/stack-compose"
+import { StackFiles } from "@/components/docker/stack-files"
+import { StackHistory } from "@/components/docker/stack-history"
+import { StackLogs } from "@/components/docker/stack-logs"
 import { StackMap } from "@/components/docker/stack-map"
+import { StackPreview } from "@/components/docker/stack-preview"
 import { ServiceRows } from "@/components/docker/stack-services-table"
 import { StackUsageBand } from "@/components/docker/stack-usage-band"
 import {
@@ -64,13 +62,10 @@ import {
   type ServiceBucket,
   type ServiceReading,
 } from "@/components/docker/stack-service-readings"
-import { CodeEditor } from "@/components/code-editor"
-import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { FileBrowser } from "@/components/files/inline-browser"
 import {
   ProductLogo,
   ProductLogos,
@@ -81,7 +76,6 @@ import {
 import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
-import { Tag } from "@/components/tag"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
@@ -213,6 +207,10 @@ function StackBody({ name }: { name: string }) {
   const runner = useRunConsole()
   // The verb in flight, and the service it is for: that row says so while it runs.
   const [pending, setPending] = useState<{ service?: string; label: string }>()
+  // Counts the compose commands that finished: Deploy preview and History
+  // read the server again after each, since each moves what they report.
+  const [epoch, setEpoch] = useState(0)
+  const [draft, setDraft] = useComposeDraft(name)
 
   const { data, error, loading, refresh } = usePoll<StackDetail>(
     (signal) => get<StackDetail>(`/docker/stacks/${encodeURIComponent(name)}`, undefined, signal),
@@ -339,7 +337,10 @@ function StackBody({ name }: { name: string }) {
         service: opts.service,
         confirm: opts.confirmPhrase,
       })
-      .finally(() => setPending(undefined))
+      .finally(() => {
+        setPending(undefined)
+        setEpoch((n) => n + 1)
+      })
     // `down` removes the containers, and with them the stack this page is
     // about: compose only knows a stack that has some. Staying here would
     // report the disappearance as an error about something the reader just
@@ -371,6 +372,12 @@ function StackBody({ name }: { name: string }) {
 
   const control = Boolean(data?.managed) && can("system.admin")
   const busy = runner.running
+  // Deploy where the reader has just read what it will do: the preview, and
+  // the editor that saved a file nothing runs yet.
+  const deploy =
+    control && can("service.control")
+      ? () => void run("up").catch((err) => notify.error(String(err)))
+      : undefined
 
   /** One service's verbs: compose's, for that service, and the ways into its container. */
   const serviceVerbs = (reading: ServiceReading): Verb[] => {
@@ -465,7 +472,7 @@ function StackBody({ name }: { name: string }) {
     { value: "services", label: "Services", count: data?.services.length },
     // What a deploy would change, before it changes it.
     { value: "preview", label: "Deploy preview" },
-    { value: "compose", label: "Compose file" },
+    { value: "compose", label: "Compose file", unsaved: Boolean(draft) },
     // The stack's own directory, read where the stack is: the compose file's
     // neighbours — an `.env`, a mounted config, the data a bind mount writes —
     // are what a stack is opened to check.
@@ -631,10 +638,16 @@ function StackBody({ name }: { name: string }) {
                         {entry.count}
                       </span>
                     )}
+                    {"unsaved" in entry && entry.unsaved && (
+                      <span
+                        title="An edit that is not saved yet"
+                        className="size-1.5 rounded-full bg-warning"
+                      />
+                    )}
                   </TabsPrimitive.Trigger>
                 ))}
               </TabsPrimitive.List>
-              <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto pt-4">
+              <TabsContent value="services" className="min-h-0 flex-1 overflow-y-auto pt-5">
                 {data.services.length === 0 ? (
                   <EmptyState
                     icon={Box}
@@ -699,33 +712,66 @@ function StackBody({ name }: { name: string }) {
                   </div>
                 )}
               </TabsContent>
-              <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto pt-4">
-                {tab === "preview" && <DeployPreviewPanel stack={data.name} />}
+              <TabsContent value="preview" className="min-h-0 flex-1 overflow-y-auto pt-5">
+                {tab === "preview" && (
+                  <StackPreview
+                    stack={data.name}
+                    epoch={epoch}
+                    readings={readings}
+                    productOf={productOf}
+                    onDeploy={deploy}
+                    busy={busy}
+                    onEdit={() => setTab("compose")}
+                  />
+                )}
               </TabsContent>
-              <TabsContent value="compose" className="min-h-0 flex-1 pt-4">
-                <ComposeEditor
-                  stack={data}
-                  onSaved={reload}
-                  canWrite={can("system.admin") && can("file.write")}
-                  canValidate={can("system.admin")}
-                />
+              <TabsContent value="compose" className="min-h-0 flex-1 pt-5">
+                {tab === "compose" && (
+                  <StackCompose
+                    stack={data}
+                    onSaved={reload}
+                    canWrite={can("system.admin") && can("file.write")}
+                    canValidate={can("system.admin")}
+                    readings={readings}
+                    productOf={productOf}
+                    onPreview={() => setTab("preview")}
+                    onDeploy={deploy}
+                    busy={busy}
+                  />
+                )}
               </TabsContent>
               {data.workingDir && (
-                <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto pt-4">
+                <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto pt-5">
                   {tab === "files" && (
-                    <FileBrowser
-                      root={data.workingDir}
-                      label={data.name}
-                      emptyNote="This stack's directory is empty."
+                    <StackFiles
+                      stack={data}
+                      productOf={productOf}
+                      onOpenCompose={() => setTab("compose")}
                     />
                   )}
                 </TabsContent>
               )}
-              <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto pt-4">
-                {tab === "history" && <DeploymentHistoryPanel stack={data.name} />}
+              <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto pt-5">
+                {tab === "history" && (
+                  <StackHistory
+                    stack={data.name}
+                    epoch={epoch}
+                    productOf={productOf}
+                    onRestore={
+                      can("system.admin") && can("file.write") && data.configPath
+                        ? (content, from) => {
+                            setDraft({ content, from })
+                            setTab("compose")
+                          }
+                        : undefined
+                    }
+                  />
+                )}
               </TabsContent>
-              <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-4">
-                {tab === "logs" && <StackLogs stack={data} />}
+              <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-5">
+                {tab === "logs" && (
+                  <StackLogs stack={data} readings={readings} productOf={productOf} />
+                )}
               </TabsContent>
             </Tabs>
           </>
@@ -1029,190 +1075,5 @@ function StackActions({
       )}
       {verbs.length > 0 && <VerbMenu verbs={verbs} label={`More actions for ${data.name}`} />}
     </>
-  )
-}
-
-/* ---------------------------------------------------------------- editor -- */
-
-function ComposeEditor({
-  stack,
-  onSaved,
-  canWrite,
-  canValidate,
-}: {
-  stack: StackDetail
-  onSaved: () => void
-  canWrite: boolean
-  canValidate: boolean
-}) {
-  const [content, setContent] = useState<string>()
-  const [original, setOriginal] = useState("")
-  const [validation, setValidation] = useState<ComposeValidation>()
-  const [busy, setBusy] = useState(false)
-  const [fetchError, setFetchError] = useState<string>()
-  // "There is no file" is a fact about the stack, not something that happens
-  // while loading, so it is derived rather than written into state by the
-  // effect below.
-  const loadError = stack.configPath
-    ? fetchError
-    : "This stack has no compose file the dashboard can read."
-
-  useEffect(() => {
-    if (!stack.configPath) return
-    const controller = new AbortController()
-    get<{ path: string; content: string }>(
-      `/docker/stacks/${encodeURIComponent(stack.name)}/config`,
-      undefined,
-      controller.signal,
-    )
-      .then((res) => {
-        setContent(res.content)
-        setOriginal(res.content)
-      })
-      .catch((err) => !controller.signal.aborted && setFetchError(String(err)))
-    return () => controller.abort()
-  }, [stack.name, stack.configPath])
-
-  const dirty = content !== undefined && content !== original
-
-  const check = async () => {
-    setBusy(true)
-    try {
-      const res = await post<ComposeValidation>(
-        `/docker/stacks/${encodeURIComponent(stack.name)}/validate`,
-        { content },
-      )
-      setValidation(res)
-      if (res.valid) notify.success(`Valid — ${res.services.length} service(s)`)
-    } catch (err) {
-      notify.error("Could not check the file", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const save = async (force = false) => {
-    setBusy(true)
-    try {
-      const res = await put<{ validation: ComposeValidation }>(
-        `/docker/stacks/${encodeURIComponent(stack.name)}/config`,
-        { content, force },
-      )
-      setOriginal(content ?? "")
-      setValidation(res.validation)
-      // Saying so explicitly, because this is the one thing an editor in a
-      // deployment tool is most likely to be misread about.
-      notify.success("Saved", {
-        description: "Nothing changed yet — bring the stack up to apply it.",
-      })
-      onSaved()
-    } catch (err) {
-      if (err instanceof ApiError && err.code === "compose_invalid") {
-        setValidation({ valid: false, error: err.message, services: [] })
-        notify.error("Compose rejected this file", err.message)
-      } else {
-        notify.error("Could not save", err)
-      }
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  if (loadError) return <ErrorState error={new Error(loadError)} />
-  if (content === undefined) return <LoadingRows />
-
-  return (
-    <div className="flex h-full min-h-0 flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <Code className="size-3.5 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono text-hint text-muted-foreground">
-          {stack.configPath}
-        </span>
-        {dirty && <Tag tone="warning">unsaved</Tag>}
-        {canValidate && (
-          <Button size="xs" variant="outline" onClick={check} disabled={busy}>
-            Check
-          </Button>
-        )}
-        {canWrite && (
-          <Button size="xs" onClick={() => save()} disabled={busy || !dirty} pending={busy}>
-            <FloppyDisk className="size-3" />
-            Save
-          </Button>
-        )}
-      </div>
-
-      <CodeEditor
-        value={content}
-        onChange={setContent}
-        language="yaml"
-        readOnly={!canWrite}
-        className="min-h-0 flex-1 overflow-hidden rounded-lg border"
-      />
-
-      {validation && !validation.valid && (
-        <Notice title="Compose will not accept this" icon={Warning} tone="danger">
-          <pre className="mt-1 font-mono text-hint whitespace-pre-wrap">{validation.error}</pre>
-          {canWrite && (
-            <Button size="xs" variant="outline" className="mt-2" onClick={() => save(true)}>
-              Save it anyway
-            </Button>
-          )}
-        </Notice>
-      )}
-      {validation?.valid && (
-        <Hint>
-          Valid. Defines {validation.services.join(", ") || "no services"}.{" "}
-          <Term name="compose">Saving does not deploy</Term> — bring the stack up to apply it.
-        </Hint>
-      )}
-    </div>
-  )
-}
-
-/* ------------------------------------------------------------------ logs -- */
-
-/**
- * Every container in the stack, as one log.
- *
- * It was a socket of its own that followed the running services only and
- * wrote `db | ` in front of each line — so a crashed service's last words
- * were never in it, a JSON line stopped being JSON, and the only way to read
- * one service was to type its name into the filter. The stack is a log
- * source now (`stack:<project>`): every container's output merged by time,
- * the exited ones included, each line read through its own container's lens
- * and carrying its service as the lane down the left and as a field to
- * narrow by. Events is what Docker did to them, beside it.
- */
-function StackLogs({ stack }: { stack: StackDetail }) {
-  // As one string: the stack's poll hands a new array every ten seconds.
-  const images = stack.services
-    .map((service) => service.image)
-    .filter(Boolean)
-    .join(",")
-  const running = stack.services.some((service) => service.state === "running")
-  const sources = useMemo<ServiceLogSource[]>(
-    () => [
-      {
-        id: stackSource(stack.name),
-        label: stack.name,
-        kind: "stack",
-        status: running ? "running" : "exited",
-        images: images ? images.split(",") : undefined,
-        product: "docker-compose",
-      },
-    ],
-    [stack.name, running, images],
-  )
-  const views = useMemo(() => [containerEventsView({ stack: stack.name })], [stack.name])
-  return (
-    <ServiceLogs
-      sources={sources}
-      storageKey={`docker.stack.${stack.name}.logs`}
-      views={views}
-      readings
-      className="h-full min-h-0"
-      paneClassName="min-h-[30rem]"
-    />
   )
 }
