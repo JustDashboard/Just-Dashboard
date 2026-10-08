@@ -332,10 +332,26 @@ export const health = {
       metric: "disk",
       value: 87,
       threshold: 85,
+      area: "storage",
+      evidence: [
+        { label: "Used", value: "87%" },
+        { label: "Free", value: "10.4 GB" },
+        { label: "Size", value: "80.0 GB" },
+      ],
+      subjects: [{ kind: "mount", id: "/", name: "/" }],
     },
   ],
   checkedAt: iso(now),
   recorded: true,
+  areas: [
+    { id: "cpu", status: "ok", summary: "4% stalled" },
+    { id: "memory", status: "ok", summary: "8.2 GB free" },
+    { id: "storage", status: "warning", summary: "/ at 87%" },
+    { id: "network", status: "ok", summary: "no drops" },
+    { id: "services", status: "ok", summary: "none failed" },
+    { id: "containers", status: "ok", summary: "12 running" },
+    { id: "hardware", status: "ok", summary: "no sensors · handles 3%" },
+  ],
 }
 
 export async function json(route: Route, body: unknown) {

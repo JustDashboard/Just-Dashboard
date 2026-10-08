@@ -417,11 +417,10 @@ export default function MetricsPage() {
 
         {/* The verdict is already in the facts row, and on the page made
           entirely of the numbers it was computed from, "Warning" with no way
-          to ask why is a dead end. Rendered only when there is something to
-          say: a server with nothing wrong loses no height to a list saying so. */}
-        {(healthError || (health && (health.findings.length > 0 || health.silences?.length))) && (
-          <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
-        )}
+          to ask why is a dead end. A clean server keeps the strip of areas
+          checked — a line of green that says what was looked at — rather
+          than losing the panel and leaving the verdict unexplained. */}
+        <HealthPanel plain health={health} error={healthError} loading={healthLoading} />
 
         <div className="grid items-start gap-8 lg:grid-cols-2 [&>*]:min-w-0">
           <NotableMoments rows={rows} events={events} cores={cores} onZoom={zoom} />

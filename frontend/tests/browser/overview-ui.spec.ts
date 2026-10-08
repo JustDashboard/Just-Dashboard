@@ -90,10 +90,14 @@ test("what every module found is one Health list, worst first", async ({ page })
   const health = page.locator("[data-slot=panel]", {
     has: page.getByRole("heading", { name: "Health" }),
   })
-  const findings = health.locator("[data-slot=accordion-trigger]")
+  const findings = health.getByRole("list", { name: "Needs attention" }).locator(":scope > li")
   // The failing project outranks the recorder's disk warning; the
   // certificate past its renewal and the security updates follow it.
   await expect(findings.first()).toContainText("docs-site is failing its health check")
+  // Every area checked is on the strip, the disk's amber among the green.
+  const areas = health.getByRole("list", { name: "Areas checked" })
+  await expect(areas).toContainText("/ at 87%")
+  await expect(areas).toContainText("Modules")
   await expect(health).toContainText("/ is filling up")
   await expect(health).toContainText("status.example.test: certificate expires in 12d")
   await expect(health).toContainText("2 security updates waiting")
@@ -102,8 +106,7 @@ test("what every module found is one Health list, worst first", async ({ page })
   await expect(page.locator('[data-slot="host-identity"]').getByText("Critical")).toBeVisible()
 
   // Each one opens the page that fixes it.
-  await health.getByText("2 security updates waiting").click()
-  await health.getByRole("button", { name: "Open packages" }).click()
+  await health.getByRole("link", { name: "Open packages: 2 security updates waiting" }).click()
   await expect(page).toHaveURL(/\/packages$/)
 })
 

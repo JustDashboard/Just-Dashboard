@@ -42,19 +42,52 @@ export type StorageCleanupResult = {
   removedBytes: number
 }
 export type WorkloadSort = "cpu" | "memory" | "swap" | "io" | "handles"
+/** A process named by its identity, so a fix cannot land on a reused PID. */
+export type WorkloadMember = { pid: number; createTime: string }
+/**
+ * One workload: a supervisor's processes, or the copies of one program started
+ * by hand — forty renderers are one culprit, and the fix is the group's.
+ */
+export type WorkloadGroup = {
+  key: string
+  manager: ProcessRow["manager"]
+  name: string
+  label?: string
+  count: number
+  cpuPercent: number
+  memory: number
+  swap: number
+  ioRate: number
+  handles: number
+  users: string[]
+  /** The heaviest member by the measure asked for. */
+  pid: number
+  cmdline: string
+  members: WorkloadMember[]
+  truncated?: boolean
+  /** What started a hand-run group, where that is a program rather than a shell. */
+  launcher?: { pid: number; name: string; cmdline: string; createTime: string; username: string }
+}
 export type WorkloadReport = {
   checkedAt: string
   sort: WorkloadSort
   processes: ProcessRow[]
+  groups?: WorkloadGroup[]
   total: number
   silences: string[]
+}
+export type WorkloadControlResult = {
+  items: { pid: number; ok: boolean; skipped?: boolean; error?: string }[]
+  signalled?: number
+  changed?: number
 }
 export type HealthInvestigation =
   | { kind: "storage"; path: string; inodes: boolean }
   | { kind: "workloads"; sort: WorkloadSort }
   | { kind: "network"; networkInterface?: string }
+  | { kind: "services" }
+  | { kind: "containers" }
   | { kind: "external"; reason: string }
-  | { kind: "link"; href: string; label: string }
 
 export function advisorFileHref(path: string) {
   const parent = path.slice(0, path.lastIndexOf("/")) || "/"
@@ -71,6 +104,7 @@ export function healthInvestigation(id: string): HealthInvestigation | undefined
   if (id === "files") return { kind: "workloads", sort: "handles" }
   if (id === "timewait") return { kind: "network" }
   if (id.startsWith("drops:")) return { kind: "network", networkInterface: id.slice(6) }
+  if (id.startsWith("neterr:")) return { kind: "network", networkInterface: id.slice(7) }
   if (id === "steal")
     return {
       kind: "external",
@@ -83,14 +117,8 @@ export function healthInvestigation(id: string): HealthInvestigation | undefined
       reason:
         "Inspect cooling, airflow and the device with your hardware provider. Reducing CPU work may help CPU temperature, but cannot repair a fan or a hot disk. The limits below come from the sensor driver.",
     }
-  if (id === "systemd.failed")
-    return {
-      kind: "link",
-      href: "/processes/services?state=failed",
-      label: "Inspect failed services",
-    }
-  if (id.startsWith("docker."))
-    return { kind: "link", href: "/docker/containers", label: "Inspect affected containers" }
+  if (id === "systemd.failed") return { kind: "services" }
+  if (id.startsWith("docker.")) return { kind: "containers" }
   return undefined
 }
 
