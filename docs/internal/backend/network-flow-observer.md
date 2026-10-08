@@ -122,15 +122,22 @@ sudo -n nsenter --target 1 --cgroup -- env JD_NETFLOWS_OBSERVER_LIVE=1 GOMAXPROC
   -test.run '^TestLive(FixedObserver|Kernel|NestedBPF)' -test.v -test.timeout=3m
 ```
 
+The Docker attribution fixture requires a reachable Docker socket and the already cached
+`python:3.11-slim` image; it does not pull images. It creates only named disposable containers with
+memory, CPU and process limits, no capabilities, and a read-only fixture binary. The backend-death
+fixture kills only its exact child process.
+
 Entering only the host cgroup namespace avoids a test-session namespace rooted somewhere else while
 `/sys/fs/cgroup` exposes the host mount. Fixtures attach only uniquely named disposable cgroups,
 pass their pinned directory descriptor to subprocesses, and migrate only those subprocesses. Traffic
 runs in disposable network namespaces. The suite verifies real fixed-program acceptance, 32 short TCP
 sender FINs, 32 UDP sender/receiver byte differentials through storage/export, foreign-program
 preservation through refused detach and retry, actual ring saturation/budget omissions, and nested
-syscall buffer reads during concurrent GC. Its UDP timing ratio describes one measured workload and
-host; it is not a universal overhead claim. Further live Docker attribution and backend-death coverage
-are tracked with the implementation evidence; unknown attribution is not an acceptance substitute.
+syscall buffer reads during concurrent GC. Docker fixtures verify cgroup-based attribution between
+containers sharing a network namespace and refuse to borrow a replacement instance's identity for
+old pending events. A backend SIGKILL fixture verifies that all owned links disappear while a foreign
+link remains. These lifecycle results do not establish shutdown-tail completeness. The UDP timing
+ratio describes one measured workload and host; it is not a universal overhead claim.
 
 Primary contracts: [Linux BPF UAPI](https://github.com/torvalds/linux/blob/v6.14/include/uapi/linux/bpf.h),
 [ring-buffer ownership and layout](https://docs.kernel.org/bpf/ringbuf.html),

@@ -93,6 +93,8 @@ to the contribution terms above, including the additional licence grant to the p
   `JD_NETFLOWS_OBSERVER_LIVE=1` as root in the host cgroup namespace; see the exact command and evidence
   limits in [the observer contract](docs/internal/backend/network-flow-observer.md). These fixtures
   never attach a production cgroup, replace a foreign program or migrate an unrelated process.
+  Docker attribution acceptance also needs a reachable Docker socket and the already cached
+  `python:3.11-slim` image; the fixture never pulls an image and removes its bounded test containers.
 - Independent network recovery also has a real systemd timer fixture. On a host with a reachable
   systemd manager, add `JD_SYSTEMD_RECOVERY_LIVE=1` to the network namespace command above. It builds
   the standalone helper and uses uniquely named transient timers with `NetworkNamespacePath` for

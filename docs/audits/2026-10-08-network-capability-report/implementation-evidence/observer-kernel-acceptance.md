@@ -3,7 +3,8 @@
 The fixed observer digest is
 `055fae72bf5671b0f332b549bde5d55e8482d780a1699cc8a036160bfc553529`.
 This implementation extends the retained socket baseline; P8 remains in progress until its remaining
-native attribution, process-death, frontend and integrated acceptance are complete.
+frontend and integrated acceptance are complete. Native attribution and backend-death acceptance
+below passed on the unchanged product implementation.
 
 The final-source opted-in race binary passed all six observer fixtures on the native Linux host:
 [raw native output](observer-kernel-native-race.txt). Fixtures used exact owned cgroups and network
@@ -18,6 +19,22 @@ The storage/export fixture retained 132 distinct rows, including all 32 short TC
 retained 365 emitted events, 99 identity gaps, 365 unknown owner observations and three reader budget
 pauses; ring drops, budget omissions, byte gaps and pending omissions were zero in that fixture.
 The non-Docker fixture does not verify container or process attribution.
+
+Two additional opted-in fixtures passed in the final race binary:
+[raw Docker and backend-death output](observer-docker-death-native-race.txt). The backend SIGKILL
+fixture completed in 0.05 s: all five unpinned owned link IDs disappeared while its separately owned
+foreign ingress link and program remained. Killing the backend does not prove that its uncommitted
+shutdown tail was complete.
+
+The Docker fixture completed in 10.34 s with two disposable containers sharing one network namespace.
+All 32 UDP sender rows matched the actual owning container's cgroup and running instance; observations
+were restricted to that owned container cgroup. After removal and recreation under the same name in
+the still-shared namespace, all 32 old pending sender rows remained unknown, and none borrowed the
+replacement container identity. SQLite history filtered by the replacement ID contained zero rows;
+the original ID retained 64 verified rows. This establishes instance-safe cgroup attribution for that
+workload, not general process identity or every Docker mode. The fixture used a cached image, read-only
+binary and containers limited to 128 MiB, 0.5 CPU and 64 processes with all capabilities dropped.
+Both fixtures completed owned cleanup; no named test containers or fixture cgroups remained.
 
 The separate 4 KiB ring saturation fixture reported 31 delivered events, 4,969 ring drops,
 15,256 deliberate budget omissions and 20,000 preexisting-socket identity gaps. Its 10,000-datagram
@@ -56,3 +73,8 @@ Documentation review covered the complete backend diff against internal docs, `A
 `README.md` and `CONTRIBUTING.md`. Affected operator, lifecycle, network, contributor and observer
 documents were updated. `AGENTS.md` needs no change. No dependencies, release notes, licence headers
 or CI were changed.
+
+The Docker/death test follow-up updates this acceptance record, the observer contract and contributor
+prerequisites. Operator behavior is unchanged, so `README.md`, `AGENTS.md` and the remaining internal
+documents need no further update. Its final changed-file checks are recorded in
+[the focused output](observer-docker-death-changed-checks.txt).
