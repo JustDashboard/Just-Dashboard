@@ -207,6 +207,10 @@ func familyFor(recordType string) string {
 // the *server* can reach a destination. It is not a check of whether the
 // internet can reach the server, which cannot be answered from inside it.
 func (s *Service) PortCheck(ctx context.Context, target string, port int) (*ProbeResult, error) {
+	return s.PortCheckFromSource(ctx, target, port, "")
+}
+
+func (s *Service) PortCheckFromSource(ctx context.Context, target string, port int, source string) (*ProbeResult, error) {
 	if !ValidTarget(target) {
 		return nil, fmt.Errorf("target must be a hostname or IP address")
 	}
@@ -216,6 +220,13 @@ func (s *Service) PortCheck(ctx context.Context, target string, port int) (*Prob
 	res := &ProbeResult{Tool: "port", Target: net.JoinHostPort(target, strconv.Itoa(port))}
 	start := time.Now()
 	dialer := &net.Dialer{Timeout: 6 * time.Second}
+	if source != "" {
+		ip := net.ParseIP(source)
+		if ip == nil || net.ParseIP(target) == nil || (ip.To4() == nil) != (net.ParseIP(target).To4() == nil) {
+			return nil, fmt.Errorf("the probe source and literal target must have the same family")
+		}
+		dialer.LocalAddr = &net.TCPAddr{IP: ip}
+	}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(target, strconv.Itoa(port)))
 	res.Duration = time.Since(start).Round(time.Millisecond).String()
 	if err != nil {
