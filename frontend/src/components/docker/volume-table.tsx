@@ -324,10 +324,10 @@ function volumeFacts(
         {volume.driver}
       </span>,
     )
-  } else if (Object.keys(volume.options ?? {}).length > 0) {
+  } else if (volume.mountType) {
     facts.push(
-      <span key="options" className="font-mono">
-        {volume.options?.type ?? "local"} mount
+      <span key="mount" className="font-mono">
+        {volume.mountType} mount
       </span>,
     )
   }
@@ -358,8 +358,6 @@ function MountedBy({ volume }: { volume: VolumeDetail }) {
           </>
         ) : s === "anonymous" ? (
           "nothing — its container was removed"
-        ) : volume.refCount > 0 ? (
-          plural(volume.refCount, "container")
         ) : (
           "nothing"
         )}

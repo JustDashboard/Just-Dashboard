@@ -18,6 +18,7 @@ import {
   holderHue,
   holderOf,
   prunable,
+  redactOption,
   sizeReading,
   standing,
   volumeProduct,
@@ -112,15 +113,18 @@ export function VolumeSheet({
       footer={
         actions.length > 0 &&
         actions.map((verb) => (
+          // A refused verb keeps its reason as its name, the word on its face.
           <Button
             key={verb.key}
             size="sm"
             variant={verb.danger ? "destructive" : "outline"}
             disabled={verb.disabled}
+            aria-label={verb.label}
+            title={verb.disabled ? verb.label : undefined}
             onClick={verb.run}
           >
             <verb.icon className="size-4" />
-            {verb.label}
+            {verb.label.split(" — ")[0]}
           </Button>
         ))
       }
@@ -256,16 +260,22 @@ function Readings({ volume, backup }: { volume: VolumeDetail; backup?: Backup })
  * table below already says the container is stopped.
  */
 function PruneNotice({ volume, stacks }: { volume: VolumeDetail; stacks: Set<string> }) {
-  if (volume.usedBy.length > 0 || volume.refCount > 0) return null
+  if (volume.usedBy.length > 0) return null
   const s = standing(volume)
   const holder = holderOf(volume)
   const size = volume.size > 0 ? ` and the ${bytes(volume.size)} in it` : ""
   if (!prunable(volume)) {
     return (
+      // Only what is certain: a prune leaves it alone. What removing it does to
+      // the data is the driver's business — a CSI or EBS plugin deletes the
+      // disk — so it is not promised either way.
       <Notice title="Nothing mounts this volume">
-        A prune leaves it alone: its{" "}
-        {volume.driver === "local" ? "mount options put" : "driver keeps"} the data somewhere other
-        than this disk, and removing it deletes only Docker&apos;s record of it.
+        A prune leaves it alone: Docker prunes only local volumes without driver options, and this
+        one{" "}
+        {volume.driver === "local"
+          ? `is a ${volume.mountType} mount`
+          : `is kept by ${volume.driver}`}
+        .
       </Notice>
     )
   }
@@ -320,11 +330,7 @@ function MountedBy({
         Mounted by{volume.usedBy.length > 0 && ` · ${plural(volume.usedBy.length, "container")}`}
       </p>
       {volume.usedBy.length === 0 ? (
-        <Hint>
-          {volume.refCount > 0
-            ? `Docker counts ${plural(volume.refCount, "container")} holding it that the container list could not name.`
-            : "No container mounts it."}
-        </Hint>
+        <Hint>No container mounts it, running or stopped.</Hint>
       ) : (
         // Framed, as every table is (§2), beside the file browser's own frame.
         <div className="overflow-hidden rounded-lg border">
@@ -425,7 +431,7 @@ function Configuration({ volume }: { volume: VolumeDetail }) {
         </Detail>
         {options.map(([key, value]) => (
           <Detail key={`o-${key}`} label={key}>
-            <span className="font-mono break-all">{value}</span>
+            <span className="font-mono break-all">{redactOption(key, value)}</span>
           </Detail>
         ))}
       </DetailList>

@@ -6,6 +6,8 @@ import {
   isAnonymous,
   prunable,
   pruneShare,
+  pruneSurprise,
+  redactOption,
   sizeReading,
   splitName,
   standing,
@@ -59,10 +61,12 @@ describe("standing", () => {
     expect(prunable(held)).toBe(false)
   })
 
-  test("a reference the container listing could not name is still a hold", () => {
-    const held = volume("x", { refCount: 1 })
-    expect(standing(held)).toBe("stopped")
-    expect(prunable(held)).toBe(false)
+  // Docker's count is read from a disk-usage walk cached for minutes; after a
+  // `docker compose down` in a shell it still says 1 while the prune deletes.
+  test("a stale reference count does not hold what nothing mounts", () => {
+    const left = volume("nextcloud_db", { refCount: 1, labels: compose("nextcloud", "db") })
+    expect(standing(left)).toBe("down")
+    expect(prunable(left)).toBe(true)
   })
 
   test("a stack taken down leaves its volumes behind, and a prune takes them", () => {
@@ -84,10 +88,13 @@ describe("standing", () => {
 describe("prunable", () => {
   test("the daemon skips other drivers and local volumes with options", () => {
     expect(prunable(volume("plugin", { extra: { driver: "rclone" } }))).toBe(false)
-    expect(
-      prunable(volume("nfs", { extra: { options: { type: "nfs", o: "addr=10.0.0.2" } } })),
-    ).toBe(false)
-    expect(prunable(volume("plain", { extra: { options: {} } }))).toBe(true)
+    expect(prunable(volume("nfs", { extra: { mountType: "nfs" } }))).toBe(false)
+    expect(prunable(volume("plain"))).toBe(true)
+  })
+
+  test("what a prune did beside what it was shown to do", () => {
+    expect(pruneSurprise(["a", "b"], ["a", "b"])).toEqual({ extra: [], kept: [] })
+    expect(pruneSurprise(["a", "b"], ["a", "c"])).toEqual({ extra: ["c"], kept: ["b"] })
   })
 
   test("the share counts measured bytes only", () => {
@@ -108,6 +115,10 @@ describe("sizeReading", () => {
     expect(sizeReading(volume("a", { size: 0, refCount: -1 }))).toEqual({ word: "not measured" })
     expect(
       sizeReading(volume("a", { size: -1, refCount: -1, extra: { driver: "rclone" } })),
+    ).toEqual({ word: "not measurable" })
+    // Docker's walk skips a local volume that mounts something else.
+    expect(
+      sizeReading(volume("a", { size: 0, refCount: -1, extra: { mountType: "nfs" } })),
     ).toEqual({ word: "not measurable" })
   })
 })
@@ -265,4 +276,13 @@ test("a volume is drawn as what mounts it, or as what its stack and name say", (
   // Two letters of a suffix are not a language.
   expect(volumeProduct(volume("app_r"), products)).toBeUndefined()
   expect(volumeProduct(volume("d".repeat(64)), products)).toBeUndefined()
+})
+
+test("a driver option is shown without the password a CIFS mount carries", () => {
+  expect(redactOption("o", "addr=10.0.0.5,username=backup,password=hunter2,vers=3.0")).toBe(
+    "addr=10.0.0.5,username=backup,password=••••••,vers=3.0",
+  )
+  expect(redactOption("o", "addr=10.0.0.2,rw")).toBe("addr=10.0.0.2,rw")
+  expect(redactOption("device", "//nas/share")).toBe("//nas/share")
+  expect(redactOption("secret", "abc")).toBe("••••••")
 })

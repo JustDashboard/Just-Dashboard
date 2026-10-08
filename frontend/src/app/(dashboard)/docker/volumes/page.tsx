@@ -28,6 +28,7 @@ import {
   holders,
   inShow,
   pruneShare,
+  pruneSurprise,
   standing,
   visibleVolumes,
   withLiveStates,
@@ -139,9 +140,12 @@ export default function DockerVolumesPage() {
     return map
   }, [coverage.data])
   const known = useMemo(() => new Set((stacks.data ?? []).map((s) => s.name)), [stacks.data])
+  // A remembered "Not backed up" waits for the coverage it filters by rather
+  // than drawing an empty table until the Backups page answers.
+  const showing = show === "unprotected" && !coverage.data ? "all" : show
   const visible = useMemo(
-    () => visibleVolumes(volumes, { query, show, standing: only, holder, sort, backups }),
-    [volumes, query, show, only, holder, sort, backups],
+    () => visibleVolumes(volumes, { query, show: showing, standing: only, holder, sort, backups }),
+    [volumes, query, showing, only, holder, sort, backups],
   )
   const arrived = useArrivals(volumes.map((v) => v.name))
 
@@ -192,21 +196,41 @@ export default function DockerVolumesPage() {
         } finally {
           setRemoving(undefined)
         }
+        return "reported"
       },
     })
 
-  const prune = () =>
+  /**
+   * The list is read again before the confirmation opens, so what it names is
+   * what nothing mounts now rather than half a minute ago. Docker still
+   * decides when the prune runs, so what it actually deleted is compared with
+   * what was named, and a difference is said rather than left to be found.
+   */
+  const prune = async () => {
+    let fresh: VolumeDetail[]
+    try {
+      fresh = await get<VolumeDetail[]>("/docker/volumes/")
+    } catch (err) {
+      notify.error("Could not read the volumes", err)
+      return
+    }
+    list.refresh()
+    const named = pruneShare(fresh)
+    if (named.volumes.length === 0) {
+      notify.info("A prune would delete nothing: every volume is mounted")
+      return
+    }
     confirm({
       title: "Prune volumes",
       confirmLabel: "Prune",
       description: (
         <>
           <p className="text-destructive">
-            Deletes {plural(share.volumes.length, "volume")}
-            {share.size > 0 && <> and the {bytes(share.size)} in them</>}, permanently:
+            Deletes {plural(named.volumes.length, "volume")}
+            {named.size > 0 && <> and the {bytes(named.size)} in them</>}, permanently:
           </p>
           <ul className="max-h-48 space-y-0.5 overflow-auto font-mono text-xs">
-            {share.volumes.map((v) => (
+            {named.volumes.map((v) => (
               <li key={v.name} className="flex min-w-0 justify-between gap-3">
                 <span className="truncate">{v.name}</span>
                 <span className="shrink-0 text-muted-foreground">
@@ -219,8 +243,12 @@ export default function DockerVolumesPage() {
           <p>
             Each is a local volume no container mounts, running or stopped — Docker&apos;s own
             meaning of unused. A volume a stopped container holds is kept.
-            {share.volumes.some((v) => standing(v) === "down") &&
+            {named.volumes.some((v) => standing(v) === "down") &&
               " The ones naming a stack are what it left when it was taken down: deploying it again would start it empty."}
+          </p>
+          <p className="text-muted-foreground">
+            Docker decides as the prune runs: a volume unmounted after this list was read goes too,
+            and the result names it.
           </p>
         </>
       ),
@@ -232,15 +260,28 @@ export default function DockerVolumesPage() {
             undefined,
             { confirm: phrase },
           )
-          notify.success(
-            `Deleted ${plural(rep.items.length, "volume")}, reclaimed ${bytes(rep.spaceReclaimed)}`,
+          const { extra, kept } = pruneSurprise(
+            named.volumes.map((v) => v.name),
+            rep.items,
           )
+          const done = `Deleted ${plural(rep.items.length, "volume")}, reclaimed ${bytes(rep.spaceReclaimed)}`
+          const said = [
+            extra.length > 0 &&
+              `Not on the list, and deleted because nothing mounted ${extra.length === 1 ? "it" : "them"} by then: ${extra.join(", ")}.`,
+            kept.length > 0 &&
+              `Kept because a container mounted ${kept.length === 1 ? "it" : "them"} by then: ${kept.join(", ")}.`,
+          ].filter(Boolean)
+          const description = said.length > 0 ? said.join(" ") : undefined
+          if (extra.length > 0) notify.warning(done, { description })
+          else notify.success(done, { description })
           refresh()
         } finally {
           setPruning(false)
         }
+        return "reported"
       },
     })
+  }
 
   /**
    * What can be done to a volume, declared once for its row and its sheet
@@ -251,13 +292,11 @@ export default function DockerVolumesPage() {
    */
   const verbsFor = (volume: VolumeDetail): Verb[] => {
     const verbs: Verb[] = []
-    const held = volume.usedBy.length > 0 || volume.refCount > 0
+    const held = volume.usedBy.length > 0
     if (can("destructive")) {
       verbs.push({
         key: "remove",
-        label: held
-          ? `Remove — mounted by ${plural(Math.max(volume.usedBy.length, volume.refCount), "container")}`
-          : "Remove",
+        label: held ? `Remove — mounted by ${plural(volume.usedBy.length, "container")}` : "Remove",
         icon: Trash,
         inline: true,
         danger: true,
@@ -301,7 +340,6 @@ export default function DockerVolumesPage() {
   const sheetVerbs = (volume: VolumeDetail) =>
     verbsFor(volume)
       .filter((v) => !v.key.startsWith("copy"))
-      .map((v) => (v.key === "remove" ? { ...v, label: "Remove" } : v))
       .sort((a, b) => Number(Boolean(a.danger)) - Number(Boolean(b.danger)))
 
   const onSort = (key: SortKey) =>
@@ -309,7 +347,7 @@ export default function DockerVolumesPage() {
       current.key === key ? { key, desc: !current.desc } : { key, desc: FIRST_DIRECTION[key] },
     )
 
-  const filtered = query !== "" || show !== "all" || only !== "" || holder !== ""
+  const filtered = query !== "" || showing !== "all" || only !== "" || holder !== ""
 
   return (
     <Workspace
@@ -383,7 +421,7 @@ export default function DockerVolumesPage() {
                   <button
                     type="button"
                     aria-label={`Only the ${plural(share.volumes.length, "volume")} a prune would delete`}
-                    onClick={() => narrow({ show: "unmounted" })}
+                    onClick={() => narrow({ show: "prunable" })}
                     className="rounded-sm focus-ring hover:underline"
                   >
                     <Status
@@ -392,7 +430,7 @@ export default function DockerVolumesPage() {
                     />
                   </button>
                 ) : list.data && volumes.length > 0 ? (
-                  <Status verdict="ok" label="Every volume is held by a container" />
+                  <Status verdict="ok" label="A prune would delete nothing" />
                 ) : null}
               </span>
               {can("service.control") && (
@@ -448,7 +486,7 @@ export default function DockerVolumesPage() {
                     aria-label="Find volumes"
                   />
                   <div className="flex min-w-0 flex-wrap items-center gap-1">
-                    <FilterChip selected={show === "all"} onClick={() => setShow("all")}>
+                    <FilterChip selected={showing === "all"} onClick={() => setShow("all")}>
                       All <ChipCount>{volumes.length}</ChipCount>
                     </FilterChip>
                     {(
@@ -460,12 +498,25 @@ export default function DockerVolumesPage() {
                       ] as [Show, string][]
                     ).map(([key, label]) =>
                       count(key) > 0 ? (
-                        <FilterChip key={key} selected={show === key} onClick={() => setShow(key)}>
+                        <FilterChip
+                          key={key}
+                          selected={showing === key}
+                          onClick={() => setShow(key)}
+                        >
                           {label} <ChipCount>{count(key)}</ChipCount>
                         </FilterChip>
                       ) : null,
                     )}
                   </div>
+                  {showing === "prunable" && (
+                    <FilterChip
+                      selected
+                      onClick={() => setShow("all")}
+                      aria-label="Clear prune filter"
+                    >
+                      A prune would delete ×
+                    </FilterChip>
+                  )}
                   {holder && (
                     <FilterChip
                       selected

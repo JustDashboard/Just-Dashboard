@@ -1999,8 +1999,13 @@ The passes, in order. Each one is a diff you can review on its own.
    and its prune removes only the local volumes without driver options that nothing references
    (`volume/service.Prune`, `ByReferenced(false)`). What it does take is a volume whose containers
    were *removed* — the stack taken down with `docker compose down` is the common case, and its
-   Compose labels still name it, so the page says which stack left it. The list route now carries a
-   volume's driver options so the page can say exactly which volumes a prune would take.
+   Compose labels still name it, so the page says which stack left it. A volume's standing is read
+   from the container listing rather than Docker's reference count, which comes from a disk-usage
+   walk the server caches for minutes and still says *held* after a `docker compose down` in a
+   shell. The list route says what a volume's driver options mount (`mountType`) without carrying
+   them, since a CIFS `o=` holds the share's password; the sheet reads them from inspect with such
+   values masked. The prune confirmation reads the list again before it opens, and afterwards says
+   any volume Docker deleted that it did not name, or kept that it did.
 
    The dashboard's own two pages took the same exit in 0.7.0, and the reason generalises: a figure
    on a page you configure is best drawn beside the control that sets it. Version's Installed,

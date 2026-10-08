@@ -66,13 +66,16 @@ export function isAnonymous(volume: Pick<VolumeDetail, "name" | "labels">): bool
   return "com.docker.volume.anonymous" in volume.labels || /^[0-9a-f]{64}$/.test(volume.name)
 }
 
-export function standing(
-  volume: Pick<VolumeDetail, "usedBy" | "refCount" | "labels" | "name">,
-): Standing {
+/**
+ * Who mounts a volume is read from the container listing on every poll;
+ * Docker's own reference count comes from a disk-usage walk the server caches
+ * for minutes. After a `docker compose down` in a shell the count still says
+ * held while the listing already says nothing — and the prune deletes it — so
+ * the listing is what a volume's standing is read from.
+ */
+export function standing(volume: Pick<VolumeDetail, "usedBy" | "labels" | "name">): Standing {
   if (volume.usedBy.some((u) => UP.has(u.state))) return "running"
-  // A reference Docker counted that the container listing could not name is
-  // still a hold; calling it unmounted would invite the delete it refuses.
-  if (volume.usedBy.length > 0 || volume.refCount > 0) return "stopped"
+  if (volume.usedBy.length > 0) return "stopped"
   if (composeProject(volume)) return "down"
   if (isAnonymous(volume)) return "anonymous"
   return "loose"
@@ -84,15 +87,37 @@ export function standing(
  * with options is a remote filesystem or a bind, and pruning one would free
  * nothing, so the daemon skips it — as it skips every other driver.
  */
-export function prunable(
-  volume: Pick<VolumeDetail, "usedBy" | "refCount" | "driver" | "options">,
-): boolean {
-  return (
-    volume.usedBy.length === 0 &&
-    volume.refCount <= 0 &&
-    volume.driver === "local" &&
-    Object.keys(volume.options ?? {}).length === 0
-  )
+export function prunable(volume: Pick<VolumeDetail, "usedBy" | "driver" | "mountType">): boolean {
+  return volume.usedBy.length === 0 && volume.driver === "local" && !volume.mountType
+}
+
+/**
+ * What a prune did beside what it was shown to do. Docker decides when it
+ * runs, so a volume unmounted after the list was read goes with the rest and
+ * one mounted since is kept; either is said rather than left to be found.
+ */
+export function pruneSurprise(listed: string[], deleted: string[]) {
+  return {
+    extra: deleted.filter((name) => !listed.includes(name)),
+    kept: listed.filter((name) => !deleted.includes(name)),
+  }
+}
+
+const SECRET_KEY = /pass|secret|token|credential|key/i
+
+/**
+ * A driver option as it may be put on a screen: a CIFS share's `o=` carries
+ * `password=` among its mount flags, and an option named for a secret is one.
+ */
+export function redactOption(key: string, value: string): string {
+  if (SECRET_KEY.test(key)) return "••••••"
+  return value
+    .split(",")
+    .map((flag) => {
+      const [name, ...rest] = flag.split("=")
+      return rest.length > 0 && SECRET_KEY.test(name) ? `${name}=••••••` : flag
+    })
+    .join(",")
 }
 
 /**
@@ -100,12 +125,16 @@ export function prunable(
  * the figure in from its disk-usage walk, which only local volumes get; a
  * volume that walk has not reached carries no reference count either.
  */
-export function sizeReading(volume: Pick<VolumeDetail, "size" | "driver" | "refCount">): {
+export function sizeReading(
+  volume: Pick<VolumeDetail, "size" | "driver" | "refCount" | "mountType">,
+): {
   bytes?: number
   word?: "empty" | "not measured" | "not measurable"
 } {
   if (volume.size > 0) return { bytes: volume.size }
-  if (volume.driver !== "local") return { word: "not measurable" }
+  // The walk skips a local volume that mounts something else, as it skips
+  // every other driver: the bytes are not on this disk to count.
+  if (volume.driver !== "local" || volume.mountType) return { word: "not measurable" }
   if (volume.refCount < 0) return { word: "not measured" }
   return { word: "empty" }
 }
@@ -237,7 +266,7 @@ export function withLiveStates(volumes: VolumeDetail[], states: Map<string, stri
   })
 }
 
-export type Show = "all" | "running" | "stopped" | "unmounted" | "unprotected"
+export type Show = "all" | "running" | "stopped" | "unmounted" | "prunable" | "unprotected"
 
 export type SortKey = "name" | "mounted" | "standing" | "size" | "created"
 export type VolumeSort = { key: SortKey; desc: boolean }
@@ -272,6 +301,8 @@ export function inShow(volume: VolumeDetail, show: Show, backup: Backup | undefi
       return s === "stopped"
     case "unmounted":
       return s === "down" || s === "loose" || s === "anonymous"
+    case "prunable":
+      return prunable(volume)
     case "unprotected":
       return backup !== undefined && backup.state !== "protected"
   }

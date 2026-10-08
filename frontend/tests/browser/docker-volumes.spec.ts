@@ -24,10 +24,10 @@ test("the page opens on the engine, who holds the data and where each volume sta
 
   const identity = page.locator("[data-slot=host-identity]")
   await expect(identity.getByText("29.8.0")).toBeVisible()
-  await expect(identity.getByText("15 volumes")).toBeVisible()
+  await expect(identity.getByText("16 volumes")).toBeVisible()
   await expect(identity.getByText("31.4 GB stored")).toBeVisible()
   await expect(identity.getByText("11 mounted")).toBeVisible()
-  await expect(identity.getByText("4 of 15 backed up")).toBeVisible()
+  await expect(identity.getByText("4 of 16 backed up")).toBeVisible()
   await expect(identity.getByText("4 volumes a prune would delete")).toBeVisible()
 
   const held = page.getByRole("region", { name: "Who holds the data" })
@@ -90,7 +90,7 @@ test("a stopped container's volume is held, and a stack taken down is what a pru
   await expect.poll(() => mocks.calls).toContain("POST /docker/volumes/prune")
   await expect(page.getByText("Deleted 4 volumes, reclaimed 2.9 GB")).toBeVisible()
   await expect(body(page)).toHaveCount(VOLUMES.length - 4)
-  await expect(page.getByText("Every volume is held by a container")).toBeVisible()
+  await expect(page.getByText("A prune would delete nothing", { exact: true })).toBeVisible()
 })
 
 test("the band, the verdict and the chips narrow the table, and Escape lets go", async ({
@@ -110,15 +110,17 @@ test("the band, the verdict and the chips narrow the table, and Escape lets go",
   await expect(body(page)).toHaveCount(2)
   await page.getByRole("button", { name: "Clear mount filter" }).click()
 
+  // The verdict narrows to exactly what it counts: the CIFS volume nothing
+  // mounts is not mounted, and a prune leaves it alone.
   await page.getByRole("button", { name: "Only the 4 volumes a prune would delete" }).click()
   await expect(body(page)).toHaveCount(4)
-  await expect(page.getByRole("button", { name: /^Not mounted/ })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  await expect(row(page, "nas-backups")).toHaveCount(0)
+  await page.getByRole("button", { name: "Clear prune filter" }).click()
+  await page.getByRole("button", { name: /^Not mounted/ }).click()
+  await expect(body(page)).toHaveCount(5)
 
   await page.getByRole("button", { name: /^Not backed up/ }).click()
-  await expect(body(page)).toHaveCount(11)
+  await expect(body(page)).toHaveCount(12)
   await expect(row(page, "minio-data").getByText("backup paused")).toBeVisible()
 
   // A stack's name in a row narrows to it too.
@@ -252,4 +254,61 @@ test("on a phone each row keeps its name, standing and size", async ({ page }) =
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   )
   expect(overflow).toBeLessThanOrEqual(1)
+})
+
+test("a volume another filesystem backs is kept by a prune, and its password is not shown", async ({
+  page,
+}) => {
+  await mockVolumes(page)
+  await page.goto("/docker/volumes")
+
+  const nas = row(page, "nas-backups")
+  await expect(nas.getByText("cifs mount")).toBeVisible()
+  await expect(nas.getByText("not measurable")).toBeVisible()
+  await expect(nas.getByText("not mounted", { exact: true })).toBeVisible()
+
+  await page.getByRole("button", { name: "nas-backups", exact: true }).click()
+  const sheet = page.getByRole("dialog")
+  await expect(sheet.getByText(/A prune leaves it alone/)).toBeVisible()
+  await expect(
+    sheet.getByText("addr=10.0.0.5,username=backup,password=••••••,vers=3.0"),
+  ).toBeVisible()
+  await expect(sheet.getByText(/hunter2/)).toHaveCount(0)
+})
+
+test("a volume Docker refuses to remove says why and stays", async ({ page }) => {
+  await mockVolumes(page, { refuse: ["scratch"] })
+  await page.goto("/docker/volumes")
+
+  await row(page, "scratch").getByRole("button", { name: "Remove", exact: true }).click()
+  await page
+    .getByRole("dialog", { name: "Delete volume" })
+    .getByRole("button", { name: "Delete" })
+    .click()
+  await expect(page.getByText("Delete volume failed")).toBeVisible()
+  await expect(page.getByText(/volume is in use/)).toBeVisible()
+  // The confirmation stays open on a refusal; once it is closed the row is still there.
+  await page.keyboard.press("Escape")
+  await expect(row(page, "scratch")).toHaveCount(1)
+})
+
+/**
+ * Docker decides as the prune runs. A volume it deleted that the dialog did
+ * not name — unmounted after the list was read — is said, not left to be found.
+ */
+test("a prune that deleted more than it named says which", async ({ page }) => {
+  await mockVolumes(page, { pruned: ["nextcloud_db", "nextcloud_html", "scratch", "n8n_data"] })
+  await page.goto("/docker/volumes")
+
+  await page.getByRole("button", { name: "Prune 2.9 GB" }).click()
+  await page
+    .getByRole("dialog", { name: "Prune volumes" })
+    .getByRole("button", { name: "Prune" })
+    .click()
+  await expect(page.getByText(/^Deleted 4 volumes/)).toBeVisible()
+  await expect(page.getByText(/Not on the list.*n8n_data/)).toBeVisible()
+  // And the one it named that Docker kept, mounted again by then.
+  await expect(
+    page.getByText(/Kept because a container mounted it by then: 3f9ad2c8/),
+  ).toBeVisible()
 })

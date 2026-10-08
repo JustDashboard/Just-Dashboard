@@ -109,6 +109,9 @@ function volume(
     created: number
     labels?: Record<string, string>
     driver?: string
+    /** Driver options, which only the inspect route returns; the list carries their kind. */
+    options?: Record<string, string>
+    mountType?: string
     usedBy?: ReturnType<typeof mount>[]
   },
 ) {
@@ -125,6 +128,8 @@ function volume(
     refCount: options.refCount ?? usedBy.length,
     inUse: usedBy.length > 0,
     usedBy,
+    mountType: options.mountType,
+    options: options.options,
   }
 }
 
@@ -205,6 +210,17 @@ export const VOLUMES = [
     usedBy: [mount("vaultwarden", "/data")],
   }),
   volume("scratch", { size: 0, refCount: 0, created: 30 }),
+  volume("nas-backups", {
+    size: 0,
+    refCount: -1,
+    created: 24 * 44,
+    mountType: "cifs",
+    options: {
+      type: "cifs",
+      device: "//nas.lan/backups",
+      o: "addr=10.0.0.5,username=backup,password=hunter2,vers=3.0",
+    },
+  }),
   volume("jellyfin-media", {
     size: -1,
     refCount: -1,
@@ -327,6 +343,10 @@ export async function mockVolumes(
     capabilities?: string[]
     /** Leave the backup coverage unanswered, as it is for a reader the route refuses. */
     noBackups?: boolean
+    /** Volumes the daemon refuses to delete, as it does one a container has mounted since. */
+    refuse?: string[]
+    /** What the daemon's prune reports instead of what this fixture would delete. */
+    pruned?: string[]
   } = {},
 ): Promise<VolumeMocks> {
   const sockets: { send: (message: string) => void }[] = []
@@ -368,9 +388,16 @@ export async function mockVolumes(
           volumes = [...volumes, made]
           return json(route, made)
         }
-        return json(route, volumes)
+        // The list route carries what options mount, never the options.
+        return json(
+          route,
+          volumes.map((v) => ({ ...v, options: undefined })),
+        )
       case "/docker/volumes/prune": {
-        const gone = volumes.filter((v) => v.usedBy.length === 0 && v.driver === "local")
+        // The daemon's own filter: local, no driver options, nothing mounting it.
+        const gone = options.pruned
+          ? volumes.filter((v) => options.pruned!.includes(v.name))
+          : volumes.filter((v) => v.usedBy.length === 0 && v.driver === "local" && !v.mountType)
         volumes = volumes.filter((v) => !gone.includes(v))
         return json(route, {
           kind: "volumes",
@@ -391,6 +418,13 @@ export async function mockVolumes(
       const name = decodeURIComponent(one[1])
       const found = volumes.find((v) => v.name === name)
       if (method === "DELETE") {
+        if (options.refuse?.includes(name)) {
+          return json(
+            route,
+            { error: { code: "conflict", message: `remove ${name}: volume is in use` } },
+            409,
+          )
+        }
         volumes = volumes.filter((v) => v.name !== name)
         return route.fulfill({ status: 204 })
       }
