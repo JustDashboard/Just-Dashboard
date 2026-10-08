@@ -85,7 +85,10 @@ test("history stays opt-in and has unknown totals before recording", async ({ pa
   await expect(
     page.getByText("No contact or bandwidth conclusion can be drawn.", { exact: false }),
   ).toBeVisible()
-  await expect(page.getByText("Unknown", { exact: true })).toHaveCount(3)
+  for (const label of ["Displayed TCP sent", "Displayed TCP received", "Displayed retransmits"])
+    await expect(page.locator('[data-slot="stat-tile"]').filter({ hasText: label })).toContainText(
+      "Unknown",
+    )
   expect(mutations).toEqual([])
   await page.getByRole("button", { name: "Start recording" }).click()
   await expect.poll(() => mutations.length).toBe(1)
@@ -219,3 +222,250 @@ test.describe("mobile socket evidence", () => {
     expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
   })
 })
+
+const observerReport: FlowReport = {
+  ...report,
+  status: "waiting",
+  recordingSince: stamp,
+  settings: { ...report.settings, enabled: true, kernelObserverEnabled: false },
+  kernelObserver: {
+    status: "off",
+    reason: "Exact helper support is checked only on explicit attachment.",
+    checkedAt: stamp,
+    attachmentsRetained: false,
+    ringBytes: 1048576,
+    eventsPerSecond: 10000,
+    socketCapacity: 4096,
+    pendingCapacity: 8192,
+    dockerStatus: "unavailable",
+    dockerCheckedAt: stamp,
+    quality: {
+      events: "4",
+      ringDrops: "2",
+      budgetOmissions: "3",
+      headerGaps: "0",
+      identityGaps: "0",
+      stateAdmissionGaps: "0",
+      parserGaps: "0",
+      byteGaps: "1",
+      pendingOmissions: "0",
+      attributionGaps: "4",
+      readerBudgetPauses: "0",
+      unsavedEvents: "0",
+      timestampGaps: "4",
+      shutdownTailUnknown: true,
+    },
+  },
+}
+
+test("kernel activation is separate, reviewed and never triggered by reading or ordinary history", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await install(page, mutations, observerReport)
+  await page.goto("/network/flows")
+  await loaded(page)
+  await page.getByRole("button", { name: "Inspect again" }).click()
+  await page.getByRole("button", { name: "Read period" }).click()
+  expect(mutations).toEqual([])
+  await page.getByRole("button", { name: "Review observer activation" }).click()
+  await expect(page.getByRole("dialog")).toContainText("bounded event and storage budgets")
+  expect(mutations).toEqual([])
+  await page.getByRole("button", { name: "Activate observer", exact: true }).click()
+  await expect.poll(() => mutations.length).toBe(1)
+  expect(mutations[0]).toEqual({
+    method: "POST",
+    path: "/network/flows/observer",
+    body: { enabled: true },
+  })
+  await page.reload()
+  await loaded(page)
+  expect(mutations).toHaveLength(1)
+})
+
+test("observer needs history first and remains unavailable to an admin without destructive capability", async ({
+  page,
+}) => {
+  await install(page, [], {
+    ...observerReport,
+    settings: { ...observerReport.settings, enabled: false },
+  })
+  await page.goto("/network/flows")
+  await loaded(page)
+  await expect(page.getByRole("button", { name: "Review observer activation" })).toBeDisabled()
+  await expect(
+    page.getByText("Start history recording before reviewing observer activation.", {
+      exact: true,
+    }),
+  ).toBeVisible()
+  await mockNetwork(page, [], {
+    session: { ...admin, capabilities: ["system.admin", "read"] },
+    overrides: { [path]: observerReport },
+  })
+  await page.reload()
+  await loaded(page)
+  await expect(page.getByRole("button", { name: "Review observer activation" })).toHaveCount(0)
+})
+
+test("retained partial attachments survive a failed stop and offer a truthful retry", async ({
+  page,
+}) => {
+  const active: FlowReport = {
+    ...observerReport,
+    settings: { ...observerReport.settings, kernelObserverEnabled: true },
+    kernelObserver: {
+      ...observerReport.kernelObserver,
+      status: "partial",
+      attachmentsRetained: true,
+      reason: "Owned link detach needs retry.",
+    },
+  }
+  await install(page, [], active)
+  await page.route("**/api/v1/network/flows/observer", (route) =>
+    json(route, { error: { message: "Detach failed; owned links remain" } }, 503),
+  )
+  await page.goto("/network/flows")
+  await loaded(page)
+  await page.getByRole("button", { name: "Review observer stop" }).click()
+  await page.getByRole("button", { name: "Stop observer", exact: true }).click()
+  await expect(page.getByText("Partial observer coverage", { exact: true })).toBeVisible()
+  await expect(page.getByText("Owned attachments remain.", { exact: false })).toBeVisible()
+  await expect(
+    page.getByText("Detach failed; owned links remain Inspect observer state before trying again."),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Review observer stop" })).toBeEnabled()
+  await expect(page.getByText("Observer off", { exact: true })).toHaveCount(0)
+})
+
+test("failed refresh blocks observer activation and a review already open", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await install(page, mutations, observerReport)
+  await page.clock.install()
+  await page.goto("/network/flows")
+  await loaded(page)
+  await page.getByRole("button", { name: "Review observer activation" }).click()
+  await page.route("**/api/v1/network/flows/?*", (route) =>
+    json(route, { error: { message: "Stored state unavailable" } }, 503),
+  )
+  // The explicit background poll can fail while a review remains open.
+  await page.clock.fastForward(30001)
+  await expect(page.getByText("Last known observer state", { exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "Activate observer", exact: true }).click()
+  expect(mutations).toEqual([])
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByRole("button", { name: "Review observer activation" })).toBeDisabled()
+})
+
+test("kernel subtotals keep TCP channels separate, show UDP bytes and retain dated gaps", async ({
+  page,
+}) => {
+  const kernel: FlowRow = {
+    ...row,
+    id: "kernel-cookie-owner",
+    evidence: "kernel_transport_payload_observed",
+    observedTxBytes: "131072",
+    observedRxBytes: null,
+    observedPackets: "4",
+    observedTxPackets: "3",
+    observedRxPackets: "1",
+    observedTxKnownPackets: "2",
+    observedRxKnownPackets: "0",
+    observedTxByteGaps: "1",
+    observedRxByteGaps: "1",
+    observedSyn: "1",
+    observedFin: "1",
+    observedRst: "0",
+    timestampUncertain: true,
+  }
+  await install(page, [], {
+    ...observerReport,
+    rows: [
+      row,
+      kernel,
+      {
+        ...kernel,
+        id: "kernel-udp",
+        socket: { ...kernel.socket, protocol: "udp" },
+        observedTxBytes: "257",
+      },
+    ],
+  })
+  await page.goto("/network/flows")
+  await loaded(page)
+  await expect(
+    page.locator('[data-slot="stat-tile"]').filter({ hasText: "Displayed TCP sent" }),
+  ).toContainText("128.0 KiB")
+  await expect(page.getByText("Kernel transport payload", { exact: true })).toHaveCount(2)
+  await expect(page.getByText("Sent subtotal 257 B", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("UTC timestamp uncertain; inspect observer clock evidence", { exact: true }),
+  ).toHaveCount(2)
+  await expect(page.getByText("Received subtotal Unknown", { exact: true })).toHaveCount(2)
+  await page.getByRole("button", { name: "Observer bounds and retained quality" }).click()
+  await expect(page.getByText("Ring delivery drops", { exact: true })).toBeVisible()
+  await expect(page.locator(`time[datetime="${stamp}"]`).first()).toBeVisible()
+  await expect(
+    page.getByText("The final events at shutdown remain unknown.", { exact: true }),
+  ).toBeVisible()
+})
+
+test("interrupted restart needs a new explicit opt-in and historical IDs do not imply retained attachments", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await install(page, mutations, {
+    ...observerReport,
+    kernelObserver: {
+      ...observerReport.kernelObserver,
+      status: "interrupted",
+      programIds: [123],
+      linkIds: [456],
+      reason: "Previous process ended; explicit opt-in required.",
+    },
+  })
+  await page.goto("/network/flows")
+  await loaded(page)
+  await expect(page.getByText("Previous observer interrupted", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review observer activation" })).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Review observer stop" })).toHaveCount(0)
+  expect(mutations).toEqual([])
+})
+
+for (const width of [390, 1280, 1720]) {
+  test(`observer evidence and its review stay within ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 960 })
+    await install(page, [], {
+      ...observerReport,
+      kernelObserver: {
+        ...observerReport.kernelObserver,
+        digest: "a".repeat(64),
+        bootId: "b".repeat(64),
+        targetCgroup: "/" + "long-fixture-owner-".repeat(16),
+        quality: { ...observerReport.kernelObserver.quality!, ringDrops: "9007199254740993" },
+      },
+    })
+    await page.goto("/network/flows")
+    await loaded(page)
+    await page.getByRole("button", { name: "Observer bounds and retained quality" }).click()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    if (process.env.JD_NETWORK_SCREENSHOTS)
+      await page.screenshot({
+        path: `${process.env.JD_NETWORK_SCREENSHOTS}/kernel-observer-${width}.png`,
+        fullPage: true,
+      })
+    if (process.env.JD_NETWORK_SCREENSHOTS) {
+      await page.getByText("Ring delivery drops", { exact: true }).scrollIntoViewIfNeeded()
+      await page.screenshot({
+        path: `${process.env.JD_NETWORK_SCREENSHOTS}/kernel-observer-quality-${width}.png`,
+        fullPage: true,
+      })
+    }
+    await page.getByRole("button", { name: "Review observer activation" }).click()
+    const dialog = page.getByRole("dialog")
+    await expect(dialog).toBeVisible()
+    expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+  })
+}

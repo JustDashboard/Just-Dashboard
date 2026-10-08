@@ -79,8 +79,14 @@ row is available; consumed/detached seeds cannot overwrite retained edits or gat
 draft. A new seed identity and delayed admin authentication can still initialize a plan. External
 pickers accept only current option identities so synthetic empty
 form events cannot erase dependent scope. External check reload/filter/comparison never launch
-probes and retain source/family/time distinctions. Socket history shows decimal-string
-TCP counters and explicit null/unknown UDP/drop data, with recording separate from page reads.
+probes and retain source/family/time distinctions. Socket history keeps native decimal-string TCP
+counter deltas separate from opt-in kernel TCP/UDP transport-payload subtotals, including when both
+channels describe the same socket. Missing lengths, owners, UTC certainty and delivery/budget/storage
+gaps remain explicit. Observer activation and stop use reviewed destructive controls, gated by fresh
+admin reads and history recording; page reads, ordinary opt-in and restart never attach it. Retained
+attachments after a failed stop offer retry without claiming off. The observer must be stopped
+explicitly before ordinary history opt-out; history erasure also stops it. Historical program/link IDs
+are dated evidence, not proof of current attachment ownership.
 
 - `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
   `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with

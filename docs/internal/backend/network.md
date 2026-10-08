@@ -389,4 +389,6 @@ Provider/foreign coverage stays unknown; planning does not replace the native ow
 [Native socket history](network-flow-accounting.md) records only after explicit admin opt-in.
 Identity-safe TCP counter deltas, UDP peers, fresh Docker descriptor attribution and period quality
 are bounded and retained. Snapshot gaps, UDP byte counts and short-flow completeness remain unknown;
-page reads and export never collect. This baseline has no supported kernel observer yet.
+page reads and export never collect. The separate [kernel observer](network-flow-observer.md)
+requires a reviewed explicit opt-in and retains TCP/UDP packet subtotals and declared coverage gaps;
+its figures are never added to the native TCP channel and do not establish complete host traffic.

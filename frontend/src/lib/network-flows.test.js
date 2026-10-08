@@ -7,6 +7,9 @@ import {
   flowPolicyProblem,
   flowReading,
   flowTotals,
+  flowKernelTotals,
+  flowIsKernelRow,
+  observerReading,
   yesterdayUTC,
 } from "./network-flows"
 
@@ -47,6 +50,54 @@ describe("native socket evidence", () => {
     })
     expect(flowDateRange("2026-02-31")).toBeNull()
     expect(flowDateRange("not-a-day")).toBeNull()
+  })
+  test("separates identical TCP channels and never promotes unknown evidence", () => {
+    const native = { socket: { protocol: "tcp" }, txBytes: "257", rxBytes: "0" }
+    const kernel = {
+      ...native,
+      evidence: "kernel_transport_payload_observed",
+      observedTxBytes: "257",
+      observedRxBytes: "0",
+      observedPackets: "4",
+      observedTxPackets: "3",
+      observedRxPackets: "1",
+      observedTxKnownPackets: "2",
+      observedRxKnownPackets: "1",
+      observedTxByteGaps: "1",
+      observedRxByteGaps: "0",
+    }
+    const rows = [native, kernel, { ...native, evidence: "future_unknown_channel" }]
+    expect(flowTotals(rows).tx.value).toBe(257n)
+    expect(flowTotals(rows).tx.known).toBe(1)
+    expect(flowIsKernelRow(kernel)).toBe(true)
+    const observed = flowKernelTotals(rows)
+    expect(observed.rows).toBe(1)
+    expect(observed.tx.value).toBe(257n)
+    expect(observed.rx.value).toBe(0n)
+    expect(observed.txGaps.value).toBe(1n)
+    expect(observed.txKnown.value).toBe(2n)
+    expect(observed.txPackets.value).toBe(3n)
+  })
+  test("keeps missing kernel bytes and quality counts unknown while adding exact subtotals", () => {
+    const kernel = (observedTxBytes, observedTxByteGaps) => ({
+      socket: { protocol: "udp" },
+      evidence: "kernel_transport_payload_observed",
+      observedTxBytes,
+      observedTxByteGaps,
+    })
+    expect(flowKernelTotals([]).tx.value).toBeNull()
+    const observed = flowKernelTotals([
+      kernel("9007199254740993", "0"),
+      kernel("9007199254740993", "1"),
+      kernel(null, undefined),
+    ])
+    expect(observed.tx.value).toBe(18014398509481986n)
+    expect(observed.tx.unknown).toBe(1)
+    expect(observed.txGaps.value).toBe(1n)
+    expect(observed.txGaps.unknown).toBe(1)
+    expect(observed.packets.value).toBeNull()
+    expect(observerReading("interrupted").tone).toBe("warning")
+    expect(observerReading("partial").label).toBe("Partial observer coverage")
   })
   test("off, stale and unavailable do not claim complete or current accounting", () => {
     expect(flowReading("off").label).toBe("Recorder off")

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post, put, del, errorMessage } from "@/lib/api"
@@ -12,6 +12,8 @@ import {
   flowPolicyProblem,
   flowReading,
   flowTotals,
+  flowIsKernelRow,
+  flowKernelTotals,
   yesterdayUTC,
   type FlowReport,
   type FlowSettings,
@@ -24,6 +26,7 @@ import { Status } from "@/components/status-dot"
 import { ErrorState, LoadingPanel, Notice, EmptyNote } from "@/components/state"
 import { Field, FieldRow, Disclosure } from "@/components/form"
 import { NetworkReadWarning } from "@/components/network/read-warning"
+import { KernelObserverPanel, ObserverQualityReading } from "@/components/network/kernel-observer"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,16 +55,53 @@ export default function NetworkFlowsPage() {
     [admin, filters.day, filters.address, filters.containerId],
     { enabled: admin && Boolean(range) },
   )
-  const [action, setAction] = useState<"recording" | "export" | null>(null)
+  const [action, setAction] = useState<"recording" | "export" | "observer" | null>(null)
   const busy = action !== null
   const [actionError, setActionError] = useState("")
   const { confirm, dialog } = useConfirm()
   const data = read.data
   const disabled = busy || Boolean(read.error) || !data
+  const observerRetained = Boolean(
+    data?.settings.kernelObserverEnabled || data?.kernelObserver.attachmentsRetained,
+  )
   const totals = flowTotals(data?.rows ?? [])
+  const observed = flowKernelTotals(data?.rows ?? [])
   const reading = flowReading(data?.status ?? "unavailable")
+  const mutationState = useRef({ data, disabled, destructive })
+  useEffect(() => {
+    mutationState.current = { data, disabled, destructive }
+  }, [data, disabled, destructive])
+  const reviewObserver = (enabled: boolean) => {
+    if (!data || disabled || !destructive) return
+    confirm({
+      title: enabled ? "Activate kernel packet observer" : "Stop kernel packet observer",
+      description: enabled
+        ? `Observe TCP and UDP transport payload metadata at the declared cgroup hooks. Peer and owner evidence is retained for up to ${data.settings.retentionDays} days with bounded event and storage budgets. Missing events, bytes and owners remain unknown. Restarting the dashboard will leave the observer off.`
+        : "Drain retained observations and detach this session's owned programs. Failed cleanup retains the actual attachment state for inspection and retry. The final shutdown tail can remain unknown.",
+      confirmLabel: enabled ? "Activate observer" : "Stop observer",
+      action: async () => {
+        const latest = mutationState.current
+        if (!latest.data || latest.disabled || !latest.destructive)
+          throw new Error("Inspect a fresh recorder state before changing the observer.")
+        if (enabled && !latest.data.settings.enabled)
+          throw new Error("Start history recording before activating the observer.")
+        setAction("observer")
+        setActionError("")
+        try {
+          await post("/network/flows/observer", { enabled })
+          return "reported"
+        } catch (err) {
+          setActionError(`${errorMessage(err)} Inspect observer state before trying again.`)
+          throw err
+        } finally {
+          read.refresh()
+          setAction(null)
+        }
+      },
+    })
+  }
   const changeRecording = async () => {
-    if (!data || disabled) return
+    if (!data || disabled || (data.settings.enabled && observerRetained)) return
     setAction("recording")
     setActionError("")
     try {
@@ -119,7 +159,7 @@ export default function NetworkFlowsPage() {
                       size="sm"
                       variant="outline"
                       pending={action === "recording"}
-                      disabled={disabled}
+                      disabled={disabled || (data.settings.enabled && observerRetained)}
                       onClick={changeRecording}
                     >
                       {data.settings.enabled ? "Stop recording" : "Start recording"}
@@ -136,6 +176,9 @@ export default function NetworkFlowsPage() {
                     {data.settings.enabled ? "on" : "off"} · Sample interval{" "}
                     {data.settings.intervalSeconds}s · Retention {data.settings.retentionDays} days
                   </p>
+                  {data.settings.enabled && observerRetained && (
+                    <p>Stop the kernel observer before stopping ordinary history recording.</p>
+                  )}
                   <p>
                     {data.recordingSince ? (
                       <>
@@ -240,11 +283,12 @@ export default function NetworkFlowsPage() {
             )
           ) : (
             <>
-              <Notice title="Sampled TCP deltas; incomplete flow coverage">
+              <Notice title="Separate measurement sources; incomplete flow coverage">
                 <p>
-                  UDP bytes and dropped-event counts are unknown. Connections that open and close
-                  between snapshots can be missed. Empty results do not prove no contact or zero
-                  bandwidth.
+                  Native snapshots leave UDP bytes and dropped-event counts unknown, and miss
+                  connections that open and close between reads. Kernel packet observations retain
+                  separate subtotals and coverage gaps. The two channels are never added together.
+                  Empty results do not prove no contact or zero bandwidth.
                 </p>
                 {data.error && <p className="mt-2">{data.error}</p>}
               </Notice>
@@ -270,6 +314,48 @@ export default function NetworkFlowsPage() {
                   hint={`${filters.day} · UTC`}
                 />
               </StatGrid>
+              <KernelObserverPanel
+                observer={data.kernelObserver}
+                settings={data.settings}
+                disabled={disabled}
+                pending={action === "observer"}
+                stale={Boolean(read.error)}
+                canControl={destructive}
+                onReview={reviewObserver}
+              />
+              {observed.rows > 0 && (
+                <Panel plain>
+                  <PanelHeader title="Displayed kernel packet observations" />
+                  <PanelBody>
+                    <StatGrid columns={3}>
+                      <StatTile
+                        label="Observed sent subtotal"
+                        value={flowBytes(observed.tx.value)}
+                        hint={`${observed.tx.known} rows with known payload bytes`}
+                      />
+                      <StatTile
+                        label="Observed received subtotal"
+                        value={flowBytes(observed.rx.value)}
+                        hint={`${observed.rx.known} rows with known payload bytes`}
+                      />
+                      <StatTile
+                        label="Observed packet subtotal"
+                        value={observed.packets.value?.toString() ?? "Unknown"}
+                        hint={`${observed.packets.known} counted rows · ${observed.packets.unknown} unknown`}
+                      />
+                    </StatGrid>
+                    <p className="mt-3 text-body text-muted-foreground">
+                      Known sent byte gaps {observed.txGaps.value?.toString() ?? "Unknown"} · Known
+                      received byte gaps {observed.rxGaps.value?.toString() ?? "Unknown"} · Rows
+                      without gap counts: sent {observed.txGaps.unknown}, received{" "}
+                      {observed.rxGaps.unknown} · Rows without known sent bytes{" "}
+                      {observed.tx.unknown} · Without known received bytes {observed.rx.unknown}.
+                      Subtotals include only retained events with known transport payload lengths;
+                      they are not complete host bandwidth or billing.
+                    </p>
+                  </PanelBody>
+                </Panel>
+              )}
               {data.truncated && (
                 <Notice tone="warning" title="Displayed rows are capped">
                   The period has more matching rows. These figures cover only the rows below; narrow
@@ -290,6 +376,7 @@ export default function NetworkFlowsPage() {
                           <TableHead>Capped source reads</TableHead>
                           <TableHead>Omitted sources</TableHead>
                           <TableHead>Skipped intervals</TableHead>
+                          <TableHead>Kernel observer quality</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -303,6 +390,11 @@ export default function NetworkFlowsPage() {
                             <TableCell>{hour.truncatedSources}</TableCell>
                             <TableCell>{hour.omittedSources}</TableCell>
                             <TableCell>{hour.discardedIntervals}</TableCell>
+                            <TableCell>
+                              <Disclosure quiet summary="Retained observer gaps">
+                                <ObserverQualityReading quality={hour.observerQuality} />
+                              </Disclosure>
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -366,10 +458,6 @@ export default function NetworkFlowsPage() {
                 <PanelHeader title="Measurement boundaries" />
                 <PanelBody>
                   <div className="space-y-3 text-body">
-                    <p>
-                      Optional kernel observer: {data.kernelObserver.status}.{" "}
-                      {data.kernelObserver.reason}
-                    </p>
                     <Disclosure quiet summary="Native source and counter coverage">
                       <ul className="list-disc space-y-2 pl-5 text-muted-foreground">
                         {data.coverage.map((line) => (
@@ -393,7 +481,7 @@ export default function NetworkFlowsPage() {
                           confirm({
                             title: "Erase socket history",
                             description:
-                              "Delete all retained socket observations and coverage hours. Recording keeps its current on/off setting and starts a fresh byte baseline.",
+                              "Stop any attached kernel observer, then delete all retained socket observations and coverage hours. Ordinary history keeps its current on/off setting and starts a fresh byte baseline.",
                             confirmLabel: "Erase history",
                             action: async () => {
                               await del("/network/flows/history")
@@ -433,7 +521,7 @@ function SocketRows({ rows }: { rows: FlowRow[] }) {
               <TableRow>
                 <TableHead>Owner / protocol</TableHead>
                 <TableHead>Local → observed peer</TableHead>
-                <TableHead>Native TCP deltas</TableHead>
+                <TableHead>Measurement source / bytes</TableHead>
                 <TableHead>Observed UTC window</TableHead>
                 <TableHead>Identity / coverage</TableHead>
               </TableRow>
@@ -464,23 +552,46 @@ function SocketRows({ rows }: { rows: FlowRow[] }) {
                     </p>
                   </TableCell>
                   <TableCell>
-                    <p>
-                      Sent{" "}
-                      {row.socket.protocol === "tcp"
-                        ? flowBytes(row.txBytes)
-                        : "Unavailable for UDP"}
-                    </p>
-                    <p>
-                      Received{" "}
-                      {row.socket.protocol === "tcp"
-                        ? flowBytes(row.rxBytes)
-                        : "Unavailable for UDP"}
-                    </p>
-                    <p>Retransmits {flowCounter(row.retransmissions)?.toString() ?? "Unknown"}</p>
-                    <p>
-                      Outstanding-loss gauge max{" "}
-                      {flowCounter(row.lostGaugeMax)?.toString() ?? "Unknown"}
-                    </p>
+                    {flowIsKernelRow(row) ? (
+                      <>
+                        <p className="font-medium">Kernel transport payload</p>
+                        <p>Sent subtotal {flowBytes(row.observedTxBytes)}</p>
+                        <p>Received subtotal {flowBytes(row.observedRxBytes)}</p>
+                        <p>
+                          Observed SYN {flowCounter(row.observedSyn)?.toString() ?? "Unknown"} · FIN{" "}
+                          {flowCounter(row.observedFin)?.toString() ?? "Unknown"} · RST{" "}
+                          {flowCounter(row.observedRst)?.toString() ?? "Unknown"}
+                        </p>
+                        <p className="text-muted-foreground">
+                          Observed flags; lifecycle completeness unknown
+                        </p>
+                      </>
+                    ) : row.evidence ? (
+                      <p>Unrecognized evidence source; byte interpretation unknown</p>
+                    ) : (
+                      <>
+                        <p className="font-medium">Native TCP counter deltas</p>
+                        <p>
+                          Sent{" "}
+                          {row.socket.protocol === "tcp"
+                            ? flowBytes(row.txBytes)
+                            : "Unavailable for UDP"}
+                        </p>
+                        <p>
+                          Received{" "}
+                          {row.socket.protocol === "tcp"
+                            ? flowBytes(row.rxBytes)
+                            : "Unavailable for UDP"}
+                        </p>
+                        <p>
+                          Retransmits {flowCounter(row.retransmissions)?.toString() ?? "Unknown"}
+                        </p>
+                        <p>
+                          Outstanding-loss gauge max{" "}
+                          {flowCounter(row.lostGaugeMax)?.toString() ?? "Unknown"}
+                        </p>
+                      </>
+                    )}
                   </TableCell>
                   <TableCell>
                     <p>
@@ -489,22 +600,52 @@ function SocketRows({ rows }: { rows: FlowRow[] }) {
                     <p>
                       <Time value={row.lastSeen} />
                     </p>
-                    <p className="text-muted-foreground">Observed span; no close event</p>
+                    <p className="text-muted-foreground">
+                      {row.timestampUncertain
+                        ? "UTC timestamp uncertain; inspect observer clock evidence"
+                        : flowIsKernelRow(row)
+                          ? "Retained packet window; full connection span unknown"
+                          : "Observed span; no close event"}
+                    </p>
                   </TableCell>
                   <TableCell>
-                    <p>
-                      {row.samples} samples · {row.measuredIntervals} measured ·{" "}
-                      {row.skippedIntervals} skipped
-                    </p>
+                    {flowIsKernelRow(row) ? (
+                      <>
+                        <p>
+                          {flowCounter(row.observedPackets)?.toString() ?? "Unknown"} observed
+                          packets
+                        </p>
+                        <p>
+                          Sent known lengths{" "}
+                          {flowCounter(row.observedTxKnownPackets)?.toString() ?? "Unknown"}/
+                          {flowCounter(row.observedTxPackets)?.toString() ?? "Unknown"} · Byte gaps{" "}
+                          {flowCounter(row.observedTxByteGaps)?.toString() ?? "Unknown"}
+                        </p>
+                        <p>
+                          Received known lengths{" "}
+                          {flowCounter(row.observedRxKnownPackets)?.toString() ?? "Unknown"}/
+                          {flowCounter(row.observedRxPackets)?.toString() ?? "Unknown"} · Byte gaps{" "}
+                          {flowCounter(row.observedRxByteGaps)?.toString() ?? "Unknown"}
+                        </p>
+                        <p>Cgroup {row.socketCgroup ?? "unknown"}</p>
+                      </>
+                    ) : (
+                      <p>
+                        {row.samples} samples · {row.measuredIntervals} measured ·{" "}
+                        {row.skippedIntervals} skipped
+                      </p>
+                    )}
                     <p>
                       Cookie {row.socket.cookie ?? "unknown"} · Inode{" "}
                       {row.socket.inode ?? "unknown"}
                     </p>
                     <p>Namespace {row.namespace}</p>
-                    <p>
-                      Sent intervals {row.txIntervals} · Received {row.rxIntervals} · Retransmits{" "}
-                      {row.retransIntervals}
-                    </p>
+                    {!row.evidence && (
+                      <p>
+                        Sent intervals {row.txIntervals} · Received {row.rxIntervals} · Retransmits{" "}
+                        {row.retransIntervals}
+                      </p>
+                    )}
                     <p className="max-w-48 break-all text-muted-foreground">
                       Via {row.sourceName} · Boot {row.bootId}
                     </p>

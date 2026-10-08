@@ -1,0 +1,23 @@
+
+Running 16 tests using 1 worker
+
+(node:716652) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/network-flows.spec.ts:78:5 › history stays opt-in and has unknown totals before recording (2.3s)
+  ✓   2 [chromium] › tests/browser/network-flows.spec.ts:102:5 › full tuple and container proof keep UDP bytes and loss unknown (1.8s)
+  ✓   3 [chromium] › tests/browser/network-flows.spec.ts:134:5 › failed refresh retains dates and blocks recorder mutations and exports (2.1s)
+  ✓   4 [chromium] › tests/browser/network-flows.spec.ts:149:5 › period filters send UTC boundaries and full container identity (2.0s)
+  ✓   5 [chromium] › tests/browser/network-flows.spec.ts:167:5 › retention changes review erasure and keep recording as a separate intent (2.9s)
+  ✓   6 [chromium] › tests/browser/network-flows.spec.ts:188:5 › read-only role sees the privacy boundary without requesting flow metadata (1.3s)
+  ✓   7 [chromium] › tests/browser/network-flows.spec.ts:210:7 › mobile socket evidence › long identities and tuple table scroll inside the reading (1.6s)
+  ✓   8 [chromium] › tests/browser/network-flows.spec.ts:259:5 › kernel activation is separate, reviewed and never triggered by reading or ordinary history (3.5s)
+  ✓   9 [chromium] › tests/browser/network-flows.spec.ts:284:5 › observer needs history first and remains unavailable to an admin without destructive capability (2.9s)
+  ✓  10 [chromium] › tests/browser/network-flows.spec.ts:308:5 › retained partial attachments survive a failed stop and offer a truthful retry (2.4s)
+  ✓  11 [chromium] › tests/browser/network-flows.spec.ts:339:5 › failed refresh blocks observer activation and a review already open (2.1s)
+  ✓  12 [chromium] › tests/browser/network-flows.spec.ts:358:5 › kernel subtotals keep TCP channels separate, show UDP bytes and retain dated gaps (2.2s)
+  ✓  13 [chromium] › tests/browser/network-flows.spec.ts:411:5 › interrupted restart needs a new explicit opt-in and historical IDs do not imply retained attachments (1.5s)
+  ✓  14 [chromium] › tests/browser/network-flows.spec.ts:434:7 › observer evidence and its review stay within 390px (2.0s)
+  ✓  15 [chromium] › tests/browser/network-flows.spec.ts:434:7 › observer evidence and its review stay within 1280px (2.7s)
+  ✓  16 [chromium] › tests/browser/network-flows.spec.ts:434:7 › observer evidence and its review stay within 1720px (3.3s)
+
+  16 passed (38.3s)

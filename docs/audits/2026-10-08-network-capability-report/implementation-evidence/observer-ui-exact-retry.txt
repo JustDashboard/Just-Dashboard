@@ -1,0 +1,14 @@
+
+Running 7 tests using 1 worker
+
+(node:772252) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › tests/browser/design-system.spec.ts:433:7 › the databases pages keep the rules (54.4s)
+  ✓  2 [chromium] › tests/browser/design-system.spec.ts:433:7 › the databases pages keep the rules at a phone's width (44.7s)
+  ✓  3 [chromium] › tests/browser/design-system.spec.ts:622:5 › every page declares one register, and only a flow page has a foreground (26.2s)
+  ✓  4 [chromium] › tests/browser/design-system.spec.ts:643:5 › the deployment pages are reading pages with no foreground (29.4s)
+  ✓  5 [chromium] › tests/browser/network-flows.spec.ts:134:5 › failed refresh retains dates and blocks recorder mutations and exports (1.2s)
+  ✓  6 [chromium] › tests/browser/network-flows.spec.ts:261:5 › kernel activation is separate, reviewed and never triggered by reading or ordinary history (2.1s)
+  ✓  7 [chromium] › tests/browser/network-flows.spec.ts:286:5 › observer needs history first and remains unavailable to an admin without destructive capability (1.4s)
+
+  7 passed (2.7m)

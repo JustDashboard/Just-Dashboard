@@ -2,9 +2,11 @@
 
 `internal/netflows` is the opt-in P8 socket baseline. It retains evidence for identifying observed
 TCP byte users, looking up an observed peer address by a freshly verified Docker identity, and
-comparing sampled retransmission deltas and outstanding-loss gauges. P8 remains in progress: no
-supported kernel observer is bundled, so UDP bytes, complete short-lived flows, close events and
-actual dropped-event counts remain unavailable. A socket snapshot is not complete flow accounting.
+comparing sampled retransmission deltas and outstanding-loss gauges. The separately opted-in
+[kernel observer](network-flow-observer.md) adds bounded TCP/UDP packet evidence, payload subtotals
+and delivery/coverage counters. These two channels are never summed. This native snapshot baseline
+still leaves UDP bytes, missed short-lived sockets and event drops unknown; neither channel proves
+complete flow accounting. P8 acceptance remains in progress.
 
 ## Collection and identity
 
@@ -93,14 +95,16 @@ All paths below `/network/flows` require `system.admin`, including exports. Resp
 | --- | --- |
 | `GET /network/flows/` | Read bounded retained observations and quality. |
 | `GET /network/flows/export` | Export at most 1,000 rows and 2 MiB JSON. Both row and coverage truncation are explicit; one export is admitted at a time. |
-| `POST /network/flows/recording` | Audit an explicit `{enabled}` opt-in/out; no host network mutation. |
+| `POST /network/flows/recording` | Audit an explicit `{enabled}` native-history opt-in/out; observer attachments require an explicit reviewed stop before opt-out. |
+| `POST /network/flows/observer` | Audit explicit fixed kernel observer activation/stop; `s.destructive`, ordinary reviewed confirmation. History recording is a prerequisite; no automatic attachment at startup. |
 | `PUT /network/flows/policy` | Audit interval/retention changes; `s.destructive`, ordinary reviewed confirmation because pruning can erase records. |
-| `DELETE /network/flows/history` | Audit erasure of observations and coverage; `s.destructive`, ordinary confirmation. |
+| `DELETE /network/flows/history` | Stop the kernel observer and audit erasure of observations and coverage; `s.destructive`, ordinary confirmation. |
 
 These paths do not enroll in network pending confirmation and never alter links, policy, shaping,
 DNS or boot inputs. The server initializes this module after Docker exists, starts its recorder
 during startup and drains it before closing Docker. It mounts the admin-only routes within Network.
-No auto-reconcile daemon or kernel program is installed. The reporting page is `/network/flows`.
+No auto-reconcile daemon or automatically attached kernel program is installed. The reporting page
+is `/network/flows`; observer controls and quality live beside its native source readings.
 
 ## Measured acceptance and its limits
 
@@ -154,6 +158,7 @@ Frontend pure logic tests cover nullable counters, UTC boundaries and exact arit
 specs cover opt-in, unknown history/UDP, stale readings, filters, retention review, role privacy and
 mobile containment; a source-matched production build/browser run is required at integration.
 
-No real reboot or power-loss acceptance is claimed for this observation baseline. No optional
-kernel observer, UDP byte measurement, complete short-lived coverage, event-drop proof or billing
-accounting is accepted by these fixtures.
+No real reboot or power-loss acceptance is claimed for this observation baseline. These native
+snapshot fixtures do not establish kernel observer acceptance, UDP byte measurement, complete
+short-lived coverage, event-drop proof or billing accounting. See the separate observer acceptance
+and its declared fixture limits.

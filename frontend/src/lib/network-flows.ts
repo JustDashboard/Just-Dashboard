@@ -1,6 +1,53 @@
 import type { DotTone } from "@/components/status-dot"
 
-export type FlowSettings = { enabled: boolean; intervalSeconds: number; retentionDays: number }
+export type FlowSettings = {
+  enabled: boolean
+  kernelObserverEnabled?: boolean
+  intervalSeconds: number
+  retentionDays: number
+}
+export type ObserverQuality = {
+  events: string
+  ringDrops: string
+  budgetOmissions: string
+  headerGaps: string
+  identityGaps: string
+  stateAdmissionGaps: string
+  parserGaps: string
+  byteGaps: string
+  pendingOmissions: string
+  attributionGaps: string
+  readerBudgetPauses: string
+  unsavedEvents: string
+  timestampGaps: string
+  shutdownTailUnknown: boolean
+}
+export type KernelObserverEvidence = {
+  status: string
+  reason: string
+  batchId?: string
+  attachmentsRetained?: boolean
+  dockerStatus?: string
+  dockerError?: string
+  dockerCheckedAt?: string
+  timestampReason?: string
+  digest?: string
+  kernelRelease?: string
+  bootId?: string
+  targetCgroup?: string
+  startedAt?: string | null
+  checkedAt?: string
+  stoppedAt?: string | null
+  programIds?: number[]
+  linkIds?: number[]
+  ringBytes?: number
+  eventsPerSecond?: number
+  socketCapacity?: number
+  pendingCapacity?: number
+  dockerSources?: number
+  omittedDockerSources?: number
+  quality?: ObserverQuality
+}
 export type FlowOwner = {
   status: string
   program?: string
@@ -43,6 +90,21 @@ export type FlowRow = {
   rxIntervals: number
   retransIntervals: number
   skippedIntervals: number
+  evidence?: string
+  socketCgroup?: string
+  observedTxBytes?: string | null
+  observedRxBytes?: string | null
+  observedPackets?: string
+  observedTxPackets?: string
+  observedRxPackets?: string
+  observedTxKnownPackets?: string
+  observedRxKnownPackets?: string
+  observedTxByteGaps?: string
+  observedRxByteGaps?: string
+  observedSyn?: string
+  observedFin?: string
+  observedRst?: string
+  timestampUncertain?: boolean
 }
 export type FlowSource = {
   id: string
@@ -78,6 +140,7 @@ export type FlowCycle = {
   discardedIntervals: number
   elapsedMillis: number
   droppedEvents: string | null
+  observer?: KernelObserverEvidence
 }
 export type FlowCoverageHour = {
   hour: string
@@ -91,6 +154,7 @@ export type FlowCoverageHour = {
   captureMillis: number
   maxCaptureMillis: number
   lastCycle: FlowCycle
+  observerQuality?: ObserverQuality
 }
 export type FlowReport = {
   checkedAt: string
@@ -111,7 +175,7 @@ export type FlowReport = {
   prunedRows: number
   error?: string
   coverage: string[]
-  kernelObserver: { status: string; reason: string }
+  kernelObserver: KernelObserverEvidence
 }
 
 export function flowCounter(raw: string | null | undefined): bigint | null {
@@ -136,7 +200,7 @@ export function flowBytes(raw: string | bigint | null | undefined): string {
 export function flowTotals(rows: FlowRow[]) {
   const total = (key: "txBytes" | "rxBytes" | "retransmissions") => {
     const values = rows
-      .filter((row) => row.socket.protocol === "tcp")
+      .filter((row) => row.socket.protocol === "tcp" && !row.evidence)
       .map((row) => flowCounter(row[key]))
     const known = values.filter((n): n is bigint => n !== null)
     return {
@@ -145,6 +209,49 @@ export function flowTotals(rows: FlowRow[]) {
     }
   }
   return { tx: total("txBytes"), rx: total("rxBytes"), retrans: total("retransmissions") }
+}
+export function flowIsKernelRow(row: FlowRow): boolean {
+  return row.evidence === "kernel_transport_payload_observed"
+}
+export function flowKernelTotals(rows: FlowRow[]) {
+  const observed = rows.filter(flowIsKernelRow)
+  const sum = (key: keyof FlowRow) => {
+    const values = observed.map((row) => flowCounter(row[key] as string | null | undefined))
+    const known = values.filter((n): n is bigint => n !== null)
+    return {
+      value: known.length ? known.reduce((a, b) => a + b, BigInt(0)) : null,
+      known: known.length,
+      unknown: values.length - known.length,
+    }
+  }
+  return {
+    rows: observed.length,
+    tx: sum("observedTxBytes"),
+    rx: sum("observedRxBytes"),
+    packets: sum("observedPackets"),
+    txPackets: sum("observedTxPackets"),
+    rxPackets: sum("observedRxPackets"),
+    txKnown: sum("observedTxKnownPackets"),
+    rxKnown: sum("observedRxKnownPackets"),
+    txGaps: sum("observedTxByteGaps"),
+    rxGaps: sum("observedRxByteGaps"),
+  }
+}
+export function observerReading(status: string): { label: string; tone: DotTone } {
+  switch (status) {
+    case "off":
+      return { label: "Observer off", tone: "unknown" }
+    case "starting":
+      return { label: "Observer starting", tone: "warning" }
+    case "recording":
+      return { label: "Observer active", tone: "running" }
+    case "partial":
+      return { label: "Partial observer coverage", tone: "warning" }
+    case "interrupted":
+      return { label: "Previous observer interrupted", tone: "warning" }
+    default:
+      return { label: "Observer unavailable", tone: "unknown" }
+  }
 }
 export function flowReading(status: string): { label: string; tone: DotTone } {
   switch (status) {
