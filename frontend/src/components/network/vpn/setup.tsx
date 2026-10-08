@@ -10,6 +10,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
+import { portProblem } from "../tools/tool-input"
 
 /** What a client is told to resolve names with: a public resolver, or one that also blocks ads. */
 const RESOLVERS = [
@@ -59,8 +60,10 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
   const [exitNode, setExitNode] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const portError = port ? portProblem(port) : undefined
 
   const submit = async () => {
+    if (busy || portError) return
     setBusy(true)
     setError(undefined)
     try {
@@ -70,7 +73,7 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         firewall: { opened: boolean; reason?: string }
       }>("/network/vpn/wireguard", {
         endpoint: endpoint.trim() || undefined,
-        port: port ? Number(port) : undefined,
+        port: port ? Number(port.trim()) : undefined,
         subnet: subnet.trim() || undefined,
         dns: RESOLVERS.find((r) => r.id === resolver)?.servers,
         exitNode,
@@ -137,11 +140,17 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
             className="font-mono"
           />
         </Field>
-        <Field label="Port" htmlFor="wg-port" hint="UDP; the first free from 51820 when empty">
+        <Field
+          label="Port"
+          htmlFor="wg-port"
+          hint="UDP; the first free from 51820 when empty"
+          error={portError}
+        >
           <Input
             id="wg-port"
             inputMode="numeric"
             value={port}
+            aria-invalid={Boolean(portError)}
             placeholder="51820"
             onChange={(event) => setPort(event.target.value)}
           />
@@ -170,7 +179,7 @@ export function WireGuardSetup({ onCreated }: { onCreated: (tunnel: WGInterface)
         </p>
       )}
       <div className="flex justify-end">
-        <Button onClick={submit} pending={busy} disabled={busy}>
+        <Button onClick={submit} pending={busy} disabled={busy || Boolean(portError)}>
           Set up WireGuard
         </Button>
       </div>

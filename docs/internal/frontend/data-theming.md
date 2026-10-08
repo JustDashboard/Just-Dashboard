@@ -16,6 +16,8 @@ custom ports, interface scopes and TLS names.
 
 Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
 submitting. VXLAN creation likewise rejects invalid UDP ports instead of choosing the default.
+WireGuard setup permits an intentionally empty automatic port and rejects any nonempty invalid
+port draft, including whitespace, before submitting.
 Host support, route lookup, path MTU, packet snapshots and Wake-on-LAN use the same probe
 surface; Wake-on-LAN reports that a packet was sent rather than claiming the target is awake. The
 packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
+import { admin, json, loaded, mockNetwork, vpn, type Mutation } from "./network-fixture"
 import { dnsViewManaged, overrides as dnsOverrides, mockNetworkWrites } from "./network-dns-fixture"
 import { gateway, overrides as gatewayOverrides } from "./network-gateway-fixture"
 
@@ -160,6 +160,41 @@ test("turning off a WireGuard exit requires confirmation before sending its muta
   await expect
     .poll(() => mutations.find((entry) => entry.path.endsWith("/wg0/exit"))?.body)
     .toEqual({ on: false })
+})
+
+test("WireGuard setup keeps automatic ports optional and refuses malformed explicit ports", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockNetwork(page, mutations, {
+    overrides: {
+      "/network/vpn": { ...vpn, wireguard: { ...vpn.wireguard, interfaces: [] } },
+    },
+  })
+  await page.route("**/api/v1/network/vpn/wireguard", async (route) => {
+    mutations.push({
+      method: route.request().method(),
+      path: "/network/vpn/wireguard",
+      body: route.request().postDataJSON(),
+    })
+    await json(route, {
+      interface: { ...vpn.wireguard.interfaces[0], listenPort: 65535 },
+      warnings: [],
+      firewall: { opened: true },
+    })
+  })
+  await page.goto("/network/vpn")
+  const setup = page.getByRole("button", { name: "Set up WireGuard", exact: true })
+  await expect(setup).toBeEnabled()
+  for (const port of ["0", "not-a-port", " "]) {
+    await page.getByLabel("Port", { exact: true }).fill(port)
+    await expect(setup).toBeDisabled()
+    await expect(page.getByText("Use a whole port number from 1 to 65535.")).toBeVisible()
+  }
+  expect(mutations).toEqual([])
+  await page.getByLabel("Port", { exact: true }).fill(" 65535 ")
+  await setup.click()
+  await expect.poll(() => mutations.at(-1)?.body).toMatchObject({ port: 65535 })
 })
 
 test("IPv6 policy rules carry the selected family to the backend", async ({ page }) => {
