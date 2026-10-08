@@ -195,6 +195,38 @@ func TestAdmissionRepairWaitsForIndependentRecoveryLock(t *testing.T) {
 	}
 }
 
+func TestAdmissionRemovalPermissionFailureRefusesLastTranslationRemoval(t *testing.T) {
+	h := newGwHost(t)
+	forward, err := h.AddForward(context.Background(), gwWebForward(), gwClient, "ops", gwProtected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.first("iptables -D INPUT", "permission denied", errors.New("permission denied"))
+	if err := h.DeleteForward(context.Background(), forward.ID); err == nil || !strings.Contains(err.Error(), "removing owned admission") {
+		t.Fatalf("last translation removal claimed success: %v", err)
+	}
+	if saved := h.spec(t); len(saved.Forwards) != 1 || !saved.Forwards[0].Enabled {
+		t.Fatalf("failed admission removal was persisted: %+v", saved.Forwards)
+	}
+	j, err := readChange(h.paths.Dir)
+	if err != nil || j.Phase != "degraded" || len(j.RecoveryErrors) == 0 {
+		t.Fatalf("failed admission restoration was hidden: %+v, %v", j, err)
+	}
+}
+
+func TestAdmissionRemovalDoesNotRequireToolsForUnaffectedFamilies(t *testing.T) {
+	h := newGwHost(t)
+	sp := dualStackAdmissionSpec()
+	sp.Forwards = sp.Forwards[:1]
+	h.first("ip6tables", "", &UnavailableError{Tool: "ip6tables"})
+	if err := h.syncAdmission(context.Background(), emptySpec(), sp); err != nil {
+		t.Fatal(err)
+	}
+	if h.rec.ran("ip6tables") {
+		t.Fatal("IPv4-only removal tried an unaffected IPv6 family")
+	}
+}
+
 func TestMissingAdmissionToolCannotHideAnExistingDropPolicy(t *testing.T) {
 	h := newGwHost(t)
 	h.first("ip6tables -S", "", &UnavailableError{Tool: "ip6tables"})

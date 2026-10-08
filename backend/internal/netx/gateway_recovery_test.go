@@ -51,6 +51,9 @@ func TestAdmissionRecoveryDoesNotIgnorePermissionFailures(t *testing.T) {
 	if recoveryExpectedAbsence("iptables", "Permission denied", errors.New("permission denied")) {
 		t.Fatal("recovery ignored a permission error")
 	}
+	if recoveryExpectedAbsence("iptables", "nsenter: failed to execute iptables: No such file or directory", errors.New("No such file or directory")) {
+		t.Fatal("tool execution failure was confused with a missing owned rule")
+	}
 	if !recoveryExpectedAbsence("iptables", "Bad rule (does a matching rule exist in that chain?).", errors.New("rule absent")) {
 		t.Fatal("a missing owned rule made bounded deletion fail")
 	}

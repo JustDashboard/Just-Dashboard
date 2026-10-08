@@ -128,12 +128,19 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 	if !insert && !needsAdmission(prior) {
 		return nil
 	}
+	affected := admissionFamilies(prior)
+	for family := range admissionFamilies(target) {
+		affected[family] = true
+	}
 	for _, cmd := range admissionCommands(insert) {
+		family := "inet"
+		if cmd[0] == "ip6tables" {
+			family = "inet6"
+		}
+		if !affected[family] {
+			continue
+		}
 		if cmd[1] == "-I" {
-			family := "inet"
-			if cmd[0] == "ip6tables" {
-				family = "inet6"
-			}
 			if !admissionFamilies(target)[family] {
 				continue
 			}
@@ -156,8 +163,18 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 			// Delete until the kernel says there is none left, a few times
 			// at most. The failure that ends it is the common case.
 			for i := 0; i < admissionDeleteCap; i++ {
-				if _, err := run(ctx, cmd[0], cmd[1:]...); err != nil {
-					break
+				if out, err := run(ctx, cmd[0], cmd[1:]...); err != nil {
+					if recoveryExpectedAbsence(cmd[0], out, err) {
+						break
+					}
+					var unavailable *UnavailableError
+					if errors.As(err, &unavailable) {
+						state := inspectAdmissionChain(ctx, cmd[0], cmd[2], family, true)
+						if state.Status == "unsupported" && !state.Needed {
+							break
+						}
+					}
+					return fmt.Errorf("removing owned admission from %s/%s: %w", family, cmd[2], err)
 				}
 			}
 			continue

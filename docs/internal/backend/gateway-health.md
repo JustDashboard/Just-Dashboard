@@ -40,6 +40,11 @@ chain does not exist. An unreadable inventory remains uncertainty. An active fam
 insertion fails causes rollback, including IPv6. The gateway verifies all required admission rules
 before it reports a successful apply.
 
+Owned-rule removal is limited to the families used before or after the change. A missing exact rule
+is an expected deletion result; permission or tool failures are errors. An unavailable tool is
+optional only when inventory establishes the required compatible chain is absent. Disabling the
+last translation cannot report success after a failed admission deletion.
+
 `Service.RepairGatewayAdmission` reasserts only the fixed connection-mark/comment rules and verifies
 them afterwards, under the network mutation mutex, independent recovery file lock and current
 gateway compatibility guard. An unresolved pending or degraded journal refuses a repair before

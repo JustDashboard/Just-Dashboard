@@ -424,11 +424,8 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 }
 
 func recoveryExpectedAbsence(tool, out string, err error) bool {
-	if isGone(err) {
-		return true
-	}
 	if tool != "iptables" && tool != "ip6tables" {
-		return false
+		return isGone(err)
 	}
 	message := out + err.Error()
 	return strings.Contains(message, "Bad rule") || strings.Contains(message, "matching rule") || strings.Contains(message, "No chain/target/match")
