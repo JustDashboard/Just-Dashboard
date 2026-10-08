@@ -75,11 +75,20 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
-- `stacks-tab.tsx` is the stack list, as rows in one plain panel rather than a grid of bordered cards:
-  each row carries the stack's state, its services (dot, name, ports, health) and the one action that
-  belongs there — deploy when the application is down. It opens with the same search box and state
-  chips as the containers page, because "which of these is down" is the same question asked of the same
-  server. A stack's own page follows the same rule as a container's: the compose verbs that are pressed
+- `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
+  server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
+  published, and the attention verdict that presses the Needs attention chip), then `stack-band.tsx`
+  (the five stacks using the most processor and memory as spans of one bar the size of the machine,
+  summed over each stack's containers from the containers socket, a press narrowing the table to that
+  stack; and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into
+  the exit they caused and failed checks, each opening its stack), then `stack-table.tsx`: the stacks as
+  one framed table of their containers. A stack is a row with its state, how many declared services are
+  up, its summed CPU and memory and the one action that belongs there — deploy when the application is
+  down — and a lane in its name's hue down its containers; each container is a row of the containers
+  page's readings (state with uptime, health or exit code, CPU with its last hour, memory against its
+  limit, published ports) and its verbs, opening the container. Stacks fold their containers away for
+  the session. Rows are worst first; below 1280px the same rows are drawn down rather than across.
+  The joins, buckets and change words are pure (`stack-readings.ts`, unit-tested). A stack's own page follows the same rule as a container's: the compose verbs that are pressed
   daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
   drawn the same way as the container menu. Its services tab, the deploy preview's
   service rows and the deployment history are hairline lists the eye reads down, not stacks of bordered

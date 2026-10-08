@@ -1018,7 +1018,8 @@ table appeared already scrolling inside its own panel, with Issues and the row's
 right edge — a table that arrives broken.
 
 **And a table whose every row is a place to go is not a table at all.** Since 2026-09-23 the
-containers, images, volumes, networks and stacks lists are cards at every width — the argument
+containers, images, volumes and networks lists are cards at every width (the stacks list was one too,
+until 0.7.1 made it a table of readings — §15 pass 2) — the argument
 `git/repo-card.tsx` made for checkouts, and §16's for anything you take: each row opens a page or a
 panel, so it carries the lit edge. `components/docker/container-card.tsx` keeps both halves of the
 paragraphs above: from `xl` its readings sit beside the name in fixed measures, each naming itself
@@ -1953,6 +1954,35 @@ The passes, in order. Each one is a diff you can review on its own.
    service's Runs view, which used to open inside the timer's table row. The job editor is a sheet
    as well, its frequency a row of toggles rather than a select, drawing the week the schedule
    being written makes as the fields change.
+
+   Docker's Stacks page took the same exit in 0.7.1 at the operator's request, because it was the
+   still page of the section: a title over six cards, each a stack's name with its services as a line
+   of 6px dots under it, so "is the database up" was a dot, an Alertmanager killed for memory read as
+   grey as a mail server stopped by hand, and "which application is using the server" had no answer
+   on the page at all. It had no tiles to take apart; what it lacked was readings. It opens now on
+   the server's identity line — the Compose mark, Docker's version, stacks deployed, services running,
+   ports published — with the attention verdict at its right end, red where a service fails its check
+   or exited on an error and amber for the rest, a press of which narrows the table as the chip does.
+   Under it `components/docker/stack-band.tsx` is Services' band for applications: the five stacks
+   using the most processor and memory on Live's bar the size of the machine (`ShareBar`), each a sum
+   over the stack's containers from the containers socket, a press narrowing the table to that stack;
+   and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into the
+   exit they caused and failed checks, each with its time and its stack's name in that stack's lane
+   hue, opening the stack. The stacks themselves are one framed table of their containers
+   (`stack-table.tsx`) — a stack is still a destination, but its containers are rows of readings, and
+   a stack's row is where they add up. A stack's row carries its products, state, how many declared
+   services are up (a service its file dropped is counted as an orphan, not as a fourth of three), the
+   summed CPU and memory as plain figures (a counting figure waits to be scrolled into view, and most
+   rows of a capped table are not), and Deploy when it is down, brand-faced only for a stack never
+   deployed; a lane in its name's hue (`hueFor(name, LANES)`, a compose project being a namespace) runs
+   down its containers. Each container is the containers page's readings in Services' columns: the
+   state with how long — up for, failing its check, killed with exit 137 — CPU as its last hour beside
+   this second's figure, memory beside a short bar against its limit where it has one, the published
+   ports, and its verbs. The chips count and narrow (Running, Needs attention in its tone, Stopped, Not
+   deployed, the last three only while there is one); a stack folds its containers away for the session;
+   a container's state moves the moment Docker's does and the list is read again when one does, so the
+   stack's own state follows within the second. Below 1280px the same rows are drawn down rather than
+   across, chosen once by a media query.
 
    Notifications took it as well. Its four (channels, delivered and failed in the last day, the
    last message) went to the Channels header, which counts the channels and the paused, and to a
