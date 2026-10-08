@@ -58,7 +58,7 @@ func (c *Client) CreateVolume(ctx context.Context, spec VolumeSpec) (*Volume, er
 	return &Volume{
 		Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 		CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: 0,
-		Options: v.Options,
+		MountType: optionMount(v.Options),
 	}, nil
 }
 
@@ -81,6 +81,8 @@ type VolumeDetail struct {
 	// it is read from a disk-usage walk that can be missing or cached, while
 	// "which container, at which path" is what decides whether to delete.
 	UsedBy []VolumeUser `json:"usedBy"`
+	// Options and the driver, for the volumes that are not plain local ones.
+	Options map[string]string `json:"options,omitempty"`
 }
 
 type VolumeUser struct {
@@ -105,9 +107,10 @@ func (c *Client) VolumeDetail(ctx context.Context, name string) (*VolumeDetail, 
 		Volume: Volume{
 			Name: v.Name, Driver: v.Driver, Mountpoint: v.Mountpoint,
 			CreatedAt: v.CreatedAt, Scope: v.Scope, Labels: labelsOrEmpty(v.Labels), RefCount: -1,
-			Options: v.Options,
+			MountType: optionMount(v.Options),
 		},
-		UsedBy: []VolumeUser{},
+		UsedBy:  []VolumeUser{},
+		Options: v.Options,
 	}
 	if du := c.diskUsage(ctx); du != nil {
 		for _, entry := range du.Volumes {
