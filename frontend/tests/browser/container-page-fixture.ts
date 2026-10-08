@@ -289,7 +289,13 @@ function detailOf(container: Listed) {
     logPath: `/var/lib/docker/containers/${container.id}/${container.id}-json.log`,
     exitCode: runner ? 1 : 0,
     restartCount: runner ? 23 : n8n ? 1 : 0,
-    entrypoint: ["tini", "--", "/docker-entrypoint.sh"],
+    // As inspect reports them: the entrypoint, and the command handed to it apart.
+    command: n8n ? "" : runner ? "javascript" : container.command,
+    entrypoint: n8n
+      ? ["tini", "--", "/docker-entrypoint.sh"]
+      : runner
+        ? ["/usr/local/bin/task-runner-launcher"]
+        : [],
     workingDir: n8n ? "/home/node" : "/",
     user: n8n ? "node" : "runner",
   }
