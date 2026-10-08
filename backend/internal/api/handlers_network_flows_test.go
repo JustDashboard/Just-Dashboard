@@ -126,6 +126,13 @@ func (o *fixtureFlowObserver) Acknowledge(string) error { return nil }
 func TestFlowObserverRequiresExplicitAdminOptInAndAuditsEachMutation(t *testing.T) {
 	c, s := newClient(t)
 	c.h = flowTestRoutes(s)
+	assertFlowObserverExplicitStop(t, c, s)
+}
+
+// The integration fixture also calls this with Server.Routes so the same
+// authorization and stop prerequisite are checked on the mounted surface.
+func assertFlowObserverExplicitStop(t *testing.T, c *client, s *Server) {
+	t.Helper()
 	observer := &fixtureFlowObserver{}
 	s.modules.flowAccounting = netflows.New(netflows.NewStore(s.Store.DB), nil)
 	s.modules.flowAccounting.SetObserver(observer)
@@ -145,8 +152,14 @@ func TestFlowObserverRequiresExplicitAdminOptInAndAuditsEachMutation(t *testing.
 	if w := c.do("POST", "/api/v1/network/flows/observer", `{"enabled":true}`, nil); w.Code != 200 || observer.starts != 1 || !observer.active {
 		t.Fatalf("explicit attach=%d %s", w.Code, w.Body.String())
 	}
+	if w := c.do("POST", "/api/v1/network/flows/recording", `{"enabled":false}`, nil); w.Code != 400 || !observer.active {
+		t.Fatalf("ordinary history stop bypassed explicit observer detach: %d %s", w.Code, w.Body.String())
+	}
 	if w := c.do("POST", "/api/v1/network/flows/observer", `{"enabled":false}`, nil); w.Code != 200 || observer.active {
 		t.Fatalf("explicit stop=%d", w.Code)
+	}
+	if w := c.do("POST", "/api/v1/network/flows/recording", `{"enabled":false}`, nil); w.Code != 200 {
+		t.Fatalf("ordinary history stop after explicit detach=%d %s", w.Code, w.Body.String())
 	}
 	var audits int
 	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action='network.flow.observer' AND status=200`).Scan(&audits); err != nil || audits != 2 {

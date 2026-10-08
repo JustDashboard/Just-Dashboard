@@ -5,7 +5,9 @@ kernel observer. Socket history and export remain `system.admin` reads with `pri
 responses. `POST /network/flows/observer` takes only an explicit `enabled` boolean, passes through
 `s.destructive`, and records `network.flow.observer` in the audit log. Reading a report, enabling
 ordinary history, and changing retention never attach programs. History must already be enabled.
-The observer does not automatically reattach after restart: startup records an interrupted session
+An ordinary history stop is refused while the kernel observer or retained owned attachments exist;
+the explicit destructive observer stop must succeed first. Clearing history also stops the observer
+through its destructive route. The observer does not automatically reattach after restart: startup records an interrupted session
 and requires a new explicit opt-in.
 
 ## Fixed programs and ownership

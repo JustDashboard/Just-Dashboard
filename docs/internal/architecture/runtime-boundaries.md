@@ -58,7 +58,8 @@ traffic; no polling listener or scanner is installed on a source by the dashboar
 The separate Socket History collector stays off by default. Its explicitly opted-in kernel observer
 holds only owned unpinned cgroup links, drains bounded event batches through a durable SQLite receipt,
 and retains failed detach state for retry. Shutdown reports an unsuccessful final write or detach;
-restart records interruption and never automatically reloads the observer. See
+restart records interruption and never automatically reloads the observer. Ordinary history opt-out
+requires an explicit observer stop first so it cannot bypass the destructive route and its rate budget. See
 [the observer contract](../backend/network-flow-observer.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,

@@ -46,6 +46,12 @@ the earlier full netflows race run passed in 45.931 s, and focused observer API 
 4.741 s. No frontend source changed in this backend commit. The parent integration owns the new
 observer controls, separate native/kernel totals and current-head mounted/browser checks.
 
+The ordinary history-stop route now refuses active/retained observer ownership and pending batches;
+operators must use the separately destructive observer-stop route first. This preserves the tighter
+mutation budget. A focused API race regression passed in 3.851 s, and the follow-up changed checks
+passed (API 0.527 s, netflows 4.689 s): [raw output](observer-stop-prerequisite-checks.txt). The parent
+integration reuses `assertFlowObserverExplicitStop` on `Server.Routes` for mounted-surface acceptance.
+
 Documentation review covered the complete backend diff against internal docs, `AGENTS.md`,
 `README.md` and `CONTRIBUTING.md`. Affected operator, lifecycle, network, contributor and observer
 documents were updated. `AGENTS.md` needs no change. No dependencies, release notes, licence headers

@@ -183,14 +183,12 @@ func (s *Service) Recording(ctx context.Context, enabled bool) (Settings, error)
 		return Settings{}, err
 	}
 	st := s.state
-	st.Settings.Enabled = enabled
-	if !enabled {
-		if err := s.stopObserverLocked(ctx); err != nil {
-			return Settings{}, err
-		}
-		st = s.state
-		st.Settings.Enabled = false
+	if !enabled && (st.Settings.KernelObserverEnabled || s.pendingRecord != nil || s.observer != nil && s.observer.Status().AttachmentsRetained) {
+		// History toggles use an ordinary route. Detaching a kernel program
+		// must remain an explicit destructive operation with its own budget.
+		return Settings{}, fmt.Errorf("%w: stop the kernel observer explicitly before stopping history recording", ErrInvalid)
 	}
+	st.Settings.Enabled = enabled
 	if enabled && !s.state.Settings.Enabled {
 		now := time.Now().UTC()
 		st.Since = &now
