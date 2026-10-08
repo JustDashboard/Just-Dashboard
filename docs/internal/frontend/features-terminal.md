@@ -43,9 +43,25 @@
   distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
   five rows. `ContainerFindings` filters a diagnosis pass for one container; the containers page passes its own,
   and the container's page asks for one.
-  `RuntimeHealthPanel` is the other half and counts what is *fine* as well as what is not, because a
-  list of problems can never say "eight healthy, four with no health check at all" — and that last
-  number is what stops "all healthy" meaning "nothing is being watched".
+  The other half — what is *fine* as well as what is not — was `RuntimeHealthPanel`, a bar of the
+  health-check counts over the containers list, because a list of problems can never say "eight
+  healthy, four with no health check at all" and that last number is what stops "all healthy" meaning
+  "nothing is being watched". The 0.7.1 containers overhaul moved those counts to where they are read:
+  the page's identity line says how many running containers a passing health check vouches for, and
+  every running row says its own verdict, "no health check" included.
+- The containers page (`app/(dashboard)/docker/containers/page.tsx`) is three parts under the engine's
+  identity line. `container-band.tsx` draws the five containers using the most processor and memory
+  as spans of one bar the size of the host (the Processes band's `ShareBar`), figures gliding to each
+  two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`,
+  a restart loop folded to one line and an OOM kill said on the exit it caused (`foldRestarts`).
+  `container-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
+  memory as figures beside short bars (memory against its limit, amber past 85%), the processor's
+  hour and the network rate from `2xl`, the compose project in its `hueFor(…, LANES)` hue as a filter
+  — drawn down the row below `xl`. `containers.ts` (unit-tested) holds what the rows say: the five
+  buckets the state chips count (failing, starting, running, paused, stopped — failing being a restart
+  loop, a dead container, a failed health check, a crash exit or an exit the event log says the OOM
+  killer caused, since `docker stop` also leaves 137), the exit words, the sort, and the network rate
+  from two frames of Docker's cumulative counters.
 - `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
   outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
   which filters were applied and tabbing looked like the selection moving.
