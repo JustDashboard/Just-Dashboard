@@ -11,6 +11,11 @@ independent host recovery separately. A saved change means the host apply/save f
 explicitly states that this status does not confirm browser reconnect or application reachability.
 Unavailable recovery, unverified boot restoration and recovery errors remain visible. Runtime-only
 changes say they are applied and explicitly state that they are not saved for boot.
+Device creation offers VXLAN unicast or multicast destinations; multicast requires a sending card
+and matching local/destination address families. Its notice leaves multicast-underlay readiness and
+peer reachability unverified. GRE and GRETAP, in both families, expose decimal uint32 tunnel keys
+and outer TTL/hop limits, with blank or zero retaining the kernel defaults. A key is an identifier;
+GRE remains unencrypted, and creating a link does not test endpoint reachability.
 Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
 the administrator capability, with destructive controls also following the destructive capability;
 backend route checks remain authoritative. VPN peer reads are disabled for a reader without the

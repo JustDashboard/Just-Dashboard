@@ -1278,8 +1278,10 @@ test("limited readers see no SSH, diagnostic, firewall or failed-login mutations
   await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
   await page.goto("/network/tools")
   await expect(
-    page.getByText("Diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need the admin capability", { exact: true }),
   ).toBeVisible()
+  await expect(page.getByText("calculated in this browser", { exact: true })).toBeVisible()
+  await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveCount(0)
 })
 
 for (const [path, endpoint, reply, message] of [
