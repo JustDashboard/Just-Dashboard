@@ -222,7 +222,7 @@ for (const status of [409, 500]) {
     await expect(dialog.getByRole("textbox", { name: "Run name" })).toHaveValue(
       "IPv6 private listener",
     )
-    await expect(page.getByRole("textbox", { name: "Port", exact: true })).toHaveValue("8443")
+    await expect(page.locator("#tool-port-port")).toHaveValue("8443")
     await dialog.getByRole("button", { name: "Run and save", exact: true }).click()
     await expect(page).toHaveURL(/\/network\/runs\?run=created-1$/)
     await expect(page.getByRole("region", { name: "Saved diagnostic" })).toContainText("Queued")
@@ -418,7 +418,9 @@ test("retention is bounded and confirms deletion, keeping the draft after refusa
   expect(state.calls.filter((call) => call.method === "PUT")).toHaveLength(0)
   await dialog.getByRole("button", { name: "Save retention", exact: true }).click()
   await expect(dialog).toBeVisible()
-  await expect(page.getByRole("textbox", { name: "Finished runs to retain" })).toHaveValue("2")
+  await expect(
+    page.getByRole("textbox", { name: "Finished runs to retain", includeHidden: true }),
+  ).toHaveValue("2")
   await dialog.getByRole("button", { name: "Save retention", exact: true }).click()
   await expect(dialog).toHaveCount(0)
   expect(state.policy).toEqual({ maxRuns: 2, maxAgeHours: 24 })

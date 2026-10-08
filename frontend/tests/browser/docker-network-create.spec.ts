@@ -13,9 +13,9 @@ async function setup(page: Page, options: { role?: "admin" | "limited" | "read" 
           : admin.capabilities,
     user: { ...admin.user, role: role === "read" ? "read-only" : role },
   }
-  await mockNetwork(page, [], { session })
+  await mockNetwork(page, [], { session, overrides: { "/docker/ping": { available: true } } })
   await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
-  await page.goto("/docker/networks")
+  await page.goto("/docker/networks", { waitUntil: "domcontentloaded" })
   if (role !== "read") {
     await page.getByRole("button", { name: "Create network", exact: true }).click()
     await expect(page.getByRole("dialog")).toBeVisible()
@@ -35,7 +35,7 @@ for (const width of [390, 1440]) {
     await dialog.getByLabel("IPv4 gateway (optional)").fill("192.0.2.1")
     await dialog.getByLabel("IPv4 allocation range (optional)").fill("192.0.2.128/25")
     await dialog.getByRole("switch", { name: "Allow standalone containers to join" }).check()
-    await dialog.getByRole("switch", { name: "Enable IPv6", exact: true }).check()
+    await dialog.getByRole("switch", { name: "Enable IPv6" }).check()
     await dialog.getByLabel("IPv6 subnet (optional)").fill("fd00:1::/64")
     await dialog.getByLabel("IPv6 gateway (optional)").fill("fd00:1::1")
     await dialog.getByLabel("IPv6 allocation range (optional)").fill("fd00:1::1000/116")

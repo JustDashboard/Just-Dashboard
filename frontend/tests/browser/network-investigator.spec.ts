@@ -238,7 +238,9 @@ test("unavailable private DNS shows skipped later evidence and retains a failed 
   )
   await page.getByLabel("Destination", { exact: true }).fill("next.private")
   await page.getByRole("button", { name: "Investigate", exact: true }).click()
-  await expect(page.getByRole("alert")).toContainText("Container identity changed")
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Container identity changed" }),
+  ).toBeVisible()
   await expect(page.getByLabel("Destination", { exact: true })).toHaveValue("next.private")
   await expect(page.getByRole("region", { name: "Connection path report" })).toContainText(
     "private.corp",
