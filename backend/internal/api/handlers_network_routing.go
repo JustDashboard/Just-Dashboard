@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"time"
 
@@ -37,15 +38,32 @@ func (s *Server) mountNetworkRoutingRoutes(r chi.Router) {
 // what the network module's own spec holds: Docker's bridge networks, and
 // what Tailscale advertises.
 func (s *Server) forwardingNeeds(ctx context.Context) netx.ForwardingNeeds {
-	var needs netx.ForwardingNeeds
-	for _, n := range s.networkInventory(ctx).Networks {
-		if n.Driver == "bridge" {
-			needs.DockerNetworks++
-		}
-	}
+	needs := dockerForwardingNeeds(s.networkInventory(ctx))
 	// What this server offers its tailnet routes other machines' traffic
 	// through it, so it needs forwarding exactly as a NAT entry does.
 	needs.TailscaleExitNode, needs.TailscaleSubnetRoutes = s.modules.network.TailscaleNeedsForwarding(ctx)
+	return needs
+}
+
+func dockerForwardingNeeds(inv netx.Inventory) netx.ForwardingNeeds {
+	needs := netx.ForwardingNeeds{DockerNetworksUnknown: inv.DockerNetworksUnknown}
+	for _, n := range inv.Networks {
+		if n.Driver != "bridge" {
+			continue
+		}
+		// The inventory does not expose EnableIPv4, and custom IPAM may omit
+		// subnets. Keep the existing conservative IPv4 dependency for bridges.
+		needs.DockerNetworks++
+		ipv6 := n.IPv6
+		for _, subnet := range n.Subnets {
+			if prefix, err := netip.ParsePrefix(subnet); err == nil && prefix.Addr().Unmap().Is6() {
+				ipv6 = true
+			}
+		}
+		if ipv6 {
+			needs.DockerIPv6Networks++
+		}
+	}
 	return needs
 }
 
