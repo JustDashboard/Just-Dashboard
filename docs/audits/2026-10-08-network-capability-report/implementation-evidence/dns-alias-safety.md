@@ -26,7 +26,7 @@ sudo -n env TMPDIR=/home/ubuntu/Just-Dashboard/.network-worktrees/dns-alias-arti
   -test.run '^TestDNSEvidenceNativeDisposableResolver$' -test.count=1 -test.v
 ```
 
-[The final run](dns-alias-native-pass.txt) passed with no skip: 5.94 seconds inside the private
+[The corrected original run](dns-alias-native-pass.txt) passed with no skip: 5.94 seconds inside the private
 namespace and 7.28 seconds for the wrapper. The fixture uses actual systemd-resolved 257.4, private
 network/mount namespaces, private `/etc` and `/run/systemd`, private D-Bus, controlled IPv4/IPv6 TLS
 servers and an Ed25519-signed private zone with a fixture-only trust anchor. It proves signed safe
@@ -39,8 +39,15 @@ resolver was restarted or configured. The native lane was released before the ne
 One whitespace-only line in the successful transcript is trimmed for repository checks; the
 original output remains in the task artifact directory. Failed native transcripts are unchanged.
 
-The native run predates a small per-question DNSSEC-failure label addition and the separate host-file
-selection fix; focused races cover those final changes. The integrated gate must use the final source.
+The original native run predates a small per-question DNSSEC-failure label addition and the separate
+host-file selection fix. [The final-source rerun](dns-alias-native-final-source-pass.txt), compiled
+from commit `148e4f38a8e2c5bf9669f31af2234afad7da200e`, passes with no skip: 9.95 seconds in
+the private namespace and 11.15 seconds for the wrapper. It uses the same command and private fixture
+shown above, with the binary named `dns-evidence-final-source.test`. The raw transcript remains at
+`.network-worktrees/dns-alias-artifacts/native-race-final-source.log`; trailing spaces on its single
+blank line are removed only in the checked-in copy. A process inspection after the terminal result
+found no owned test, resolver or D-Bus child. The native lane was then released to the P11 worker.
+The integrated frontend gate remains required.
 
 ## Source contract corrections and preserved failures
 
