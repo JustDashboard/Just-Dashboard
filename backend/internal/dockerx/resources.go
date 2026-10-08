@@ -256,7 +256,6 @@ func (c *Client) CreateNetwork(ctx context.Context, spec NetworkSpec) (*Network,
 // answers to.
 type NetworkDetail struct {
 	Network
-	Gateway string            `json:"gateway,omitempty"`
 	Options map[string]string `json:"options,omitempty"`
 	Members []NetworkMember   `json:"members"`
 	// System marks bridge, host and none: the three networks Docker creates

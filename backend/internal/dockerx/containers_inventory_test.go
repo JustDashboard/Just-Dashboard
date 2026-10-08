@@ -18,7 +18,7 @@ func inventoryTestClient(t *testing.T) (*Client, *atomic.Int32) {
 		path := strings.TrimPrefix(r.URL.Path, "/v1.47")
 		switch {
 		case path == "/containers/json":
-			running := `{"Id":"running","Names":["/web"],"Image":"example/app:1","ImageID":"sha256:abc","State":"running","Labels":{"com.docker.compose.project":"site"},"Mounts":[{"Type":"volume","Name":"data","Destination":"/data"}],"NetworkSettings":{"Networks":{"private":{}}}}`
+			running := `{"Id":"running","Names":["/web"],"Image":"example/app:1","ImageID":"sha256:abc","State":"running","Labels":{"com.docker.compose.project":"site"},"Mounts":[{"Type":"volume","Name":"data","Destination":"/data"}],"NetworkSettings":{"Networks":{"private":{"IPAddress":"172.18.0.2","IPPrefixLen":16,"GlobalIPv6Address":"fd00::2","GlobalIPv6PrefixLen":64,"MacAddress":"02:42:ac:12:00:02"}}}}`
 			stopped := `{"Id":"stopped","Names":["/old"],"Image":"example/app:1","ImageID":"sha256:abc","State":"exited","Mounts":[{"Type":"volume","Name":"data","Destination":"/data"}],"NetworkSettings":{"Networks":{"private":{}}}}`
 			if r.URL.Query().Get("all") == "1" {
 				fmt.Fprintf(w, "[%s,%s]", running, stopped)
@@ -26,7 +26,7 @@ func inventoryTestClient(t *testing.T) (*Client, *atomic.Int32) {
 				fmt.Fprintf(w, "[%s]", running)
 			}
 		case path == "/networks":
-			fmt.Fprint(w, `[{"Id":"network","Name":"private","IPAM":{}}]`)
+			fmt.Fprint(w, `[{"Id":"network","Name":"private","IPAM":{"Config":[{"Subnet":"172.18.0.0/16","Gateway":"172.18.0.1"}]}}]`)
 		case path == "/containers/running/stats":
 			fmt.Fprint(w, `{"read":"2026-09-27T10:00:00Z","memory_stats":{"usage":524288,"limit":1048576}}`)
 		case path == "/containers/running/json":
@@ -112,5 +112,28 @@ func TestDiagnoseInspectsEachContainerOnce(t *testing.T) {
 	if inspections.Load() != 2 || diagnosis.Checked != 2 || diagnosis.Runtime.Running != 1 ||
 		diagnosis.Runtime.Healthy != 1 || diagnosis.Runtime.Exited != 1 {
 		t.Fatalf("diagnosis changed or repeated inspections: %+v, inspections=%d", diagnosis, inspections.Load())
+	}
+}
+
+// The table of who is where reads every network's members at once, so the
+// listing carries each one's address rather than leaving it to an inspect per
+// network — and a stopped container, which holds no address, is still listed.
+func TestNetworkListingCarriesEachMembersAddress(t *testing.T) {
+	c, inspections := inventoryTestClient(t)
+	networks, err := c.ListNetworks(cacheTestContext(t))
+	if err != nil || len(networks) != 1 {
+		t.Fatalf("networks = %+v, %v", networks, err)
+	}
+	n := networks[0]
+	if n.Gateway != "172.18.0.1" || len(n.Endpoints) != 2 || inspections.Load() != 0 {
+		t.Fatalf("network = %+v, inspections=%d", n, inspections.Load())
+	}
+	old, web := n.Endpoints[0], n.Endpoints[1]
+	if old.Name != "old" || old.Container != "stopped" || old.IPv4 != "" {
+		t.Fatalf("stopped member = %+v", old)
+	}
+	if web.Name != "web" || web.Container != "running" || web.IPv4 != "172.18.0.2/16" ||
+		web.IPv6 != "fd00::2/64" || web.MAC != "02:42:ac:12:00:02" {
+		t.Fatalf("running member = %+v", web)
 	}
 }
