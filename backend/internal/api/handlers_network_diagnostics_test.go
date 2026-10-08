@@ -172,6 +172,8 @@ func TestDiagnosticInvalidRequestsDoNotCreateJobsAndUnavailableIsExplicit(t *tes
 	c, s := newClient(t)
 	if w := c.do(http.MethodGet, "/api/v1/network/diagnostics/", "", nil); w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("not started=%d %s", w.Code, w.Body.String())
+	} else if !strings.Contains(w.Body.String(), `"retryable":true`) {
+		t.Fatalf("unavailable read must offer retry: %s", w.Body.String())
 	}
 	var calls atomic.Int32
 	installDiagnosticRunner(t, s, func(context.Context, netsec.ProbeRequest) (*netsec.ProbeResult, error) {

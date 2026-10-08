@@ -19,6 +19,7 @@ import {
 import type { ToolDef } from "./tool-defs"
 import { useToolRun, type ToolPrefill } from "./use-tool-run"
 import { ToolResult } from "./tool-result"
+import { SaveDiagnosticRun } from "./save-run"
 
 /** Each tool retains its inputs, result and request while another tool is selected. */
 export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefill }) {
@@ -131,6 +132,7 @@ export function ToolPanel({ def, prefill }: { def: ToolDef; prefill?: ToolPrefil
           <Button onClick={t.run} disabled={t.busy || !t.canRun} pending={t.busy}>
             Run
           </Button>
+          <SaveDiagnosticRun request={t.request} label={def.label} disabled={t.busy || !t.canRun} />
           {(t.result || t.error || t.past.length > 0) && (
             <Button size="sm" variant="ghost" onClick={t.clear} disabled={t.busy}>
               Clear

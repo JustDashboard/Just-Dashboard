@@ -114,6 +114,33 @@ ordinary admin mutations. Deletion and policy changes use the destructive capabi
 budget because they erase saved records; neither needs the rare server-side typed phrase. Deleting
 an active run is rejected so its process cannot be orphaned.
 
+## Operator workflow
+
+Network tools keep their quick **Run** command and current drafts/results. **Run and save** snapshots
+that same tool request, asks for a bounded name, and launches only after an explicit press. A rejected
+launch retains its name and tool draft for retry. The command opens `/network/runs?run=<id>` after
+acceptance. The Tools/Saved runs links join the two surfaces; no page arrival or reload emits a probe.
+
+`components/network/saved-runs.tsx` renders `/network/runs` in the reporting register: counts on a
+`StatGrid`, retained history as `ChoiceRow` destinations, and one framed, independently scrolling
+history/inspector workbench. It shows scope, timestamps, lifecycle stages, typed outcome and its
+provenance. Structured records remain readable; raw tool/error text is behind **Bounded tool
+evidence**. Completed is kept distinct from a whole-path guarantee, and unsupported, permission,
+DNS, refusal, timeout, certificate, findings, interruption, and absent answers have separate labels.
+
+The inspector retains its selected ID in the URL and retrieves its saved result after navigation or
+reload. **Save name**, **Cancel run**, **Rerun**, **Export JSON**, and compatible-run **Compare** use the
+API lifecycle above. **Watch job** attaches the existing job console to its saved job ID without
+restarting work. Cancellation remains visibly stopping until the durable record settles. Name and
+retention drafts survive rejected writes. Deletion and retention changes use ordinary destructive
+confirmation, with no typed phrase. Readers see a capability notice and issue no diagnostic reads;
+their local subnet calculator remains accessible from Quick tools.
+
+List, result, and retention reads retain successful data on a failed later poll and show a dated
+retry warning. Initial failures show an error with Retry, so an unavailable backend is never shown as
+an empty successful inventory. Retention/count bounds and comparison compatibility are shared pure
+readings in `lib/network-diagnostics.ts`; backend authorization and validation remain authoritative.
+
 ## Verification
 
 `netdiag/service_test.go` covers durable reopen, explicit reruns, interrupted startup without traffic,
@@ -125,11 +152,18 @@ audit, exports, comparison, invalid requests, and reader/limited/narrowed-token 
 diagnostic and generic job paths. `store/network_diagnostics_test.go` verifies additive creation on
 an existing install while preserving its settings.
 
+`lib/network-diagnostics.test.js` covers compatible requests, terminal/unfinished evidence, byte and
+retention limits, and the outcome labels. `tests/browser/network-runs.spec.ts` prepares 19 cases for
+409/500 launch retry with an IPv6 draft, save rejection, lifecycle persistence on reload, pending
+cancellation, explicit rerun/compare/export/delete, restart interruption without replay, each typed
+failure/finding, initial/stale result retry, retention confirmation/refusal, read-role gating, and widths of
+375, 1280, and 1720 pixels. The desktop cases also save screenshots for visual review.
+
 Run `scripts/test-changed.sh c91b3903` for this tranche's scoped checks. For a focused iteration:
 
 ```bash
 cd backend
 go test ./internal/netdiag ./internal/netsec ./internal/store ./internal/api \
-  -run 'Test(SavedDiagnostic|StartupInterrupts|CancellationWaits|Diagnostic|RetentionPersists|ConcurrencyValidation|TimeoutAndOutcome|ArtifactExport|ProbeRequest|OpenAddsDiagnostic)'
+  -run 'Test(SavedDiagnostic|StartupInterrupts|CancellationWaits|CancellationSignals|FailedFinalRecording|Diagnostic|RetentionPersists|ConcurrencyValidation|TimeoutAndOutcome|ArtifactExport|ProbeRequest|OpenAddsDiagnostic)'
 go test -race ./internal/netdiag
 ```

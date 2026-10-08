@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
+import type { DiagnosticRequest } from "@/lib/network-diagnostics"
 import type { ProbeResult } from "@/lib/types"
 import type { ToolDef } from "./tool-defs"
 import { portProblem, toolReady } from "./tool-input"
@@ -54,18 +55,20 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   const portError = def.needsPort && port ? portProblem(port) : undefined
   const canRun = toolReady(def, target, port, option)
 
+  const request: DiagnosticRequest = {
+    tool: def.key,
+    target: target.trim(),
+    ...(def.needsPort ? { port: Number(port.trim()) } : {}),
+    ...(def.recordOptions ? { record } : {}),
+    ...(def.optionOptions || def.optionPlaceholder ? { option: option.trim() } : {}),
+  }
+
   const run = async () => {
     if (busy || !canRun) return
     setBusy(true)
     setError(undefined)
     try {
-      const res = await post<ProbeResult>("/network/probe", {
-        tool: def.key,
-        target: target.trim(),
-        ...(def.needsPort ? { port: Number(port.trim()) } : {}),
-        ...(def.recordOptions ? { record } : {}),
-        ...(def.optionOptions || def.optionPlaceholder ? { option: option.trim() } : {}),
-      })
+      const res = await post<ProbeResult>("/network/probe", request)
       setPast((prev) => (result ? [result, ...prev].slice(0, 3) : prev))
       setResult(res)
     } catch (err) {
@@ -102,6 +105,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     result,
     past,
     canRun,
+    request,
     run,
     restore,
     clear,

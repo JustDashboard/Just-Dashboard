@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Crosshair, Globe, NetworkDevice, SecureConnection, Servers } from "@/components/icons"
 import { PageContext, SearchInput } from "@/components/page"
@@ -53,7 +54,17 @@ export function ToolsPanel() {
 
   return (
     <>
-      <PageContext eyebrow="Network" title="Tools" />
+      <PageContext
+        eyebrow="Network"
+        title="Tools"
+        actions={
+          admin && (
+            <Button asChild variant="outline" size="sm">
+              <Link href="/network/runs">Saved runs</Link>
+            </Button>
+          )
+        }
+      />
       {!admin && (
         <Notice title="Server diagnostics need the admin capability">
           The subnet calculator runs locally in your browser and is available with read access.

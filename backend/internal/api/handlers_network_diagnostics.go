@@ -40,7 +40,7 @@ func mapDiagnosticError(err error) error {
 	case errors.Is(err, netdiag.ErrInvalid):
 		return httpx.BadRequest("%v", err)
 	case errors.Is(err, netdiag.ErrUnavailable):
-		return httpx.Err(http.StatusServiceUnavailable, "diagnostics_unavailable", err.Error())
+		return httpx.Err(http.StatusServiceUnavailable, "diagnostics_unavailable", err.Error()).Retry()
 	case errors.Is(err, netdiag.ErrBusy), errors.Is(err, netdiag.ErrNotRunning), errors.Is(err, netdiag.ErrRunning), errors.Is(err, netdiag.ErrIncompatible):
 		return httpx.Err(http.StatusConflict, "diagnostic_conflict", err.Error())
 	default:
