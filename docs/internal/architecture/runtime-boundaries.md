@@ -6,7 +6,7 @@
 upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modules.go` (`moduleSet`)
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
-`linuxUsers`, `netsec`, `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
+`linuxUsers`, `netsec`, `captures` (`netcapture`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
@@ -44,6 +44,11 @@ probes. A recording failure leaves the service unavailable until a bounded pendi
 retained; it does not relaunch the probe. Shutdown cancels and drains active diagnostic jobs through
 their existing process-group cancellation. Saved artifacts and generic job views of those artifacts
 remain administrator-only. See [diagnostic lifecycle](../backend/network-diagnostics.md).
+Private PCAP startup marks unfinished captures interrupted without replay. Shutdown cancels and
+drains their native groups; a separate host `timeout` bounds a capture even after backend death.
+A final recording failure retains bounded pending data and blocks new launches until the same write
+can be retried. Capture changes no host network configuration. See
+[capture lifecycle](../backend/network-captures.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
@@ -165,7 +170,8 @@ watching (`watched_endpoints`, filled from the older one-port-per-name `watched_
 running digests and the git commit captured before every state-changing action, with environment values
 hashed rather than stored); the general `settings` key/value table; mount, container, interface
 (`metric_interface_samples`) and host metric samples; and the network module's sealed WireGuard client
-configurations (`network_vpn_clients`). What the network module makes on the host is kept in
+configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnostic_runs`) and private
+packet capture metadata/artifacts (`network_packet_captures`). What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old

@@ -1,0 +1,16 @@
+=== RUN   TestLiveBoundedNativePCAPBothFamiliesAndCleanup
+    native_live_test.go:39: root fixture:
+        === RUN   TestLiveBoundedNativePCAPBothFamiliesAndCleanup
+        === RUN   TestLiveBoundedNativePCAPBothFamiliesAndCleanup/inet
+            native_live_test.go:108: inet native tcpdump packets=2 bytes=184 stop=packet_limit drops=0 SHA256=e5135ad4c0e220eb5ac59346d77d0e19aba303f05b406769682d3c19cac71dcd
+        === RUN   TestLiveBoundedNativePCAPBothFamiliesAndCleanup/inet6
+            native_live_test.go:108: inet6 native tcpdump packets=2 bytes=224 stop=packet_limit drops=0 SHA256=8edefc8c491283a492f6a681e0a7ec53715d6bfe95e26b743497d6c1cd3f5a13
+        === NAME  TestLiveBoundedNativePCAPBothFamiliesAndCleanup
+            native_live_test.go:172: owned native capture survived applying-process SIGKILL and independent timeout removed all namespace PIDs after 3.023093077s
+        --- PASS: TestLiveBoundedNativePCAPBothFamiliesAndCleanup (7.17s)
+            --- PASS: TestLiveBoundedNativePCAPBothFamiliesAndCleanup/inet (1.34s)
+            --- PASS: TestLiveBoundedNativePCAPBothFamiliesAndCleanup/inet6 (1.34s)
+        PASS
+--- PASS: TestLiveBoundedNativePCAPBothFamiliesAndCleanup (8.21s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netcapture	9.229s

@@ -37,6 +37,8 @@ strategy, and feature ownership behind those rules.
   explanations, pinned native DNS/route/TCP evidence and unknown foreign/provider layers.
 - [`backend/network-diagnostics.md`](backend/network-diagnostics.md) — bounded saved probe runs,
   cancellation, restart interruption, comparison, export and retention.
+- [`backend/network-captures.md`](backend/network-captures.md) — bounded private PCAP jobs, native cleanup,
+  artifact integrity, incident references and redacted support export.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
   measured unit activation and generation-bound repair review.
 - [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.

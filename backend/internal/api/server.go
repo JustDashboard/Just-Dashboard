@@ -132,6 +132,9 @@ func (s *Server) Start(ctx context.Context) error {
 	if err := s.modules.diagnostics.Start(ctx); err != nil {
 		s.Log.Warn("durable network diagnostics are unavailable", "err", err)
 	}
+	if err := s.modules.captures.Start(ctx); err != nil {
+		s.Log.Warn("durable packet captures are unavailable", "err", err)
+	}
 	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 30*time.Second)
 	if err := s.modules.backupRunner.RecoverInterruptedRuns(cleanupCtx); err != nil {
 		s.Log.Warn("interrupted backup runs could not be recovered", "err", err)
@@ -258,6 +261,11 @@ func (s *Server) Shutdown() {
 	s.modules.term.Shutdown()
 	s.modules.dbs.Shutdown()
 	s.modules.docker.Close()
+	captureCtx, captureCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.modules.captures.Shutdown(captureCtx); err != nil && s.Log != nil {
+		s.Log.Warn("packet capture cleanup is unverified", "err", err)
+	}
+	captureCancel()
 	diagnosticCtx, diagnosticCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := s.modules.diagnostics.Shutdown(diagnosticCtx); err != nil && s.Log != nil {
 		s.Log.Warn("network diagnostics did not finish stopping before shutdown", "err", err)

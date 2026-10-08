@@ -48,6 +48,11 @@ export. They use polled status without a socket-only live halo and can watch the
 The connection investigator retains its previous report and tuple after a failed retry, labeling
 each layer observed, modeled, measured or unknown. Drift readings preserve dated observations on a
 failed refresh and expire an advisory repair selection when compared identities or evidence change.
+Packet captures retain dated native observations after poll failures. Their immutable scope uses
+one interface/family and literal filter fields; rejected launches retain the entire bounded draft.
+Original PCAP and redacted support have separate downloads. A cancel remains pending until native
+cleanup, and interrupted captures never replay. Admin-only rendering issues no private capture
+requests for read accounts. Incident references compare timestamps without assuming the same flow.
 DNS lookup defaults to the native effective resolver policy. Direct comparison requires selected,
 named destinations and acknowledgment that private names leave their usual policy scope; the old
 `includePublic` flag does not authorize fan-out. Resolver changes may carry a private

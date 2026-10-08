@@ -51,6 +51,7 @@ for the host to run. The packages under
 | `linuxusers` | Host accounts, groups, lock state, login metadata, and authorized SSH keys | [`../backend/git-backups-users.md`](../backend/git-backups-users.md#host-users-and-ssh-keys) |
 | `logsx` | Source discovery, the lenses that name each line's event and values and their detection, records kept or dropped whole, field predicates, facets, measures and patterns, filtering, history search, and live tails | [`../backend/docker-files-logs.md`](../backend/docker-files-logs.md#logs) |
 | `metrics` | Persistent host/container samples, history, events, and health assessment | [`../backend/observability-security.md`](../backend/observability-security.md#metrics-saturation-health) |
+| `netcapture` | Explicit private bounded PCAP jobs, immutable filter scope, native cleanup, durable artifacts and redacted support export | [`../backend/network-captures.md`](../backend/network-captures.md) |
 | `netdiag` | Bounded durable network probe artifacts, lifecycle, retention and compatible comparison; reuses `jobs` | [`../backend/network-diagnostics.md`](../backend/network-diagnostics.md) |
 | `netpath` | Typed host/container connection evidence with pinned DNS, route and optional bounded TCP measurement | [`../backend/network-investigator.md`](../backend/network-investigator.md) |
 | `netsec` | Exposure, posture, listeners, sessions/logins, firewall, fail2ban, sshd, and diagnostic probes | [`../backend/observability-security.md`](../backend/observability-security.md) |

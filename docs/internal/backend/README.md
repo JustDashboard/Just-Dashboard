@@ -4,6 +4,7 @@
 - [`network.md`](network.md) — the network module: devices, namespaces, routing, forwarding, the gateway table, protections, shaping, WireGuard, Tailscale, the resolver and traffic.
 - [`network-investigator.md`](network-investigator.md) — typed host/container path explanations and bounded native measurements.
 - [`network-diagnostics.md`](network-diagnostics.md) — durable diagnostic lifecycle, admin-only artifacts and retention.
+- [`network-captures.md`](network-captures.md) — bounded private PCAP artifacts, native deadlines and retention.
 - [`network-drift.md`](network-drift.md) — saved/render/runtime comparisons and owned repair review.
 - [`docker-files-logs.md`](docker-files-logs.md) — Docker, files, archives, previews, and logs.
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.

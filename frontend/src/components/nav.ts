@@ -243,6 +243,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           },
           { title: "Tools", href: "/network/tools", icon: Wrench },
           {
+            title: "Packet captures",
+            href: "/network/captures",
+            icon: Inspect,
+            capability: "system.admin",
+          },
+          {
             title: "Saved runs",
             href: "/network/runs",
             icon: Notes,

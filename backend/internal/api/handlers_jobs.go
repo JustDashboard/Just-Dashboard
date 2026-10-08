@@ -8,6 +8,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
 	"github.com/go-chi/chi/v5"
 )
@@ -20,6 +21,10 @@ import (
 // the wrong one for certbot and apt, which is why these are jobs instead —
 // started by a POST, watched by id, and unaffected by anything the watcher
 // does.
+func privateNetworkJob(kind string) bool {
+	return strings.HasPrefix(kind, netdiag.JobPrefix) || strings.HasPrefix(kind, netcapture.JobPrefix)
+}
+
 func (s *Server) mountJobRoutes(r chi.Router) {
 	r.Route("/jobs", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleJobList))
@@ -41,7 +46,7 @@ func (s *Server) handleJobList(w http.ResponseWriter, r *http.Request) error {
 	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 		visible := make([]jobs.Job, 0, len(list))
 		for _, job := range list {
-			if !strings.HasPrefix(job.Kind, netdiag.JobPrefix) {
+			if !privateNetworkJob(job.Kind) {
 				visible = append(visible, job)
 			}
 		}
@@ -57,7 +62,7 @@ func (s *Server) handleJobGet(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return httpx.ErrNotFound
 	}
-	if strings.HasPrefix(job.Kind, netdiag.JobPrefix) {
+	if privateNetworkJob(job.Kind) {
 		if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 			return httpx.ErrForbidden
 		}
@@ -73,9 +78,18 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) error {
 	if !ok {
 		return httpx.BadRequest("that operation is not running")
 	}
-	if strings.HasPrefix(job.Kind, netdiag.JobPrefix) {
+	if privateNetworkJob(job.Kind) {
 		if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 			return httpx.ErrForbidden
+		}
+		if strings.HasPrefix(job.Kind, netcapture.JobPrefix) {
+			captureID := strings.Split(strings.TrimPrefix(job.Kind, netcapture.JobPrefix), ".")[0]
+			httpx.SetAudit(r, "network.capture.cancel", captureID, map[string]any{"jobId": id})
+			if _, err := s.modules.captures.Cancel(r.Context(), captureID); err != nil {
+				return mapCaptureError(err)
+			}
+			httpx.NoContent(w)
+			return nil
 		}
 		parts := strings.Split(strings.TrimPrefix(job.Kind, netdiag.JobPrefix), ".")
 		httpx.SetAudit(r, "network.diagnostic.cancel", parts[0], map[string]any{"jobId": id})
@@ -107,7 +121,7 @@ func (s *Server) handleJobStream(w http.ResponseWriter, r *http.Request) error {
 		return httpx.ErrNotFound
 	}
 	defer unsubscribe()
-	if strings.HasPrefix(job.Kind, netdiag.JobPrefix) && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+	if privateNetworkJob(job.Kind) && !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
 		return httpx.ErrForbidden
 	}
 

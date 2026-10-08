@@ -53,6 +53,7 @@ func (s *Server) mountNetworkRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/traffic/history", s.handle(s.handleNetworkTrafficHistory))
 
 		s.mountNetworkDiagnosticRoutes(r)
+		s.mountNetworkCaptureRoutes(r)
 		s.mountNetworkInvestigatorRoutes(r)
 		s.mountNetworkChangeRoutes(r)
 		s.mountNetworkDriftRoutes(r)

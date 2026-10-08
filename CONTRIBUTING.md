@@ -94,6 +94,13 @@ to the contribution terms above, including the additional licence grant to the p
   disposable namespaces, then removes those exact fixtures. It does not install persistent host
   units or reboot the host; timer dispatch and cold-runtime reconstruction are separate from actual
   reboot acceptance.
+- Private PCAP changes also run from `backend/`:
+  `JD_NETCAPTURE_LIVE=1 go test -race ./internal/netcapture -run Live -count=1 -v`. The fixture
+  needs root or passwordless sudo plus host `ip`, `tcpdump`, `timeout` and Python. It creates and
+  removes only a uniquely named disposable namespace, checks known IPv4/IPv6 loopback packets,
+  bounds, cancellation and independent timeout after killing its own applying process. It never
+  captures production interfaces or starts public listeners. See
+  [capture verification](docs/internal/backend/network-captures.md#verification).
 - Installer and terminal-admin changes also run `python3 scripts/test_manage.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.

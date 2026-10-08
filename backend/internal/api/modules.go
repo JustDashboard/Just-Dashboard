@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/linuxusers"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/logsx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/metrics"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netcapture"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
@@ -94,6 +95,8 @@ type moduleSet struct {
 	// started them and are watched by id rather than by the socket.
 	jobs            *jobs.Manager
 	diagnostics     *netdiag.Service
+	captures        *netcapture.Service
+	captureNative   captureNativeOwner
 	backupStore     *backups.Store
 	backupRunner    *backups.Runner
 	backupSched     *backups.Scheduler
@@ -227,6 +230,8 @@ func (s *Server) initModules() {
 	s.modules.ipam = netipam.New(s.Store, s.ipamInventory)
 	s.modules.jobs = jobs.New(s.Log)
 	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
+	s.modules.captureNative = netcapture.NewNative()
+	s.modules.captures = netcapture.New(s.Store.DB, s.modules.jobs, s.modules.captureNative.Capture)
 
 	databaseDumper := &backupDatabaseDumper{server: s}
 	s.modules.backupStore = backups.NewStore(s.Store, s.Sealer, s.modules.files).

@@ -11,7 +11,8 @@ The [capability-report implementation ledger](../../audits/2026-10-08-network-ca
 tracks the additional work and its acceptance evidence.
 
 The section also offers [connection investigation](network-investigator.md), [saved diagnostic
-runs](network-diagnostics.md) and [owned drift inspection](network-drift.md). The investigator pins a
+runs](network-diagnostics.md), [bounded packet captures](network-captures.md) and
+[owned drift inspection](network-drift.md). The investigator pins a
 typed host/container tuple and distinguishes observed, modeled, measured and unknown layers. The
 diagnostic service retains bounded quick-tool and typed investigation artifacts with lifecycle state in SQLite; host-network configuration
 remains in the managed spec. Drift compares desired/rendered/runtime identities and measured unit
@@ -333,3 +334,13 @@ Parsers and renderers are tested against sanitized fixtures copied from the tool
 apply's command order and rollback with the recorder, and every guard as a table. Live tests behind
 `JD_NETNS_LIVE=1` build devices, routes, rules, a gateway table with forwards, limits and blocklists,
 and shaping inside throwaway network namespaces — never on the host's own interfaces.
+
+### Retained capture routes
+
+`/network/captures` is owned by `netcapture`, separate from the network configuration spec.
+`GET /captures/`, `/captures/interfaces` and `/captures/{id}` read private records and native choices;
+`POST /captures/` queues an immutable bounded request, and `POST /captures/{id}/cancel` waits for
+process cleanup. `GET /captures/{id}/pcap` downloads original bytes after integrity validation;
+`GET /captures/{id}/support` exports separately redacted metadata. `DELETE /captures/{id}` removes a
+terminal record with the destructive gate. Every route requires `system.admin`; generic capture
+job access has the same gate. See [capture lifecycle](network-captures.md) for hard limits and scope.

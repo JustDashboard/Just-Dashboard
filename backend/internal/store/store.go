@@ -1001,6 +1001,16 @@ CREATE TABLE IF NOT EXISTS network_diagnostic_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_network_diagnostic_runs_created ON network_diagnostic_runs(created_at DESC, id);
 
+-- Explicit bounded PCAP artifacts; private API access and fixed retention.
+CREATE TABLE IF NOT EXISTS network_packet_captures (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  payload TEXT NOT NULL CHECK(length(payload)<=65536),
+  artifact BLOB NOT NULL DEFAULT X'' CHECK(length(artifact)<=2097152)
+);
+CREATE INDEX IF NOT EXISTS idx_network_packet_captures_created ON network_packet_captures(created_at DESC,id);
+
 -- A WireGuard client's configuration, kept sealed (auth.Sealer) so an
 -- administrator can show its QR code again after the sheet that made it was
 -- closed. The client's private key is in it, which is why it is sealed and

@@ -116,6 +116,12 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   `system.admin` and accepts a closed source/target tuple rather than a PID, executable or argv.
   Retained investigations use that same adapter and privilege boundary; comparison requires the
   same requested source, family, protocol, port, address, mark and measurement choice.
+- **Private packet captures.** Every `/network/captures` route and generic `network.capture.*`
+  job view/cancel requires `system.admin`; deletion additionally uses `s.destructive`. Closed
+  typed filters produce fixed native argv without client paths or shell expressions. Mutations
+  are audited, and successful private PCAP/support downloads use `httpx.AuditRead`. Original bytes
+  remain sensitive; only the separate support metadata is redacted. See
+  [capture lifecycle](../backend/network-captures.md).
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything
