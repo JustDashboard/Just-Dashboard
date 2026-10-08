@@ -1,12 +1,17 @@
 "use client"
 
 import { useState } from "react"
-import { get } from "@/lib/api"
+import { get, post } from "@/lib/api"
+import { useAuth } from "@/hooks/use-auth"
+import { notify } from "@/lib/toast"
+import type { NetworkChangeStatus } from "@/lib/types"
 import {
   driftCounts,
   driftReading,
+  driftRepairOutcome,
   driftReportObservations,
   driftReviewKey,
+  selectedDriftRepairRequest,
   type DriftObservation,
   type DriftReport,
 } from "@/lib/network-drift"
@@ -26,9 +31,12 @@ import { Checkbox } from "@/components/ui/checkbox"
 
 /** Reading register: compare measured configuration with what the dashboard owns. */
 export default function NetworkDriftPage() {
+  const { can } = useAuth()
   const read = usePoll<DriftReport>((signal) => get("/network/drift", undefined, signal), 30_000)
   const [selection, setSelection] = useState<{ key: string; ids: string[] }>({ key: "", ids: [] })
   const [review, setReview] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [actionError, setActionError] = useState<string>()
   if (!read.data)
     return (
       <Page className="animate-rise">
@@ -48,6 +56,35 @@ export default function NetworkDriftPage() {
   const reading = driftReading(data.status)
   const blocked = Boolean(read.error) || !data.consistent || data.repairPlan.status === "blocked"
   const activation = data.boot.execution
+  const canRepair = can("system.admin") && can("destructive")
+  const request = selectedDriftRepairRequest(data, selected)
+  const applySelected = async () => {
+    if (busy || blocked || !canRepair || !request || actionError) return
+    setBusy(true)
+    let requestSent = false
+    try {
+      const fresh = await get<DriftReport>("/network/drift")
+      if (driftReviewKey(fresh) !== key || !selectedDriftRepairRequest(fresh, selected)) {
+        throw new Error("The reviewed evidence changed. Close this review and inspect again.")
+      }
+      requestSent = true
+      const result = await post<NetworkChangeStatus>("/network/drift/repairs", request)
+      const outcome = driftRepairOutcome(result)
+      notify[outcome.tone](outcome.title, { description: outcome.description })
+      setReview(false)
+      setSelection({ key: "", ids: [] })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setActionError(
+        requestSent
+          ? `${message} Inspect the current change status before retrying.`
+          : `${message} No repair request was sent.`,
+      )
+    } finally {
+      setBusy(false)
+      read.refresh()
+    }
+  }
   return (
     <Page className="animate-rise">
       <PageContext title="Network drift" />
@@ -60,7 +97,7 @@ export default function NetworkDriftPage() {
                 tone={read.error ? "warning" : reading.tone}
                 label={read.error ? "Last known evidence" : reading.label}
               />
-              <Button size="sm" variant="outline" onClick={read.refresh}>
+              <Button size="sm" variant="outline" disabled={busy} onClick={read.refresh}>
                 Inspect again
               </Button>
             </div>
@@ -232,8 +269,11 @@ export default function NetworkDriftPage() {
             <Button
               size="sm"
               variant="outline"
-              disabled={blocked || !items.length}
-              onClick={() => setReview(true)}
+              disabled={busy || blocked || !items.length}
+              onClick={() => {
+                setActionError(undefined)
+                setReview(true)
+              }}
             >
               Review selected ({items.length})
             </Button>
@@ -241,9 +281,12 @@ export default function NetworkDriftPage() {
         />
         <PanelBody>
           <div className="space-y-3">
-            <Notice title="Review only">
-              This plan cannot execute repairs. It proposes owned resources for review and preserves
-              foreign resources.
+            <Notice
+              title={data.repairPlan.executable ? "Selected repairs available" : "Review only"}
+            >
+              {data.repairPlan.executable
+                ? "Reviewed boot files and owned admission rules can be repaired individually. Other proposals remain available for review."
+                : "This plan cannot execute repairs. It proposes owned resources for review and preserves foreign resources."}
             </Notice>
             {data.repairPlan.blockers.map((reason) => (
               <p key={reason} className="text-body text-warning">
@@ -260,12 +303,17 @@ export default function NetworkDriftPage() {
                         {item.resource}
                       </label>
                     }
-                    subtitle={item.reason}
+                    subtitle={
+                      <>
+                        {item.reason}
+                        {item.blocker && <span className="block">Review only: {item.blocker}</span>}
+                      </>
+                    }
                     leading={
                       <Checkbox
                         id={`repair-${item.id}`}
                         aria-label={`Select repair for ${item.resource}`}
-                        disabled={blocked}
+                        disabled={blocked || busy}
                         checked={selected.includes(item.id)}
                         onCheckedChange={(checked) =>
                           setSelection({
@@ -304,30 +352,88 @@ export default function NetworkDriftPage() {
       </Panel>
       <Modal
         open={review}
-        onOpenChange={setReview}
+        onOpenChange={(open) => {
+          if (!busy) setReview(open)
+        }}
         title="Review selected owned repairs"
-        description="Inspect the proposed changes and preconditions. This plan cannot apply changes."
+        description="Inspect the selected exact changes and their preconditions before applying."
         size="lg"
         footer={
-          <Button variant="outline" onClick={() => setReview(false)}>
-            Close review
-          </Button>
+          <>
+            <Button variant="outline" disabled={busy} onClick={() => setReview(false)}>
+              Close review
+            </Button>
+            {canRepair && request && (
+              <Button
+                variant="destructive"
+                disabled={blocked || Boolean(actionError) || busy}
+                pending={busy}
+                onClick={applySelected}
+              >
+                Apply selected repairs
+              </Button>
+            )}
+          </>
         }
       >
         <div className="space-y-4">
-          <Notice title="No changes will be applied">
-            Repair execution is unavailable for this plan.
-          </Notice>
+          {!request || !canRepair ? (
+            <Notice title="No changes will be applied">
+              {canRepair
+                ? "The selections include resources available for review only."
+                : "An administrator with destructive permission can apply executable selected repairs."}
+            </Notice>
+          ) : (
+            <Notice title="Apply only these reviewed resources">
+              File selections repair saved boot inputs. Admission selections repair owned rules in
+              the current kernel. The server rereads ownership and evidence before applying.
+            </Notice>
+          )}
+          {actionError && (
+            <Notice tone="warning" title="Repair needs review">
+              {actionError}
+            </Notice>
+          )}
           {blocked || !items.length ? (
             <Notice tone="warning" title="The reviewed evidence changed">
               Close this review and inspect the network again before selecting repairs.
             </Notice>
           ) : (
-            <RowList>
+            <div className="space-y-6">
               {items.map((item) => (
-                <Row key={item.id} title={item.resource} subtitle={item.reason} />
+                <section key={item.id} className="space-y-3">
+                  <h3 className="font-mono text-body font-medium break-all">{item.resource}</h3>
+                  <p className="text-body text-muted-foreground">{item.reason}</p>
+                  {item.blocker && (
+                    <p className="text-body text-warning">Review only: {item.blocker}</p>
+                  )}
+                  {item.effect && (
+                    <p className="text-body">
+                      {item.effect === "boot_files"
+                        ? "Repairs this saved boot input. A future restore will read it."
+                        : "Repairs this owned admission rule in the current kernel."}
+                    </p>
+                  )}
+                  {item.after && (
+                    <>
+                      <p className="text-hint text-muted-foreground">Before</p>
+                      <pre className="font-mono text-hint break-all whitespace-pre-wrap">
+                        {item.before || "File absent"}
+                      </pre>
+                      <p className="text-hint text-muted-foreground">After</p>
+                      <pre className="font-mono text-hint break-all whitespace-pre-wrap">
+                        {item.after}
+                      </pre>
+                    </>
+                  )}
+                  <ul className="list-disc space-y-1 pl-5 text-body text-muted-foreground">
+                    {item.preconditions.map((text) => (
+                      <li key={text}>{text}</li>
+                    ))}
+                  </ul>
+                </section>
               ))}
-            </RowList>
+            </div>
           )}
           <Digest label="Reviewed generation" value={data.repairPlan.generation} />
           <ul className="list-disc space-y-1 pl-5 text-body text-muted-foreground">

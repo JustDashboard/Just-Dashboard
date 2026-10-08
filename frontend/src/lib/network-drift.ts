@@ -26,6 +26,12 @@ export type OwnedRepair = {
   reason: string
   preconditions: string[]
   dependencies?: string[]
+  executable?: boolean
+  blocker?: string
+  reviewToken?: string
+  before?: string
+  after?: string
+  effect?: "boot_files" | "runtime"
 }
 
 export type DriftReport = {
@@ -132,6 +138,15 @@ export function driftReportObservations(report: DriftReport): DriftObservation[]
     ...report.files,
     ...report.runtime,
     { id: "boot:unit", status: report.boot.status } as DriftObservation,
+    {
+      id: "boot:activation",
+      status:
+        report.boot.execution?.status === "failed"
+          ? "drift"
+          : report.boot.execution?.status === "succeeded"
+            ? "matching"
+            : "unknown",
+    } as DriftObservation,
     ...report.blocklists.map(
       (list) =>
         ({
@@ -148,6 +163,59 @@ export function driftReportObservations(report: DriftReport): DriftObservation[]
   ]
 }
 
+export function selectedDriftRepairRequest(report: DriftReport, selected: string[]) {
+  if (
+    !report.consistent ||
+    report.repairPlan.status === "blocked" ||
+    !report.repairPlan.executable ||
+    !report.savedGeneration ||
+    report.savedGeneration !== report.repairPlan.generation ||
+    !selected.length ||
+    new Set(selected).size !== selected.length
+  )
+    return undefined
+  const items = report.repairPlan.items.filter((item) => selected.includes(item.id))
+  if (
+    items.length !== selected.length ||
+    items.some((item) => !item.executable || !item.reviewToken)
+  )
+    return undefined
+  return {
+    generation: report.savedGeneration,
+    selections: items.map(({ id, reviewToken }) => ({ id, reviewToken })),
+  }
+}
+
+export function driftRepairOutcome(change: NetworkChangeStatus) {
+  const pending = change.phase === "awaiting_confirmation" && change.watchdog === "armed"
+  const completed = ["saved", "confirmed"].includes(change.phase) && change.watchdog === "completed"
+  const runtimeApplied = change.runtime === "applied"
+  const filesSaved = change.persistence === "written" && change.boot === "not_verified"
+  const runtimeOnly =
+    runtimeApplied && change.persistence === "not_applicable" && change.boot === "not_applicable"
+  if (
+    (!pending && !completed) ||
+    (change.recoveryErrors?.length ?? 0) > 0 ||
+    (!filesSaved && !runtimeOnly) ||
+    !["applied", "not_applied"].includes(change.runtime)
+  )
+    return {
+      tone: "warning" as const,
+      title: "Inspect the repair outcome",
+      description:
+        "The returned change does not establish a completed repair. Inspect its current status before retrying.",
+    }
+  return {
+    tone: "success" as const,
+    title: pending ? "Repairs await reconnection confirmation" : "Selected repairs applied",
+    description: runtimeOnly
+      ? "Runtime applied; not saved for boot."
+      : runtimeApplied
+        ? "Selected runtime rules applied and boot inputs saved; boot execution remains unverified."
+        : "Selected boot inputs saved; boot execution remains unverified.",
+  }
+}
+
 // Keep a selection only while its reviewed evidence is unchanged. Poll time is
 // excluded: a fresh read of the same facts should not interrupt an operator.
 export function driftReviewKey(report: DriftReport) {
@@ -160,6 +228,8 @@ export function driftReviewKey(report: DriftReport) {
     boot: {
       status: report.boot.status,
       owned: report.boot.owned,
+      activeState: report.boot.activeState,
+      bootId: report.boot.execution?.bootId,
       fragmentPath: report.boot.fragmentPath,
       dropInPaths: report.boot.dropInPaths,
       needDaemonReload: report.boot.needDaemonReload,

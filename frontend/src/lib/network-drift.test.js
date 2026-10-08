@@ -1,5 +1,12 @@
 import { expect, test } from "bun:test"
-import { driftCounts, driftReading, driftReportObservations, driftReviewKey } from "./network-drift"
+import {
+  driftCounts,
+  driftReading,
+  driftRepairOutcome,
+  driftReportObservations,
+  driftReviewKey,
+  selectedDriftRepairRequest,
+} from "./network-drift"
 
 test("missing, unreadable and incomplete comparisons keep distinct readings", () => {
   expect(driftReading("missing").label).toBe("Missing")
@@ -25,7 +32,52 @@ test("counts include unavailable configuration and boot evidence without inventi
         blocklists: [{ id: 1, enabled: false, enforcement: "unknown" }],
       }),
     ),
-  ).toEqual({ differences: 1, unknown: 1, matching: 0 })
+  ).toEqual({ differences: 1, unknown: 2, matching: 0 })
+})
+
+test("selected execution sends only reviewed identities and refuses advisory or shifted evidence", () => {
+  const report = {
+    consistent: true,
+    savedGeneration: "generation",
+    repairPlan: {
+      generation: "generation",
+      status: "review_required",
+      executable: true,
+      items: [
+        {
+          id: "one",
+          executable: true,
+          reviewToken: "reviewed",
+          resource: "/owned/path",
+          after: "render",
+        },
+        { id: "advice", executable: false, reviewToken: "advisory" },
+      ],
+    },
+  }
+  expect(selectedDriftRepairRequest(report, ["one"])).toEqual({
+    generation: "generation",
+    selections: [{ id: "one", reviewToken: "reviewed" }],
+  })
+  for (const ids of [[], ["unknown"], ["one", "one"], ["advice"], ["one", "advice"]]) {
+    expect(selectedDriftRepairRequest(report, ids)).toBeUndefined()
+  }
+  expect(selectedDriftRepairRequest({ ...report, consistent: false }, ["one"])).toBeUndefined()
+  expect(
+    selectedDriftRepairRequest({ ...report, savedGeneration: "changed" }, ["one"]),
+  ).toBeUndefined()
+  expect(
+    selectedDriftRepairRequest(
+      { ...report, repairPlan: { ...report.repairPlan, executable: false } },
+      ["one"],
+    ),
+  ).toBeUndefined()
+  expect(
+    selectedDriftRepairRequest(
+      { ...report, repairPlan: { ...report.repairPlan, status: "blocked" } },
+      ["one"],
+    ),
+  ).toBeUndefined()
 })
 
 test("review identity binds comparison bytes, boot ownership and unresolved journal", () => {
@@ -71,4 +123,47 @@ test("review identity binds comparison bytes, boot ownership and unresolved jour
   expect(
     driftReviewKey({ ...report, boot: { ...report.boot, fragmentPath: "/foreign/unit" } }),
   ).not.toBe(key)
+})
+
+test("repair outcomes require independent phase evidence and retain boot execution limits", () => {
+  const render = {
+    phase: "saved",
+    watchdog: "completed",
+    runtime: "not_applied",
+    persistence: "written",
+    boot: "not_verified",
+  }
+  expect(driftRepairOutcome(render)).toMatchObject({
+    tone: "success",
+    title: "Selected repairs applied",
+    description: "Selected boot inputs saved; boot execution remains unverified.",
+  })
+  const pending = { ...render, phase: "awaiting_confirmation", watchdog: "armed" }
+  expect(driftRepairOutcome(pending).title).toBe("Repairs await reconnection confirmation")
+  expect(
+    driftRepairOutcome({
+      ...render,
+      runtime: "applied",
+      persistence: "not_applicable",
+      boot: "not_applicable",
+    }).description,
+  ).toBe("Runtime applied; not saved for boot.")
+  expect(driftRepairOutcome({ ...render, runtime: "applied" }).description).toContain(
+    "boot execution remains unverified",
+  )
+  for (const changed of [
+    { phase: "degraded" },
+    { phase: "boot_degraded" },
+    { phase: "unreadable" },
+    { watchdog: "armed" },
+    { runtime: "unknown" },
+    { persistence: "unknown" },
+    { boot: "unknown" },
+    { boot: "failed" },
+    { recoveryErrors: ["restore failed"] },
+    { persistence: "not_applicable", boot: "not_applicable" },
+  ]) {
+    expect(driftRepairOutcome({ ...render, ...changed }).tone).toBe("warning")
+  }
+  expect(driftRepairOutcome({ ...pending, watchdog: "failed_to_arm" }).tone).toBe("warning")
 })

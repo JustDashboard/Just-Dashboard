@@ -157,12 +157,21 @@ inspection and immediate pre-effect checks describe an observation window.
 
 `/network/drift` uses the reading register to show dated desired, rendered and
 runtime evidence, ownership conflicts, and measured unit activation separately
-from reboot attribution. Summary counts include spec, journal, boot-unit and
-enabled blocklist readings. Failed refreshes retain dated evidence and disable
-repair selection. Reviewed selections expire when generation, ownership,
-selected comparison bytes or journal facts change; polling time alone does not
-invalidate identical evidence. The initial reporting page offers ordinary plan
-review; execution controls require the separately integrated selected repair UI.
+from reboot attribution. Summary counts include spec, journal, boot-unit,
+measured activation and enabled blocklist readings. Failed refreshes retain dated
+evidence and disable repair selection. Reviewed selections expire when generation,
+ownership, selected comparison bytes or journal facts change; polling time alone does not
+invalidate identical evidence. Administrators with destructive permission can
+review executable selections through the ordinary destructive review, including
+exact before/after contents and per-item preconditions. A selection containing
+advisory items has no apply control. Apply rereads the report and refuses changed
+evidence before sending only the reviewed generation, item IDs and tokens; the
+backend independently rechecks them under both locks. Failed preflight states
+that no request was sent. An uncertain mutation response directs the operator
+to current change status before retrying. Result notifications require consistent
+independent phase evidence and distinguish runtime-only repairs from saved boot
+inputs without claiming boot execution. Eligible repairs use the shared pending
+confirmation banner and fresh reconnection challenge.
 
 Focused regression checks:
 
