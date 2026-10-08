@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Native-owned devices keep their runtime-only contract. Their observed undo
@@ -52,6 +53,7 @@ func (s *Service) runtimeOnly(ctx context.Context, st step) error {
 		}
 	}
 	j.Phase, j.Runtime = "runtime_applied", "applied"
+	j.AppliedAt = time.Now().UTC()
 	if err := j.save(); err != nil {
 		return recover(err)
 	}
@@ -63,6 +65,9 @@ func (s *Service) runtimeOnly(ctx context.Context, st step) error {
 	j.Phase = "saved"
 	if j.Watchdog == "armed" {
 		j.Watchdog = "completed"
+	}
+	if err := finishPendingConfirmation(j); err != nil {
+		return recover(err)
 	}
 	if err := j.save(); err != nil {
 		return recover(err)

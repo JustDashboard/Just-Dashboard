@@ -640,6 +640,9 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 		if json.Unmarshal([]byte(out), &filters) != nil {
 			return errors.New("tc printed unreadable ingress filters")
 		}
+		if len(filters) != 1 {
+			return shapingDrift("%s ingress contains filters beyond the requested policer", sh.Device)
+		}
 		found := false
 		for _, f := range filters {
 			if f.Pref == 1 && f.Protocol == "all" && f.Kind == "matchall" && f.Chain == 0 && len(f.Options.Actions) == 1 && f.Options.Actions[0].Kind == "police" && f.Options.Actions[0].Control.Type == "drop" {

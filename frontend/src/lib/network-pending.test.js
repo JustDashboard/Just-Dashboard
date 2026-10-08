@@ -27,6 +27,7 @@ test("pending applies enroll only managed netx mutations", () => {
     "/network/namespaces",
     "/network/changes/one/confirm",
     "/network/gateway-foreign",
+    "/network/gateway/admission/repair",
   ]) {
     expect(supportsPendingNetworkMutation(path, "POST")).toBe(false)
   }

@@ -57,6 +57,11 @@ recoverable rather than pretending several filesystem renames are one atomic tra
 collects failed writes and commands, exposes them as degraded, and blocks further journaled changes.
 Native-owned state/MTU/bridge edits retain observed undo without creating managed boot files.
 See [network recovery](network-recovery.md) for host prerequisites, phases and acceptance boundaries.
+Interactive covered mutations support a ninety-second temporary apply and account/session/source-bound
+reconnection confirmation. The host recovers an unconfirmed journal independently; ordinary API
+callers remain immediate. Boot recovery restores files and prior owned link/namespace dependencies
+before undo, as described in [boot recovery](network-boot-recovery.md). Confirmation proves a fresh
+dashboard response rather than general service or tunnel health.
 
 `s.mu` serialises mutations. The unit is enabled, not started: everything it would restore was just
 applied. A later unit-enable failure is a `persistenceError`: runtime and spec have committed, so callers
@@ -84,6 +89,9 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   the parent or bridge such a device rides on; a passthru macvlan on a device that carries one is
   refused (it takes every frame the parent receives). An MTU under 1280 is refused on the client path
   and on any device with a global IPv6 address.
+  The create form exposes VXLAN unicast or multicast destinations with an explicit sender for
+  multicast, and decimal uint32 GRE keys plus TTL/IPv6 hop limits. GRE remains unencrypted and the
+  form does not claim verified multicast underlay or remote endpoint reachability.
 - Routing reads every table in both families with `rt_tables` names (the local table is counted, not
   listed), the policy rules with their owners, and the client path. Added rules take priorities in
   10000–19999, checking live foreign priorities as well as the spec in that family; a rule with no
@@ -298,6 +306,7 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | --- | --- |
 | Overview | `GET /`, `GET /capabilities`, `GET /overview`, `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`; `GET`/`POST /namespaces`, `DELETE /namespaces/{name}` |
+| Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
 | Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
 | Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
 | Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |

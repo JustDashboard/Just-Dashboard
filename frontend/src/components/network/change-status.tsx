@@ -30,8 +30,9 @@ export function NetworkChange({ change }: { change: NetworkChangeStatus }) {
           <Detail label="Host recovery">{WATCHDOG_STATE[change.watchdog] ?? "Unknown"}</Detail>
         </DetailList>
         <p className="text-hint text-muted-foreground">
-          These are the host&rsquo;s apply, save and recovery outcomes. Browser reconnect and
-          application reachability have not been confirmed by this status.
+          {change.phase === "confirmed"
+            ? "The applying session received and confirmed a fresh dashboard response. Application and tunnel health remain unverified."
+            : "These are the host’s apply, save and recovery outcomes. Browser reconnect and application reachability have not been confirmed by this status."}
         </p>
         {Boolean(change.recoveryErrors?.length) && (
           <div role="alert">

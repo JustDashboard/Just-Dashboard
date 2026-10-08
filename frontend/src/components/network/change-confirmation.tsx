@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { usePathname } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
@@ -15,15 +16,21 @@ import { useConfirm } from "@/components/confirm-dialog"
 export function NetworkChangeConfirmation() {
   const { can } = useAuth()
   const admin = can("system.admin")
+  const inNetwork = usePathname().startsWith("/network")
+  const [observed, setObserved] = useState<string>()
   const state = usePoll(
-    (signal) => get<NetworkConfirmationView>("/network/changes/current", undefined, signal),
+    async (signal) => {
+      const view = await get<NetworkConfirmationView>("/network/changes/current", undefined, signal)
+      if (view.change?.phase === "awaiting_confirmation") setObserved(view.change.id)
+      return view
+    },
     2000,
     [],
     { enabled: admin },
   )
   const refresh = state.refresh
   const [enabled, setEnabled] = useState(true)
-  const [observed, setObserved] = useState<string>()
+  const [dismissed, setDismissed] = useState<string>()
   const [verification, setVerification] = useState<{ id: string; challenge: string }>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
@@ -105,7 +112,12 @@ export function NetworkChangeConfirmation() {
   }
 
   if (!admin) return null
-  if (!available && !change && !observed) return null
+  const outcome =
+    change &&
+    ["recovered", "degraded", "confirmed"].includes(change.phase) &&
+    dismissed !== change.id &&
+    (inNetwork || observed === change.id || change.phase === "degraded")
+  if (!pending && !outcome && !(observed && state.error) && !(inNetwork && available)) return null
   return (
     <aside aria-label="Network change confirmation" className="mx-4 my-3 min-w-0">
       {pending ? (
@@ -158,7 +170,7 @@ export function NetworkChangeConfirmation() {
             </div>
           )}
         </Notice>
-      ) : change && ["recovered", "degraded", "confirmed"].includes(change.phase) ? (
+      ) : outcome && change ? (
         <Notice
           tone={change.phase === "degraded" ? "warning" : "default"}
           title={
@@ -184,6 +196,16 @@ export function NetworkChangeConfirmation() {
           {state.error && (
             <p className="mt-1">The latest status request failed; this is the last known result.</p>
           )}
+          {change.phase !== "degraded" && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              onClick={() => setDismissed(change.id)}
+            >
+              Dismiss network outcome
+            </Button>
+          )}
         </Notice>
       ) : observed && state.error ? (
         <Notice tone="warning" title="Waiting for network recovery status">
@@ -193,7 +215,7 @@ export function NetworkChangeConfirmation() {
           </p>
         </Notice>
       ) : null}
-      {available && !pending && (
+      {inNetwork && available && !pending && (
         <label className="mt-2 flex min-h-11 items-center gap-3 text-body">
           <Switch
             aria-label="Require network reconnection confirmation"

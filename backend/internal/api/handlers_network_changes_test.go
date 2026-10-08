@@ -98,7 +98,7 @@ func TestOtherAdministratorCannotVerifyPendingChange(t *testing.T) {
 
 func TestPendingHeaderDoesNotEnrollUnsupportedNetworkOwners(t *testing.T) {
 	s, _, _ := confirmationRouter(t, auth.RoleAdmin, "session", 7)
-	for _, path := range []string{"/network/vpn/tailscale", "/network/dns", "/network/firewall/rules", "/network/namespaces", "/network/changes/pending-one/confirm"} {
+	for _, path := range []string{"/network/vpn/tailscale", "/network/dns", "/network/firewall/rules", "/network/namespaces", "/network/changes/pending-one/confirm", "/network/gateway/admission/repair"} {
 		called := false
 		handler := s.pendingNetworkApply(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))

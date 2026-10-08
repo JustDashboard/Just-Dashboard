@@ -29,6 +29,8 @@ strategy, and feature ownership behind those rules.
   admission, blocklists, kernel protections, shaping, WireGuard and Tailscale, the resolver and traffic.
 - [`backend/network-recovery.md`](backend/network-recovery.md) — durable network change phases,
   independent recovery, prerequisites and verification limits.
+- [`backend/network-boot-recovery.md`](backend/network-boot-recovery.md) — reconstructing prior managed
+  dependencies before interrupted-change recovery after a cold start.
 - [`backend/gateway-health.md`](backend/gateway-health.md) — checked firewall layers, per-family
   admission health and blocklist cache/render/runtime evidence.
 - [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.

@@ -8,8 +8,12 @@ export function supportsPendingNetworkMutation(path: string, method: string): bo
     "/network/routing/rules",
     "/network/forwarding",
     "/network/shaping",
-    "/network/gateway",
-    "/network/protection",
+    "/network/gateway/forwards",
+    "/network/gateway/nat",
+    "/network/protection/limits",
+    "/network/protection/blocklists",
+    "/network/protection/settings",
+    "/network/protection/trusted",
   ].some((prefix) => clean === prefix || clean.startsWith(`${prefix}/`))
 }
 

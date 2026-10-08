@@ -15,6 +15,7 @@ func pendingHost(t *testing.T) *gwHost {
 	t.Helper()
 	h := newGwHost(t)
 	h.independentRecovery, h.recoveryInstalled = true, true
+	h.rec.on(filepath.Join(h.paths.Dir, recoveryBinary)+" --network-recovery-check", "")
 	h.rec.on("systemd-run", "armed")
 	return h
 }

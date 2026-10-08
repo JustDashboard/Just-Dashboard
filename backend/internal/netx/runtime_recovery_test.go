@@ -67,6 +67,28 @@ func TestRuntimeOnlyRecoveryFailuresRemainVisibleAndBlockAnotherEdit(t *testing.
 	}
 }
 
+func TestPendingRuntimeOnlyChangeNeedsReconnectionWithoutClaimingBootPersistence(t *testing.T) {
+	h := pendingHost(t)
+	if err := h.runtimeOnly(WithPendingConfirmation(context.Background(), 7), step{
+		apply:    func(context.Context) error { return nil },
+		recovery: []recoveryCommand{{Tool: "ip", Args: []string{"link", "set", "eth0", "mtu", "1500"}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	j, err := readChange(h.paths.Dir)
+	if err != nil || j.Phase != "awaiting_confirmation" || j.Persistence != "not_applicable" || j.AppliedAt.IsZero() || j.OwnerUserID != 7 {
+		t.Fatalf("runtime-only pending = %+v, %v", j, err)
+	}
+	proof, err := h.VerifyReconnection(context.Background(), j.ID, 7, "session", "192.0.2.17")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := h.ConfirmChange(context.Background(), j.ID, 7, "session", proof.Challenge, "192.0.2.17")
+	if err != nil || status.Phase != "confirmed" || status.Persistence != "not_applicable" || status.Boot != "not_applicable" {
+		t.Fatalf("runtime-only confirmation = %+v, %v", status, err)
+	}
+}
+
 func TestRecoveryRestoresForwardingBeforeUnchangedManagedProtections(t *testing.T) {
 	rtProc(t, nil, "0", "0")
 	before := map[string]string{"net.ipv4.tcp_syncookies": "1", "net.ipv4.conf.all.rp_filter": "2"}

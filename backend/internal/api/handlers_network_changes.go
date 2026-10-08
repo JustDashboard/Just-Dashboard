@@ -20,7 +20,7 @@ const networkApplyHeader = "X-JD-Network-Apply"
 // Firewall, DNS, namespaces and VPN have separate owners and are not enrolled.
 func supportsPendingNetworkApply(path string) bool {
 	path = strings.TrimSuffix(path, "/")
-	for _, prefix := range []string{"/network/links", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway", "/network/protection"} {
+	for _, prefix := range []string{"/network/links", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
