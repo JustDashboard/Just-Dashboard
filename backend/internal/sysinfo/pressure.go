@@ -20,9 +20,12 @@ import (
 //
 // Some is the share of time at least one task was stalled; Full is the share
 // where every task was — an idle-but-blocked machine, which for I/O is the
-// signature of a disk that has become the bottleneck. avg10 is the window
-// used: a dashboard sampling every 15 seconds wants the kernel's own
-// short-window average, not a total counter it would have to difference.
+// signature of a disk that has become the bottleneck. avg10 is the window the
+// recorder samples: a dashboard sampling every 15 seconds wants the kernel's
+// own short-window average, not a total counter it would have to difference.
+// The minute and five-minute averages are what Health judges on, because a
+// ten-second window catches a compile finishing and calls the machine
+// saturated.
 type Pressure struct {
 	// Supported is false on a kernel built without PSI (pre-4.20, or with
 	// CONFIG_PSI_DEFAULT_DISABLED and no psi=1 on the command line), which is
@@ -34,6 +37,15 @@ type Pressure struct {
 	MemFull float64 `json:"memFull"`
 	IOSome  float64 `json:"ioSome"`
 	IOFull  float64 `json:"ioFull"`
+
+	CPUSome60  float64 `json:"cpuSome60"`
+	CPUSome300 float64 `json:"cpuSome300"`
+	MemSome60  float64 `json:"memSome60"`
+	MemSome300 float64 `json:"memSome300"`
+	MemFull60  float64 `json:"memFull60"`
+	IOSome60   float64 `json:"ioSome60"`
+	IOSome300  float64 `json:"ioSome300"`
+	IOFull60   float64 `json:"ioFull60"`
 }
 
 // pressureRoot is a variable so the tests can point it at a fixture directory
@@ -48,31 +60,37 @@ func ReadPressure() Pressure {
 	var p Pressure
 	if some, _, ok := readPSI(pressureRoot + "/cpu"); ok {
 		p.Supported = true
-		p.CPUSome = some
+		p.CPUSome, p.CPUSome60, p.CPUSome300 = some.avg10, some.avg60, some.avg300
 	}
 	if some, full, ok := readPSI(pressureRoot + "/memory"); ok {
 		p.Supported = true
-		p.MemSome, p.MemFull = some, full
+		p.MemSome, p.MemSome60, p.MemSome300 = some.avg10, some.avg60, some.avg300
+		p.MemFull, p.MemFull60 = full.avg10, full.avg60
 	}
 	if some, full, ok := readPSI(pressureRoot + "/io"); ok {
 		p.Supported = true
-		p.IOSome, p.IOFull = some, full
+		p.IOSome, p.IOSome60, p.IOSome300 = some.avg10, some.avg60, some.avg300
+		p.IOFull, p.IOFull60 = full.avg10, full.avg60
 	}
 	return p
 }
+
+// psiLine is one line's three averages.
+type psiLine struct{ avg10, avg60, avg300 float64 }
 
 // readPSI parses one pressure file:
 //
 //	some avg10=0.00 avg60=0.00 avg300=0.00 total=0
 //	full avg10=0.00 avg60=0.00 avg300=0.00 total=0
 //
-// Only avg10 is taken. The totals are cumulative microseconds and would need
-// differencing against the previous read to mean anything; the kernel has
-// already done that work for the averages.
-func readPSI(path string) (some, full float64, ok bool) {
+// The averages are taken by name rather than position. The totals are
+// cumulative microseconds and would need differencing against the previous
+// read to mean anything; the kernel has already done that work for the
+// averages.
+func readPSI(path string) (some, full psiLine, ok bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, 0, false
+		return some, full, false
 	}
 	defer f.Close()
 
@@ -82,20 +100,27 @@ func readPSI(path string) (some, full float64, ok bool) {
 		if len(fields) < 2 {
 			continue
 		}
-		var avg10 float64
+		var line psiLine
 		for _, field := range fields[1:] {
 			key, value, found := strings.Cut(field, "=")
-			if !found || key != "avg10" {
+			if !found {
 				continue
 			}
-			avg10, _ = strconv.ParseFloat(value, 64)
-			break
+			n, _ := strconv.ParseFloat(value, 64)
+			switch key {
+			case "avg10":
+				line.avg10 = round2(n)
+			case "avg60":
+				line.avg60 = round2(n)
+			case "avg300":
+				line.avg300 = round2(n)
+			}
 		}
 		switch fields[0] {
 		case "some":
-			some, ok = round2(avg10), true
+			some, ok = line, true
 		case "full":
-			full, ok = round2(avg10), true
+			full, ok = line, true
 		}
 	}
 	return some, full, ok

@@ -232,7 +232,7 @@ func (t *Table) snapshot(ctx context.Context) ([]Process, error) {
 			row.ioCounterReady = true
 		}
 		row.Threads, _ = p.NumThreadsWithContext(ctx)
-		row.Nice, _ = p.NiceWithContext(ctx)
+		row.Nice = niceOf(ctx, p)
 		if ct, err := p.CreateTimeWithContext(ctx); err == nil {
 			row.CreateTime = time.UnixMilli(ct).UTC()
 		}
@@ -654,7 +654,7 @@ func (t *Table) Detail(ctx context.Context, pid int32) (*Process, error) {
 		row.Children = len(children)
 	}
 	row.Threads, _ = p.NumThreadsWithContext(ctx)
-	row.Nice, _ = p.NiceWithContext(ctx)
+	row.Nice = niceOf(ctx, p)
 	if ct, err := p.CreateTimeWithContext(ctx); err == nil {
 		row.CreateTime = time.UnixMilli(ct).UTC()
 	}
@@ -889,6 +889,19 @@ func MarkPM2(rows []Process, processes []PM2Process) {
 			rows[i].Manager, rows[i].ManagerName = "pm2", name
 		}
 	}
+}
+
+// niceOf reads a process's nice value on the -20…19 scale SetNice and every
+// tool speak. gopsutil hands back getpriority(2)'s raw kernel value, which is
+// 20 minus the nice value: read as-is, every ordinary process was "nice 20",
+// past the end of the range, and the advisor's Lower priority was disabled
+// for all of them.
+func niceOf(ctx context.Context, p *process.Process) int32 {
+	raw, err := p.NiceWithContext(ctx)
+	if err != nil || raw < 1 || raw > 40 {
+		return 0
+	}
+	return 20 - raw
 }
 
 func (t *Table) SetNice(ctx context.Context, pid int32, nice int) error {

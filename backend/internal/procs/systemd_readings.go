@@ -156,6 +156,50 @@ func (s *Systemd) unitReadings(ctx context.Context, units []Unit, now time.Time)
 	return out
 }
 
+// failedDescribed bounds the one `show` DescribeFailed makes: a host with more
+// failed units than this has a problem the first thirty-two already name.
+const failedDescribed = 32
+
+// DescribeFailed fills each failed unit's last result, how its main process
+// ended and when it failed, from one `systemctl show` over the failed units.
+// List leaves those empty because reading them for every unit is what makes
+// the inventory slow, and a failed unit is the one whose reason is the whole
+// answer. Best-effort: a manager that will not answer leaves them empty.
+func (s *Systemd) DescribeFailed(ctx context.Context, units []Unit) {
+	index := map[string]int{}
+	ask := []string{}
+	for i, u := range units {
+		if u.ActiveState != "failed" || ValidateName(u.Name) != nil || len(ask) == failedDescribed {
+			continue
+		}
+		index[u.Name] = i
+		ask = append(ask, u.Name)
+	}
+	if len(ask) == 0 {
+		return
+	}
+	args := append([]string{"show", "--no-pager", "-p",
+		"Id,Result,ExecMainCode,ExecMainStatus,StateChangeTimestampMonotonic", "--"}, ask...)
+	res, err := run(ctx, 10*time.Second, "systemctl", args...)
+	if err != nil || res.ExitCode != 0 {
+		return
+	}
+	uptime, _ := host.UptimeWithContext(ctx)
+	now := time.Now()
+	for _, record := range parseShowRecords(res.Stdout) {
+		i, ok := index[record["Id"]]
+		if !ok {
+			continue
+		}
+		u := &units[i]
+		u.Result = record["Result"]
+		u.ExitCode, u.ExitStatus = exitOf(record)
+		if mono := monotonic(record["StateChangeTimestampMonotonic"]); mono > 0 && uptime > 0 {
+			u.ChangedAt = activeSinceUnix(mono, uptime, now).Unix()
+		}
+	}
+}
+
 // parseShowRecords splits `systemctl show` over several units into one map
 // per unit; the records are separated by a blank line.
 func parseShowRecords(stdout string) []map[string]string {
