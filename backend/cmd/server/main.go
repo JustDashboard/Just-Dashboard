@@ -42,14 +42,18 @@ func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--network-recovery-check" {
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "--network-recover" {
+	if len(os.Args) > 1 && (os.Args[1] == "--network-recover" || os.Args[1] == "--network-recover-boot") {
 		if len(os.Args) != 4 {
 			fmt.Fprintln(os.Stderr, "network recovery needs a directory and change ID")
 			os.Exit(2)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
-		if err := netx.RecoverNetworkStandalone(ctx, os.Args[2], os.Args[3]); err != nil {
+		recover := netx.RecoverNetworkStandalone
+		if os.Args[1] == "--network-recover-boot" {
+			recover = netx.RecoverNetworkBootStandalone
+		}
+		if err := recover(ctx, os.Args[2], os.Args[3]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}

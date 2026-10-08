@@ -87,7 +87,7 @@ Type=oneshot
 		RemainAfterExit=yes
 `)
 	if len(recovery) > 0 && recovery[0] {
-		fmt.Fprintf(&b, "ExecStartPre=%s --network-recover %s pending\n", filepath.Join(dir, recoveryBinary), dir)
+		fmt.Fprintf(&b, "ExecStartPre=%s --network-recover-boot %s pending\n", filepath.Join(dir, recoveryBinary), dir)
 	}
 	fmt.Fprintf(&b, "ExecStart=-ip -force -batch %s\n", filepath.Join(dir, linksFile))
 	fmt.Fprintf(&b, "ExecStart=-ip -6 -force -batch %s\n", filepath.Join(dir, rules6File))

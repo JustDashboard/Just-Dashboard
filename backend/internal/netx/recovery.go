@@ -43,6 +43,16 @@ func executeRecovery(ctx context.Context, input []byte, name string, args ...str
 // systemd. Keeping its argv there also makes disposable-namespace acceptance
 // possible without a namespace wrapper escaping back to host PID 1.
 func RecoverNetworkStandalone(ctx context.Context, dir, id string) error {
+	return recoverNetworkStandalone(ctx, dir, id, false)
+}
+
+// RecoverNetworkBootStandalone rebuilds managed dependencies lost at reboot
+// before running the same targeted undo as the independent timer.
+func RecoverNetworkBootStandalone(ctx context.Context, dir, id string) error {
+	return recoverNetworkStandalone(ctx, dir, id, true)
+}
+
+func recoverNetworkStandalone(ctx context.Context, dir, id string, boot bool) error {
 	execute := recoveryExecutor(func(ctx context.Context, input []byte, name string, args ...string) (string, error) {
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
@@ -58,7 +68,7 @@ func RecoverNetworkStandalone(ctx context.Context, dir, id string) error {
 		}
 		return out.String(), nil
 	})
-	return RecoverNetwork(context.WithValue(ctx, recoveryExecutorKey{}, execute), dir, id)
+	return recoverNetwork(context.WithValue(ctx, recoveryExecutorKey{}, execute), dir, id, boot)
 }
 
 func recordRecoveryError(ctx context.Context, err error) {
@@ -108,6 +118,7 @@ type changeJournal struct {
 	Paths                 Paths              `json:"paths"`
 	Files                 []recoverySnapshot `json:"files"`
 	Commands              []recoveryCommand  `json:"commands"`
+	BootDependencies      []recoveryCommand  `json:"bootDependencies,omitempty"`
 	VerificationDigest    string             `json:"verificationDigest,omitempty"`
 	VerificationSession   string             `json:"verificationSession,omitempty"`
 	VerificationTransport string             `json:"verificationTransport,omitempty"`
@@ -203,12 +214,16 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 		return nil, fmt.Errorf("preparing independent network recovery: %w", err)
 	}
 	commands = append(commands, extra...)
+	dependencies, err := bootRecoveryDependencies(old)
+	if err != nil {
+		return nil, fmt.Errorf("preparing managed dependencies for boot recovery: %w", err)
+	}
 	var id [16]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return nil, err
 	}
 	sum := sha256.Sum256(spec)
-	j := &changeJournal{Paths: s.paths, Commands: commands, ChangeStatus: ChangeStatus{
+	j := &changeJournal{Paths: s.paths, Commands: commands, BootDependencies: dependencies, ChangeStatus: ChangeStatus{
 		ID: hex.EncodeToString(id[:]), Phase: "prepared", Generation: hex.EncodeToString(sum[:]),
 		Watchdog: "unsupported", Runtime: "not_applied", Persistence: "not_written", Boot: "not_verified",
 	}}
@@ -273,7 +288,7 @@ func (s *Service) installRecoveryBinary(ctx context.Context) error {
 	// before touching the kernel, including on the very first managed change.
 	unitName := "just-dashboard-network-recovery.service"
 	unitPath := filepath.Join(filepath.Dir(s.paths.Unit), unitName)
-	unit := generatedHeader + "[Unit]\nDescription=Recover interrupted Just Dashboard network changes\nAfter=local-fs.target\nBefore=" + UnitName + "\n\n[Service]\nType=oneshot\nExecStart=" + path + " --network-recover " + s.paths.Dir + " pending\n\n[Install]\nWantedBy=multi-user.target\n"
+	unit := renderRecoveryUnit(s.paths)
 	if data, err := os.ReadFile(unitPath); err == nil && !strings.HasPrefix(string(data), generatedHeader) {
 		return fmt.Errorf("the independent recovery unit is owned by another writer")
 	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -294,10 +309,20 @@ func (s *Service) installRecoveryBinary(ctx context.Context) error {
 	return nil
 }
 
-// RecoverNetwork is run by the host's systemd timer and at boot. It starts
+// RecoverNetwork is run by the host's systemd timer. It starts
 // without the API, database, credentials or dashboard container. An old timer
 // cannot recover a later change because the random journal ID must match.
 func RecoverNetwork(ctx context.Context, dir, id string) error {
+	return recoverNetwork(ctx, dir, id, false)
+}
+
+// RecoverNetworkBoot runs after native network owners have restored their
+// devices, but before the dashboard's ordinary boot restoration begins.
+func RecoverNetworkBoot(ctx context.Context, dir, id string) error {
+	return recoverNetwork(ctx, dir, id, true)
+}
+
+func recoverNetwork(ctx context.Context, dir, id string, boot bool) error {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 		return fmt.Errorf("network recovery needs an absolute, clean directory")
 	}
@@ -316,10 +341,14 @@ func RecoverNetwork(ctx context.Context, dir, id string) error {
 	if id != "pending" && id != j.ID || changeTerminal(j.Phase) {
 		return nil
 	}
-	return recoverChange(ctx, j)
+	return recoverChangeWithDependencies(ctx, j, boot)
 }
 
 func recoverChange(ctx context.Context, j *changeJournal) error {
+	return recoverChangeWithDependencies(ctx, j, false)
+}
+
+func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot bool) error {
 	allowed := map[string]bool{
 		filepath.Join(j.Paths.Dir, linksFile): true, filepath.Join(j.Paths.Dir, rules6File): true,
 		filepath.Join(j.Paths.Dir, shapingFile): true, filepath.Join(j.Paths.Dir, gatewayFile): true,
@@ -342,6 +371,11 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 			return fmt.Errorf("refused unexpected recovery tool %s", c.Tool)
 		}
 	}
+	for _, c := range j.BootDependencies {
+		if c.Tool != "ip" || !validBootRecoveryCommand(c.Args) {
+			return fmt.Errorf("refused unexpected boot dependency command")
+		}
+	}
 	j.Phase, j.RecoveryErrors = "recovering", nil
 	if err := j.save(); err != nil {
 		return err
@@ -352,9 +386,13 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 			j.RecoveryErrors = append(j.RecoveryErrors, "restore "+f.Path+": "+err.Error())
 		}
 	}
-	for _, c := range j.Commands {
+	commands := j.Commands
+	if boot {
+		commands = append(append([]recoveryCommand(nil), j.BootDependencies...), commands...)
+	}
+	for _, c := range commands {
 		out, err := executeRecovery(ctx, c.Input, c.Tool, c.Args...)
-		if err != nil && !(c.AllowGone && recoveryExpectedAbsence(c.Tool, out, err)) && !(c.AllowExists && strings.Contains(strings.ToLower(out+err.Error()), "file exists")) {
+		if err != nil && !(c.AllowGone && recoveryExpectedAbsence(c.Tool, out, err)) && !(c.AllowExists && recoveryExpectedExistence(c.Tool, c.Args, out, err)) {
 			j.RecoveryErrors = append(j.RecoveryErrors, c.Tool+" "+strings.Join(c.Args, " ")+": "+err.Error())
 		}
 	}
