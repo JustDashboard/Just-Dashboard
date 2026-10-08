@@ -625,7 +625,14 @@ func (s *Service) recordBlocklistError(ctx context.Context, id int, cause error)
 				msg = msg[:300] + "…"
 			}
 			next.Blocklists[i].Error = msg
-			if err := s.commit(ctx, next, step{}); err != nil {
+			// Fetch metadata does not change desired enforcement. Re-rendering
+			// here would make cache loss prevent its own failure from being
+			// recorded, or accidentally replace a still-loaded last-good set.
+			b, err := json.MarshalIndent(next, "", "  ")
+			if err == nil {
+				err = writeNetworkFile(s.specPath(), append(b, '\n'), 0o600)
+			}
+			if err != nil {
 				s.log.Error("recording a blocklist refresh failure", "list", id, "err", err)
 			}
 			return

@@ -133,24 +133,11 @@ func blocklistFile(dir string, id int) string {
 	return filepath.Join(dir, fmt.Sprintf("%d.txt", id))
 }
 
-// readBlocklist reads a cached list. A missing or unreadable file is an empty
-// list, never an error: the table then loads without the list rather than not
-// at all, and the list's own Error says why it is empty.
+// readBlocklist is the convenience read used by callers that also obtain
+// cache health. Rendering uses checkedBlocklist and refuses unhealthy data.
 func readBlocklist(dir string, id int) []netip.Prefix {
-	if dir == "" {
-		return nil
-	}
-	b, err := os.ReadFile(blocklistFile(dir, id))
-	if err != nil {
-		return nil
-	}
-	var out []netip.Prefix
-	for _, line := range strings.Split(string(b), "\n") {
-		if p, err := ParsePrefix(line); err == nil {
-			out = append(out, p)
-		}
-	}
-	return out
+	nets, _ := readBlocklistChecked(dir, id)
+	return nets
 }
 
 // blocklistEntries is what a blocklist drops: a manual list's own entries, or a
@@ -180,9 +167,13 @@ var blocklistMemo = struct {
 }{byPath: map[string]memoizedList{}}
 
 type memoizedList struct {
-	mtime int64
-	size  int64
-	nets  []netip.Prefix
+	mtime      int64
+	size       int64
+	mode       os.FileMode
+	ctime      int64
+	info       os.FileInfo
+	nets       []netip.Prefix
+	generation string
 }
 
 // blocklistParses counts the times a list file was actually read, for the
@@ -192,30 +183,7 @@ var blocklistParses atomic.Int64
 // cachedBlocklist returns a list's networks, merged. The slice is shared with
 // the memo and must not be changed.
 func cachedBlocklist(dir string, id int) []netip.Prefix {
-	if dir == "" {
-		return nil
-	}
-	path := blocklistFile(dir, id)
-	fi, err := os.Stat(path)
-	if err != nil {
-		forgetBlocklist(dir, id)
-		return nil
-	}
-	mtime, size := fi.ModTime().UnixNano(), fi.Size()
-	blocklistMemo.Lock()
-	if m, ok := blocklistMemo.byPath[path]; ok && m.mtime == mtime && m.size == size {
-		blocklistMemo.Unlock()
-		return m.nets
-	}
-	blocklistMemo.Unlock()
-	nets := mergePrefixes(readBlocklist(dir, id))
-	blocklistParses.Add(1)
-	blocklistMemo.Lock()
-	if len(blocklistMemo.byPath) > 64 {
-		clear(blocklistMemo.byPath) // far more lists than anyone keeps: start over rather than grow
-	}
-	blocklistMemo.byPath[path] = memoizedList{mtime: mtime, size: size, nets: nets}
-	blocklistMemo.Unlock()
+	nets, _ := checkedBlocklist(dir, id)
 	return nets
 }
 
@@ -231,8 +199,19 @@ func forgetBlocklist(dir string, id int) {
 // never fails on a host where it does not exist yet), deleted, and defined
 // again whole.
 func renderGateway(sp *Spec, trusted []netip.Prefix) (string, error) {
+	lists := map[int][]netip.Prefix{}
+	for _, bl := range sp.Blocklists {
+		if !bl.Enabled {
+			continue
+		}
+		nets, health := blocklistData(gatewayListDir, bl)
+		if health.Status != "ready" {
+			return "", fmt.Errorf("blocklist %d (%s) cannot be rendered safely: %s", bl.ID, bl.Name, health.Error)
+		}
+		lists[bl.ID] = nets
+	}
 	return renderGatewayWith(sp, trusted, func(bl BlocklistSpec) []netip.Prefix {
-		return blocklistEntries(gatewayListDir, bl)
+		return lists[bl.ID]
 	})
 }
 

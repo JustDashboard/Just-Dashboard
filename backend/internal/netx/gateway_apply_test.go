@@ -70,6 +70,7 @@ func newGwHost(t *testing.T, allowlist ...string) *gwHost {
 	rec.on("nft -c -f", "")
 	rec.on("nft -f", "")
 	rec.on("nft list set", "")
+	rec.on("nft -j list set", `{"nftables":[]}`)
 	rec.on("nft delete table", "")
 	rec.on("nft -t -j list table inet jd_gateway", fixture(t, "gateway-table.json"))
 	rec.fail("ip -j addr show dev nope", "Device \"nope\" does not exist.")
@@ -277,9 +278,9 @@ func TestAddForwardTakesTheLoadBackWhenVerifyFails(t *testing.T) {
 	}
 }
 
-func TestAdmissionFailureOnTheDockerChainOrIPv6IsNotAReasonToRefuse(t *testing.T) {
+func TestAnAbsentDockerChainAndAnUnusedIPv6FamilyDoNotBlockIPv4(t *testing.T) {
 	h := newGwHost(t)
-	h.fail("iptables -I DOCKER-USER")
+	h.first("iptables -S DOCKER-USER", "No chain/target/match by that name.", errors.New("no chain"))
 	h.fail("ip6tables -I")
 	if _, err := h.AddForward(context.Background(), gwWebForward(), gwClient, "ops", gwProtected); err != nil {
 		t.Fatalf("a host without that chain was refused: %v", err)
@@ -318,7 +319,7 @@ func TestForwardsAreReadOnlyWhereTheFirewallCannotAdmitThem(t *testing.T) {
 	}{
 		{"firewalld running", `{"nftables":[]}`, "firewalld", "running\n", "firewalld"},
 		{"firewalld's table", firewalld, "firewalld", "", "firewalld"},
-		{"a foreign drop-forward table", foreign, "nftables", "", `table "filter" drops forwarded traffic by default in its chain "forward"`},
+		{"a foreign drop-forward table", foreign, "nftables", "", `table "filter" can drop translated traffic in its chain "forward"`},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

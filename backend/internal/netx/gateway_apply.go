@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ForwardingRequiredError is a forward or NAT entry that was refused because the
@@ -123,6 +124,25 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 		return nil
 	}
 	for _, cmd := range admissionCommands(insert) {
+		if cmd[1] == "-I" {
+			family := "inet"
+			if cmd[0] == "ip6tables" {
+				family = "inet6"
+			}
+			if !admissionFamilies(target)[family] {
+				continue
+			}
+			ch := inspectAdmissionChain(ctx, cmd[0], cmd[2], family, true)
+			if ch.Status == "unsupported" {
+				if ch.Needed {
+					return fmt.Errorf("admission is required in %s/%s but unavailable: %s", family, cmd[2], ch.Reason)
+				}
+				continue
+			}
+			if ch.Status == "unreadable" {
+				return fmt.Errorf("reading admission chain %s/%s: %s", family, cmd[2], ch.Reason)
+			}
+		}
 		if cmd[1] == "-D" {
 			// One -D removes one copy of the rule. Duplicates arise — an
 			// earlier run that died between the delete and the insert, a
@@ -141,16 +161,9 @@ func (s *Service) syncAdmission(ctx context.Context, target, prior *Spec) error 
 		if err == nil {
 			continue
 		}
-		var missing *UnavailableError
-		switch {
-		case errors.As(err, &missing):
-			// No iptables on this host: nothing it drops, nothing to admit.
-		case cmd[0] == "ip6tables", cmd[2] == "DOCKER-USER":
-			// IPv6 filtering may not exist, and the Docker chain exists only
-			// where Docker runs; neither is a reason to refuse the change.
-		default:
-			return fmt.Errorf("admitting the translated connections through %s: %w", cmd[2], err)
-		}
+		// Optional absence was checked before insertion. A present chain
+		// that fails to accept its rule is a partial apply, even on IPv6.
+		return fmt.Errorf("admitting the translated connections through %s: %w", cmd[2], err)
 	}
 	return nil
 }
@@ -195,6 +208,9 @@ func (s *Service) gatewayStepWithRules(old, next *Spec, previous string) step {
 			if _, err := run(ctx, "nft", "list", "set", "inet", gatewayTable, "trusted4"); err != nil {
 				return fmt.Errorf("the gateway table is not loaded after applying it: %w", err)
 			}
+			if a := s.admissionState(ctx, next); a.Needed && !a.Present {
+				return fmt.Errorf("translated connections were not admitted in every required chain: %s", admissionFailure(a))
+			}
 			return nil
 		},
 	}
@@ -230,9 +246,16 @@ func (s *Service) mutateGatewayWithRollback(ctx context.Context, edit func(old, 
 	if err != nil {
 		return err
 	}
-	previous, err := renderGateway(old, s.trustedFor(old))
-	if err != nil {
-		return err
+	previous, renderErr := renderGateway(old, s.trustedFor(old))
+	if renderErr != nil {
+		// Cache loss must not prevent disabling, removing or refreshing the
+		// broken list. The last committed render retains its previous data
+		// and is the rollback source until the candidate is validated.
+		b, readErr := os.ReadFile(filepath.Join(s.paths.Dir, gatewayFile))
+		if readErr != nil {
+			return fmt.Errorf("reading the last applied gateway policy after cache failure: %v (%w)", readErr, renderErr)
+		}
+		previous = string(b)
 	}
 	next := old.clone()
 	translating, err := edit(old, next)
@@ -883,8 +906,19 @@ type GatewayForwarding struct {
 // AdmissionState is whether the iptables rule that admits translated
 // connections is in place, against whether anything needs it.
 type AdmissionState struct {
-	Needed  bool `json:"needed"`
-	Present bool `json:"present"`
+	Needed    bool                  `json:"needed"`
+	Present   bool                  `json:"present"`
+	CheckedAt time.Time             `json:"checkedAt"`
+	Chains    []AdmissionChainState `json:"chains"`
+}
+
+type AdmissionChainState struct {
+	Family string `json:"family"`
+	Tool   string `json:"tool"`
+	Chain  string `json:"chain"`
+	Needed bool   `json:"needed"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // ForwardView is a port forward as the Gateway page shows it.
@@ -985,12 +1019,141 @@ func (s *Service) Gateway(ctx context.Context) (*GatewayView, error) {
 	return v, nil
 }
 
-// admissionState checks the one rule in FORWARD; the others are put in and
-// taken out together with it.
+// Each filtering family has independent chains. A reload can remove any
+// single owned rule, so aggregate health must never infer the others from it.
 func (s *Service) admissionState(ctx context.Context, sp *Spec) AdmissionState {
-	a := AdmissionState{Needed: needsAdmission(sp)}
-	if _, err := run(ctx, "iptables", append([]string{"-C", "FORWARD"}, admissionRule()...)...); err == nil {
-		a.Present = true
+	a := AdmissionState{Needed: needsAdmission(sp), CheckedAt: time.Now().UTC(), Chains: []AdmissionChainState{}}
+	families := admissionFamilies(sp)
+	a.Present = a.Needed
+	required := false
+	for _, tool := range []string{"iptables", "ip6tables"} {
+		family := "inet"
+		if tool == "ip6tables" {
+			family = "inet6"
+		}
+		if !families[family] {
+			continue
+		}
+		for _, chain := range admissionChains {
+			ch := inspectAdmissionChain(ctx, tool, chain, family, true)
+			a.Chains = append(a.Chains, ch)
+			required = required || ch.Needed
+			if ch.Needed && ch.Status != "present" {
+				a.Present = false
+			}
+		}
+	}
+	a.Needed = a.Needed && required
+	if !a.Needed {
+		a.Present = false
 	}
 	return a
+}
+
+func admissionFamilies(sp *Spec) map[string]bool {
+	out := map[string]bool{}
+	for _, f := range sp.Forwards {
+		if a, err := ParseAddr(f.Target); f.Enabled && err == nil {
+			out[familyOf(a)] = true
+		}
+	}
+	for _, n := range sp.NAT {
+		if p, err := ParsePrefix(n.Source); n.Enabled && err == nil {
+			out[familyOf(p.Addr())] = true
+		}
+	}
+	return out
+}
+
+func inspectAdmissionChain(ctx context.Context, tool, chain, family string, needed bool) AdmissionChainState {
+	v := AdmissionChainState{Family: family, Tool: tool, Chain: chain, Needed: needed}
+	out, err := run(ctx, tool, "-S", chain)
+	if err != nil {
+		var missing *UnavailableError
+		switch {
+		case errors.As(err, &missing), strings.Contains(out+err.Error(), "No chain/target/match"), strings.Contains(out+err.Error(), "does not exist"), strings.Contains(out+err.Error(), "Table does not exist"):
+			v.Status, v.Reason = "unsupported", "This tool or filtering chain is absent; no admission rule can be installed here."
+			if chain == "DOCKER-USER" {
+				v.Needed = false
+			} else {
+				// An absent tool is optional only after checking that no
+				// compatible filtering chain still requires its admission.
+				listing, readErr := run(ctx, "nft", "-t", "-j", "list", "ruleset")
+				var rules nftListing
+				if readErr != nil || json.Unmarshal([]byte(listing), &rules) != nil || rules.Nftables == nil {
+					v.Status, v.Reason = "unreadable", "Cannot establish whether the unavailable admission tool leaves a filtering chain unadmitted."
+				} else {
+					v.Needed = false
+					nftFamily := "ip"
+					if family == "inet6" {
+						nftFamily = "ip6"
+					}
+					for _, o := range rules.Nftables {
+						if o.Chain != nil && o.Chain.Family == nftFamily && o.Chain.Table == "filter" && o.Chain.Name == chain {
+							v.Needed = true
+							break
+						}
+					}
+				}
+			}
+		default:
+			v.Status, v.Reason = "unreadable", err.Error()
+		}
+		return v
+	}
+	chainRules := out
+	out, err = run(ctx, tool, append([]string{"-C", chain}, admissionRule()...)...)
+	if err == nil {
+		for _, line := range strings.Split(chainRules, "\n") {
+			if !strings.HasPrefix(line, "-A "+chain+" ") {
+				continue
+			}
+			if strings.ReplaceAll(line, "\"", "") != strings.Join(append([]string{"-A", chain}, admissionRule()...), " ") {
+				v.Status, v.Reason = "absent", "The owned admission rule exists but is not first in the chain; earlier rules may block it."
+				return v
+			}
+			break
+		}
+		v.Status = "present"
+		return v
+	}
+	if strings.Contains(out+err.Error(), "Bad rule") || strings.Contains(out+err.Error(), "matching rule") {
+		v.Status, v.Reason = "absent", "The dashboard's translation admission rule is missing from this chain."
+	} else {
+		v.Status, v.Reason = "unreadable", err.Error()
+	}
+	return v
+}
+
+func admissionFailure(a AdmissionState) string {
+	var failed []string
+	for _, ch := range a.Chains {
+		if ch.Needed && ch.Status != "present" {
+			failed = append(failed, ch.Family+"/"+ch.Chain+": "+ch.Status)
+		}
+	}
+	return strings.Join(failed, ", ")
+}
+
+// RepairGatewayAdmission changes only rules owned by their fixed mark and
+// comment. It never edits a foreign chain's rules, policy or ownership.
+func (s *Service) RepairGatewayAdmission(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sp, err := s.loadSpec()
+	if err != nil {
+		return err
+	}
+	if needsAdmission(sp) {
+		if _, err := s.requireWritable(ctx); err != nil {
+			return err
+		}
+	}
+	if err := s.syncAdmission(ctx, sp, sp); err != nil {
+		return err
+	}
+	if a := s.admissionState(ctx, sp); a.Needed && !a.Present {
+		return fmt.Errorf("admission repair is incomplete: %s", admissionFailure(a))
+	}
+	return nil
 }

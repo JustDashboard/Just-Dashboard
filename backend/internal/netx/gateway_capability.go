@@ -35,10 +35,26 @@ type Capability struct {
 	// Blocker names the chain that makes the gateway read-only, with the rule
 	// that would admit the dashboard's translated connections there.
 	Blocker *CapabilityBlocker `json:"blocker,omitempty"`
+	// Writable describes compatibility for a mutation, never reachability.
+	Reachability  string        `json:"reachability"`
+	Layers        []PolicyLayer `json:"layers"`
+	UnknownLayers []string      `json:"unknownLayers"`
 
 	// missing is nft itself being absent; mutations answer it as an install
 	// hand-off rather than a read-only host.
 	missing bool
+}
+
+// PolicyLayer records the coverage of a local base chain. Unknown rules are
+// retained as uncertainty rather than inferred to permit translated traffic.
+type PolicyLayer struct {
+	Family string `json:"family"`
+	Table  string `json:"table"`
+	Chain  string `json:"chain"`
+	Hook   string `json:"hook"`
+	Policy string `json:"policy"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 // CapabilityBlocker is a base chain at the forward hook that drops by default.
@@ -76,6 +92,12 @@ type nftListing struct {
 			Hook   string `json:"hook"`
 			Policy string `json:"policy"`
 		} `json:"chain"`
+		Rule *struct {
+			Family string                       `json:"family"`
+			Table  string                       `json:"table"`
+			Chain  string                       `json:"chain"`
+			Expr   []map[string]json.RawMessage `json:"expr"`
+		} `json:"rule"`
 	} `json:"nftables"`
 }
 
@@ -89,7 +111,8 @@ type nftListing struct {
 // filtering is a table of its own that drops forwarded traffic, because the
 // accept would have to be written into that table.
 func (s *Service) GatewayCapability(ctx context.Context) Capability {
-	c := Capability{Firewall: "none"}
+	c := Capability{Firewall: "none", Reachability: "unknown", Layers: []PolicyLayer{},
+		UnknownLayers: []string{"provider and upstream policy", "measured end-to-end connectivity"}}
 	out, err := run(ctx, "nft", "-t", "-j", "list", "ruleset")
 	if err != nil {
 		var missing *UnavailableError
@@ -102,7 +125,7 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 		return c
 	}
 	var listing nftListing
-	if err := json.Unmarshal([]byte(out), &listing); err != nil {
+	if err := json.Unmarshal([]byte(out), &listing); err != nil || listing.Nftables == nil {
 		c.Reason = "nft printed its ruleset in a form this dashboard could not read, so whether the gateway can be admitted is not known."
 		return c
 	}
@@ -113,6 +136,13 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 	}
 	var blocker *CapabilityBlocker
 	hasIPTables := false
+	rules := map[string][][]map[string]json.RawMessage{}
+	for _, o := range listing.Nftables {
+		if r := o.Rule; r != nil {
+			key := r.Family + "/" + r.Table + "/" + r.Chain
+			rules[key] = append(rules[key], r.Expr)
+		}
+	}
 	for _, o := range listing.Nftables {
 		if o.Table != nil && o.Table.Family == "inet" && o.Table.Name == "firewalld" {
 			firewalld = true
@@ -124,16 +154,29 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 		if (ch.Family == "ip" || ch.Family == "ip6") && iptablesCompat[ch.Table] {
 			hasIPTables = true
 		}
-		if ch.Hook != "forward" || ch.Policy != "drop" || blocker != nil {
+		if ch.Hook != "forward" && ch.Hook != "input" && ch.Hook != "prerouting" && ch.Hook != "postrouting" {
 			continue
 		}
+		layer := PolicyLayer{Family: ch.Family, Table: ch.Table, Chain: ch.Name, Hook: ch.Hook, Policy: ch.Policy, Status: "checked"}
 		if ch.Family == "inet" && ch.Table == gatewayTable {
+			layer.Status = "owned"
+			c.Layers = append(c.Layers, layer)
 			continue
 		}
-		if (ch.Family == "ip" || ch.Family == "ip6") && iptablesCompat[ch.Table] && ch.Name == "FORWARD" {
+		// Admission is inserted only into the filter table. A security or
+		// mangle chain called FORWARD remains an independent policy layer.
+		if (ch.Family == "ip" || ch.Family == "ip6") && ch.Table == "filter" && (ch.Name == "FORWARD" || ch.Name == "INPUT") {
+			layer.Status = "owned"
+			layer.Reason = "Translated connections require the owned admission rule at the start of this chain."
+			c.Layers = append(c.Layers, layer)
 			continue
 		}
-		blocker = &CapabilityBlocker{Family: ch.Family, Table: ch.Table, Chain: ch.Name, Rule: admitMarkRule}
+		key := ch.Family + "/" + ch.Table + "/" + ch.Name
+		layer.Status, layer.Reason = assessPolicyRules(ch.Policy, rules[key], ch.Hook != "prerouting")
+		c.Layers = append(c.Layers, layer)
+		if blocker == nil && (layer.Status == "blocked" || layer.Status == "unknown") {
+			blocker = &CapabilityBlocker{Family: ch.Family, Table: ch.Table, Chain: ch.Name, Rule: admitMarkRule}
+		}
 	}
 
 	c.Docker = dockerPresent(ctx)
@@ -145,7 +188,7 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 	case blocker != nil:
 		c.Firewall = "nftables"
 		c.Blocker = blocker
-		c.Reason = fmt.Sprintf("The %s table %q drops forwarded traffic by default in its chain %q, and an accept in the gateway's table cannot override that. Add this rule to that chain to let connections the gateway translates through: %s",
+		c.Reason = fmt.Sprintf("The %s table %q can drop translated traffic in its chain %q, and an accept in the gateway's table cannot override that. Review the checked policy layers and add this rule before blocking rules to admit the gateway's translated connections: %s",
 			blocker.Family, blocker.Table, blocker.Chain, blocker.Rule)
 		return c
 	}
@@ -157,6 +200,77 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 		c.Firewall = "iptables"
 	}
 	return c
+}
+
+// assessPolicyRules supports unconditional verdicts and the exact masked
+// connmark exemption we document. Selectors, jumps and maps need a packet
+// trace or probe; treating them as unconditional accepts would hide blockers.
+func assessPolicyRules(policy string, rules [][]map[string]json.RawMessage, markAvailable bool) (string, string) {
+	for _, expr := range rules {
+		verdict, markOnly, unconditional := "", true, true
+		for _, e := range expr {
+			for kind, raw := range e {
+				switch kind {
+				case "counter", "comment":
+				case "accept", "drop", "reject", "return":
+					verdict = kind
+				case "match":
+					unconditional = false
+					if !markAvailable || !isAdmissionMarkMatch(raw) {
+						markOnly = false
+					}
+				default:
+					return "unknown", "A jump, map or unsupported expression needs bounded trace or probe evidence; admission is not proven."
+				}
+			}
+		}
+		if (verdict == "accept" || (verdict == "return" && policy == "accept")) && (unconditional || markOnly) {
+			return "admitted", "Supported rule forms permit connections carrying the dashboard's translation mark through this chain."
+		}
+		if verdict == "drop" || verdict == "reject" {
+			if unconditional {
+				return "blocked", "An explicit unconditional drop or reject blocks translated traffic."
+			}
+			return "unknown", "An explicit conditional drop or reject can match translated traffic; a flow-specific trace or probe is required."
+		}
+		if verdict == "return" && policy == "drop" {
+			return "blocked", "A return applies this base chain's drop policy."
+		}
+		if !unconditional {
+			return "unknown", "A conditional rule could change admission; a flow-specific trace or probe is required."
+		}
+	}
+	if policy == "drop" {
+		return "blocked", "The chain drops forwarded traffic by default."
+	}
+	if policy != "accept" {
+		return "unknown", "The base-chain policy could not be determined."
+	}
+	return "checked", "No blocking verdict exists in the supported rule forms of this local chain."
+}
+
+func isAdmissionMarkMatch(raw json.RawMessage) bool {
+	var m struct {
+		Op    string          `json:"op"`
+		Left  json.RawMessage `json:"left"`
+		Right uint64          `json:"right"`
+	}
+	if json.Unmarshal(raw, &m) != nil || m.Op != "==" || m.Right != 0x4a000000 {
+		return false
+	}
+	var left struct {
+		And []json.RawMessage `json:"&"`
+	}
+	if json.Unmarshal(m.Left, &left) != nil || len(left.And) != 2 {
+		return false
+	}
+	var ct struct {
+		CT struct {
+			Key string `json:"key"`
+		} `json:"ct"`
+	}
+	var mask uint64
+	return json.Unmarshal(left.And[0], &ct) == nil && ct.CT.Key == "mark" && json.Unmarshal(left.And[1], &mask) == nil && mask == 0xff000000
 }
 
 // ufwActive reports whether ufw is managing the host's filtering.

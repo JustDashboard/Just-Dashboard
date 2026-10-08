@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -614,11 +615,155 @@ func TestLiveCapabilityReadsRealRulesets(t *testing.T) {
 		t.Fatal(err)
 	}
 	gwMustInNS(t, ns, "nft", "-f", add)
+	if c := svc.GatewayCapability(ctx); !c.Writable || len(c.Layers) != 1 || c.Layers[0].Status != "admitted" {
+		t.Fatalf("the documented connmark exemption was not recognized: %+v", c)
+	}
 	// iptables-nft's own FORWARD policy drop is not a blocker.
 	gwMustInNS(t, ns, "nft", "delete", "table", "inet", "filter")
 	gwMustInNS(t, ns, "iptables", "-P", "FORWARD", "DROP")
 	if c := svc.GatewayCapability(ctx); !c.Writable || c.Firewall != "iptables" {
 		t.Fatalf("an iptables-nft host with a drop policy = %+v", c)
+	}
+}
+
+func TestLiveAdmissionDetectsEveryFamilyAndChainAfterPartialReload(t *testing.T) {
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "admission-health")
+	prevRun, prevHas := run, has
+	run, has = gwLiveRun(ns), func(string) bool { return false }
+	t.Cleanup(func() { run, has = prevRun, prevHas })
+	prevClass := gatewayClassNet
+	gatewayClassNet = t.TempDir()
+	t.Cleanup(func() { gatewayClassNet = prevClass })
+	svc := testService(t)
+	sp := dualStackAdmissionSpec()
+	b, err := json.Marshal(sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(svc.specPath(), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"iptables", "ip6tables"} {
+		gwMustInNS(t, ns, tool, "-N", "DOCKER-USER")
+		gwMustInNS(t, ns, tool, "-P", "FORWARD", "DROP")
+		gwMustInNS(t, ns, tool, "-P", "INPUT", "DROP")
+	}
+	ctx := context.Background()
+	if err := svc.RepairGatewayAdmission(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range []string{"iptables", "ip6tables"} {
+		for _, chain := range admissionChains {
+			gwMustInNS(t, ns, append([]string{tool, "-D", chain}, admissionRule()...)...)
+			state := svc.admissionState(ctx, sp)
+			if state.Present || len(state.Chains) != 6 {
+				t.Fatalf("partial removal of %s/%s was hidden: %+v", tool, chain, state)
+			}
+			missing := 0
+			for _, ch := range state.Chains {
+				if ch.Status == "absent" {
+					missing++
+					if ch.Tool != tool || ch.Chain != chain {
+						t.Fatalf("unexpected missing rule: %+v", ch)
+					}
+				}
+			}
+			if missing != 1 {
+				t.Fatalf("missing = %d, want one: %+v", missing, state)
+			}
+			if err := svc.RepairGatewayAdmission(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if state := svc.admissionState(ctx, sp); !state.Present {
+				t.Fatalf("repair failed: %+v", state)
+			}
+		}
+	}
+}
+
+func TestLiveCapabilityDetectsExplicitDropInAcceptPolicyChain(t *testing.T) {
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "explicit-drop")
+	prevRun, prevHas := run, has
+	run, has = gwLiveRun(ns), func(string) bool { return false }
+	t.Cleanup(func() { run, has = prevRun, prevHas })
+	prevClass := gatewayClassNet
+	gatewayClassNet = t.TempDir()
+	t.Cleanup(func() { gatewayClassNet = prevClass })
+	svc := testService(t)
+	rules := filepath.Join(t.TempDir(), "drop.nft")
+	if err := os.WriteFile(rules, []byte("table inet foreign {\n chain forward {\n type filter hook forward priority filter; policy accept;\n ip daddr 198.51.100.7 drop\n }\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gwMustInNS(t, ns, "nft", "-f", rules)
+	c := svc.GatewayCapability(context.Background())
+	if c.Writable || c.Reachability != "unknown" || len(c.Layers) != 1 || c.Layers[0].Status != "unknown" || c.Blocker == nil {
+		t.Fatalf("explicit matching drop in accept-policy chain was hidden: %+v", c)
+	}
+}
+
+func TestLiveBlocklistHealthRetainsLoadedDataAfterCacheLossAndDetectsSetDrift(t *testing.T) {
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "cache-health")
+	prevRun, prevHas := run, has
+	run, has = gwLiveRun(ns), func(string) bool { return false }
+	t.Cleanup(func() { run, has = prevRun, prevHas })
+	svc := testService(t)
+	sp := emptySpec()
+	sp.NextID = 2
+	sp.Blocklists = []BlocklistSpec{{ID: 1, Name: "live list", Kind: "feed", URL: "https://example.com/list", Count: 2, Enabled: true}}
+	nets := []netip.Prefix{netip.MustParsePrefix("198.51.100.0/24"), netip.MustParsePrefix("2001:db8::/64")}
+	if err := writeBlocklistCache(filepath.Join(svc.paths.Dir, "lists"), 1, nets); err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(svc.specPath(), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rendered, err := renderGateway(sp, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.loadGatewayRules(context.Background(), rendered); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(filepath.Join(svc.paths.Dir, gatewayFile), []byte(rendered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v, err := svc.Blocklist(context.Background(), 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Enforcement != "verified" || v.Runtime.Count == nil || *v.Runtime.Count != 2 {
+		t.Fatalf("live generations did not verify: %+v", v)
+	}
+	if err := os.Remove(blocklistFile(filepath.Join(svc.paths.Dir, "lists"), 1)); err != nil {
+		t.Fatal(err)
+	}
+	v, err = svc.Blocklist(context.Background(), 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Cache.Status != "missing" || v.Count != 0 || v.SavedCount != 2 || v.Runtime.Count == nil || *v.Runtime.Count != 2 || v.Enforcement != "degraded" {
+		t.Fatalf("lost cache claimed healthy protection: %+v", v)
+	}
+	if _, err := svc.AddLimit(context.Background(), LimitRequest{Name: "x", Protocol: "tcp", Ports: "8080", Rate: 5, Per: "second"}, "127.0.0.1", "ops"); err == nil {
+		t.Fatal("missing cache allowed a reload")
+	}
+	if actual := readBlocklistRuntime(context.Background(), 1); actual.Generation != v.Runtime.Generation {
+		t.Fatal("failed reload changed the last-good kernel set")
+	}
+	if err := writeBlocklistCache(filepath.Join(svc.paths.Dir, "lists"), 1, nets); err != nil {
+		t.Fatal(err)
+	}
+	gwMustInNS(t, ns, "nft", "delete", "element", "inet", gatewayTable, "bl_1_6", "{", "2001:db8::/64", "}")
+	v, _ = svc.Blocklist(context.Background(), 1, "")
+	if v.Enforcement != "degraded" || v.Runtime.Count == nil || *v.Runtime.Count != 1 {
+		t.Fatalf("partial family set drift was not detected: %+v", v)
 	}
 }
 

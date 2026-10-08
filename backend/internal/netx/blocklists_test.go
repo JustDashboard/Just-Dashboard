@@ -534,6 +534,11 @@ func TestRefresherSkipsFreshListsAndRefreshesTheStaleOnesOneAtATime(t *testing.T
 			bl.Refreshed = now.Add(-e.age)
 		}
 		sp.Blocklists = append(sp.Blocklists, bl)
+		if bl.Kind != "manual" {
+			if err := writeBlocklistCache(filepath.Join(h.paths.Dir, "lists"), bl.ID, []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	sp.NextID = 10
 	h.seed(t, sp)
@@ -581,6 +586,9 @@ func TestRefreshLoopRunsAPassAndStopsWithItsContext(t *testing.T) {
 	sp := emptySpec()
 	sp.NextID = 5
 	sp.Blocklists = []BlocklistSpec{{ID: 1, Name: "s", Kind: "feed", URL: srv.URL + "/stale", Enabled: true, Count: 1, Refreshed: time.Now().Add(-48 * time.Hour)}}
+	if err := writeBlocklistCache(filepath.Join(h.paths.Dir, "lists"), 1, []netip.Prefix{netip.MustParsePrefix("203.0.113.0/24")}); err != nil {
+		t.Fatal(err)
+	}
 	h.seed(t, sp)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -721,7 +729,7 @@ func TestAFailedAddLeavesNoCacheBehind(t *testing.T) {
 	}
 }
 
-func TestReadBlocklistSkipsGarbageAndAMissingFile(t *testing.T) {
+func TestReadBlocklistRefusesGarbageAndAMissingFile(t *testing.T) {
 	dir := t.TempDir()
 	if got := readBlocklist(dir, 1); got != nil {
 		t.Fatalf("a missing cache read as %v", got)
@@ -730,8 +738,8 @@ func TestReadBlocklistSkipsGarbageAndAMissingFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readBlocklist(dir, 1)
-	if len(got) != 2 || got[0] != netip.MustParsePrefix("203.0.113.0/24") {
-		t.Fatalf("read %v", got)
+	if got != nil {
+		t.Fatalf("a malformed cache was partially accepted: %v", got)
 	}
 	if readBlocklist("", 1) != nil {
 		t.Fatal("no directory should read as no list")

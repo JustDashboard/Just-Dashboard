@@ -407,16 +407,21 @@ func limitView(l LimitSpec, counters map[string]RuleCounter) LimitView {
 
 // BlocklistView is a list with its size, freshness and what it has dropped.
 type BlocklistView struct {
-	ID        int        `json:"id"`
-	Name      string     `json:"name"`
-	Kind      string     `json:"kind"`
-	Countries []string   `json:"countries"`
-	URL       string     `json:"url"`
-	Entries   []string   `json:"entries"`
-	Enabled   bool       `json:"enabled"`
-	Refreshed *time.Time `json:"refreshed"`
-	Count     int        `json:"count"`
-	Error     string     `json:"error"`
+	ID                 int                    `json:"id"`
+	Name               string                 `json:"name"`
+	Kind               string                 `json:"kind"`
+	Countries          []string               `json:"countries"`
+	URL                string                 `json:"url"`
+	Entries            []string               `json:"entries"`
+	Enabled            bool                   `json:"enabled"`
+	Refreshed          *time.Time             `json:"refreshed"`
+	Count              int                    `json:"count"`
+	Error              string                 `json:"error"`
+	SavedCount         int                    `json:"savedCount"`
+	Cache              BlocklistCacheHealth   `json:"cache"`
+	RenderedGeneration string                 `json:"renderedGeneration"`
+	Runtime            BlocklistRuntimeHealth `json:"runtime"`
+	Enforcement        string                 `json:"enforcement"`
 	Made
 	// ContainsYou says the list holds the reader's own address. The trusted
 	// set keeps it from being dropped, but the page says so rather than
@@ -429,7 +434,16 @@ type BlocklistView struct {
 func blocklistView(dir string, bl BlocklistSpec, client netip.Addr, counters map[string]RuleCounter) BlocklistView {
 	v := BlocklistView{
 		ID: bl.ID, Name: bl.Name, Kind: bl.Kind, Countries: bl.Countries, URL: bl.URL, Entries: bl.Entries,
-		Enabled: bl.Enabled, Count: bl.Count, Error: bl.Error, Made: bl.Made,
+		Enabled: bl.Enabled, SavedCount: bl.Count, Error: bl.Error, Made: bl.Made,
+	}
+	nets, health := blocklistData(dir, bl)
+	v.Cache, v.Count, v.Enforcement = health, health.Count, "unknown"
+	if health.Status != "ready" {
+		v.Enforcement = "degraded"
+		if v.Error != "" {
+			v.Error += "; "
+		}
+		v.Error += health.Error
 	}
 	if v.Countries == nil {
 		v.Countries = []string{}
@@ -442,7 +456,7 @@ func blocklistView(dir string, bl BlocklistSpec, client netip.Addr, counters map
 		v.Refreshed = &t
 	}
 	if client.IsValid() {
-		for _, p := range blocklistEntries(dir, bl) {
+		for _, p := range nets {
 			if p.Contains(client) {
 				v.ContainsYou = true
 				break
@@ -462,7 +476,9 @@ func (s *Service) blocklistViewByID(ctx context.Context, id int, client string) 
 	addr, _ := ParseAddr(client)
 	for _, bl := range sp.Blocklists {
 		if bl.ID == id {
-			return blocklistView(filepath.Join(s.paths.Dir, "lists"), bl, addr, nil), nil
+			v := blocklistView(filepath.Join(s.paths.Dir, "lists"), bl, addr, nil)
+			s.blocklistHealth(ctx, bl, &v)
+			return v, nil
 		}
 	}
 	return BlocklistView{}, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
@@ -526,7 +542,9 @@ func (s *Service) Protection(ctx context.Context, client string) (*ProtectionVie
 		v.Limits = append(v.Limits, limitView(l, counters))
 	}
 	for _, bl := range sp.Blocklists {
-		v.Blocklists = append(v.Blocklists, blocklistView(dir, bl, addr, counters))
+		view := blocklistView(dir, bl, addr, counters)
+		s.blocklistHealth(ctx, bl, &view)
+		v.Blocklists = append(v.Blocklists, view)
 	}
 	return v, nil
 }
