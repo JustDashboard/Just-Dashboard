@@ -83,10 +83,11 @@ export function ContainerRows({ rows, ...rest }: Omit<RowsProps, "now"> & { rows
   const now = useNow(30_000)
   // A state change updates the row in place; only a new container arrives.
   const arrived = useArrivals(rows.map((c) => c.id))
-  // Memory without a limit is drawn against the heaviest listed, as the
+  // Memory without a limit is drawn against the heaviest container, as the
   // process table's is: against the host, a column of 2% containers is a
-  // column of empty tracks.
-  const heaviest = rows.reduce((top, c) => Math.max(top, rest.stats[c.id]?.memUsage ?? 0), 0)
+  // column of empty tracks. Every container, not the rows a filter left, so a
+  // filter does not rescale the bars.
+  const heaviest = Object.values(rest.stats).reduce((top, s) => Math.max(top, s.memUsage), 0)
   const shared = { ...rest, now }
   if (!wide) {
     return (
