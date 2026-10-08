@@ -223,7 +223,11 @@ test("failed Docker candidate reads offer retry without claiming every container
   }
   let reads = 0
   await mockNetwork(page, [], {
-    overrides: { "/docker/networks/": [network], "/docker/networks/lab": network },
+    overrides: {
+      "/docker/ping": { available: true },
+      "/docker/networks/": [network],
+      "/docker/networks/lab": network,
+    },
   })
   await page.route("**/api/v1/docker/containers/", async (route) => {
     reads++
@@ -273,7 +277,11 @@ test("a failed later Docker candidate poll keeps the selected container and alia
   }
   let reads = 0
   await mockNetwork(page, [], {
-    overrides: { "/docker/networks/": [network], "/docker/networks/lab": network },
+    overrides: {
+      "/docker/ping": { available: true },
+      "/docker/networks/": [network],
+      "/docker/networks/lab": network,
+    },
   })
   await page.route("**/api/v1/docker/containers/", async (route) => {
     reads++
