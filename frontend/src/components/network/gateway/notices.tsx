@@ -68,8 +68,9 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
                     title: "Repair owned admission rules",
                     description: (
                       <p>
-                        Restore the dashboard&rsquo;s marked admission rules for its active translations.
-                        This may admit traffic previously refused by the missing rules.
+                        Restore the dashboard&rsquo;s marked admission rules for its active
+                        translations. This may admit traffic previously refused by the missing
+                        rules.
                       </p>
                     ),
                     confirmLabel: "Repair rules",

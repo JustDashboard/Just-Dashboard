@@ -640,16 +640,23 @@ func verifyShaping(ctx context.Context, sh ShapeSpec) error {
 		if json.Unmarshal([]byte(out), &filters) != nil {
 			return errors.New("tc printed unreadable ingress filters")
 		}
-		if len(filters) != 1 {
-			return shapingDrift("%s ingress contains filters beyond the requested policer", sh.Device)
-		}
-		found := false
+		found := 0
 		for _, f := range filters {
-			if f.Pref == 1 && f.Protocol == "all" && f.Kind == "matchall" && f.Chain == 0 && len(f.Options.Actions) == 1 && f.Options.Actions[0].Kind == "police" && f.Options.Actions[0].Control.Type == "drop" {
-				found = true
+			if f.Pref != 1 || f.Protocol != "all" || f.Kind != "matchall" || f.Chain != 0 {
+				return shapingDrift("%s ingress contains filters beyond the requested policer", sh.Device)
+			}
+			// iproute2 can emit a descriptor and a detailed record for one
+			// filter. Count actual actions rather than treating both as rules.
+			if len(f.Options.Actions) == 0 {
+				continue
+			}
+			if len(f.Options.Actions) == 1 && f.Options.Actions[0].Kind == "police" && f.Options.Actions[0].Control.Type == "drop" {
+				found++
+			} else {
+				return shapingDrift("%s ingress filter actions differ from the requested policer", sh.Device)
 			}
 		}
-		if !found {
+		if found != 1 {
 			return shapingDrift("%s ingress matchall/drop policer is missing", sh.Device)
 		}
 		// iproute2 releases omit policer rate/burst from JSON, including 6.14.

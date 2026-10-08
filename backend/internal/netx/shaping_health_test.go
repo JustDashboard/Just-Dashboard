@@ -33,3 +33,24 @@ func TestShapingHealthDistinguishesRateDriftFromUnreadableKernel(t *testing.T) {
 		})
 	}
 }
+
+func TestIngressVerificationAcceptsNativeDescriptorAndDetailsButRejectsExtraFilters(t *testing.T) {
+	for _, extra := range []bool{false, true} {
+		t.Run(map[bool]string{false: "native descriptor and action", true: "foreign filter"}[extra], func(t *testing.T) {
+			r := record(t).on("tc -j qdisc show dev eth0", `[{"kind":"ingress","handle":"ffff:"}]`)
+			filters := `[{"protocol":"all","pref":1,"kind":"matchall","chain":0},{"protocol":"all","pref":1,"kind":"matchall","chain":0,"options":{"actions":[{"kind":"police","control_action":{"type":"drop"}}]}}`
+			if extra {
+				filters += `,{"protocol":"all","pref":2,"kind":"flower","chain":0}`
+			}
+			r.on("tc -j filter show dev eth0", filters+"]").on("tc -r -d filter show dev eth0", "police 0x1 rate 8Mbit burst 100000b mtu 2Kb action drop")
+			got := readShapeVerification(context.Background(), ShapeSpec{Device: "eth0", IngressKbit: 8000})
+			want := "verified"
+			if extra {
+				want = "drift"
+			}
+			if got.Status != want {
+				t.Fatalf("ingress evidence = %+v, want %s", got, want)
+			}
+		})
+	}
+}
