@@ -8,6 +8,7 @@ import {
   portRows,
   reachWords,
   restartWords,
+  sinceWords,
   splitImage,
   trendOf,
   upWords,
@@ -197,5 +198,14 @@ describe("splitImage", () => {
     ])
     expect(splitImage("postgres:16-alpine")).toEqual(["postgres", "16-alpine"])
     expect(splitImage("nginx@sha256:0123456789abcdef0123")[0]).toBe("nginx")
+  })
+})
+
+describe("sinceWords", () => {
+  test("counts from Docker's status without repeating its exit code", () => {
+    expect(sinceWords("exited", "Exited (1) 3 hours ago")).toBe("stopped 3 hours ago")
+    expect(sinceWords("exited", "Exited (0) About an hour ago")).toBe("stopped about an hour ago")
+    expect(sinceWords("restarting", "Restarting (1) 8 seconds ago")).toBe("last exit 8 seconds ago")
+    expect(sinceWords("created", "Created")).toBeUndefined()
   })
 })

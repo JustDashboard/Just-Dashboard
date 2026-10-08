@@ -129,6 +129,21 @@ export function upWords(startedAt: string | undefined, now: number): string | un
   return `up ${duration(Math.max(0, (now - since) / 1000))}`
 }
 
+/**
+ * When a container that is not running last changed, out of Docker's own
+ * status sentence — "Exited (1) 3 hours ago" is "stopped 3 hours ago", and a
+ * restart in progress counts from its last exit. The exit code is left out:
+ * the verdict beside it already says it in words.
+ */
+export function sinceWords(state: string, status: string): string | undefined {
+  const ago = status.replace(/^[A-Za-z]+\s*(\(\d+\))?\s*/, "").trim()
+  if (!/ ago$/.test(ago)) return undefined
+  const when = ago.charAt(0).toLowerCase() + ago.slice(1)
+  if (state === "exited") return `stopped ${when}`
+  if (state === "restarting") return `last exit ${when}`
+  return undefined
+}
+
 /** The networks Docker makes for everything; sharing one says nothing about two containers. */
 const SHARED_BY_ALL = new Set(["bridge", "host", "none"])
 

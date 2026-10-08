@@ -1,11 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import {
-  ArrowCircleUp,
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
   ClockRewind,
   Copy,
   Eye,
@@ -18,7 +20,7 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post, patch, ApiError } from "@/lib/api"
-import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
+import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import type {
   ContainerDetail,
@@ -37,34 +39,46 @@ import { dockerSource } from "@/lib/log-sources"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
 import { XtermPane } from "@/components/xterm-pane"
 import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
 import { ContainerUsage } from "@/components/docker/container-usage"
 import { ContainerLiveUsage } from "@/components/docker/container-live-usage"
-import { statusWord } from "@/components/docker/container-cells"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { useDockerFindingActions } from "@/components/docker/finding-actions"
 import { ConfigurationRemedy } from "@/components/docker/configuration-remedy"
 import { ContainerFindings } from "@/components/docker/attention"
 import { containerEventsView } from "@/components/docker/container-events"
-import { PortTag, RouteRow } from "@/components/docker/exposure"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
 import {
   DatabaseStorageWarning,
   looksLikeDatabase,
   type ConfirmFn,
 } from "@/components/docker/shared"
+import { containerVerdict, exitWords, restartWords } from "@/components/docker/container"
+import { ContainerIdentity } from "@/components/docker/container-identity"
+import { ContainerReadings, useContainerFrames } from "@/components/docker/container-readings"
+import { ContainerPicture } from "@/components/docker/container-picture"
+import { ContainerCompany } from "@/components/docker/container-company"
+import { ContainerRecent } from "@/components/docker/container-recent"
+import {
+  EnvironmentTable,
+  NetworksTable,
+  PortsTable,
+  isSecretEnvKey,
+} from "@/components/docker/container-tables"
 import { FileBrowser } from "@/components/files/inline-browser"
-import { ProductLogo, containerProduct } from "@/components/product-logo"
+import { containerProduct } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Detail, DetailList, Metric, MetricStrip, Page, PageContext } from "@/components/page"
+import { Detail, DetailList, Page, PageContext } from "@/components/page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { Group, Well } from "@/components/panel"
-import { FilterChip } from "@/components/tabs"
+import { Group, Panel, PanelHeader, Well } from "@/components/panel"
+import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
+import { IconAction } from "@/components/icon-action"
+import { VerbMenu } from "@/components/verbs"
+import { ShellWords } from "@/components/deploy/run-evidence"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { copyText } from "@/lib/clipboard"
 
@@ -84,6 +98,18 @@ import { copyText } from "@/lib/clipboard"
  * 0.6.7 and this is not the reason to bring it back (`shell-design.md`). What
  * the panel took as a `focusTab` prop is `?tab=` now — the same job, and it
  * survives a reload and a shared link.
+ *
+ * The 2026-10-08 overhaul gave it the shape every destination in the product
+ * now opens on, because the operator found it the page with no life: a strip
+ * of four grey label-and-value pairs over three columns of grey fields, and
+ * nothing on it that moved. It opens on the container's identity line (the
+ * product it runs, its image, its project, how long it has been up, ticking,
+ * and the verdict at the line's end) over the views as the underlined strip,
+ * and the Overview reads, in order: why it is not working where it is not;
+ * what it is using, live, with its last hour; what is wrong with it; a picture
+ * of how it is reached and what it keeps; the containers it runs beside, as a
+ * live table; what just happened to it and how it runs; and its ports and
+ * networks as tables. Where each old figure went is in `design-system.md` §15.
  */
 export function ContainerPage() {
   const { id } = useParams<{ id: string }>()
@@ -94,6 +120,15 @@ export function ContainerPage() {
     <ContainerDetailPanel key={`${id}:${tab ?? ""}`} containerId={id} focusTab={tab ?? undefined} />
   )
 }
+
+const BACK = (
+  <Link
+    href="/docker/containers"
+    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
+  >
+    <ArrowLeft className="size-3" /> Containers
+  </Link>
+)
 
 function ContainerDetailPanel({
   containerId,
@@ -123,9 +158,13 @@ function ContainerDetailPanel({
   // requested tab: a link to the logs gets the logs, and the moment the reader
   // moves to another tab that choice becomes the remembered one again.
   const [tab, setTabState] = useState(focusTab ?? remembered)
+  // The logs' view a press asked for — Events, from the Overview's Recent —
+  // handed to the pane once, as a window is.
+  const [logView, setLogView] = useState<string>()
   const setTab = useCallback(
-    (next: string) => {
+    (next: string, view?: string) => {
       setTabState(next)
+      setLogView(view)
       remember(next)
     },
     [remember],
@@ -165,15 +204,23 @@ function ContainerDetailPanel({
           ),
   })
   // Why it stopped, read once for the page rather than by the tab that says
-  // so: the Logs tab opens on the same diagnosis's window.
+  // so: the Logs tab opens on the same diagnosis's window, and the verdict at
+  // the end of the identity line is what tells a loop from a restart.
   const failure = usePoll<FailureDiagnosis>(
     (signal) =>
       get<FailureDiagnosis>(`/docker/containers/${containerId}/failure`, undefined, signal),
     0,
-    [containerId],
+    [containerId, reloads],
   )
   // Whether the Logs tab is handed that window rather than the tail.
   const [crash, setCrash] = useState(false)
+  // Where each published port is reached from — the picture's ways in and the
+  // Ports table both draw it.
+  const routes = usePoll<PortRoute[]>(
+    (signal) => get<PortRoute[]>(`/docker/containers/${containerId}/routes`, undefined, signal),
+    0,
+    [containerId, reloads],
+  )
 
   // Whether this page has ever had its container, so a 404 can be told apart
   // from a bad address.
@@ -204,12 +251,39 @@ function ContainerDetailPanel({
     return () => controller.abort()
   }, [containerId, reloads, router])
 
-  const shell = can("terminal") && detail?.state === "running"
+  const running = detail?.state === "running"
+  const frames = useContainerFrames(containerId, tab === "overview" && running)
+  const verdict = useMemo(
+    () => (detail ? containerVerdict(detail, failure.data) : undefined),
+    [detail, failure.data],
+  )
+  const traffic = useMemo(() => {
+    const { current, previous } = frames
+    if (!current || !previous || !current.networkAvailable || !previous.networkAvailable) return
+    const seconds = (Date.parse(current.ts) - Date.parse(previous.ts)) / 1000
+    if (seconds <= 0) return
+    const moved = current.netRx + current.netTx - previous.netRx - previous.netTx
+    return moved >= 0 ? moved / seconds : undefined
+  }, [frames])
+
+  const shell = can("terminal") && running
   const changed = useCallback(() => {
     setReloads((n) => n + 1)
     health.refresh()
-    failure.refresh()
-  }, [health, failure])
+  }, [health])
+
+  const views = detail
+    ? [
+        { key: "overview", label: "Overview" },
+        { key: "usage", label: "Usage" },
+        { key: "logs", label: "Logs" },
+        { key: "env", label: "Environment", count: detail.env.length },
+        { key: "mounts", label: "Storage", count: detail.mounts.length },
+        { key: "inspect", label: "Inspect" },
+        { key: "configure", label: "Configuration" },
+        ...(shell ? [{ key: "shell", label: "Shell" }] : []),
+      ]
+    : []
 
   return (
     <Workspace
@@ -237,125 +311,130 @@ function ContainerDetailPanel({
         },
       ]}
     >
-      <Page fill>
-        <div className="flex min-w-0 shrink-0 flex-col gap-4">
+      <Page fill className="gap-5 md:gap-5">
+        <div className="flex min-w-0 shrink-0 flex-col gap-5">
           <PageContext
-            eyebrow={
-              <Link
-                href="/docker/containers"
-                className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-              >
-                <ArrowLeft className="size-3" /> Containers
-              </Link>
-            }
+            eyebrow={BACK}
             title={detail?.name ?? "Container"}
             actions={
               detail && (
                 <>
-                  <Status
-                    state={detail.state}
-                    live={detail.state === "running"}
-                    label={statusWord(detail)}
-                  />
-                  {/* Start, stop and restart were reachable from the table and
-                    nowhere else, so opening a container to look at why it is
-                    unhappy meant closing it again to do anything about it. */}
-                  <ContainerLifecycle
+                  {/* Every verb the container has, the lifecycle as words and
+                    the rest behind one menu — the page used to draw only the
+                    first three, so pausing or removing the container it was
+                    about meant going back to the list. */}
+                  <ContainerVerbs
                     detail={detail}
                     confirm={confirm}
                     onOpenTab={setTab}
                     onChanged={changed}
                   />
-                  <ContainerActions detail={detail} confirm={confirm} onChanged={changed} />
-                  <Button size="xs" variant="ghost" disabled={at <= 0} onClick={() => adjacent(-1)}>
-                    Previous container
-                  </Button>
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    disabled={at < 0 || at >= navigation.length - 1}
-                    onClick={() => adjacent(1)}
-                  >
-                    Next container
-                  </Button>
-                  <WorkspaceHelp />
+                  <span className="flex items-center">
+                    <IconAction
+                      label="Previous container"
+                      disabled={at <= 0}
+                      onClick={() => adjacent(-1)}
+                    >
+                      <ChevronUp />
+                    </IconAction>
+                    <IconAction
+                      label="Next container"
+                      disabled={at < 0 || at >= navigation.length - 1}
+                      onClick={() => adjacent(1)}
+                    >
+                      <ChevronDown />
+                    </IconAction>
+                    {/* Keyboard shortcuts mean nothing on a touch screen, and
+                      the row of verbs already wraps there. */}
+                    <span className="max-sm:hidden">
+                      <WorkspaceHelp />
+                    </span>
+                  </span>
                 </>
               )
             }
           />
-          {/* What the container *is*, as its own row of facts rather than as tags
-            crammed into the title (§15 pass 8, and the same call `ProjectShell`
-            makes). "Which image is this" is the second question anybody opening
-            a container has, and it used to need the Overview tab. */}
-          {detail && (
-            <MetricStrip className="animate-rise">
-              <Metric
-                label="Container"
-                value={
-                  <span className="inline-flex items-center gap-2">
-                    <ProductLogo id={containerProduct(detail)} />
-                    {detail.name}
-                  </span>
-                }
-              />
-              <Metric label="Image" value={detail.image} />
-              <Metric label="ID" value={detail.id.slice(0, 12)} />
-              {detail.composeStack && (
-                <Metric
-                  label="Compose stack"
-                  value={
-                    <Link
-                      href={`/docker/stacks/${encodeURIComponent(detail.composeStack)}`}
-                      className="rounded-sm focus-ring hover:underline"
-                    >
-                      {detail.composeStack}
-                    </Link>
-                  }
-                />
-              )}
-            </MetricStrip>
-          )}
+          {detail && verdict && <ContainerIdentity detail={detail} verdict={verdict} />}
         </div>
 
         {error && <ErrorState error={error} />}
         {!detail && !error && <LoadingRows />}
 
-        {detail && (
-          <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col gap-3">
-            <TabsList className="w-fit shrink-0">
-              <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="usage">Usage</TabsTrigger>
-              <TabsTrigger value="logs">Logs</TabsTrigger>
-              <TabsTrigger value="env">Environment</TabsTrigger>
-              <TabsTrigger value="mounts">Storage</TabsTrigger>
-              <TabsTrigger value="inspect">Inspect</TabsTrigger>
-              <TabsTrigger value="configure">Configuration</TabsTrigger>
-              {shell && <TabsTrigger value="shell">Shell</TabsTrigger>}
-            </TabsList>
+        {detail && verdict && (
+          <Tabs value={tab} onValueChange={(next) => setTab(next)} className="min-h-0 flex-1 gap-0">
+            {/* The underlined strip every switcher between views of one thing
+              wears (`tabClasses`), with the two views that hold a list
+              counting it. */}
+            <TabsPrimitive.List
+              aria-label={`Views of ${detail.name}`}
+              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
+            >
+              {views.map((view) => (
+                <TabsPrimitive.Trigger
+                  key={view.key}
+                  value={view.key}
+                  className={tabClasses(tab === view.key, "h-10")}
+                >
+                  {view.label}
+                  {view.count !== undefined && view.count > 0 && (
+                    <ChipCount>{view.count}</ChipCount>
+                  )}
+                </TabsPrimitive.Trigger>
+              ))}
+            </TabsPrimitive.List>
 
-            <TabsContent value="overview" className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+            <TabsContent value="overview" className="min-h-0 flex-1 overflow-y-auto pt-6">
               {/*
-              Why it is not working, then what is wrong with it, then the facts
-              about it. An operator who opened this page opened it for the
-              first of those, and the version this replaces led with the third.
-            */}
-              <FailurePanel
-                data={failure.data}
-                onReadLogs={() => {
-                  setCrash(true)
-                  setTab("logs")
-                }}
-              />
-              <ContainerFindings
-                diagnosis={health.data}
-                containerId={detail.id}
-                onAction={runFix}
-              />
-              <OverviewFields detail={detail} />
-              <Reachability containerId={detail.id} />
+                Why it is not working, then what it is using, then what is
+                wrong with it, then what it is connected to and what it runs
+                beside, then what happened and how it runs. An operator who
+                opened this page opened it for the first of those.
+              */}
+              <div className="flex min-w-0 flex-col gap-8 pb-4">
+                <FailurePanel
+                  data={failure.data}
+                  onReadLogs={() => {
+                    setCrash(true)
+                    setTab("logs")
+                  }}
+                />
+                <ContainerReadings
+                  detail={detail}
+                  frames={frames}
+                  onUsage={() => setTab("usage")}
+                />
+                <ContainerFindings
+                  diagnosis={health.data}
+                  containerId={detail.id}
+                  onAction={runFix}
+                />
+                <ContainerPicture
+                  detail={detail}
+                  verdict={verdict}
+                  routes={routes.data}
+                  traffic={traffic}
+                  readings={
+                    running && frames.current
+                      ? {
+                          cpu: frames.current.cpuReady ? frames.current.cpuPercent : undefined,
+                          memory: frames.current.memUsage,
+                        }
+                      : undefined
+                  }
+                />
+                <ContainerCompany container={detail} tab="overview" />
+                <div className="grid gap-8 xl:grid-cols-2 [&>*]:min-w-0">
+                  <ContainerRecent detail={detail} onEvents={() => setTab("logs", "events")} />
+                  <HowItRuns detail={detail} />
+                </div>
+                <div className="grid items-start gap-6 2xl:grid-cols-2 [&>*]:min-w-0">
+                  <PortsTable detail={detail} routes={routes.data} />
+                  <NetworksTable detail={detail} />
+                </div>
+              </div>
             </TabsContent>
 
-            <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto">
+            <TabsContent value="usage" className="min-h-0 flex-1 space-y-6 overflow-y-auto pt-6">
               <ContainerLiveUsage key={detail.id} detail={detail} />
               <ResourceLimitsEditor
                 detail={detail}
@@ -370,29 +449,30 @@ function ContainerDetailPanel({
 
             {/* Scrolls on a phone, where the readings and a pane worth reading
               are taller than what is left of the window under the facts. */}
-            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="logs" className="min-h-0 flex-1 overflow-y-auto pt-4">
               <ContainerLogs
                 detail={detail}
                 failure={failure.data}
                 crash={crash}
+                view={logView}
                 onCrashChange={setCrash}
               />
             </TabsContent>
 
-            <TabsContent value="env" className="min-h-0 flex-1">
-              <EnvironmentList env={detail.env} />
+            <TabsContent value="env" className="min-h-0 flex-1 overflow-y-auto pt-4">
+              <EnvironmentTable env={detail.env} />
             </TabsContent>
 
             {/* The listing takes the tab's height and scrolls inside itself, so
               the tab only scrolls once a writable-layer report outgrows it. */}
-            <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="mounts" className="min-h-0 flex-1 overflow-y-auto pt-4">
               <div className="flex h-full min-h-0 flex-col gap-3">
                 <MountList detail={detail} />
                 <WritableLayer containerId={detail.id} />
               </div>
             </TabsContent>
 
-            <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto">
+            <TabsContent value="configure" className="min-h-0 flex-1 overflow-y-auto pt-4">
               {tab === "configure" && (
                 <ConfigurationRemedy
                   detail={detail}
@@ -408,12 +488,12 @@ function ContainerDetailPanel({
               )}
             </TabsContent>
 
-            <TabsContent value="inspect" className="min-h-0 flex-1">
+            <TabsContent value="inspect" className="min-h-0 flex-1 pt-4">
               {tab === "inspect" && <RawInspect containerId={detail.id} />}
             </TabsContent>
 
             {shell && (
-              <TabsContent value="shell" className="min-h-0 flex-1">
+              <TabsContent value="shell" className="min-h-0 flex-1 pt-4">
                 {tab === "shell" && <ContainerShell detail={detail} />}
               </TabsContent>
             )}
@@ -501,205 +581,45 @@ function ContainerShell({ detail }: { detail: ContainerDetail }) {
 }
 
 /**
- * Names that conventionally hold a credential. The server already withholds
- * these values from anyone below system.admin; this list is what decides
- * whether an admin's copy is printed on screen or kept behind a click, so it
- * errs towards hiding — a needless extra click costs less than a key read over
- * someone's shoulder or captured in a screen share.
+ * How the container runs, as the facts behind the readings above.
+ *
+ * It was three columns of label-and-value pairs headed "What it is running",
+ * "How it behaves" and "What it can reach", with the networks and the ports
+ * as two more groups under them. The ports and networks are tables of their
+ * own now and the picture draws both; what is left is one block: the command
+ * coloured as a command rather than printed as a string, and two columns of
+ * facts — what it runs as, and how it comes back. The two fields that decide
+ * how much of the server is on the other side of the container wall keep
+ * their tone.
  */
-const SECRET_ENV_HINTS = [
-  "SECRET",
-  "PASSWORD",
-  "PASSWD",
-  "TOKEN",
-  "CREDENTIAL",
-  "PRIVATE",
-  "SALT",
-  "SIGNATURE",
-  "CIPHER",
-  "APIKEY",
-  "API_KEY",
-  "AUTH",
-  "DSN",
-  "_KEY",
-  "KEY_",
-  "MASTER_KEY",
-  "ACCESS",
-  "SESSION",
-  // A connection string carries the password inside it, so the variable name
-  // gives no hint that the value is a credential — DATABASE_URL is the single
-  // most common way a password ends up on somebody's screen.
-  "JWT",
-  "DATABASE_URL",
-  "DB_URL",
-  "CONNECTION_STRING",
-  "_URI",
-  "WEBHOOK",
-]
-
-function isSecretEnvKey(name: string) {
-  const upper = name.toUpperCase()
-  return upper === "KEY" || SECRET_ENV_HINTS.some((hint) => upper.includes(hint))
-}
-
-function EnvironmentList({ env }: { env: string[] }) {
-  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
-  const rows = useMemo(
-    () =>
-      env.map((line) => {
-        const eq = line.indexOf("=")
-        const name = eq === -1 ? line : line.slice(0, eq)
-        const value = eq === -1 ? "" : line.slice(eq + 1)
-        return { line, name, value, secret: isSecretEnvKey(name) }
-      }),
-    [env],
-  )
-  const secretCount = rows.filter((r) => r.secret).length
-
-  if (rows.length === 0) {
-    return <EmptyNote>No environment variables set.</EmptyNote>
-  }
-
+function HowItRuns({ detail }: { detail: ContainerDetail }) {
+  const running = detail.state === "running"
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      {secretCount > 0 && (
-        <p className="flex items-start gap-2 text-xs text-muted-foreground">
-          <ShieldOff className="mt-px size-3.5 shrink-0" />
-          <span>
-            {secretCount} {secretCount === 1 ? "value looks" : "values look"} like a credential and
-            {secretCount === 1 ? " is" : " are"} hidden. Reveal only when nobody is watching your
-            screen.
-          </span>
-        </p>
-      )}
-      <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto font-mono text-xs">
-        {rows.map((row) => {
-          const show = !row.secret || revealed[row.name]
-          return (
-            <div
-              key={row.line}
-              className="flex items-start gap-2 rounded-md px-2 py-1 hover:bg-row-hover"
-            >
-              <span className="shrink-0 text-muted-foreground">{row.name}=</span>
-              {show ? (
-                <span className="break-all">{row.value}</span>
-              ) : (
-                <span className="text-muted-foreground select-none">••••••••••••</span>
-              )}
-              {/*
-                Copy sits beside Reveal so the common case — pasting a
-                credential into a client — does not require putting it on
-                screen first. The value goes to the clipboard and nowhere
-                else: it is never logged, notified with, or sent anywhere.
-              */}
-              {row.secret && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="-my-1 ml-auto shrink-0 font-normal"
-                  aria-label={`Copy ${row.name}`}
-                  onClick={() => void copyText(row.value, `${row.name} copied`)}
-                >
-                  <Copy />
-                  Copy
-                </Button>
-              )}
-              {row.secret && (
-                <Button
-                  size="xs"
-                  variant="ghost"
-                  className="-my-1 shrink-0 font-normal"
-                  aria-label={`${revealed[row.name] ? "Hide" : "Reveal"} ${row.name}`}
-                  onClick={() => setRevealed((prev) => ({ ...prev, [row.name]: !prev[row.name] }))}
-                >
-                  {revealed[row.name] ? <EyeOff /> : <Eye />}
-                  {revealed[row.name] ? "Hide" : "Reveal"}
-                </Button>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-/**
- * What this container is, in three answers rather than thirteen rows.
- *
- * It was one flat `<dl>`: container id, image, command, created, started,
- * restart policy, restarts, exit code, network mode, working dir, user,
- * privileged — twelve labels in a column, in no order anybody could name, with
- * the two that decide whether the container can reach the host (`privileged`,
- * `networkMode`) sitting between "working dir" and nothing. For a reader who
- * already knows Docker that is a lookup table; for anybody else it is the wall
- * of unexplained words this whole feature exists not to be.
- *
- * Three groups, and each of them is a question somebody actually asks:
- *
- *   **What is it running** — the image, the command, the handle to quote.
- *   **How it behaves** — when it started, whether it comes back, how often it
- *     has had to, and what it said when it last stopped.
- *   **What it can reach** — the three fields that decide how much of the server
- *     is on the other side of the container wall.
- *
- * The groups sit two-up from `sm`, which also halves the scroll before the
- * Networks and Ports blocks that follow.
- */
-function OverviewFields({ detail }: { detail: ContainerDetail }) {
-  const exposure = detail.exposure ?? []
-
-  return (
-    <div className="space-y-5">
-      <div className="grid gap-5 sm:grid-cols-2">
-        <FieldGroup title="What it is running">
-          <DetailList>
-            <Detail label={<Term name="image">Image</Term>}>
-              <span className="font-mono break-all">{detail.image}</span>
+    <Panel plain className="animate-rise">
+      <PanelHeader title="How it runs" />
+      <div className="flex min-w-0 flex-col gap-4 pt-3">
+        {detail.command && (
+          <Well className="max-h-28 text-xs leading-relaxed break-all whitespace-pre-wrap">
+            <ShellWords command={detail.command} />
+          </Well>
+        )}
+        <div className="grid min-w-0 gap-x-8 gap-y-1.5 sm:grid-cols-2">
+          <DetailList className="content-start">
+            <Detail label={<Term name="image">Image</Term>} className="font-mono break-all">
+              {detail.image}
             </Detail>
-            <Detail label="Command">
-              <span className="font-mono break-all">{detail.command || "—"}</span>
+            <Detail label="Working dir" className="font-mono break-all">
+              {detail.workingDir || "/"}
             </Detail>
-            <Detail label="Container ID">
-              <span className="font-mono break-all">{detail.id.slice(0, 20)}</span>
+            <Detail label={<Term name="containerUser">User</Term>} className="font-mono">
+              {detail.user || "the image's own"}
             </Detail>
-          </DetailList>
-        </FieldGroup>
-
-        <FieldGroup title="How it behaves">
-          <DetailList>
-            <Detail label="Started">
-              {detail.startedAt
-                ? `${timestamp(detail.startedAt)} (${duration(detail.uptimeSeconds)})`
-                : "—"}
-            </Detail>
-            <Detail label="Created">{timestamp(detail.createdAt)}</Detail>
-            <Detail label={<Term name="restart">Restart policy</Term>}>
-              {detail.restartPolicy || "none"}
-            </Detail>
-            {/* A restart count is a number until it is a symptom: anything
-                above zero on a container nobody restarted by hand means it has
-                been crashing and coming back. */}
-            <Detail label="Restarts" className={detail.restartCount > 0 ? "text-warning" : ""}>
-              {detail.restartCount}
-            </Detail>
-            <Detail label={<Term name="exitCode">Exit code</Term>}>
-              {detail.state === "running" ? "—" : detail.exitCode}
-            </Detail>
-          </DetailList>
-        </FieldGroup>
-
-        <FieldGroup title="What it can reach">
-          <DetailList>
             <Detail label={<Term name="networkMode">Network mode</Term>}>
               {detail.networkMode === "host" ? (
                 <span className="text-warning">host — the server&rsquo;s own network</span>
               ) : (
                 detail.networkMode
               )}
-            </Detail>
-            <Detail label={<Term name="containerUser">User</Term>}>
-              {detail.user || "default"}
             </Detail>
             <Detail label={<Term name="privileged">Privileged</Term>}>
               {detail.privileged ? (
@@ -708,68 +628,46 @@ function OverviewFields({ detail }: { detail: ContainerDetail }) {
                 "no"
               )}
             </Detail>
-            <Detail label="Working dir">{detail.workingDir || "—"}</Detail>
+            {detail.capAdd.length > 0 && (
+              <Detail label="Capabilities" className="font-mono text-warning">
+                {detail.capAdd.join(", ")}
+              </Detail>
+            )}
           </DetailList>
-        </FieldGroup>
-
-        {detail.networkDetails.length > 0 && (
-          <FieldGroup title={<Term name="network">Networks</Term>}>
-            {/* Rows, not a fence per network: two networks were two boxes
-                beside three groups of plain text. */}
-            <ul className="divide-y divide-hairline text-xs">
-              {detail.networkDetails.map((net) => (
-                <li key={net.networkId} className="py-1.5 first:pt-0 last:pb-0">
-                  <div className="font-medium">{net.name}</div>
-                  <p className="font-mono text-muted-foreground">
-                    {net.ipAddress || "no address"} · gateway {net.gateway || "—"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          </FieldGroup>
-        )}
+          <DetailList className="content-start">
+            <Detail label="Started" className="numeric">
+              {detail.startedAt && Date.parse(detail.startedAt) > 0
+                ? `${timestamp(detail.startedAt)} · ${relativeTime(detail.startedAt)}`
+                : "never"}
+            </Detail>
+            <Detail label="Created" className="numeric">
+              {timestamp(detail.createdAt)}
+            </Detail>
+            <Detail label={<Term name="restart">Restart policy</Term>}>
+              <span title={detail.restartPolicy || "no"}>{restartWords(detail.restartPolicy)}</span>
+            </Detail>
+            {/* A restart count is a number until it is a symptom: anything
+                above zero on a container nobody restarted by hand means it
+                has been crashing and coming back. */}
+            <Detail
+              label="Restarts"
+              className={cn("numeric", detail.restartCount > 0 && "text-warning")}
+            >
+              {detail.restartCount}
+            </Detail>
+            <Detail label={<Term name="exitCode">Last exit</Term>}>
+              {running ? (
+                <span className="text-muted-foreground">still running</span>
+              ) : (
+                <span className={cn(detail.exitCode !== 0 && "text-destructive")}>
+                  {exitWords(detail.exitCode)}
+                </span>
+              )}
+            </Detail>
+          </DetailList>
+        </div>
       </div>
-
-      {/*
-        Gated on the exposure list rather than on Docker's raw port list, which
-        is what it actually renders. The two disagree for a container whose
-        ports the server classified but Docker reported empty, and the panel
-        then drew no ports at all for a container that publishes some.
-      */}
-      {exposure.length > 0 && (
-        <FieldGroup title={<Term name="port">Ports</Term>}>
-          <div className="flex flex-wrap gap-1.5">
-            {/*
-              A published port on a known address becomes a link, and every
-              badge carries what its binding means — see the exposure model. A
-              port on every interface deliberately gets no link: which of this
-              machine's addresses is the right one depends on where the reader
-              is, and guessing produces a link that leads somewhere else.
-            */}
-            {exposure.map((port, i) => (
-              <PortTag key={`${port.hostIp}-${port.hostPort}-${i}`} port={port} />
-            ))}
-          </div>
-          {exposure.some((p) => p.scope === "all") && (
-            <Hint className="mt-2">
-              A port published on every interface is reachable from anywhere that can route to this
-              server. Docker writes it as a NAT rule, which is consulted before the firewall&apos;s
-              own.
-            </Hint>
-          )}
-        </FieldGroup>
-      )}
-    </div>
-  )
-}
-
-/** One labelled group of fields inside the Overview tab. */
-function FieldGroup({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="min-w-0 space-y-2">
-      <p className="eyebrow">{title}</p>
-      {children}
-    </section>
+    </Panel>
   )
 }
 
@@ -794,12 +692,15 @@ function ContainerLogs({
   detail,
   failure,
   crash,
+  view,
   onCrashChange,
 }: {
   detail: ContainerDetail
   failure?: FailureDiagnosis
   /** Whether the pane is handed the failure's window. */
   crash: boolean
+  /** A view a press elsewhere on the page asked for: Events, from the Overview's Recent. */
+  view?: string
   onCrashChange: (on: boolean) => void
 }) {
   const product = containerProduct(detail)
@@ -850,6 +751,7 @@ function ContainerLogs({
         storageKey={`docker.container.${detail.id}.logs`}
         readings
         views={views}
+        view={view}
         window={crash && logWindow ? { ...logWindow, label } : undefined}
         onLeaveWindow={() => onCrashChange(false)}
         actions={wide && chip}
@@ -861,19 +763,19 @@ function ContainerLogs({
 }
 
 /**
- * What the container is *doing*: start it, stop it, restart it, freeze it.
+ * Everything that can be done to the container, beside the way back: the
+ * lifecycle as named buttons, because this is the page somebody opens to act
+ * on what they found, and every other verb behind one menu where it gets its
+ * word (`useContainerVerbs`, so the confirmation a stop raises here is the
+ * sentence the table raises, and a capability that hides a verb in one place
+ * hides it in both).
  *
- * These lived only in the table row, which meant the panel somebody opens to
- * find out why a container is unhealthy had no way to act on the answer — the
- * reader closed it, found the row again, and pressed a glyph. They are words
- * here rather than icons because the panel has the width for words and because
- * this is the surface a newcomer opens first.
- *
- * The verbs themselves come from `container-actions.tsx`, so the confirmation
- * this raises for a stop is the same sentence the table raises, and a
- * capability that hides the button in one place hides it in both.
+ * It used to draw only the inline three. Pause, Remove and Copy id were in the
+ * table's menu and nowhere here, so removing the container this page is
+ * about — which it then handles by going back to the list — meant leaving it
+ * first. Logs and the shell are views of this page, so they stay tabs.
  */
-function ContainerLifecycle({
+function ContainerVerbs({
   detail,
   confirm,
   onOpenTab,
@@ -884,6 +786,7 @@ function ContainerLifecycle({
   onOpenTab: (tab: string) => void
   onChanged: () => void
 }) {
+  const { can } = useAuth()
   const { pending, act } = useContainerControl(onChanged)
   const verbs = useContainerVerbs({
     container: detail,
@@ -892,13 +795,14 @@ function ContainerLifecycle({
     onOpenTab,
     onChanged,
   })
-  const lifecycle = verbs.filter((v) => v.inline)
   const busy = pending[detail.id]
-  if (lifecycle.length === 0) return null
+  const inline = verbs.filter((verb) => verb.inline)
+  const rest = verbs.filter((verb) => !verb.inline && verb.key !== "logs" && verb.key !== "shell")
+  const composeManaged = Boolean(detail.composeStack)
 
   return (
     <span className="flex flex-wrap items-center gap-1.5">
-      {lifecycle.map((verb) => (
+      {inline.map((verb) => (
         <Button
           key={verb.key}
           size="sm"
@@ -911,90 +815,27 @@ function ContainerLifecycle({
           {verb.label}
         </Button>
       ))}
-    </span>
-  )
-}
-
-/**
- * The actions that change what a container *is*, rather than what it is doing.
- *
- * Docker has no notion of editing a container: every field but a handful of
- * resource limits is fixed at creation, and the way to change one is through
- * the Deploy pages, which own the compose file. There is no standalone
- * duplicate flow here anymore.
- */
-function ContainerActions({
-  detail,
-  confirm,
-  onChanged,
-}: {
-  detail: ContainerDetail
-  confirm?: ConfirmFn
-  onChanged: () => void
-}) {
-  const { can } = useAuth()
-  const composeManaged = Boolean(detail.composeStack)
-
-  const update = () =>
-    confirm?.({
-      title: "Update this container",
-      confirmLabel: "Update",
-      description: (
+      {/*
+        Compose owns this container, so anything that changes its
+        configuration is undone by the next deploy — silently, and days later,
+        which is the worst way to find out. Rename moves behind a statement of
+        what will happen, and the way to the stack that owns it comes first.
+      */}
+      {composeManaged ? (
         <>
-          <p>
-            Pulls a newer <b>{detail.image}</b> and replaces <b>{detail.name}</b> with a container
-            built from it, keeping every setting it has now.
-          </p>
-          <p>
-            Its volumes come with it. Anything written inside the container rather than into a
-            volume does not — that is destroyed with the old container.
-          </p>
+          <Button size="sm" variant="outline" asChild>
+            <Link href={`/docker/stacks/${encodeURIComponent(detail.composeStack ?? "")}`}>
+              <Layers className="size-3.5" />
+              Open stack
+            </Link>
+          </Button>
+          {can("service.control") && <ComposeDriftMenu detail={detail} onChanged={onChanged} />}
         </>
-      ),
-      action: async (phrase) => {
-        await post(
-          `/docker/containers/${detail.id}/recreate`,
-          { pullLatest: true },
-          { confirm: phrase },
-        )
-        onChanged()
-      },
-    })
-
-  /*
-    Compose owns this container, so anything that changes its configuration is
-    undone by the next deploy — silently, and days later, which is the worst
-    way to find out. Rename used to sit here for a compose container exactly as
-    it does for a standalone one: renaming one breaks compose's own lookup.
-
-    It is not hidden — an operator who means it should be able to do it —
-    but it moves behind a statement of what will happen, and the actions that
-    are safe on a compose container come first.
-  */
-  if (composeManaged) {
-    return (
-      <>
-        <Button size="sm" variant="outline" asChild>
-          <Link href={`/docker/stacks/${encodeURIComponent(detail.composeStack ?? "")}`}>
-            <Layers className="size-3.5" />
-            Open stack
-          </Link>
-        </Button>
-        {can("service.control") && <ComposeDriftMenu detail={detail} onChanged={onChanged} />}
-      </>
-    )
-  }
-
-  return (
-    <>
-      {can("destructive") && confirm && (
-        <Button size="sm" variant="outline" onClick={update}>
-          <ArrowCircleUp className="size-3.5" />
-          Update
-        </Button>
+      ) : (
+        can("service.control") && <RenameButton detail={detail} onRenamed={onChanged} />
       )}
-      {can("service.control") && <RenameButton detail={detail} onRenamed={onChanged} />}
-    </>
+      {rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${detail.name}`} />}
+    </span>
   )
 }
 
@@ -1644,58 +1485,6 @@ function RawInspect({ containerId }: { containerId: string }) {
 }
 
 /**
- * Where this container is actually reachable from — Docker, the reverse proxy
- * and the firewall, correlated.
- *
- * Three facts this dashboard already holds in three separate panels, and the
- * question an operator has is the one none of them answers alone: can the
- * internet reach my database. Docker knows the binding; the proxy panel knows
- * the vhost; the firewall panel knows the rules. Joining them is the thing
- * nothing else in this class of tool can do, because nothing else manages all
- * three.
- *
- * And it is the easiest place to overclaim, so every verdict carries the
- * reasoning that produced it and says whether it was read or worked out. "Bound
- * to every interface" is a fact; "reachable from the internet" is a conclusion.
- */
-function Reachability({ containerId }: { containerId: string }) {
-  const { data } = usePoll<PortRoute[]>(
-    (signal) => get<PortRoute[]>(`/docker/containers/${containerId}/routes`, undefined, signal),
-    0,
-    [containerId],
-  )
-  if (!data || data.length === 0) return null
-
-  const exposed = data.filter((r) => r.reach === "external")
-  const bypassed = data.filter((r) => r.firewall.dockerBypass && r.firewall.verdict === "denied")
-
-  return (
-    <section className="space-y-2">
-      <p className="eyebrow">Reachable at</p>
-      <ul className="divide-y divide-hairline">
-        {data.map((route) => (
-          <RouteRow key={`${route.hostIp}-${route.hostPort}-${route.protocol}`} route={route} />
-        ))}
-      </ul>
-      {bypassed.length > 0 && (
-        <Notice title="The firewall does not apply to these ports" icon={Warning} tone="warning">
-          Docker publishes a port by writing NAT rules that are consulted before the firewall&apos;s
-          own filter chain, so a rule denying the port has no effect on it. The way to close a
-          published port is to bind it to 127.0.0.1 rather than to deny it in the firewall.
-        </Notice>
-      )}
-      {exposed.some((r) => r.vhost) && (
-        <Hint>
-          A port that is both published on every interface <em>and</em> proxied can be reached
-          directly, skipping whatever the proxy site enforces in front of it. Binding it to
-          127.0.0.1 leaves the proxy as the only way in.
-        </Hint>
-      )}
-    </section>
-  )
-}
-
-/**
  * Why it stopped, and why it keeps stopping.
  *
  * The facts are already on the page and none of them is an answer: a restart
@@ -1712,13 +1501,10 @@ function FailurePanel({
   /** Opens the Logs tab on the diagnosis's window. */
   onReadLogs: () => void
 }) {
-  if (!data) return null
-
-  // A container that has been up for a week with nothing to say deserves to be
-  // told so once, quietly, rather than given a panel.
-  if (data.state === "running" && !data.restarts.looping) {
-    return <Hint>{data.headline}</Hint>
-  }
+  // A container that has been up for a week with nothing to say is told so by
+  // the identity line, which ticks its uptime beside its verdict; the
+  // sentence that used to open the tab said it a second time.
+  if (!data || (data.state === "running" && !data.restarts.looping)) return null
 
   const tone = data.state === "looping" || data.state === "unhealthy" ? "danger" : "warning"
   return (
@@ -1732,16 +1518,26 @@ function FailurePanel({
         </p>
       )}
 
-      <div className="mt-2 space-y-1">
-        <p className="eyebrow">Evidence</p>
-        {data.evidence.map((item, i) => (
-          <p key={i} className="text-hint">
-            <span className="font-medium">{item.label}: </span>
-            <span className="text-muted-foreground">{item.value}</span>
-            <span className="ml-1 text-muted-foreground/70">— {item.source}</span>
-          </p>
-        ))}
-      </div>
+      {/* The evidence as a column of facts, the decisive one in ink: three
+          lines of "label: value — source" ran together into one paragraph. */}
+      {data.evidence.length > 0 && (
+        <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-hint sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+          {data.evidence.map((item, i) => (
+            <Fragment key={i}>
+              <dt className="text-muted-foreground">{item.label}</dt>
+              <dd
+                className={cn(
+                  "min-w-0 break-words",
+                  item.weight === "decisive" ? "font-medium text-foreground" : "text-foreground/85",
+                )}
+              >
+                {item.value}
+              </dd>
+              <dd className="text-muted-foreground/70 max-sm:hidden">{item.source}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
 
       {data.suggestions.length > 0 && (
         <ul className="mt-2 space-y-1 text-hint">

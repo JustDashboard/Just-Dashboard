@@ -10,6 +10,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useSocket } from "@/hooks/use-socket"
 import { Detail, DetailList, Section } from "@/components/page"
 import { StatGrid, StatTile } from "@/components/stat-tile"
+import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/overview/readings"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -23,6 +24,13 @@ import {
 
 const readingRate = containerRateLabel
 const count = (value: number | null | undefined) => (value == null ? "—" : value.toLocaleString())
+/** A rate that glides to each frame; the label's own rules decide when there is none to draw. */
+const liveRate = (value: number | null | undefined) =>
+  readingRate(value) === "—" || value == null || value < 1 ? (
+    readingRate(value)
+  ) : (
+    <LiveBytes value={value} suffix="/s" />
+  )
 
 /** Live readings are separate from recorded charts: their timestamps and cadences differ. */
 export function ContainerLiveUsage({ detail }: { detail: ContainerDetail }) {
@@ -121,9 +129,17 @@ export function ContainerLiveUsage({ detail }: { detail: ContainerDetail }) {
           </p>
         )}
         <StatGrid columns={4} dense>
+          {/* Keyed by the colour each measurement's chart draws below, and
+              gliding to every frame, as the Overview tab's readings do. */}
           <StatTile
-            label="CPU"
-            value={percent(cpu)}
+            label={
+              <>
+                <SeriesKey color={HUE.cpu} />
+                CPU
+              </>
+            }
+            meterLabel="CPU"
+            value={cpu === undefined ? "—" : <LiveFigure value={cpu} decimals={1} unit="%" />}
             hint={
               cpu === undefined
                 ? "Waiting for a CPU interval"
@@ -131,8 +147,14 @@ export function ContainerLiveUsage({ detail }: { detail: ContainerDetail }) {
             }
           />
           <StatTile
-            label="Memory working set"
-            value={bytes(current?.memUsage)}
+            label={
+              <>
+                <SeriesKey color={HUE.mem} />
+                Memory working set
+              </>
+            }
+            meterLabel="Memory working set"
+            value={current ? <LiveBytes value={current.memUsage} /> : "—"}
             hint={
               current
                 ? current.memLimited
@@ -143,8 +165,14 @@ export function ContainerLiveUsage({ detail }: { detail: ContainerDetail }) {
             meter={current?.memLimited ? current.memPercent : undefined}
           />
           <StatTile
-            label="Network received"
-            value={readingRate(rates?.rx)}
+            label={
+              <>
+                <SeriesKey color="var(--chart-2)" />
+                Network received
+              </>
+            }
+            meterLabel="Network received"
+            value={liveRate(rates?.rx)}
             hint={
               !current
                 ? "Waiting for a reading"
@@ -154,8 +182,14 @@ export function ContainerLiveUsage({ detail }: { detail: ContainerDetail }) {
             }
           />
           <StatTile
-            label="Network sent"
-            value={readingRate(rates?.tx)}
+            label={
+              <>
+                <SeriesKey color="var(--chart-5)" />
+                Network sent
+              </>
+            }
+            meterLabel="Network sent"
+            value={liveRate(rates?.tx)}
             hint={
               !current
                 ? "Waiting for a reading"
