@@ -35,6 +35,7 @@ import (
 // happened to /ssh-sessions).
 func (s *Server) mountNetworkRoutes(r chi.Router) {
 	r.Route("/network", func(r chi.Router) {
+		r.Use(s.pendingNetworkApply)
 		r.Method(http.MethodGet, "/", s.handle(s.handleNetworkInfo))
 		// Probes make the server emit traffic to an address the caller
 		// chose. That is a scanner if it is handed to everybody, so it sits
@@ -51,6 +52,7 @@ func (s *Server) mountNetworkRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/traffic/live", s.handle(s.handleNetworkTrafficLive))
 		r.Method(http.MethodGet, "/traffic/history", s.handle(s.handleNetworkTrafficHistory))
 
+		s.mountNetworkChangeRoutes(r)
 		s.mountNetworkLinkRoutes(r)
 		s.mountNetworkRoutingRoutes(r)
 		s.mountNetworkGatewayRoutes(r)
@@ -182,6 +184,7 @@ func (s *Server) networkInventory(ctx context.Context) netx.Inventory {
 // request or the host — a name already taken, a tool that printed an error —
 // and is a 400 carrying it, never a 500 swallowing it.
 func mapNetworkError(err error) error {
+	var confirmation *netx.ConfirmationError
 	var guard *netx.GuardError
 	var missing *netx.UnavailableError
 	var readOnly *netx.ReadOnlyError
@@ -189,6 +192,8 @@ func mapNetworkError(err error) error {
 	switch {
 	case errors.As(err, &apiErr):
 		return apiErr
+	case errors.As(err, &confirmation):
+		return httpx.Err(http.StatusConflict, "network_confirmation", confirmation.Reason)
 	case errors.As(err, &guard):
 		return httpx.Err(http.StatusConflict, "would_lock_you_out", guard.Reason)
 	case errors.As(err, &missing):

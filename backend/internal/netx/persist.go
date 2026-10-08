@@ -213,6 +213,7 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 		}
 	}
 	journal.Phase, journal.Runtime = "runtime_applied", "applied"
+	journal.AppliedAt = time.Now().UTC()
 	if err := journal.save(); err != nil {
 		return finishRecovery(err, nil, true)
 	}
@@ -242,6 +243,10 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 		return finishRecovery(err, written, true)
 	}
 	if err := s.ensureUnit(ctx, unitChanged); err != nil {
+		if journal.OwnerUserID > 0 {
+			return finishRecovery(err, written, true)
+		}
+
 		journal.Phase, journal.Boot = "boot_degraded", "failed"
 		if journal.Watchdog == "armed" {
 			journal.Watchdog = "completed"
@@ -258,6 +263,10 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 	if !has("systemctl") {
 		journal.Boot = "unsupported"
 	}
+	if err := finishPendingConfirmation(journal); err != nil {
+		return finishRecovery(err, written, true)
+	}
+
 	if err := journal.save(); err != nil {
 		return finishRecovery(err, written, true)
 	}

@@ -11,6 +11,8 @@
  *    in the error body.
  */
 
+import { networkPendingHeaders } from "@/lib/network-pending"
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
 
 /** Headers required on browser mutations, including multipart uploads. */
@@ -176,7 +178,7 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
   const headers: Record<string, string> = {}
   const method = options.method ?? "GET"
   if (!["GET", "HEAD", "OPTIONS", "TRACE"].includes(method.toUpperCase())) {
-    Object.assign(headers, mutationHeaders())
+    Object.assign(headers, mutationHeaders(), networkPendingHeaders(path, method))
   }
   if (options.body !== undefined) headers["Content-Type"] = "application/json"
   if (options.confirm) {
@@ -191,6 +193,11 @@ export async function api<T>(path: string, options: RequestOptions = {}): Promis
     signal: options.signal,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   })
+
+  const networkChange = res.headers.get("X-JD-Network-Change")
+  if (networkChange && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("jd:network-change", { detail: networkChange }))
+  }
 
   return readResponse<T>(res)
 }

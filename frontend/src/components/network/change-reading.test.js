@@ -43,3 +43,15 @@ test("runtime-only changes report applied rather than saved for boot", () => {
     { label: "Runtime applied", tone: "running" },
   )
 })
+
+test("pending changes remain warnings until the fresh response is explicitly confirmed", () => {
+  expect(changeStatus({ ...saved, phase: "awaiting_confirmation", watchdog: "armed" })).toEqual({
+    label: "Awaiting reconnection confirmation",
+    tone: "warning",
+  })
+  expect(changeStatus({ ...saved, phase: "confirmed" })).toEqual({
+    label: "Confirmed after reconnecting",
+    tone: "running",
+  })
+  expect(changeStatus({ ...saved, phase: "confirmed", runtime: "unknown" }).tone).toBe("warning")
+})

@@ -82,6 +82,10 @@ type ChangeStatus struct {
 	Persistence    string    `json:"persistence"`
 	Boot           string    `json:"boot"`
 	RecoveryErrors []string  `json:"recoveryErrors,omitempty"`
+	OwnerUserID    int64     `json:"ownerUserId,omitempty"`
+	ExpiresAt      time.Time `json:"expiresAt,omitzero"`
+	AppliedAt      time.Time `json:"appliedAt,omitzero"`
+	VerifiedAt     time.Time `json:"verifiedAt,omitzero"`
 }
 
 type recoverySnapshot struct {
@@ -101,9 +105,12 @@ type recoveryCommand struct {
 
 type changeJournal struct {
 	ChangeStatus
-	Paths    Paths              `json:"paths"`
-	Files    []recoverySnapshot `json:"files"`
-	Commands []recoveryCommand  `json:"commands"`
+	Paths                 Paths              `json:"paths"`
+	Files                 []recoverySnapshot `json:"files"`
+	Commands              []recoveryCommand  `json:"commands"`
+	VerificationDigest    string             `json:"verificationDigest,omitempty"`
+	VerificationSession   string             `json:"verificationSession,omitempty"`
+	VerificationTransport string             `json:"verificationTransport,omitempty"`
 }
 
 // lockChange also serializes the independent host process against an apply.
@@ -183,6 +190,10 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
+	if pendingOwner(ctx) > 0 && (!s.independentRecovery || !has("systemctl") || !has("systemd-run")) {
+		return nil, &ConfirmationError{"Pending apply requires an independent host recovery watchdog; nothing was applied."}
+	}
+
 	old, err := s.loadSpec()
 	if err != nil {
 		return nil, err
@@ -212,6 +223,14 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 		}
 		j.Watchdog = "armed"
 	}
+	if owner := pendingOwner(ctx); owner > 0 {
+		if j.Watchdog != "armed" {
+			return nil, &ConfirmationError{"Pending apply requires an armed independent recovery watchdog; nothing was applied."}
+		}
+		j.OwnerUserID = owner
+		j.ExpiresAt = time.Now().UTC().Add(confirmationWindow)
+	}
+
 	if err := j.save(); err != nil {
 		return nil, err
 	}

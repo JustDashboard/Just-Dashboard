@@ -1,5 +1,6 @@
 "use client"
 
+import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
 import { SecurityState } from "@/components/security/security-state"
 
 /**
@@ -10,5 +11,10 @@ import { SecurityState } from "@/components/security/security-state"
  * a second copy of it. Each page reads its own part of the network itself.
  */
 export default function NetworkLayout({ children }: { children: React.ReactNode }) {
-  return <SecurityState>{children}</SecurityState>
+  return (
+    <SecurityState>
+      <NetworkChangeConfirmation />
+      {children}
+    </SecurityState>
+  )
 }

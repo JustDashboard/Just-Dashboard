@@ -5,6 +5,8 @@ export const CHANGE_PHASE: Record<NetworkChangeStatus["phase"], string> = {
   runtime_applied: "Runtime applied",
   persisted: "Persistence written",
   saved: "Saved",
+  awaiting_confirmation: "Awaiting reconnection confirmation",
+  confirmed: "Confirmed after reconnecting",
   recovering: "Recovery in progress",
   recovered: "Recovered",
   degraded: "Recovery needs attention",
@@ -20,7 +22,7 @@ export function changeStatus(change: NetworkChangeStatus) {
     Boolean(change.recoveryErrors?.length)
   const runtimeOnly = change.persistence === "not_applicable" && change.boot === "not_applicable"
   const verified =
-    change.phase === "saved" &&
+    ["saved", "confirmed"].includes(change.phase) &&
     change.runtime === "applied" &&
     change.watchdog === "completed" &&
     ((change.persistence === "written" && change.boot === "enabled") || runtimeOnly)

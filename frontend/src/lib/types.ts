@@ -6736,6 +6736,8 @@ export type NetworkChangeStatus = {
     | "runtime_applied"
     | "persisted"
     | "saved"
+    | "awaiting_confirmation"
+    | "confirmed"
     | "recovering"
     | "recovered"
     | "degraded"
@@ -6748,6 +6750,10 @@ export type NetworkChangeStatus = {
   persistence: "not_written" | "written" | "restored" | "unknown" | "not_applicable"
   boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown" | "not_applicable"
   recoveryErrors?: string[]
+  ownerUserId?: number
+  expiresAt?: string
+  appliedAt?: string
+  verifiedAt?: string
 }
 
 export type NetworkPersistence = {
@@ -7568,3 +7574,9 @@ export type BBRState = {
 }
 
 export type ShapingView = { devices: ShapeDevice[]; bbr: BBRState; qdiscs: string[] }
+
+export type NetworkConfirmationView = {
+  available: boolean
+  owned: boolean
+  change: NetworkChangeStatus | null
+}
