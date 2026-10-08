@@ -25,7 +25,7 @@ import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
+import { NewNetworkDialog } from "./network-create"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
@@ -66,7 +66,7 @@ export function NetworksTab({
     "all",
   )
 
-  const { data, error, loading, refresh } = usePoll(
+  const { data, error, refresh, lastSuccess } = usePoll(
     (signal) => get<DockerNetwork[]>("/docker/networks/", undefined, signal),
     30000,
   )
@@ -93,8 +93,10 @@ export function NetworksTab({
     }),
     [networks],
   )
-  if (loading) return <LoadingPanel />
-  if (error) return <ErrorState error={error} />
+  if (!data) {
+    if (error) return <ErrorState error={error} onRetry={refresh} />
+    return <LoadingPanel />
+  }
 
   // The three the Engine owns are never removable, so they are not "unused"
   // in any sense the prune button should count.
@@ -102,6 +104,12 @@ export function NetworksTab({
 
   return (
     <div className="space-y-4">
+      <NetworkReadWarning
+        error={error}
+        refresh={refresh}
+        lastSuccess={lastSuccess}
+        reading="Docker networks"
+      />
       {/* Plain: the list is the page, and each network is a card with its own
           edge — a frame around framed cards is the nesting §12 refuses. */}
       <Panel plain className="animate-rise">
@@ -219,7 +227,14 @@ export function NetworksTab({
         onOpenChange={(o) => !o && setSelected(null)}
         onChanged={refresh}
       />
-      <NewNetworkDialog open={creating} onOpenChange={setCreating} onCreated={refresh} />
+      <NewNetworkDialog
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={refresh}
+        networks={networks}
+        inventoryError={error}
+        refreshInventory={refresh}
+      />
     </div>
   )
 }
@@ -689,107 +704,6 @@ function AttachDialog({
           <Hint>
             An additional hostname the others can use. Useful when an application&apos;s config
             expects a name that is not the container&apos;s.
-          </Hint>
-        </div>
-      </div>
-    </Modal>
-  )
-}
-
-function NewNetworkDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCreated: () => void
-}) {
-  const [name, setName] = useState("")
-  const [internal, setInternal] = useState(false)
-  const [subnet, setSubnet] = useState("")
-  const [busy, setBusy] = useState(false)
-
-  const create = async () => {
-    setBusy(true)
-    try {
-      await post("/docker/networks/", { name, internal, subnet: subnet.trim() || undefined })
-      notify.success(`${name} created`)
-      onCreated()
-      onOpenChange(false)
-      setName("")
-      setSubnet("")
-      setInternal(false)
-    } catch (err) {
-      notify.error("Could not create the network", err)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onOpenChange={(o) => !busy && onOpenChange(o)}
-      size="sm"
-      title="Create network"
-      description="A private network for containers that need to reach each other. On it, a
-            container's name is its hostname."
-      footer={
-        <>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button onClick={create} disabled={busy || !name.trim()} pending={busy}>
-            Create
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="network-name" className="text-xs">
-            Name
-          </Label>
-          <Input
-            id="network-name"
-            value={name}
-            spellCheck={false}
-            className="font-mono"
-            placeholder="app-internal"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </div>
-        <Group className="flex items-start gap-3">
-          <Switch
-            id="network-internal"
-            checked={internal}
-            onCheckedChange={setInternal}
-            className="mt-0.5"
-          />
-          <label htmlFor="network-internal" className="cursor-pointer">
-            <span className="block text-xs font-medium">Cut it off from the internet</span>
-            <Hint>
-              Containers on this network can reach each other and nothing else. The right choice for
-              a database that only needs to talk to the application in front of it.
-            </Hint>
-          </label>
-        </Group>
-        <div className="space-y-1.5">
-          <Label htmlFor="network-subnet" className="text-xs">
-            Subnet (optional)
-          </Label>
-          <Input
-            id="network-subnet"
-            value={subnet}
-            spellCheck={false}
-            className="font-mono text-xs"
-            placeholder="Docker picks one"
-            onChange={(e) => setSubnet(e.target.value)}
-          />
-          <Hint>
-            Only worth setting if it has to avoid a range already used on your own network — a VPN
-            or an office LAN.
           </Hint>
         </div>
       </div>

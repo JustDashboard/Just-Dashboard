@@ -490,6 +490,13 @@ func (s *Server) handleNetworkCreate(w http.ResponseWriter, r *http.Request) err
 	if err := httpx.DecodeJSON(r, &spec); err != nil {
 		return err
 	}
+	spec, err := dockerx.NormalizeNetworkSpec(spec)
+	if err != nil {
+		return httpx.Wrap(http.StatusBadRequest, "invalid_network", err)
+	}
+	if err := s.authoriseNetworkSpec(r, spec); err != nil {
+		return err
+	}
 	net, err := s.modules.docker.CreateNetwork(r.Context(), spec)
 	if err != nil {
 		return s.dockerErr(err)

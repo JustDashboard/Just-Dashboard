@@ -13,6 +13,37 @@ the latest pair and cannot block collection. The final unsubscribe cancels the s
 snapshot. Direct reads and mutation checks remain fresh. Read-only database discovery can separately
 opt into a request-scoped inventory/inspection snapshot; it never survives that request.
 
+### Network creation
+
+`POST /docker/networks/` requires `service.control` and is audited. `NetworkSpec` accepts the legacy
+`subnet`, `gateway` and `ipRange` fields or an additive `ipam` array, never both. Each pool contains a
+canonical IPv4 or IPv6 subnet with optional gateway and allocation range inside it. IPv6 pools require
+`ipv6: true`; up to sixteen pools are accepted and pools in one request must not overlap. The Engine
+receives every pool and remains responsible for driver availability and conflicts with existing
+networks. Names and metadata are validated before calling it. Labels and options have at most 32
+entries, 256-byte keys, 4096-byte values and 16 KiB total per map.
+
+Custom drivers and any driver options require `system.admin`, including options for `bridge`.
+`host`, `none` and `null` are existing system networks and cannot be created here. Manually supplied
+`io.just-dashboard.*` and `com.docker.compose.*` labels are refused so a manual network cannot claim
+deployment or Compose ownership. A supplied pool containing the connection's observed client address
+is refused with `409 would_lock_you_out`. This guard does not prove absence of conflicts with other
+host, VPN or provider routes.
+
+The creation dialog keeps the simple name/internal/subnet path and exposes driver, gateway, allocation
+range, attachable, IPv6 pools, labels and driver options under Advanced settings. Non-administrators
+can create ordinary bridge networks but do not see driver or option controls. It checks explicit pools
+against the last listed Docker networks, retains the draft after an Engine refusal, and disables
+creation after an inventory read failure until a successful refresh. The internal-network setting
+does not claim isolation for containers also attached to another network.
+
+Focused coverage is `network_spec_test.go`, `docker_network_spec_test.go`,
+`network-create-reading.test.js` and `docker-network-create.spec.ts`. Engine-wire tests inspect both
+address families after creation; browser tests cover mobile/desktop payloads, refusals, stale inventory
+and role-specific controls. These fixtures do not constitute native driver or provider acceptance.
+
+### Containers and inventory
+
 - **`ContainerSpec` is the dashboard's shape, not `container.Config` + `HostConfig`.** Those are split on
   the historical accident of which fields the daemon could change after creation, and rendering them as a
   form is how Portainer's create page became twelve accordions. `toEngine` translates and warns about

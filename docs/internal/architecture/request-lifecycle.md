@@ -104,6 +104,11 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a host
   bind or plugin mount from this policy. Local filesystem volume backing paths must be absolute and pass
   the configured file-root check, including for administrators.
+- **Docker network specs.** Creation requires `service.control`; a custom driver or any driver options
+  additionally require `system.admin`. Manual creation refuses Compose/dashboard ownership labels and
+  explicit address pools that contain the connection's observed client address before Engine I/O.
+  Additive IPv4/IPv6 IPAM pools retain the legacy single-pool API; validation and bounded metadata are
+  described in [Docker network creation](../backend/docker-files-logs.md#network-creation).
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything

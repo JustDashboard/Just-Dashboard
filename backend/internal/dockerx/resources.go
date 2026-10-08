@@ -196,24 +196,19 @@ type NetworkSpec struct {
 	IPv6       bool              `json:"ipv6,omitempty"`
 	Labels     map[string]string `json:"labels,omitempty"`
 	Options    map[string]string `json:"options,omitempty"`
+	IPAM       []NetworkIPAM     `json:"ipam,omitempty"`
 }
 
 func (c *Client) CreateNetwork(ctx context.Context, spec NetworkSpec) (*Network, error) {
+	spec, err := NormalizeNetworkSpec(spec)
+	if err != nil {
+		return nil, err
+	}
 	cli, err := c.api()
 	if err != nil {
 		return nil, err
 	}
-	name := strings.TrimSpace(spec.Name)
-	if name == "" {
-		return nil, errors.New("a network name is required")
-	}
-	if !validResourceName(name) {
-		return nil, errors.New("a network name may contain letters, digits, and _ . - after the first character")
-	}
-	driver := spec.Driver
-	if driver == "" {
-		driver = "bridge"
-	}
+	name, driver := spec.Name, spec.Driver
 	opts := network.CreateOptions{
 		Driver:     driver,
 		Internal:   spec.Internal,
@@ -222,9 +217,11 @@ func (c *Client) CreateNetwork(ctx context.Context, spec NetworkSpec) (*Network,
 		Labels:     spec.Labels,
 		Options:    spec.Options,
 	}
-	if spec.Subnet != "" {
-		cfg := network.IPAMConfig{Subnet: spec.Subnet, Gateway: spec.Gateway, IPRange: spec.IPRange}
-		opts.IPAM = &network.IPAM{Driver: "default", Config: []network.IPAMConfig{cfg}}
+	if len(spec.IPAM) != 0 {
+		opts.IPAM = &network.IPAM{Driver: "default"}
+		for _, pool := range spec.IPAM {
+			opts.IPAM.Config = append(opts.IPAM.Config, network.IPAMConfig{Subnet: pool.Subnet, Gateway: pool.Gateway, IPRange: pool.IPRange})
+		}
 	}
 	res, err := cli.NetworkCreate(ctx, name, opts)
 	if err != nil {
