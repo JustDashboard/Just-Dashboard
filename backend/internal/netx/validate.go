@@ -85,7 +85,15 @@ func ParsePrefix(s string) (netip.Prefix, error) {
 	if p.Addr().Zone() != "" {
 		return netip.Prefix{}, fmt.Errorf("%q carries a zone; give the network without it", s)
 	}
-	return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()), nil
+	if p.Addr().Is4In6() {
+		// Unmapping changes the address width too. Keeping /120 beside an
+		// IPv4 address would produce an invalid prefix that callers trust.
+		if p.Bits() < 96 {
+			return netip.Prefix{}, fmt.Errorf("%q is wider than the IPv4-mapped address range", s)
+		}
+		return netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96), nil
+	}
+	return p, nil
 }
 
 // familyOf names the family the way ip and nft spell it.

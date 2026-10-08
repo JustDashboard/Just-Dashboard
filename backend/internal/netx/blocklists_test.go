@@ -29,6 +29,10 @@ type feedPage struct {
 	body   string
 }
 
+type feedTransport func(*http.Request) (*http.Response, error)
+
+func (f feedTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
 func newFeedServer(t *testing.T) *feedServer {
 	t.Helper()
 	f := &feedServer{pages: map[string]feedPage{}, hits: map[string]int{}}
@@ -400,6 +404,89 @@ func TestRefreshPutsTheCacheBackWhenTheTableCannotBeLoaded(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(h.paths.Dir, "lists", "1.txt")); string(b) != "203.0.113.0/24\n" {
 		t.Fatalf("the cache describes a list that never loaded: %q", b)
+	}
+}
+
+func TestRefreshRestoresThePreviousKernelRulesAfterVerificationFails(t *testing.T) {
+	srv := newFeedServer(t)
+	srv.set("/feed", "203.0.113.0/24\n")
+	h := newGwHost(t)
+	ctx := context.Background()
+	if _, err := h.AddBlocklist(ctx, BlocklistRequest{Name: "feed", Kind: "feed", URL: srv.URL + "/feed"}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	srv.set("/feed", "198.51.100.0/24\n")
+	h.fail("nft list set")
+	if err := h.RefreshBlocklist(ctx, 1); err == nil {
+		t.Fatal("a failed verification was reported successful")
+	}
+	if len(h.loaded) < 3 {
+		t.Fatalf("kernel did not receive a rollback: %v", h.loaded)
+	}
+	last := h.loaded[len(h.loaded)-1]
+	if !strings.Contains(last, "203.0.113.0/24") || strings.Contains(last, "198.51.100.0/24") {
+		t.Fatalf("rollback loaded the failed candidate's cache:\n%s", last)
+	}
+	if b, _ := os.ReadFile(blocklistFile(filepath.Join(h.paths.Dir, "lists"), 1)); string(b) != "203.0.113.0/24\n" {
+		t.Fatalf("previous cache was not restored: %q", b)
+	}
+}
+
+func TestRefreshKeepsTheCommittedCacheWhenEnablingTheUnitFails(t *testing.T) {
+	srv := newFeedServer(t)
+	srv.set("/feed", "203.0.113.0/24\n")
+	h := newGwHost(t)
+	ctx := context.Background()
+	if _, err := h.AddBlocklist(ctx, BlocklistRequest{Name: "feed", Kind: "feed", URL: srv.URL + "/feed"}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	srv.set("/feed", "198.51.100.0/24\n")
+	h.first("systemctl is-enabled", "disabled", nil)
+	h.fail("systemctl enable")
+	err := h.RefreshBlocklist(ctx, 1)
+	var saved *persistenceError
+	if !errors.As(err, &saved) {
+		t.Fatalf("unit failure did not retain committed classification: %v", err)
+	}
+	if b, _ := os.ReadFile(blocklistFile(filepath.Join(h.paths.Dir, "lists"), 1)); string(b) != "198.51.100.0/24\n" {
+		t.Fatalf("cache was reverted although runtime and spec committed: %q", b)
+	}
+	if last := h.loaded[len(h.loaded)-1]; !strings.Contains(last, "198.51.100.0/24") {
+		t.Fatalf("committed kernel rules were reverted:\n%s", last)
+	}
+}
+
+func TestRefreshCannotOverwriteAFeedChangedWhileItWasFetching(t *testing.T) {
+	srv := newFeedServer(t)
+	srv.set("/feed", "203.0.113.0/24\n")
+	srv.set("/new", "198.51.100.0/24\n")
+	h := newGwHost(t)
+	ctx := context.Background()
+	if _, err := h.AddBlocklist(ctx, BlocklistRequest{Name: "feed", Kind: "feed", URL: srv.URL + "/feed"}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	previous := httpClient
+	client := *httpClient
+	client.Transport = feedTransport(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path == "/feed" {
+			// Another operator changes the URL after refresh read its spec,
+			// before the old response is returned to the background worker.
+			if _, err := h.UpdateBlocklist(ctx, 1, BlocklistRequest{Name: "new", URL: srv.URL + "/new"}, gwClient, "ops"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return previous.Transport.RoundTrip(req)
+	})
+	httpClient = &client
+	t.Cleanup(func() { httpClient = previous })
+	if err := h.RefreshBlocklist(ctx, 1); err == nil || !strings.Contains(err.Error(), "changed while") {
+		t.Fatalf("stale refresh = %v", err)
+	}
+	if bl := h.spec(t).Blocklists[0]; bl.URL != srv.URL+"/new" {
+		t.Fatalf("stale refresh replaced the new URL: %+v", bl)
+	}
+	if b, _ := os.ReadFile(blocklistFile(filepath.Join(h.paths.Dir, "lists"), 1)); string(b) != "198.51.100.0/24\n" {
+		t.Fatalf("stale refresh replaced the new cache: %q", b)
 	}
 }
 

@@ -697,8 +697,9 @@ func TestRoutingRuleRequestValidation(t *testing.T) {
 		{name: "mark too large", req: RuleRequest{FWMark: "0x1ffffffff", Table: 100}, want: "firewall mark"},
 		{name: "bad interface", req: RuleRequest{IIF: "a b", Table: 100}, want: "interface name"},
 		{name: "bad from", req: RuleRequest{From: "x", Table: 100}, want: "not an IP address"},
-		{name: "an IPv6 rule", req: RuleRequest{From: "2001:db8:88::/64", Table: 100}, want: "IPv6 policy rules are not offered"},
-		{name: "an IPv6 destination", req: RuleRequest{To: "2001:db8:88::/64", Action: "blackhole"}, want: "IPv6 policy rules are not offered"},
+		{name: "mixed families", req: RuleRequest{From: "2001:db8:88::/64", To: "10.0.0.0/8", Table: 100}, want: "must match"},
+		{name: "explicit family mismatch", req: RuleRequest{Family: "inet", To: "2001:db8:88::/64", Action: "blackhole"}, want: "must match"},
+		{name: "unknown family", req: RuleRequest{Family: "banana", FWMark: "0x10", Table: 100}, want: "family"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -719,9 +720,7 @@ func TestRoutingRuleRequestValidation(t *testing.T) {
 func TestRoutingRuleRefusalsAreTheRightKind(t *testing.T) {
 	_, err := RuleRequest{Table: 100}.spec()
 	rtGuarded(t, err)
-	// An IPv6 rule is not a lockout and not a host restriction: the request
-	// asks for something the boot file cannot hold, so it is a plain refusal.
-	_, err = RuleRequest{From: "2001:db8::/32", Table: 100}.spec()
+	_, err = RuleRequest{Family: "inet", From: "2001:db8::/32", Table: 100}.spec()
 	var g *GuardError
 	if err == nil || errors.As(err, &g) || errors.Is(err, ErrReadOnly) {
 		t.Fatalf("err = %v, want a plain refusal", err)
@@ -797,6 +796,61 @@ func TestRoutingAddRuleGivenPriority(t *testing.T) {
 	}
 }
 
+func TestRoutingExplicitRulePriorityCannotCollideWithAnotherProgram(t *testing.T) {
+	rec := rtHost(t)
+	rec.replies = append([]reply{{prefix: "ip -j rule show", out: `[{"priority":15000,"src":"all","fwmark":"0x5","table":7}]`}}, rec.replies...)
+	s := testService(t)
+	_, err := s.AddRule(context.Background(), RuleRequest{Priority: 15000, FWMark: "0x20", Table: 200}, rtClient, "ion")
+	if !errors.Is(err, ErrExists) || len(rtMutations(rec)) != 0 {
+		t.Fatalf("err = %v, mutations = %v", err, rtMutations(rec))
+	}
+}
+
+func TestRoutingIPv6PolicyRulesPersistAndUseTheFamilyOnAddAndDelete(t *testing.T) {
+	rec := rtHost(t).on("ip -6 rule add", "").on("ip -6 rule del", "")
+	rec.replies = append([]reply{{prefix: "ip -j -6 rule show", out: `[{"priority":10000,"src":"all","table":7}]`}}, rec.replies...)
+	s := testService(t)
+	r, err := s.AddRule(context.Background(), RuleRequest{From: "2001:db8:88::7/64", Table: 100}, rtClient, "ion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Family != "inet6" || r.Priority != 10001 || r.From != "2001:db8:88::/64" {
+		t.Fatalf("rule = %+v", r)
+	}
+	want := "rule add priority 10001 from 2001:db8:88::/64 lookup 100"
+	if b, err := os.ReadFile(filepath.Join(s.paths.Dir, rules6File)); err != nil || !strings.Contains(string(b), want) {
+		t.Fatalf("IPv6 boot file = %q, %v", b, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(s.paths.Dir, linksFile)); strings.Contains(string(b), "2001:db8:88") {
+		t.Fatalf("IPv6 rule reached IPv4 batch: %s", b)
+	}
+	if err := s.DeleteRule(context.Background(), r.ID, rtClient, "ion"); err != nil {
+		t.Fatal(err)
+	}
+	if !rec.ran("ip -6 rule add priority 10001") || !rec.ran("ip -6 rule del priority 10001") || len(rtLoad(t, s).Rules) != 0 {
+		t.Fatalf("commands = %v", rec.commands())
+	}
+}
+
+func TestRoutingIPv6InterfaceAndMarkRulesHaveAnExplicitFamily(t *testing.T) {
+	for _, req := range []RuleRequest{
+		{Family: "inet6", OIF: "tailscale0", Action: "blackhole"},
+		{Family: "ipv6", FWMark: "0x10", Table: 100},
+		{From: "::/0", IIF: "eth0", Table: 100},
+	} {
+		r, err := req.spec()
+		if err != nil || r.Family != "inet6" {
+			t.Fatalf("request %+v -> %+v, %v", req, r, err)
+		}
+		if shadowsReplies(r, Path{Address: "100.110.34.9", Source: "100.110.34.31", Device: "tailscale0"}) {
+			t.Fatalf("IPv6 rule shadows IPv4 replies: %+v", r)
+		}
+	}
+	if _, err := ruleArgs(RuleSpec{Family: "inet6", Priority: 10000, From: "10.0.0.0/8", Action: "lookup", Table: 100}); err == nil {
+		t.Fatal("mismatched family in edited spec reached the boot file")
+	}
+}
+
 func TestRoutingAddRuleRefusals(t *testing.T) {
 	cases := []struct {
 		name string
@@ -809,6 +863,8 @@ func TestRoutingAddRuleRefusals(t *testing.T) {
 		{"an unreachable of the client's network", RuleRequest{To: "100.64.0.0/10", Action: "unreachable"}, "discard the replies to your connection"},
 		{"a blackhole of the server's own source", RuleRequest{From: "100.110.34.31/32", Action: "blackhole"}, "discard the replies to your connection"},
 		{"a blackhole of the device the replies leave by", RuleRequest{OIF: "tailscale0", Action: "blackhole"}, "discard the replies to your connection"},
+		{"a blackhole of unmarked replies", RuleRequest{FWMark: "0", Action: "blackhole"}, "discard the replies to your connection"},
+		{"a zero mark mask", RuleRequest{FWMark: "0x10/0", Table: 100}, "mask of zero"},
 		{"table 52", RuleRequest{From: "10.9.0.0/24", Table: 52}, "Tailscale"},
 		{"table 255", RuleRequest{From: "10.9.0.0/24", Table: 255}, "local"},
 	}
@@ -952,7 +1008,7 @@ func TestRoutingCanonicalFWMark(t *testing.T) {
 			t.Errorf("canonicalFWMark(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"x", "0x1ffffffff", "1/zz", "-1"} {
+	for _, bad := range []string{"x", "0x1ffffffff", "1/zz", "-1", "1/0"} {
 		if _, err := canonicalFWMark(bad); err == nil {
 			t.Errorf("canonicalFWMark(%q) accepted", bad)
 		}

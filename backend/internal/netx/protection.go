@@ -19,9 +19,16 @@ func renderSysctl(sp *Spec) string {
 	b.WriteString(generatedHeader)
 	keys := make([]string, 0, len(sp.Sysctls))
 	for k := range sp.Sysctls {
-		keys = append(keys, k)
+		if k != sysctlForwardV4 {
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
+	// Changing ip_forward resets accept_redirects. Restore forwarding before
+	// protections so a boot cannot undo the operator's redirect policy.
+	if _, set := sp.Sysctls[sysctlForwardV4]; set {
+		keys = append([]string{sysctlForwardV4}, keys...)
+	}
 	for _, k := range keys {
 		b.WriteString(k + " = " + sp.Sysctls[k] + "\n")
 	}
@@ -290,7 +297,7 @@ func (s *Service) SetProtections(ctx context.Context, values map[string]string, 
 func writeSysctls(ctx context.Context, keys []string, want, prev map[string]string) error {
 	for i, k := range keys {
 		if _, err := run(ctx, "sysctl", "-w", k+"="+want[k]); err != nil {
-			restoreSysctls(ctx, keys[:i], prev)
+			rollback(ctx, func(recovery context.Context) { restoreSysctls(recovery, keys[:i], prev) })
 			return fmt.Errorf("setting %s: %w", k, err)
 		}
 	}

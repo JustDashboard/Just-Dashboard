@@ -345,16 +345,30 @@ func TestNamespacesDelete(t *testing.T) {
 		}
 	})
 	t.Run("is remade when the client path moves", func(t *testing.T) {
-		rec := rtHost(t).on("ip link del", "").on("ip netns del", "").on("ip -batch -", "")
+		rec := rtHost(t).on("ip link del", "").on("ip netns del", "").on("ip -force -batch -", "")
 		rtAnswerAfter(rec, "ip netns del", "ip -j route get", fixture(t, "routing-route-get-moved.json"))
 		s := testService(t)
 		rtSaveSpec(t, s, made())
 		rtGuarded(t, s.DeleteNamespace(context.Background(), "tenant-a", rtClient, "ion"))
-		if !strings.Contains(string(rec.stdin["ip -batch -"]), "netns add tenant-a") {
+		if !strings.Contains(string(rec.stdin["ip -force -batch -"]), "netns add tenant-a") {
 			t.Fatalf("not remade: %v", rtMutations(rec))
 		}
 		if len(rtLoad(t, s).Namespaces) != 2 {
 			t.Fatal("a rolled-back delete dropped the entry")
+		}
+	})
+	t.Run("partial deletion restores the removed pairs even while the namespace remains", func(t *testing.T) {
+		rec := rtHost(t).on("ip link del", "").fail("ip netns del", "namespace is busy").on("ip -force -batch -", "")
+		s := testService(t)
+		rtSaveSpec(t, s, made())
+		if err := s.DeleteNamespace(context.Background(), "tenant-a", rtClient, "ion"); err == nil {
+			t.Fatal("a partial deletion was reported successful")
+		}
+		if got := string(rec.stdin["ip -force -batch -"]); !strings.Contains(got, "link add vx42 type veth") || !strings.Contains(got, "netns add tenant-a") {
+			t.Fatalf("removed pair was not restored: %q", got)
+		}
+		if len(rtLoad(t, s).Links) != 2 || len(rtLoad(t, s).Namespaces) != 2 {
+			t.Fatal("a failed deletion changed the spec")
 		}
 	})
 }

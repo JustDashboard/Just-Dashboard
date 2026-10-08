@@ -199,6 +199,42 @@ func TestForwardingOnWritesTheKey(t *testing.T) {
 	}
 }
 
+func TestForwardingPreservesManagedRedirectProtectionNowAndAtBoot(t *testing.T) {
+	rec := rtCommit(record(t)).on("sysctl -w", "")
+	rtProc(t, rec, "1", "0")
+	if err := os.MkdirAll(filepath.Dir(procPath("net.ipv4.conf.all.accept_redirects")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(procPath("net.ipv4.conf.all.accept_redirects"), []byte("0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inner := run
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := inner(ctx, name, args...)
+		if err == nil && name == "sysctl" && len(args) == 2 && args[1] == sysctlForwardV4+"=0" {
+			// Mirror Linux's host-mode reset when forwarding is disabled.
+			if err := os.WriteFile(procPath("net.ipv4.conf.all.accept_redirects"), []byte("1\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return out, err
+	}
+	s := testService(t)
+	sp := emptySpec()
+	sp.Sysctls["net.ipv4.conf.all.accept_redirects"] = "0"
+	rtSaveSpec(t, s, sp)
+	if _, err := s.SetForwarding(context.Background(), "ipv4", false, ForwardingNeeds{}, "ion"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := readSysctl("net.ipv4.conf.all.accept_redirects"); got != "0" {
+		t.Fatalf("forwarding reset redirect protection to %q", got)
+	}
+	b, err := os.ReadFile(s.paths.Sysctl)
+	if err != nil || strings.Index(string(b), "net.ipv4.ip_forward") > strings.Index(string(b), "net.ipv4.conf.all.accept_redirects") {
+		t.Fatalf("boot restores forwarding after protection: %q, %v", b, err)
+	}
+}
+
 // rtAcceptRA stands the uplink's accept_ra setting behind /proc/sys.
 func rtAcceptRA(t *testing.T, dev, val string) {
 	t.Helper()

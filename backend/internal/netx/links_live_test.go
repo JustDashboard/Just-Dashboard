@@ -234,6 +234,13 @@ func TestLiveBootFileLoadsWithoutOneError(t *testing.T) {
 	if out, err := ns.run(context.Background(), nil, "ip", "-force", "-batch", file); err != nil || strings.TrimSpace(out) != "" {
 		t.Fatalf("ip -force -batch: %v\n%s", err, out)
 	}
+	file6 := filepath.Join(t.TempDir(), rules6File)
+	if err := os.WriteFile(file6, []byte(renderIPv6Rules(sp)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := ns.run(context.Background(), nil, "ip", "-6", "-force", "-batch", file6); err != nil || strings.TrimSpace(out) != "" {
+		t.Fatalf("ip -6 -force -batch: %v\n%s", err, out)
+	}
 	// Running it a second time is what happens when the unit is started over
 	// a network that is already up: every line reports "exists" and none
 	// breaks the ones after it.
@@ -297,13 +304,10 @@ func TestLiveBootFileLoadsWithoutOneError(t *testing.T) {
 			t.Errorf("route %d was not recognised in the kernel's own output", id)
 		}
 	}
-	for _, id := range []int{9, 10, 11, 12} {
+	for _, id := range []int{9, 10, 11, 12, 13} {
 		if !managedRules[id] {
 			t.Errorf("rule %d was not recognised in the kernel's own output", id)
 		}
-	}
-	if managedRules[13] {
-		t.Error("the IPv6 rule, which the boot file cannot hold, reads as live")
 	}
 }
 

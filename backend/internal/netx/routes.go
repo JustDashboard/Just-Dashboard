@@ -108,7 +108,7 @@ type ipRoute struct {
 	Dst      string   `json:"dst"`
 	Gateway  string   `json:"gateway"`
 	Dev      string   `json:"dev"`
-	Table    string   `json:"table"`
+	Table    ipTable  `json:"table"`
 	Protocol string   `json:"protocol"`
 	Scope    string   `json:"scope"`
 	Metric   int      `json:"metric"`
@@ -123,17 +123,35 @@ type ipRoute struct {
 
 // ipRule is one entry of `ip -j rule show`.
 type ipRule struct {
-	Priority int    `json:"priority"`
-	Src      string `json:"src"`
-	SrcLen   *int   `json:"srclen"`
-	Dst      string `json:"dst"`
-	DstLen   *int   `json:"dstlen"`
-	IIF      string `json:"iif"`
-	OIF      string `json:"oif"`
-	FWMark   string `json:"fwmark"`
-	FWMask   string `json:"fwmask"`
-	Table    string `json:"table"`
-	Action   string `json:"action"`
+	Priority int     `json:"priority"`
+	Src      string  `json:"src"`
+	SrcLen   *int    `json:"srclen"`
+	Dst      string  `json:"dst"`
+	DstLen   *int    `json:"dstlen"`
+	IIF      string  `json:"iif"`
+	OIF      string  `json:"oif"`
+	FWMark   string  `json:"fwmark"`
+	FWMask   string  `json:"fwmask"`
+	Table    ipTable `json:"table"`
+	Action   string  `json:"action"`
+}
+
+// iproute2 versions may encode a table's number as a string or a JSON number,
+// while named tables remain strings. Both identify the same kernel table.
+type ipTable string
+
+func (t *ipTable) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		*t = ipTable(name)
+		return nil
+	}
+	var id uint32
+	if err := json.Unmarshal(data, &id); err != nil {
+		return fmt.Errorf("a routing table is a name or a 32-bit number: %w", err)
+	}
+	*t = ipTable(strconv.FormatUint(uint64(id), 10))
+	return nil
 }
 
 // rtTableDirs are the directories iproute2 reads table names from, the
@@ -190,17 +208,17 @@ func rtTables() (byID map[int]string, byName map[string]int) {
 
 // tableOf turns the table field of `ip -j` — a number, or the name ip found in
 // rt_tables, or nothing for main — into an id and a name.
-func tableOf(field string, byID map[int]string, byName map[string]int) (int, string) {
+func tableOf(field ipTable, byID map[int]string, byName map[string]int) (int, string) {
 	if field == "" {
 		return tableMain, byID[tableMain]
 	}
-	if n, err := strconv.Atoi(field); err == nil {
+	if n, err := strconv.Atoi(string(field)); err == nil {
 		return n, byID[n]
 	}
-	if id, ok := byName[field]; ok {
-		return id, field
+	if id, ok := byName[string(field)]; ok {
+		return id, string(field)
 	}
-	return 0, field
+	return 0, string(field)
 }
 
 func parseIPRoutes(out string) ([]ipRoute, error) {
@@ -576,6 +594,9 @@ func canonicalFWMark(s string) (string, error) {
 		m, err := strconv.ParseUint(mask, 0, 32)
 		if err != nil {
 			return "", fmt.Errorf("%q is not a firewall mark mask", mask)
+		}
+		if m == 0 {
+			return "", guarded("A firewall mark mask of zero matches every packet; select at least one mark bit.")
 		}
 		if m != 0xffffffff {
 			out += fmt.Sprintf("/0x%x", m)
@@ -965,6 +986,9 @@ func (s *Service) DeleteRoute(ctx context.Context, id int, client, actor string)
 
 // RuleRequest is a policy rule to add.
 type RuleRequest struct {
+	// Family is inet or inet6; omitted, addresses select it and interface or
+	// mark-only rules default to IPv4.
+	Family string `json:"family,omitempty"`
 	// Priority is chosen where zero; given, it is within the dashboard's
 	// range.
 	Priority int    `json:"priority,omitempty"`
@@ -983,6 +1007,16 @@ type RuleRequest struct {
 // priority.
 func (req RuleRequest) spec() (RuleSpec, error) {
 	r := RuleSpec{Family: "inet", Action: "lookup"}
+	explicitFamily := strings.ToLower(strings.TrimSpace(req.Family))
+	switch explicitFamily {
+	case "":
+	case "inet", "ipv4", "4":
+		r.Family = "inet"
+	case "inet6", "ipv6", "6":
+		r.Family = "inet6"
+	default:
+		return RuleSpec{}, fmt.Errorf("a rule's family is inet or inet6")
+	}
 	switch a := strings.ToLower(strings.TrimSpace(req.Action)); a {
 	case "", "lookup":
 	case "blackhole", "unreachable", "prohibit":
@@ -1001,10 +1035,10 @@ func (req RuleRequest) spec() (RuleSpec, error) {
 			return "", err
 		}
 		p = p.Masked()
+		families = append(families, p.Addr())
 		if p.Bits() == 0 {
 			return "", nil
 		}
-		families = append(families, p.Addr())
 		return p.String(), nil
 	}
 	var err error
@@ -1014,15 +1048,14 @@ func (req RuleRequest) spec() (RuleSpec, error) {
 	if r.To, err = selector(req.To); err != nil {
 		return RuleSpec{}, err
 	}
-	for _, a := range families {
-		if a.Is6() {
-			return RuleSpec{}, fmt.Errorf("IPv6 policy rules are not offered: the file the boot unit restores rules from is read by `ip` as IPv4, which has no way to say otherwise per line, so an IPv6 rule would be gone after a restart")
+	for i, a := range families {
+		family := familyOf(a)
+		if i == 0 && explicitFamily == "" {
+			r.Family = family
 		}
-	}
-	if len(families) == 0 {
-		// Nothing but an interface or a mark selects, and those say no
-		// family: the rule is IPv4's, as the boot file will read it.
-		r.Family = "inet"
+		if family != r.Family {
+			return RuleSpec{}, fmt.Errorf("a rule's source and destination must match its %s family", r.Family)
+		}
 	}
 	for _, f := range []struct {
 		raw string
@@ -1080,6 +1113,9 @@ func checkRuleTable(id int) error {
 
 // ruleArgs is the arguments after `ip rule add` for a managed rule.
 func ruleArgs(r RuleSpec) ([]string, error) {
+	if r.Family != "" && r.Family != "inet" && r.Family != "inet6" {
+		return nil, fmt.Errorf("a rule's family is inet or inet6")
+	}
 	if r.Priority < rulePriorityMin || r.Priority > rulePriorityMax {
 		return nil, fmt.Errorf("priority %d is outside the dashboard's range", r.Priority)
 	}
@@ -1091,6 +1127,9 @@ func ruleArgs(r RuleSpec) ([]string, error) {
 		p, err := ParsePrefix(f.val)
 		if err != nil {
 			return nil, err
+		}
+		if p.Addr().Is6() != (r.Family == "inet6") {
+			return nil, fmt.Errorf("a rule's selector must match its family")
 		}
 		args = append(args, f.key, p.Masked().String())
 	}
@@ -1138,7 +1177,27 @@ func shadowsReplies(r RuleSpec, path Path) bool {
 	if err != nil {
 		return false
 	}
-	if r.FWMark != "" || (r.IIF != "" && r.IIF != "lo") {
+	if client.Is6() != (r.Family == "inet6") {
+		return false
+	}
+	if r.FWMark != "" {
+		val, rawMask, masked := strings.Cut(r.FWMark, "/")
+		mark, err := strconv.ParseUint(val, 0, 32)
+		if err != nil {
+			return true
+		}
+		mask := uint64(0xffffffff)
+		if masked {
+			mask, err = strconv.ParseUint(rawMask, 0, 32)
+			if err != nil {
+				return true
+			}
+		}
+		if mark&mask != 0 {
+			return false
+		}
+	}
+	if r.IIF != "" && r.IIF != "lo" {
 		return false
 	}
 	if r.OIF != "" && path.Device != "" && r.OIF != path.Device {
@@ -1172,27 +1231,29 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 	next := sp.clone()
 	used := map[int]bool{}
 	for _, have := range next.Rules {
-		used[have.Priority] = true
+		if have.Family == r.Family {
+			used[have.Priority] = true
+		}
+	}
+	// Explicit priorities must avoid foreign rules too. Two rules at one
+	// priority otherwise leave their order dependent on who installed first.
+	query := append([]string{"-j"}, familyArgs(r.Family)...)
+	out, err := run(ctx, "ip", append(query, "rule", "show")...)
+	if err != nil {
+		return nil, err
+	}
+	live, err := parseIPRules(out)
+	if err != nil {
+		return nil, err
+	}
+	for _, l := range live {
+		used[l.Priority] = true
 	}
 	if r.Priority != 0 {
 		if used[r.Priority] {
 			return nil, fmt.Errorf("priority %d: %w", r.Priority, ErrExists)
 		}
 	} else {
-		// A priority another program already uses is left alone as well: the
-		// kernel would take a second rule at it, but which of the two a
-		// reader meant would then depend on their selectors.
-		out, err := run(ctx, "ip", "-j", "rule", "show")
-		if err != nil {
-			return nil, err
-		}
-		live, err := parseIPRules(out)
-		if err != nil {
-			return nil, err
-		}
-		for _, l := range live {
-			used[l.Priority] = true
-		}
 		for p := rulePriorityMin; p <= rulePriorityMax; p++ {
 			if !used[p] {
 				r.Priority = p
@@ -1219,10 +1280,12 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 	next.Rules = append(next.Rules, r)
 	err = s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
-			_, err := run(ctx, "ip", append([]string{"rule", "add"}, args...)...)
+			_, err := run(ctx, "ip", append(append(familyArgs(r.Family), "rule", "add"), args...)...)
 			return err
 		},
-		undo:   func(ctx context.Context) { s.best(ctx, "ip", append([]string{"rule", "del"}, args...)...) },
+		undo: func(ctx context.Context) {
+			s.best(ctx, "ip", append(append(familyArgs(r.Family), "rule", "del"), args...)...)
+		},
 		verify: verifyRouting(path),
 	})
 	if err != nil {
@@ -1264,12 +1327,14 @@ func (s *Service) DeleteRule(ctx context.Context, id int, client, actor string) 
 	}
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
-			if _, err := run(ctx, "ip", append([]string{"rule", "del"}, args...)...); err != nil && !isGone(err) {
+			if _, err := run(ctx, "ip", append(append(familyArgs(gone.Family), "rule", "del"), args...)...); err != nil && !isGone(err) {
 				return err
 			}
 			return nil
 		},
-		undo:   func(ctx context.Context) { s.best(ctx, "ip", append([]string{"rule", "add"}, args...)...) },
+		undo: func(ctx context.Context) {
+			s.best(ctx, "ip", append(append(familyArgs(gone.Family), "rule", "add"), args...)...)
+		},
 		verify: verifyRouting(path),
 	})
 }

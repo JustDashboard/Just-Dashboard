@@ -168,19 +168,41 @@ func (s *Service) SetForwarding(ctx context.Context, family string, on bool, nee
 		val = "1"
 	}
 	next.Sysctls[key] = val
-	err = s.commit(ctx, next, step{
-		apply: func(ctx context.Context) error {
-			_, err := run(ctx, "sysctl", "-w", key+"="+val)
-			return err
-		},
-		undo: func(ctx context.Context) { s.best(ctx, "sysctl", "-w", key+"="+prev) },
-		verify: func(context.Context) error {
-			got, err := readSysctl(key)
+	keys := []string{key}
+	want, previous := map[string]string{key: val}, map[string]string{key: prev}
+	// Linux resets this protection when ip_forward changes. Preserve the
+	// dashboard's managed choice immediately as well as in the boot drop-in.
+	redirectKey := "net.ipv4.conf.all.accept_redirects"
+	if canon == "ipv4" && prev != val {
+		if protection, set := next.Sysctls[redirectKey]; set {
+			cur, err := readSysctl(redirectKey)
 			if err != nil {
-				return err
+				return nil, fmt.Errorf("reading the managed redirect policy before changing forwarding: %w", err)
 			}
-			if got != val {
-				return fmt.Errorf("the kernel still reports %s = %s", key, got)
+			keys = append(keys, redirectKey)
+			want[redirectKey], previous[redirectKey] = protection, cur
+		}
+	}
+	undo := func(ctx context.Context) { restoreSysctls(ctx, keys, previous) }
+	err = s.commit(ctx, next, step{
+		apply: applying(func(ctx context.Context) error {
+			for _, k := range keys {
+				if _, err := run(ctx, "sysctl", "-w", k+"="+want[k]); err != nil {
+					return err
+				}
+			}
+			return nil
+		}, undo),
+		undo: undo,
+		verify: func(context.Context) error {
+			for _, k := range keys {
+				got, err := readSysctl(k)
+				if err != nil {
+					return err
+				}
+				if got != want[k] {
+					return fmt.Errorf("the kernel still reports %s = %s", k, got)
+				}
 			}
 			return nil
 		},
