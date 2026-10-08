@@ -6961,6 +6961,7 @@ export type WGPeer = {
   kind: "device" | "site" | "peer"
   publicKey: string
   address: string
+  address6?: string
   allowedIps: string[]
   endpoint: string
   /** Unix seconds; zero is never. */
@@ -6991,7 +6992,27 @@ export type WGInterface = {
   endpoint: string
   exitNode: boolean
   subnet: string
+  ipv6Enabled?: boolean
+  families?: {
+    ipv4: WGFamilyState
+    ipv6: WGFamilyState
+  }
+  endpointReachability?: "not_tested"
   peers: WGPeer[]
+}
+
+export type WGFamilyState = {
+  configured: boolean
+  subnet?: string
+  runtime: "not_configured" | "present" | "down" | "missing" | "unreadable"
+  reason?: string
+  exit: {
+    configured: boolean
+    interface?: string
+    runtime: "disabled" | "verified" | "degraded" | "unknown"
+    reason?: string
+    capability: GatewayCapability
+  }
 }
 
 export type WireGuardView = {

@@ -23,6 +23,7 @@ import { InstallHandoff } from "@/components/network/install"
 import { TunnelPicture } from "@/components/network/vpn/tunnel-picture"
 import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
 import { WireGuardSetup } from "@/components/network/vpn/setup"
+import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidence"
 import { TailscaleBlock } from "@/components/network/vpn/tailscale"
 
 /**
@@ -86,8 +87,7 @@ export default function NetworkVPNPage() {
     ...(overview.data?.dockerNetworks.flatMap((n) => n.subnets) ?? []),
     ...(overview.data?.links
       .filter((l) => l.managed && l.role === "bridge")
-      .flatMap((l) => l.addresses.filter((a) => a.family === "inet").map((a) => network(a.cidr))) ??
-      []),
+      .flatMap((l) => l.addresses.map((a) => network(a.cidr))) ?? []),
   ]
   const addingTunnel = wireguard.interfaces.find((t) => t.name === adding?.tunnel)
   const openTunnel = wireguard.interfaces.find((t) => t.name === opened?.tunnel)
@@ -155,7 +155,7 @@ export default function NetworkVPNPage() {
           value={exits.length ? exits.join(" · ") : "None"}
           hint={
             exits.length
-              ? "clients browse through this server"
+              ? "configured exit offers; provider path untested"
               : "this server routes no client's internet"
           }
         />
@@ -307,9 +307,7 @@ function TunnelBlock({
     const apply = () =>
       act(
         () => post(`${base}/exit`, { on }),
-        on
-          ? `${tunnel.name} routes its clients' internet`
-          : `${tunnel.name} is a private network only`,
+        on ? `${tunnel.name} has IPv4 exit rules` : `${tunnel.name} is a private network only`,
       )
     if (on) return void apply()
     confirm({
@@ -328,6 +326,22 @@ function TunnelBlock({
       },
     })
   }
+  const setIPv6Exit = (on: boolean) => {
+    if (on)
+      return void act(
+        () => post(`${base}/exit`, { on: true, ipv6: true }),
+        `${tunnel.name} has IPv4 and IPv6 exit rules`,
+      )
+    confirm({
+      title: `Turn off ${tunnel.name}'s IPv6 exit`,
+      confirmLabel: "Turn off IPv6",
+      description: "Full-tunnel clients lose IPv6 internet access. IPv4 exit remains configured.",
+      action: async () => {
+        await post(`${base}/exit`, { on: true, ipv6: false })
+        onChanged()
+      },
+    })
+  }
   const online = tunnel.peers.filter((p) => p.online).length
   return (
     <Panel plain>
@@ -342,20 +356,37 @@ function TunnelBlock({
           <span className="flex flex-wrap items-center gap-3">
             <Status
               tone={tunnel.up ? "running" : "stopped"}
-              live={tunnel.up && online > 0}
               label={tunnel.up ? `${online} of ${tunnel.peers.length} online` : "Down"}
             />
             {tunnel.managed && (
               <>
                 <label className="flex items-center gap-2 text-hint text-muted-foreground">
-                  Exit node
+                  IPv4 exit
                   <Switch
                     checked={tunnel.exitNode}
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      (!tunnel.exitNode && tunnel.families?.ipv4.exit.capability.writable === false)
+                    }
                     onCheckedChange={setExit}
                     aria-label={`${tunnel.name} as an exit node`}
                   />
                 </label>
+                {tunnel.ipv6Enabled && (
+                  <label className="flex items-center gap-2 text-hint text-muted-foreground">
+                    IPv6 exit
+                    <Switch
+                      checked={Boolean(tunnel.families?.ipv6.exit.configured)}
+                      disabled={
+                        busy ||
+                        (!tunnel.families?.ipv6.exit.configured &&
+                          tunnel.families?.ipv6.exit.capability.writable === false)
+                      }
+                      onCheckedChange={setIPv6Exit}
+                      aria-label={`${tunnel.name} IPv6 exit`}
+                    />
+                  </label>
+                )}
                 {tunnel.up ? (
                   <Button size="xs" variant="outline" onClick={down} disabled={busy}>
                     Take down
@@ -388,6 +419,7 @@ function TunnelBlock({
         }
       />
       <PanelBody>
+        <WireGuardFamilyEvidence tunnel={tunnel} />
         {!tunnel.managed && (
           <Notice title="Written by hand">
             This tunnel&rsquo;s file was not written here, so it is read and never changed.

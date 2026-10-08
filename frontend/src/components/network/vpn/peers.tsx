@@ -160,7 +160,9 @@ export function AddPeer({
               label="Send its internet traffic here"
               hint={
                 tunnel.exitNode
-                  ? "IPv4 internet goes through this server. IPv6 is blocked to prevent leaks until dual-stack egress is configured."
+                  ? tunnel.families?.ipv6.exit.configured
+                    ? "IPv4 and IPv6 default routes use this server while the tunnel is up. Local routes can remain native; this is not a client kill switch."
+                    : "IPv4 internet goes through this server. IPv6 is captured by the tunnel and has no exit until IPv6 egress is enabled."
                   : "Needs the tunnel to be an exit node; without it only this server's networks are reached."
               }
             >
@@ -170,7 +172,7 @@ export function AddPeer({
                   onCheckedChange={setFullTunnel}
                   aria-label="Full tunnel"
                 />
-                {fullTunnel ? "IPv4 full tunnel" : "Only this server's networks"}
+                {fullTunnel ? "Full tunnel" : "Only this server's networks"}
               </label>
             </Field>
           ) : (
@@ -311,7 +313,6 @@ export function PeerSheet({
             <Status
               tone={peer.online ? "running" : peer.latestHandshake ? "stopped" : "unknown"}
               label={peer.online ? "Online" : peer.latestHandshake ? "Quiet" : "Never connected"}
-              live={peer.online}
             />
             {peer.id > 0 && tunnel.managed && (
               <Button size="sm" variant="outline" className="ml-auto" onClick={remove}>
@@ -327,6 +328,11 @@ export function PeerSheet({
             <Detail label="Address">
               <span className="font-mono">{peer.address}</span>
             </Detail>
+            {peer.address6 && (
+              <Detail label="IPv6 address">
+                <span className="font-mono break-all">{peer.address6}</span>
+              </Detail>
+            )}
             <Detail label="Routes to it">
               <span className="font-mono">{peer.allowedIps.join(", ") || "—"}</span>
             </Detail>
