@@ -56,18 +56,26 @@ export function IPAMReservationPicker({
   )
   const unavailable =
     Boolean(selected.length && (!inventory.data || inventory.error || invalid)) ||
-    Boolean(initialId && !inventory.data) ||
+    Boolean(initialId && (!inventory.data || inventory.error)) ||
     missingInitial
   useEffect(() => {
     onUnavailable(unavailable)
   }, [unavailable, onUnavailable])
   useEffect(() => {
-    if (!open || !admin || !initialId || !inventory.data || loadedInitial.current === initialId)
+    if (
+      !open ||
+      !admin ||
+      !initialId ||
+      !inventory.data ||
+      inventory.error ||
+      loadedInitial.current === initialId
+    )
       return
-    loadedInitial.current = initialId
     const row = selectedReservation(inventory.data.reservations, initialId, owner)
-    if (row) onSelect(row, row.family)
-  }, [open, admin, initialId, inventory.data, owner, onSelect])
+    if (!row) return
+    loadedInitial.current = initialId
+    onSelect(row, row.family)
+  }, [open, admin, initialId, inventory.data, inventory.error, owner, onSelect])
   if (!admin) return null
   return (
     <div className="space-y-3">
@@ -108,7 +116,7 @@ export function IPAMReservationPicker({
         <div role="alert" className="space-y-2 text-hint text-destructive">
           <p>
             {inventory.error
-              ? "Shared reservation inventory is unavailable. Your selected draft is retained; refresh before using it."
+              ? "Shared reservation inventory is unavailable. Your draft is retained; refresh before using a selected plan."
               : "The selected reservation is absent, held by another handoff or no longer reserved. Return to IPAM to review it."}
           </p>
           <Button type="button" size="xs" variant="outline" onClick={inventory.refresh}>

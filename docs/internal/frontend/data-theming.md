@@ -72,9 +72,12 @@ containment; successful setup says configured when native runtime is not up.
 SQM retains its entire bounded profile after rejected writes and requires pending reconnection
 even when the global preference is off. Failed native shaping polls block edits until fresh reads.
 IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
-review; planning release never deletes a native resource. Incomplete planning envelopes are failed
-reads: a selected owner draft survives an unreadable refresh and its handoff is blocked until fresh
-inventory is available. External pickers accept only current option identities so synthetic empty
+review; planning release never deletes a native resource. Incomplete planning envelopes or malformed
+rows are failed reads: a selected owner draft survives an unreadable refresh and its handoff is blocked
+until fresh inventory is available. Creation links initialize once per seed identity after a valid
+row is available; consumed/detached seeds cannot overwrite retained edits or gate an unselected
+draft. A new seed identity and delayed admin authentication can still initialize a plan. External
+pickers accept only current option identities so synthetic empty
 form events cannot erase dependent scope. External check reload/filter/comparison never launch
 probes and retain source/family/time distinctions. Socket history shows decimal-string
 TCP counters and explicit null/unknown UDP/drop data, with recording separate from page reads.

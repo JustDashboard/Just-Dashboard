@@ -83,18 +83,97 @@ export type IPAMView = {
   limitations: string[]
 }
 export function readIPAMView(value: unknown): IPAMView {
-  const view = value as Partial<IPAMView> | null
+  const view = ipamRecord(value)
+  const inventory = ipamRecord(view?.inventory)
   if (
     !view ||
-    !Array.isArray(view.pools) ||
-    !Array.isArray(view.reservations) ||
-    !Array.isArray(view.utilization) ||
-    !Array.isArray(view.limitations) ||
-    !Array.isArray(view.inventory?.observations) ||
-    !Array.isArray(view.inventory?.coverage)
+    !inventory ||
+    !ipamStrings(inventory, ["checkedAt", "finishedAt"]) ||
+    !ipamStringArray(view.limitations) ||
+    !ipamRows(
+      view.pools,
+      (row) =>
+        ipamStrings(row, ["id", "name", "prefix", "createdAt"]) &&
+        ipamFamily(row.family) &&
+        typeof row.allocationBits === "number" &&
+        Number.isInteger(row.allocationBits) &&
+        row.allocationBits >= 0 &&
+        row.allocationBits <= (row.family === "inet" ? 32 : 128) &&
+        ipamOptionalStrings(row, ["retiredAt"]),
+    ) ||
+    !ipamRows(
+      view.reservations,
+      (row) =>
+        ipamStrings(row, [
+          "id",
+          "poolId",
+          "prefix",
+          "owner",
+          "resource",
+          "state",
+          "createdAt",
+          "updatedAt",
+          "startedBy",
+        ]) &&
+        ipamFamily(row.family) &&
+        Object.hasOwn(ownerLabel, String(row.owner)) &&
+        Object.hasOwn(reservationState, String(row.state)) &&
+        typeof row.acknowledgedUnknown === "boolean" &&
+        ipamStringArray(row.unknownSources) &&
+        ipamOptionalStrings(row, ["releasedAt", "nativeId", "detail"]),
+    ) ||
+    !ipamRows(
+      view.utilization,
+      (row) =>
+        typeof row.poolId === "string" &&
+        [
+          "totalAddresses",
+          "totalBlocks",
+          "reservedBlocks",
+          "observedBlocks",
+          "unavailableBlocks",
+          "candidateBlocks",
+        ].every((key) => typeof row[key] === "string" && /^\d+$/.test(row[key] as string)) &&
+        (row.coverage === "observed" || row.coverage === "unknown"),
+    ) ||
+    !ipamRows(inventory.observations, (row) =>
+      ipamStrings(row, ["prefix", "owner", "resource", "domain", "basis"]),
+    ) ||
+    !ipamRows(
+      inventory.coverage,
+      (row) =>
+        ipamStrings(row, ["source", "detail", "checkedAt"]) &&
+        ["observed", "unknown", "unreadable"].includes(String(row.state)),
+    )
   )
     throw new Error("Shared address inventory returned an incomplete response. Refresh to retry.")
-  return view as IPAMView
+  return value as IPAMView
+}
+function ipamRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+function ipamRows(value: unknown, valid: (row: Record<string, unknown>) => boolean) {
+  return (
+    Array.isArray(value) &&
+    value.every((item) => {
+      const row = ipamRecord(item)
+      return row !== undefined && valid(row)
+    })
+  )
+}
+function ipamStrings(row: Record<string, unknown>, keys: string[]) {
+  return keys.every((key) => typeof row[key] === "string")
+}
+function ipamOptionalStrings(row: Record<string, unknown>, keys: string[]) {
+  return keys.every((key) => row[key] === undefined || typeof row[key] === "string")
+}
+function ipamStringArray(value: unknown) {
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+function ipamFamily(value: unknown) {
+  return value === "inet" || value === "inet6"
 }
 export const reservationState: Record<IPAMReservation["state"], string> = {
   reserved: "Reserved plan",

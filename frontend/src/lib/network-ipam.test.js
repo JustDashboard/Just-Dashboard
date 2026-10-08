@@ -16,12 +16,57 @@ describe("shared planning evidence", () => {
       reservations: [],
       utilization: [],
       limitations: [],
-      inventory: { observations: [], coverage: [] },
+      inventory: { checkedAt: "", finishedAt: "", observations: [], coverage: [] },
     }
     expect(readIPAMView(empty)).toBe(empty)
     expect(() => readIPAMView({ ...empty, inventory: { observations: [] } })).toThrow(
       "incomplete response",
     )
+  })
+  test("malformed rows and unknown states fail before a picker can render them", () => {
+    const empty = {
+      pools: [],
+      reservations: [],
+      utilization: [],
+      limitations: [],
+      inventory: { checkedAt: "", finishedAt: "", observations: [], coverage: [] },
+    }
+    const reservation = {
+      id: "a".repeat(32),
+      poolId: "b".repeat(32),
+      prefix: "10.244.0.0/24",
+      family: "inet",
+      owner: "docker_network",
+      resource: "private-app",
+      state: "reserved",
+      acknowledgedUnknown: false,
+      unknownSources: [],
+      createdAt: "2026-10-08T00:00:00Z",
+      updatedAt: "2026-10-08T00:00:00Z",
+      startedBy: "operator",
+    }
+    expect(readIPAMView({ ...empty, reservations: [reservation] }).reservations).toEqual([
+      reservation,
+    ])
+    for (const row of [
+      null,
+      [],
+      {},
+      { ...reservation, family: "ipv7" },
+      { ...reservation, state: "available" },
+      { ...reservation, owner: "unrecognized" },
+      { ...reservation, unknownSources: [null] },
+      { ...reservation, detail: {} },
+      { ...reservation, resource: 12 },
+    ])
+      expect(() => readIPAMView({ ...empty, reservations: [row] })).toThrow("incomplete response")
+    for (const key of ["pools", "utilization"])
+      expect(() => readIPAMView({ ...empty, [key]: [null] })).toThrow("incomplete response")
+    for (const key of ["observations", "coverage"])
+      expect(() =>
+        readIPAMView({ ...empty, inventory: { ...empty.inventory, [key]: [null] } }),
+      ).toThrow("incomplete response")
+    expect(() => readIPAMView({ ...empty, limitations: [{}] })).toThrow("incomplete response")
   })
   test("unknown coverage and no known overlap never claim free native/provider space", () => {
     expect(previewReading({ status: "unknown_coverage" }).label).toBe("Coverage incomplete")

@@ -39,6 +39,18 @@ export function NewNetworkDialog({
   const [advanced, setAdvanced] = useState(false)
   const [busy, setBusy] = useState(false)
   const [reservations, setReservations] = useState<IPAMReservation[]>([])
+  // A consumed or detached link must not initialize this retained draft again.
+  const [detachedSeeds, setDetachedSeeds] = useState<string[]>([])
+  const activeSeed =
+    initialReservationId && !detachedSeeds.includes(initialReservationId)
+      ? initialReservationId
+      : ""
+  const detachSeed = useCallback(() => {
+    if (initialReservationId)
+      setDetachedSeeds((ids) =>
+        ids.includes(initialReservationId) ? ids : [...ids, initialReservationId],
+      )
+  }, [initialReservationId])
   const [ipamUnavailable, setIPAMUnavailable] = useState(Boolean(initialReservationId))
   const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
   const reading = useMemo(() => {
@@ -49,6 +61,8 @@ export function NewNetworkDialog({
     }
   }, [draft, networks])
   const update = <K extends keyof NetworkDraft>(key: K, value: NetworkDraft[K]) => {
+    if (key === "name" || key === "subnet" || key === "ipv6Subnet" || (key === "ipv6" && !value))
+      detachSeed()
     if (key === "name") setReservations([])
     if (key === "subnet") setReservations((rows) => rows.filter((row) => row.family !== "inet"))
     if (key === "ipv6Subnet" || (key === "ipv6" && !value))
@@ -57,6 +71,7 @@ export function NewNetworkDialog({
   }
   const selectReservation = useCallback(
     (row: IPAMReservation | undefined, family: "inet" | "inet6") => {
+      detachSeed()
       setReservations((rows) => [
         ...rows.filter(
           (existing) => existing.family !== family && (!row || existing.resource === row.resource),
@@ -84,11 +99,18 @@ export function NewNetworkDialog({
       }))
       if (family === "inet6") setAdvanced(true)
     },
-    [],
+    [detachSeed],
   )
 
   const create = async () => {
-    if (!reading.spec || busy || inventoryError || ipamUnavailable || !can("service.control"))
+    if (
+      !reading.spec ||
+      busy ||
+      inventoryError ||
+      activeSeed ||
+      ipamUnavailable ||
+      !can("service.control")
+    )
       return
     setBusy(true)
     try {
@@ -104,6 +126,7 @@ export function NewNetworkDialog({
       setDraft(EMPTY_NETWORK)
       setAdvanced(false)
       setReservations([])
+      setDetachedSeeds([])
     } catch (error) {
       if (reservations.length) setIPAMRefreshKey((value) => value + 1)
       notify.error("Could not create the network", error)
@@ -161,6 +184,7 @@ export function NewNetworkDialog({
               busy ||
               !reading.spec ||
               Boolean(inventoryError) ||
+              Boolean(activeSeed) ||
               ipamUnavailable ||
               !can("service.control")
             }
@@ -178,7 +202,7 @@ export function NewNetworkDialog({
           selected={reservations}
           onSelect={selectReservation}
           onUnavailable={setIPAMUnavailable}
-          initialId={initialReservationId}
+          initialId={activeSeed}
           disabled={busy}
           refreshKey={ipamRefreshKey}
         />

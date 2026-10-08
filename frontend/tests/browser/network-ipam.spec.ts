@@ -250,3 +250,263 @@ test("WireGuard reservation opts IPv6 addressing in while leaving IPv6 exit off"
     ipv6: { subnet: row.prefix, exitNode: false },
   })
 })
+
+for (const later of ["missing", "held", "error"] as const) {
+  test(`a detached Docker seed permits an unused draft after a later ${later} read`, async ({
+    page,
+  }) => {
+    await page.clock.install()
+    await setup(page)
+    const row = { ...fixture.reservations[0], state: "reserved" as const }
+    let refreshed = false
+    await page.route("**/api/v1/network/ipam/", (route) => {
+      if (refreshed && later === "error")
+        return json(route, { error: { code: "unavailable", message: "Planning unavailable" } }, 500)
+      return json(route, {
+        ...fixture,
+        reservations: !refreshed
+          ? [row]
+          : later === "missing"
+            ? []
+            : [{ ...row, state: "review_required" }],
+      })
+    })
+    const calls: Record<string, unknown>[] = []
+    await page.route("**/api/v1/docker/networks/", (route) => {
+      if (route.request().method() === "POST") {
+        calls.push(route.request().postDataJSON())
+        return json(route, { id: "created" }, 201)
+      }
+      return json(route, [])
+    })
+    await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+    const dialog = page.getByRole("dialog", { name: "Create network" })
+    await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+    await dialog.getByLabel("Name", { exact: true }).fill("manual-private")
+    await dialog.getByLabel("IPv6 subnet (optional)").fill("fd49:abcd::/64")
+    refreshed = true
+    await page.clock.runFor(30_100)
+    if (later === "error")
+      await expect(
+        dialog.getByRole("alert").filter({ hasText: "inventory is unavailable" }),
+      ).toBeVisible()
+    await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
+    await dialog.getByRole("button", { name: "Create", exact: true }).click()
+    await expect.poll(() => calls.length).toBe(1)
+    expect(calls[0]).toMatchObject({ name: "manual-private", ipam: [{ subnet: "fd49:abcd::/64" }] })
+    expect(calls[0]).not.toHaveProperty("ipamReservationIds")
+  })
+}
+
+test("a delayed Docker seed cannot overwrite explicit input", async ({ page }) => {
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/v1/network/ipam/", async (route) => {
+    await pending
+    return json(route, { ...fixture, reservations: [row] })
+  })
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await dialog.getByLabel("Name", { exact: true }).fill("manual-before-read")
+  await dialog.getByLabel("Subnet (optional)", { exact: true }).fill("10.249.0.0/24")
+  release()
+  await expect(dialog.getByLabel("Shared IPv6 reservation")).toBeEnabled()
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("manual-before-read")
+  await expect(dialog.getByLabel("Subnet (optional)", { exact: true })).toHaveValue("10.249.0.0/24")
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
+})
+
+test("a missing initial seed initializes when a later readable inventory contains it", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  let available = false
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: available ? [row] : [] }),
+  )
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByRole("alert").filter({ hasText: "reservation is absent" })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
+  available = true
+  await page.clock.runFor(30_100)
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await expect(dialog.getByLabel("Shared IPv6 reservation")).toContainText(row.resource)
+})
+
+test("malformed later rows retain a selected Docker draft and block its handoff", async ({
+  page,
+}) => {
+  await page.clock.install()
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  let malformed = false
+  const errors: string[] = []
+  page.on("pageerror", (error) => errors.push(error.message))
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: malformed ? [null] : [row] }),
+  )
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  malformed = true
+  await page.clock.runFor(30_100)
+  await expect(
+    dialog.getByRole("alert").filter({ hasText: "inventory is unavailable" }),
+  ).toBeVisible()
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
+  expect(errors).toEqual([])
+})
+
+test("closing and reopening retains an explicitly detached Docker draft", async ({ page }) => {
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: [row] }),
+  )
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await dialog.getByLabel("IPv6 subnet (optional)").fill("fd49:abcd::/64")
+  await dialog.getByRole("button", { name: "Cancel", exact: true }).click()
+  await page.getByRole("button", { name: "Create network", exact: true }).click()
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue("fd49:abcd::/64")
+  await expect(dialog.getByLabel("Shared IPv6 reservation")).toContainText("No selected plan")
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
+})
+
+test("a new seed identity can initialize after the earlier one was detached", async ({ page }) => {
+  await setup(page)
+  const first = { ...fixture.reservations[0], state: "reserved" as const }
+  const next = {
+    ...first,
+    id: "c".repeat(32),
+    prefix: "fd48:abcd:1::/64",
+    resource: "next-private",
+  }
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, { ...fixture, reservations: [first, next] }),
+  )
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${first.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(first.resource)
+  await dialog.getByLabel("Name", { exact: true }).fill("manual-private")
+  await page.evaluate(
+    (id) => window.history.pushState(null, "", `/docker/networks?ipamReservation=${id}`),
+    next.id,
+  )
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(next.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(next.prefix)
+})
+
+test("an edited WireGuard seed stays detached when the original becomes held", async ({ page }) => {
+  await page.clock.install()
+  await setup(page)
+  const row = {
+    ...fixture.reservations[0],
+    owner: "wireguard_server" as const,
+    resource: "wg-ipam",
+    state: "reserved" as const,
+  }
+  let held = false
+  await page.route("**/api/v1/network/ipam/", (route) =>
+    json(route, {
+      ...fixture,
+      reservations: [{ ...row, state: held ? "review_required" : "reserved" }],
+    }),
+  )
+  const calls: Record<string, unknown>[] = []
+  await page.route("**/api/v1/network/vpn/wireguard", (route) => {
+    calls.push(route.request().postDataJSON())
+    return json(route, {
+      interface: { name: "wg-manual", listenPort: 51820 },
+      warnings: [],
+      firewall: { opened: false },
+    })
+  })
+  await page.goto(`/network/vpn?ipamReservation=${row.id}`)
+  const dialog = page.getByRole("dialog", { name: "Create WireGuard tunnel" })
+  await expect(dialog.getByLabel("IPv6 tunnel network", { exact: true })).toHaveValue(row.prefix)
+  await dialog.getByLabel("Tunnel name").fill("wg-manual")
+  await dialog.getByLabel("IPv6 tunnel network", { exact: true }).fill("fd49:abcd::/64")
+  held = true
+  await page.clock.runFor(30_100)
+  await expect(dialog.getByRole("button", { name: "Set up WireGuard", exact: true })).toBeEnabled()
+  await dialog.getByRole("button", { name: "Set up WireGuard", exact: true }).click()
+  await expect.poll(() => calls.length).toBe(1)
+  expect(calls[0]).toMatchObject({
+    name: "wg-manual",
+    ipv6: { subnet: "fd49:abcd::/64", exitNode: false },
+  })
+  expect(calls[0]).not.toHaveProperty("ipamReservationIds")
+})
+
+for (const later of ["missing", "error"] as const) {
+  test(`a selected Docker reservation still blocks after a later ${later} read`, async ({
+    page,
+  }) => {
+    await page.clock.install()
+    await setup(page)
+    const row = { ...fixture.reservations[0], state: "reserved" as const }
+    let refreshed = false
+    await page.route("**/api/v1/network/ipam/", (route) =>
+      refreshed && later === "error"
+        ? json(route, { error: { code: "unavailable", message: "Planning unavailable" } }, 500)
+        : json(route, { ...fixture, reservations: refreshed ? [] : [row] }),
+    )
+    await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+    await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+    const dialog = page.getByRole("dialog", { name: "Create network" })
+    await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+    refreshed = true
+    await page.clock.runFor(30_100)
+    await expect(
+      dialog.getByRole("alert").filter({
+        hasText: later === "error" ? "inventory is unavailable" : "reservation is absent",
+      }),
+    ).toBeVisible()
+    await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+    await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+    await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeDisabled()
+  })
+}
+
+test("a creation link initializes after delayed admin authentication", async ({ page }) => {
+  await setup(page)
+  const row = { ...fixture.reservations[0], state: "reserved" as const }
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/v1/auth/session", async (route) => {
+    await pending
+    return json(route, admin)
+  })
+  let privateReads = 0
+  await page.route("**/api/v1/network/ipam/", (route) => {
+    privateReads++
+    return json(route, { ...fixture, reservations: [row] })
+  })
+  await page.route("**/api/v1/docker/networks/", (route) => json(route, []))
+  await page.goto(`/docker/networks?ipamReservation=${row.id}`)
+  expect(privateReads).toBe(0)
+  release()
+  const dialog = page.getByRole("dialog", { name: "Create network" })
+  await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue(row.resource)
+  await expect(dialog.getByLabel("IPv6 subnet (optional)")).toHaveValue(row.prefix)
+  await expect(dialog.getByRole("button", { name: "Create", exact: true })).toBeEnabled()
+})

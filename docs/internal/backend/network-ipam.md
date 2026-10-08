@@ -57,10 +57,20 @@ Picking an IPv6 plan opts addressing in and leaves IPv6 exit off. Random/default
 cannot match an explicit selected reservation. Interface/namespace records remain advisory plans
 and provider ranges remain declared plans. A form link or reservation by itself is not evidence that native configuration was applied.
 
-Creation forms treat an incomplete planning response as a failed read. They retain a selected name,
+Creation forms validate the planning envelope and every row, including native owner, family and
+reservation state. An incomplete or malformed response becomes a failed read. They retain a selected name,
 prefix and planning identity through a later failed refresh and refuse the selected handoff until
 current inventory is readable. The picker accepts only a current reservation or the explicit
 unselected option; synthetic empty form events cannot erase a selected plan.
+
+A creation link initializes the exact reservation once after a readable inventory contains it.
+Missing first reads do not consume the link. Applying or explicitly detaching that seed records its
+identity in the retained draft; a later response cannot overwrite explicit name/prefix edits, and
+the original reservation no longer gates an unselected draft. Current selected reservations still
+require readable, matching inventory. A newly supplied seed identity can initialize independently,
+including when authentication first supplies the admin capability. Closing a Docker creation dialog
+retains its edited draft and detachment; successful creation resets it. An unselected explicit prefix
+still cannot borrow a held reservation: backend ownership and overlap checks remain authoritative.
 
 ## Verification
 

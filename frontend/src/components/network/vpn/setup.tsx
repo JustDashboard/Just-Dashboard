@@ -74,10 +74,23 @@ export function WireGuardSetup({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [reservations, setReservations] = useState<IPAMReservation[]>([])
+  // A consumed or detached link must not initialize this retained draft again.
+  const [detachedSeeds, setDetachedSeeds] = useState<string[]>([])
+  const activeSeed =
+    initialReservationId && !detachedSeeds.includes(initialReservationId)
+      ? initialReservationId
+      : ""
+  const detachSeed = useCallback(() => {
+    if (initialReservationId)
+      setDetachedSeeds((ids) =>
+        ids.includes(initialReservationId) ? ids : [...ids, initialReservationId],
+      )
+  }, [initialReservationId])
   const [ipamUnavailable, setIPAMUnavailable] = useState(Boolean(initialReservationId))
   const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
   const selectReservation = useCallback(
     (row: IPAMReservation | undefined, family: "inet" | "inet6") => {
+      detachSeed()
       setReservations((rows) => [
         ...rows.filter(
           (existing) => existing.family !== family && (!row || existing.resource === row.resource),
@@ -99,13 +112,13 @@ export function WireGuardSetup({
         setExit6(false)
       }
     },
-    [name],
+    [name, detachSeed],
   )
   const portError = port ? portProblem(port) : undefined
   const ipv6Error = ipv6 ? wireGuardIPv6Problem(subnet6) : undefined
 
   const submit = async () => {
-    if (busy || portError || ipv6Error || ipamUnavailable) return
+    if (busy || portError || ipv6Error || activeSeed || ipamUnavailable) return
     setBusy(true)
     setError(undefined)
     try {
@@ -149,7 +162,7 @@ export function WireGuardSetup({
         selected={reservations}
         onSelect={selectReservation}
         onUnavailable={setIPAMUnavailable}
-        initialId={initialReservationId}
+        initialId={activeSeed}
         disabled={busy}
         refreshKey={ipamRefreshKey}
       />
@@ -162,6 +175,7 @@ export function WireGuardSetup({
           id="wg-name"
           value={name}
           onChange={(event) => {
+            detachSeed()
             setName(event.target.value)
             setReservations([])
           }}
@@ -240,7 +254,10 @@ export function WireGuardSetup({
             checked={ipv6}
             onCheckedChange={(value) => {
               setIPv6(value)
-              if (!value) setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+              if (!value) {
+                detachSeed()
+                setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
+              }
             }}
             aria-label="IPv6 addressing"
           />
@@ -260,6 +277,7 @@ export function WireGuardSetup({
               value={subnet6}
               placeholder="fd42:8::/64"
               onChange={(event) => {
+                detachSeed()
                 setSubnet6(event.target.value)
                 setReservations((rows) => rows.filter((row) => row.family !== "inet6"))
               }}
@@ -294,6 +312,7 @@ export function WireGuardSetup({
             value={subnet}
             placeholder="10.8.0.0/24"
             onChange={(event) => {
+              detachSeed()
               setSubnet(event.target.value)
               setReservations((rows) => rows.filter((row) => row.family !== "inet"))
             }}
@@ -316,7 +335,13 @@ export function WireGuardSetup({
         <Button
           onClick={submit}
           pending={busy}
-          disabled={busy || Boolean(portError) || Boolean(ipv6Error) || ipamUnavailable}
+          disabled={
+            busy ||
+            Boolean(portError) ||
+            Boolean(ipv6Error) ||
+            Boolean(activeSeed) ||
+            ipamUnavailable
+          }
         >
           Set up WireGuard
         </Button>
