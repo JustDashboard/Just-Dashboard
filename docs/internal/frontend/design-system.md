@@ -2228,6 +2228,32 @@ and the live tail keeps its height under them — a window of at least 1280 by 8
 three and two at the old 200px tile floor, now 180 — and on a smaller window the same figures are
 the counts on the lens row's chips, the database workbench's answer.
 
+**Docker's Events page took the overhaul on 2026-10-08**, at the operator's request, because it
+was the greyest page in the section: one plain column of 13px sentences with a grey dot each, no
+figure anywhere, and a database in a restart loop as sixteen identical rows that pushed everything
+else off the screen. It is `components/docker/events-page.tsx` over three files beside it. It opens
+on the Containers page's identity line (Docker as its mark and version, the host, how long the
+dashboard has been listening and how much it has kept) with the verdict at its right end — a loop
+still going is named, then the containers that failed, then *Nothing failed* — beside the socket's
+`Status live` and a 1h / 6h / 24h / All window that every block below reads over. Pass 2 is kept,
+the Logs page's way: four `StatButton` tiles (failures, restarts, created or removed, external),
+each counting up as it lands with its shape across the window as its `TileTrend`, keyed by its
+line's colour, and each narrowing the table and the feed to what it counts. The containers the
+record names are a framed table, one row each and worst first (`event-activity.tsx`): the
+container as its product with its last outcome in the corner, its state now from Docker's own
+listing (a loop shimmering, *out of memory · 25m ago*, *Removed*), its window as a lane of marks —
+each outcome in its hue, a failure a dot, a loop a red band, dashed where the dashboard was not yet
+listening, the newest mark breathing for two minutes — its failures, its comebacks and who last
+acted on it. A row narrows the feed; its name opens the container. The feed (`event-feed.tsx`)
+folds a restart loop into one row and a container's run of events moments apart (a restart's kill,
+exit, stop, start and restart) into another (`foldBursts`), each row its product mark, its subject in
+the project's lane hue and who did it with the audit log's account of how that is known; a row new
+since the page opened rises. An exit moments after a `kill` of the same container was asked for, and
+is read as the stop it was (`settleAskedExits`): a restart pressed here used to count as a crash
+because most programs answer SIGTERM with 143. The colours are the sanctioned ones: state hues on
+outcomes, `--tag-*` for kinds (created or removed in cyan, external in violet), lane hues for
+projects.
+
 **The Network section was made in 0.7.1 out of four Security pages**, at the operator's request: the
 firewall, the connections, the interface list and the tools left Security, which kept what is about
 who may get in, and joined new pages that change the network as well as read it. Every page is a
