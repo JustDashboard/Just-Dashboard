@@ -370,6 +370,7 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	req.Target = strings.TrimSpace(req.Target)
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
 
@@ -418,9 +419,19 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 		res, err = s.modules.netsec.Egress(ctx)
 	case "neigh":
 		res, err = s.modules.netsec.Neighbours(ctx)
+	case "route":
+		res, err = s.modules.netsec.RouteLookup(ctx, req.Target)
+	case "mtu":
+		res, err = s.modules.netsec.PathMTU(ctx, req.Target)
+	case "capture":
+		res, err = s.modules.netsec.PacketSnapshot(ctx, req.Target, req.Option)
+	case "wol":
+		res, err = s.modules.netsec.WakeOnLAN(ctx, req.Target, req.Option)
+	case "capabilities":
+		res = networkSupportProbe(s.modules.network.HostSupport(ctx))
 	default:
 		return httpx.BadRequest("tool must be ping, traceroute, dns, port, scan, http, tls, whois, " +
-			"dnsauth, banner, ssh, starttls, tlssurvey, dnsbl, asn, mx, httpsec, siteaudit, listeners, egress or neigh")
+			"dnsauth, banner, ssh, starttls, tlssurvey, dnsbl, asn, mx, httpsec, siteaudit, listeners, egress, neigh, route, mtu, capture, wol or capabilities")
 	}
 	if err != nil {
 		return httpx.BadRequest("%v", err)

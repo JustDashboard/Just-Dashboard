@@ -220,6 +220,9 @@ func runOnHostStdin(ctx context.Context, stdin []byte, name string, args ...stri
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return buf.String(), fmt.Errorf("%s: %w", name, ctx.Err())
+		}
 		var execErr *exec.Error
 		if errors.As(err, &execErr) {
 			return "", &UnavailableError{Tool: name}

@@ -9,7 +9,7 @@ import (
 // never reaches a shell, but a target beginning with a dash would still be
 // read as an option by the tool itself.
 func TestValidTarget(t *testing.T) {
-	for _, ok := range []string{"example.com", "sub.example.co.uk", "192.0.2.1", "2001:db8::1", "host1"} {
+	for _, ok := range []string{"example.com", "example.com.", "sub.example.co.uk", "192.0.2.1", "2001:db8::1", "host1"} {
 		if !ValidTarget(ok) {
 			t.Errorf("%q rejected", ok)
 		}
