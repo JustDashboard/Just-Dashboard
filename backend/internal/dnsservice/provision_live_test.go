@@ -230,15 +230,32 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	if engine == PiHole {
 		policyRequests = append(policyRequests, ChangeRequest{Action: "client_groups", Client: &ClientGroupChange{Address: "198.51.100.77", Groups: []int{}}})
 	}
+	assertCurrentPolicy := func(change Change, expected *Snapshot) {
+		t.Helper()
+		current, e := s.CurrentChange(ctx, change.ID)
+		if e != nil || current.State != "available" || current.Connection.ID != connection.ID || current.Connection.Generation != change.Generation || current.Snapshot == nil || expected == nil || current.Snapshot.PolicyFingerprint != expected.PolicyFingerprint || current.Snapshot.SelectionFingerprint != expected.SelectionFingerprint {
+			t.Fatalf("native exact current %s state=%s error=%s err=%v", change.Request.Action, current.State, current.Error, e)
+		}
+		retained, e := s.Change(ctx, change.ID)
+		if e != nil || retained.State != change.State || retained.Before == nil || retained.Before.PolicyFingerprint != change.Before.PolicyFingerprint || (retained.After == nil) != (change.After == nil) {
+			t.Fatal("native current reading changed the retained review", e)
+		}
+		if retained.After != nil && retained.After.PolicyFingerprint != change.After.PolicyFingerprint {
+			t.Fatal("native current reading replaced retained readback")
+		}
+		t.Logf("Native exact-selection current read passed: %s %s", change.Request.Action, change.State)
+	}
 	for _, request := range policyRequests {
 		change, e := s.Preview(ctx, connection.ID, request)
 		if e != nil {
 			t.Fatal("native reviewed policy preview", request.Action, e)
 		}
+		assertCurrentPolicy(change, change.Before)
 		change, e = s.Apply(ctx, change.ID)
 		if e != nil || change.State != "verified" || !policyPreserved(request, change.Before, change.After) {
 			t.Fatalf("native reviewed %s state=%s error=%s err=%v", request.Action, change.State, change.Error, e)
 		}
+		assertCurrentPolicy(change, change.After)
 		if _, e = s.Apply(ctx, change.ID); !errors.Is(e, ErrConflict) {
 			t.Fatal("native reviewed policy replay", e)
 		}
@@ -297,10 +314,12 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		if e != nil {
 			t.Fatal("native reviewed removal preview", e)
 		}
+		assertCurrentPolicy(change, change.Before)
 		change, e = s.Apply(ctx, change.ID)
 		if e != nil || change.State != "verified" {
 			t.Fatal("native reviewed removal readback", change.State, change.Error, e)
 		}
+		assertCurrentPolicy(change, change.After)
 	}
 	removed, err := s.RemoveProvision(ctx, plan.ID)
 	if err != nil || removed.State != "removed" {
