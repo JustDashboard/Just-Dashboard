@@ -97,8 +97,8 @@ export function ImpactList({ preview, pending }: { preview?: GatewayPreview; pen
   )
 }
 
-/** Each modeled flow's verdict, with its layers folded under it. */
-export function FlowSummary({ flows }: { flows: EntryFlow[] }) {
+/** Each modeled flow's verdict, with its layers folded under it; named where several entries share a list. */
+export function FlowSummary({ flows, named = false }: { flows: EntryFlow[]; named?: boolean }) {
   return (
     <ul className="space-y-2" aria-label="Modeled policy layers">
       {flows.map((flow) => (
@@ -109,7 +109,15 @@ export function FlowSummary({ flows }: { flows: EntryFlow[] }) {
                 {flow.verdict === "clear" ? "clear" : flow.verdict}
               </Tag>
               <span className="min-w-0 text-muted-foreground">
-                {flow.direction === "inbound" ? "Arriving" : "Leaving"}: {flowWord(flow)}
+                {named && <span className="text-foreground">{flow.name} · </span>}
+                {named
+                  ? flow.direction === "inbound"
+                    ? "arriving"
+                    : "leaving"
+                  : flow.direction === "inbound"
+                    ? "Arriving"
+                    : "Leaving"}
+                : {flowWord(flow)}
               </span>
             </summary>
             <ul className="mt-1.5 space-y-1 pl-4">

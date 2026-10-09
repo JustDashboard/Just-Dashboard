@@ -373,11 +373,17 @@ func AttachExternalEvidence(v *GatewayView, observations []ExternalObservation) 
 		if f.Readiness == nil || !e.Current || !f.Enabled {
 			continue
 		}
-		switch e.Status {
-		case "connected":
+		switch {
+		case e.Status == "connected":
 			f.Readiness.Reachability = "verified"
-		case "failed":
+			if f.Readiness.Ready {
+				f.Readiness.Reason = "Installed and admitted, and an external source reached the public port after the last change."
+			}
+		case e.Status == "failed":
 			f.Readiness.Reachability = "failed"
+			if f.Readiness.Ready {
+				f.Readiness.Reason = "Installed and admitted, but an external source could not reach the public port after the last change."
+			}
 		}
 	}
 }

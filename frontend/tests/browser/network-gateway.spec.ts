@@ -652,7 +652,9 @@ test.describe("installed, measured and previewed", () => {
   }) => {
     await open(page, "/network/gateway")
     await expect(page.getByText("Each entry\u2019s flow, as modeled")).toBeVisible()
-    await expect(page.getByText("Arriving: A checked layer may drop it")).toBeVisible()
+    await expect(
+      page.getByText("Game server · arriving: A checked layer may drop it"),
+    ).toBeVisible()
   })
 })
 

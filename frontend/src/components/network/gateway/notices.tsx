@@ -113,7 +113,7 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
             {Boolean(view.flows?.length) && (
               <div className="space-y-1.5">
                 <p className="text-hint font-medium">Each entry&rsquo;s flow, as modeled</p>
-                <FlowSummary flows={view.flows ?? []} />
+                <FlowSummary flows={view.flows ?? []} named />
                 <p className="text-hint text-muted-foreground">
                   Each enabled entry&rsquo;s flow is walked through the host&rsquo;s other chains in
                   their supported rule forms, following jumps. A drop that only names some sources

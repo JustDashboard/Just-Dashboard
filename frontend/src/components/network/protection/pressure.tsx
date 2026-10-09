@@ -27,10 +27,7 @@ function bars(counts: PressureCount[], mono = true): BarListItem[] {
     label: c.key,
     mono,
     value: (
-      <span className="numeric">
-        {c.count.toLocaleString()}{" "}
-        <span className="text-muted-foreground">{Math.round(c.share * 100)}%</span>
-      </span>
+      <span className="numeric">{`${c.count.toLocaleString()} · ${Math.round(c.share * 100)}%`}</span>
     ),
     share: c.count / top,
   }))

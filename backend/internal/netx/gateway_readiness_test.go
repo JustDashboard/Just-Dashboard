@@ -156,7 +156,7 @@ func TestExternalEvidenceVerifiesOnlyAfterTheLastChange(t *testing.T) {
 	v := &GatewayView{
 		hostAddrs: gwHostAddrs,
 		Forwards: []ForwardView{
-			{ID: 1, Protocol: "tcp", Ports: "8080", Enabled: true, ChangedAt: &changed, Readiness: &EntryReadiness{Reachability: "unverified"}},
+			{ID: 1, Protocol: "tcp", Ports: "8080", Enabled: true, ChangedAt: &changed, Readiness: &EntryReadiness{Reachability: "unverified", Ready: true, Reason: "unmeasured"}},
 			{ID: 2, Protocol: "udp", Ports: "27015", Enabled: true, Readiness: &EntryReadiness{Reachability: "unverified"}},
 			{ID: 3, Protocol: "both", Ports: "9000-9010", Enabled: true, ChangedAt: &changed, Readiness: &EntryReadiness{Reachability: "unverified"}},
 		},
@@ -171,6 +171,9 @@ func TestExternalEvidenceVerifiesOnlyAfterTheLastChange(t *testing.T) {
 	AttachExternalEvidence(v, obs)
 	if e := v.Forwards[0].External; e == nil || e.CheckID != "new" || !e.Current || v.Forwards[0].Readiness.Reachability != "verified" {
 		t.Fatalf("forward 1: %+v %+v", e, v.Forwards[0].Readiness)
+	}
+	if !strings.Contains(v.Forwards[0].Readiness.Reason, "reached the public port") {
+		t.Fatalf("the reason still says unmeasured: %q", v.Forwards[0].Readiness.Reason)
 	}
 	if v.Forwards[1].External != nil {
 		t.Fatal("a UDP forward cannot be verified by a TCP check")

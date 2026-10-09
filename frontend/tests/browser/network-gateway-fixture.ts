@@ -65,7 +65,11 @@ export const gateway = {
       packets: 184_320,
       bytes: 211_450_000,
       total: total(1_284_320),
-      readiness: ready({ reachability: "verified" }),
+      readiness: ready({
+        reachability: "verified",
+        reason:
+          "Installed and admitted, and an external source reached the public port after the last change.",
+      }),
       external: {
         status: "connected",
         checkId: "c1",
