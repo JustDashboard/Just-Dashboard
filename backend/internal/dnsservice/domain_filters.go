@@ -37,29 +37,13 @@ func (f *DomainFilterChange) UnmarshalJSON(body []byte) error {
 	}
 	*f = DomainFilterChange{Domain: raw.Domain, Disposition: raw.Disposition, Match: raw.Match}
 	if raw.Groups != nil {
-		groups, ok := domainFilterGroups(raw.Groups)
+		groups, ok := filterRawGroups(raw.Groups)
 		if !ok {
 			return errors.New("domain filter groups must be explicit bounded integer IDs")
 		}
 		f.Groups = &groups
 	}
 	return nil
-}
-
-func domainFilterGroups(raw json.RawMessage) ([]int, bool) {
-	var values []json.RawMessage
-	if json.Unmarshal(raw, &values) != nil || values == nil || len(values) > 64 {
-		return nil, false
-	}
-	groups := make([]int, 0, len(values))
-	for _, value := range values {
-		var id *int
-		if json.Unmarshal(value, &id) != nil || id == nil {
-			return nil, false
-		}
-		groups = append(groups, *id)
-	}
-	return groups, filterGroups(groups)
 }
 
 type DomainFilterPolicy struct {
@@ -212,7 +196,7 @@ func (c *nativeClient) readDomainFilters(ctx context.Context, version string) (d
 			Status  *int64  `json:"status"`
 		}
 		body, _ := json.Marshal(row)
-		_, validGroups := domainFilterGroups(row["groups"])
+		_, validGroups := filterRawGroups(row["groups"])
 		if json.Unmarshal(body, &source) != nil || !filterNumber(source.ID) || sourceIDs[*source.ID] || source.Address == nil || *source.Address == "" || len(*source.Address) > 4096 || source.Enabled == nil || !validGroups || (source.Type != "allow" && source.Type != "block") || (source.Count != nil && !filterNumber(source.Count)) || (source.Updated != nil && !filterNumber(source.Updated)) || (source.Status != nil && !filterNumber(source.Status)) {
 			return inv, errors.New("native subscription metadata is incomplete or outside its bounds")
 		}
@@ -231,7 +215,7 @@ func (c *nativeClient) readDomainFilters(ctx context.Context, version string) (d
 			Modified *int64  `json:"date_modified"`
 		}
 		body, _ := json.Marshal(row)
-		_, validGroups := domainFilterGroups(row["groups"])
+		_, validGroups := filterRawGroups(row["groups"])
 		if json.Unmarshal(body, &r) != nil || !filterNumber(r.ID) || !filterNumber(r.Added) || !filterNumber(r.Modified) || ids[*r.ID] || r.Domain == "" || len(r.Domain) > 4096 || (r.Type != "allow" && r.Type != "deny") || (r.Kind != "exact" && r.Kind != "regex") || r.Enabled == nil || !validGroups || row["comment"] == nil || r.Comment != nil && len(*r.Comment) > 4096 {
 			return inv, errors.New("native domain rule identity or metadata is unreadable")
 		}
@@ -257,6 +241,8 @@ func (inv domainFilterInventory) selection(engine Engine, f DomainFilterChange) 
 		wanted := adGuardDomainRule(f)
 		for _, rule := range inv.Rules {
 			normal := strings.ToLower(strings.TrimSpace(rule))
+			// Simple anchor variants still name this target, but their native
+			// modifiers require review in the native console.
 			anchor := strings.TrimPrefix(normal, "@@")
 			prefix := "||" + f.Domain
 			if normal == f.Domain || (strings.HasPrefix(anchor, prefix) && (len(anchor) == len(prefix) || strings.ContainsRune("^$|/:*", rune(anchor[len(prefix)])))) {
