@@ -240,6 +240,10 @@ func dnsInterpretNative(r *DNSInvestigation, flags uint64) {
 	}
 	r.Transport = DNSEvidenceReading{"encrypted", "native_reply", "The native resolver reports confidential transport for this fresh network DNS answer. This is not a packet trace or proof about upstream forwarding."}
 	strict := r.PolicyStable && len(r.AnswerInterfaces) > 0
+	// A global-scope reply carries the index of the interface it arrived on,
+	// not scope zero. When the global scope is the only candidate, the question
+	// went to its servers alone, so its policy covers that reply.
+	globalOnly := len(r.Policy) == 1 && r.Policy[0].Index == 0
 	for _, index := range r.AnswerInterfaces {
 		found := false
 		for _, p := range r.Policy {
@@ -247,6 +251,10 @@ func dnsInterpretNative(r *DNSInvestigation, flags uint64) {
 				found = true
 				strict = strict && p.DNSOverTLS == "yes"
 			}
+		}
+		if !found && globalOnly {
+			found = true
+			strict = strict && r.Policy[0].DNSOverTLS == "yes"
 		}
 		strict = strict && found
 	}

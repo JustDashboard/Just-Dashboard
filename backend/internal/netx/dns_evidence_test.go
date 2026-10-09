@@ -373,3 +373,28 @@ func TestDNSEvidenceBusEscapesAndGlobalEndpointScopes(t *testing.T) {
 		t.Fatalf("address scope became policy owner: %+v %v", r, err)
 	}
 }
+
+// A global-scope reply reports the interface it arrived on. With the global
+// scope as the only candidate its strict policy still covers the answer; with
+// a link scope also in play the unmatched interface leaves trust unknown.
+func TestDNSEvidenceGlobalScopeReplyInterface(t *testing.T) {
+	fresh := dnsFlagDNS | dnsFlagNetwork | dnsFlagConfidential
+	global := DNSPolicyScope{Index: 0, Interface: "global", DNSOverTLS: "yes"}
+	for _, tc := range []struct {
+		name   string
+		policy []DNSPolicyScope
+		want   string
+	}{
+		{"global only", []DNSPolicyScope{global}, "native_policy_validated"},
+		{"global opportunistic", []DNSPolicyScope{{Index: 0, Interface: "global", DNSOverTLS: "opportunistic"}}, "unknown"},
+		{"global and a link", []DNSPolicyScope{global, {Index: 4, Interface: "wg0", DNSOverTLS: "yes"}}, "unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &DNSInvestigation{Policy: tc.policy, PolicyStable: true, AnswerInterfaces: []int{7}}
+			dnsInterpretNative(r, fresh)
+			if r.Transport.State != "encrypted" || r.Trust.State != tc.want {
+				t.Fatalf("trust = %+v", r.Trust)
+			}
+		})
+	}
+}

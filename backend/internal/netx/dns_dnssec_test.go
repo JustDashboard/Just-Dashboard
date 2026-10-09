@@ -172,3 +172,26 @@ func TestDNSSECRootAnchorsMatchByDigestOnly(t *testing.T) {
 		t.Fatalf("an unsupported digest type matched: %+v", links)
 	}
 }
+
+// Excluding trust anchors for the root's own keys would make resolved demand a
+// DS for the root; every other level keeps the exclusion.
+func TestDNSSECChainAsksTheRootWithAnchorsInPlay(t *testing.T) {
+	root := testDNSKEY(t)
+	fresh := dnsFlagDNS | dnsFlagNetwork | dnsFlagAuthenticated
+	sets := map[string]nativeSetReply{". 48": {rdatas: [][]byte{root}, flags: fresh}}
+	var asked []string
+	base := chainExecutor(t, sets, &asked)
+	flags := map[string]string{}
+	_, err := (&Service{}).InvestigateDNSSEC(context.Background(), "www.example.com", func(ctx context.Context, name string, args ...string) (string, error) {
+		if name == "busctl" && len(args) > 13 && args[7] == "ResolveRecord" {
+			flags[args[10]+" "+args[12]] = args[13]
+		}
+		return base(ctx, name, args...)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags[". 48"] != fmt.Sprint(dnsFreshFlags&^dnsFlagNoTrustAnchor) || flags["example.com. 48"] != fmt.Sprint(dnsFreshFlags) {
+		t.Fatalf("flags = %v", flags)
+	}
+}

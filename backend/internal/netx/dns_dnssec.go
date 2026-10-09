@@ -287,11 +287,15 @@ func dnsNativeSet(ctx context.Context, execute TrafficExecutor, owner, zone stri
 	if current, err := dnsBusOwner(ctx, execute); err != nil || current != owner {
 		return nil, DNSSECSet{}, fmt.Errorf("native resolver identity changed during the walk; no further question was sent")
 	}
-	question := zone + "."
+	question, flags := zone+".", dnsFreshFlags
 	if zone == "." {
-		question = "."
+		// Excluding trust anchors makes resolved demand a DS for the root
+		// itself, which no zone can sign. The root's keys are asked with
+		// anchors in play; a reply that comes from the anchor store rather than
+		// the network still fails the fresh-origin check below.
+		question, flags = ".", dnsFreshFlags&^dnsFlagNoTrustAnchor
 	}
-	out, err := dnsBusCall(ctx, execute, owner, dnsNativePath, dnsNativeManager, "ResolveRecord", "isqqt", "0", question, "1", strconv.Itoa(int(qtype)), strconv.FormatUint(dnsFreshFlags, 10))
+	out, err := dnsBusCall(ctx, execute, owner, dnsNativePath, dnsNativeManager, "ResolveRecord", "isqqt", "0", question, "1", strconv.Itoa(int(qtype)), strconv.FormatUint(flags, 10))
 	if err != nil {
 		line := strings.SplitN(strings.TrimSpace(out), "\n", 2)[0]
 		switch {
@@ -306,7 +310,6 @@ func dnsNativeSet(ctx context.Context, execute TrafficExecutor, owner, zone stri
 	}
 	var reply dnsBusReply
 	var rows [][]json.RawMessage
-	var flags uint64
 	if json.Unmarshal([]byte(out), &reply) != nil || reply.Type != "a(iqqay)t" || len(reply.Data) != 2 || json.Unmarshal(reply.Data[0], &rows) != nil || len(rows) == 0 || len(rows) > 64 || json.Unmarshal(reply.Data[1], &flags) != nil {
 		return nil, DNSSECSet{}, fmt.Errorf("native record envelope for %s is malformed", zone)
 	}

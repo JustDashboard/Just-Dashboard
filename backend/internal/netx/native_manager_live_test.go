@@ -582,6 +582,42 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 				}
 				t.Log("Native confirmation save failure, process death after durable confirmation, and lost terminal cleanup outcome recovered through fresh helpers")
 			}
+			// The DNS page's split-DNS editor writes this shape: the profile's own
+			// intent with servers split by family and the same routing and search
+			// domains on every enabled family.
+			split := *p.Intent
+			split.IPv4.DNS, split.IPv6.DNS = []string{"127.0.0.3"}, []string{"::1"}
+			split.IPv4.Domains = []string{"~corp.test", "lab.test"}
+			split.IPv6.Domains = []string{"~corp.test", "lab.test"}
+			if _, err := s.EditNativeProfile(WithPendingConfirmation(ctx, 7), "d0", NativeEditRequest{Generation: p.Generation, Intent: split}, "127.0.0.1"); err != nil {
+				t.Fatalf("%s split-DNS temporary apply: %v", owner, err)
+			}
+			j, _ = readChange(s.paths.Dir)
+			proof, err = s.VerifyReconnection(ctx, j.ID, 7, "native-session", "127.0.0.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if status, err := s.ConfirmChange(ctx, j.ID, 7, "native-session", proof.Challenge, "127.0.0.1"); err != nil || status.Cleanup != "complete" {
+				t.Fatalf("%s split-DNS confirmation: %+v %v", owner, status, err)
+			}
+			splitDeadline := time.Now().Add(15 * time.Second)
+			for time.Now().Before(splitDeadline) {
+				p, err = s.NativeProfile(ctx, "d0")
+				if err == nil && p.Intent != nil && nativeIntentEqual(*p.Intent, split) && p.Runtime.Status == "matching" {
+					break
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			if err != nil || p.Intent == nil || !nativeIntentEqual(*p.Intent, split) || p.Runtime.Status != "matching" {
+				t.Fatalf("%s split-DNS runtime agreement: %+v %v", owner, p, err)
+			}
+			if !useNM {
+				state, _ := nativeFixtureExecute(ctx, nil, "networkctl", "--no-pager", "--json=short", "status", "d0")
+				if !strings.Contains(state, `"corp.test"`) || !strings.Contains(state, `"lab.test"`) {
+					t.Fatalf("%s split-DNS runtime domains: %s", owner, state)
+				}
+			}
+			t.Logf("%s split-DNS routing/search domains and per-family servers applied temporarily, confirmed and verified against native runtime", owner)
 			t.Logf("%s actual IPv4/IPv6 addresses, DNS, metric/table routes, rollback, confirmation and backend-death helper recovery passed", owner)
 			stopOwner()
 		})

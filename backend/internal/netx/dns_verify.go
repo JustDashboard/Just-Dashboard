@@ -263,9 +263,12 @@ func transportResult(c *DNSVerificationCheck, mode string, r *DNSInvestigation, 
 	switch r.Transport.State {
 	case "encrypted":
 		c.State = "passed"
-		if r.Trust.State == "native_policy_validated" {
+		switch {
+		case r.Trust.State == "native_policy_validated":
 			c.Detail = "systemd-resolved reports the answer came over TLS and enforced the configured server name and system trust (strict mode). The certificate was not inspected separately."
-		} else {
+		case mode == "yes":
+			c.Detail = "systemd-resolved reports the answer came over TLS. Its strict identity policy for the answering scope could not be read back, so certificate trust is not established here; the certificate check inspects it separately."
+		default:
 			c.Detail = "systemd-resolved reports the answer came over TLS; opportunistic mode does not authenticate the certificate."
 		}
 	case "unencrypted":
@@ -302,11 +305,28 @@ func readbackDNS(ctx context.Context, req DNSSettings) (string, string) {
 	if err != nil || !strings.Contains("\n"+out, "\nGlobal") {
 		return "unknown", "resolvectl status could not be read, so the running settings were not compared"
 	}
-	g, _, _ := parseResolvedStatus(out)
+	g, links, _ := parseResolvedStatus(out)
+	// resolvectl prints a link's loopback-addressed server under Global as
+	// well (the manager attributes it to the loopback scope). Such an entry
+	// belongs to its link, not to what this drop-in wrote.
+	linkLoopback := map[string]bool{}
+	for _, l := range links {
+		for _, entry := range normalizeServers(l.Servers) {
+			if sv, err := parseDNSServer(entry); err == nil && sv.addr.IsLoopback() {
+				linkLoopback[entry] = true
+			}
+		}
+	}
 	diffs := []string{}
 	compare := func(what string, want, got []string, normalize bool) {
 		if normalize {
-			got = normalizeServers(got)
+			kept := []string{}
+			for _, entry := range normalizeServers(got) {
+				if !linkLoopback[entry] || containsString(want, entry) {
+					kept = append(kept, entry)
+				}
+			}
+			got = kept
 		}
 		if strings.Join(want, " ") != strings.Join(got, " ") {
 			shown := strings.Join(got, " ")

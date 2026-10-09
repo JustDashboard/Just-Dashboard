@@ -288,3 +288,26 @@ func TestDNSViewAndRefusalNameTheOwner(t *testing.T) {
 		t.Fatalf("refusal = %v", err)
 	}
 }
+
+// Read-only evidence on the machine running the test: the owner verdict for
+// its own resolver chain. It reads files and asks resolvectl and systemctl for
+// state; it writes nothing. Set JD_DNS_OWNER_LIVE=1 to run it.
+func TestResolverOwnerReadsThisHost(t *testing.T) {
+	if os.Getenv("JD_DNS_OWNER_LIVE") != "1" {
+		t.Skip("set JD_DNS_OWNER_LIVE=1 to read this host's resolver owner")
+	}
+	s := testService(t)
+	rc := readResolvConf(resolvConfPath)
+	rv := s.readResolved(context.Background(), false)
+	o := resolverOwner(context.Background(), rc, rv, nil)
+	if o.ID == "" || o.Name == "" || o.Handoff == "" || o.Evidence == nil {
+		t.Fatalf("owner = %+v", o)
+	}
+	t.Logf("owner=%s chain=%s confidence=%s dashboardWrites=%t handoff=%q", o.ID, o.Chain, o.Confidence, o.DashboardWrites, o.Handoff)
+	for _, e := range o.Evidence {
+		t.Logf("evidence %s: %s", e.Source, e.Detail)
+	}
+	for _, c := range o.Conflicts {
+		t.Logf("conflict: %s", c)
+	}
+}
