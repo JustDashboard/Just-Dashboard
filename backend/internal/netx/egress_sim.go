@@ -499,7 +499,7 @@ func (s *Service) runEgressSimulation(ctx context.Context, g EgressGroupSpec, ta
 			return result, err
 		}
 		if spoofing {
-			rules := fmt.Sprintf("table inet jdsim {\n chain fwd {\n  type filter hook forward priority 0; policy accept;\n  iifname \"%s\" %s saddr != %s drop\n }\n}\n", up, map[string]string{"inet": "ip", "inet6": "ip6"}[family], a.hostNet)
+			rules := fmt.Sprintf("table inet jdsim {\n chain spoof {\n  type filter hook forward priority 0; policy accept;\n  iifname \"%s\" %s saddr != %s drop\n }\n}\n", up, map[string]string{"inet": "ip", "inet6": "ip6"}[family], a.hostNet)
 			if _, err := runStdin(ctx, []byte(rules), "ip", "netns", "exec", gw, "nft", "-f", "-"); err != nil {
 				spoofing = false
 			}
@@ -819,6 +819,7 @@ func judgeEgressSimulation(g, sim EgressGroupSpec, plan egressSimPlan, r *Egress
 		add("Manual failback waits for the operator", back == 0 && held, fmt.Sprintf("%d automatic failbacks; the rules said failback is available: %v.", back, held))
 	} else {
 		upAt, backAt := -1, -1
+		already := len(rec) > 0 && slices.Contains(r.Steps[phase["recovery"].Start].Active, primary) && !rec[0].Switched
 		for i, st := range rec {
 			for _, m := range st.Members {
 				if m.ID == primary && m.State == "up" && upAt < 0 {
@@ -832,7 +833,10 @@ func judgeEgressSimulation(g, sim EgressGroupSpec, plan egressSimPlan, r *Egress
 		stable := int(math.Ceil(float64(t.StableSeconds) / float64(t.IntervalSeconds)))
 		ok := upAt >= 0 && backAt >= 0 && backAt-upAt >= stable
 		detail := fmt.Sprintf("%s was up again at recovery sample %d and failed back to at sample %d; the stable window is %d samples.", name, upAt+1, backAt+1, stable)
-		if backAt < 0 {
+		switch {
+		case already:
+			ok, detail = false, fmt.Sprintf("%s was already carrying traffic when its recovery began: it was failed back to while it flapped.", name)
+		case backAt < 0:
 			detail = fmt.Sprintf("%s never failed back to during %d clean samples (up at sample %d).", name, len(rec), upAt+1)
 		}
 		add("Fails back only after a stable recovery", ok, detail)

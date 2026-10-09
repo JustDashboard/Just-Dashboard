@@ -63,7 +63,7 @@ func newEgressLab(t *testing.T) *egressLab {
 		ns.must(t, "ip", "-n", "n", "link", "set", g, "up")
 		ns.must(t, "ip", "-n", g, "route", "add", "default", "via", fmt.Sprintf("10.21%d.0.2", k))
 		ns.must(t, "ip", "netns", "exec", g, "sysctl", "-qw", "net.ipv4.ip_forward=1")
-		spoof := fmt.Sprintf("table inet upstream {\n chain fwd {\n  type filter hook forward priority 0; policy accept;\n  iifname \"h%d\" ip saddr != 10.20%d.1.0/24 counter drop\n }\n}\n", k, k)
+		spoof := fmt.Sprintf("table inet upstream {\n chain spoof {\n  type filter hook forward priority 0; policy accept;\n  iifname \"h%d\" ip saddr != 10.20%d.1.0/24 counter drop\n }\n}\n", k, k)
 		if _, err := ns.run(context.Background(), []byte(spoof), "ip", "netns", "exec", g, "nft", "-f", "-"); err != nil {
 			t.Fatal(err)
 		}
@@ -641,7 +641,12 @@ func TestLiveEgressSimulationRunsInDisposableNamespaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before := l.ns.must(t, "ip", "rule", "show") + l.ns.must(t, "ip", "route", "show", "table", "all")
+	// The kernel finishes IPv6 duplicate address detection on its own time,
+	// so the comparison is of the dashboard's concern: rules and IPv4 routes.
+	routing := func() string {
+		return l.ns.must(t, "ip", "rule", "show") + l.ns.must(t, "ip", "-6", "rule", "show") + l.ns.must(t, "ip", "-4", "route", "show", "table", "all")
+	}
+	before := routing()
 	wait := func(id string) EgressSimulation {
 		t.Helper()
 		deadline := time.Now().Add(5 * time.Minute)
@@ -685,7 +690,7 @@ func TestLiveEgressSimulationRunsInDisposableNamespaces(t *testing.T) {
 	if list := l.ns.must(t, "ip", "netns", "list"); strings.Contains(list, "jds") {
 		t.Fatalf("simulation namespaces left behind:\n%s", list)
 	}
-	if after := l.ns.must(t, "ip", "rule", "show") + l.ns.must(t, "ip", "route", "show", "table", "all"); after != before {
+	if after := routing(); after != before {
 		t.Fatalf("the simulation changed the host's own routing:\n%s\n---\n%s", before, after)
 	}
 	if _, err := os.Stat(filepath.Join(l.s.paths.Dir, egressSimFile)); !errors.Is(err, os.ErrNotExist) {

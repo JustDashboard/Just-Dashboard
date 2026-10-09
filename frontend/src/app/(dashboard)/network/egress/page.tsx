@@ -92,7 +92,7 @@ export default function NetworkEgressPage() {
           sample history end with this process.
         </Notice>
       )}
-      <StatGrid columns={4}>
+      <StatGrid columns={4} dense>
         <StatTile label="Groups" value={data.groups.length} trailing={`of ${data.capacity}`} />
         <StatTile label="Carrying traffic" value={data.groups.filter((g) => g.enabled).length} />
         <StatTile label="Automated" value={data.groups.filter((g) => g.automation).length} />

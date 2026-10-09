@@ -348,7 +348,7 @@ func (m *egressMonitor) round(ctx context.Context, g EgressGroupSpec) {
 			m.s.flushEgressConnections(ctx, g, sources, map[int]bool{t.id: true}, egressSpared(g, nil), out)
 			if out.Flushed+out.FlushFailed > 0 || out.Error != "" {
 				m.store.record(ctx, EgressEvent{GroupID: g.ID, Kind: "connections", MemberID: t.id, Outcome: "applied", Actor: "egress monitor",
-					Reason:   fmt.Sprintf("Flushed %d connections pinned to %s, which is down.", out.Flushed, mem.Name),
+					Reason:   fmt.Sprintf("Flushed %d tracked connections of %s, which is down, so none stays routed into a dead path.", out.Flushed, mem.Name),
 					Evidence: &EgressEvidence{Connections: out}})
 			}
 		}
