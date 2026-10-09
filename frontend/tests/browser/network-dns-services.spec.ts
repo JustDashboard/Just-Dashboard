@@ -14,7 +14,7 @@ const posts = (control: DNSServicePageControl) =>
 const section = (page: Page, name: string) =>
   sheet(page)
     .locator("section")
-    .filter({ has: page.getByRole("heading", { name, exact: true }) })
+    .filter({ has: page.getByRole("heading", { name, exact: true, includeHidden: true }) })
 const detail = (root: Locator, label: string) =>
   root
     .locator("dt")
@@ -23,7 +23,11 @@ const detail = (root: Locator, label: string) =>
 const createReview = (page: Page) =>
   sheet(page).getByRole("button", { name: "Create retained review", exact: true })
 const applyReview = (page: Page) =>
-  sheet(page).getByRole("button", { name: "Apply reviewed native change", exact: true })
+  sheet(page).getByRole("button", {
+    name: "Apply reviewed native change",
+    exact: true,
+    includeHidden: true,
+  })
 
 async function select(page: Page, label: string, option: string) {
   await sheet(page).getByLabel(label, { exact: true }).click()
