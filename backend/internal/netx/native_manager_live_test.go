@@ -531,6 +531,7 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 			if err != nil || status.Cleanup != "complete" {
 				t.Fatalf("actual native confirmed cleanup: %+v %v", status, err)
 			}
+			p = nativeFixtureEqualProfileLive(t, ctx, s, owner, candidate)
 			worker := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1")
 			worker.Env = append(os.Environ(), "JD_NATIVE_MANAGER_WORKER=apply")
 			out, err := worker.CombinedOutput()

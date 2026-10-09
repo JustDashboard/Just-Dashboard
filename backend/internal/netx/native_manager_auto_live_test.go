@@ -158,6 +158,8 @@ func TestNativeManagerAutomaticOwnerLive(t *testing.T) {
 	p = nativeAutomaticWait(t, ctx, s, owner, initial)
 	nativeAutomaticAcquired(t, ctx, s, false)
 	nativeAutomaticCleanup(t, ctx, s, j.ID)
+	p = nativeFixtureEqualProfileLive(t, ctx, s, owner, initial)
+	nativeAutomaticAcquired(t, ctx, s, false)
 
 	// This separate backend process reaches actual manual activation before
 	// exiting. A new production helper must restore dynamic acquisition.

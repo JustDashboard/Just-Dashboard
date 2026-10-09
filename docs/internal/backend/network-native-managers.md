@@ -6,6 +6,8 @@ current surface edits IPv4/IPv6 addressing methods, per-family static addresses,
 domains, and explicit unicast routes in an existing selected persistent profile. The full P11 scope
 also includes structural bond and supported VRF editing; that work and its acceptance remain open.
 Its prepared owner/member scope is described in [native structure preparation](network-native-structure.md).
+The isolated shipped helper-v10 unchanged-profile fixture is tracked in
+[profile inode acceptance](evidence/native-manager-profile-inodes-v10-2026-10-09.md).
 Existing controller/member profiles remain refused until saved, loaded, applied and kernel
 topology are verified together; their observed relationships are still reported. Existing standalone
 veth Ethernet profiles additionally require a reciprocal peer in the same inspected namespace.
