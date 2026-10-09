@@ -110,6 +110,9 @@ func nativeRebindAfterBoot(ctx context.Context, j *changeJournal, u *nativeUndo)
 			if bytes.Equal(current.Data, f.Candidate.Data) && current.Identity != f.Candidate.Identity {
 				return errors.New("native boot recovery preserved a replaced persistent profile")
 			}
+			if bytes.Equal(current.Data, f.Before.Data) && current.Identity != f.Before.Identity && current.Identity != f.RollbackID {
+				return errors.New("native boot recovery preserved a replaced prior persistent profile inode")
+			}
 			continue
 		}
 		// The selected netplan artifact and its staging directory are in /run,

@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v5"
+const nativeRecoveryToken = "jd-native-manager-v6"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {
@@ -333,6 +333,10 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 	if err := nativeVerifyRecoveryStrategy(ctx, u); err != nil {
 		return err
 	}
+	ownership, err := nativeRecoveryOwnershipPreflight(u)
+	if err != nil {
+		return nativePreserveRefusedRecovery(ctx, j, u, err)
+	}
 	if nativeUsesCheckpoint(u) {
 		if u.CheckpointState == "creating" {
 			checkpoints, err := nativeBusProperty[[]string](ctx, u.OwnerBus, nmObject, nmService, "Checkpoints", "ao")
@@ -342,6 +346,13 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 			u.CheckpointState = "none"
 			if err := saveNativeUndo(j, u); err != nil {
 				return err
+			}
+		}
+		if ownership.AllPrior {
+			if err := nativeWaitVerified(ctx, j, u, false); err == nil {
+				return nil
+			} else if ownership.UnprovenPrior {
+				return nativePreserveRefusedRecovery(ctx, j, u, errors.New("native prior bytes have an unrecorded inode and their complete active state is not verified; no rollback, exchange or activation was attempted"))
 			}
 		}
 		if u.Checkpoint != "" && !slices.Contains([]string{"released", "recovered"}, u.CheckpointState) {
@@ -354,6 +365,10 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 				if err := saveNativeUndo(j, u); err != nil {
 					return err
 				}
+				ownership, err := nativeRecoveryOwnershipPreflight(u)
+				if err != nil || ownership.UnprovenPrior {
+					return nativePreserveRefusedRecovery(ctx, j, u, errors.New("native checkpoint rollback refused changed selected ownership at its effect boundary"))
+				}
 				r, err := nativeBus(ctx, u.OwnerBus, nmObject, nmService, "call", "CheckpointRollback", "o", u.Checkpoint)
 				if err != nil {
 					return errors.New("native checkpoint rollback was refused or failed")
@@ -364,6 +379,15 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 				}
 			}
 		}
+	}
+	// A successful or interrupted native writer can have changed selected
+	// files. Recheck the complete scope before any independent file restore.
+	ownership, err = nativeRecoveryOwnershipPreflight(u)
+	if err != nil {
+		return nativePreserveRefusedRecovery(ctx, j, u, err)
+	}
+	if ownership.UnprovenPrior {
+		return nativeWaitVerified(ctx, j, u, false)
 	}
 	for _, f := range u.Files {
 		current, err := nativeReadProfile(f.Before.Path)
@@ -391,6 +415,10 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 		if err := nativeReplaceProfile(rollback, f.Candidate); err != nil {
 			return err
 		}
+	}
+	ownership, err = nativeRecoveryOwnershipPreflight(u)
+	if err != nil || ownership.UnprovenPrior {
+		return nativePreserveRefusedRecovery(ctx, j, u, errors.New("native activation refused changed selected recovery ownership at its effect boundary"))
 	}
 	if err := nativeActivate(ctx, u); err != nil {
 		return err

@@ -127,7 +127,7 @@ func TestNativeNetworkdDomainPolicyFencesRecoveryAndActiveOverrides(t *testing.T
 }
 
 func TestNativeDomainRecoveryRefusesOldHelperBeforeJournalOrWatchdog(t *testing.T) {
-	for _, token := range []string{"jd-native-manager-v3", "jd-native-manager-v4"} {
+	for _, token := range []string{"jd-native-manager-v3", "jd-native-manager-v4", "jd-native-manager-v5"} {
 		t.Run(token, func(t *testing.T) {
 			h := pendingHost(t)
 			prior := nativeExecute

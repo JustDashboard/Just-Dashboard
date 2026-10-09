@@ -94,8 +94,9 @@ Immediate requests are refused before taking a recovery lock or retrying prior t
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise `jd-native-manager-v5` before admission, including
-networkd automatic-domain preservation/provenance and both NetworkManager active domain properties.
+The standalone recovery executable must advertise `jd-native-manager-v6` before admission, including
+networkd automatic-domain preservation/provenance, both NetworkManager active domain properties and
+selected-file/stage ownership checks before checkpoint rollback or restored-profile activation.
 An older helper is refused before journaling
 or arming a new native change. The private undo payload remains at v3 with its peer vocabulary;
 the domain policy is already captured in existing file snapshots, so no additional raw policy is serialized.
@@ -116,6 +117,25 @@ Exact-origin admission and recovery refuse foreign native checkpoints, a changed
 or any selected origin, UUID, byte or inode change outside the recorded transaction.
 When the displaced authored inode is still retained in staging, rollback exchanges that exact inode
 back into its selected name; reconstructed runtime artifacts retain their separately recorded boot proof.
+Pending recovery verifies every selected candidate's recorded inode and bytes, both captured restore
+stages and the absence of unexpected cleanup claims before asking a native checkpoint writer to act.
+It repeats those checks at the checkpoint effect boundary and after that writer returns, before
+independent restore or activation. Refusal also durably arms release of the exact saved, epoch-pinned,
+device-scoped checkpoint and verifies its disappearance, preventing its automatic deadline from
+later overwriting foreign edits. It retains every profile/stage and the degraded independent journal;
+this release does not confirm or adopt the changed profile. A lost release reply remains `releasing`
+until an exact inventory retry proves disappearance. An unverified scope, changed owner, or failed
+release/storage operation reports an unresolved native deadline and preserves the available evidence;
+foreign-edit containment is not claimed while that native writer may still act.
+The pinned [NetworkManager checkpoint manager](https://github.com/NetworkManager/NetworkManager/blob/1.52.1/src/core/nm-checkpoint-manager.c)
+dispatches timeout expiry through its rollback writer; destroying the exact object clears its timeout
+callback without restoring profiles. The local native fixture must measure that deadline containment
+separately from explicit rollback refusal.
+A native timeout or lost rollback reply may already have
+restored prior bytes with a new inode. That inode permits only read-only completion after complete
+saved, loaded, applied, kernel and owner agreement; it cannot authorize another rollback, exchange
+or activation. Independent exact-origin recovery and persistent prior profiles after a boot change
+require their captured original or restore inode.
 Confirming first verifies current native intent and
 the returned dashboard challenge. It durably records the checkpoint timeout hold while independent
 pending recovery still owns the change, then records `confirmed`. Only after that decision reaches
@@ -151,6 +171,10 @@ the evidence for native-owner review.
 `native_manager_recovery_test.go` uses bounded root-owned file fixtures and injected storage failures
 to check durable confirmation before cleanup, cleanup retry after checkpoint release, foreign-stage
 preservation, next-change refusal, old-bus object refusal and conservative boot-epoch recovery.
+`native_manager_recovery_preflight_test.go` also checks foreign selected/staged bytes and inodes,
+missing restore stages, unexpected claims, a foreign write during checkpoint inspection and
+read-only restrictions on an unrecorded restored inode before rollback/activation, owned deadline
+release after refusal, uncertain release retry and foreign checkpoint-scope refusal.
 `native_manager_io_test.go` checks the real busctl distinction between property values and method
 return argument arrays, and that effect argv pins both the transport GUID and unique daemon owner.
 Admission fixtures also verify that a refused immediate request creates no recovery state and leaves
