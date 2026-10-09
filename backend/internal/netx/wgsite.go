@@ -217,6 +217,22 @@ func (s *Service) EditWireGuardPeer(ctx context.Context, iface string, id int, r
 			removed = append(removed, r)
 		}
 	}
+	// The operator arriving through this site is the one case where taking a
+	// network away, or redialling the site, cuts the request's own path.
+	if addr, err := ParseAddr(client); err == nil {
+		for _, r := range removed {
+			if r.Contains(addr) {
+				return nil, guarded("%s is how your own connection (%s) reaches the dashboard, so it cannot be withdrawn from %s", r, addr, target.name)
+			}
+		}
+		if req.Endpoint != nil && endpoint != target.endpoint {
+			for _, r := range append(append([]netip.Prefix{}, own...), oldRemote...) {
+				if r.Contains(addr) {
+					return nil, guarded("your own connection (%s) comes through %s, so where this server dials it cannot change from here", addr, target.name)
+				}
+			}
+		}
+	}
 	if authorizeWithdrawal != nil && (len(removed) > 0 || (req.Endpoint != nil && endpoint != target.endpoint)) {
 		if err := authorizeWithdrawal(); err != nil {
 			return nil, err
@@ -245,20 +261,33 @@ func (s *Service) EditWireGuardPeer(ctx context.Context, iface string, id int, r
 	}
 
 	// The peer's own configuration: regenerated from its sealed copy when an
-	// edit reaches it. A forgotten copy cannot be regenerated without its
-	// private key, so such an edit is refused rather than half applied.
-	clientEdit := req.FullTunnel != nil || req.ShareNetworks != nil || req.Keepalive != nil ||
-		(site && req.Endpoint != nil && endpoint != target.endpoint)
+	// edit reaches it. A device's routes and keepalive, and what a site may
+	// reach here, exist only there, so without the copy such an edit is
+	// refused rather than half applied. A site's new endpoint is this
+	// server's setting; its own listen port follows when the copy is kept,
+	// and is otherwise named for the operator to set on the site.
+	needClient := req.FullTunnel != nil || req.ShareNetworks != nil || (!site && req.Keepalive != nil)
+	endpointMoved := site && req.Endpoint != nil && endpoint != target.endpoint
+	clientEdit := needClient || endpointMoved
+	var warnings []string
 	var stored VPNClient
 	var newConfig, newRoutes, qr string
 	if clientEdit {
 		stored, err = s.peerClient(ctx, iface, id)
-		if errors.Is(err, ErrForgotten) {
+		switch {
+		case err == nil:
+		case needClient && errors.Is(err, ErrForgotten):
 			return nil, &ReadOnlyError{Reason: "this change is in " + name + "'s own configuration, which was forgotten here; remove the peer and add it again to make a new one"}
-		}
-		if err != nil {
+		case needClient:
 			return nil, err
+		default:
+			clientEdit = false
+			if endpoint != "" {
+				warnings = append(warnings, name+"'s own configuration is not kept here: set its ListenPort to "+endpoint[strings.LastIndex(endpoint, ":")+1:]+" on the site.")
+			}
 		}
+	}
+	if clientEdit {
 		cc, err := wgClientFrom(stored.Config)
 		if err != nil {
 			return nil, err
@@ -408,7 +437,7 @@ func (s *Service) EditWireGuardPeer(ctx context.Context, iface string, id int, r
 	}
 	s.wg.note(ctx, WGEvent{Iface: iface, Kind: "peer_edited", Peer: target.publicKey, PeerName: name, Actor: actor, Detail: strings.Join(changed, "; ")})
 
-	res := &WGPeerEditResult{ClientChanged: clientEdit, Reloaded: live, Warnings: []string{}}
+	res := &WGPeerEditResult{ClientChanged: clientEdit, Reloaded: live, Warnings: append([]string{}, warnings...)}
 	if clientEdit {
 		res.Config, res.QR = newConfig, qr
 		res.Warnings = append(res.Warnings, name+" keeps its old configuration until the new one is imported on it.")

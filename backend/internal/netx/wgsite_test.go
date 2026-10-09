@@ -142,6 +142,10 @@ func TestEditWireGuardPeerRefusals(t *testing.T) {
 		// would route the phone's own transport into the tunnel.
 		{"captures a roaming peer", 2, WGPeerEdit{RemoteNetworks: wgListp("192.168.77.0/24", "198.51.100.4/30")}, "", "WireGuard endpoint 198.51.100.7", true},
 		{"unresolvable endpoint", 2, WGPeerEdit{Endpoint: wgStrp("office.invalid:51820")}, "", "does not resolve", false},
+		// The operator arrives through the site: its network and its endpoint
+		// are their own way in.
+		{"withdraws the operator's network", 2, WGPeerEdit{RemoteNetworks: wgListp()}, "192.168.77.20", "your own connection", true},
+		{"redials the operator's site", 2, WGPeerEdit{Endpoint: wgStrp("198.51.100.51:51820")}, "192.168.77.20", "your own connection", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, rec := wgAddPeerHost(t)
@@ -267,5 +271,27 @@ func TestVerifyWireGuardSiteThatIsQuietFails(t *testing.T) {
 	}
 	if v.Outcome != "failed" || v.Checks[0].Name != "handshake" || v.Checks[0].Status != "fail" {
 		t.Fatalf("a quiet site = %+v", v)
+	}
+}
+
+// A site's keepalive and endpoint are this server's settings: they change
+// without a kept copy of the site's own configuration, which only gets a
+// note about the port to set there.
+func TestEditWireGuardSiteWithoutItsConfigurationChangesThisServer(t *testing.T) {
+	s, rec := wgAddPeerHost(t)
+	res, err := s.EditWireGuardPeer(context.Background(), "wg0", 2, WGPeerEdit{Keepalive: wgIntp(15), Endpoint: wgStrp("198.51.100.51:51999")}, "", "alice", func() error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, _ := os.ReadFile(filepath.Join(s.paths.WireGuard, "wg0.conf"))
+	if !strings.Contains(string(text), "Endpoint = 198.51.100.51:51999\n") || !strings.Contains(string(text), "PersistentKeepalive = 15\n") {
+		t.Fatalf("file:\n%s", text)
+	}
+	if res.ClientChanged || len(res.Warnings) != 1 || !strings.Contains(res.Warnings[0], "ListenPort to 51999") || !rec.ran("systemctl reload") {
+		t.Fatalf("result = %+v", res)
+	}
+	// What a site may reach here is only in its own configuration.
+	if _, err := s.EditWireGuardPeer(context.Background(), "wg0", 2, WGPeerEdit{ShareNetworks: wgListp("172.17.0.0/16")}, "", "alice", nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("a client-only edit without the configuration: %v", err)
 	}
 }
