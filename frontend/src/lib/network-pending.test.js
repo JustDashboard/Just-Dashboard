@@ -60,3 +60,24 @@ test("native persistent profile writes always request independent confirmed appl
   expect(networkPendingHeaders("/network/native/profile-other/eth0", "PUT")).toEqual({})
   expect(supportsPendingNetworkMutation("/network/changes/one/cleanup", "POST")).toBe(false)
 })
+
+test("host firewall changes enroll, while reviews, history and logging do not", () => {
+  for (const [path, method] of [
+    ["/firewall/rules", "POST"],
+    ["/firewall/rules/3?id=fw-0123456789ab", "PUT"],
+    ["/firewall/rules/3?id=fw-0123456789ab", "DELETE"],
+    ["/firewall/enabled", "POST"],
+    ["/firewall/policy", "POST"],
+    ["/firewall/reset", "POST"],
+    ["/firewall/plans", "POST"],
+  ])
+    expect(supportsPendingNetworkMutation(path, method)).toBe(true)
+  for (const path of [
+    "/firewall/logging",
+    "/firewall/preflight",
+    "/firewall/plans/preview",
+    "/firewall/history",
+  ])
+    expect(supportsPendingNetworkMutation(path, "POST")).toBe(false)
+  expect(supportsPendingNetworkMutation("/firewall/rules", "GET")).toBe(false)
+})

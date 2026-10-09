@@ -1,4 +1,11 @@
-import type { FirewallRule, FirewallStatus } from "@/lib/types"
+import type {
+  FirewallAccessCheck,
+  FirewallAccessComparison,
+  FirewallPlanOperation,
+  FirewallRule,
+  FirewallRuleFinding,
+  FirewallStatus,
+} from "@/lib/types"
 
 /**
  * What a firewall's rules say about inbound traffic, read the way the backend
@@ -104,4 +111,51 @@ export function deniedSources(status: FirewallStatus | undefined) {
         .map((r) => r.from),
     ),
   ]
+}
+
+/** Each rule's ordering finding, by the rule's identity. */
+export function findingsByRule(status: FirewallStatus | undefined) {
+  const out = new Map<string, FirewallRuleFinding>()
+  for (const finding of status?.findings ?? []) out.set(finding.ruleId, finding)
+  return out
+}
+
+/** Whether a verdict lets the connection in. */
+export function accessAdmits(verdict: FirewallAccessCheck["verdict"]) {
+  return verdict === "admitted" || verdict === "limited" || verdict === "unfiltered"
+}
+
+/**
+ * The access checks a change would take away: required ways in admitted
+ * before and refused after. The server refuses the same set; this is the
+ * page saying so before it is asked.
+ */
+export function accessLosses(checks: FirewallAccessComparison[]) {
+  return checks.filter(
+    (check) => check.required && accessAdmits(check.before) && check.verdict === "refused",
+  )
+}
+
+/** The checks the firewall could not decide, which the page names rather than counts as fine. */
+export function accessUnknowns(checks: FirewallAccessCheck[] | undefined) {
+  return (checks ?? []).filter((check) => check.verdict === "unknown")
+}
+
+/** A staged plan's operations as the server reads them. */
+export type StagedChange =
+  | { op: "add"; rule: Record<string, unknown>; label: string }
+  | { op: "delete"; ruleId: string; label: string }
+
+export function planOperations(staged: StagedChange[]): FirewallPlanOperation[] {
+  return staged.map((change) =>
+    change.op === "add"
+      ? { op: "add", rule: change.rule }
+      : { op: "delete", ruleId: change.ruleId },
+  )
+}
+
+/** The path that edits or removes a rule by its identity where it has one. */
+export function rulePath(rule: FirewallRule) {
+  const base = `/firewall/rules/${rule.number}`
+  return rule.id ? `${base}?id=${encodeURIComponent(rule.id)}` : base
 }

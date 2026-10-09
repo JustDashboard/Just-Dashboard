@@ -86,6 +86,8 @@ type RouteEntry struct {
 	Managed bool   `json:"managed"`
 	// Guard is why the route cannot be removed here, when it cannot.
 	Guard string `json:"guard,omitempty"`
+	// Comment is the note a managed route was saved with.
+	Comment string `json:"comment,omitempty"`
 }
 
 // RouteNexthop is one leg of a multipath route.
@@ -485,7 +487,7 @@ func routeEntry(r ipRoute, family string, table int, sp *Spec) RouteEntry {
 		e.Nexthops = append(e.Nexthops, RouteNexthop{Gateway: n.Gateway, Device: n.Dev, Weight: n.Weight})
 	}
 	if m, ok := managedRoute(sp, e, table); ok {
-		e.ID, e.Managed = m.ID, true
+		e.ID, e.Managed, e.Comment = m.ID, true, m.Comment
 	}
 	e.Owner, e.Guard = routeOwner(e, table)
 	return e

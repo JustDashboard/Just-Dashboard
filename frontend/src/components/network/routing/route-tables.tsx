@@ -1,7 +1,7 @@
 "use client"
 
 import { useAuth } from "@/hooks/use-auth"
-import { Trash } from "@/components/icons"
+import { Pencil, Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkRoute, NetworkRouting, NetworkRule } from "@/lib/types"
@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Cidr } from "@/components/network/address"
+import { routeVia, ruleSelectors, ruleThen } from "./route-reading"
 
 const OWNER_PRODUCT: Partial<Record<NetworkRoute["owner"], string>> = {
   tailscale: "tailscale",
@@ -49,13 +50,19 @@ export function RouteTable({
   table,
   onChanged,
   actions,
+  match,
+  onEdit,
 }: {
   table: NetworkRouting["tables"][number]
   onChanged: () => void
   actions?: React.ReactNode
+  /** With a target filter: the routes covering it, and the one this table selects. */
+  match?: { target: string; covering: NetworkRoute[]; selected?: NetworkRoute }
+  onEdit?: (route: NetworkRoute) => void
 }) {
   const { can } = useAuth()
   const removable = can("system.admin") && can("destructive")
+  const routes = match ? match.covering : table.routes
   const { confirm, dialog } = useConfirm()
   const remove = (route: NetworkRoute) =>
     confirm({
@@ -88,7 +95,9 @@ export function RouteTable({
         actions={
           <span className="flex items-center gap-3">
             <span className="numeric text-hint text-muted-foreground">
-              {table.routes.length} route{table.routes.length === 1 ? "" : "s"}
+              {match
+                ? `${routes.length} of ${table.routes.length} cover ${match.target}`
+                : `${table.routes.length} route${table.routes.length === 1 ? "" : "s"}`}
             </span>
             {actions}
           </span>
@@ -109,10 +118,14 @@ export function RouteTable({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {table.routes.map((route, index) => (
-              <TableRow key={`${route.family}:${route.destination}:${route.device}:${index}`}>
+            {routes.map((route, index) => (
+              <TableRow
+                key={`${route.family}:${route.destination}:${route.device}:${index}`}
+                data-selected={match?.selected === route ? "" : undefined}
+                className={cn(match?.selected === route && "bg-wash-brand")}
+              >
                 <TableCell title={route.guard}>
-                  <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex flex-wrap items-center gap-2">
                     {route.destination === "default" ? (
                       <span className="font-mono font-medium">default</span>
                     ) : (
@@ -120,15 +133,19 @@ export function RouteTable({
                     )}
                     {route.type !== "unicast" && <Tag tone="danger">{route.type}</Tag>}
                     {route.family === "inet6" && <Tag>IPv6</Tag>}
+                    {route.nexthops.length > 0 && <Tag>multipath</Tag>}
+                    {match?.selected === route && (
+                      <Tag className="text-brand">selected for {match.target}</Tag>
+                    )}
                   </span>
+                  {route.comment && (
+                    <span className="mt-1 block text-hint text-muted-foreground">
+                      {route.comment}
+                    </span>
+                  )}
                 </TableCell>
                 <TableCell className="font-mono text-xs">
-                  {route.gateway ??
-                    (route.nexthops.length > 0 ? (
-                      route.nexthops.map((n) => n.gateway ?? n.device).join(", ")
-                    ) : (
-                      <span className="text-muted-foreground">on-link</span>
-                    ))}
+                  {routeVia(route) ?? <span className="text-muted-foreground">on-link</span>}
                 </TableCell>
                 <TableCell className="font-mono text-xs">
                   {route.device ?? "—"}
@@ -152,7 +169,17 @@ export function RouteTable({
                 <TableCell className="numeric text-right font-mono text-xs">
                   {route.metric || "—"}
                 </TableCell>
-                <TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {removable && route.managed && !route.guard && onEdit && (
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Edit the route to ${route.destination}`}
+                      onClick={() => onEdit(route)}
+                    >
+                      <Pencil aria-hidden />
+                    </Button>
+                  )}
                   {removable && route.managed && !route.guard && (
                     <Button
                       size="icon-xs"
@@ -166,10 +193,12 @@ export function RouteTable({
                 </TableCell>
               </TableRow>
             ))}
-            {table.routes.length === 0 && (
+            {routes.length === 0 && (
               <TableRow>
                 <TableCell colSpan={6} className="text-muted-foreground">
-                  This table holds no routes; a rule sending here falls through to the next.
+                  {match
+                    ? `No route in this table covers ${match.target}.`
+                    : "This table holds no routes; a rule sending here falls through to the next."}
                 </TableCell>
               </TableRow>
             )}
@@ -241,25 +270,23 @@ export function RuleTable({
                   {rule.priority}
                 </TableCell>
                 <TableCell className="font-mono text-xs" title={rule.guard}>
-                  {[
-                    rule.from && `from ${rule.from}`,
-                    rule.to && `to ${rule.to}`,
-                    rule.iif && `iif ${rule.iif}`,
-                    rule.oif && `oif ${rule.oif}`,
-                    rule.fwmark && `fwmark ${rule.fwmark}`,
-                  ]
-                    .filter(Boolean)
-                    .join(" ") || <span className="text-muted-foreground">everything</span>}
+                  {ruleSelectors(rule).join(" ") || (
+                    <span className="text-muted-foreground">everything</span>
+                  )}
                   {rule.family === "inet6" && <Tag className="ml-2">IPv6</Tag>}
                 </TableCell>
                 <TableCell className="text-xs">
-                  {rule.action === "lookup" ? (
-                    <>
-                      look up <span className="font-medium">{rule.tableName ?? rule.table}</span>
-                    </>
-                  ) : (
-                    <span className="text-destructive">{rule.action}</span>
-                  )}
+                  <span
+                    className={cn(
+                      rule.action !== "lookup" &&
+                        rule.action !== "goto" &&
+                        rule.action !== "nop" &&
+                        "text-destructive",
+                      rule.unresolved && "text-warning",
+                    )}
+                  >
+                    {ruleThen(rule)}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <span className="inline-flex items-center gap-1.5 text-xs">

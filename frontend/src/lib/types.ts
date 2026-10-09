@@ -2391,6 +2391,12 @@ export type SSHKey = {
 
 export type FirewallRule = {
   number?: number
+  /** Stable identity: survives renumbering, and an edit naming a stale one is refused. */
+  id?: string
+  /** The device a rule is scoped to ("on eth0"). */
+  interface?: string
+  /** The firewalld zone holding the rule. */
+  zone?: string
   action: string
   protocol?: string
   from: string
@@ -2429,8 +2435,69 @@ export type FirewallCapabilities = {
   readOnlyReason?: string
 }
 
+export type FirewallBackend = "ufw" | "firewalld" | "iptables" | "nftables"
+
+/** One firewall the host could be run by, and whether it is the one in charge. */
+export type FirewallDetection = {
+  backend: FirewallBackend
+  installed: boolean
+  active: "active" | "inactive" | "unknown" | "not_checked"
+  selected: boolean
+  reason: string
+}
+
+export type FirewallZone = {
+  name: string
+  default: boolean
+  target: string
+  interfaces: string[]
+  sources: string[]
+  rules: FirewallRule[]
+}
+
+export type FirewallFamilyPolicy = {
+  family: "ipv4" | "ipv6"
+  filtered: boolean
+  incoming?: string
+  outgoing?: string
+  routed?: string
+  reason?: string
+}
+
+export type FirewallInterfacePolicy = {
+  interface: string
+  zone?: string
+  incoming: string
+  rules: number
+  reason?: string
+}
+
+export type FirewallRuleFinding = {
+  ruleId: string
+  number: number
+  kind: "shadowed" | "redundant"
+  byId: string
+  byNumber: number
+  reason: string
+}
+
+/** One way in and whether the firewall admits it. */
+export type FirewallAccessCheck = {
+  name: string
+  port: number
+  protocol: string
+  family: "ipv4" | "ipv6"
+  source: string
+  interface?: string
+  required: boolean
+  verdict: "admitted" | "limited" | "refused" | "unfiltered" | "unknown"
+  rule?: number
+  ruleId?: string
+  reason: string
+}
+
 export type FirewallStatus = {
-  backend: "ufw" | "firewalld" | "iptables"
+  backend: FirewallBackend
   available: boolean
   enabled: boolean
   defaultPolicy?: string
@@ -2440,9 +2507,65 @@ export type FirewallStatus = {
   zone?: string
   capabilities: FirewallCapabilities
   rules: FirewallRule[]
+  /** "configured" when an inactive firewall's rules were read from its configuration. */
+  rulesFrom?: "configured"
   raw?: string
   error?: string
+  detection?: FirewallDetection[]
+  zones?: FirewallZone[]
+  effective?: { families: FirewallFamilyPolicy[]; interfaces: FirewallInterfacePolicy[] }
+  findings?: FirewallRuleFinding[]
+  analysis?: string
+  /** Other nftables tables beside the dashboard's own, which keep enforcing. */
+  foreign?: string[]
+  access?: FirewallAccessCheck[]
 }
+
+export type FirewallAccessComparison = FirewallAccessCheck & {
+  before: FirewallAccessCheck["verdict"]
+}
+
+/** A proposed firewall change judged before it is made. */
+export type FirewallPreflight = {
+  backend: FirewallBackend
+  checks: FirewallAccessComparison[]
+  findings: FirewallRuleFinding[]
+  refusal?: string
+}
+
+export type FirewallPlanOperation = {
+  op: "add" | "replace" | "delete"
+  ruleId?: string
+  rule?: Record<string, unknown>
+}
+
+export type FirewallPlanReview = FirewallPreflight & {
+  steps: {
+    op: "add" | "replace" | "delete"
+    ruleId?: string
+    number?: number
+    description: string
+    outcome: "pending" | "applied" | "failed" | "skipped" | "compensated"
+    detail?: string
+  }[]
+}
+
+export type FirewallRuleEvent = {
+  id: number
+  at: string
+  actor: string
+  backend: FirewallBackend
+  operation: string
+  ruleId?: string
+  previousRuleId?: string
+  rule?: Record<string, unknown>
+  previous?: Record<string, unknown>
+  outcome: "applied" | "refused" | "failed" | "pending" | "compensated" | "skipped"
+  detail?: string
+  changeId?: string
+}
+
+export type FirewallRuleHistory = { events: FirewallRuleEvent[]; limits: string[] }
 
 /** A named port from the server's catalogue, with its warning attached. */
 export type ServicePreset = {
@@ -6726,6 +6849,8 @@ export type NetworkPath = {
   device?: string
   gateway?: string
   source?: string
+  /** The table the kernel says answered, when it names one; absent for main. */
+  table?: string
   local?: boolean
 }
 
@@ -6755,6 +6880,17 @@ export type NetworkChangeStatus = {
   expiresAt?: string
   appliedAt?: string
   verifiedAt?: string
+  /** What a routing change was checked against after it applied. */
+  validation?: NetworkChangeValidation
+}
+
+export type NetworkChangeValidation = {
+  checkedAt: string
+  client: boolean
+  sourceSelected: boolean
+  anchors: string[]
+  flows: number
+  moved: { address: string; before: string; after: string }[]
 }
 
 export type NetworkPersistence = {
@@ -6867,6 +7003,25 @@ export type NetworkRoute = {
   owner: NetworkRouteOwner
   managed: boolean
   guard?: string
+  /** The note a managed route was saved with. */
+  comment?: string
+}
+
+export type NetworkNexthop = { gateway?: string; device?: string; weight?: number }
+
+/** A route as the dashboard saved it, which an edit plan compares. */
+export type NetworkRouteSpec = {
+  id: number
+  family: "inet" | "inet6"
+  destination: string
+  type: string
+  gateway?: string
+  device?: string
+  table: number
+  metric?: number
+  source?: string
+  nexthops?: NetworkNexthop[]
+  comment?: string
 }
 
 export type NetworkRule = {
@@ -6878,12 +7033,144 @@ export type NetworkRule = {
   iif?: string
   oif?: string
   fwmark?: string
-  action: "lookup" | "blackhole" | "unreachable" | "prohibit" | "goto"
+  uidRange?: string
+  tos?: string
+  ipProto?: string
+  sport?: string
+  dport?: string
+  /** Inverts every selector. */
+  not?: boolean
+  /** Looks the packet up in its VRF device's table. */
+  l3mdev?: boolean
+  suppressPrefixLength?: number
+  action: "lookup" | "blackhole" | "unreachable" | "prohibit" | "goto" | "nop"
   table?: number
   tableName?: string
+  goto?: number
+  /** A goto whose target priority holds no rule. */
+  unresolved?: boolean
   owner: "system" | "tailscale" | "just-dashboard"
   managed: boolean
   guard?: string
+}
+
+/** What one rule did with a modeled packet. */
+export type NetworkDecisionStep = {
+  priority: number
+  result:
+    | "no_match"
+    | "unknown"
+    | "undecided"
+    | "no_route"
+    | "suppressed"
+    | "throw"
+    | "jumped"
+    | "passed"
+    | "decided"
+  detail?: string
+}
+
+/** The table and rule behind the browser's reply path. */
+export type NetworkClientDecision = {
+  basis: "kernel_and_model" | "kernel" | "disagree"
+  table: number
+  tableName?: string
+  device?: string
+  gateway?: string
+  rulePriority?: number
+  candidates: number[]
+  reason?: string
+  steps: NetworkDecisionStep[]
+}
+
+export type NetworkRouteDecision = {
+  status: "route" | "local" | "discard" | "unreachable" | "unknown"
+  rulePriority?: number
+  table?: number
+  tableName?: string
+  route?: NetworkRoute
+  reason?: string
+  steps: NetworkDecisionStep[]
+  alternatives?: { assumption: string; decision: NetworkRouteDecision }[]
+}
+
+export type NetworkImpactItem = {
+  kind: string
+  name: string
+  address: string
+  before: string
+  after: string
+  reason?: string
+}
+
+/** What a route or rule would do to the traffic this host is known to send. */
+export type NetworkRouteImpact = {
+  family: "inet" | "inet6"
+  table: number
+  checkedAt: string
+  affected: NetworkImpactItem[]
+  unknown: NetworkImpactItem[]
+  unaffected: number
+  clientAffected: boolean
+  limits: string[]
+}
+
+export type NetworkRoutePlan = {
+  before: NetworkRouteSpec
+  after: NetworkRouteSpec
+  replace: boolean
+  commands: string[]
+  changes: string[]
+  impact: NetworkRouteImpact
+}
+
+export type NetworkRuleRelation = { priority: number; owner: string; reason: string }
+
+export type NetworkRulePreview = {
+  rule: { priority: number; family: "inet" | "inet6" }
+  checkedAt: string
+  after?: NetworkRule
+  before?: NetworkRule
+  shadowedBy: NetworkRuleRelation[]
+  shadows: NetworkRuleRelation[]
+  impact: NetworkRouteImpact
+  probe?: {
+    tuple: Record<string, unknown>
+    kernel?: NetworkPath & { family: string; table?: number }
+    kernelError?: string
+    now: NetworkRouteDecision
+    with: NetworkRouteDecision
+    agreement: "agrees" | "disagrees" | "model_unknown" | "kernel_unavailable"
+    changes: boolean
+  }
+  refusal?: string
+}
+
+export type NetworkRouteEvent = {
+  id: number
+  observedAt: string
+  previousAt: string
+  acrossRestart?: boolean
+  object: "route" | "rule"
+  change: "added" | "removed" | "changed"
+  family: "inet" | "inet6"
+  table?: number
+  tableName?: string
+  destination?: string
+  owner: string
+  managed: boolean
+  before?: string
+  after?: string
+}
+
+export type NetworkRouteHistory = {
+  intervalSeconds: number
+  running: boolean
+  since?: string
+  lastReading?: string
+  lastError?: string
+  events: NetworkRouteEvent[]
+  limits: string[]
 }
 
 export type ForwardingFamily = {
@@ -6894,6 +7181,17 @@ export type ForwardingFamily = {
   /** What stops working if it is turned off. */
   neededBy: string[]
   guard?: string
+  /** How the Docker dependency was counted for this family. */
+  dockerBasis?: string
+  health?: {
+    status: "off" | "measuring" | "forwarding" | "idle" | "partial" | "unknown"
+    forwarded?: number
+    ratePerSecond?: number
+    windowSeconds?: number
+    disabled: string[]
+    checkedAt: string
+    reason?: string
+  }
 }
 
 export type NetworkForwarding = { ipv4: ForwardingFamily; ipv6: ForwardingFamily }
@@ -6908,12 +7206,61 @@ export type NetworkRouting = {
   hiddenLocal: number
   rulePriorities: { min: number; max: number }
   forwarding: NetworkForwarding
+  clientDecision?: NetworkClientDecision
+  vrfs?: { name: string; table: number }[]
+}
+
+export type BGPPolicy = {
+  routeMapIn?: string
+  routeMapOut?: string
+  prefixListIn?: string
+  prefixListOut?: string
+  filterListIn?: string
+  filterListOut?: string
+}
+
+export type OSPFNeighbor = {
+  version: 2 | 3
+  routerId: string
+  address?: string
+  interface?: string
+  state: string
+  role?: string
+  priority: number
+  deadSeconds?: number
+  uptimeSeconds?: number
+}
+
+export type BGPRoutesView = {
+  family: string
+  prefix?: string
+  routerId?: string
+  localAs?: number
+  total: number
+  truncated: boolean
+  routes: {
+    prefix: string
+    best: boolean
+    valid: boolean
+    multipath: boolean
+    nexthops: string[]
+    peer?: string
+    path: string
+    origin?: string
+    localPref?: number
+    med?: number
+    weight: number
+    from?: string
+  }[]
+  error?: string
 }
 
 export type BGPView = {
   installed: boolean
   running: boolean
   error?: string
+  ospf?: OSPFNeighbor[]
+  readOnly?: string
   families: {
     name: string
     routerId: string
@@ -6931,6 +7278,7 @@ export type BGPView = {
       messagesSent: number
       connectionsDropped: number
       description?: string
+      policy?: BGPPolicy
     }[]
   }[]
 }
