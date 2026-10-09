@@ -6682,6 +6682,17 @@ export type NetworkLink = {
   managed: boolean
   /** Why it may not be set down, deleted or re-parented. */
   guard?: string
+  /**
+   * Set where a Docker device's join to its container or network could not be
+   * made, with the reason: "unresolved" veth, "unknown" bridge network.
+   */
+  dockerJoin?: "unresolved" | "unknown"
+  dockerJoinReason?: string
+  /** A dashboard-made veth's other end and the managed namespace it lives in. */
+  peer?: string
+  peerNamespace?: string
+  /** A dashboard-made unicast VXLAN's further flood ends. */
+  remotes?: string[]
 }
 
 export type NetworkAddress = {
@@ -6692,6 +6703,130 @@ export type NetworkAddress = {
   public?: boolean
   managed?: boolean
   guard?: string
+  /** How the kernel says the address came to be. */
+  origin?: "static" | "dhcp" | "slaac" | "temporary" | "dynamic" | "link-local"
+  /** Remaining lifetimes of a dynamic address; absent is forever. */
+  validSeconds?: number
+  preferredSeconds?: number
+}
+
+/** Whether one part of a detailed reading arrived, and why not. */
+export type NetworkReading = {
+  state: "ok" | "unavailable" | "not_applicable" | "failed"
+  reason?: string
+  package?: string
+}
+
+/** A device's driver, offloads and every error counter, read when its sheet opens. */
+export type NetworkLinkDetail = {
+  name: string
+  checkedAt: string
+  driver?: { name: string; version?: string; firmware?: string; bus?: string }
+  driverRead: NetworkReading
+  offloads: { name: string; enabled: boolean; fixed: boolean }[]
+  offloadsRead: NetworkReading
+  errors?: Record<
+    | "rxErrors"
+    | "rxDropped"
+    | "rxOverErrors"
+    | "rxLengthErrors"
+    | "rxCrcErrors"
+    | "rxFrameErrors"
+    | "rxFifoErrors"
+    | "rxMissedErrors"
+    | "txErrors"
+    | "txDropped"
+    | "txCarrierErrors"
+    | "txCollisions"
+    | "txAbortedErrors"
+    | "txFifoErrors"
+    | "txWindowErrors"
+    | "txHeartbeatErrors"
+    | "carrierChanges",
+    number
+  >
+  errorsRead: NetworkReading
+}
+
+/** One VLAN a bridge port carries. */
+export type NetworkPortVLAN = { vid: number; pvid?: boolean; untagged?: boolean }
+
+/** A bridge read as a switch. */
+export type NetworkBridgeView = {
+  name: string
+  managed: boolean
+  checkedAt: string
+  stp: boolean
+  vlanFiltering: boolean
+  multicastSnooping: boolean
+  defaultPvid: number
+  ageingSeconds: number
+  vlanProtocol?: string
+  settingsRead: NetworkReading
+  ports: {
+    name: string
+    self: boolean
+    managed: boolean
+    vlans: NetworkPortVLAN[]
+    desired?: NetworkPortVLAN[]
+  }[]
+  vlansRead: NetworkReading
+  fdb: { mac: string; port: string; vlan?: number; state?: string; dst?: string; static: boolean }[]
+  fdbTotal: number
+  fdbRead: NetworkReading
+}
+
+/** What joining a device to a bridge, or leaving one, would do. */
+export type NetworkMasterPreview = {
+  device: string
+  bridge?: string
+  allowed: boolean
+  refusal?: string
+  persisted: boolean
+  steps: string[]
+  effects: { kind: string; detail: string }[]
+}
+
+/** What this host can establish about whether a tunnel or virtual device can carry traffic. */
+export type NetworkLinkReadiness = {
+  name: string
+  kind: string
+  checkedAt: string
+  checks: {
+    id: string
+    label: string
+    state: "ok" | "warning" | "failed" | "unknown" | "info"
+    detail: string
+  }[]
+  limits: string[]
+}
+
+/** One namespace read as its own network. */
+export type NetworkNamespaceDetail = {
+  name: string
+  kind: "named" | "container"
+  managed: boolean
+  image?: string
+  pid?: number
+  checkedAt: string
+  devices: NetworkNamespace["devices"]
+  devicesRead: NetworkReading
+  routes: {
+    family: "inet" | "inet6"
+    destination: string
+    type?: string
+    gateway?: string
+    device?: string
+    source?: string
+    protocol?: string
+    metric?: number
+    table?: string
+  }[]
+  routesRead: NetworkReading
+  dns?: { nameservers: string[]; search: string[]; options: string[] }
+  dnsRead: NetworkReading
+  listeners: { protocol: string; address: string; port: number }[]
+  listenersRead: NetworkReading
 }
 
 /** One two-second reading of a device. */
@@ -6774,6 +6909,8 @@ export type NetworkDefaultRoute = {
 export type NetworkFinding = {
   id: string
   level: "critical" | "warning" | "notice"
+  /** The reading it was judged from. */
+  source: string
   title: string
   detail: string
   /** The page that fixes it. */
@@ -6831,6 +6968,78 @@ export type NetworkOverview = {
     namespaces: number
   }
   findings: NetworkFinding[]
+  /** Each family's way out, and what it establishes about the address the internet sees. */
+  identity: NetworkEgressIdentity[]
+  /** The topology's edges as connection tracking holds them. */
+  flows: NetworkTopologyFlows
+  /** Which readings arrived; a failed one is not an empty answer. */
+  observations: NetworkObservation[]
+  incidents: NetworkIncident[]
+  incidentsError?: string
+  readAt: string
+}
+
+export type NetworkEgressIdentity = {
+  family: "inet" | "inet6"
+  forwarding: boolean
+  forwardingError?: string
+  device?: string
+  gateway?: string
+  /** The address the kernel sends from: the NIC source. */
+  source?: string
+  sourceScope: "public" | "private" | "shared" | "unique-local" | "link-local" | "loopback" | "none"
+  /** What is known about the provider-facing identity. */
+  public: "nic" | "translated" | "unobserved" | "no_route" | "unknown"
+  detail: string
+  error?: string
+}
+
+export type NetworkObservation = {
+  source: string
+  label: string
+  state: "ok" | "failed" | "unavailable"
+  error?: string
+  href: string
+}
+
+export type NetworkFlowEdge = {
+  /** Topology node ids: "internet", "host", "link:<device>" or "docker:<network id>". */
+  from: string
+  to: string
+  flows: number
+  bytes?: number
+  protocols: string[]
+  translation: "none" | "masquerade" | "forward"
+  via?: string
+  path: string[]
+}
+
+export type NetworkTopologyFlows = {
+  state: "ok" | "unavailable" | "failed"
+  error?: string
+  readAt: string
+  total: number
+  classified: number
+  truncated: boolean
+  accounting: boolean
+  edges: NetworkFlowEdge[]
+}
+
+export type NetworkIncident = {
+  id: number
+  findingId: string
+  source: string
+  level: NetworkFinding["level"]
+  title: string
+  detail: string
+  href: string
+  openedAt: string
+  lastSeenAt: string
+  resolvedAt?: string
+  /** When its reading began failing; an unobserved incident stays open. */
+  unobservedSince?: string
+  /** Incidents that began within the same two minutes. */
+  related: number[]
 }
 
 /** What a change to a device the dashboard did not make says about the next boot. */
@@ -6844,6 +7053,8 @@ export type NetworkNamespace = {
   image?: string
   pid?: number
   devices: { name: string; state: string; mtu: number; mac?: string; addresses: string[] }[]
+  /** Why its devices could not be read; they are then unknown, not empty. */
+  readError?: string
 }
 
 export type NetworkRouteOwner =

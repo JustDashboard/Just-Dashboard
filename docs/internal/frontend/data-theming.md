@@ -16,6 +16,14 @@ and matching local/destination address families. Its notice leaves multicast-und
 peer reachability unverified. GRE and GRETAP, in both families, expose decimal uint32 tunnel keys
 and outer TTL/hop limits, with blank or zero retaining the kernel defaults. A key is an identifier;
 GRE remains unencrypted, and creating a link does not test endpoint reachability.
+The live throughput ring (`use-live-traffic.ts`) carries its own last-success time and retry, so
+the Overview, Interfaces and the live Traffic window show a dated "live throughput" warning while
+the retained ring stays drawn; the Overview's Throughput head also counts the newest reading's age
+on the browser clock and turns stale past three sampler intervals. A later namespaces poll failure
+keeps the list with its own dated warning; a single namespace whose devices could not be read says
+so in place, and the namespace sheet, device detail, bridge and readiness reads each keep their last
+answer with a dated warning. Parts of those reads that did not arrive (`Reading` state unavailable,
+not_applicable or failed) are worded as such, never as empty lists.
 Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
 the administrator capability, with destructive controls also following the destructive capability;
 backend route checks remain authoritative. VPN peer reads are disabled for a reader without the

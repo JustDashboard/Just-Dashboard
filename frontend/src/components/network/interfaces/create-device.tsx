@@ -98,8 +98,21 @@ type LinkRequest = {
   mode?: string
   mtu?: number
   stp?: boolean
+  vlanFiltering?: boolean
+  multicastSnooping?: boolean
   addresses?: string[]
   up: boolean
+}
+
+/** What each macvlan mode means for the host and its siblings, said before it is made. */
+const MACVLAN_MODES: Record<string, string> = {
+  bridge:
+    "Macvlans on the same card reach each other directly. This server cannot reach them through the card, nor they the server: give the host its own macvlan to talk to them.",
+  private:
+    "Each macvlan reaches only the outside network: not this server through the card, and not the other macvlans on it.",
+  vepa: "Traffic between macvlans on the card goes out to the switch, which must reflect it back (802.1Qbg). This server still cannot reach them through the card.",
+  passthru:
+    "One macvlan takes the card: every frame it receives goes to the macvlan and the host's own stack sees none. Refused on a card that carries the uplink or your connection.",
 }
 
 /**
@@ -136,6 +149,8 @@ export function CreateDevice({
   const [address, setAddress] = useState("")
   const [mtu, setMtu] = useState("")
   const [stp, setStp] = useState(false)
+  const [vlanFiltering, setVlanFiltering] = useState(false)
+  const [snooping, setSnooping] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -193,7 +208,11 @@ export function CreateDevice({
       if (key.trim()) body.key = Number(key.trim())
     }
     if (kind === "macvlan") body.mode = mode
-    if (kind === "bridge") body.stp = stp
+    if (kind === "bridge") {
+      body.stp = stp
+      if (vlanFiltering) body.vlanFiltering = true
+      if (!snooping) body.multicastSnooping = false
+    }
     if (mtu.trim()) body.mtu = Number(mtu)
     if (address.trim()) body.addresses = [address.trim()]
     setBusy(true)
@@ -439,7 +458,7 @@ export function CreateDevice({
           </FieldRow>
         )}
         {kind === "macvlan" && (
-          <Field label="Mode" htmlFor="device-mode">
+          <Field label="Mode" htmlFor="device-mode" hint={MACVLAN_MODES[mode]}>
             <Select value={mode} onValueChange={setMode}>
               <SelectTrigger id="device-mode" className="w-full">
                 <SelectValue />
@@ -479,6 +498,58 @@ export function CreateDevice({
             </Field>
           )}
         </FieldRow>
+        {kind === "bridge" && (
+          <FieldRow>
+            <Field
+              label="Filter by VLAN"
+              hint="Each port carries only its VLANs, tagged or untagged; set them on each port's sheet"
+            >
+              <label className="flex h-9 items-center gap-2 text-body">
+                <Switch
+                  checked={vlanFiltering}
+                  onCheckedChange={setVlanFiltering}
+                  aria-label="Filter by VLAN"
+                />
+                {vlanFiltering ? "On — ports start on VLAN 1, untagged" : "Off"}
+              </label>
+            </Field>
+            <Field
+              label="Multicast snooping"
+              hint="Off floods multicast to every port, which some IPTV and discovery setups need"
+            >
+              <label className="flex h-9 items-center gap-2 text-body">
+                <Switch
+                  checked={snooping}
+                  onCheckedChange={setSnooping}
+                  aria-label="Multicast snooping"
+                />
+                {snooping ? "On" : "Off"}
+              </label>
+            </Field>
+          </FieldRow>
+        )}
+        {kind === "vlan" && (
+          <Notice title="Tagged on its card">
+            Frames on this device leave its card tagged with its id. To carry several VLANs on one
+            port, or one untagged, make a bridge that filters by VLAN and set the port&rsquo;s
+            native and tagged VLANs on its sheet.
+          </Notice>
+        )}
+        {kind === "macvlan" && (
+          <Notice title="Provider MAC filtering">
+            A macvlan sends with a MAC address of its own. Cloud providers and switch port security
+            usually drop frames from addresses they did not assign, so on a virtual machine&rsquo;s
+            card it may never reach the network. Its sheet checks the card after it is made;
+            connectivity beyond this server is not probed.
+          </Notice>
+        )}
+        {kind === "dummy" && (
+          <Notice title="What a dummy is for">
+            As a service address: give it a /32 or /128 and bind services to it — it stays up when
+            every card is down. As a route sink: leave it without an address and route destinations
+            into it from its sheet.
+          </Notice>
+        )}
         {tunnel && (
           <Notice title="Not encrypted">
             GRE carries the packets as they are. Across the internet, put it inside WireGuard or use

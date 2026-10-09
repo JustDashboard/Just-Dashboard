@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { get } from "@/lib/api"
 import type { NetworkLive, NetworkLivePoint } from "@/lib/types"
 
@@ -13,6 +13,10 @@ export type LiveTraffic = {
   /** The newest reading's time, in unix seconds; zero before the first answer. */
   now: number
   error?: Error
+  /** When the last poll succeeded, in milliseconds; retained rings are older than an error. */
+  lastSuccess?: number
+  /** Ask again now, after a failed poll. */
+  refresh: () => void
 }
 
 /**
@@ -27,7 +31,9 @@ export type LiveTraffic = {
  * dressed as a live one.
  */
 export function useLiveTraffic(enabled = true, intervalMs = 2000): LiveTraffic {
-  const [state, setState] = useState<LiveTraffic>({ series: {}, now: 0 })
+  const [state, setState] = useState<Omit<LiveTraffic, "refresh">>({ series: {}, now: 0 })
+  const [attempt, setAttempt] = useState(0)
+  const refresh = useCallback(() => setAttempt((n) => n + 1), [])
   const since = useRef(0)
 
   useEffect(() => {
@@ -44,7 +50,11 @@ export function useLiveTraffic(enabled = true, intervalMs = 2000): LiveTraffic {
           controller.signal,
         )
         if (cancelled) return
-        setState((previous) => ({ series: merge(previous.series, live.series), now: live.now }))
+        setState((previous) => ({
+          series: merge(previous.series, live.series),
+          now: live.now,
+          lastSuccess: Date.now(),
+        }))
         const newest = Math.max(
           since.current,
           ...Object.values(live.series).map((points) => points.at(-1)?.t ?? 0),
@@ -71,9 +81,9 @@ export function useLiveTraffic(enabled = true, intervalMs = 2000): LiveTraffic {
       controller.abort()
       clearTimeout(timer)
     }
-  }, [enabled, intervalMs])
+  }, [enabled, intervalMs, attempt])
 
-  return state
+  return useMemo(() => ({ ...state, refresh }), [state, refresh])
 }
 
 /** The previous rings with the new points appended, trimmed, and gone devices dropped. */

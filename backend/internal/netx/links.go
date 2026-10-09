@@ -85,6 +85,8 @@ type Link struct {
 	// managed namespace it was moved into.
 	Peer          string `json:"peer,omitempty"`
 	PeerNamespace string `json:"peerNamespace,omitempty"`
+	// Remotes are a dashboard-made unicast VXLAN's further flood ends.
+	Remotes []string `json:"remotes,omitempty"`
 	// XDP names the eBPF program attached at the driver, if one is.
 	XDP string `json:"xdp,omitempty"`
 	// Managed marks a device the dashboard created, and so may remove.
@@ -457,8 +459,13 @@ func annotate(links []Link, a annotation) {
 				l.Container, l.ContainerImage = c.Name, c.Image
 			}
 		}
-		if m, ok := a.spec.link(l.Name); ok && m.Kind == "veth" {
-			l.Peer, l.PeerNamespace = m.Peer, m.PeerNamespace
+		if m, ok := a.spec.link(l.Name); ok {
+			switch m.Kind {
+			case "veth":
+				l.Peer, l.PeerNamespace = m.Peer, m.PeerNamespace
+			case "vxlan":
+				l.Remotes = m.Remotes
+			}
 		}
 		if a.speed != nil && (l.Kind == "physical" || l.Kind == "bond") {
 			l.SpeedMbps = a.speed(l.Name)

@@ -2,7 +2,8 @@
 
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
-import { useState } from "react"
+import { Suspense, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -30,10 +31,23 @@ import { BGPBlock } from "@/components/network/routing/bgp"
  * routes removable from their rows; then BGP, where FRR runs.
  *
  * The commands sit with what they add to: a route beside the main table, a
- * rule beside the rules.
+ * rule beside the rules. Another page can open the route form with a device
+ * already chosen (`?route=new&device=dummy0`): a dummy's sheet hands off
+ * "route a destination into it" this way.
  */
 export default function NetworkRoutingPage() {
+  return (
+    // The handoff lives in the query string, which the App Router only hands
+    // out inside a Suspense boundary.
+    <Suspense fallback={<LoadingPanel />}>
+      <Routing />
+    </Suspense>
+  )
+}
+
+function Routing() {
   const { can } = useAuth()
+  const params = useSearchParams()
   const admin = can("system.admin")
   const routing = usePoll<NetworkRouting>(
     (signal) => get("/network/routing", undefined, signal),
@@ -41,7 +55,15 @@ export default function NetworkRoutingPage() {
   )
   const links = usePoll<NetworkLink[]>((signal) => get("/network/links", undefined, signal), 30_000)
   const bgp = usePoll<BGPView>((signal) => get("/network/bgp", undefined, signal), 30_000)
-  const [adding, setAdding] = useState<"route" | "rule">()
+  const [adding, setAdding] = useState<"route" | "rule" | undefined>(() =>
+    params.get("route") === "new" ? "route" : undefined,
+  )
+  const [handoffDevice] = useState(() => params.get("device") ?? undefined)
+  useEffect(() => {
+    if (params.get("route") !== null || params.get("device") !== null) {
+      window.history.replaceState(null, "", window.location.pathname)
+    }
+  }, [params])
 
   if (!routing.data) {
     return (
@@ -144,6 +166,7 @@ export default function NetworkRoutingPage() {
         routing={data}
         links={links.data ?? []}
         onAdded={routing.refresh}
+        initialDevice={handoffDevice}
       />
       <AddRule
         open={admin && adding === "rule"}
