@@ -131,6 +131,9 @@ to the contribution terms above, including the additional licence grant to the p
   [native DNS service acceptance](docs/internal/backend/network-dns-services.md#acceptance-status)
   for the selected test binary, required already-cached images and exact owned cleanup scope.
   These fixtures publish explicit high loopback ports and never redirect the host resolver.
+  Filter-inventory changes also verify native source/custom-rule metadata and restart persistence;
+  subscription loading and effective client filtering remain unmeasured. Retain failed and
+  corrected source/binary/raw records separately.
   Record/client UI changes also run the selected DNS service browser spec against a fresh production
   build. Its mocks must supply `/changes/{id}/current` for the exact retained selection; ordinary
   connection inventory cannot stand in for selected record/client freshness. Browser mocks and

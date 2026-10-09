@@ -1,0 +1,42 @@
+=== RUN   TestDNSFilterAdGuardNativeMetadataAndRawDrift
+--- PASS: TestDNSFilterAdGuardNativeMetadataAndRawDrift (0.11s)
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/missing
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/null-enable
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/wrong-enable
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/missing-id
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/duplicate-id
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/bad-count
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/bad-update
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/too-many
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/too-many-rules
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/long-rule
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/long-url
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/null-response
+=== RUN   TestDNSFilterMissingMalformedAndBoundsRemainUnknown/body-bound
+--- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown (0.07s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/missing (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/null-enable (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/wrong-enable (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/missing-id (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/duplicate-id (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/bad-count (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/bad-update (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/too-many (0.02s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/too-many-rules (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/long-rule (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/long-url (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/null-response (0.00s)
+    --- PASS: TestDNSFilterMissingMalformedAndBoundsRemainUnknown/body-bound (0.02s)
+=== RUN   TestDNSFilterPiHoleGroupEmptyAndIndependentRuleKinds
+--- PASS: TestDNSFilterPiHoleGroupEmptyAndIndependentRuleKinds (0.01s)
+=== RUN   TestDNSFilterAdGuardNullRequiresExactPinnedWriterAndPresentFields
+--- PASS: TestDNSFilterAdGuardNullRequiresExactPinnedWriterAndPresentFields (0.01s)
+=== RUN   TestDNSFilterTechnitiumPinnedNullAndUnsupportedScopes
+--- PASS: TestDNSFilterTechnitiumPinnedNullAndUnsupportedScopes (0.01s)
+=== RUN   TestDNSFilterVersionCancellationAndConnectionGeneration
+--- PASS: TestDNSFilterVersionCancellationAndConnectionGeneration (2.35s)
+=== RUN   TestDNSFilterCancellationDuringNativeRequestAndUnavailableReadOnly
+--- PASS: TestDNSFilterCancellationDuringNativeRequestAndUnavailableReadOnly (2.44s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	6.021s

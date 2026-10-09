@@ -124,6 +124,11 @@ and [domain rules](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/conte
 plus Technitium's [15.6.0 settings writer](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/WebServiceSettingsApi.cs)
 and [block-list manager](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/Dns/ZoneManagers/BlockListZoneManager.cs).
 Filter mutation, full rule contents, manual/app filtering and wider P17 acceptance remain open.
+The [source-matched filter acceptance](evidence/dns-service-filters-2026-10-09.md) retains scoped
+checks, all three actual engine passes, exact source/binary/raw hashes and owned cleanup, with the
+original AdGuard failure separately attributed. It verifies empty subscriptions and AdGuard/Pi-hole
+local-rule metadata persistence; it does not establish loaded subscription content or effective
+client filtering.
 
 ## Reviewed records and client groups
 
@@ -312,6 +317,9 @@ the system temporary filesystem is constrained. The fixture creates only labeled
 two-volume containers and explicit high loopback DNS/management ports. It checks native auth,
 read-only defaults, reviewed changes/readback, real UDP/TCP local or authoritative answers, retained
 credentials/config after container restart, owned removal and cold interrupted predecessor cleanup.
+Filter inventory changes also check known empty native subscriptions, AdGuard/Pi-hole local custom
+rule metadata and stable section fingerprints after restart. Subscription URLs are never added or
+fetched for this proof; unsupported Technitium manual/app rules remain explicit.
 It removes its exact owned resources and leaves the host resolver unchanged. A missing selected
 image is a failed acceptance, not a successful skip. `JD_DNS_SERVICES_NATIVE_LOG_DIR` optionally
 retains bounded owner-specific fixture logs with bootstrap credentials redacted.
