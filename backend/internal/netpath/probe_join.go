@@ -108,10 +108,3 @@ func CorrelatePort(res *netsec.ProbeResult, path *Result) {
 		res.Verdict = netsec.ProbeFindings
 	}
 }
-
-func nonEmpty(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
-}
