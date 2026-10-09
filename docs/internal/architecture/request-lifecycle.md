@@ -113,7 +113,17 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   additionally require `system.admin`. Manual creation refuses Compose/dashboard ownership labels and
   explicit address pools that contain the connection's observed client address before Engine I/O.
   Additive IPv4/IPv6 IPAM pools retain the legacy single-pool API; validation and bounded metadata are
-  described in [Docker network creation](../backend/docker-files-logs.md#network-creation).
+  described in [Docker network creation](../backend/docker-files-logs.md#network-creation). A driver
+  other than `bridge` is checked against the Engine's catalogue before Engine I/O, and refused when the
+  catalogue cannot be read.
+- **Docker network membership and removal.** Connect and disconnect stay `service.control`, removal and
+  prune `s.destructive`, but each handler reads the network's dependents afresh and refuses what its
+  preview blocks (`dockerx.PreviewConnect`, `PreviewDisconnect`, `PreviewRemove`, `PruneCandidates`),
+  failing closed when the dependents cannot be read: the dashboard's own containers, the shared ingress
+  and a deployment's database-link members are never detached, no container joins the dashboard's own
+  network, and a live deployment's network is removed only through its removal plan. Prune removes only
+  the reviewed IDs still removable, never through the Engine's own prune. See
+  [guarded changes](../backend/docker-files-logs.md#network-ownership-dependencies-and-guarded-changes).
 - **Saved network diagnostics.** Launch, read, export, compare and cancel require `system.admin`.
   The generic job list/get/stream/cancel routes apply that same gate to `network.diagnostic.*` jobs,
   so artifact access cannot bypass the feature route. Deletion and retention changes additionally

@@ -38,6 +38,11 @@ A change that weakens any of these has to say so explicitly.
    - `api.authoriseNetworkSpec` for manual Docker network creation: custom drivers and driver options
      require `system.admin`, reserved ownership labels are refused, and explicit pools may not contain
      the observed dashboard client address;
+   - the Docker network connect, disconnect, removal and prune handlers, by the conflicts
+     `dockerx.PreviewConnect`, `PreviewDisconnect`, `PreviewRemove` and `PruneCandidates` read from the
+     network's dependents: the dashboard's own containers, the shared ingress and database-link members
+     are never detached, nothing joins the dashboard's own network, a live deployment's network is not
+     removed by hand, and an unreadable dependency reading refuses the change;
    - the generic job handlers for `network.diagnostic.*` jobs: lists filter them and get/stream/cancel
      require `system.admin`, matching the saved-artifact routes;
    - `api.logTargetFor` for a log source that is login and sudo records (auth data needs
