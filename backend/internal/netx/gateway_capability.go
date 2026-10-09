@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,8 @@ type Capability struct {
 	// missing is nft itself being absent; mutations answer it as an install
 	// hand-off rather than a read-only host.
 	missing bool
+	// listing is the ruleset read, kept for per-flow evaluation.
+	listing *nftListing
 }
 
 // PolicyLayer records the coverage of a local base chain. Unknown rules are
@@ -55,6 +58,13 @@ type PolicyLayer struct {
 	Policy string `json:"policy"`
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
+	// Type is the chain's type (filter, nat, route): a nat chain only
+	// translates unless it holds an explicit drop or reject.
+	Type string `json:"type,omitempty"`
+	// Rules counts the chain's own rules; Uncertain names, by position, the
+	// forms the generic check could not read (at most a handful).
+	Rules     int      `json:"rules"`
+	Uncertain []string `json:"uncertain,omitempty"`
 }
 
 // CapabilityBlocker is a base chain at the forward hook that drops by default.
@@ -86,11 +96,13 @@ type nftListing struct {
 			Name   string `json:"name"`
 		} `json:"table"`
 		Chain *struct {
-			Family string `json:"family"`
-			Table  string `json:"table"`
-			Name   string `json:"name"`
-			Hook   string `json:"hook"`
-			Policy string `json:"policy"`
+			Family string          `json:"family"`
+			Table  string          `json:"table"`
+			Name   string          `json:"name"`
+			Type   string          `json:"type"`
+			Hook   string          `json:"hook"`
+			Prio   json.RawMessage `json:"prio"`
+			Policy string          `json:"policy"`
 		} `json:"chain"`
 		Rule *struct {
 			Family string                       `json:"family"`
@@ -129,6 +141,7 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 		c.Reason = "nft printed its ruleset in a form this dashboard could not read, so whether the gateway can be admitted is not known."
 		return c
 	}
+	c.listing = &listing
 
 	firewalld := false
 	if state, ferr := run(ctx, "firewall-cmd", "--state"); ferr == nil && strings.TrimSpace(state) == "running" {
@@ -157,7 +170,8 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 		if ch.Hook != "forward" && ch.Hook != "input" && ch.Hook != "prerouting" && ch.Hook != "postrouting" {
 			continue
 		}
-		layer := PolicyLayer{Family: ch.Family, Table: ch.Table, Chain: ch.Name, Hook: ch.Hook, Policy: ch.Policy, Status: "checked"}
+		key := ch.Family + "/" + ch.Table + "/" + ch.Name
+		layer := PolicyLayer{Family: ch.Family, Table: ch.Table, Chain: ch.Name, Hook: ch.Hook, Policy: ch.Policy, Status: "checked", Type: ch.Type, Rules: len(rules[key])}
 		if ch.Family == "inet" && ch.Table == gatewayTable {
 			layer.Status = "owned"
 			c.Layers = append(c.Layers, layer)
@@ -171,8 +185,12 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 			c.Layers = append(c.Layers, layer)
 			continue
 		}
-		key := ch.Family + "/" + ch.Table + "/" + ch.Name
-		layer.Status, layer.Reason = assessPolicyRules(ch.Policy, rules[key], ch.Hook != "prerouting")
+		if ch.Type == "nat" {
+			layer.Status, layer.Reason = assessNATChain(rules, key, 0)
+		} else {
+			layer.Status, layer.Reason = assessPolicyRules(ch.Policy, rules[key], ch.Hook != "prerouting")
+		}
+		layer.Uncertain = uncertainForms(rules[key])
 		c.Layers = append(c.Layers, layer)
 		if blocker == nil && (layer.Status == "blocked" || layer.Status == "unknown") {
 			blocker = &CapabilityBlocker{Family: ch.Family, Table: ch.Table, Chain: ch.Name, Rule: admitMarkRule}
@@ -249,6 +267,56 @@ func assessPolicyRules(policy string, rules [][]map[string]json.RawMessage, mark
 	return "checked", "No blocking verdict exists in the supported rule forms of this local chain."
 }
 
+// assessNATChain judges a nat chain, following its jumps: translation
+// statements and returns do not drop, so such a chain is checked unless it
+// (or a chain it reaches) holds an explicit drop or reject.
+func assessNATChain(rules map[string][][]map[string]json.RawMessage, key string, depth int) (string, string) {
+	if depth > 8 {
+		return "unknown", "Jumps from this nat chain nest deeper than the check follows."
+	}
+	family, rest, _ := strings.Cut(key, "/")
+	table, _, _ := strings.Cut(rest, "/")
+	for _, expr := range rules[key] {
+		act, target, _ := ruleAction(expr)
+		switch act {
+		case "drop":
+			return "unknown", "This nat chain holds an explicit drop or reject; a flow-specific evaluation decides whether it applies."
+		case "unknown":
+			return "unknown", "This nat chain holds a statement whose effect is not modeled."
+		case "jump", "goto":
+			if status, reason := assessNATChain(rules, family+"/"+table+"/"+target, depth+1); status != "checked" {
+				return status, reason
+			}
+		}
+	}
+	return "checked", "A nat chain that only translates and returns; it cannot drop translated traffic."
+}
+
+// uncertainForms names the rules whose forms the generic check cannot read.
+func uncertainForms(rules [][]map[string]json.RawMessage) []string {
+	var out []string
+	for i, expr := range rules {
+		for _, e := range expr {
+			for kind, raw := range e {
+				switch kind {
+				case "match", "counter", "comment", "accept", "drop", "reject", "return", "log", "mangle":
+					continue
+				case "xt":
+					var x struct{ Type, Name string }
+					_ = json.Unmarshal(raw, &x)
+					out = append(out, fmt.Sprintf("rule %d: iptables %s %s", i+1, x.Type, x.Name))
+				default:
+					out = append(out, fmt.Sprintf("rule %d: %s", i+1, kind))
+				}
+			}
+		}
+		if len(out) >= 6 {
+			return append(out[:6], fmt.Sprintf("and later rules of %d", len(rules)))
+		}
+	}
+	return out
+}
+
 func isAdmissionMarkMatch(raw json.RawMessage) bool {
 	var m struct {
 		Op    string          `json:"op"`
@@ -291,14 +359,78 @@ func dockerPresent(ctx context.Context) bool {
 }
 
 // requireWritable is the guard in front of every gateway mutation that adds
-// or changes a translation or a drop.
-func (s *Service) requireWritable(ctx context.Context) (Capability, error) {
+// or changes a translation. With the spec about to be applied, a foreign
+// layer the generic check could not clear is judged per translated flow: the
+// change goes ahead only when every enabled flow is certainly admitted or
+// passed (or restricted only by source) at every checked layer.
+func (s *Service) requireWritable(ctx context.Context, specs ...*Spec) (Capability, error) {
 	c := s.GatewayCapability(ctx)
 	switch {
 	case c.Writable:
 		return c, nil
 	case c.missing:
 		return c, &UnavailableError{Tool: "nft", Package: "nftables"}
+	case c.Firewall == "firewalld" || c.listing == nil || len(specs) == 0 || specs[0] == nil:
+		return c, &ReadOnlyError{Reason: c.Reason}
 	}
-	return c, &ReadOnlyError{Reason: c.Reason}
+	flows := evaluateGatewayFlows(c.listing, modelGatewayFlows(specs[0], hostAddresses(ctx)))
+	if len(flows) == 0 {
+		return c, &ReadOnlyError{Reason: c.Reason}
+	}
+	for _, f := range flows {
+		if f.Verdict == "clear" {
+			continue
+		}
+		for _, l := range f.Layers {
+			if l.Verdict != "blocked" && l.Verdict != "unknown" {
+				continue
+			}
+			at := "its policy"
+			if l.Rule > 0 {
+				at = fmt.Sprintf("rule %d", l.Rule)
+			}
+			if l.Path != "" {
+				at += " of " + l.Path
+			}
+			word := "can drop"
+			if l.Verdict == "blocked" {
+				word = "drops"
+			}
+			return c, &ReadOnlyError{Reason: fmt.Sprintf("The %s table %q %s %q's translated connections in its chain %q (%s): %s Add this rule before it to admit the gateway's translated connections: %s",
+				l.Family, l.Table, word, f.Name, l.Chain, at, l.Reason, admitMarkRule)}
+		}
+	}
+	c.Writable = true
+	c.Reason = "Every enabled translated flow passes the checked layers in their supported rule forms."
+	return c, nil
+}
+
+// hostAddr is one address this host holds and the network it is on.
+type hostAddr struct {
+	Addr    netip.Addr
+	Network netip.Prefix
+	Dev     string
+}
+
+// hostAddresses are every address this host holds, for modeling where a
+// visitor's packet is addressed before translation and which networks a
+// flow leaving through the uplink cannot be addressed to.
+func hostAddresses(ctx context.Context) []hostAddr {
+	raw, err := run(ctx, "ip", "-j", "addr", "show")
+	if err != nil {
+		return nil
+	}
+	var addrs []ipAddr
+	if json.Unmarshal([]byte(raw), &addrs) != nil {
+		return nil
+	}
+	var out []hostAddr
+	for _, a := range addrs {
+		for _, info := range a.AddrInfo {
+			if addr, err := netip.ParseAddr(info.Local); err == nil {
+				out = append(out, hostAddr{Addr: addr, Network: netip.PrefixFrom(addr, info.PrefixLen).Masked(), Dev: a.IfName})
+			}
+		}
+	}
+	return out
 }

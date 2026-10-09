@@ -219,13 +219,18 @@ var loopbackRanges = []netip.Prefix{
 }
 
 // trustedFor is the set the gateway table returns early for: loopback, the
-// operator's allowlist ranges and the addresses the spec keeps.
+// operator's allowlist ranges and the addresses the spec keeps without an
+// expiry. An expiring kept address is a rule of its own (allowRules), and is
+// not trusted for the guards: it stops protecting anyone when it expires.
 func (s *Service) trustedFor(sp *Spec) []netip.Prefix {
 	out := append([]netip.Prefix{}, loopbackRanges...)
 	out = append(out, s.trustedRanges...)
+	expiring := expiringTrusted(sp)
 	for _, raw := range sp.Trusted {
 		if p, err := ParsePrefix(raw); err == nil {
-			out = append(out, p.Masked())
+			if _, ends := expiring[p.Masked().String()]; !ends {
+				out = append(out, p.Masked())
+			}
 		}
 	}
 	return mergePrefixes(out)
@@ -245,11 +250,27 @@ func (s *Service) isTrusted(sp *Spec, addr netip.Addr) bool {
 // is not already covered, so the first protection entry an operator makes
 // cannot be the one that refuses them. Returns whether it added one.
 func (s *Service) trustClient(sp *Spec, client string) bool {
+	return s.trustClientBy(sp, client, "", "")
+}
+
+// trustClientBy is trustClient recording who the address was kept for and
+// why. A kept address that was set to expire becomes permanent again rather
+// than being added twice.
+func (s *Service) trustClientBy(sp *Spec, client, actor, reason string) bool {
 	addr, err := ParseAddr(client)
 	if err != nil || addr.IsLoopback() || s.isTrusted(sp, addr) {
 		return false
 	}
-	sp.Trusted = append(sp.Trusted, netip.PrefixFrom(addr, addr.BitLen()).String())
+	key := netip.PrefixFrom(addr, addr.BitLen()).String()
+	if reason == "" {
+		reason = "Kept for the operator's address when a protection entry was saved from it."
+	}
+	if _, ends := expiringTrusted(sp)[key]; ends {
+		recordTrustedNote(sp, key, actor, reason)
+		return true
+	}
+	sp.Trusted = append(sp.Trusted, key)
+	recordTrustedNote(sp, key, actor, reason)
 	return true
 }
 

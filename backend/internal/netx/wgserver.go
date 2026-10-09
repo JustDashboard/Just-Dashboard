@@ -897,9 +897,6 @@ func (s *Service) setWGExitNetworks(ctx context.Context, iface string, networks 
 	next := old.clone()
 	owner := wgOwner(iface)
 	if on {
-		if _, err := s.requireWritable(ctx); err != nil {
-			return err
-		}
 		for _, network := range networks {
 			upsertOwnedNAT(next, owner, "WireGuard "+iface+" "+wgFamilyName(network.subnet)+" exit", network.subnet.String(), network.uplink, actor)
 		}
@@ -914,6 +911,9 @@ func (s *Service) setWGExitNetworks(ctx context.Context, iface string, networks 
 			}
 		}
 		next.NAT = kept
+		if _, err := s.requireWritable(ctx, next); err != nil {
+			return err
+		}
 	} else {
 		had := len(next.NAT)
 		removeOwnedNAT(next, owner)

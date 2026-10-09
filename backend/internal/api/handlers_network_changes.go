@@ -23,7 +23,7 @@ func supportsPendingNetworkApply(path string) bool {
 	if path == "/network/drift/repairs" {
 		return true
 	}
-	for _, prefix := range []string{"/network/links", "/network/native/profiles", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted"} {
+	for _, prefix := range []string{"/network/links", "/network/native/profiles", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted", "/network/protection/exceptions"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}

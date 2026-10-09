@@ -149,6 +149,7 @@ func wgHostReplies(t *testing.T, rec *recorder) {
 		on("ip6tables", "").
 		on("nft -f", "").
 		on("nft list set", "").
+		on("nft -t -j list table inet "+gatewayTable, `{"nftables":[]}`).
 		on("nft delete table", "")
 }
 

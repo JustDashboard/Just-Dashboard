@@ -383,26 +383,35 @@ type LimitView struct {
 	// Rate new connections per Per (second, minute or hour), allowing Burst
 	// more; Rate zero is no rate limit, and Per and Burst are then empty and
 	// zero. A Burst of zero under a rate is nft's own default of five.
-	Rate           int    `json:"rate"`
-	Per            string `json:"per"`
-	Burst          int    `json:"burst"`
-	PerSource      bool   `json:"perSource"`
-	MaxConnections int    `json:"maxConnections"`
-	Action         string `json:"action"`
-	Enabled        bool   `json:"enabled"`
+	Rate              int    `json:"rate"`
+	Per               string `json:"per"`
+	Burst             int    `json:"burst"`
+	PerSource         bool   `json:"perSource"`
+	MaxConnections    int    `json:"maxConnections"`
+	GlobalConnections int    `json:"globalConnections"`
+	Profile           string `json:"profile"`
+	Action            string `json:"action"`
+	Enabled           bool   `json:"enabled"`
 	Made
 	// Packets and Bytes are what the limit has refused since the table was
-	// loaded.
-	Packets uint64 `json:"packets"`
-	Bytes   uint64 `json:"bytes"`
+	// loaded; GlobalPackets is the share refused by the ceiling for
+	// everyone, also included in Packets. Total carries across reloads.
+	Packets       uint64       `json:"packets"`
+	Bytes         uint64       `json:"bytes"`
+	GlobalPackets uint64       `json:"globalPackets"`
+	Total         CounterTotal `json:"total"`
+	// Meters is how many sources the per-source sets track now.
+	Meters *LimitMeters `json:"meters,omitempty"`
 }
 
 func limitView(l LimitSpec, counters map[string]RuleCounter) LimitView {
 	c := counters["limit:"+strconv.Itoa(l.ID)]
+	g := counters["limit-global:"+strconv.Itoa(l.ID)]
 	return LimitView{
 		ID: l.ID, Name: l.Name, Protocol: l.Protocol, Ports: l.Ports, Rate: l.Rate, Per: l.Per, Burst: l.Burst,
-		PerSource: l.PerSource, MaxConnections: l.MaxConnections, Action: l.Action, Enabled: l.Enabled,
-		Made: l.Made, Packets: c.Packets, Bytes: c.Bytes,
+		PerSource: l.PerSource, MaxConnections: l.MaxConnections, GlobalConnections: l.GlobalConnections, Profile: l.Profile,
+		Action: l.Action, Enabled: l.Enabled, Made: l.Made,
+		Packets: c.Packets + g.Packets, Bytes: c.Bytes + g.Bytes, GlobalPackets: g.Packets,
 	}
 }
 
@@ -427,9 +436,53 @@ type BlocklistView struct {
 	// ContainsYou says the list holds the reader's own address. The trusted
 	// set keeps it from being dropped, but the page says so rather than
 	// leaving it to be found out.
-	ContainsYou bool   `json:"containsYou"`
-	Packets     uint64 `json:"packets"`
-	Bytes       uint64 `json:"bytes"`
+	ContainsYou bool         `json:"containsYou"`
+	Packets     uint64       `json:"packets"`
+	Bytes       uint64       `json:"bytes"`
+	Total       CounterTotal `json:"total"`
+	// Refresh is the schedule in force; NextRefresh nil means it is never
+	// fetched on its own. Stale is a list older than twice its schedule.
+	Refresh     string            `json:"refresh"`
+	NextRefresh *time.Time        `json:"nextRefresh"`
+	Stale       bool              `json:"stale"`
+	LastAttempt *time.Time        `json:"lastAttempt"`
+	Failures    int               `json:"failures"`
+	Sources     []BlocklistSource `json:"sources"`
+	LastDiff    *BlocklistDiff    `json:"lastDiff"`
+	// Integrity is signed (a pinned Ed25519 signature verified on each
+	// fetch), https (transport only) or local (typed here).
+	Integrity    string `json:"integrity"`
+	SignatureURL string `json:"signatureUrl"`
+	// Coverage is how much of the address space the cached list takes.
+	Coverage BlocklistCoverage `json:"coverage"`
+}
+
+// BlocklistCoverage measures a list's size in addresses rather than lines.
+type BlocklistCoverage struct {
+	IPv4Addresses uint64  `json:"ipv4Addresses"`
+	IPv4Share     float64 `json:"ipv4Share"`
+	IPv6Slash48s  float64 `json:"ipv6Slash48s"`
+	IPv4Networks  int     `json:"ipv4Networks"`
+	IPv6Networks  int     `json:"ipv6Networks"`
+}
+
+func coverageOf(nets []netip.Prefix) BlocklistCoverage {
+	var c BlocklistCoverage
+	for _, p := range nets {
+		if p.Addr().Is4() {
+			c.IPv4Networks++
+			c.IPv4Addresses += 1 << (32 - p.Bits())
+			continue
+		}
+		c.IPv6Networks++
+		if p.Bits() <= 48 {
+			c.IPv6Slash48s += float64(uint64(1) << min(48-p.Bits(), 62))
+		} else {
+			c.IPv6Slash48s += 1 / float64(uint64(1)<<min(p.Bits()-48, 62))
+		}
+	}
+	c.IPv4Share = float64(c.IPv4Addresses) / float64(uint64(1)<<32)
+	return c
 }
 
 func blocklistView(dir string, bl BlocklistSpec, client netip.Addr, counters map[string]RuleCounter) BlocklistView {
@@ -466,6 +519,33 @@ func blocklistView(dir string, bl BlocklistSpec, client netip.Addr, counters map
 	}
 	c := counters["blocklist:"+strconv.Itoa(bl.ID)]
 	v.Packets, v.Bytes = c.Packets, c.Bytes
+	v.Coverage = coverageOf(nets)
+	v.Sources, v.LastDiff, v.Failures, v.SignatureURL = bl.Sources, bl.LastDiff, bl.Failures, bl.SignatureURL
+	if v.Sources == nil {
+		v.Sources = []BlocklistSource{}
+	}
+	if !bl.LastAttempt.IsZero() {
+		t := bl.LastAttempt
+		v.LastAttempt = &t
+	}
+	switch {
+	case bl.Kind == "manual":
+		v.Integrity = "local"
+	case bl.SignatureURL != "":
+		v.Integrity = "signed"
+	default:
+		v.Integrity = "https"
+	}
+	if bl.Kind != "manual" {
+		v.Refresh = bl.Refresh
+		if v.Refresh == "" {
+			v.Refresh = "24h"
+		}
+		v.NextRefresh = nextRefresh(bl)
+		if every := refreshEvery(bl); every > 0 && !bl.Refreshed.IsZero() {
+			v.Stale = time.Since(bl.Refreshed) > 2*every
+		}
+	}
 	return v
 }
 
@@ -495,6 +575,20 @@ type TrustedEntry struct {
 	Origin string `json:"origin"`
 	// Removable is true for the entries the dashboard keeps itself.
 	Removable bool `json:"removable"`
+	// The note behind a kept address: why, by whom, until when, and when an
+	// operator last confirmed it is still needed.
+	Reason      string     `json:"reason"`
+	AddedBy     string     `json:"addedBy"`
+	AddedAt     *time.Time `json:"addedAt"`
+	ExpiresAt   *time.Time `json:"expiresAt"`
+	Expired     bool       `json:"expired"`
+	ConfirmedAt *time.Time `json:"confirmedAt"`
+	ConfirmedBy string     `json:"confirmedBy"`
+	// LastSeen is the last dashboard sign-in or session from inside it, in
+	// the bounded window; Stale is a kept address neither seen nor
+	// confirmed within trustedStaleAfter.
+	LastSeen *time.Time `json:"lastSeen"`
+	Stale    bool       `json:"stale"`
 }
 
 // ProtectionView is everything the Protection page draws.
@@ -513,6 +607,17 @@ type ProtectionView struct {
 	Settings      []ProtectionSetting `json:"settings"`
 	ResetNote     string              `json:"resetNote"`
 	Conntrack     Conntrack           `json:"conntrack"`
+	// Exceptions are scoped allowances with reasons and expiries.
+	Exceptions []ExceptionView `json:"exceptions"`
+	// Profiles are starting points for limits on common services.
+	Profiles []LimitProfile `json:"profiles"`
+	// KernelProfiles stage a set of kernel values for a kind of host.
+	KernelProfiles []KernelProfile `json:"kernelProfiles"`
+	// Interfaces are the per-device effective values of the per-interface
+	// protections.
+	Interfaces InterfaceReading `json:"interfaces"`
+	// Counters labels the live figures and the totals.
+	Counters CounterEvidence `json:"counters"`
 }
 
 // Protection reads the limits, blocklists, trusted addresses, kernel settings
@@ -522,35 +627,57 @@ func (s *Service) Protection(ctx context.Context, client string) (*ProtectionVie
 	if err != nil {
 		return nil, err
 	}
-	counters, loaded := gatewayCounters(ctx)
+	live := readLiveCounters(ctx)
+	counters := live.Counters
 	addr, _ := ParseAddr(client)
 	dir := filepath.Join(s.paths.Dir, "lists")
 	v := &ProtectionView{
-		Loaded:     loaded,
-		Limits:     make([]LimitView, 0, len(sp.Limits)),
-		Blocklists: make([]BlocklistView, 0, len(sp.Blocklists)),
-		Presets:    feedPresets,
-		Trusted:    s.trustedView(sp, addr),
-		Client:     client,
-		Settings:   protectionSettings(sp),
-		ResetNote:  resetNote,
-		Conntrack:  readConntrack(),
+		Loaded:         live.Loaded,
+		Limits:         make([]LimitView, 0, len(sp.Limits)),
+		Blocklists:     make([]BlocklistView, 0, len(sp.Blocklists)),
+		Presets:        feedPresets,
+		Trusted:        s.trustedView(sp, addr, s.operatorActivity(ctx)),
+		Client:         client,
+		Settings:       protectionSettings(sp),
+		ResetNote:      resetNote,
+		Conntrack:      readConntrack(),
+		Exceptions:     exceptionViews(sp, counters),
+		Profiles:       limitProfiles,
+		KernelProfiles: kernelProfiles(),
+		Interfaces:     readInterfaceSettings(),
+		Counters:       s.telemetry.evidence(live),
 	}
 	if addr.IsValid() {
 		v.ClientTrusted = s.isTrusted(sp, addr)
 	}
+	var keys []string
 	for _, l := range sp.Limits {
-		v.Limits = append(v.Limits, limitView(l, counters))
+		keys = append(keys, limitKey(l.ID), "limit-global:"+strconv.Itoa(l.ID))
+	}
+	for _, bl := range sp.Blocklists {
+		keys = append(keys, "blocklist:"+strconv.Itoa(bl.ID))
+	}
+	totals := s.telemetry.totals(ctx, live, keys)
+	for _, l := range sp.Limits {
+		lv := limitView(l, counters)
+		t, g := totals[limitKey(l.ID)], totals["limit-global:"+strconv.Itoa(l.ID)]
+		lv.Total = CounterTotal{Packets: t.Packets + g.Packets, Bytes: t.Bytes + g.Bytes, Since: t.Since, Resets: t.Resets}
+		if l.Enabled && live.Loaded && ((l.Rate > 0 && l.PerSource) || l.MaxConnections > 0) {
+			m := readLimitMeters(ctx, l)
+			lv.Meters = &m
+		}
+		v.Limits = append(v.Limits, lv)
 	}
 	for _, bl := range sp.Blocklists {
 		view := blocklistView(dir, bl, addr, counters)
+		view.Total = totals["blocklist:"+strconv.Itoa(bl.ID)]
 		s.blocklistHealth(ctx, bl, &view)
 		v.Blocklists = append(v.Blocklists, view)
 	}
 	return v, nil
 }
 
-func (s *Service) trustedView(sp *Spec, client netip.Addr) []TrustedEntry {
+func (s *Service) trustedView(sp *Spec, client netip.Addr, activity map[netip.Addr]time.Time) []TrustedEntry {
 	out := []TrustedEntry{}
 	for _, p := range loopbackRanges {
 		out = append(out, TrustedEntry{Address: p.String(), Origin: "loopback"})
@@ -558,16 +685,45 @@ func (s *Service) trustedView(sp *Spec, client netip.Addr) []TrustedEntry {
 	for _, p := range s.trustedRanges {
 		out = append(out, TrustedEntry{Address: p.String(), Origin: "allowlist"})
 	}
+	now := gatewayNow()
+	stamp := func(t time.Time) *time.Time {
+		if t.IsZero() {
+			return nil
+		}
+		return &t
+	}
 	for _, raw := range sp.Trusted {
 		p, err := ParsePrefix(raw)
 		if err != nil {
 			continue
 		}
+		p = p.Masked()
 		origin := "kept"
 		if client.IsValid() && p.Contains(client) {
 			origin = "you"
 		}
-		out = append(out, TrustedEntry{Address: p.Masked().String(), Origin: origin, Removable: true})
+		e := TrustedEntry{Address: p.String(), Origin: origin, Removable: true}
+		if n, i := trustedNote(sp, p.String()); i >= 0 {
+			e.Reason, e.AddedBy, e.AddedAt = n.Reason, n.CreatedBy, stamp(n.CreatedAt)
+			e.ExpiresAt, e.ConfirmedAt, e.ConfirmedBy = stamp(n.ExpiresAt), stamp(n.ConfirmedAt), n.ConfirmedBy
+			e.Expired = !n.ExpiresAt.IsZero() && !now.Before(n.ExpiresAt)
+		}
+		var seen time.Time
+		for a, t := range activity {
+			if p.Contains(a) && t.After(seen) {
+				seen = t
+			}
+		}
+		e.LastSeen = stamp(seen)
+		reviewed := seen
+		if e.ConfirmedAt != nil && e.ConfirmedAt.After(reviewed) {
+			reviewed = *e.ConfirmedAt
+		}
+		if e.AddedAt != nil && e.AddedAt.After(reviewed) {
+			reviewed = *e.AddedAt
+		}
+		e.Stale = origin != "you" && now.Sub(reviewed) > trustedStaleAfter
+		out = append(out, e)
 	}
 	return out
 }
@@ -588,6 +744,9 @@ func (s *Service) RemoveTrusted(ctx context.Context, address, client string) err
 				continue
 			}
 			next.Trusted = append(next.Trusted[:i], next.Trusted[i+1:]...)
+			if _, at := trustedNote(next, want.String()); at >= 0 {
+				next.TrustedNotes = append(next.TrustedNotes[:at], next.TrustedNotes[at+1:]...)
+			}
 			if addr, aerr := ParseAddr(client); aerr == nil && s.isTrusted(old, addr) && !s.isTrusted(next, addr) {
 				return false, guarded("%s is the address you are using, and nothing else keeps it out of the gateway's drops. Remove it from another address, or keep it.", want)
 			}

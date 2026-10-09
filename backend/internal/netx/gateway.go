@@ -245,6 +245,7 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 	writeSet(&b, "trusted6", "ipv6_addr", v6)
 
 	var pre []string
+	excepted := map[int][]string{}
 	for _, bl := range sp.Blocklists {
 		if !bl.Enabled {
 			continue
@@ -252,10 +253,21 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 		l4, l6 := splitFamilies(lists(bl))
 		writeSet(&b, fmt.Sprintf("bl_%d_4", bl.ID), "ipv4_addr", l4)
 		writeSet(&b, fmt.Sprintf("bl_%d_6", bl.ID), "ipv6_addr", l6)
+		// A list with its own exceptions drops through a chain of its own,
+		// so an excepted source returns past this list and is still judged
+		// by the next one. A list without exceptions keeps its single rule.
+		if rules := exceptionRules(sp, fmt.Sprintf("blocklist:%d", bl.ID)); len(rules) > 0 {
+			excepted[bl.ID] = rules
+			pre = append(pre,
+				fmt.Sprintf("ip saddr @bl_%d_4 jump bx_%d", bl.ID, bl.ID),
+				fmt.Sprintf("ip6 saddr @bl_%d_6 jump bx_%d", bl.ID, bl.ID))
+			continue
+		}
 		pre = append(pre,
 			fmt.Sprintf("ip saddr @bl_%d_4 counter drop comment \"blocklist:%d\"", bl.ID, bl.ID),
 			fmt.Sprintf("ip6 saddr @bl_%d_6 counter drop comment \"blocklist:%d\"", bl.ID, bl.ID))
 	}
+	allowed := allowRules(sp)
 
 	var guard, routed []string
 	for _, l := range limits {
@@ -285,8 +297,8 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 			continue
 		}
 		src, _ := ParsePrefix(n.Source)
-		marks = append(marks, fmt.Sprintf("%s %s oifname %q ct state new %s comment \"nat-mark:%d\"",
-			gwSaddr(src.Addr()), src.Masked(), n.Interface, gatewayMarkConn, n.ID))
+		marks = append(marks, fmt.Sprintf("%s %s%s oifname %q ct state new %s comment \"nat-mark:%d\"",
+			gwSaddr(src.Addr()), src.Masked(), gwDestinations(src.Addr(), n.Destinations), n.Interface, gatewayMarkConn, n.ID))
 	}
 
 	returns := []string{"ct state established,related return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}
@@ -296,16 +308,24 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 		// would cut the sessions already open with it and drop the replies to
 		// this server's own outbound connections (DNS, ACME, updates). Only a
 		// new connection from a listed network is refused.
+		head := []string{"ct state established,related return", "iif \"lo\" return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}
 		writeGatewayChain(&b, "pre", "type filter hook prerouting priority mangle; policy accept;",
-			append([]string{"ct state established,related return", "iif \"lo\" return", "ip saddr @trusted4 return", "ip6 saddr @trusted6 return"}, pre...))
+			append(append(head, allowed...), pre...))
+		for _, bl := range sp.Blocklists {
+			if rules, ok := excepted[bl.ID]; ok && bl.Enabled {
+				writeGatewayRegularChain(&b, fmt.Sprintf("bx_%d", bl.ID),
+					append(rules, fmt.Sprintf("counter drop comment \"blocklist:%d\"", bl.ID)))
+			}
+		}
 	}
 	if len(guard) > 0 {
-		writeGatewayChain(&b, "input", "type filter hook input priority filter - 10; policy accept;", append(append([]string{}, returns...), guard...))
+		writeGatewayChain(&b, "input", "type filter hook input priority filter - 10; policy accept;", append(append(append([]string{}, returns...), allowed...), guard...))
 	}
 	var fwd []string
 	fwd = append(fwd, marks...)
 	if len(routed) > 0 {
 		fwd = append(fwd, returns...)
+		fwd = append(fwd, allowed...)
 		fwd = append(fwd, routed...)
 	}
 	if len(fwd) > 0 {
@@ -320,6 +340,13 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 		dnat = append(dnat, gatewayForwardRules(f)...)
 		if _, masq, _ := splitNAT(f.SourceNAT); masq {
 			snat = append(snat, gatewayForwardMasqRules(f)...)
+		}
+	}
+	// A mapped entry's inbound half comes after every forward: a forward
+	// names a port, the mapping takes the whole address.
+	for _, n := range nats {
+		if n.Enabled && natMapped(n) {
+			dnat = append(dnat, gatewayNATInboundRule(n))
 		}
 	}
 	for _, n := range nats {
@@ -342,6 +369,15 @@ func renderGatewayWith(sp *Spec, trusted []netip.Prefix, lists func(BlocklistSpe
 // as a name.
 func writeGatewayChain(b *strings.Builder, name, header string, rules []string) {
 	fmt.Fprintf(b, "\tchain %s {\n\t\t%s\n", name, header)
+	for _, r := range rules {
+		fmt.Fprintf(b, "\t\t%s\n", r)
+	}
+	b.WriteString("\t}\n")
+}
+
+// writeGatewayRegularChain writes a chain no hook reaches, only a jump.
+func writeGatewayRegularChain(b *strings.Builder, name string, rules []string) {
+	fmt.Fprintf(b, "\tchain %s {\n", name)
 	for _, r := range rules {
 		fmt.Fprintf(b, "\t\t%s\n", r)
 	}
@@ -434,6 +470,12 @@ func gatewayLimitRules(l LimitSpec, forward bool) []string {
 					match, l.ID, fam, gwFamSaddr(fam), l.MaxConnections, tail))
 			}
 		}
+		// The ceiling for everyone together has a comment of its own so its
+		// refusals read apart from one address's.
+		if l.GlobalConnections > 0 {
+			out = append(out, fmt.Sprintf("%s ct count over %d counter %s comment \"limit-global:%d\"",
+				match, l.GlobalConnections, action, l.ID))
+		}
 		if l.Rate > 0 {
 			// nft refuses "burst 0"; leaving the clause out is its own
 			// default of five packets, which is what a burst of zero means
@@ -525,14 +567,76 @@ func gatewayForwardMasqRules(f ForwardSpec) []string {
 func gatewayNATRule(n NATSpec) string {
 	src, _ := ParsePrefix(n.Source)
 	verdict := "masquerade"
-	if n.ToAddress != "" {
+	switch {
+	case natMapped(n):
+		to, _ := ParsePrefix(n.Translated)
+		verdict = "snat " + gwNATFamily(src.Addr()) + gwNATTarget(to.Masked())
+	case n.ToAddress != "":
 		to, _ := ParseAddr(n.ToAddress)
 		verdict = "snat ip to " + to.String()
 		if to.Is6() {
 			verdict = "snat ip6 to " + to.String()
 		}
 	}
-	return fmt.Sprintf("%s %s oifname %q counter %s comment \"nat:%d\"", gwSaddr(src.Addr()), src.Masked(), n.Interface, verdict, n.ID)
+	return fmt.Sprintf("%s %s%s oifname %q counter %s comment \"nat:%d\"", gwSaddr(src.Addr()), src.Masked(), gwDestinations(src.Addr(), n.Destinations), n.Interface, verdict, n.ID)
+}
+
+// gatewayNATInboundRule is a mapped entry's other direction: a connection
+// arriving for the public side is sent to the private one and marked, so the
+// firewall's chains admit it the way they admit a port forward.
+func gatewayNATInboundRule(n NATSpec) string {
+	src, _ := ParsePrefix(n.Source)
+	to, _ := ParsePrefix(n.Translated)
+	daddr := "ip daddr"
+	if to.Addr().Is6() {
+		daddr = "ip6 daddr"
+	}
+	return fmt.Sprintf("iifname %q %s %s %s counter dnat %s%s comment \"nat-in:%d\"",
+		n.Interface, daddr, gwPrefixWord(to.Masked()), gatewayMarkConn, gwNATFamily(src.Addr()), gwNATTarget(src.Masked()), n.ID)
+}
+
+// natMapped reports an entry that translates both directions.
+func natMapped(n NATSpec) bool { return n.Mode == natOneToOne || n.Mode == natNPTv6 }
+
+const (
+	natOneToOne = "one-to-one"
+	natNPTv6    = "nptv6"
+)
+
+func gwNATFamily(a netip.Addr) string {
+	if a.Is4() {
+		return "ip "
+	}
+	return "ip6 "
+}
+
+// gwNATTarget is a translation's destination: one address, or a whole network
+// mapped host for host (nft's prefix NAT, a stateful netmap).
+func gwNATTarget(p netip.Prefix) string {
+	if p.IsSingleIP() {
+		return "to " + p.Addr().String()
+	}
+	return "prefix to " + p.String()
+}
+
+// gwPrefixWord is a network as nft takes it in a match: bare for one address.
+func gwPrefixWord(p netip.Prefix) string {
+	if p.IsSingleIP() {
+		return p.Addr().String()
+	}
+	return p.String()
+}
+
+// gwDestinations is a NAT entry's destination match, empty when it has none.
+func gwDestinations(src netip.Addr, dests []string) string {
+	if len(dests) == 0 {
+		return ""
+	}
+	daddr := " ip daddr "
+	if src.Is6() {
+		daddr = " ip6 daddr "
+	}
+	return daddr + gwBraces(dests)
 }
 
 // braces writes a list of networks as an nft anonymous set, or bare when
@@ -578,6 +682,9 @@ func normalizeGateway(sp *Spec) ([]ForwardSpec, []NATSpec, []LimitSpec, error) {
 		if err := checkBlocklist(bl); err != nil {
 			return nil, nil, nil, fmt.Errorf("blocklist %d (%s): %w", bl.ID, bl.Name, err)
 		}
+	}
+	if err := checkExceptions(sp); err != nil {
+		return nil, nil, nil, err
 	}
 	return forwards, nats, limits, nil
 }
@@ -663,7 +770,19 @@ func normNAT(n NATSpec) (NATSpec, error) {
 	if err := ValidIfName(n.Interface); err != nil {
 		return n, err
 	}
-	if n.ToAddress = strings.TrimSpace(n.ToAddress); n.ToAddress != "" {
+	n.ToAddress, n.Translated = strings.TrimSpace(n.ToAddress), strings.TrimSpace(n.Translated)
+	switch n.Mode {
+	case "", "masquerade", "snat":
+		n.Mode = ""
+		if n.Translated != "" {
+			return n, fmt.Errorf("a public address or network belongs to a one-to-one or prefix entry")
+		}
+	case natOneToOne, natNPTv6:
+		return normMappedNAT(n, src.Masked())
+	default:
+		return n, fmt.Errorf("the translation is masquerade, snat, one-to-one or nptv6")
+	}
+	if n.ToAddress != "" {
 		to, err := ParseAddr(n.ToAddress)
 		if err != nil {
 			return n, err
@@ -673,6 +792,73 @@ func normNAT(n NATSpec) (NATSpec, error) {
 		}
 		n.ToAddress = to.String()
 	}
+	dests, err := normNATDestinations(src.Addr(), n.Destinations)
+	if err != nil {
+		return n, err
+	}
+	n.Destinations = dests
+	return n, nil
+}
+
+// maxNATDestinations bounds a policy entry's destination networks.
+const maxNATDestinations = 16
+
+func normNATDestinations(src netip.Addr, raw []string) ([]string, error) {
+	if len(raw) > maxNATDestinations {
+		return nil, fmt.Errorf("a NAT entry names at most %d destination networks", maxNATDestinations)
+	}
+	var out []netip.Prefix
+	for _, r := range raw {
+		p, err := ParsePrefix(r)
+		if err != nil {
+			return nil, err
+		}
+		if p.Addr().Is4() != src.Is4() {
+			return nil, fmt.Errorf("the destination %s is not the same kind of address as the source", r)
+		}
+		if p.Bits() == 0 {
+			return nil, fmt.Errorf("a destination of %s is every address; leave the destinations empty instead", p)
+		}
+		out = append(out, p.Masked())
+	}
+	var dests []string
+	for _, p := range mergePrefixes(out) {
+		dests = append(dests, p.String())
+	}
+	return dests, nil
+}
+
+// normMappedNAT validates an entry that translates both directions: a
+// private address or network and a public one of exactly the same width,
+// which nft maps host for host.
+func normMappedNAT(n NATSpec, src netip.Prefix) (NATSpec, error) {
+	if n.ToAddress != "" || len(n.Destinations) > 0 {
+		return n, fmt.Errorf("a %s entry maps every connection between its two sides; it takes no fixed source address or destinations", n.Mode)
+	}
+	if n.Translated == "" {
+		return n, fmt.Errorf("a %s entry needs the public address or network it maps to", n.Mode)
+	}
+	to, err := ParsePrefix(n.Translated)
+	if err != nil {
+		return n, err
+	}
+	to = to.Masked()
+	switch {
+	case to.Addr().Is4() != src.Addr().Is4():
+		return n, fmt.Errorf("the public side %s is not the same kind of address as %s", to, src)
+	case to.Bits() != src.Bits():
+		return n, fmt.Errorf("the public side is a /%d and the private side a /%d: a mapping translates host for host, so both are the same size", to.Bits(), src.Bits())
+	case to.Overlaps(src):
+		return n, fmt.Errorf("%s and %s overlap; a network cannot be mapped onto itself", src, to)
+	}
+	if n.Mode == natNPTv6 {
+		if src.Addr().Is4() || src.Bits() < 16 || src.Bits() > 64 {
+			return n, fmt.Errorf("IPv6 prefix translation maps an IPv6 network between /16 and /64")
+		}
+	} else if (src.Addr().Is4() && src.Bits() < 24) || (src.Addr().Is6() && src.Bits() < 112) {
+		return n, fmt.Errorf("a one-to-one mapping covers at most 256 addresses (a /24, or a /112 in IPv6); use IPv6 prefix translation for a larger IPv6 network")
+	}
+	n.Translated = to.String()
 	return n, nil
 }
 
@@ -697,8 +883,16 @@ func normLimit(l LimitSpec) (LimitSpec, error) {
 	if l.MaxConnections < 0 || l.MaxConnections > 1_000_000 {
 		return l, fmt.Errorf("the connection limit is between 1 and 1000000")
 	}
-	if l.Rate == 0 && l.MaxConnections == 0 {
+	if l.GlobalConnections < 0 || l.GlobalConnections > 10_000_000 {
+		return l, fmt.Errorf("the ceiling for everyone together is between 1 and 10000000")
+	}
+	if l.Rate == 0 && l.MaxConnections == 0 && l.GlobalConnections == 0 {
 		return l, fmt.Errorf("a limit needs a rate, a number of connections, or both")
+	}
+	if l.Profile != "" {
+		if _, ok := limitProfileFor(l.Profile); !ok {
+			return l, fmt.Errorf("%q is not a service profile this dashboard offers", l.Profile)
+		}
 	}
 	if l.Rate > 0 {
 		switch l.Per {

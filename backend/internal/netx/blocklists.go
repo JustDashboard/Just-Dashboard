@@ -3,6 +3,10 @@ package netx
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +29,8 @@ const (
 	maxManualList            = 10_000
 	maxCountries             = 30
 	blocklistStaleAfter      = 24 * time.Hour
-	blocklistRefreshInterval = time.Hour
+	blocklistRefreshInterval = 15 * time.Minute
+	maxSignatureBytes        = 4096
 
 	// A feed's networks are somebody else's idea of what to drop, and a feed
 	// that has gone wrong, or been tampered with, would otherwise take the
@@ -165,77 +170,191 @@ func parseFeed(data []byte) (nets []netip.Prefix, skipped int) {
 // cap is refused, not cut off: half a feed loaded as if it were the whole is
 // a list that silently stops protecting.
 func fetch(ctx context.Context, url string) ([]byte, int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, 0, err
-	}
-	if req.URL.Scheme != "https" {
-		return nil, 0, fmt.Errorf("%s is not an https address; lists are fetched over https only", url)
-	}
-	req.Header.Set("User-Agent", "just-dashboard-blocklist")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("fetching %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)) // drained so the connection can be reused
-		return nil, resp.StatusCode, fmt.Errorf("%s answered %s", url, resp.Status)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedBytes+1))
-	if err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("reading %s: %w", url, err)
-	}
-	if len(body) > maxFeedBytes {
-		return nil, resp.StatusCode, fmt.Errorf("%s is larger than %d MB; a list that size is not a blocklist this host should load", url, maxFeedBytes>>20)
-	}
-	return body, resp.StatusCode, nil
+	r, err := fetchHTTP(ctx, url, nil, maxFeedBytes)
+	return r.body, r.status, err
 }
 
-// fetchList gets the networks of a country or feed list, merged. A country
-// has an IPv4 zone and usually an IPv6 one; a country with no IPv6 zone is a
-// 404 there, which is information and not a failure.
+type httpFetch struct {
+	body         []byte
+	status       int
+	etag         string
+	lastModified string
+}
+
+// fetchHTTP is fetch with request headers (a feed's validators) and its own
+// size cap; a 304 answers with no body and no error.
+func fetchHTTP(ctx context.Context, url string, headers map[string]string, limit int) (httpFetch, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return httpFetch{}, err
+	}
+	if req.URL.Scheme != "https" {
+		return httpFetch{}, fmt.Errorf("%s is not an https address; lists are fetched over https only", url)
+	}
+	req.Header.Set("User-Agent", "just-dashboard-blocklist")
+	for k, v := range headers {
+		if v != "" {
+			req.Header.Set(k, v)
+		}
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return httpFetch{}, fmt.Errorf("fetching %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	out := httpFetch{status: resp.StatusCode, etag: resp.Header.Get("ETag"), lastModified: resp.Header.Get("Last-Modified")}
+	if resp.StatusCode == http.StatusNotModified && len(headers) > 0 {
+		return out, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096)) // drained so the connection can be reused
+		return out, fmt.Errorf("%s answered %s", url, resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+	if err != nil {
+		return out, fmt.Errorf("reading %s: %w", url, err)
+	}
+	if len(body) > limit {
+		return out, fmt.Errorf("%s is larger than %d MB; a list that size is not a blocklist this host should load", url, maxFeedBytes>>20)
+	}
+	out.body = body
+	return out, nil
+}
+
+// fetchOptions are what a refresh knows from the last one.
+type fetchOptions struct {
+	// etag and lastModified ask a feed to answer 304 when nothing changed.
+	etag, lastModified string
+	signatureURL       string
+	publicKey          string
+}
+
+// fetchResult is a fetched list and where it came from.
+type fetchResult struct {
+	nets      []netip.Prefix
+	sources   []BlocklistSource
+	unchanged bool
+}
+
+func sourceOf(url string, r httpFetch, now time.Time, nets, skipped int) BlocklistSource {
+	sum := sha256.Sum256(r.body)
+	return BlocklistSource{
+		URL: url, Status: "ok", FetchedAt: now, Bytes: len(r.body), SHA256: hex.EncodeToString(sum[:]),
+		Networks: nets, Skipped: skipped, ETag: r.etag, LastModified: r.lastModified,
+	}
+}
+
+// verifyFeedSignature checks a detached Ed25519 signature over the exact
+// bytes fetched, against the operator's pinned key. The signature file holds
+// the 64-byte signature in base64 or hex.
+func verifyFeedSignature(ctx context.Context, body []byte, signatureURL, publicKey string) error {
+	key, err := decodeFeedKey(publicKey)
+	if err != nil {
+		return err
+	}
+	r, err := fetchHTTP(ctx, signatureURL, nil, maxSignatureBytes)
+	if err != nil {
+		return fmt.Errorf("fetching the feed's signature: %w", err)
+	}
+	text := strings.TrimSpace(string(r.body))
+	sig, err := base64.StdEncoding.DecodeString(text)
+	if err != nil || len(sig) != ed25519.SignatureSize {
+		if raw, herr := hex.DecodeString(text); herr == nil && len(raw) == ed25519.SignatureSize {
+			sig = raw
+		} else {
+			return errors.New("the feed's signature is not a 64-byte Ed25519 signature in base64 or hex")
+		}
+	}
+	if !ed25519.Verify(key, body, sig) {
+		return errors.New("the feed's signature does not verify against the pinned public key; the list was not changed")
+	}
+	return nil
+}
+
+func decodeFeedKey(publicKey string) (ed25519.PublicKey, error) {
+	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(publicKey))
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, errors.New("the public key is a 32-byte Ed25519 key in base64")
+	}
+	return ed25519.PublicKey(key), nil
+}
+
+// fetchList gets the networks of a country or feed list, merged.
 func fetchList(ctx context.Context, kind string, countries []string, url string) ([]netip.Prefix, error) {
+	r, err := fetchListWith(ctx, kind, countries, url, fetchOptions{})
+	return r.nets, err
+}
+
+// fetchListWith gets a list with its provenance. A country has an IPv4 zone
+// and usually an IPv6 one; a country with no IPv6 zone is a 404 there, which
+// is information and not a failure. A feed with validators may answer that
+// nothing changed; a signed feed is used only when its signature verifies.
+func fetchListWith(ctx context.Context, kind string, countries []string, url string, opt fetchOptions) (fetchResult, error) {
 	var all []netip.Prefix
+	var res fetchResult
+	now := time.Now().UTC()
 	switch kind {
 	case "feed":
-		body, _, err := fetch(ctx, url)
-		if err != nil {
-			return nil, err
+		headers := map[string]string{}
+		if opt.etag != "" || opt.lastModified != "" {
+			headers["If-None-Match"], headers["If-Modified-Since"] = opt.etag, opt.lastModified
 		}
-		nets, _ := parseFeed(body)
+		r, err := fetchHTTP(ctx, url, headers, maxFeedBytes)
+		if err != nil {
+			return res, err
+		}
+		if r.status == http.StatusNotModified {
+			res.unchanged = true
+			res.sources = []BlocklistSource{{URL: url, Status: "unchanged", FetchedAt: now, ETag: opt.etag, LastModified: opt.lastModified}}
+			return res, nil
+		}
+		if opt.signatureURL != "" {
+			if err := verifyFeedSignature(ctx, r.body, opt.signatureURL, opt.publicKey); err != nil {
+				return res, err
+			}
+		}
+		nets, skipped := parseFeed(r.body)
+		kept := 0
 		for _, p := range nets {
 			if (p.Addr().Is4() && p.Bits() < feedMinBitsV4) || (p.Addr().Is6() && p.Bits() < feedMinBitsV6) {
+				skipped++
 				continue
 			}
 			all = append(all, p)
+			kept++
 		}
+		src := sourceOf(url, r, now, kept, skipped)
+		src.Signed = opt.signatureURL != ""
+		res.sources = append(res.sources, src)
 	case "country":
 		for _, cc := range countries {
-			body, code, err := fetch(ctx, fmt.Sprintf(ipdenyV4, cc))
-			if err != nil {
-				if code == http.StatusNotFound {
-					return nil, fmt.Errorf("there is no address list for the country %q", strings.ToUpper(cc))
+			for _, family := range []string{"4", "6"} {
+				zone := fmt.Sprintf(ipdenyV4, cc)
+				if family == "6" {
+					zone = fmt.Sprintf(ipdenyV6, cc)
 				}
-				return nil, err
-			}
-			nets, _ := parseFeed(body)
-			all = append(all, nets...)
-			body, code, err = fetch(ctx, fmt.Sprintf(ipdenyV6, cc))
-			switch {
-			case err == nil:
-				nets, _ := parseFeed(body)
+				r, err := fetchHTTP(ctx, zone, nil, maxFeedBytes)
+				switch {
+				case err == nil:
+				case r.status == http.StatusNotFound && family == "6":
+					res.sources = append(res.sources, BlocklistSource{URL: zone, Country: cc, Family: "ipv6", Status: "absent", FetchedAt: now})
+					continue
+				case r.status == http.StatusNotFound:
+					return res, fmt.Errorf("there is no address list for the country %q", strings.ToUpper(cc))
+				default:
+					return res, err
+				}
+				nets, skipped := parseFeed(r.body)
 				all = append(all, nets...)
-			case code == http.StatusNotFound:
-				// No IPv6 zone for this country.
-			default:
-				return nil, err
+				src := sourceOf(zone, r, now, len(nets), skipped)
+				src.Country, src.Family = cc, "ipv"+family
+				res.sources = append(res.sources, src)
 			}
 		}
 	}
 	merged := mergePrefixes(all)
 	if len(merged) == 0 {
-		return nil, errors.New("the list held no networks this host could use")
+		return res, errors.New("the list held no networks this host could use")
 	}
 	if kind == "feed" {
 		var covered uint64
@@ -245,13 +364,110 @@ func fetchList(ctx context.Context, kind string, countries []string, url string)
 			}
 		}
 		if covered > feedMaxV4Addresses {
-			return nil, fmt.Errorf("the feed's IPv4 networks cover %d million addresses, more than a sixteenth of the internet. A list that wide is not a list of bad networks, and loading it would cut this server off from much of the world", covered>>20)
+			return res, fmt.Errorf("the feed's IPv4 networks cover %d million addresses, more than a sixteenth of the internet. A list that wide is not a list of bad networks, and loading it would cut this server off from much of the world", covered>>20)
 		}
 	}
 	if len(merged) > maxListEntries {
-		return nil, fmt.Errorf("the list holds %d networks; more than %d is too many to load as one set", len(merged), maxListEntries)
+		return res, fmt.Errorf("the list holds %d networks; more than %d is too many to load as one set", len(merged), maxListEntries)
 	}
-	return merged, nil
+	res.nets = merged
+	return res, nil
+}
+
+// blocklistDiff compares a list's new networks with the ones it had. Without
+// a readable previous cache there is nothing to compare against.
+func blocklistDiff(before []netip.Prefix, baseline bool, after []netip.Prefix, at time.Time) *BlocklistDiff {
+	d := &BlocklistDiff{At: at, Baseline: baseline}
+	if !baseline {
+		d.Added = len(after)
+		return d
+	}
+	had := map[netip.Prefix]bool{}
+	for _, p := range before {
+		had[p] = true
+	}
+	has := map[netip.Prefix]bool{}
+	for _, p := range after {
+		has[p] = true
+		if !had[p] {
+			d.Added++
+			if len(d.AddedSample) < 8 {
+				d.AddedSample = append(d.AddedSample, p.String())
+			}
+		}
+	}
+	for _, p := range before {
+		if !has[p] {
+			d.Removed++
+			if len(d.RemovedSample) < 8 {
+				d.RemovedSample = append(d.RemovedSample, p.String())
+			}
+		}
+	}
+	return d
+}
+
+// blocklistRefreshChoices are the schedules a fetched list may keep.
+var blocklistRefreshChoices = map[string]time.Duration{
+	"6h": 6 * time.Hour, "12h": 12 * time.Hour, "24h": 24 * time.Hour,
+	"72h": 72 * time.Hour, "168h": 168 * time.Hour, "manual": 0,
+}
+
+// refreshEvery is a list's schedule; zero is manual only.
+func refreshEvery(bl BlocklistSpec) time.Duration {
+	if d, ok := blocklistRefreshChoices[bl.Refresh]; ok {
+		return d
+	}
+	return blocklistStaleAfter
+}
+
+// refreshBackoff is how long a failing list waits before the next try:
+// doubling from fifteen minutes, never longer than its schedule.
+func refreshBackoff(bl BlocklistSpec) time.Duration {
+	if bl.Failures == 0 {
+		return 0
+	}
+	wait := 15 * time.Minute << min(bl.Failures-1, 8)
+	if every := refreshEvery(bl); every > 0 && wait > every {
+		wait = every
+	}
+	return wait
+}
+
+// nextRefresh is when the scheduler will next fetch a list, nil for one it
+// never fetches on its own.
+func nextRefresh(bl BlocklistSpec) *time.Time {
+	every := refreshEvery(bl)
+	if bl.Kind == "manual" || !bl.Enabled || every == 0 {
+		return nil
+	}
+	next := bl.Refreshed.Add(every)
+	if bl.Refreshed.IsZero() {
+		next = time.Now().UTC()
+	}
+	if bl.Failures > 0 {
+		if retry := bl.LastAttempt.Add(refreshBackoff(bl)); retry.Before(next) || next.Before(bl.LastAttempt) {
+			next = retry
+		}
+	}
+	return &next
+}
+
+// refreshDue reports whether a list should be fetched at now.
+func refreshDue(bl BlocklistSpec, now time.Time) bool {
+	every := refreshEvery(bl)
+	if !bl.Enabled || bl.Kind == "manual" || every == 0 {
+		return false
+	}
+	// A clock that moved backwards past the last attempt does not stall
+	// the list: it is retried.
+	if bl.Failures > 0 && !now.Before(bl.LastAttempt) && now.Sub(bl.LastAttempt) < refreshBackoff(bl) {
+		return false
+	}
+	if bl.Failures > 0 {
+		return true
+	}
+	return bl.Refreshed.IsZero() || now.Sub(bl.Refreshed) >= every
 }
 
 // writeBlocklistCache stores a fetched list, one network per line.
@@ -282,6 +498,13 @@ type BlocklistRequest struct {
 	URL     string `json:"url"`
 	Preset  string `json:"preset"`
 	Enabled *bool  `json:"enabled"`
+	// Refresh is a fetched list's schedule: 6h, 12h, 24h, 72h, 168h or
+	// manual; empty keeps the existing one (daily for a new list).
+	Refresh string `json:"refresh"`
+	// SignatureURL and PublicKey make a custom feed verify a detached
+	// Ed25519 signature on every fetch.
+	SignatureURL string `json:"signatureUrl"`
+	PublicKey    string `json:"publicKey"`
 }
 
 // buildBlocklist validates a request into the fields of a spec entry. It
@@ -365,12 +588,38 @@ func buildBlocklist(req BlocklistRequest, kind, client string) (BlocklistSpec, e
 			return bl, errors.New("a feed is fetched over https; an http address could be answered by anyone on the way with a list that drops your own networks")
 		}
 		bl.URL = u
+		sigURL, key := strings.TrimSpace(req.SignatureURL), strings.TrimSpace(req.PublicKey)
+		switch {
+		case sigURL == "" && key == "":
+		case req.Preset != "":
+			return bl, errors.New("this feed does not publish a signature; signatures are for feeds you name yourself")
+		case sigURL == "" || key == "":
+			return bl, errors.New("a signed feed needs both the signature address and the public key")
+		default:
+			su, err := ParseFeedURL(sigURL)
+			if err != nil || !strings.HasPrefix(su, "https://") {
+				return bl, errors.New("the signature is fetched over https")
+			}
+			if _, err := decodeFeedKey(key); err != nil {
+				return bl, err
+			}
+			bl.SignatureURL, bl.PublicKey = su, key
+		}
 	default:
 		return bl, errors.New("a list is manual, a country or a feed")
 	}
 	name, err := CleanLabel(req.Name, 64)
 	if err != nil {
 		return bl, err
+	}
+	if refresh := strings.TrimSpace(req.Refresh); refresh != "" {
+		if kind == "manual" {
+			return bl, errors.New("a manual list is never fetched, so it has no schedule")
+		}
+		if _, ok := blocklistRefreshChoices[refresh]; !ok {
+			return bl, errors.New("the schedule is 6h, 12h, 24h, 72h, 168h or manual")
+		}
+		bl.Refresh = refresh
 	}
 	bl.Name = name
 	bl.Enabled = true
@@ -393,13 +642,16 @@ func (s *Service) AddBlocklist(ctx context.Context, req BlocklistRequest, client
 		// Outside the lock: a country is up to sixty requests, and holding
 		// every other change to the network for that long is not a price
 		// anyone should pay for a list that has not been saved yet.
-		if fetched, err = fetchList(ctx, bl.Kind, bl.Countries, bl.URL); err != nil {
+		r, err := fetchListWith(ctx, bl.Kind, bl.Countries, bl.URL, fetchOptions{signatureURL: bl.SignatureURL, publicKey: bl.PublicKey})
+		if err != nil {
 			return BlocklistView{}, err
 		}
-		bl.Count, bl.Refreshed = len(fetched), time.Now().UTC()
+		fetched = r.nets
+		bl.Count, bl.Refreshed, bl.LastAttempt, bl.Sources = len(fetched), time.Now().UTC(), time.Now().UTC(), r.sources
+		bl.LastDiff = blocklistDiff(nil, false, fetched, bl.Refreshed)
 	}
 	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
-		s.trustClient(next, client)
+		s.trustClientBy(next, client, actor, "")
 		bl.ID, bl.Made = next.takeID(), gwStamp(actor)
 		if fetched != nil {
 			if err := stage(bl.ID, fetched); err != nil {
@@ -436,15 +688,22 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 	if err != nil {
 		return BlocklistView{}, err
 	}
+	if req.Refresh == "" {
+		upd.Refresh = existing.Refresh
+	}
 	var fetched []netip.Prefix
-	refetch := upd.Kind != "manual" && (!sameStrings(upd.Countries, existing.Countries) || upd.URL != existing.URL)
+	var sources []BlocklistSource
+	refetch := upd.Kind != "manual" && (!sameStrings(upd.Countries, existing.Countries) || upd.URL != existing.URL || upd.SignatureURL != existing.SignatureURL || upd.PublicKey != existing.PublicKey)
 	if refetch {
-		if fetched, err = fetchList(ctx, upd.Kind, upd.Countries, upd.URL); err != nil {
+		r, err := fetchListWith(ctx, upd.Kind, upd.Countries, upd.URL, fetchOptions{signatureURL: upd.SignatureURL, publicKey: upd.PublicKey})
+		if err != nil {
 			return BlocklistView{}, err
 		}
+		fetched, sources = r.nets, r.sources
 	}
+	before, beforeHealth := blocklistData(filepath.Join(s.paths.Dir, "lists"), *existing)
 	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
-		s.trustClient(next, client)
+		s.trustClientBy(next, client, actor, "")
 		for i := range next.Blocklists {
 			bl := &next.Blocklists[i]
 			if bl.ID != id {
@@ -459,14 +718,21 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 			}
 			switch bl.Kind {
 			case "manual":
+				now := time.Now().UTC()
+				nets, _ := blocklistData("", BlocklistSpec{Kind: "manual", Entries: upd.Entries})
+				bl.LastDiff = blocklistDiff(before, beforeHealth.Status == "ready", nets, now)
 				bl.Entries, bl.Count = upd.Entries, upd.Count
 			default:
-				bl.Countries, bl.URL = upd.Countries, upd.URL
+				bl.Countries, bl.URL, bl.Refresh = upd.Countries, upd.URL, upd.Refresh
+				bl.SignatureURL, bl.PublicKey = upd.SignatureURL, upd.PublicKey
 				if fetched != nil {
 					if err := stage(id, fetched); err != nil {
 						return false, fmt.Errorf("saving the list: %w", err)
 					}
-					bl.Count, bl.Refreshed, bl.Error = len(fetched), time.Now().UTC(), ""
+					now := time.Now().UTC()
+					bl.LastDiff = blocklistDiff(before, beforeHealth.Status == "ready", fetched, now)
+					bl.Count, bl.Refreshed, bl.Error, bl.Sources = len(fetched), now, "", sources
+					bl.LastAttempt, bl.Failures = now, 0
 				}
 			}
 			return false, nil
@@ -511,44 +777,56 @@ func (s *Service) DeleteBlocklist(ctx context.Context, id int, client string) er
 }
 
 // RefreshBlocklist fetches a fetched list again and reloads the table with
-// it. A failure keeps the list as it was, and says why on the list.
+// it. A failure keeps the list as it was, and says why on the list. A feed
+// that answers 304 to its validators, while the cache is healthy, records a
+// refresh without changing the cache or reloading anything.
 func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
 	cur, err := s.loadSpec()
 	if err != nil {
 		return err
 	}
-	var kind, url string
-	var countries []string
+	var bl BlocklistSpec
 	found := false
-	for _, bl := range cur.Blocklists {
-		if bl.ID == id {
-			kind, url, countries, found = bl.Kind, bl.URL, bl.Countries, true
+	for _, b := range cur.Blocklists {
+		if b.ID == id {
+			bl, found = b, true
 		}
 	}
 	switch {
 	case !found:
 		return fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
-	case kind == "manual":
+	case bl.Kind == "manual":
 		return errors.New("a manual list is what you typed; there is nothing to fetch")
 	}
-	fetched, err := fetchList(ctx, kind, countries, url)
+	before, health := blocklistData(filepath.Join(s.paths.Dir, "lists"), bl)
+	opt := fetchOptions{signatureURL: bl.SignatureURL, publicKey: bl.PublicKey}
+	if bl.Kind == "feed" && health.Status == "ready" && len(bl.Sources) == 1 {
+		opt.etag, opt.lastModified = bl.Sources[0].ETag, bl.Sources[0].LastModified
+	}
+	r, err := fetchListWith(ctx, bl.Kind, bl.Countries, bl.URL, opt)
 	if err != nil {
 		s.recordBlocklistError(ctx, id, err)
 		return err
 	}
+	if r.unchanged {
+		return s.recordBlocklistUnchanged(ctx, bl, r.sources[0])
+	}
 	err = s.mutateGatewayWithCache(ctx, func(old, next *Spec, stage func(int, []netip.Prefix) error) (bool, error) {
 		for i := range next.Blocklists {
-			bl := &next.Blocklists[i]
-			if bl.ID != id {
+			b := &next.Blocklists[i]
+			if b.ID != id {
 				continue
 			}
-			if bl.Kind != kind || bl.URL != url || !sameStrings(bl.Countries, countries) {
+			if b.Kind != bl.Kind || b.URL != bl.URL || !sameStrings(b.Countries, bl.Countries) || b.SignatureURL != bl.SignatureURL || b.PublicKey != bl.PublicKey {
 				return false, errors.New("the blocklist changed while it was being fetched; refresh it again")
 			}
-			if err := stage(id, fetched); err != nil {
+			if err := stage(id, r.nets); err != nil {
 				return false, fmt.Errorf("saving the list: %w", err)
 			}
-			bl.Count, bl.Refreshed, bl.Error = len(fetched), time.Now().UTC(), ""
+			now := time.Now().UTC()
+			b.LastDiff = blocklistDiff(before, health.Status == "ready", r.nets, now)
+			b.Count, b.Refreshed, b.Error, b.Sources = len(r.nets), now, "", r.sources
+			b.LastAttempt, b.Failures = now, 0
 			return false, nil
 		}
 		return false, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
@@ -559,54 +837,85 @@ func (s *Service) RefreshBlocklist(ctx context.Context, id int) error {
 	return err
 }
 
+// recordBlocklistUnchanged notes a 304: the cache and the loaded set stay,
+// only the fetch metadata moves.
+func (s *Service) recordBlocklistUnchanged(ctx context.Context, fetched BlocklistSpec, src BlocklistSource) error {
+	return s.writeBlocklistMetadata(ctx, fetched.ID, func(b *BlocklistSpec) bool {
+		if b.URL != fetched.URL || b.Kind != fetched.Kind {
+			return false
+		}
+		now := time.Now().UTC()
+		b.Refreshed, b.LastAttempt, b.Failures, b.Error = now, now, 0, ""
+		if len(b.Sources) == 1 {
+			b.Sources[0].Status, b.Sources[0].FetchedAt = src.Status, now
+		}
+		b.LastDiff = &BlocklistDiff{At: now, Baseline: true}
+		return true
+	})
+}
+
 // recordBlocklistError writes why a refresh failed onto the list, so the page
-// shows it where the list is. The list itself — its cache and what is loaded
-// — is untouched.
+// shows it where the list is, and counts the failure for the scheduler's
+// backoff. The list itself — its cache and what is loaded — is untouched.
 func (s *Service) recordBlocklistError(ctx context.Context, id int, cause error) {
+	if err := s.writeBlocklistMetadata(ctx, id, func(b *BlocklistSpec) bool {
+		msg := cause.Error()
+		if len(msg) > 300 {
+			msg = msg[:300] + "…"
+		}
+		b.Error, b.LastAttempt = msg, time.Now().UTC()
+		b.Failures++
+		return true
+	}); err != nil {
+		s.log.Error("recording a blocklist refresh failure", "list", id, "err", err)
+	}
+}
+
+// writeBlocklistMetadata changes fetch metadata in the spec without
+// rendering or reloading: metadata does not change desired enforcement.
+// Re-rendering here would make cache loss prevent its own failure from being
+// recorded, or accidentally replace a still-loaded last-good set. It shares
+// the host recovery lock and leaves an unresolved journal alone.
+func (s *Service) writeBlocklistMetadata(ctx context.Context, id int, edit func(*BlocklistSpec) bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := lockChange(s.paths.Dir)
 	if err != nil {
-		s.log.Error("locking blocklist failure metadata", "list", id, "err", err)
-		return
+		return err
 	}
 	defer unlockChange(lock)
 	if pending, readErr := readChange(s.paths.Dir); readErr == nil && !changeTerminal(pending.Phase) {
-		return
+		return nil
 	}
 	sp, err := s.loadSpec()
 	if err != nil {
-		return
+		return err
 	}
 	next := sp.clone()
 	for i := range next.Blocklists {
-		if next.Blocklists[i].ID == id {
-			msg := cause.Error()
-			if len(msg) > 300 {
-				msg = msg[:300] + "…"
-			}
-			next.Blocklists[i].Error = msg
-			// Fetch metadata does not change desired enforcement. Re-rendering
-			// here would make cache loss prevent its own failure from being
-			// recorded, or accidentally replace a still-loaded last-good set.
-			b, err := json.MarshalIndent(next, "", "  ")
-			if err == nil {
-				err = writeNetworkFile(s.specPath(), append(b, '\n'), 0o600)
-			}
-			if err != nil {
-				s.log.Error("recording a blocklist refresh failure", "list", id, "err", err)
-			}
-			return
+		if next.Blocklists[i].ID != id {
+			continue
 		}
+		if !edit(&next.Blocklists[i]) {
+			return nil
+		}
+		b, err := json.MarshalIndent(next, "", "  ")
+		if err != nil {
+			return err
+		}
+		return writeNetworkFile(s.specPath(), append(b, '\n'), 0o600)
 	}
+	return nil
 }
 
-// StartBlocklistRefresh refreshes every enabled fetched list that is more than
-// a day old, checking hourly, for as long as ctx lives. The first check is
-// a minute after start, so a host that was down for days catches up without
-// the dashboard's own start-up waiting on the network.
+// StartBlocklistRefresh refreshes every enabled fetched list on its own
+// schedule (daily unless changed), checking every quarter hour, for as long as
+// ctx lives, and sweeps expired protection exceptions every half minute. The
+// first check is a minute after start, so a host that was down for days
+// catches up without the dashboard's own start-up waiting on the network.
 func (s *Service) StartBlocklistRefresh(ctx context.Context) {
 	go s.refreshLoop(ctx, time.Minute, blocklistRefreshInterval)
+	go s.expiryLoop(ctx, 30*time.Second)
 }
 
 // refreshLoop checks after first and then every interval, and returns when ctx
@@ -625,9 +934,9 @@ func (s *Service) refreshLoop(ctx context.Context, first, every time.Duration) {
 	}
 }
 
-// refreshStale refreshes each enabled fetched list not refreshed within the
-// last day, one at a time. A list that fails stays stale, so the next hour
-// tries it again.
+// refreshStale refreshes each enabled fetched list that its schedule makes
+// due, one at a time. A list that fails stays due, and is tried again after
+// a backoff that doubles with each failure up to its schedule.
 func (s *Service) refreshStale(ctx context.Context, now time.Time) {
 	sp, err := s.loadSpec()
 	if err != nil {
@@ -638,10 +947,7 @@ func (s *Service) refreshStale(ctx context.Context, now time.Time) {
 		if ctx.Err() != nil {
 			return
 		}
-		if !bl.Enabled || bl.Kind == "manual" {
-			continue
-		}
-		if !bl.Refreshed.IsZero() && now.Sub(bl.Refreshed) < blocklistStaleAfter {
+		if !refreshDue(bl, now) {
 			continue
 		}
 		fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
