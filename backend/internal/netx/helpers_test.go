@@ -33,7 +33,10 @@ type reply struct {
 func record(t *testing.T, missing ...string) *recorder {
 	t.Helper()
 	rec := &recorder{t: t, stdin: map[string][]byte{}}
-	prevRun, prevStdin, prevHas, prevAnchors := run, runStdin, has, anchorPaths
+	prevRun, prevStdin, prevHas, prevAnchors, prevOwnerRoot := run, runStdin, has, anchorPaths, dnsOwnerRoot
+	// A transcript never reads the machine's own NetworkManager or resolvconf
+	// configuration; a test that wants an owner stages one.
+	dnsOwnerRoot = t.TempDir()
 	// The anchors are their own test's; everywhere else a host has none, so
 	// a transcript about a bridge is not also a transcript about 1.1.1.1.
 	anchorPaths = func(context.Context) []anchorPath { return nil }
@@ -48,7 +51,9 @@ func record(t *testing.T, missing ...string) *recorder {
 		absent[m] = true
 	}
 	has = func(name string) bool { return !absent[name] }
-	t.Cleanup(func() { run, runStdin, has, anchorPaths = prevRun, prevStdin, prevHas, prevAnchors })
+	t.Cleanup(func() {
+		run, runStdin, has, anchorPaths, dnsOwnerRoot = prevRun, prevStdin, prevHas, prevAnchors, prevOwnerRoot
+	})
 	return rec
 }
 

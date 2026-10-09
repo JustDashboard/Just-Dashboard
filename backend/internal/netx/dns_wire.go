@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -26,60 +28,198 @@ var wireLookupTypes = map[string]dnsmessage.Type{
 // /etc/hosts first even with PreferGo and a custom Dial, which would attribute
 // a local override to every upstream and never send the question.
 func lookupDNS(ctx context.Context, server, name, rtype string) ([]string, error) {
+	answers, _, err := lookupDNSWire(ctx, server, name, rtype, wireOptions{})
+	return answers, err
+}
+
+// wireOptions are what a direct comparison may ask of one destination: DNS
+// over TLS to its configured identity, and the DNSSEC OK bit.
+type wireOptions struct {
+	tlsName string
+	dnssec  bool
+}
+
+// wireMeta is how an answer arrived: over udp, tcp or tls, the resolver's AD
+// claim, and how many RRSIG records came with it.
+type wireMeta struct {
+	transport     string
+	tlsVersion    string
+	authenticated bool
+	signatures    int
+}
+
+func lookupDNSWire(ctx context.Context, server, name, rtype string, opts wireOptions) ([]string, wireMeta, error) {
+	var meta wireMeta
 	qtype, ok := wireLookupTypes[rtype]
 	if !ok {
-		return nil, fmt.Errorf("unsupported record type %s", rtype)
+		return nil, meta, fmt.Errorf("unsupported record type %s", rtype)
 	}
 	qname := name
 	if rtype == "PTR" {
 		a, err := netip.ParseAddr(name)
 		if err != nil {
-			return nil, err
+			return nil, meta, err
 		}
 		qname = reverseDNSName(a.Unmap())
 	}
 	fqdn, err := dnsmessage.NewName(strings.TrimSuffix(qname, ".") + ".")
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	var idBytes [2]byte
 	if _, err := rand.Read(idBytes[:]); err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	id := binary.BigEndian.Uint16(idBytes[:])
 	question := dnsmessage.Question{Name: fqdn, Type: qtype, Class: dnsmessage.ClassINET}
 	builder := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: true})
 	if err := builder.StartQuestions(); err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	if err := builder.Question(question); err != nil {
-		return nil, err
+		return nil, meta, err
+	}
+	if opts.dnssec {
+		// EDNS(0) with the DO bit asks for RRSIGs; the resolver's AD bit in the
+		// reply is its own claim to have validated them.
+		var opt dnsmessage.ResourceHeader
+		if err := opt.SetEDNS0(1232, dnsmessage.RCodeSuccess, true); err != nil {
+			return nil, meta, err
+		}
+		if err := builder.StartAdditionals(); err != nil {
+			return nil, meta, err
+		}
+		if err := builder.OPTResource(opt, dnsmessage.OPTResource{}); err != nil {
+			return nil, meta, err
+		}
 	}
 	packet, err := builder.Finish()
 	if err != nil {
-		return nil, err
+		return nil, meta, err
+	}
+	if opts.tlsName != "" {
+		response, version, err := exchangeDNSTLS(ctx, dnsTLSAddress(server), opts.tlsName, packet, id)
+		if err != nil {
+			return nil, meta, err
+		}
+		meta.transport, meta.tlsVersion = "tls", version
+		meta.authenticated, meta.signatures = dnsAnswerSecurity(response)
+		answers, truncated, err := parseDNSResponse(response, id, question)
+		if truncated && err == nil {
+			err = errors.New("DNS answer over TLS is truncated")
+		}
+		return answers, meta, err
 	}
 	address := server
 	if _, _, err := net.SplitHostPort(server); err != nil {
 		address = net.JoinHostPort(server, "53")
 	}
+	meta.transport = "udp"
 	response, err := exchangeDNS(ctx, "udp", address, packet, id)
 	if err != nil {
-		return nil, err
+		return nil, meta, err
 	}
 	answers, truncated, err := parseDNSResponse(response, id, question)
 	if err != nil || !truncated {
-		return answers, err
+		meta.authenticated, meta.signatures = dnsAnswerSecurity(response)
+		return answers, meta, err
 	}
+	meta.transport = "tcp"
 	response, err = exchangeDNS(ctx, "tcp", address, packet, id)
 	if err != nil {
-		return nil, fmt.Errorf("truncated DNS answer could not be retried over TCP: %w", err)
+		return nil, meta, fmt.Errorf("truncated DNS answer could not be retried over TCP: %w", err)
 	}
+	meta.authenticated, meta.signatures = dnsAnswerSecurity(response)
 	answers, truncated, err = parseDNSResponse(response, id, question)
 	if truncated && err == nil {
 		err = errors.New("DNS answer is still truncated over TCP")
 	}
-	return answers, err
+	return answers, meta, err
+}
+
+// dnsAnswerSecurity reads the AD bit and counts the RRSIG records in an
+// answer section. Neither is validation by this process.
+func dnsAnswerSecurity(packet []byte) (bool, int) {
+	var parser dnsmessage.Parser
+	header, err := parser.Start(packet)
+	if err != nil {
+		return false, 0
+	}
+	if err := parser.SkipAllQuestions(); err != nil {
+		return header.AuthenticData, 0
+	}
+	signatures := 0
+	for {
+		rh, err := parser.AnswerHeader()
+		if err != nil {
+			break
+		}
+		if rh.Type == dnsmessage.Type(46) {
+			signatures++
+		}
+		if err := parser.SkipAnswer(); err != nil {
+			break
+		}
+	}
+	return header.AuthenticData, signatures
+}
+
+// dnsTLSDial opens the TCP connection DNS over TLS runs on. A variable so tests
+// answer from a local listener.
+var dnsTLSDial = func(ctx context.Context, network, address string) (net.Conn, error) {
+	var d net.Dialer
+	return d.DialContext(ctx, network, address)
+}
+
+// dnsTLSRoots is the trust DNS over TLS certificates are verified against:
+// nil is the host's system store. A variable so tests trust their own CA.
+var dnsTLSRoots *x509.CertPool
+
+// dnsTLSAddress is where a destination answers DNS over TLS: its own port when
+// it names one, as resolved reads 192.0.2.1:8853#name, and 853 otherwise.
+func dnsTLSAddress(server string) string {
+	if _, _, err := net.SplitHostPort(server); err == nil {
+		return server
+	}
+	return net.JoinHostPort(server, "853")
+}
+
+// exchangeDNSTLS sends one query over a fresh TLS session, verifying the
+// certificate for tlsName against dnsTLSRoots.
+func exchangeDNSTLS(ctx context.Context, address, tlsName string, packet []byte, id uint16) ([]byte, string, error) {
+	raw, err := dnsTLSDial(ctx, "tcp", address)
+	if err != nil {
+		return nil, "", err
+	}
+	conn := tls.Client(raw, &tls.Config{ServerName: tlsName, RootCAs: dnsTLSRoots, MinVersion: tls.VersionTLS12})
+	defer conn.Close()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := conn.SetDeadline(deadline); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := conn.HandshakeContext(ctx); err != nil {
+		return nil, "", err
+	}
+	version := tls.VersionName(conn.ConnectionState().Version)
+	framed := binary.BigEndian.AppendUint16(nil, uint16(len(packet)))
+	if _, err := conn.Write(append(framed, packet...)); err != nil {
+		return nil, version, err
+	}
+	var size [2]byte
+	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		return nil, version, err
+	}
+	response := make([]byte, binary.BigEndian.Uint16(size[:]))
+	if _, err := io.ReadFull(conn, response); err != nil {
+		return nil, version, err
+	}
+	if len(response) < 2 || binary.BigEndian.Uint16(response) != id {
+		return nil, version, errors.New("the resolver answered a different question")
+	}
+	return response, version, nil
 }
 
 func reverseDNSName(a netip.Addr) string {

@@ -20,9 +20,11 @@ func (s *Server) mountNetworkDNSServiceRoutes(r chi.Router) {
 			})
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDNSServiceList))
+		r.Method(http.MethodGet, "/handoffs", s.handle(s.handleDNSServiceHandoffs))
 		r.Method(http.MethodPost, "/", s.handle(s.handleDNSServiceConnect))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDNSServiceInspect))
 		r.Method(http.MethodGet, "/{id}/filters", s.handle(s.handleDNSServiceFilters))
+		r.Method(http.MethodGet, "/{id}/dhcp", s.handle(s.handleDNSServiceDHCP))
 		r.Method(http.MethodGet, "/{id}/zones/{zone}/records", s.handle(s.handleDNSServiceRecords))
 		r.Method(http.MethodPut, "/{id}", s.handle(s.handleDNSServiceUpdate))
 		r.Method(http.MethodPost, "/{id}/changes", s.handle(s.handleDNSServicePreview))
@@ -158,6 +160,15 @@ func (s *Server) handleDNSServiceRecords(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleDNSServiceFilters(w http.ResponseWriter, r *http.Request) error {
 	view, err := s.modules.dnsServices.Filters(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		return mapDNSServiceError(err)
+	}
+	httpx.JSON(w, http.StatusOK, view)
+	return nil
+}
+
+func (s *Server) handleDNSServiceDHCP(w http.ResponseWriter, r *http.Request) error {
+	view, err := s.modules.dnsServices.DHCP(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		return mapDNSServiceError(err)
 	}

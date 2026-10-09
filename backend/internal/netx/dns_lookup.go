@@ -26,13 +26,17 @@ var dnsLookupFileExecutor TrafficExecutor = runDNSNative
 func readLookupResolvConf(ctx context.Context) (ResolvConf, error) {
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
-	rc := ResolvConf{Path: resolvConfPath, Mode: "static", Nameservers: []string{}}
+	rc := ResolvConf{Path: resolvConfPath, Mode: "static", Nameservers: []string{}, Search: []string{}}
 	out, err := dnsLookupFileExecutor(ctx, "cat", resolvConfPath)
 	if err != nil || len(out) > 64<<10 {
 		return rc, errors.New("the host configured resolver chain is unreadable; no effective query was sent")
 	}
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(strings.SplitN(strings.SplitN(line, "#", 2)[0], ";", 2)[0])
+		if len(fields) > 1 && (fields[0] == "search" || fields[0] == "domain") {
+			rc.Search = fields[1:]
+			continue
+		}
 		if len(fields) == 0 || fields[0] != "nameserver" {
 			continue
 		}
@@ -67,6 +71,17 @@ type LookupAnswer struct {
 	Answers   []string `json:"answers"`
 	LatencyMS float64  `json:"latencyMs"`
 	Error     string   `json:"error,omitempty"`
+	// Transport is how a direct comparison reached the destination: udp, tcp
+	// (a truncated answer retried) or tls (verified for TLSName). Effective
+	// lookups leave it empty: resolved chooses its own upstream transport.
+	Transport  string `json:"transport,omitempty"`
+	TLSName    string `json:"tlsName,omitempty"`
+	TLSVersion string `json:"tlsVersion,omitempty"`
+	// AuthenticatedData and Signatures answer a comparison that asked with the
+	// DNSSEC OK bit: the destination's AD claim and the RRSIGs it returned.
+	// Neither is validation by the dashboard.
+	AuthenticatedData *bool `json:"authenticatedData,omitempty"`
+	Signatures        *int  `json:"signatures,omitempty"`
 }
 
 // LookupResult records the native-policy test or an explicitly selected comparison.
@@ -85,21 +100,40 @@ type LookupResult struct {
 var lookupTypes = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "MX": true, "TXT": true, "NS": true, "PTR": true, "SRV": true}
 
 // lookupTarget is a resolver to ask.
-type lookupTarget struct{ server, label string }
+type lookupTarget struct{ server, label, tlsName string }
 
 // LookupDestination identifies a configured or preset destination; callers can
 // select only these addresses, so comparison cannot become an arbitrary probe.
 type LookupDestination struct {
 	Server string `json:"server"`
 	Label  string `json:"label"`
-	Reason string `json:"reason,omitempty"`
+	// TLSName is the identity a DNS-over-TLS comparison verifies: the preset's
+	// or the #name a configured server carries.
+	TLSName string `json:"tlsName,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 type LookupOptions struct {
 	Mode                  string   `json:"mode"`
 	Destinations          []string `json:"destinations"`
 	AcknowledgeDisclosure bool     `json:"acknowledgeDisclosure"`
+	// Transport is classic (UDP, TCP on truncation) or tls for a comparison;
+	// DNSSEC sets the DO bit. Both are comparison-only.
+	Transport string `json:"transport,omitempty"`
+	DNSSEC    bool   `json:"dnssec,omitempty"`
+	// AcknowledgeForwarding lets an effective lookup send a private name to a
+	// configured non-public resolver whose own forwarding is unknown.
+	AcknowledgeForwarding bool `json:"acknowledgeForwarding,omitempty"`
 }
+
+// DNSPolicyRefusal is a lookup the policy-aware test will not send: Code says
+// which (dns_private_name_public_upstream or dns_private_name_unknown_forwarding).
+type DNSPolicyRefusal struct {
+	Code   string
+	Reason string
+}
+
+func (e *DNSPolicyRefusal) Error() string { return e.Reason }
 
 // Lookup retains the original entry point but an includePublic flag alone no
 // longer authorizes direct disclosure to every configured/preset resolver.
@@ -128,8 +162,17 @@ func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opt
 	if opts.Mode != "effective" && opts.Mode != "compare" {
 		return nil, errors.New("lookup mode is effective or compare")
 	}
-	if opts.Mode == "effective" && (len(opts.Destinations) > 0 || opts.AcknowledgeDisclosure) {
-		return nil, errors.New("named destinations and disclosure acknowledgement require comparison mode")
+	if opts.Mode == "effective" && (len(opts.Destinations) > 0 || opts.AcknowledgeDisclosure || opts.Transport != "" || opts.DNSSEC) {
+		return nil, errors.New("named destinations, disclosure acknowledgement, transport and DNSSEC options require comparison mode")
+	}
+	if opts.Mode == "compare" && opts.AcknowledgeForwarding {
+		return nil, errors.New("comparison takes disclosure acknowledgement, not forwarding acknowledgement")
+	}
+	if opts.Transport == "" {
+		opts.Transport = "classic"
+	}
+	if opts.Transport != "classic" && opts.Transport != "tls" {
+		return nil, errors.New("comparison transport is classic or tls")
 	}
 	rv := s.readResolved(ctx, false)
 	rc, chainErr := readLookupResolvConf(ctx)
@@ -156,13 +199,33 @@ func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opt
 			if !ok {
 				return nil, fmt.Errorf("%s is not an available configured or preset resolver", server)
 			}
-			if !seen[server] {
-				targets = append(targets, lookupTarget{d.Server, d.Label})
-				seen[server] = true
+			if seen[server] {
+				continue
 			}
+			seen[server] = true
+			if opts.Transport == "tls" && d.TLSName == "" {
+				// A selected destination that cannot be asked this way is said, not dropped.
+				res.Omitted = append(res.Omitted, LookupDestination{Server: d.Server, Label: d.Label, Reason: "no DNS-over-TLS identity is configured for this destination, so its certificate cannot be verified; it was not asked"})
+				continue
+			}
+			tlsName := ""
+			if opts.Transport == "tls" {
+				tlsName = d.TLSName
+			}
+			targets = append(targets, lookupTarget{d.Server, d.Label, tlsName})
+		}
+		if len(targets) == 0 {
+			return nil, errors.New("none of the selected destinations has a DNS-over-TLS identity; choose one that names its certificate, such as a preset")
 		}
 		res.Route = "explicit comparison"
 		res.Note = "Direct classic DNS to the selected destinations bypasses split-DNS routing, host records, resolver encryption and DNSSEC validation. Private names are disclosed to each selected destination."
+		if opts.Transport == "tls" {
+			res.Route = "explicit comparison over DNS over TLS"
+			res.Note = "DNS over TLS to each selected destination's configured identity, with its certificate verified against this host's trust store. This bypasses split-DNS routing and host records, and private names are disclosed to each selected destination."
+		}
+		if opts.DNSSEC {
+			res.Note += " The DNSSEC OK bit was set: the AD flag is each destination's own claim to have validated, and returned signatures were not verified by the dashboard."
+		}
 	} else {
 		if chainErr != nil {
 			return nil, chainErr
@@ -174,6 +237,9 @@ func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opt
 			}
 		}
 		if delegates {
+			if err := nativePrivateNameGuard(name, rtype, rc, rv); err != nil {
+				return nil, err
+			}
 			// A classic stub request can follow an alias into another native
 			// scope before the original caller can check it. Use the same explicit
 			// alias walker as retained evidence, including fresh ownership checks.
@@ -197,7 +263,7 @@ func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opt
 		for _, entry := range rc.Nameservers {
 			sv, err := parseDNSServer(entry)
 			if err == nil {
-				targets = append(targets, lookupTarget{sv.lookupServer(), "resolv.conf effective policy"})
+				targets = append(targets, lookupTarget{server: sv.lookupServer(), label: "resolv.conf effective policy"})
 			}
 			if len(targets) == maxLookupResolvers {
 				break
@@ -205,19 +271,46 @@ func (s *Service) LookupWithOptions(ctx context.Context, name, rtype string, opt
 		}
 		res.Route = "resolv.conf order"
 		res.Note = "Absolute DNS wire query through the actual resolv.conf servers in order, stopping at the first response. A separately running resolved service does not establish this chain's ownership. Hosts/NSS, search expansion, private split policy, recursive alias disclosure, encryption and DNSSEC validation are not measured."
+		acknowledged, err := foreignPrivateNameGuard(name, rtype, rc, rv, targets, opts.AcknowledgeForwarding)
+		if err != nil {
+			return nil, err
+		}
+		if acknowledged != "" {
+			res.Note += " " + acknowledged
+		}
 	}
 	if len(targets) == 0 {
 		return nil, errors.New("no usable resolver destination is configured")
 	}
 	ask := func(t lookupTarget) LookupAnswer {
 		start := time.Now()
-		answers, err := lookupVia(ctx, t.server, name, rtype)
-		a := LookupAnswer{Server: t.server, Label: t.label, Answers: answers, LatencyMS: millis(time.Since(start))}
+		if opts.Mode != "compare" {
+			answers, err := lookupVia(ctx, t.server, name, rtype)
+			a := LookupAnswer{Server: t.server, Label: t.label, Answers: answers, LatencyMS: millis(time.Since(start))}
+			if a.Answers == nil {
+				a.Answers = []string{}
+			}
+			if err != nil {
+				a.Error = lookupError(err)
+			}
+			return a
+		}
+		queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+		defer cancel()
+		answers, meta, err := lookupDNSWire(queryCtx, t.server, name, rtype, wireOptions{tlsName: t.tlsName, dnssec: opts.DNSSEC})
+		a := LookupAnswer{Server: t.server, Label: t.label, Answers: answers, LatencyMS: millis(time.Since(start)), Transport: meta.transport, TLSName: t.tlsName, TLSVersion: meta.tlsVersion}
 		if a.Answers == nil {
 			a.Answers = []string{}
 		}
+		if opts.DNSSEC && meta.transport != "" && err == nil {
+			ad, signatures := meta.authenticated, meta.signatures
+			a.AuthenticatedData, a.Signatures = &ad, &signatures
+		}
 		if err != nil {
 			a.Error = lookupError(err)
+			if state, reason := dnsTLSFailure(err, t.tlsName); t.tlsName != "" && state == "untrusted" {
+				a.Error = reason
+			}
 		}
 		return a
 	}
@@ -273,7 +366,15 @@ func (s *Service) lookupDestinationInventory(rv ResolvedView, configured ...Reso
 			server := sv.lookupServer()
 			if !seen[server] {
 				seen[server] = true
-				out = append(out, LookupDestination{Server: server, Label: label})
+				out = append(out, LookupDestination{Server: server, Label: label, TLSName: sv.tlsName})
+				continue
+			}
+			// A configured address a preset also names keeps the identity the
+			// preset publishes, so it can be compared over TLS too.
+			for i := range out {
+				if out[i].Server == server && out[i].TLSName == "" {
+					out[i].TLSName = sv.tlsName
+				}
 			}
 		}
 	}
@@ -296,7 +397,7 @@ func (s *Service) lookupDestinationInventory(rv ResolvedView, configured ...Reso
 	for _, p := range DNSPresets() {
 		for _, sv := range p.Servers {
 			if a, err := netip.ParseAddr(sv); err == nil && a.Is4() {
-				addEntries([]string{sv}, p.Name, "")
+				addEntries([]string{sv + "#" + p.TLSName}, p.Name, "")
 				break
 			}
 		}

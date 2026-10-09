@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -300,16 +301,63 @@ func TestLookupDoesNotSendPrivateNamesToPublicPresetsByDefault(t *testing.T) {
 	rec := record(t)
 	rec.on("systemctl is-active systemd-resolved", "inactive\n")
 	pointResolvConf(t, "static")
-	server := startFakeDNS(t, answerA("192.0.2.7"))
+	var asked atomic.Int32
+	server := startFakeDNS(t, func(name string, qtype uint16) dnsBehavior {
+		asked.Add(1)
+		return answerA("192.0.2.7")(name, qtype)
+	})
 	routeDNS(t, map[string]string{"198.51.100.53": server})
-	res, err := testService(t).Lookup(context.Background(), "nas.home.arpa", "A")
-	if err != nil || len(res.Answers) != 1 || res.Answers[0].Server != "198.51.100.53" || len(res.Answers[0].Answers) != 1 {
-		t.Fatalf("private name lookup = %+v, %v", res, err)
+	// The static chain lists a public resolver first: a private name is refused
+	// before a packet leaves, and no preset is asked instead.
+	_, err := testService(t).Lookup(context.Background(), "nas.home.arpa", "A")
+	var refusal *DNSPolicyRefusal
+	if !errors.As(err, &refusal) || refusal.Code != "dns_private_name_public_upstream" || !strings.Contains(refusal.Reason, "198.51.100.53") || asked.Load() != 0 {
+		t.Fatalf("private name lookup = %v (asked %d)", err, asked.Load())
 	}
-	for _, a := range res.Answers {
-		if a.Label != "resolv.conf effective policy" {
-			t.Errorf("private name sent outside configured resolvers: %+v", a)
+	// A search domain of the chain is private too.
+	if _, err := testService(t).Lookup(context.Background(), "git.example.internal", "A"); !errors.As(err, &refusal) || asked.Load() != 0 {
+		t.Fatalf("search-domain lookup = %v", err)
+	}
+	// A public name still goes to the configured resolver alone.
+	res, err := testService(t).Lookup(context.Background(), "example.com", "A")
+	if err != nil || len(res.Answers) != 1 || res.Answers[0].Server != "198.51.100.53" || res.Answers[0].Label != "resolv.conf effective policy" {
+		t.Fatalf("public name lookup = %+v, %v", res, err)
+	}
+}
+
+// A chain of private resolvers may forward a private name on to a public one;
+// that is unseen here, so the name needs an acknowledgement, and then goes to
+// the configured resolver only.
+func TestLookupAsksBeforeSendingPrivateNamesToUnseenForwarding(t *testing.T) {
+	rec := record(t)
+	rec.on("systemctl is-active systemd-resolved", "inactive\n")
+	path := pointResolvConf(t, "static")
+	if err := os.WriteFile(path, []byte("search home.example\nnameserver 10.0.0.53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var asked atomic.Int32
+	server := startFakeDNS(t, func(name string, qtype uint16) dnsBehavior {
+		asked.Add(1)
+		return answerA("10.0.0.7")(name, qtype)
+	})
+	routeDNS(t, map[string]string{"10.0.0.53": server})
+	s := testService(t)
+	_, err := s.LookupWithOptions(context.Background(), "nas.home.example", "A", LookupOptions{})
+	var refusal *DNSPolicyRefusal
+	if !errors.As(err, &refusal) || refusal.Code != "dns_private_name_unknown_forwarding" || asked.Load() != 0 {
+		t.Fatalf("unacknowledged = %v (asked %d)", err, asked.Load())
+	}
+	res, err := s.LookupWithOptions(context.Background(), "nas.home.example", "A", LookupOptions{AcknowledgeForwarding: true})
+	if err != nil || len(res.Answers) != 1 || res.Answers[0].Server != "10.0.0.53" || asked.Load() != 1 || !strings.Contains(res.Note, "with acknowledgement") {
+		t.Fatalf("acknowledged = %+v, %v", res, err)
+	}
+	for _, rtype := range []string{"PTR"} {
+		if _, err := s.LookupWithOptions(context.Background(), "10.0.0.7", rtype, LookupOptions{}); !errors.As(err, &refusal) {
+			t.Fatalf("private reverse name = %v", err)
 		}
+	}
+	if _, err := s.LookupWithOptions(context.Background(), "nas.home.example", "A", LookupOptions{Mode: "compare", Destinations: []string{"10.0.0.53"}, AcknowledgeDisclosure: true, AcknowledgeForwarding: true}); err == nil {
+		t.Fatal("comparison accepted a forwarding acknowledgement")
 	}
 }
 
