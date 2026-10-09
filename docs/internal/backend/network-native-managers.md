@@ -53,7 +53,11 @@ A pass on an unpatched keyfile build does not cover this separate Ubuntu strateg
 The observed device index, MAC, kind, master, members, bond mode and VRF table are part of the transaction
 contract. Observing those relationships does not prove that reactivating the saved profile will
 retain them. A standalone veth profile records the peer name, index and MAC privately; both endpoints
-must identify each other by reciprocal indices in the same inventory. Generation, runtime inspection
+must identify each other within one unique name/index inventory. When iproute2 emits reciprocal
+resolved `link` names instead of `link_index`, those kernel-provided names resolve only to the exact
+observed endpoint indices ([iproute2's link serializer](https://git.kernel.org/pub/scm/network/iproute2/iproute2.git/tree/lib/utils.c?h=v6.14.0#n1219)).
+Any `link_netnsid` marker, duplicate name/index, nonreciprocal relation
+or disagreement between a numeric index and resolved name refuses the pair. Generation, runtime inspection
 and every recovery epoch check fence that pair. Missing or foreign peers preserve the journal and
 refuse activation/restoration. Only a different verified kernel boot can rebind indices after exact
 peer-name/MAC and reciprocal-relationship proof; this is not a measured reboot claim.

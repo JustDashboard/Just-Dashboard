@@ -139,17 +139,18 @@ type DockerNet struct {
 
 // ipLink is `ip -j -d -s link show`'s shape, the fields read here.
 type ipLink struct {
-	IfIndex   int      `json:"ifindex"`
-	IfName    string   `json:"ifname"`
-	Flags     []string `json:"flags"`
-	MTU       int      `json:"mtu"`
-	Qdisc     string   `json:"qdisc"`
-	Master    string   `json:"master"`
-	OperState string   `json:"operstate"`
-	LinkType  string   `json:"link_type"`
-	Address   string   `json:"address"`
-	Link      string   `json:"link"`
-	LinkIndex int      `json:"link_index"`
+	IfIndex   int             `json:"ifindex"`
+	IfName    string          `json:"ifname"`
+	Flags     []string        `json:"flags"`
+	MTU       int             `json:"mtu"`
+	Qdisc     string          `json:"qdisc"`
+	Master    string          `json:"master"`
+	OperState string          `json:"operstate"`
+	LinkType  string          `json:"link_type"`
+	Address   string          `json:"address"`
+	Link      string          `json:"link"`
+	LinkIndex int             `json:"link_index"`
+	LinkNS    json.RawMessage `json:"link_netnsid,omitempty"`
 	LinkInfo  struct {
 		InfoKind string          `json:"info_kind"`
 		InfoData json.RawMessage `json:"info_data"`

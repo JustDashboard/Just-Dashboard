@@ -53,6 +53,43 @@ func TestNativeVethRequiresReciprocalSameNamespacePeer(t *testing.T) {
 	}
 }
 
+func TestNativeVethResolvesKernelPeerNamesWithoutAdoptingForeignIndices(t *testing.T) {
+	var links []ipLink
+	if err := json.Unmarshal([]byte(`[{"ifindex":8,"ifname":"d0","link":"d1","address":"02:00:00:00:08:02","linkinfo":{"info_kind":"veth"}},{"ifindex":7,"ifname":"d1","link":"d0","address":"02:00:00:00:08:01","linkinfo":{"info_kind":"veth"}}]`), &links); err != nil {
+		t.Fatal(err)
+	}
+	peer, err := nativePeer(links[0], links)
+	if err != nil || peer == nil || *peer != (nativePeerIdentity{Device: "d1", IfIndex: 7, MAC: "02:00:00:00:08:01"}) {
+		t.Fatal("actual same-namespace iproute2 schema refused:", peer, err)
+	}
+	for _, alter := range []func([]ipLink) []ipLink{
+		func(links []ipLink) []ipLink { links[0].LinkNS = json.RawMessage(`0`); return links },
+		func(links []ipLink) []ipLink { links[1].LinkNS = json.RawMessage(`-1`); return links },
+		func(links []ipLink) []ipLink { links[1].LinkNS = json.RawMessage(`null`); return links },
+		func(links []ipLink) []ipLink { links[0].LinkIndex = 99; return links },
+		func(links []ipLink) []ipLink { links[1].Link = "foreign0"; return links },
+		func(links []ipLink) []ipLink { links[1].LinkIndex = 99; return links },
+		func(links []ipLink) []ipLink { return append(links, links[1]) },
+		func(links []ipLink) []ipLink {
+			extra := links[1]
+			extra.IfName = "foreign0"
+			return append(links, extra)
+		},
+		func(links []ipLink) []ipLink { extra := links[1]; extra.IfIndex = 99; return append(links, extra) },
+		func(links []ipLink) []ipLink { return links[:1] },
+	} {
+		changed := alter(append([]ipLink(nil), links...))
+		if _, err := nativePeer(changed[0], changed); err == nil {
+			t.Fatalf("foreign, nonreciprocal or ambiguous inventory admitted: %+v", changed)
+		}
+	}
+	indexed := nativePeerTestLinks()
+	indexed[0].LinkNS = json.RawMessage(`0`)
+	if _, err := nativePeer(indexed[0], indexed); err == nil {
+		t.Fatal("cross-namespace numeric index reuse was admitted as a local pair")
+	}
+}
+
 func TestNativeVethRecoveryPreservesForeignPeerBeforeEffect(t *testing.T) {
 	if !nativeRootTest(t) {
 		return

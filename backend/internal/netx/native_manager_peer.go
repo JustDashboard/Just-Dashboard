@@ -19,14 +19,45 @@ func nativePeer(link ipLink, links []ipLink) (*nativePeerIdentity, error) {
 	if nativeLinkKind(link) != "veth" {
 		return nil, nil
 	}
-	for _, peer := range links {
-		if peer.IfIndex != link.LinkIndex {
-			continue
+	byName, byIndex := map[string]ipLink{}, map[int]ipLink{}
+	for _, item := range links {
+		if ValidIfName(item.IfName) != nil || item.IfIndex < 1 || item.IfIndex > 2147483647 {
+			return nil, errors.New("native link inventory has unreadable endpoint identities")
 		}
-		id := &nativePeerIdentity{Device: peer.IfName, IfIndex: peer.IfIndex, MAC: peer.Address}
-		if nativeLinkKind(peer) != "veth" || peer.LinkIndex != link.IfIndex || nativeValidatePeer(link.IfName, link.IfIndex, id) != nil {
-			break
+		if _, found := byName[item.IfName]; found {
+			return nil, errors.New("native link inventory has duplicate endpoint names")
 		}
+		if _, found := byIndex[item.IfIndex]; found {
+			return nil, errors.New("native link inventory has duplicate endpoint indices")
+		}
+		byName[item.IfName], byIndex[item.IfIndex] = item, item
+	}
+	observed, found := byName[link.IfName]
+	if !found || observed.IfIndex != link.IfIndex || observed.Address != link.Address || observed.Link != link.Link || observed.LinkIndex != link.LinkIndex || nativeLinkKind(observed) != "veth" || len(link.LinkNS) != 0 || len(observed.LinkNS) != 0 {
+		return nil, errors.New("native veth endpoint is absent, changed or belongs to another namespace")
+	}
+	// iproute2 resolves IFLA_LINK to `link` for a known same-namespace
+	// endpoint, and otherwise emits `link_index`. Resolve only within this
+	// complete unique inventory, rejecting foreign-namespace markers and
+	// disagreement between a numeric index and a resolved kernel name.
+	resolve := func(endpoint ipLink) (ipLink, bool) {
+		if len(endpoint.LinkNS) != 0 {
+			return ipLink{}, false
+		}
+		target, found := byIndex[endpoint.LinkIndex]
+		if endpoint.Link != "" {
+			named, namedFound := byName[endpoint.Link]
+			if !namedFound || found && named.IfIndex != target.IfIndex || endpoint.LinkIndex != 0 && (!found || endpoint.LinkIndex != named.IfIndex) {
+				return ipLink{}, false
+			}
+			target, found = named, true
+		}
+		return target, found && nativeLinkKind(target) == "veth" && len(target.LinkNS) == 0
+	}
+	peer, found := resolve(link)
+	back, reciprocal := resolve(peer)
+	id := &nativePeerIdentity{Device: peer.IfName, IfIndex: peer.IfIndex, MAC: peer.Address}
+	if found && reciprocal && back.IfName == link.IfName && back.IfIndex == link.IfIndex && back.Address == link.Address && nativeValidatePeer(link.IfName, link.IfIndex, id) == nil {
 		return id, nil
 	}
 	return nil, errors.New("the existing veth peer is absent, outside this namespace or not reciprocally identified")
