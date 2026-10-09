@@ -375,6 +375,21 @@ ufw's grammar has shapes that are accepted and mean something else, checked agai
   IPv4 rule (ufw numbers the v6 rules after the v4 ones and refuses an insert outside the family's own
   range), and an empty family appended to, because ufw refuses `insert 1` into nothing. An explicit
   `position` is kept.
+- **A block from the Connections page has a reason and an end** (`netsec/blocks.go`,
+  `network_address_blocks`). `POST /firewall/blocks` (admin, audited) validates one remote address
+  (no loopback, unspecified or multicast), a one-line reason, a length of five minutes to ninety days
+  or none, and an optional saved diagnostic run as its incident (checked to exist), then writes the
+  same source-only deny through `AddRule` with the caller's address — so the lockout guard refuses
+  the operator's own address — commented `jd-block <id>`. The rule goes in before the record; a
+  record that cannot be written takes its rule back. An address already blocked, or already denied by
+  a plain rule somebody wrote, is refused rather than shadowed. A loop started with the server lifts
+  ended blocks every minute, removing exactly the block's rule — found by its comment, or on a
+  firewall that keeps no comments by its exact shape, which creation refused to duplicate — reading
+  the list again before each delete; a failed removal leaves the block active with its error and is
+  retried, and each outcome is a `system` audit entry (`firewall.block.expire`). Lifting only ever
+  opens the firewall, so the loop can cut nobody off. `GET /firewall/blocks` (the rules' standing)
+  lists them with whether the firewall still lists each rule; `DELETE /firewall/blocks/{id}` (admin,
+  destructive) lifts one now. The Intrusion and Logins pages keep the plain permanent deny.
 - **A ban is a deny rule wearing another name**: `netsec.Ban` refuses the caller's own address, the same
   guard the firewall route has, and the jail sheet now reaches it. `IgnoreIP` writes through to the
   jail.d drop-in — `addignoreip` changes only the running server.

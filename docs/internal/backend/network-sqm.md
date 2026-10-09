@@ -143,3 +143,11 @@ throughput, latency median/p95 and sample counts, native IFB counters, and measu
 DSCP wash. It asserts valid load/ownership/accounting, not a universal latency improvement. NIC
 offloads, arbitrary foreign ingress filters, actual provider queues, reboot and production workload
 performance remain outside that disposable fixture's evidence.
+
+The Traffic view now reads two kinds of evidence beside the profile without changing anything: the
+IFB CAKE queue's per-class statistics (average, peak and base queueing delay, drops, ECN marks and
+flows, `QdiscStat.Tins`), which is the delay this host held downloaded packets, and the shaped
+device's receive and segmentation offloads from `ethtool -k` (GRO, LRO, GSO, TSO; absent `ethtool`
+or a failed read says so). LRO merges in hardware before the IFB and cannot be split back exactly;
+GRO-merged packets are split again by `split-gso`. Neither reading is a provider-queue measurement,
+and actual reboot, provider queues and production performance remain open.
