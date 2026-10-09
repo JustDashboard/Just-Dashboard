@@ -254,3 +254,18 @@ func TestMappedNATModelsItsInboundHalf(t *testing.T) {
 		t.Fatalf("the outbound half is not addressed to the private host: %+v", flows[0].Layers)
 	}
 }
+
+func TestAVerdictMapDecidesByLookupSoItIsNeverReadAsPassing(t *testing.T) {
+	vmap := `[{"vmap": {"key": {"payload": {"protocol": "th", "field": "dport"}}, "data": {"set": [[80, {"drop": null}], [443, {"accept": null}]]}}}]`
+	raw := gwRuleset(t, gwInetForward, gwInetRule(1, vmap))
+	f := gwOneFlow(t, raw, gwFlowSpec(ForwardSpec{Ports: "8080", Target: "172.17.0.2", TargetPort: "80"}))
+	if l := gwLayer(t, f, "local", "forward"); f.Verdict == "clear" || l.Verdict != "unknown" {
+		t.Fatalf("flow %s, layer %+v", f.Verdict, l)
+	}
+	h := newGwHost(t)
+	h.first("nft -t -j list ruleset", raw, nil)
+	var ro *ReadOnlyError
+	if _, err := h.requireWritable(context.Background(), gwFlowSpec(ForwardSpec{Ports: "8080", Target: "172.17.0.2", TargetPort: "80"})); !errors.As(err, &ro) {
+		t.Fatalf("a verdict map on the forward hook must hold the change: %v", err)
+	}
+}

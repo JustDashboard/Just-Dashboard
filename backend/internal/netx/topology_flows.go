@@ -27,12 +27,6 @@ type TrackedFlow struct {
 	Counted bool
 }
 
-// conntrack status bits (linux/netfilter/nf_conntrack_common.h).
-const (
-	ctStatusSrcNAT = 1 << 4
-	ctStatusDstNAT = 1 << 5
-)
-
 // TopologyFlows is the Overview's flow-backed reading of the topology: which
 // of its nodes are exchanging traffic, through which translation, as the
 // kernel's connection tracking holds it at the moment of reading. It is not a
@@ -278,29 +272,14 @@ func protocolName(p uint8) string {
 	return fmt.Sprintf("ip-%d", p)
 }
 
-// The netlink attribute numbers of a conntrack entry
-// (linux/netfilter/nfnetlink_conntrack.h).
+// The counter attributes of a conntrack entry
+// (linux/netfilter/nfnetlink_conntrack.h); the tuple, status and protocol
+// attributes are shared with the ctnetlink client in conntrack_netlink.go.
 const (
-	ctaTupleOrig     = 1
-	ctaTupleReply    = 2
-	ctaStatus        = 3
 	ctaCountersOrig  = 9
 	ctaCountersReply = 10
 
-	ctaTupleIP    = 1
-	ctaTupleProto = 2
-
-	ctaIPv4Src = 1
-	ctaIPv4Dst = 2
-	ctaIPv6Src = 3
-	ctaIPv6Dst = 4
-
-	ctaProtoNum     = 1
-	ctaProtoDstPort = 3
-
 	ctaCountersBytes = 2
-
-	nlaTypeMask = 0x3fff
 )
 
 type ctTuple struct {

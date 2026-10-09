@@ -348,10 +348,10 @@ func readListeners(ctx context.Context) []listener {
 	if err != nil {
 		return nil
 	}
-	return parseListeners(out)
+	return parseHostListeners(out)
 }
 
-func parseListeners(out string) []listener {
+func parseHostListeners(out string) []listener {
 	var ls []listener
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.Fields(line)

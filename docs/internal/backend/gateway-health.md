@@ -49,7 +49,9 @@ anonymous sets; TCP/UDP/`th` destination ports against values, ranges and sets; 
 `nfproto`, `iifname`/`oifname` (with trailing wildcards); `ct state`, `ct status dnat`; `fib daddr type
 local`; and the masked admission mark. A rule is decided only when every match is; an unsupported
 match (a named set, an iptables `xt` match, `limit`, `meter`, `socket`, …) on a rule whose verdict
-could change the outcome leaves the layer `unknown`, naming the expression. When the only undecided
+could change the outcome leaves the layer `unknown`, naming the expression. A verdict map (`vmap`),
+`queue`, `synproxy`, `tproxy` or `fwd` is an unmodeled verdict, so a rule reaching one is `unknown`
+rather than read as passing. When the only undecided
 matches concern the visitor's source address and the branches differ between drop and pass, the
 layer is `restricted`: some sources are dropped, the rest pass. Each layer's verdict is `clear`,
 `restricted`, `blocked` or `unknown`, with the deciding rule's position and jump path. An evaluation

@@ -480,6 +480,13 @@ func ruleAction(expr []map[string]json.RawMessage) (act, target, why string) {
 				return "translate", "", "A translation rule; it changes addresses, it does not drop."
 			case "queue":
 				return "unknown", "", "A queue hands the packet to a user-space program whose verdict is not modeled."
+			// A verdict map picks accept, drop or a jump by looking the packet
+			// up, and synproxy, tproxy and fwd take the packet themselves;
+			// skipping any of them would read a possible drop as passing.
+			case "vmap":
+				return "unknown", "", "A verdict map decides by lookup, which is not modeled."
+			case "synproxy", "tproxy", "fwd":
+				return "unknown", "", "A " + kind + " statement takes the packet, which is not modeled."
 			case "xt":
 				var x struct{ Type, Name string }
 				if json.Unmarshal(raw, &x) != nil || x.Type != "target" {
