@@ -299,4 +299,9 @@ The 19 cases of `network-topology-interfaces.spec.ts` are part of that gate. Rev
 390 and 1440 pixels of the Overview, the ens3/jd-lab/vlan30/vx42 device sheets and the lab namespace
 sheet are in `shots/` (fixture data, not committed).
 
-The final gate on the committed head is recorded below.
+The final gate ran on the committed head `5d66048b` (code identical to the validation run):
+`scripts/test-changed.sh 4338e6cc` passed — Prettier, ESLint, `tsc`, 3,277 Bun tests; `go build ./...`,
+`go vet` and the beside-file tests of `internal/api`, `internal/netx` and `internal/store` (served
+from Go's test cache, the inputs being unchanged); 29 browser specs with 516 cases passed, including
+all 19 new cases, and 60 optional screenshot cases skipped, in 18.7 minutes
+(`test-changed-final.txt`; 1,235 s command, 3,006 s including the wait for the shared lock).
