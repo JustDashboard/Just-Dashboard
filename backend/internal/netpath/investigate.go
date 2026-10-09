@@ -236,6 +236,10 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 				for _, site := range listener.Routes {
 					proxy.Basis, proxy.State, proxy.Summary = Modeled, "modeled", "Configured proxy sites reference this listener. Site loading and request handling are not measured here."
 					proxy.Facts = append(proxy.Facts, Fact{"Configured site", site.Site + " · " + site.ServerName})
+					if policy := sitePolicyFact(ctx, p, site.Site); policy != "" {
+						proxy.Facts = append(proxy.Facts, Fact{"Service policy of " + site.Site, policy})
+						proxy.Limitations = appendOnce(proxy.Limitations, "A site's service policy applies to requests that reach this port through the site; a direct connection to the port meets none of it.")
+					}
 				}
 				if listener.Stream != "" || listener.ServedSites > 0 {
 					proxy.Basis, proxy.State = Modeled, "modeled"

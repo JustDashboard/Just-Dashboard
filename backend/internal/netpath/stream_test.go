@@ -105,3 +105,42 @@ func TestStreamBackendLegIsOnlyClaimedFromTheLog(t *testing.T) {
 		}
 	}
 }
+
+// A site forwarding to the destination port carries its service policy into
+// the proxy layer: what requests through it meet, and only those.
+func TestProxyLayerCarriesTheSitesServicePolicy(t *testing.T) {
+	req := Request{SourceKind: "host", Target: "127.0.0.1", Family: "inet", Protocol: "tcp", Port: 3000}
+	p := Providers{
+		Route: func(context.Context, Request) (netx.RouteLookup, error) {
+			return netx.RouteLookup{Path: netx.Path{Local: true, Source: "127.0.0.1", Device: "lo"}}, nil
+		},
+		Owners: func(context.Context) (OwnerSnapshot, error) {
+			return OwnerSnapshot{Listeners: []proxysvc.Listener{{Protocol: "tcp", Port: 3000, Address: "127.0.0.1", Process: "node",
+				Routes: []proxysvc.ListenerRoute{{Site: "app", ServerName: "app.example.com"}}}}}, nil
+		},
+		Policy: func(_ context.Context, site string) (*proxysvc.ServicePolicy, error) {
+			return &proxysvc.ServicePolicy{Site: site, Controls: []proxysvc.PolicyControl{
+				{ID: "rate-limit", Title: "Request limit", Configured: true, Setting: "10r/s, burst 20", Support: "built-in"},
+				{ID: "proxy-cache", Title: "Response cache", Configured: false, Support: "built-in"},
+				{ID: "http3", Title: "HTTP/3", Configured: true, Setting: "listen 443 quic", Support: "missing"},
+			}}, nil
+		},
+	}
+	r, err := Investigate(context.Background(), req, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := findEvidence(t, r, "proxy")
+	var fact string
+	for _, f := range proxy.Facts {
+		if f.Label == "Service policy of app" {
+			fact = f.Value
+		}
+	}
+	if fact != "request limit 10r/s, burst 20 · http/3 listen 443 quic (this nginx lacks its module)" {
+		t.Fatalf("policy fact = %q in %+v", fact, proxy.Facts)
+	}
+	if !strings.Contains(strings.Join(proxy.Limitations, " "), "a direct connection to the port meets none of it") {
+		t.Fatalf("limitations = %v", proxy.Limitations)
+	}
+}

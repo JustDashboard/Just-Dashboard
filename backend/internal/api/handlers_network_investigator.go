@@ -204,6 +204,7 @@ func (s *Server) networkPathProviders(ctx context.Context, req netpath.Request) 
 		p.StreamSession = func(ctx context.Context, name, client string, since time.Time) (*proxysvc.StreamLoggedSession, error) {
 			return s.modules.proxy.AwaitStreamSession(ctx, name, client, since, 1500*time.Millisecond)
 		}
+		p.Policy = s.modules.proxy.SitePolicy
 	}
 	p.Probe = func(ctx context.Context, request netpath.Request) (*netsec.ProbeResult, error) {
 		if container != nil {

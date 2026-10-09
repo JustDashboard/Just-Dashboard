@@ -26,6 +26,7 @@ import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
 import { SiteBalancing } from "@/components/proxy/site-balancing"
+import { SiteControls } from "@/components/proxy/site-controls-panel"
 import { poolsOfSite } from "@/components/proxy/upstream-pools"
 
 /** The site's file read back: the form's fields, and where it logs. */
@@ -190,6 +191,7 @@ function SiteBody({ name }: { name: string }) {
           evidence={upstreams.data.evidence}
         />
       )}
+      {nginx && <SiteControls name={name} admin={admin} />}
 
       {nginx && !spec && read.error ? (
         // Where an nginx site logs is its file's to say. Unread, the page
