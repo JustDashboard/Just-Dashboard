@@ -629,3 +629,12 @@ func TestDeletingAListTakesItsOwnExceptionsWithIt(t *testing.T) {
 		t.Fatalf("exceptions = %+v", got)
 	}
 }
+
+func TestReadersDoNotSeeTheSignInRecordBehindKeptAddresses(t *testing.T) {
+	seen := time.Now()
+	v := &ProtectionView{Trusted: []TrustedEntry{{Address: "198.51.100.23/32", Origin: "kept", LastSeen: &seen, Stale: true, Reason: "office"}}}
+	v.HideOperatorActivity()
+	if v.Trusted[0].LastSeen != nil || v.Trusted[0].Stale || v.Trusted[0].Reason != "office" {
+		t.Fatalf("after hiding: %+v", v.Trusted[0])
+	}
+}

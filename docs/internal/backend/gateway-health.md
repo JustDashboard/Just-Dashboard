@@ -22,8 +22,80 @@ new source-NAT flow is marked later at forward and a new port-forward flow is ma
 NAT. Complex policies require flow-specific trace or controlled probe evidence. No trace is inferred
 from the absence of a recognized blocker, and an external firewall is never edited automatically.
 
+A foreign chain of type `nat` is assessed by what it can do: translation statements (`dnat`, `snat`,
+`masquerade`, `redirect`, and the iptables `DNAT`/`SNAT`/`MASQUERADE`/`REDIRECT`/`NETMAP` targets)
+and returns cannot drop, so such a chain, followed through its jumps, is `checked` unless it holds an
+explicit drop or reject. Each layer also reports its own rule count, its chain type, and `uncertain`:
+the positions and forms (`rule 3: iptables match addrtype`) the generic check could not read.
+
 Limits and blocklist drops keep working through independent filters. Removing or disabling managed
 translations remains possible when the host has switched to an unsupported policy owner.
+
+## Per-flow evaluation
+
+`gateway_flows.go` models each enabled entry's flow exactly as the entry defines it and walks it
+through every checked base chain at the hooks it crosses (prerouting, then input for a local target
+or forward and postrouting otherwise), following jumps and gotos with continuations. A forward is
+modeled before and after this table's destination translation at `dstnat - 10`: chains earlier at
+prerouting (raw at -300, mangle at -150) see the visitor's packet addressed to one of this host's
+non-loopback addresses and the public port; later chains see the target and target port with
+`ct status dnat`. The admission mark is visible to a chain only after it is set — at the forward's
+translation, or in this table's forward chain at -10 for a NAT entry's outbound flow. A NAT entry's
+unknown destination is known not to be loopback or another local device's network. A mapping
+(one-to-one or nptv6) adds its inbound half.
+
+Supported matches are IPv4/IPv6 source and destination against literals, prefixes, ranges and
+anonymous sets; TCP/UDP/`th` destination ports against values, ranges and sets; `meta l4proto`,
+`nfproto`, `iifname`/`oifname` (with trailing wildcards); `ct state`, `ct status dnat`; `fib daddr type
+local`; and the masked admission mark. A rule is decided only when every match is; an unsupported
+match (a named set, an iptables `xt` match, `limit`, `meter`, `socket`, …) on a rule whose verdict
+could change the outcome leaves the layer `unknown`, naming the expression. When the only undecided
+matches concern the visitor's source address and the branches differ between drop and pass, the
+layer is `restricted`: some sources are dropped, the rest pass. Each layer's verdict is `clear`,
+`restricted`, `blocked` or `unknown`, with the deciding rule's position and jump path. An evaluation
+bound of 4096 rule visits per layer turns an oversized ruleset into `unknown`.
+
+`requireWritable` uses the model when the generic check refuses for a reason other than firewalld,
+a missing nft or an unreadable ruleset: a translation change goes ahead only when every enabled flow
+of the spec about to be applied (forwards, NAT entries and their mapped inbound halves) is `clear` or
+`restricted` at every checked layer. A `blocked` or `unknown` layer refuses with the table, chain,
+rule position, reason and the accept to add. WireGuard exits, drift admission repair and direct
+admission repair pass their spec too. On an ordinary Docker host the raw-table drops naming container
+addresses, the nat chains and mark-only mangle rules no longer make the gateway read-only; a real
+drop on the public port still does. `GET /network/gateway` returns every entry's flows as `flows`.
+
+This is a model of supported rule forms, not a packet trace. Provider policy, routing decisions,
+rate-limited rules and unsupported expressions stay unknown, and `capability.reachability` stays
+`unknown`.
+
+## Readiness, totals and measured reachability
+
+Each forward and NAT entry carries `readiness`: `policy` (`installed` when every rule the entry renders
+is in the loaded table by comment count, `partial`, `missing`, `drift` for extra copies, `not_loaded`,
+`disabled`), the family's `forwarding` switch, `admission` summed over the family's needed chains,
+`ready` for all three, and `reachability`. Reachability is `unverified` unless an enrolled external
+source's retained TCP measurement of one of this host's addresses on a port the forward publishes
+completed after the forward's `changedAt` (`verified` when it connected, `failed` when it did not).
+The API layer attaches that evidence (`external`) for administrators only, from the external checks
+module; a local service answering on the same port would look the same, and UDP is never measured.
+
+`POST /network/gateway/verify` checks a forward's target from this server: a bounded TCP connect to
+the target and port, reported `answering`, `refused`, `timeout`, `unreachable` or `error`, and
+`not_measurable` for a UDP-only forward. The result is retained in memory for the page and marked
+stale when the target changes. It does not pass through the translation or the forward path.
+
+Auto source translation is re-checked on every read (`decision`): the stored choice, what the host's
+addresses say now, and the sentence why. `drift` means the topology changed after the decision; any
+gateway save re-decides every auto forward.
+
+Counters survive table replacement (`gateway_telemetry.go`, `network_gateway_counters`). The loaded
+table's kernel handle names a generation; each reading folds the live counters per rule comment into
+a persistent row, carrying the last reading into the total when the handle changes or a counter falls.
+The dashboard's own reloads read the old table immediately before loading the new one, and a recorder
+reads every minute. Entries return `total` (packets, bytes, the first time the rule was seen and the
+replacements carried across) beside the live since-load figures; views return `counters` with the
+generation, last reading and the gap: traffic between the last reading and a replacement made outside
+the dashboard is not recovered.
 
 ## Admission drift and repair
 
@@ -102,6 +174,21 @@ candidate from an interrupted change. Cache snapshots accept only numeric `lists
 and refuse symlinks. Oversized recovery journals are rejected before an apply. Fetch-error metadata
 shares the host recovery lock and does not overwrite an unresolved recovery journal.
 
+## Protection evidence
+
+The recorder also keeps one row per minute of each rule's packet and byte increase and the
+connection table's count, maximum and the kernel's drop, early-drop, failed-insert and error
+increments (`network_protection_samples`, seven days). The table itself is read over ctnetlink
+(`conntrack_netlink.go`): a bounded dump (200 000 entries), per-CPU statistics and, for session
+revocation only, deletion of one entry by its exact original tuple, zone and id. No `conntrack` tool
+or `/proc/net/nf_conntrack` is needed.
+
+`GET /network/protection/pressure` (administrators: it names sources) returns the breakdown by state,
+protocol, top sources and destination ports, the statistics, the last day's series, per-limit open
+counts and busiest sources against their ceilings with recorded refusals, and indications: a nearly
+full table, recent table-full drops, a large SYN_RECV share, closing-connection churn, unreplied flows,
+one dominant source or port. Each cause carries its numbers; none is a diagnosis.
+
 ## Verification
 
 `gateway_correctness_test.go` covers supported/unknown foreign policies, independent family/chain
@@ -122,6 +209,18 @@ restoration from a fresh process. `gateway_recovery_live_test.go` repeats that i
 after cache replacement and after the actual candidate nft table loads, then requires the recovered
 cache/render/kernel generations to agree. The unit fixtures cover writer failures after rename and check
 that failed kernel restoration produces a degraded phase.
+
+`gateway_flows_test.go` runs the model against a sanitized Docker/ufw ruleset: container raw drops,
+translating nat chains and mark-only mangle rules clear a forward to a container; explicit port drops
+block with their rule position; named and literal source drops restrict; a mark accept admits only
+after the mark is set; jumps are followed; `limit` and `xt` matches stay unknown; a local target
+crosses input, not forward; a mapping's inbound half is modeled. `TestLiveFlowModelReadsRealIptablesShapes`
+builds the same iptables-nft shapes in a namespace and checks the gate against nft's own JSON.
+`gateway_telemetry_test.go` and the live `TestLiveExceptionsExpireInTheKernelAndTotalsSurviveReloads`
+cover generations, in-place resets, vanished rules, persistence across a restarted recorder and real
+handle changes; `conntrack_netlink_test.go` decodes kernel-shaped messages and
+`TestLiveConntrackNetlinkInANamespace` dumps, reads statistics and revokes a real session as root
+inside its own namespace.
 
 These checks establish the supported local policy and resource behavior. They do not measure
 provider filtering, application reachability, or traffic outside the controlled namespace.

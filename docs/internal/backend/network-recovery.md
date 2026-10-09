@@ -68,7 +68,9 @@ dependencies over a running host.
 ## Reconnect and confirm
 
 An interactive administrator can request `X-JD-Network-Apply: pending` on covered link, routing,
-forwarding, shaping, forward/NAT and protection mutations. The browser enables this after reading
+forwarding, shaping, forward/NAT and protection mutations, including exceptions and trusted-address
+notes. Previews, the forward target check, the pressure read and session revocation are not journaled
+and do not accept it; revocation deletes connection-tracking entries, which no recovery can restore. The browser enables this after reading
 independent-recovery availability; its preference appears in Network, while pending/recovery notices
 remain visible throughout the dashboard. The response body stays compatible and the
 `X-JD-Network-Change` / `X-JD-Network-Expires` headers identify the journal. Ordinary covered

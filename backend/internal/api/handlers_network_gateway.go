@@ -381,6 +381,9 @@ func (s *Server) handleNetworkProtection(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		return mapNetworkError(err)
 	}
+	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		v.HideOperatorActivity()
+	}
 	httpx.JSON(w, http.StatusOK, v)
 	return nil
 }

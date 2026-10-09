@@ -677,6 +677,15 @@ func (s *Service) Protection(ctx context.Context, client string) (*ProtectionVie
 	return v, nil
 }
 
+// HideOperatorActivity removes what the sign-in record says about each kept
+// address, for a reader who may not read that record: the audit log and
+// sessions are administrators' reading.
+func (v *ProtectionView) HideOperatorActivity() {
+	for i := range v.Trusted {
+		v.Trusted[i].LastSeen, v.Trusted[i].Stale = nil, false
+	}
+}
+
 func (s *Service) trustedView(sp *Spec, client netip.Addr, activity map[netip.Addr]time.Time) []TrustedEntry {
 	out := []TrustedEntry{}
 	for _, p := range loopbackRanges {
