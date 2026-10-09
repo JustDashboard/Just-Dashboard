@@ -3611,6 +3611,40 @@ containers/volumes/networks.
   rather than guessing. `GET /proxy/resolve?url=` (`handlers_proxy_resolve.go`, mounted in
   `mountVHostRoutes`, `system.admin`, read-only, nothing is sent to the URL) → `RouteResolution`; 400 for
   an unusable URL, 409 `config_unreadable` when `nginx -T` fails.
+- **Who may reach a URL from one address** (`effective_access.go`, `GET /proxy/resolve/access?url=&source=`,
+  `system.admin` beside `/resolve`, read-only, nothing sent). `ExplainAccess` resolves the route, finds the
+  server block and location chain again by file and line, and judges each layer for `source` (one IP
+  address, as nginx sees the visitor; a range or a zone is a 400) in nginx's order: **Outside this host**
+  (provider firewall, security group, CDN, NAT) is always `unknown`; then the host firewall, added by the
+  handler with `netsec.JudgeFirewallFrom` (`netsec/reach_source.go`: JudgeFirewall's rule order for one
+  source — the first inbound rule whose source holds the address and whose target covers the route's
+  port decides, else the inbound default; a rule whose source is an interface or a set cannot be judged
+  for an address and is counted as passed over, and an iptables refusal is never trusted, as before),
+  judged for the source as the connecting address; then the server block's rewrite-phase checks the
+  site form writes — maintenance (`$jd_<id>_maint` with its `geo $jd_<id>_maint_ip` bypass list and the
+  always-exempt ACME and page paths: 503 unless bypassed), Cloudflare only (`$jd_<id>_edge` over the
+  Cloudflare geo file: 444 unless the address is one of Cloudflare's), the crawler block (by User-Agent,
+  so an ordinary browser is let through); CORS preflight and hotlink checks answer particular requests
+  and are not access; any other server-level `if` is a layer of its own that is `unknown`, never a pass.
+  Then **Allowed addresses**: the allow and deny lines of the innermost level that sets any (a path's
+  replace the site's, an included access list's are read where nginx includes them), first match,
+  naming the deciding line and, for a line in `jd-access/`, the shared list as owner
+  (`/proxy/sites#access-lists`); a `return` answers before addresses are checked, so the layer is
+  `skipped` (an allow list does not restrict a redirect site). Then **Sign-in**: `auth_basic` and its
+  user file, `auth_request` (single sign-on), each innermost and turned off by `off`; then the request
+  limit in effect (its zone's rate, or the site's exempt list), and `ssl_verify_client` (`on` requires a
+  certificate, `optional` lets the application decide). `satisfy any` is applied as nginx applies it: an
+  address the allow lines refuse can still sign in, and one they admit is not asked. The verdict is
+  `refused` (naming the refusing layers), `unknown` (a layer, or a route `certain: false` for anything
+  but the judged server-level ifs), `credentials` or `admitted`; `no-route` where nothing answers the
+  URL. The Sites page's **Which site answers a URL** takes an optional **From address** and draws each
+  layer with its verdict, deciding lines and owner link above the route (`route-resolver.tsx`,
+  `access-explain.ts`). Tests: `TestExplainAccessFollowsNginxsOrderAndInheritance`,
+  `TestExplainAccessJudgesTheFormsOwnChecks` (rendered maintenance, Cloudflare-only, redirect and SSO
+  sites), `TestExplainAccessEdges`, `TestExplainAccessDoesNotGuessAnIf`, `TestJudgeFirewallFromOneSource`,
+  `TestRouteAccessExplainsLayersForAdmins`, and `TestLiveAccessExplanationAgreesWithNginx`, where the
+  host's nginx binary on a private prefix answers 127.0.0.1 exactly as the explanation predicted for
+  an open path, a deny ahead of an allow, and `satisfy any` with and without the address listed.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago;
   `CertbotState` answers it before reading the lineages, whatever they say. A cron file whose command

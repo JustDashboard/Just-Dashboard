@@ -107,7 +107,8 @@ export function AccessListsPanel() {
 
   return (
     <>
-      <FormSections>
+      {/* An access explanation names a shared list as its owner and links here. */}
+      <FormSections id="access-lists" className="scroll-mt-6">
         <FormSection
           aside
           title="Access lists"
