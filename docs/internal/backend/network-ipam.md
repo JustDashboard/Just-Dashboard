@@ -35,6 +35,14 @@ Native inspection bounds Docker networks to 512, named namespaces to 64, WireGua
 file to 1 MiB and total inspected configuration to 8 MiB. Bounds create explicit unknown coverage.
 Retired pool records remain immutable history, including their unique prefix.
 
+## Subnet calculator check
+
+The Tools subnet calculator stays browser-side and available to read users, including an exact local
+comparison of two prefixes (same, contains, inside, separate or different family). For an admin,
+**Check shared IPAM** posts the computed network to the existing audited `POST /ipam/preview` and
+shows its status and conflicts; **Plan in IPAM** opens this page, where reservation repeats the
+overlap check. Readers are told the check needs the admin capability and no IPAM request is made.
+
 ## Native handoffs
 
 A reservation records an exact owner, intended resource name and prefix. A supported creation form

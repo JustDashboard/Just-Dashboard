@@ -3,10 +3,9 @@
 import { useState } from "react"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
-import type { DiagnosticRequest } from "@/lib/network-diagnostics"
-import type { ProbeResult } from "@/lib/types"
+import type { DiagnosticRequest, DiagnosticResult, WakeDevice } from "@/lib/network-diagnostics"
 import type { ToolDef } from "./tool-defs"
-import { portProblem, toolReady } from "./tool-input"
+import { portProblem, toolReady, verifyProblem } from "./tool-input"
 
 /** What another page hands a tool on arrival: the address it was looking at. */
 export type ToolPrefill = { target?: string; record?: string }
@@ -31,9 +30,11 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
       : (def.recordOptions?.[0] ?? ""),
   )
   const [option, setOption] = useState(def.optionDefault ?? def.optionOptions?.[0]?.value ?? "")
+  const [verify, setVerify] = useState("")
+  const [verifyPort, setVerifyPort] = useState("")
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<ProbeResult | null>(null)
-  const [past, setPast] = useState<ProbeResult[]>([])
+  const [result, setResult] = useState<DiagnosticResult | null>(null)
+  const [past, setPast] = useState<DiagnosticResult[]>([])
   const [error, setError] = useState<Error>()
 
   // A link can choose a different target without leaving the workbench. Keep
@@ -53,14 +54,26 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   }
 
   const portError = def.needsPort && port ? portProblem(port) : undefined
-  const canRun = toolReady(def, target, port, option)
+  const verifyError = def.verify ? verifyProblem(verify, verifyPort) : undefined
+  const canRun = toolReady(def, target, port, option) && !verifyError
 
+  // An optional port left empty runs the tool without that part, so neither
+  // the port nor the protocol that qualifies it is sent.
+  const sendsPort = Boolean(def.needsPort) && (!def.portOptional || port.trim() !== "")
   const request: DiagnosticRequest = {
     tool: def.key,
     target: target.trim(),
-    ...(def.needsPort ? { port: Number(port.trim()) } : {}),
+    ...(sendsPort ? { port: Number(port.trim()) } : {}),
     ...(def.recordOptions ? { record } : {}),
-    ...(def.optionOptions || def.optionPlaceholder ? { option: option.trim() } : {}),
+    ...((def.optionOptions || def.optionPlaceholder) && (!def.portOptional || sendsPort)
+      ? { option: option.trim() }
+      : {}),
+    ...(def.verify && verify.trim()
+      ? {
+          verify: verify.trim(),
+          ...(verifyPort.trim() ? { port: Number(verifyPort.trim()) } : {}),
+        }
+      : {}),
   }
 
   const run = async () => {
@@ -68,7 +81,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     setBusy(true)
     setError(undefined)
     try {
-      const res = await post<ProbeResult>("/network/probe", request)
+      const res = await post<DiagnosticResult>("/network/probe", request)
       setPast((prev) => (result ? [result, ...prev].slice(0, 3) : prev))
       setResult(res)
     } catch (err) {
@@ -79,7 +92,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     }
   }
 
-  const restore = (res: ProbeResult) => {
+  const restore = (res: DiagnosticResult) => {
     setPast((prev) => (result ? [result, ...prev.filter((p) => p !== res)].slice(0, 3) : prev))
     setResult(res)
   }
@@ -88,6 +101,14 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     setError(undefined)
     setResult(null)
     setPast([])
+  }
+
+  /** A saved Wake-on-LAN device fills the inputs; sending is still a press. */
+  const applyDevice = (device: WakeDevice) => {
+    setTarget(device.mac)
+    setOption(device.interface)
+    setVerify(device.verify ?? "")
+    setVerifyPort(device.port ? String(device.port) : "")
   }
 
   return {
@@ -99,6 +120,12 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     setRecord,
     option,
     setOption,
+    verify,
+    setVerify,
+    verifyPort,
+    setVerifyPort,
+    verifyError,
+    applyDevice,
     busy,
     error,
     portError,

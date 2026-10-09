@@ -63,12 +63,21 @@ export function CaptureCreate({
   open,
   onOpenChange,
   onCreated,
+  seed,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: (id: string) => void
+  /** Settings handed over from a quick packet snapshot; starting is still a press. */
+  seed?: Partial<CaptureDraft>
 }) {
-  const [draft, setDraft] = useState(newCaptureDraft)
+  const [draft, setDraft] = useState(() => ({ ...newCaptureDraft(), ...seed }))
+  const seedKey = seed ? JSON.stringify(seed) : ""
+  const [previousSeed, setPreviousSeed] = useState(seedKey)
+  if (seedKey !== previousSeed) {
+    setPreviousSeed(seedKey)
+    if (seed) setDraft((current) => ({ ...current, ...seed }))
+  }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<Error>()
   const interfaces = usePoll(

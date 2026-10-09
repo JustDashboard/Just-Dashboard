@@ -17,6 +17,7 @@ import { del, downloadUrl, get, post } from "@/lib/api"
 import {
   captureFinished,
   captureReading,
+  type CaptureDraft,
   type CaptureList,
   type CaptureRun,
 } from "@/lib/network-captures"
@@ -27,9 +28,12 @@ import { NetworkReadWarning } from "./read-warning"
 export function Captures() {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const [open, setOpen] = useState(false)
   const router = useRouter()
   const params = useSearchParams()
+  const seed = captureSeed(params)
+  // A hand-off from the quick snapshot opens setup with its settings; nothing
+  // is captured until the operator starts it.
+  const [open, setOpen] = useState(() => Boolean(seed))
   const poll = usePoll(
     (signal) => get<CaptureList>("/network/captures/", undefined, signal),
     2500,
@@ -155,6 +159,7 @@ export function Captures() {
             <LoadingPanel plain />
           )}
           <CaptureCreate
+            seed={seed}
             open={open}
             onOpenChange={setOpen}
             onCreated={(id) => {
@@ -430,4 +435,24 @@ function IncidentReference({ id, capture }: { id: string; capture: CaptureRun })
       </PanelBody>
     </Panel>
   )
+}
+
+const SNAPSHOT_PROTOCOLS = ["all", "tcp", "udp", "icmp", "icmp6"] as const
+
+/** The interface and protocol a quick packet snapshot links here with. */
+function captureSeed(params: {
+  get(key: string): string | null
+}): Partial<CaptureDraft> | undefined {
+  const iface = params.get("interface")?.trim()
+  if (!iface || !/^[A-Za-z0-9._@:-]{1,15}$/.test(iface)) return undefined
+  const asked = params.get("protocol") ?? "all"
+  const protocol = (SNAPSHOT_PROTOCOLS as readonly string[]).includes(asked)
+    ? (asked as CaptureDraft["protocol"])
+    : "all"
+  return {
+    interface: iface,
+    protocol,
+    family: protocol === "icmp6" ? "inet6" : "inet",
+    name: `Snapshot follow-up · ${iface}`,
+  }
 }

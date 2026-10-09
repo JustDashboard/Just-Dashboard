@@ -1,11 +1,22 @@
 import { describe, expect, test } from "bun:test"
 import {
+  basisLabel,
   diagnosticCompatible,
   diagnosticDuration,
   diagnosticFinished,
   diagnosticNameProblem,
   diagnosticReading,
   diagnosticRetentionProblem,
+  formatMetric,
+  hasEvidence,
+  historyKeys,
+  historySeries,
+  observedSSHKeys,
+  resultReading,
+  sshFingerprintProblem,
+  sshTrustTarget,
+  stageTone,
+  wakeDeviceProblem,
 } from "./network-diagnostics"
 
 const run = {
@@ -137,4 +148,100 @@ test("report collection duration does not imply connection latency or invent abs
     expect(
       diagnosticDuration({ ...report, investigation: { ...report.investigation, endedAt } }),
     ).toBe("Not recorded")
+})
+
+describe("structured diagnostic evidence", () => {
+  test("an unanswered probe reads as inconclusive, never as down", () => {
+    expect(resultReading({ ok: false, verdict: "unknown" })).toEqual({
+      label: "inconclusive",
+      tone: "unknown",
+    })
+    expect(resultReading({ ok: true, verdict: "findings" }).tone).toBe("warning")
+    expect(resultReading({ ok: false, verdict: "failed" }).tone).toBe("danger")
+    expect(resultReading({ ok: true, verdict: "ok" }, "packet sent").label).toBe("packet sent")
+    expect(resultReading({ ok: true }).label).toBe("answered")
+    expect(resultReading({ ok: false }).label).toBe("no answer")
+    expect(stageTone("skipped")).toBe("stopped")
+    expect(stageTone("failed")).toBe("danger")
+    expect(basisLabel("self_reported")).toBe("self-reported")
+  })
+
+  test("metrics format exactly and history keeps gaps instead of inventing values", () => {
+    expect(formatMetric({ value: 25, unit: "%" })).toBe("25%")
+    expect(formatMetric({ value: 2.33333, unit: "ms" })).toBe("2.333 ms")
+    expect(formatMetric({ value: 4 })).toBe("4")
+    const history = {
+      request: { tool: "ping", target: "192.0.2.9" },
+      limitations: [],
+      points: [
+        {
+          id: "a",
+          name: "p",
+          createdAt: "2026-10-09T10:00:00Z",
+          status: "completed",
+          metrics: [{ key: "loss", label: "Packet loss", value: 0, unit: "%" }],
+        },
+        { id: "b", name: "p", createdAt: "2026-10-09T11:00:00Z", status: "failed", metrics: [] },
+        {
+          id: "c",
+          name: "p",
+          createdAt: "2026-10-09T12:00:00Z",
+          status: "completed",
+          metrics: [
+            { key: "loss", label: "Packet loss", value: 25, unit: "%" },
+            { key: "jitter", label: "Jitter", value: 1.5, unit: "ms" },
+          ],
+        },
+      ],
+    }
+    expect(historySeries(history, "loss").map((point) => point.value)).toEqual([0, null, 25])
+    expect(historyKeys(history).map((key) => key.key)).toEqual(["loss", "jitter"])
+    expect(hasEvidence({ ok: true, records: ["x"] })).toBe(false)
+    expect(hasEvidence({ ok: true, stages: [{ id: "a", label: "A", status: "passed" }] })).toBe(
+      true,
+    )
+  })
+
+  test("SSH trust reads only well-formed scan records and canonical targets", () => {
+    const fp = "SHA256:" + "A".repeat(43)
+    expect(
+      observedSSHKeys({
+        records: [`ssh-ed25519 ${fp}`, "ssh-rsa not-a-fingerprint", `rot13 ${fp}`],
+      }),
+    ).toEqual([{ type: "ssh-ed25519", fingerprint: fp }])
+    expect(sshFingerprintProblem(fp)).toBeUndefined()
+    expect(sshFingerprintProblem("MD5:aa:bb")).toBeDefined()
+    expect(sshTrustTarget("Host.Example.test.", 0)).toBe("host.example.test:22")
+    expect(sshTrustTarget("2001:db8::1", 2222)).toBe("[2001:db8::1]:2222")
+  })
+
+  test("saved Wake-on-LAN devices refuse unwakeable targets before saving", () => {
+    expect(
+      wakeDeviceProblem({ name: "NAS", mac: "02:11:22:33:44:55", interface: "eno1" }),
+    ).toBeUndefined()
+    expect(
+      wakeDeviceProblem({ name: " ", mac: "02:11:22:33:44:55", interface: "eno1" }),
+    ).toBeDefined()
+    expect(
+      wakeDeviceProblem({ name: "NAS", mac: "ff:ff:ff:ff:ff:ff", interface: "eno1" }),
+    ).toContain("broadcast")
+    expect(
+      wakeDeviceProblem({ name: "NAS", mac: "02:11:22:33:44:55", interface: "a/b" }),
+    ).toBeDefined()
+  })
+
+  test("compatibility includes the wake verification target", () => {
+    const wake = {
+      ...run,
+      request: { tool: "wol", target: "02:11:22:33:44:55", option: "eno1", verify: "192.168.1.5" },
+    }
+    expect(diagnosticCompatible(wake, { ...wake, id: "two" })).toBe(true)
+    expect(
+      diagnosticCompatible(wake, {
+        ...wake,
+        id: "two",
+        request: { ...wake.request, verify: "192.168.1.6" },
+      }),
+    ).toBe(false)
+  })
 })

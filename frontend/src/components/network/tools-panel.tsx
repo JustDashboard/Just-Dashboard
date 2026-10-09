@@ -168,6 +168,7 @@ export function ToolsPanel() {
                 <ToolPanel
                   def={tool}
                   prefill={arrival?.tool === tool.key ? arrival.prefill : undefined}
+                  active={active === tool.key}
                 />
               </div>
             ))}

@@ -314,13 +314,25 @@ retained investigations separately label native-reported encryption, strict TLS 
 
 ## Diagnostics and host support
 
-`GET /capabilities` reports host tool availability/package hints, systemd manager reachability and the
-literal IPv6 sysctl with its per-interface caveat. An installed binary does not prove kernel/NIC/provider
-support. `POST /probe` has [all 26 tools](../../audits/2026-10-08-network-audit/README.md#tools--networktools-all-26-server-diagnostics).
+`GET /capabilities` reports host tool availability/package hints, systemd manager reachability, the
+literal IPv6 sysctl with its per-interface caveat and read-only capability probes (`probes`): an
+AF_PACKET open-and-close for CAP_NET_RAW, `nft list tables`, the iptables backend, per-interface
+IPv6 state, forwarding sysctls, WireGuard/CAKE module presence (sysfs, then `modinfo`), conntrack
+counters, a mounted bpffs and an active systemd-resolved. A probe whose binary is missing is
+`unknown`, not `unsupported`; no probe writes host state. An installed binary still does not prove
+NIC or provider support. `POST /probe` has [all 26 tools](../../audits/2026-10-08-network-audit/README.md#tools--networktools-all-26-server-diagnostics).
 New tools are route lookup, path MTU, host support, bounded packet snapshot and Wake-on-LAN.
 
-Route lookup emits no traffic; egress independently inspects IPv4/IPv6 kernel routes, including
-IPv6-only hosts, without claiming the selected NIC address equals a provider-NAT public address.
+Every tool returns structured evidence beside its verbatim output — a verdict that does not
+over-claim, labelled facts with their basis, ordered stages, tables, owner-specific findings, links
+and comparable metrics. [Retained diagnostics](network-diagnostics.md#structured-evidence) documents
+the shape, each tool's readings and the joins the dispatcher adds (route and port-check path layers,
+saved SSH trust, the proxy site behind a site audit).
+
+Route lookup emits no traffic; with a port it also joins the host-source connection-path layers
+(policy rules, modeled firewall, NAT candidates, egress owner) without measuring. Egress independently
+inspects IPv4/IPv6 kernel routes, including IPv6-only hosts, classifies each selected source's scope
+and never claims the selected NIC address equals a provider-NAT public address.
 Listeners includes TCP and UDP. Tracepath availability and ICMP filtering constrain path-MTU results.
 TCP refusal can indicate a closed port or firewall rejection; a timeout does not identify its cause.
 
@@ -329,7 +341,10 @@ fifteen seconds, no promiscuous mode, output file or explicit hex/ASCII dump. Su
 include sensitive protocol fields. Process output is drained while retained text is capped at 256 KiB. Deadlines terminate the entire
 host-wrapper process group with bounded cleanup, including descendants holding output pipes.
 Wake-on-LAN sends one Ethernet magic frame to a validated unicast MAC on a selected broadcast LAN
-interface. Success confirms the send, not that a remote firmware/NIC woke. Neither tool crosses an
+interface. Success confirms the send, not that a remote firmware/NIC woke; an optional literal
+verification address (TCP port, or ICMP when none) is checked once before sending and then every
+three seconds for up to sixty, and silence is reported as unknown rather than asleep. A quick
+snapshot links to a retained capture job prefilled with its interface and protocol. Neither tool crosses an
 upstream router/provider restriction. All probes remain admin-only and audited.
 
 ## Routes

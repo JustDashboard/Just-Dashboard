@@ -18,11 +18,15 @@ import {
   diagnosticFinished,
   diagnosticNameProblem,
   diagnosticReading,
+  hasEvidence,
+  resultReading,
   type DiagnosticRun,
 } from "@/lib/network-diagnostics"
 import { notify } from "@/lib/toast"
 import { NetworkReadWarning } from "./read-warning"
 import { RunComparison } from "./run-comparison"
+import { RunHistory } from "./run-history"
+import { ProbeEvidence } from "./tools/probe-evidence"
 
 export function RunInspector({
   id,
@@ -277,6 +281,15 @@ function RunDetails({
             ))}
           </ol>
           {run.investigation && <PathReport result={run.investigation} />}
+          {run.result && hasEvidence(run.result) && (
+            <div aria-label="Structured evidence" className="space-y-2">
+              <Status
+                label={resultReading(run.result).label}
+                tone={resultReading(run.result).tone}
+              />
+              <ProbeEvidence result={run.result} />
+            </div>
+          )}
           {Boolean(run.result?.records?.length) && (
             <div aria-label="Structured result">
               <p className="mb-2 text-body font-medium">Structured records</p>
@@ -347,6 +360,7 @@ function RunDetails({
         </PanelBody>
       </Panel>
       {finished && run.hasResult && <RunComparison run={run} runs={runs} />}
+      {finished && run.hasResult && run.kind !== "investigation" && <RunHistory run={run} />}
       <JobConsole
         job={console_.job}
         lines={console_.lines}

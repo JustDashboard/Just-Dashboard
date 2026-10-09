@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import { Field } from "@/components/form"
+import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ErrorState, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -15,6 +16,7 @@ import {
 import { get } from "@/lib/api"
 import {
   diagnosticCompatible,
+  formatMetric,
   type DiagnosticComparison,
   type DiagnosticDifference,
   type DiagnosticRun,
@@ -98,6 +100,26 @@ export function RunComparison({ run, runs }: { run: DiagnosticRun; runs: Diagnos
               <Notice tone="warning" title="Partial comparison">
                 At least one retained artifact or difference was truncated.
               </Notice>
+            )}
+            {Boolean(result.metrics?.length) && (
+              <div aria-label="Measurement changes" className="space-y-1">
+                <p className="text-body font-medium">Measurements</p>
+                <DetailList>
+                  {result.metrics!.map((metric) => (
+                    <Detail key={metric.key} label={metric.label}>
+                      <span className="numeric">
+                        {metric.before === undefined
+                          ? "—"
+                          : formatMetric({ value: metric.before, unit: metric.unit })}{" "}
+                        →{" "}
+                        {metric.after === undefined
+                          ? "—"
+                          : formatMetric({ value: metric.after, unit: metric.unit })}
+                      </span>
+                    </Detail>
+                  ))}
+                </DetailList>
+              </div>
             )}
             <Difference diff={result.records} label="Structured records" />
             <details className="text-body">
