@@ -156,18 +156,41 @@ func (s *Server) handlePortsExternal(w http.ResponseWriter, r *http.Request) err
 }
 
 // externalMeasurements is the published-path investigator's view of the
-// same evidence: the TCP measurements of one host port.
-func (s *Server) externalMeasurements(ctx context.Context, port int) ([]netpath.ExternalMeasurement, error) {
+// same evidence: the measurements that can be about one binding.
+func (s *Server) externalMeasurements(ctx context.Context, protocol, family, hostIP string, port int) ([]netpath.ExternalMeasurement, error) {
 	reading := s.readPortsExternal(ctx)
-	out := []netpath.ExternalMeasurement{}
-	for _, e := range reading.Evidence {
-		if e.Port != port || e.Basis != "measured" {
-			continue
-		}
-		out = append(out, netpath.ExternalMeasurement{Source: e.Source, Placement: e.Placement, Address: e.Address, State: e.State, Basis: e.Basis, At: e.At, Local: e.Local})
-	}
+	out := measurementsFor(reading.Evidence, protocol, family, hostIP, port)
 	if reading.Error != "" && len(out) == 0 {
 		return out, errors.New(reading.Error)
 	}
 	return out, nil
+}
+
+// measurementsFor keeps the measurements that can be about one binding:
+// external checks measure TCP, in one family, and a binding on one address
+// is reached only at that address. A wildcard binding answers on every
+// address, a translated one included; a loopback binding on none.
+func measurementsFor(evidence []portExternalEvidence, protocol, family, hostIP string, port int) []netpath.ExternalMeasurement {
+	out := []netpath.ExternalMeasurement{}
+	if protocol != "tcp" {
+		return out
+	}
+	bound, err := netip.ParseAddr(hostIP)
+	wildcard := hostIP == "" || err == nil && bound.IsUnspecified()
+	if err == nil && bound.IsLoopback() {
+		return out
+	}
+	for _, e := range evidence {
+		if e.Port != port || e.Family != family || e.Basis != "measured" {
+			continue
+		}
+		if !wildcard {
+			measured, err := netip.ParseAddr(e.Address)
+			if err != nil || measured.Unmap() != bound.Unmap() {
+				continue
+			}
+		}
+		out = append(out, netpath.ExternalMeasurement{Source: e.Source, Placement: e.Placement, Address: e.Address, State: e.State, Basis: e.Basis, At: e.At, Local: e.Local})
+	}
+	return out
 }

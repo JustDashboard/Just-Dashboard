@@ -291,6 +291,18 @@ func InvestigatePublished(ctx context.Context, request PublishedRequest, p Publi
 			firewall.Summary = "Docker's chains come before the firewall adapter's in FORWARD, and Docker's own rule admits this container's port, so the adapter's route rules and routed default are not reached for it."
 			firewall.Facts = append(firewall.Facts, Fact{"Docker's accept", accept})
 			forwarded = "admitted by Docker's rule ahead of the firewall adapter"
+			// Rules FORWARD meets before Docker's accept can still drop the
+			// connection; they are listed, not evaluated, so the verdict
+			// says it depends on them.
+			earlier := append([]string{}, ahead...)
+			if len(operatorRules(chains.User)) > 0 {
+				earlier = append(earlier, "DOCKER-USER")
+			}
+			if len(earlier) > 0 {
+				firewall.State = "docker_admits_unless_earlier"
+				firewall.Summary += " " + strings.Join(earlier, " and ") + " come first and could still drop it; they are not evaluated."
+				forwarded += ", unless " + strings.Join(earlier, " or ") + " drops it first (not evaluated)"
+			}
 		case dockerFirst:
 			firewall.Limitations = append(firewall.Limitations, "Docker's chains come first in FORWARD, but no Docker accept for this container's port was listed; the connection falls through to the chains after them.")
 		}

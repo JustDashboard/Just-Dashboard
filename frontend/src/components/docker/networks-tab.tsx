@@ -684,6 +684,8 @@ function PruneDialog({
     { enabled: open },
   )
   const [busy, setBusy] = useState(false)
+  const [rereadSince, setRereadSince] = useState(0)
+  const stale = (reading.lastSuccess ?? 0) <= rereadSince
   const preview = isPrunePreview(reading.data) ? reading.data : undefined
   const error =
     reading.error ??
@@ -708,6 +710,7 @@ function PruneDialog({
       onOpenChange(false)
     } catch (err) {
       notify.error("Could not prune networks", err)
+      setRereadSince(Date.now())
       reading.refresh()
     } finally {
       setBusy(false)
@@ -729,7 +732,7 @@ function PruneDialog({
           <Button
             variant="destructive"
             onClick={prune}
-            disabled={busy || Boolean(error) || !plan || plan.removed.length === 0}
+            disabled={busy || stale || Boolean(error) || !plan || plan.removed.length === 0}
             pending={busy}
           >
             {plan && plan.removed.length > 0 ? `Remove ${plan.removed.length}` : "Remove"}
@@ -819,6 +822,7 @@ function AttachDialog({
   const [alias, setAlias] = useState("")
   const [busy, setBusy] = useState(false)
   const [settledAlias, setSettledAlias] = useState("")
+  const [rereadSince, setRereadSince] = useState(0)
 
   // The preview follows the draft, a moment after typing stops.
   useEffect(() => {
@@ -841,7 +845,8 @@ function AttachDialog({
     !preview.error &&
     isChangePreview(preview.data) &&
     preview.data.container === picked
-  const previewCurrent = previewReady && settledAlias === alias.trim()
+  const previewCurrent =
+    previewReady && settledAlias === alias.trim() && (preview.lastSuccess ?? 0) > rereadSince
 
   const attach = async () => {
     setBusy(true)
@@ -857,6 +862,7 @@ function AttachDialog({
       setAlias("")
     } catch (err) {
       notify.error("Could not attach it", err)
+      setRereadSince(Date.now())
       preview.refresh()
     } finally {
       setBusy(false)

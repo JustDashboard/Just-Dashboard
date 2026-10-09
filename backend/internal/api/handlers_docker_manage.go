@@ -554,10 +554,11 @@ func (s *Server) handleNetworkConnect(w http.ResponseWriter, r *http.Request) er
 		return conflictRefusal(conflicts)
 	}
 	// The change goes to the container the preview judged, by its full ID.
-	if err := s.modules.docker.ConnectNetwork(ctx, deps.Network.ID, deps.Container(req.Container).ID, req.Aliases); err != nil {
+	target := deps.Container(req.Container).ID
+	if err := s.modules.docker.ConnectNetwork(ctx, deps.Network.ID, target, req.Aliases); err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.connect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "aliases": req.Aliases, "acknowledged": conflictCodes(conflicts)})
+	httpx.SetAudit(r, "docker.network.connect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "containerId": target, "aliases": req.Aliases, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }
@@ -587,10 +588,18 @@ func (s *Server) handleNetworkDisconnect(w http.ResponseWriter, r *http.Request)
 	if dockerx.Blocking(conflicts) {
 		return conflictRefusal(conflicts)
 	}
-	if err := s.modules.docker.DisconnectNetwork(ctx, deps.Network.ID, deps.Container(req.Container).ID, req.Force); err != nil {
+	// The container the preview judged, or a stale endpoint whose container
+	// the Engine says is gone — what a forced disconnect exists for.
+	var target string
+	if c := deps.Container(req.Container); c != nil {
+		target = c.ID
+	} else if stale, ok := deps.StaleEndpoint(req.Container); ok {
+		target = stale
+	}
+	if err := s.modules.docker.DisconnectNetwork(ctx, deps.Network.ID, target, req.Force); err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.disconnect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "acknowledged": conflictCodes(conflicts)})
+	httpx.SetAudit(r, "docker.network.disconnect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "containerId": target, "force": req.Force, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }

@@ -125,8 +125,9 @@ func (s *Server) ipamHolderConflicts(ctx context.Context, name, id string) []doc
 	}
 	held, err := s.modules.ipam.HeldFor(ctx, "docker_network", name, id)
 	if err != nil {
-		return []dockerx.NetworkConflict{{Code: "ipam_unread", Level: dockerx.ConflictInfo,
-			Message: "Shared IPAM reservations could not be checked for this network."}}
+		// Unread is not "none": a prune keeps a network it cannot check.
+		return []dockerx.NetworkConflict{{Code: "ipam_unread", Level: dockerx.ConflictWarn,
+			Message: "Shared IPAM reservations could not be checked for this network, so one may still record it as owner."}}
 	}
 	out := []dockerx.NetworkConflict{}
 	for _, r := range held {

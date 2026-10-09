@@ -101,3 +101,22 @@ test("sources that were not read are listed, provider reservations included", ()
     ]).map((s) => s.key),
   ).toEqual(["provider"])
 })
+
+test("a socket bound to one address takes only measurements of that address", () => {
+  const bound = { port: 5432, protocol: "tcp", family: "ipv4", address: "198.51.100.4" }
+  expect(externalFor(external, bound)).toEqual([])
+  expect(
+    externalFor(
+      {
+        ...external,
+        evidence: [evidence({ checkId: "here", address: "198.51.100.4", local: true })],
+      },
+      bound,
+    ).map((e) => e.checkId),
+  ).toEqual(["here"])
+  expect(
+    externalFor(external, { port: 5432, protocol: "tcp", family: "ipv4", address: "0.0.0.0" }).map(
+      (e) => e.checkId,
+    ),
+  ).toEqual(["new"])
+})

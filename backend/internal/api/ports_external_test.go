@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netpath"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 )
 
@@ -58,5 +59,38 @@ func TestPortsExternalIsAnAdminsReading(t *testing.T) {
 		if rec := gwDo(router, http.MethodGet, "/ports/external", ""); rec.Code != test.want {
 			t.Fatalf("%s: %d %s", test.role, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestMeasurementsForKeepOnlyWhatCanBeAboutTheBinding(t *testing.T) {
+	at := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	evidence := []portExternalEvidence{
+		{Port: 5432, Family: "inet", Address: "203.0.113.5", Local: true, State: "connected", Basis: "measured", At: at, Source: "A"},
+		{Port: 5432, Family: "inet", Address: "198.51.100.9", State: "connected", Basis: "measured", At: at, Source: "B"},
+		{Port: 5432, Family: "inet6", Address: "2001:db8::5", State: "connected", Basis: "measured", At: at, Source: "C"},
+		{Port: 5432, Family: "inet", Address: "203.0.113.5", State: "unknown", Basis: "unknown", At: at, Source: "D"},
+		{Port: 443, Family: "inet", Address: "203.0.113.5", State: "connected", Basis: "measured", At: at, Source: "E"},
+	}
+	sources := func(values []netpath.ExternalMeasurement) string {
+		out := ""
+		for _, v := range values {
+			out += v.Source
+		}
+		return out
+	}
+	if got := sources(measurementsFor(evidence, "tcp", "inet", "0.0.0.0", 5432)); got != "AB" {
+		t.Fatalf("a wildcard binding takes every measured address of its family: %q", got)
+	}
+	if got := sources(measurementsFor(evidence, "tcp", "inet", "203.0.113.5", 5432)); got != "A" {
+		t.Fatalf("a binding on one address takes only that address: %q", got)
+	}
+	if got := sources(measurementsFor(evidence, "tcp", "inet", "127.0.0.1", 5432)); got != "" {
+		t.Fatalf("a loopback binding is reached from no outside source: %q", got)
+	}
+	if got := sources(measurementsFor(evidence, "udp", "inet", "0.0.0.0", 5432)); got != "" {
+		t.Fatalf("external checks measure TCP only: %q", got)
+	}
+	if got := sources(measurementsFor(evidence, "tcp", "inet6", "::", 5432)); got != "C" {
+		t.Fatalf("an IPv6 binding takes IPv6 measurements: %q", got)
 	}
 }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netipam"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // networkEngine is a Docker Engine fixture: the dashboard's own stack (its
@@ -248,5 +250,29 @@ func TestNetworkInventoryNamesOwnersAndUnreadMembership(t *testing.T) {
 	}
 	if rec := gwDo(router, http.MethodDelete, "/docker/networks/spare", ""); rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("a removal without its dependents read must not proceed: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Reservations that could not be read are not reservations that do not
+// exist: the reviewed prune keeps a network it cannot check.
+func TestPruneKeepsANetworkWhoseIPAMReservationsCouldNotBeRead(t *testing.T) {
+	s, _, router, _ := networkDependencyRouter(t)
+	closed, err := storetest.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := s.modules.ipam
+	s.modules.ipam = netipam.New(closed, nil)
+	closed.Close()
+	t.Cleanup(func() { s.modules.ipam = original })
+	var prune networkPrunePreview
+	rec := gwDo(router, http.MethodGet, "/docker/networks/prune", "")
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &prune) != nil {
+		t.Fatalf("prune preview: %d %s", rec.Code, rec.Body.String())
+	}
+	for _, c := range prune.Candidates {
+		if c.Removable {
+			t.Fatalf("%s is removable although its reservations were unread: %+v", c.Name, c.Conflicts)
+		}
 	}
 }

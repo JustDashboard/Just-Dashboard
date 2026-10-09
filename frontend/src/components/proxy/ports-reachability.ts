@@ -5,7 +5,26 @@ import type {
   PortsExternal,
 } from "@/lib/types"
 
-type SocketLike = { port: number; protocol: string; family: string; twin?: { family: string } }
+type SocketLike = {
+  port: number
+  protocol: string
+  family: string
+  address?: string
+  twin?: { family: string; address?: string }
+}
+
+const WILDCARDS = ["", "0.0.0.0", "::"]
+
+/**
+ * Whether a measured address can be this socket's: a wildcard socket answers
+ * on every address, a translated one included; one bound to an address only
+ * there; a loopback socket to no outside source at all.
+ */
+function reaches(socket: SocketLike, address: string | undefined) {
+  const bound = [socket.address, socket.twin?.address].filter((a): a is string => a !== undefined)
+  if (bound.length === 0 || bound.some((a) => WILDCARDS.includes(a))) return true
+  return address !== undefined && bound.includes(address)
+}
 
 /** The address families a socket answers in: both, where its twin is the other family's. */
 function families(socket: SocketLike): ("inet" | "inet6")[] {
@@ -31,7 +50,12 @@ export function externalFor(
   const seen = new Set<string>()
   const out: PortExternalEvidence[] = []
   for (const evidence of [...external.evidence].sort((a, b) => b.at.localeCompare(a.at))) {
-    if (evidence.port !== socket.port || !wanted.includes(evidence.family)) continue
+    if (
+      evidence.port !== socket.port ||
+      !wanted.includes(evidence.family) ||
+      !reaches(socket, evidence.address)
+    )
+      continue
     const key = `${evidence.vantageId}:${evidence.family}`
     if (seen.has(key)) continue
     seen.add(key)

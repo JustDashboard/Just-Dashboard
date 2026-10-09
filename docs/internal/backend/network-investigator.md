@@ -87,15 +87,18 @@ address (a mismatch says so; an unreadable chain, which is also what an Engine o
 looks like, is unknown); `DOCKER-USER`, where any operator rule is listed and left unevaluated; the
 forwarded leg — FORWARD's jumps read in order with Docker's filter `DOCKER` chain: where Docker's chains
 come before the firewall adapter's and Docker's own rule accepts the container's address and port, the
-adapter's route rules and routed default are never reached for it (`docker_admits`), and any foreign
-chain FORWARD consults first (Tailscale's `ts-forward`, say) is named as not evaluated; otherwise the
+adapter's route rules and routed default are never reached for it (`docker_admits`); when operator
+rules in DOCKER-USER or a foreign chain FORWARD consults first (Tailscale's `ts-forward`, say) come
+before that accept, the verdict says it holds unless they drop the connection, which is not evaluated
+(`docker_admits_unless_earlier`); otherwise the
 adapter's forwarded-traffic model decides, with the note that ufw/iptables inbound rules and default do
 not apply to a translated port. The native run on this host first showed the adapter alone predicting
 ufw's routed deny for the shared ingress's port 80, which Docker's earlier accept admits; that run is
 kept as evidence of why the order is read. Then the dashboard's gateway — an
 owned forward on the same port competes, and any other table's forward-hook chain that can drop is
 unknown; the configured proxy; provider policy, always unknown, with whether the host has a public
-interface address; and retained external measurements of the host port from enrolled sources, labelled
+interface address; and retained external measurements that can be about this binding — TCP, its
+family, and for a binding on one address only that address (a loopback binding takes none) — labelled
 by whether the measured address is on this host. The comparison line keeps those bases apart.
 
 The container page's reachability rows and the ports sheet of a Docker-published socket open it.

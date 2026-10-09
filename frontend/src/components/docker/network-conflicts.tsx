@@ -88,6 +88,10 @@ export function NetworkChangeDialog({
 }) {
   const reading = usePoll<unknown>(load, 0, [open, target], { enabled: open })
   const [busy, setBusy] = useState(false)
+  // After a refused confirmation the preview is read again; until that new
+  // reading lands, the old one is not what is confirmed.
+  const [rereadSince, setRereadSince] = useState(0)
+  const stale = (reading.lastSuccess ?? 0) <= rereadSince
   const preview = isChangePreview(reading.data) ? reading.data : undefined
   const malformed = reading.data !== undefined && !preview
 
@@ -99,6 +103,7 @@ export function NetworkChangeDialog({
       onOpenChange(false)
     } catch (err) {
       notify.error(`Could not ${confirmLabel.toLowerCase()}`, err)
+      setRereadSince(Date.now())
       reading.refresh()
     } finally {
       setBusy(false)
@@ -121,7 +126,12 @@ export function NetworkChangeDialog({
             variant="destructive"
             onClick={confirm}
             disabled={
-              busy || reading.loading || Boolean(reading.error) || !preview || preview.blocked
+              busy ||
+              reading.loading ||
+              stale ||
+              Boolean(reading.error) ||
+              !preview ||
+              preview.blocked
             }
             pending={busy}
           >

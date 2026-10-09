@@ -73,8 +73,27 @@ func TestInvestigatePublishedJoinsDockerNATFiltersProviderAndMeasurement(t *test
 	if !strings.Contains(strings.Join(firewall.Limitations, " "), "inbound default do not apply") {
 		t.Fatalf("ufw's inbound default must be said not to hold a published port: %+v", firewall)
 	}
-	if firewall.State != "docker_admits" || !strings.Contains(strings.Join(firewall.Limitations, " "), "ts-forward") || !strings.Contains(result.Comparison, "admitted by Docker's rule") {
-		t.Fatalf("Docker's accept ahead of ufw decides the forwarded leg, and the chain before it is named: %+v %s", firewall, result.Comparison)
+	if firewall.State != "docker_admits_unless_earlier" || !strings.Contains(strings.Join(firewall.Limitations, " "), "ts-forward") || !strings.Contains(result.Comparison, "admitted by Docker's rule ahead of the firewall adapter, unless ts-forward drops it first") {
+		t.Fatalf("Docker's accept ahead of ufw decides the forwarded leg unless the chain before it drops it: %+v %s", firewall, result.Comparison)
+	}
+	clean := publishedProviders()
+	clean.Chains = func(context.Context, string) netsec.DockerChains {
+		return netsec.DockerChains{NAT: netsec.ParseDockerNAT("-A DOCKER ! -i docker0 -p tcp -m tcp --dport 5432 -j DNAT --to-destination 10.0.0.2:5432"),
+			User:    []string{"-A DOCKER-USER -j RETURN"},
+			Forward: []string{"-A FORWARD -j DOCKER-USER", "-A FORWARD -j DOCKER-FORWARD", "-A FORWARD -j ufw-before-forward"},
+			Filter:  []string{"-A DOCKER -d 10.0.0.2/32 ! -i docker0 -o docker0 -p tcp -m tcp --dport 5432 -j ACCEPT"}}
+	}
+	if e := layer(mustInvestigate(t, request, clean), "firewall"); e.State != "docker_admits" {
+		t.Fatalf("with nothing ahead of Docker's accept it decides alone: %+v", e)
+	}
+	dropping := publishedProviders()
+	dropping.Chains = func(context.Context, string) netsec.DockerChains {
+		chains := clean.Chains(t.Context(), "inet")
+		chains.User = []string{"-A DOCKER-USER -p tcp -m tcp --dport 5432 -j DROP", "-A DOCKER-USER -j RETURN"}
+		return chains
+	}
+	if e := layer(mustInvestigate(t, request, dropping), "firewall"); e.State != "docker_admits_unless_earlier" || !strings.Contains(e.Summary, "DOCKER-USER") {
+		t.Fatalf("an operator rule in DOCKER-USER qualifies Docker's accept: %+v", e)
 	}
 	if e := layer(result, "provider"); e.Basis != Unknown || !strings.Contains(e.Facts[0].Value, "provider's translation") {
 		t.Fatalf("provider policy is always unknown: %+v", e)
@@ -155,4 +174,13 @@ func TestInvestigatePublishedKeepsUnreadLayersUnknown(t *testing.T) {
 	if _, err := InvestigatePublished(t.Context(), PublishedRequest{ContainerID: publishedID, HostPort: 0, Protocol: "sctp", Family: "inet"}, p); err == nil {
 		t.Fatal("a port outside the closed shape is refused")
 	}
+}
+
+func mustInvestigate(t *testing.T, request PublishedRequest, p PublishedProviders) *Result {
+	t.Helper()
+	result, err := InvestigatePublished(t.Context(), request, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

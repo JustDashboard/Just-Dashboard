@@ -180,7 +180,8 @@ listener.
 
 `GET /api/v1/ports/external` (system.admin) joins retained checks to their sources by host port for the
 ports sheet of an exposed socket: what each source measured (connected, refused or failed at an address
-on this host or one that is not), checks that ended unmeasured as unknown, and a "Check from" action for
+on this host or one that is not — for a socket bound to one address, only measurements of that address),
+checks that ended unmeasured as unknown, and a "Check from" action for
 every enrolled scope naming that port in the socket's family, which posts to `/network/external/checks`
 and reads again until the source answers. The inbound path of a Docker-published port shows the same
 measurements as its last layer. Neither starts a probe on its own.

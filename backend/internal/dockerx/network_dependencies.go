@@ -12,6 +12,7 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/errdefs"
 )
 
 // Conflict levels. A block is refused by the backend as well as shown; a
@@ -77,8 +78,10 @@ type NetworkDependencies struct {
 	// SelfProject is the dashboard's own Compose project, set by the caller,
 	// which is the one that knows where the dashboard keeps its data.
 	SelfProject string
-	// refs maps each inspected reference to the full ID it resolved to.
-	refs map[string]string
+	// refs maps each inspected reference to the full ID it resolved to, and
+	// missing lists the references the Engine says no container answers to.
+	refs    map[string]string
+	missing map[string]bool
 }
 
 // NetworkDependencies reads a network's dependents. extra names containers
@@ -100,7 +103,7 @@ func (c *Client) NetworkDependencies(ctx context.Context, id string, extra ...st
 	if err != nil {
 		return nil, fmt.Errorf("the networks could not be listed: %w", err)
 	}
-	d := &NetworkDependencies{Network: insp, Networks: map[string]Network{}, refs: map[string]string{}}
+	d := &NetworkDependencies{Network: insp, Networks: map[string]Network{}, refs: map[string]string{}, missing: map[string]bool{}}
 	for _, n := range networks {
 		brief := Network{ID: n.ID, Name: n.Name, Driver: n.Driver, Scope: n.Scope, Internal: n.Internal, Labels: n.Labels, Subnets: []string{}}
 		for _, cfg := range n.IPAM.Config {
@@ -132,6 +135,9 @@ func (c *Client) NetworkDependencies(ctx context.Context, id string, extra ...st
 	for _, ref := range refs {
 		detail, err := cli.ContainerInspect(ctx, ref)
 		if err != nil {
+			if errdefs.IsNotFound(err) {
+				d.missing[ref] = true
+			}
 			d.Unread = append(d.Unread, ref)
 			continue
 		}
@@ -208,6 +214,23 @@ func (d *NetworkDependencies) Owner() NetworkOwner {
 func (d *NetworkDependencies) member(id string) bool {
 	_, ok := d.Network.Containers[id]
 	return ok
+}
+
+// StaleEndpoint is an endpoint on this network whose container the Engine
+// says no longer exists: what a forced disconnect is for. A container that
+// could not be read for any other reason is not stale, only unread.
+func (d *NetworkDependencies) StaleEndpoint(ref string) (string, bool) {
+	if !d.missing[ref] {
+		return "", false
+	}
+	for id, ep := range d.Network.Containers {
+		if id == ref || strings.TrimPrefix(ep.Name, "/") == ref || len(ref) >= 12 && strings.HasPrefix(id, ref) {
+			if d.Container(id) == nil {
+				return id, true
+			}
+		}
+	}
+	return "", false
 }
 
 // attached says whether a container names this network: as a running
@@ -348,6 +371,12 @@ func PreviewDisconnect(d *NetworkDependencies, member string) []NetworkConflict 
 	name := d.Network.Name
 	out := []NetworkConflict{}
 	c := d.Container(member)
+	if c == nil {
+		if _, stale := d.StaleEndpoint(member); stale {
+			return append(out, NetworkConflict{Code: "stale_endpoint", Level: ConflictWarn,
+				Message: fmt.Sprintf("No container answers to %s any more; its endpoint on %s is stale. Removing it needs a forced disconnect.", member, name)})
+		}
+	}
 	if c == nil || !d.attached(c) {
 		return append(out, NetworkConflict{Code: "not_attached", Level: ConflictBlock, Message: fmt.Sprintf("That container is not on %s.", name)})
 	}
@@ -437,6 +466,9 @@ func PreviewRemove(d *NetworkDependencies, environment func(int64) (string, bool
 	if IsSystemNetwork(name) {
 		return append(out, NetworkConflict{Code: "system_network", Level: ConflictBlock, Message: fmt.Sprintf("%s is one of Docker's own networks; the Engine never removes it.", name)})
 	}
+	if d.Network.Ingress {
+		return append(out, NetworkConflict{Code: "swarm_ingress", Level: ConflictBlock, Message: fmt.Sprintf("%s carries the swarm's routing mesh; manage it with the swarm, not here.", name)})
+	}
 	running := []string{}
 	stopped := []string{}
 	for i := range d.Containers {
@@ -516,7 +548,10 @@ func PruneCandidates(networks []Network, containers []Container, selfProject str
 	}
 	out := []PruneCandidate{}
 	for _, n := range networks {
-		if IsSystemNetwork(n.Name) || running[n.Name] {
+		// Swarm networks belong to the swarm's managers, which prune their
+		// own and never the routing mesh; a container listing on one node
+		// cannot say whether they are used.
+		if IsSystemNetwork(n.Name) || running[n.Name] || n.Scope == "swarm" {
 			continue
 		}
 		owner := OwnerOfNetwork(n.Name, n.Labels, selfProject)
@@ -559,11 +594,22 @@ func overlappingSubnets(a, b []string) string {
 	return ""
 }
 
-// freeAddresses is how many IPv4 addresses the network's first IPv4 pool
-// has left for members: the allocation range, or the subnet less its
-// network, broadcast and gateway addresses, less the running members.
-// Unknown for a pool too large for the count to matter.
+// freeAddresses is how many IPv4 addresses the network still has for a
+// member, across every IPv4 pool: each pool's allocation range, or its
+// subnet less the network, broadcast and gateway addresses, less the members
+// whose address falls in it. Docker allocates from the next pool when one is
+// full, so the network is exhausted only when every pool is. Unknown when a
+// pool is too large for the count to matter.
 func freeAddresses(d *NetworkDependencies) (int64, bool) {
+	members := []netip.Addr{}
+	for _, ep := range d.Network.Containers {
+		if p, err := netip.ParsePrefix(ep.IPv4Address); err == nil {
+			members = append(members, p.Addr())
+		} else if a, err := netip.ParseAddr(ep.IPv4Address); err == nil {
+			members = append(members, a)
+		}
+	}
+	total, counted := int64(0), false
 	for _, cfg := range d.Network.IPAM.Config {
 		prefix, err := netip.ParsePrefix(cfg.Subnet)
 		if err != nil || !prefix.Addr().Is4() {
@@ -586,9 +632,16 @@ func freeAddresses(d *NetworkDependencies) (int64, bool) {
 		} else if cfg.Gateway == "" {
 			reserved++
 		}
-		return size - reserved - int64(len(d.Network.Containers)), true
+		used := int64(0)
+		for _, a := range members {
+			if pool.Contains(a) {
+				used++
+			}
+		}
+		total += max(size-reserved-used, 0)
+		counted = true
 	}
-	return 0, false
+	return total, counted
 }
 
 func publishedPorts(ports []Port) []string {

@@ -105,7 +105,13 @@ func (s *Server) publishedPathProviders(detail *dockerx.ContainerDetail, binding
 		}
 		return snapshot, nil
 	}
-	p.External = s.externalMeasurements
+	p.External = func(ctx context.Context, port int) ([]netpath.ExternalMeasurement, error) {
+		family := "inet"
+		if binding.IPv6 || strings.Contains(binding.HostIP, ":") {
+			family = "inet6"
+		}
+		return s.externalMeasurements(ctx, binding.Protocol, family, binding.HostIP, port)
+	}
 	p.PublicAddress = func(context.Context) (string, error) { return publicHostAddress() }
 	return p
 }

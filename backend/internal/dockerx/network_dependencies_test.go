@@ -2,6 +2,7 @@ package dockerx
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -92,11 +93,16 @@ func TestPreviewConnectRefusesTheDashboardsNetworkAndAFullPool(t *testing.T) {
 	}
 	d = lab()
 	// A /29 holds six usable addresses less the gateway: five members fill it.
-	for _, id := range []string{"f1", "f2", "f3"} {
-		d.Network.Containers[id] = network.EndpointResource{Name: id}
+	for i, id := range []string{"f1", "f2", "f3"} {
+		d.Network.Containers[id] = network.EndpointResource{Name: id, IPv4Address: fmt.Sprintf("10.4.0.%d/29", 4+i)}
 	}
 	if got := conflictLevels(PreviewConnect(d, "cache", nil)); got["pool_exhausted"] != ConflictBlock {
 		t.Fatalf("a full pool is refused before the Engine fails: %+v", got)
+	}
+	// Docker allocates from the next pool, so a second one with room is not exhausted.
+	d.Network.IPAM.Config = append(d.Network.IPAM.Config, network.IPAMConfig{Subnet: "10.5.0.0/24"})
+	if got := conflictLevels(PreviewConnect(d, "cache", nil)); got["pool_exhausted"] != "" {
+		t.Fatalf("a full first pool with a second one free is not exhausted: %+v", got)
 	}
 	d = lab()
 	d.Network.Name = "bridge"
@@ -296,5 +302,37 @@ func TestPreviewsJudgeTheContainerAReferenceResolvedTo(t *testing.T) {
 	}
 	if got := conflictLevels(PreviewDisconnect(lab(), "bbbb")); got["not_attached"] != ConflictBlock {
 		t.Fatalf("an unresolved short reference is refused rather than guessed: %+v", got)
+	}
+}
+
+// A forced disconnect exists for an endpoint whose container is gone. Only a
+// reference the Engine says nothing answers to is stale; an unread one is not.
+func TestPreviewDisconnectOffersAStaleEndpointOnlyWhenItsContainerIsGone(t *testing.T) {
+	d := lab()
+	d.Network.Containers["ffff000000000000"] = network.EndpointResource{Name: "ghost"}
+	d.missing = map[string]bool{"ghost": true}
+	if id, ok := d.StaleEndpoint("ghost"); !ok || id != "ffff000000000000" {
+		t.Fatalf("stale endpoint: %q %v", id, ok)
+	}
+	conflicts := PreviewDisconnect(d, "ghost")
+	if got := conflictLevels(conflicts); got["stale_endpoint"] != ConflictWarn || Blocking(conflicts) {
+		t.Fatalf("a gone container's endpoint can be removed: %+v", got)
+	}
+	d.missing = map[string]bool{}
+	if got := conflictLevels(PreviewDisconnect(d, "ghost")); got["not_attached"] != ConflictBlock {
+		t.Fatalf("an endpoint whose container was merely unread is refused: %+v", got)
+	}
+}
+
+func TestSwarmNetworksAreNeitherPrunedNorRemovedHereWhenTheyCarryTheMesh(t *testing.T) {
+	candidates := PruneCandidates([]Network{{ID: "1", Name: "ingress", Scope: "swarm"}, {ID: "2", Name: "lab", Scope: "local"}}, nil, "", func(int64) (string, bool) { return "", false })
+	if len(candidates) != 1 || candidates[0].Name != "lab" {
+		t.Fatalf("swarm networks are the managers' to prune: %+v", candidates)
+	}
+	d := lab()
+	d.Network.Containers = map[string]network.EndpointResource{}
+	d.Network.Ingress = true
+	if got := conflictLevels(PreviewRemove(d, func(int64) (string, bool) { return "", false })); got["swarm_ingress"] != ConflictBlock {
+		t.Fatalf("the routing mesh is refused: %+v", got)
 	}
 }
