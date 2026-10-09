@@ -56,6 +56,9 @@ func TestCrowdSecReadsDecisionsAlertsAndBouncers(t *testing.T) {
 	h.replies["cscli decisions list -o json"] = testdata(t, "crowdsec-decisions.json")
 	h.replies["cscli alerts list -o json --limit 50"] = testdata(t, "crowdsec-alerts.json")
 	h.replies["cscli bouncers list -o json"] = testdata(t, "crowdsec-bouncers.json")
+	h.replies["nft -j list tables"] = testdata(t, "crowdsec-nft-tables.json")
+	h.replies["nft -j list table ip crowdsec"] = testdata(t, "crowdsec-nft-table-ip.json")
+	h.replies["nft -j list table ip6 crowdsec6"] = testdata(t, "crowdsec-nft-table-ip6.json")
 	prev := crowdsecNow
 	crowdsecNow = func() time.Time { return time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC) }
 	t.Cleanup(func() { crowdsecNow = prev })

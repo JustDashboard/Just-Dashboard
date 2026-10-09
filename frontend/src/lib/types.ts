@@ -7696,7 +7696,46 @@ export type CrowdSecView = {
     type?: string
     version?: string
   }[]
+  /** Whether a bouncer verifiably turns decisions into dropped traffic. */
+  enforcement?: CrowdSecEnforcement
   error?: string
+}
+
+export type CrowdSecEnforcementState =
+  "stopped" | "unenforced" | "stale" | "degraded" | "unverified" | "partial" | "enforcing"
+
+export type CrowdSecEnforcement = {
+  state: CrowdSecEnforcementState
+  summary: string
+  bouncers: {
+    name: string
+    kind: "firewall" | "proxy" | "other"
+    valid: boolean
+    lastPull?: string
+    /** Seconds since the last pull; -1 for never. */
+    pullAgeSeconds: number
+    fresh: boolean
+    unit?: string
+    unitActive?: boolean
+  }[]
+  kernel?: {
+    backend?: "nftables" | "ipset"
+    sets: {
+      family?: string
+      table?: string
+      name: string
+      entries: number
+      dropped: boolean
+      hooks?: string[]
+    }[]
+    entries: number
+    error?: string
+  }
+  checkedAt: string
+  /** How recent a pull must be, in Go's duration spelling ("3m0s"). */
+  freshness: string
+  enforcedBy: string[]
+  missing?: { bouncer?: string; reason: string }[]
 }
 
 export type SuricataView = {

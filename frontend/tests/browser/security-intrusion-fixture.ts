@@ -235,6 +235,76 @@ export const crowdsec = {
       version: "v0.9.1",
     },
   ],
+  /** The server's verdict: the firewall bouncer pulled a minute ago and its set drops. */
+  enforcement: {
+    state: "enforcing",
+    summary:
+      "firewall-bouncer-nftables pulled 1 min ago; the kernel holds 7 addresses in crowdsec-blacklists-crowdsec, crowdsec-blacklists-cscli and a hooked rule drops them.",
+    bouncers: [
+      {
+        name: "caddy-bouncer",
+        kind: "proxy",
+        valid: true,
+        lastPull: iso(2),
+        pullAgeSeconds: 120,
+        fresh: true,
+      },
+      {
+        name: "firewall-bouncer-nftables",
+        kind: "firewall",
+        valid: true,
+        lastPull: iso(1),
+        pullAgeSeconds: 60,
+        fresh: true,
+        unit: "crowdsec-firewall-bouncer",
+        unitActive: true,
+      },
+    ],
+    kernel: {
+      backend: "nftables",
+      entries: 7,
+      sets: [
+        {
+          family: "ip",
+          table: "crowdsec",
+          name: "crowdsec-blacklists-crowdsec",
+          entries: 5,
+          dropped: true,
+          hooks: ["input"],
+        },
+        {
+          family: "ip",
+          table: "crowdsec",
+          name: "crowdsec-blacklists-cscli",
+          entries: 2,
+          dropped: true,
+          hooks: ["input"],
+        },
+      ],
+    },
+    checkedAt: iso(0),
+    freshness: "3m0s",
+    enforcedBy: ["firewall-bouncer-nftables", "caddy-bouncer"],
+  },
+}
+
+/** The same host after the firewall bouncer's table was flushed by a ruleset reload. */
+export const crowdsecFlushed = {
+  ...crowdsec,
+  enforcement: {
+    ...crowdsec.enforcement,
+    state: "degraded",
+    summary:
+      "firewall-bouncer-nftables is pulling decisions, but no CrowdSec set exists in the kernel, so nothing it pulled is dropped.",
+    kernel: { entries: 0, sets: [] },
+    enforcedBy: [],
+    missing: [
+      {
+        bouncer: "firewall-bouncer-nftables",
+        reason: "no CrowdSec set exists in nftables or ipset",
+      },
+    ],
+  },
 }
 
 function alert(

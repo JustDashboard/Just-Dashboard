@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import {
   crowdsec,
+  crowdsecFlushed,
   mockIntrusion,
   sshd,
   suricata,
@@ -121,7 +122,8 @@ test("CrowdSec reads its decisions, alerts and bouncers", async ({ page }) => {
   const tiles = section.locator("[data-slot=stat-tile]")
   await expect(tiles.filter({ hasText: "Decisions in force" })).toContainText("8")
   await expect(tiles.filter({ hasText: "Alerts, last day" })).toContainText("5")
-  await expect(tiles.filter({ hasText: "Bouncers valid" })).toContainText("2 / 2")
+  await expect(tiles.filter({ hasText: "Enforcement" })).toContainText("Enforcing")
+  await expect(tiles.filter({ hasText: "Enforcement" })).toContainText("2 of 2 pulled within 3 min")
 
   // The origin is said in words, and the community list is the one CAPI means.
   const rows = section.getByRole("row")
@@ -136,8 +138,28 @@ test("CrowdSec reads its decisions, alerts and bouncers", async ({ page }) => {
   await section.getByRole("button", { name: /^Community list/ }).click()
   await expect(section.getByRole("row")).toHaveCount(1 + 5)
 
-  await expect(section.getByText("firewall-bouncer-nftables")).toBeVisible()
-  await expect(section.getByText("caddy-bouncer")).toBeVisible()
+  await expect(section.getByText("firewall-bouncer-nftables", { exact: true })).toBeVisible()
+  await expect(section.getByText("caddy-bouncer", { exact: true })).toBeVisible()
+  // The claim is the verdict's: the engine running is not what the head says.
+  await expect(section.getByText("enforcing", { exact: true })).toBeVisible()
+  const kernel = section.getByLabel("Kernel sets")
+  await expect(kernel).toContainText("nftables")
+  await expect(kernel).toContainText("crowdsec-blacklists-crowdsec")
+  await expect(kernel).toContainText("5 addresses")
+  await expect(kernel).toContainText("dropped on the input hook")
+})
+
+test("a bouncer pulling into a flushed kernel table is not called protection", async ({ page }) => {
+  await mockIntrusion(page, [], { overrides: { "/security/crowdsec/": crowdsecFlushed } })
+  await page.goto("/security/intrusion")
+  const section = page.getByRole("region", { name: "CrowdSec" })
+  await expect(
+    section.getByText("The bouncer is pulling and nothing is dropped", { exact: true }),
+  ).toBeVisible()
+  await expect(section.getByText("no CrowdSec set exists in nftables or ipset")).toBeVisible()
+  await expect(section.getByText("not dropping", { exact: true }).first()).toBeVisible()
+  await expect(section.getByText(/enforced by/)).toHaveCount(0)
+  await expect(section.getByLabel("Kernel sets")).toContainText("No CrowdSec set exists")
 })
 
 test("a CrowdSec ban sends exactly the value, the duration and the reason", async ({ page }) => {
@@ -204,14 +226,29 @@ test("releasing a decision asks first, then deletes that decision", async ({ pag
 
 test("with no valid bouncer CrowdSec says nothing is enforcing its decisions", async ({ page }) => {
   await mockIntrusion(page, [], {
-    overrides: { "/security/crowdsec/": { ...crowdsec, bouncers: [] } },
+    overrides: {
+      "/security/crowdsec/": {
+        ...crowdsec,
+        bouncers: [],
+        enforcement: {
+          ...crowdsec.enforcement,
+          state: "unenforced",
+          summary:
+            "No bouncer is registered. Every decision is recorded and nothing drops the traffic it names.",
+          bouncers: [],
+          kernel: undefined,
+          enforcedBy: [],
+        },
+      },
+    },
   })
   await page.goto("/security/intrusion")
   const section = page.getByRole("region", { name: "CrowdSec" })
-  await expect(section.getByText("No bouncer is pulling decisions")).toBeVisible()
+  await expect(section.getByText("No bouncer enforces the decisions")).toBeVisible()
+  await expect(section.getByText(/nothing drops the traffic it names/)).toBeVisible()
   await expect(
-    section.locator("[data-slot=stat-tile]").filter({ hasText: "Bouncers valid" }),
-  ).toContainText("0 / 0")
+    section.locator("[data-slot=stat-tile]").filter({ hasText: "Enforcement" }),
+  ).toContainText("0 of 0 pulled")
 })
 
 test("Suricata reads its mode, its severities, its signatures and its latest alerts", async ({

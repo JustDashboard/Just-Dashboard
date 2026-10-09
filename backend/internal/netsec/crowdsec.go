@@ -95,6 +95,10 @@ type CrowdSecView struct {
 	Decisions []CrowdSecDecision `json:"decisions"`
 	Alerts    []CrowdSecAlert    `json:"alerts"`
 	Bouncers  []CrowdSecBouncer  `json:"bouncers"`
+	// Enforcement is whether any bouncer is actually turning the decisions
+	// into dropped traffic, judged from its pulls and the kernel's sets
+	// rather than from the engine running.
+	Enforcement *CrowdSecEnforcement `json:"enforcement,omitempty"`
 	// Error is what cscli said when it could not answer; the lists it could
 	// not fill are empty.
 	Error string `json:"error,omitempty"`
@@ -128,11 +132,27 @@ func (s *Service) CrowdSec(ctx context.Context) (*CrowdSecView, error) {
 		note("alerts", err)
 		v.Alerts = []CrowdSecAlert{}
 	}
+	bouncersRead := true
 	if out, err := run(ctx, "cscli", "bouncers", "list", "-o", "json"); err != nil {
 		note("bouncers", err)
+		bouncersRead = false
 	} else if v.Bouncers, err = parseCrowdSecBouncers(out); err != nil {
 		note("bouncers", err)
 		v.Bouncers = []CrowdSecBouncer{}
+		bouncersRead = false
+	}
+	now := crowdsecNow()
+	if bouncersRead {
+		e := s.crowdsecEnforcement(ctx, v, now)
+		v.Enforcement = &e
+	} else {
+		// An unreadable bouncer list is not an empty one: saying nothing
+		// enforces the decisions would be as unfounded as saying something does.
+		v.Enforcement = &CrowdSecEnforcement{
+			State: EnforcementUnverified, Checked: now.UTC(), Fresh: bouncerFreshness.String(),
+			Summary:  "The bouncer list could not be read, so whether anything enforces the decisions is unknown.",
+			Bouncers: []BouncerEvidence{}, Enforced: []string{},
+		}
 	}
 	v.Error = strings.Join(problems, "; ")
 	return v, nil

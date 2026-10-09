@@ -109,6 +109,11 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 			in.Fail2ban = st
 		}
 	})
+	run(func() {
+		if view, err := s.modules.netsec.CrowdSec(ctx); err == nil {
+			in.CrowdSec = view
+		}
+	})
 	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
 	run(func() { in.Network = netsec.ReadHostNetwork(ctx) })
 	run(func() {
