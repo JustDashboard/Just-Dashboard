@@ -84,6 +84,12 @@ fresh-process VLAN recovery, with owned-namespace kernel runs, the passing gates
 captures. Manager-backed VLAN and owner-profile edits, provisioning transactions and EVPN remain
 open.
 
+[Gateway, NAT and protection acceptance](network-gateway-protection-acceptance.md) (C039–C055)
+records the new NAT modes, impact previews, per-flow admission model, durable counters,
+exceptions, limit profiles, feed lifecycle, session revocation and ctnetlink pressure evidence,
+with namespace races, the failed first spec run, the passing gate and the integration correction
+for verdict maps. Off-host forward measurement and timer-independent refresh remain open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

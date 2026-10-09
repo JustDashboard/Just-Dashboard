@@ -1,0 +1,14 @@
+source 8b4e9905 (merged VPN, diagnostics, topology and gateway packages with the verdict-map fix), 2026-10-09T18:27:32Z
+=== RUN   TestLiveFlowModelReadsRealIptablesShapes
+--- PASS: TestLiveFlowModelReadsRealIptablesShapes (0.15s)
+=== RUN   TestLiveConntrackNetlinkInANamespace
+    gateway_maturity_live_test.go:250: helper:
+        === RUN   TestLiveConntrackHelper
+        --- PASS: TestLiveConntrackHelper (3.14s)
+        PASS
+--- PASS: TestLiveConntrackNetlinkInANamespace (3.23s)
+=== RUN   TestLiveConntrackDumpReadsAnOwnedNamespace
+--- PASS: TestLiveConntrackDumpReadsAnOwnedNamespace (0.04s)
+PASS
+exit=0
+jd namespaces left: 0

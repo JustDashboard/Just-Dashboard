@@ -317,3 +317,17 @@ also passed with the same counts ([log](network-gateway-protection/run1-test-cha
 | C054 | verified | Per-interface effective values and workload profiles pass unit and browser checks. |
 | C055 | verified | History, ctnetlink breakdown, statistics and indications pass unit, live netlink and browser checks. |
 
+
+## Integration correction
+
+Merging this package beside the topology package (`8b4e9905`) needed two changes and found one
+gap. Both packages had written a ctnetlink reader, so the topology reader now shares this
+package's tuple, status and protocol attribute constants, and this package's host listener parser
+is renamed `parseHostListeners` beside the topology namespace parser. Review of the relaxed
+admission gate found that the per-flow model skipped verdict maps: a rule such as
+`th dport vmap { 80 : drop }` read as passing, so a change could proceed past a foreign drop.
+`vmap`, `synproxy`, `tproxy` and `fwd` are now unmodeled verdicts that leave the layer `unknown`
+and hold the change; `TestAVerdictMapDecidesByLookupSoItIsNeverReadAsPassing` failed before the
+fix and passes after it. On the assembled source, `netx`, `store` and the whole `api` package,
+3,300 Bun tests, `tsc`, ESLint and Prettier passed, and both packages' live conntrack and flow-model
+namespace tests passed with no namespace left ([log](network-gateway-protection/integration-live-conntrack.log)).
