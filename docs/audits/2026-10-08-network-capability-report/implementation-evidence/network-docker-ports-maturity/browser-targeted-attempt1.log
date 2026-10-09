@@ -1,0 +1,399 @@
+== build 2026-10-09T18:12:57Z
+$ node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build
+monaco: /home/ubuntu/Just-Dashboard-net-docker/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard-net-docker/frontend/public/monaco/vs
+▲ Next.js 16.3.5 (Turbopack)
+✓ Running next.config.ts took 38ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 26.5s
+  Running TypeScript ...
+  Finished TypeScript in 87s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/73) ...
+  Generating static pages using 7 workers (18/73) 
+  Generating static pages using 7 workers (36/73) 
+  Generating static pages using 7 workers (54/73) 
+✓ Generating static pages using 7 workers (73/73) in 1119ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /account
+├ ƒ /account/keys
+├ ƒ /account/security
+├ ƒ /account/sessions
+├ ƒ /account/users
+├ ○ /apple-icon.png
+├ ƒ /audit
+├ ƒ /backups
+├ ƒ /backups/[job]
+├ ƒ /boards
+├ ƒ /boards/[id]
+├ ƒ /dashboard
+├ ƒ /dashboard/configuration
+├ ƒ /databases
+├ ƒ /databases/[id]
+├ ƒ /databases/[id]/[...missing]
+├ ƒ /databases/[id]/access
+├ ƒ /databases/[id]/advisor
+├ ƒ /databases/[id]/backups
+├ ƒ /databases/[id]/data
+├ ƒ /databases/[id]/diagram
+├ ƒ /databases/[id]/generate
+├ ƒ /databases/[id]/logs
+├ ƒ /databases/[id]/performance
+├ ƒ /databases/[id]/query
+├ ƒ /databases/[id]/schema
+├ ƒ /databases/[id]/search
+├ ƒ /databases/[id]/settings
+├ ƒ /databases/map
+├ ƒ /databases/new
+├ ƒ /deploy
+├ ƒ /deploy/[id]
+├ ƒ /deploy/[id]/console
+├ ƒ /deploy/[id]/deployments
+├ ƒ /deploy/[id]/game-settings
+├ ƒ /deploy/[id]/logs
+├ ƒ /deploy/[id]/players
+├ ƒ /deploy/[id]/runs/[run]
+├ ƒ /deploy/[id]/runtime
+├ ƒ /deploy/[id]/settings
+├ ƒ /deploy/[id]/settings/automation
+├ ƒ /deploy/[id]/settings/build
+├ ƒ /deploy/[id]/settings/danger
+├ ƒ /deploy/[id]/settings/databases
+├ ƒ /deploy/[id]/settings/domains
+├ ƒ /deploy/[id]/settings/general
+├ ƒ /deploy/[id]/settings/runtime
+├ ƒ /deploy/[id]/settings/storage
+├ ƒ /deploy/[id]/settings/variables
+├ ƒ /deploy/credentials
+├ ƒ /deploy/new
+├ ƒ /deploy/notifications
+├ ƒ /docker
+├ ƒ /docker/containers
+├ ƒ /docker/containers/[id]
+├ ƒ /docker/events
+├ ƒ /docker/images
+├ ƒ /docker/networks
+├ ƒ /docker/stacks
+├ ƒ /docker/stacks/[name]
+├ ƒ /docker/volumes
+├ ƒ /files
+├ ƒ /files/editor
+├ ƒ /git
+├ ○ /icon.svg
+├ ƒ /login
+├ ƒ /logs
+├ ƒ /metrics
+├ ƒ /network
+├ ƒ /network/captures
+├ ƒ /network/connections
+├ ƒ /network/dns
+├ ƒ /network/drift
+├ ƒ /network/external
+├ ƒ /network/firewall
+├ ƒ /network/flows
+├ ƒ /network/gateway
+├ ƒ /network/interfaces
+├ ƒ /network/investigate
+├ ƒ /network/ipam
+├ ƒ /network/protection
+├ ƒ /network/routing
+├ ƒ /network/runs
+├ ƒ /network/tools
+├ ƒ /network/traffic
+├ ƒ /network/vpn
+├ ƒ /packages
+├ ƒ /processes
+├ ƒ /processes/pm2
+├ ƒ /processes/scheduled
+├ ƒ /processes/services
+├ ƒ /proxy
+├ ƒ /proxy/certificates
+├ ƒ /proxy/config
+├ ƒ /proxy/ports
+├ ƒ /proxy/sites
+├ ƒ /proxy/sites/[name]
+├ ƒ /proxy/streams
+├ ƒ /proxy/tls
+├ ƒ /proxy/traffic
+├ ƒ /security
+├ ƒ /security/intrusion
+├ ƒ /security/logins
+├ ƒ /security/ssh
+├ ƒ /system-users
+└ ƒ /terminal
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+== serve 2026-10-09T18:14:56Z
+== specs 2026-10-09T18:14:57Z: tests/browser/docker-network-maturity.spec.ts tests/browser/proxy-ports-reachability.spec.ts tests/browser/docker-network-create.spec.ts tests/browser/network-report.spec.ts tests/browser/docker-ui.spec.ts tests/browser/security-ui.spec.ts tests/browser/proxy-ports.spec.ts
+
+Running 216 tests using 1 worker
+
+  ✓    1 [chromium] › tests/browser/docker-network-create.spec.ts:26:7 › advanced network allocation keeps both families and metadata at 390px (2.6s)
+  ✓    2 [chromium] › tests/browser/docker-network-create.spec.ts:26:7 › advanced network allocation keeps both families and metadata at 1440px (2.6s)
+  ✓    3 [chromium] › tests/browser/docker-network-create.spec.ts:74:5 › an Engine refusal keeps the allocation draft for correction and retry (1.7s)
+  ✓    4 [chromium] › tests/browser/docker-network-create.spec.ts:97:5 › an unreadable refreshed inventory keeps the draft and requires a successful refresh (1.4s)
+  ✓    5 [chromium] › tests/browser/docker-network-create.spec.ts:116:5 › limited operators use bridge settings and readers have no creation action (1.7s)
+  ✓    6 [chromium] › tests/browser/docker-network-maturity.spec.ts:139:5 › networks name their owners, and unread membership never reads as unused (1.5s)
+  ✘    7 [chromium] › tests/browser/docker-network-maturity.spec.ts:166:5 › a network's detail names its owner, both families and the networks its members join (6.3s)
+  ✓    8 [chromium] › tests/browser/docker-network-maturity.spec.ts:198:5 › attaching previews shared names and refusals, and keeps the draft when the preview fails (4.5s)
+  ✓    9 [chromium] › tests/browser/docker-network-maturity.spec.ts:276:5 › detaching names who loses the member, and a refused detach cannot be confirmed (2.6s)
+  ✓   10 [chromium] › tests/browser/docker-network-maturity.spec.ts:337:5 › a removal says what still names the network, and a live deployment's network is refused (1.9s)
+  ✓   11 [chromium] › tests/browser/docker-network-maturity.spec.ts:406:5 › the reviewed prune removes only what nothing names and says why the rest is kept (1.6s)
+  ✓   12 [chromium] › tests/browser/docker-network-maturity.spec.ts:471:5 › the creation form reads the Engine's drivers and names options Docker would ignore (2.0s)
+  ✓   13 [chromium] › tests/browser/docker-network-maturity.spec.ts:560:7 › network previews fit without page overflow at 390px (2.0s)
+  ✓   14 [chromium] › tests/browser/docker-network-maturity.spec.ts:560:7 › network previews fit without page overflow at 1440px (2.4s)
+  ✓   15 [chromium] › tests/browser/docker-network-maturity.spec.ts:593:5 › readers see owners and previews' results but are offered no change (983ms)
+  ✓   16 [chromium] › tests/browser/docker-ui.spec.ts:522:5 › the overview separates runtime health from attention (933ms)
+  ✓   17 [chromium] › tests/browser/docker-ui.spec.ts:544:5 › attention lists posture findings and never calls them health (1.0s)
+  ✓   18 [chromium] › tests/browser/docker-ui.spec.ts:573:5 › a stack that was never deployed says so (618ms)
+  ✓   19 [chromium] › tests/browser/docker-ui.spec.ts:587:5 › a stack opens as its own page (1.3s)
+  ✓   20 [chromium] › tests/browser/docker-ui.spec.ts:602:5 › a link to the old stack query lands on the stack (894ms)
+  ✓   21 [chromium] › tests/browser/docker-ui.spec.ts:610:5 › a volume in use offers no delete button (872ms)
+  ✓   22 [chromium] › tests/browser/docker-ui.spec.ts:629:5 › published ports say what their binding means (918ms)
+  ✓   23 [chromium] › tests/browser/docker-ui.spec.ts:644:5 › the containers table keeps status runtime-only and counts issues apart (1.0s)
+  ✓   24 [chromium] › tests/browser/docker-ui.spec.ts:662:5 › memory says no limit rather than inventing one (921ms)
+  ✓   25 [chromium] › tests/browser/docker-ui.spec.ts:717:5 › attention collapses one problem repeated across containers into one row (1.2s)
+  ✓   26 [chromium] › tests/browser/docker-ui.spec.ts:764:5 › on a phone the containers are a list rather than a table with columns removed (844ms)
+  ✓   27 [chromium] › tests/browser/docker-ui.spec.ts:801:5 › the image, volume and network lists read down the row on a phone (1.8s)
+  ✓   28 [chromium] › tests/browser/docker-ui.spec.ts:835:5 › a container's actions are reachable on a touch screen (728ms)
+  ✓   29 [chromium] › tests/browser/docker-ui.spec.ts:861:5 › the destructive verbs are words, not glyphs (1.5s)
+  ✓   30 [chromium] › tests/browser/docker-ui.spec.ts:883:5 › the state filters narrow the list and carry their own counts (1.3s)
+  ✓   31 [chromium] › tests/browser/docker-ui.spec.ts:909:5 › runtime health keeps every count, including the zeroes (978ms)
+  ✓   32 [chromium] › tests/browser/docker-ui.spec.ts:929:5 › the container page can act on the container it is describing (1.6s)
+  ✓   33 [chromium] › tests/browser/docker-ui.spec.ts:948:5 › a link to the old container query lands on the container (949ms)
+  ✓   34 [chromium] › tests/browser/docker-ui.spec.ts:961:5 › asking for a container's logs opens the logs (1.9s)
+  ✓   35 [chromium] › tests/browser/docker-ui.spec.ts:1254:5 › a container's logs read as what its image writes (1.1s)
+  ✓   36 [chromium] › tests/browser/docker-ui.spec.ts:1281:5 › a container's events fold its restart loop under its health check (1.7s)
+  ✓   37 [chromium] › tests/browser/docker-ui.spec.ts:1344:5 › the crash window chip and the pane stay in step (2.6s)
+  ✓   38 [chromium] › tests/browser/docker-ui.spec.ts:1394:5 › the failure's notice opens the logs on its window (1.3s)
+  ✓   39 [chromium] › tests/browser/docker-ui.spec.ts:1421:5 › a crash window let go of while the page was away is not what it opens on (1.8s)
+  ✓   40 [chromium] › tests/browser/docker-ui.spec.ts:1451:5 › a stack's logs are one log with a lane per service (4.3s)
+  ✓   41 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 320px (9.1s)
+  ✓   42 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 320px (1.8s)
+  ✓   43 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 390px (8.9s)
+  ✓   44 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 390px (1.7s)
+  ✓   45 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 640px (8.6s)
+  ✓   46 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 640px (1.8s)
+  ✓   47 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 768px (9.4s)
+  ✓   48 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 768px (1.8s)
+  ✓   49 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1024px (9.8s)
+  ✓   50 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 1024px (2.0s)
+  ✓   51 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1280px (10.1s)
+  ✓   52 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 1280px (2.5s)
+  ✓   53 [chromium] › tests/browser/docker-ui.spec.ts:1495:7 › no Docker page scrolls sideways at 1600px (12.3s)
+  ✓   54 [chromium] › tests/browser/docker-ui.spec.ts:1519:7 › no Docker logs view scrolls sideways at 1600px (3.3s)
+  ✓   55 [chromium] › tests/browser/docker-ui.spec.ts:1551:5 › a running container's dot says the reading is live (1.4s)
+  ✓   56 [chromium] › tests/browser/docker-ui.spec.ts:1571:5 › a container's card keeps every reading on a wide desktop (1.6s)
+  ✓   57 [chromium] › tests/browser/docker-ui.spec.ts:1593:5 › the inspect tab does not undo the masking the environment tab applies (2.1s)
+  ✓   58 [chromium] › tests/browser/docker-ui.spec.ts:1631:5 › a volume's contents are in the volume, not a page away (3.7s)
+  ✓   59 [chromium] › tests/browser/docker-ui.spec.ts:1676:5 › the storage browser draws a directory the way the file manager does (1.8s)
+  ✓   60 [chromium] › tests/browser/docker-ui.spec.ts:1713:5 › the storage tab opens onto what is in a mount (1.1s)
+  ✓   61 [chromium] › tests/browser/docker-ui.spec.ts:1736:5 › the storage tab switches the listing between mounts (1.1s)
+  ✓   62 [chromium] › tests/browser/docker-ui.spec.ts:1897:5 › usage separates live rates from totals, waits for intervals, and keeps idle history (2.2s)
+  ✓   63 [chromium] › tests/browser/docker-ui.spec.ts:1920:5 › usage stays live with history disabled and removes stale figures (1.0s)
+  ✓   64 [chromium] › tests/browser/docker-ui.spec.ts:1933:5 › host networking explains unavailable attribution and stopped containers keep history (3.1s)
+  ✓   65 [chromium] › tests/browser/docker-ui.spec.ts:1952:7 › usage has readable measurements without page overflow at 1280px (2.1s)
+  ✓   66 [chromium] › tests/browser/docker-ui.spec.ts:1952:7 › usage has readable measurements without page overflow at 1720px (2.2s)
+  ✓   67 [chromium] › tests/browser/docker-ui.spec.ts:1952:7 › usage has readable measurements without page overflow at 390px (2.3s)
+  ✓   68 [chromium] › tests/browser/docker-ui.spec.ts:1980:5 › workspace: container name typing, adjacent details and Back retain list focus (3.5s)
+  ✓   69 [chromium] › tests/browser/docker-ui.spec.ts:2006:5 › workspace: Back restores a long container list's scroll and focused row (6.5s)
+  ✓   70 [chromium] › tests/browser/docker-ui.spec.ts:2045:5 › an administrator traces a published port's path from outside, layer by layer (1.9s)
+  ✓   71 [chromium] › tests/browser/network-report.spec.ts:17:5 › an IPv6-only browser sees IPv6 decisions and asks the kernel with read access (1.2s)
+  ✓   72 [chromium] › tests/browser/network-report.spec.ts:74:7 › a 409 Tailscale offer keeps its draft and retries without duplicate routes (1.5s)
+  ✓   73 [chromium] › tests/browser/network-report.spec.ts:74:7 › a 500 Tailscale offer keeps its draft and retries without duplicate routes (1.4s)
+  ✓   74 [chromium] › tests/browser/network-report.spec.ts:109:5 › read users calculate IPv6 subnets without mounting privileged diagnostics (1.0s)
+  ✓   75 [chromium] › tests/browser/network-report.spec.ts:136:7 › a failed later program traffic poll shows retained data, age and retry (1.3s)
+  ✓   76 [chromium] › tests/browser/network-report.spec.ts:136:7 › a failed later container traffic poll shows retained data, age and retry (1.2s)
+  ✓   77 [chromium] › tests/browser/network-report.spec.ts:136:7 › a failed later link inventory poll shows retained data, age and retry (1.5s)
+  ✓   78 [chromium] › tests/browser/network-report.spec.ts:136:7 › a failed later eBPF inventory poll shows retained data, age and retry (1.0s)
+  ✓   79 [chromium] › tests/browser/network-report.spec.ts:192:5 › a failed second Firewall poll retains its rules and offers a dated retry (1.2s)
+  ✓   80 [chromium] › tests/browser/network-report.spec.ts:227:5 › failed Docker candidate reads offer retry without claiming every container is attached (2.5s)
+  ✓   81 [chromium] › tests/browser/network-report.spec.ts:281:5 › a failed later Docker candidate poll keeps the selected container and alias for retry (3.5s)
+  ✓   82 [chromium] › tests/browser/network-report.spec.ts:357:7 › the overview reports saved host changes without claiming connectivity confirmation (1.6s)
+  ✓   83 [chromium] › tests/browser/network-report.spec.ts:357:7 › the overview reports boot_degraded host changes without claiming connectivity confirmation (1.5s)
+  ✓   84 [chromium] › tests/browser/network-report.spec.ts:357:7 › the overview reports unreadable host changes without claiming connectivity confirmation (1.8s)
+  ✓   85 [chromium] › tests/browser/network-report.spec.ts:408:5 › an unreadable Tailscale preference refresh keeps its draft and sends no route replacement (1.1s)
+  ✓   86 [chromium] › tests/browser/proxy-ports-reachability.spec.ts:162:5 › a published port's sheet says provider policy is unseen, shows the external proof and checks again (1.5s)
+  ✓   87 [chromium] › tests/browser/proxy-ports-reachability.spec.ts:182:5 › a port Docker publishes is traced from outside through its NAT, unknown layers named (1.5s)
+  ✓   88 [chromium] › tests/browser/proxy-ports-reachability.spec.ts:197:5 › an unenrolled port says reachability from outside is unproven, and a reader is offered no check (1.9s)
+  ✓   89 [chromium] › tests/browser/proxy-ports-reachability.spec.ts:235:5 › the free-port search names what it passed over and the sources it could not read (1.6s)
+  ✓   90 [chromium] › tests/browser/proxy-ports.spec.ts:39:5 › each socket says where it answers, with the network named (1.3s)
+  ✓   91 [chromium] › tests/browser/proxy-ports.spec.ts:73:5 › the chips split the services by who can connect, counting a pair once (2.3s)
+  ✓   92 [chromium] › tests/browser/proxy-ports.spec.ts:105:5 › the tiles count services and say what each count is made of (1.4s)
+  ✓   93 [chromium] › tests/browser/proxy-ports.spec.ts:120:5 › a host with nothing the internet can reach reads so (1.9s)
+  ✓   94 [chromium] › tests/browser/proxy-ports.spec.ts:138:5 › a socket on one address can be taken to the firewall (1.8s)
+  ✓   95 [chromium] › tests/browser/proxy-ports.spec.ts:147:5 › the overview counts services and names a public database critical (2.1s)
+  ✓   96 [chromium] › tests/browser/proxy-ports.spec.ts:173:5 › a port Docker publishes in both families is one row and one count (2.5s)
+  ✓   97 [chromium] › tests/browser/proxy-ports.spec.ts:192:5 › a database behind a firewall denying inbound is the posture's warning everywhere (2.2s)
+  ✓   98 [chromium] › tests/browser/proxy-ports.spec.ts:224:5 › a database Docker publishes or a rule admits stays critical behind a firewall denying inbound (3.0s)
+  ✓   99 [chromium] › tests/browser/proxy-ports.spec.ts:280:5 › a socket on the private uplink is not said to be out of the internet's reach (908ms)
+  ✓  100 [chromium] › tests/browser/proxy-ports.spec.ts:305:5 › a folded pair's addresses, protocol and user are whole on a phone and a desktop (1.4s)
+  ✓  101 [chromium] › tests/browser/proxy-ports.spec.ts:363:5 › a database is coloured by who can connect, and counted once however it is bound (1.8s)
+  ✓  102 [chromium] › tests/browser/proxy-ports.spec.ts:400:5 › databases only a bridge can reach are a warning everywhere (1.8s)
+  ✓  103 [chromium] › tests/browser/proxy-ports.spec.ts:424:5 › the tiles' hints and the longest reach fit a phone (900ms)
+  ✓  104 [chromium] › tests/browser/proxy-ports.spec.ts:453:5 › a listing that timed out can be tried again (995ms)
+  ✓  105 [chromium] › tests/browser/proxy-ports.spec.ts:493:5 › reach and protocol combine, and the address bar carries the view (4.2s)
+  ✓  106 [chromium] › tests/browser/proxy-ports.spec.ts:550:5 › each column sorts both ways and says which way to a screen reader (2.1s)
+  ✓  107 [chromium] › tests/browser/proxy-ports.spec.ts:585:5 › twenty git-daemon sockets fold under one application, and the kernel's ephemeral ports can be set aside (2.3s)
+  ✓  108 [chromium] › tests/browser/proxy-ports.spec.ts:635:5 › a host whose kernel range is unknown is not offered to hide by it (934ms)
+  ✓  109 [chromium] › tests/browser/proxy-ports.spec.ts:643:5 › a failed poll keeps the rows and says they are the last list that arrived (1.2s)
+  ✓  110 [chromium] › tests/browser/proxy-ports.spec.ts:685:5 › refreshing can be paused, resumed at once, and asked for (2.8s)
+  ✓  111 [chromium] › tests/browser/proxy-ports.spec.ts:729:5 › a row's endpoint and command can be copied (3.6s)
+  ✓  112 [chromium] › tests/browser/proxy-ports.spec.ts:752:5 › the rows shown export as CSV and JSON, one line per socket (1.9s)
+  ✓  113 [chromium] › tests/browser/proxy-ports.spec.ts:783:5 › a host with no sockets, and a filter with no match, each say which it is (2.0s)
+  ✓  114 [chromium] › tests/browser/proxy-ports.spec.ts:800:5 › the attention finding opens the ports page on its ports alone (2.6s)
+  ✓  115 [chromium] › tests/browser/proxy-ports.spec.ts:817:5 › the Internet-facing tile opens on what it counts, not the ports a finding opened (2.6s)
+  ✓  116 [chromium] › tests/browser/proxy-ports.spec.ts:861:5 › a connection's service port opens what listens on it; a port the kernel picked does not (1.3s)
+  ✓  117 [chromium] › tests/browser/proxy-ports.spec.ts:876:5 › the Listening tile opens every socket, not the port a link opened a moment ago (2.8s)
+  ✓  118 [chromium] › tests/browser/proxy-ports.spec.ts:898:5 › the list's controls are named, and a phone draws one list with no overflow (1.6s)
+  ✓  119 [chromium] › tests/browser/proxy-ports.spec.ts:937:5 › each socket names who it answers for, not only the process holding it (1.7s)
+  ✓  120 [chromium] › tests/browser/proxy-ports.spec.ts:987:5 › 'Open container' opens the container a port is published for (2.4s)
+  ✓  121 [chromium] › tests/browser/proxy-ports.spec.ts:998:5 › a row's owner opens its own page: the deployment, the unit, the PM2 app (9.1s)
+  ✓  122 [chromium] › tests/browser/proxy-ports.spec.ts:1031:5 › a search finds a socket by its container, image, deployment, unit or the dashboard's tag (1.7s)
+  ✓  123 [chromium] › tests/browser/proxy-ports.spec.ts:1052:5 › owners are whole on a phone, the dashboard's own marked (1.9s)
+  ✓  124 [chromium] › tests/browser/security-ui.spec.ts:524:5 › the overview reads as readings, findings and how the panel is reached (3.2s)
+  ✓  125 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /security keeps non-table Panels plain (1.2s)
+  ✓  126 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /security has an accessible name (1.8s)
+  ✓  127 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /network/firewall keeps non-table Panels plain (1.1s)
+  ✓  128 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /network/firewall has an accessible name (1.0s)
+  ✓  129 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /security/ssh keeps non-table Panels plain (1.1s)
+  ✓  130 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /security/ssh has an accessible name (999ms)
+  ✓  131 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /security/intrusion keeps non-table Panels plain (1.0s)
+  ✓  132 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /security/intrusion has an accessible name (1.2s)
+  ✓  133 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /network/connections keeps non-table Panels plain (1.1s)
+  ✓  134 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /network/connections has an accessible name (1.4s)
+  ✓  135 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /security/logins keeps non-table Panels plain (1.0s)
+  ✓  136 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /security/logins has an accessible name (986ms)
+  ✓  137 [chromium] › tests/browser/security-ui.spec.ts:604:7 › /network/tools keeps non-table Panels plain (922ms)
+  ✓  138 [chromium] › tests/browser/security-ui.spec.ts:613:7 › every icon-only control on /network/tools has an accessible name (901ms)
+  ✓  139 [chromium] › tests/browser/security-ui.spec.ts:634:5 › the firewall page opens on its defaults and offers the controls that set them (1.5s)
+  ✓  140 [chromium] › tests/browser/security-ui.spec.ts:664:5 › ssh changes are staged as a page state and applied together (2.4s)
+  ✓  141 [chromium] › tests/browser/security-ui.spec.ts:696:5 › a jail's sheet bans an address by hand and the tuning offers the caller's own (3.1s)
+  ✓  142 [chromium] › tests/browser/security-ui.spec.ts:726:5 › an offender is blocked with a plain deny and looked up on the tools page (3.4s)
+  ✓  143 [chromium] › tests/browser/security-ui.spec.ts:754:5 › connections offers a block only for an address that is not private (1.6s)
+  ✓  144 [chromium] › tests/browser/security-ui.spec.ts:771:5 › the logins page folds the failed record into attackers (1.3s)
+  ✓  145 [chromium] › tests/browser/security-ui.spec.ts:794:5 › the ssh page reads its auth log through the lens, the day's counts in its one grid (4.5s)
+  ✓  146 [chromium] › tests/browser/security-ui.spec.ts:861:5 › an attacker in the auth log is blocked from its line; a tailnet address is not (3.4s)
+  ✓  147 [chromium] › tests/browser/security-ui.spec.ts:895:5 › without the admin capability the ssh page says so and reads no auth data (856ms)
+  ✓  148 [chromium] › tests/browser/security-ui.spec.ts:909:5 › a host with no auth.log reads sshd and sudo through the journal (1.3s)
+  ✓  149 [chromium] › tests/browser/security-ui.spec.ts:923:5 › an auth.log outside the log roots is said to be, not said to be missing (1.3s)
+  ✓  150 [chromium] › tests/browser/security-ui.spec.ts:939:5 › the firewall page reads what its rules did, with the day's counts in its grid (6.9s)
+  ✓  151 [chromium] › tests/browser/security-ui.spec.ts:985:5 › with no ufw.log the firewall's drops are read from kern.log, then the kernel ring (2.5s)
+  ✓  152 [chromium] › tests/browser/security-ui.spec.ts:1012:5 › a host with neither file reads the firewall's drops from the kernel ring (1.1s)
+  ✓  153 [chromium] › tests/browser/security-ui.spec.ts:1030:5 › with logging off the firewall log points at the control that turns it on (1.2s)
+  ✓  154 [chromium] › tests/browser/security-ui.spec.ts:1046:5 › intrusion's activity is fail2ban's own log, strikes and repeat offenders included (3.6s)
+  ✓  155 [chromium] › tests/browser/security-ui.spec.ts:1082:5 › with no fail2ban.log the activity is read from its unit's journal (1.2s)
+  ✓  156 [chromium] › tests/browser/security-ui.spec.ts:1106:9 › with no hover available › row controls on /network/connections are reachable without a pointer (921ms)
+  ✓  157 [chromium] › tests/browser/security-ui.spec.ts:1106:9 › with no hover available › row controls on /security/logins are reachable without a pointer (803ms)
+  ✓  158 [chromium] › tests/browser/security-ui.spec.ts:1106:9 › with no hover available › row controls on /security/intrusion are reachable without a pointer (1.0s)
+  -  159 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /security at 390
+  -  160 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /network/firewall at 390
+  -  161 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /security/ssh at 390
+  -  162 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /security/intrusion at 390
+  -  163 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /network/connections at 390
+  -  164 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /security/logins at 390
+  -  165 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 390 wide › /network/tools at 390
+  -  166 [chromium] › tests/browser/security-ui.spec.ts:1168:11 › screenshots › 390 wide › rule and jail dialogs at 390
+  -  167 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /security at 1280
+  -  168 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /network/firewall at 1280
+  -  169 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /security/ssh at 1280
+  -  170 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /security/intrusion at 1280
+  -  171 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /network/connections at 1280
+  -  172 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /security/logins at 1280
+  -  173 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1280 wide › /network/tools at 1280
+  -  174 [chromium] › tests/browser/security-ui.spec.ts:1168:11 › screenshots › 1280 wide › rule and jail dialogs at 1280
+  -  175 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /security at 1720
+  -  176 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /network/firewall at 1720
+  -  177 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /security/ssh at 1720
+  -  178 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /security/intrusion at 1720
+  -  179 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /network/connections at 1720
+  -  180 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /security/logins at 1720
+  -  181 [chromium] › tests/browser/security-ui.spec.ts:1143:13 › screenshots › 1720 wide › /network/tools at 1720
+  -  182 [chromium] › tests/browser/security-ui.spec.ts:1168:11 › screenshots › 1720 wide › rule and jail dialogs at 1720
+  ✓  183 [chromium] › tests/browser/security-ui.spec.ts:1191:5 › jail policy inputs keep edits and send all three values together (2.4s)
+  ✓  184 [chromium] › tests/browser/security-ui.spec.ts:1209:5 › reverting an SSH setting removes the pending change (1.2s)
+  ✓  185 [chromium] › tests/browser/security-ui.spec.ts:1219:5 › a source-only firewall deny stays editable and preserves its source (1.7s)
+  ✓  186 [chromium] › tests/browser/security-ui.spec.ts:1238:5 › the rule builder shows the service warning and requires a deliberate source choice (2.2s)
+  ✓  187 [chromium] › tests/browser/security-ui.spec.ts:1260:5 › limited readers see no SSH, diagnostic, firewall or failed-login mutations (2.3s)
+  ✓  188 [chromium] › tests/browser/security-ui.spec.ts:1297:7 › firewall keeps its unavailable state distinct from a healthy reading (897ms)
+  ✓  189 [chromium] › tests/browser/security-ui.spec.ts:1297:7 › ssh keeps its unavailable state distinct from a healthy reading (708ms)
+  ✓  190 [chromium] › tests/browser/security-ui.spec.ts:1297:7 › intrusion keeps its unavailable state distinct from a healthy reading (758ms)
+  ✓  191 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security keeps its content in the viewport at 390 (820ms)
+  ✓  192 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/firewall keeps its content in the viewport at 390 (837ms)
+  ✓  193 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/ssh keeps its content in the viewport at 390 (1.1s)
+  ✓  194 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/intrusion keeps its content in the viewport at 390 (1.0s)
+  ✓  195 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/connections keeps its content in the viewport at 390 (739ms)
+  ✓  196 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/logins keeps its content in the viewport at 390 (710ms)
+  ✓  197 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/tools keeps its content in the viewport at 390 (732ms)
+  ✓  198 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security keeps its content in the viewport at 1280 (1.0s)
+  ✓  199 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/firewall keeps its content in the viewport at 1280 (1.0s)
+  ✓  200 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/ssh keeps its content in the viewport at 1280 (1.1s)
+  ✓  201 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/intrusion keeps its content in the viewport at 1280 (1.2s)
+  ✓  202 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/connections keeps its content in the viewport at 1280 (893ms)
+  ✓  203 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/logins keeps its content in the viewport at 1280 (777ms)
+  ✓  204 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/tools keeps its content in the viewport at 1280 (831ms)
+  ✓  205 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security keeps its content in the viewport at 1720 (931ms)
+  ✓  206 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/firewall keeps its content in the viewport at 1720 (1.0s)
+  ✓  207 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/ssh keeps its content in the viewport at 1720 (1.1s)
+  ✓  208 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/intrusion keeps its content in the viewport at 1720 (1.1s)
+  ✓  209 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/connections keeps its content in the viewport at 1720 (845ms)
+  ✓  210 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /security/logins keeps its content in the viewport at 1720 (929ms)
+  ✓  211 [chromium] › tests/browser/security-ui.spec.ts:1307:9 › /network/tools keeps its content in the viewport at 1720 (900ms)
+  ✓  212 [chromium] › tests/browser/security-ui.spec.ts:1331:5 › diagnostics retain drafts and finish requests while another tool is selected (1.4s)
+  ✓  213 [chromium] › tests/browser/security-ui.spec.ts:1373:5 › a new diagnostic deep link overrides only that tool's saved input and never runs itself (984ms)
+  ✓  214 [chromium] › tests/browser/security-ui.spec.ts:1408:5 › firewall and SSH changes use ordinary confirmation (2.9s)
+  ✓  215 [chromium] › tests/browser/security-ui.spec.ts:1432:5 › workspace: security filters are shareable and Back restores the previous question (3.6s)
+  ✓  216 [chromium] › tests/browser/security-ui.spec.ts:1457:5 › the posture names the layers its checks could not see (921ms)
+
+
+  1) [chromium] › tests/browser/docker-network-maturity.spec.ts:166:5 › a network's detail names its owner, both families and the networks its members join 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('dialog', { name: 'lab' }).getByText('Compose · shop', { exact: true })
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByRole('dialog', { name: 'lab' }).getByText('Compose · shop', { exact: true })
+
+
+      171 |   await page.getByRole("button", { name: "lab", exact: true }).click()
+      172 |   const panel = page.getByRole("dialog", { name: "lab" })
+    > 173 |   await expect(panel.getByText("Compose · shop", { exact: true })).toBeVisible()
+          |                                                                    ^
+      174 |   await expect(
+      175 |     panel.getByText("Compose recreates it the next time its project comes up."),
+      176 |   ).toBeVisible()
+        at /home/ubuntu/Just-Dashboard-net-docker/frontend/tests/browser/docker-network-maturity.spec.ts:173:68
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/docker-network-maturity-a--6efaa-e-networks-its-members-join-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/docker-network-maturity-a--6efaa-e-networks-its-members-join-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/docker-network-maturity-a--6efaa-e-networks-its-members-join-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/docker-network-maturity-a--6efaa-e-networks-its-members-join-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/browser/docker-network-maturity.spec.ts:166:5 › a network's detail names its owner, both families and the networks its members join 
+  24 skipped
+  191 passed (6.8m)
+== exit 1 2026-10-09T18:21:46Z

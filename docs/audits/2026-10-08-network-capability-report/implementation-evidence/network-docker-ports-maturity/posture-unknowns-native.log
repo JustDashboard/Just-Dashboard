@@ -1,0 +1,8 @@
+Fri Oct  9 18:26:07 UTC 2026
+working tree after 413542c4 plus this read-only live test
+sudo -n env JD_POSTURE_LIVE=1 jd-api.test -test.run ^TestLivePostureUnknownsOnThisHost$ -test.v
+=== RUN   TestLivePostureUnknownsOnThisHost
+    handlers_security_live_test.go:29: status critical, 5 findings, skipped [fail2ban failed logins] (euid 0)
+    handlers_security_live_test.go:31: unknown provider  Provider policy is not visible: No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers in front of this host are unseen: a port graded reachable here may be filtered upstream, and one graded closed may still be forwarded to by a provider's mapping. This host has a public address on an interface (57.131.21.87), so the internet can reach it without a provider translation.
+--- PASS: TestLivePostureUnknownsOnThisHost (2.77s)
+PASS
