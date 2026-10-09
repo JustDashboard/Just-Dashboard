@@ -630,6 +630,28 @@ export type DockerNetwork = {
    * was structurally zero on every host until this was joined in.
    */
   usedBy: string[]
+  /**
+   * False where the container listing failed: `usedBy` is then unread rather
+   * than empty, and nothing may treat the network as unused. Absent from older
+   * backends, which is read as known.
+   */
+  membersKnown?: boolean
+  membersError?: string
+  /** Who created the network, by its labels. */
+  owner?: NetworkOwner
+}
+
+/**
+ * Who created a Docker network and so who acts on it next: Compose recreates
+ * its own, a deployment reconciles its own, nothing comes back for a manual one.
+ */
+export type NetworkOwner = {
+  kind: "system" | "dashboard" | "database-link" | "deployment" | "compose" | "manual"
+  project?: string
+  composeNetwork?: string
+  environmentId?: number
+  /** The deployment's "project · environment", while that environment exists. */
+  deployment?: string
 }
 
 export type ComposeService = {
@@ -965,6 +987,13 @@ export type NetworkMember = {
   aliases: string[]
   state?: string
   stack?: string
+  /** Its own inspect failed, so its aliases are unknown rather than none. */
+  unread?: boolean
+  /** Its other networks: the containers on two networks are what joins them. */
+  networks?: string[]
+  /** The shared public Caddy, and the dashboard's own containers: never detached. */
+  ingress?: boolean
+  dashboard?: boolean
 }
 
 export type NetworkDetail = DockerNetwork & {
@@ -6386,6 +6415,17 @@ export type Posture = {
   checks: number
   /** Checks that could not run, because a check that did not run is not a pass. */
   skipped: string[]
+  /** Layers no check could see — provider policy, foreign nftables tables. */
+  unknowns?: PostureUnknown[]
+}
+
+/** A layer of the host's exposure the posture did not see: neither a finding nor a pass. */
+export type PostureUnknown = {
+  id: string
+  layer: "provider" | "nftables"
+  title: string
+  detail: string
+  subjects?: string[]
 }
 
 export type SSHSetting = {

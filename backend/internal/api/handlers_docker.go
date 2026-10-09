@@ -53,6 +53,12 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))
+			// The inbound path to one published port, Docker's NAT and the
+			// forwarded leg's filters included. It reads the host's iptables
+			// and firewall, as the connection investigator does, so it is the
+			// investigator's capability.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+				Method(http.MethodGet, "/{id}/published/{port}", s.handle(s.handleContainerPublishedPath))
 			r.Method(http.MethodGet, "/{id}/stats/stream", s.handle(s.handleContainerStatStream))
 			r.Method(http.MethodGet, "/stats/history", s.handle(s.handleContainerSparklines))
 			r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleContainerStatsHistory))
@@ -126,7 +132,15 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 
 		r.Route("/networks", func(r chi.Router) {
 			r.Method(http.MethodGet, "/", s.handle(s.handleNetworkList))
+			// What this Engine can create a network with, read now.
+			r.Method(http.MethodGet, "/drivers", s.handle(s.handleNetworkDrivers))
+			// The previews read what a change would disturb and change
+			// nothing; the mutations below refuse what they block.
+			r.Method(http.MethodGet, "/prune", s.handle(s.handleNetworkPrunePreview))
 			r.Method(http.MethodGet, "/{id}", s.handle(s.handleNetworkInspect))
+			r.Method(http.MethodGet, "/{id}/removal", s.handle(s.handleNetworkRemovalPreview))
+			r.Method(http.MethodGet, "/{id}/connect", s.handle(s.handleNetworkConnectPreview))
+			r.Method(http.MethodGet, "/{id}/disconnect", s.handle(s.handleNetworkDisconnectPreview))
 			r.Group(func(r chi.Router) {
 				r.Use(httpx.RequireCapability(auth.CapServiceControl))
 				r.Method(http.MethodPost, "/", s.handle(s.handleNetworkCreate))
@@ -808,6 +822,14 @@ func (s *Server) handleNetworkList(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return s.dockerErr(err)
 	}
+	// The dashboard's own project is told by the data directory its backend
+	// mounts; with no container listing it is unknown, and its networks are
+	// labelled as the Compose networks they also are.
+	self := ""
+	if containers, err := s.modules.docker.ListContainers(r.Context(), false); err == nil {
+		self = s.selfProject(containers)
+	}
+	s.annotateNetworkOwners(r.Context(), list, self)
 	httpx.JSON(w, http.StatusOK, list)
 	return nil
 }
@@ -821,25 +843,39 @@ func (s *Server) handleNetworkInspect(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return s.dockerErr(err)
 	}
+	self := ""
+	if containers, err := s.modules.docker.ListContainers(r.Context(), false); err == nil {
+		self = s.selfProject(containers)
+	}
+	networks := []dockerx.Network{n.Network}
+	s.annotateNetworkOwners(r.Context(), networks, self)
+	n.Owner = networks[0].Owner
+	for i := range n.Members {
+		n.Members[i].Dashboard = self != "" && n.Members[i].Stack == self
+	}
 	httpx.JSON(w, http.StatusOK, n)
 	return nil
 }
 
 func (s *Server) handleNetworkRemove(w http.ResponseWriter, r *http.Request) error {
 	id := httpx.URLParam(r, "id")
-	n, err := s.modules.docker.InspectNetwork(r.Context(), id)
+	ctx, cancel := timeoutCtx(r, networkDependencyTimeout)
+	defer cancel()
+	deps, err := s.networkDependencies(ctx, id)
 	if err != nil {
+		return err
+	}
+	// No typed phrase: a network holds no data. What a removal does break —
+	// a stopped container that names it, a deployment that owns it — is
+	// what the preview lists, and what it blocks is refused here too.
+	conflicts := s.removalConflicts(ctx, deps)
+	if dockerx.Blocking(conflicts) {
+		return conflictRefusal(conflicts)
+	}
+	if err := s.modules.docker.RemoveNetwork(ctx, deps.Network.ID); err != nil {
 		return s.dockerErr(err)
 	}
-	// No typed phrase: a network holds no data and Docker refuses to remove one
-	// that still has containers attached, so the mistake this would guard
-	// against is one the daemon already refuses.
-	if err := s.modules.docker.RemoveNetwork(r.Context(), id); err != nil {
-		return s.dockerErr(err)
-	}
-	// The name is worth more than the id in an audit trail, and it is the only
-	// reason this handler still inspects before removing.
-	httpx.SetAudit(r, "docker.network.remove", n.Name, map[string]any{"id": id})
+	httpx.SetAudit(r, "docker.network.remove", deps.Network.Name, map[string]any{"id": deps.Network.ID, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }

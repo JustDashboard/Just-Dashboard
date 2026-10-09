@@ -265,6 +265,20 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   data), `LoginRecordRead` false wherever `last`/`lastb` are missing (util-linux-extra, absent from
   minimal cloud images). Each is reported as a finding — silence in a security verdict reads as
   "checked, nothing outstanding".
+- **A layer no check can see is named, not passed.** `Posture.Unknowns` (`posture_unknowns.go`) is
+  neither a finding nor a pass. Provider policy is always unknown — no provider adapter exists — and its
+  detail says whether this host has a public address on an interface (`publicHostAddress`) or is only
+  reached through a provider's translation. Other nftables tables come from the gateway's own reading of
+  the ruleset (`GatewayCapability().Layers`, handed in as `AssessInput.Policy`, so the ruleset is not
+  parsed a second way): a base chain at the input, forward or prerouting hook that is not an iptables-nft
+  table, not firewalld's and not the dashboard's own gateway, whose decision is more than an
+  unconditional accept (`blocked` or `unknown`), is listed as a foreign decision this check does not
+  evaluate; an unread or unreadable ruleset is itself an unknown. The Security page lists them under the
+  findings as "Not seen by these checks", and a clean list beside them reads "No findings in the layers
+  these checks can see". The ports sheet says the same of an exposed socket's provider, and the
+  container reachability verdicts end with it: "reachable from outside" is unproven until an external
+  check measures it. `JD_POSTURE_LIVE=1` (`TestLivePostureUnknownsOnThisHost`, run as root from a
+  compiled test binary) grades the actual host read-only and lists its unknowns.
 
 `netsec.Disconnect` ends an interactive login: the PID is matched against the live session list first,
 or the route is a "kill any process on this host" primitive wearing a sensible name. SIGHUP, not

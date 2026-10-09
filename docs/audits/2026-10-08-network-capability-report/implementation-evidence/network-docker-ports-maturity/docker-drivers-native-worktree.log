@@ -1,0 +1,10 @@
+Fri Oct  9 17:26:10 UTC 2026
+465480babe134586801fdaca7d4f6980c02ed004
+Engine 29.8.1 API 1.56
+=== RUN   TestLiveNetworkDriverCatalogueAndIgnoredOption
+    network_drivers_live_test.go:56: native catalogue: swarm=inactive manager=false pluginsRead=true drivers=6 plugin drivers=[]
+    network_drivers_live_test.go:108: the Engine accepted the undocumented option "com.docker.network.bridge.mtu" and the owned bridge br-a2dc260f0a3a kept MTU 1500
+    network_drivers_live_test.go:91: cleanup verified: no network labelled jd.network-driver-options=6bf8cf81accaeda0 remains
+--- PASS: TestLiveNetworkDriverCatalogueAndIgnoredOption (0.20s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dockerx	0.213s

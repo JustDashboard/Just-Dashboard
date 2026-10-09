@@ -47,6 +47,11 @@ import { ConfigurationRemedy } from "@/components/docker/configuration-remedy"
 import { ContainerFindings } from "@/components/docker/attention"
 import { containerEventsView } from "@/components/docker/container-events"
 import { PortTag, RouteRow } from "@/components/docker/exposure"
+import {
+  bindingFamily,
+  PublishedPathSheet,
+  type PublishedBinding,
+} from "@/components/docker/published-path"
 import { ExplainIcon, Hint, Term } from "@/components/docker/explain"
 import {
   DatabaseStorageWarning,
@@ -1659,6 +1664,8 @@ function RawInspect({ containerId }: { containerId: string }) {
  * to every interface" is a fact; "reachable from the internet" is a conclusion.
  */
 function Reachability({ containerId }: { containerId: string }) {
+  const { can } = useAuth()
+  const [tracing, setTracing] = useState<PublishedBinding | null>(null)
   const { data } = usePoll<PortRoute[]>(
     (signal) => get<PortRoute[]>(`/docker/containers/${containerId}/routes`, undefined, signal),
     0,
@@ -1674,9 +1681,29 @@ function Reachability({ containerId }: { containerId: string }) {
       <p className="eyebrow">Reachable at</p>
       <ul className="divide-y divide-hairline">
         {data.map((route) => (
-          <RouteRow key={`${route.hostIp}-${route.hostPort}-${route.protocol}`} route={route} />
+          <RouteRow
+            key={`${route.hostIp}-${route.hostPort}-${route.protocol}`}
+            route={route}
+            // The path reads the host's iptables and firewall, as the
+            // connection investigator does, so it is an administrator's.
+            onTrace={
+              can("system.admin")
+                ? () =>
+                    setTracing({
+                      hostPort: route.hostPort,
+                      protocol: route.protocol,
+                      family: bindingFamily(route.hostIp),
+                    })
+                : undefined
+            }
+          />
         ))}
       </ul>
+      <PublishedPathSheet
+        container={containerId}
+        binding={tracing}
+        onClose={() => setTracing(null)}
+      />
       {bypassed.length > 0 && (
         <Notice title="The firewall does not apply to these ports" icon={Warning} tone="warning">
           Docker publishes a port by writing NAT rules that are consulted before the firewall&apos;s

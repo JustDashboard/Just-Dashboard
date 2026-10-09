@@ -20,7 +20,7 @@ import {
 import type { Posture, SecurityFinding } from "@/lib/types"
 import { ProductGlyph } from "@/components/product-logo"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { FindingList, type Finding } from "@/components/finding-list"
 import { FilterChip } from "@/components/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -126,12 +126,40 @@ export function PosturePanel({
             emptyLabel={
               posture.skipped.length > 0
                 ? `No findings in completed checks. Not checked: ${posture.skipped.join(", ")}.`
-                : "All security checks passed"
+                : (posture.unknowns ?? []).length > 0
+                  ? "No findings in the layers these checks can see"
+                  : "All security checks passed"
             }
           />
         </div>
+        <PostureUnknowns unknowns={posture.unknowns ?? []} />
       </PanelBody>
     </Panel>
+  )
+}
+
+/**
+ * The layers no check could see, said beside the findings rather than left
+ * out of them: a verdict silent about provider policy or another nftables
+ * table reads as having checked them. Neither a finding nor a pass.
+ */
+function PostureUnknowns({ unknowns }: { unknowns: NonNullable<Posture["unknowns"]> }) {
+  if (unknowns.length === 0) return null
+  return (
+    <section aria-label="Not seen by these checks" className="mt-6 space-y-2">
+      <p className="eyebrow">Not seen by these checks</p>
+      <ul className="space-y-3">
+        {unknowns.map((unknown) => (
+          <li key={unknown.id} className="flex items-start gap-2.5">
+            <StatusDot tone="unknown" className="mt-1.5" />
+            <div className="min-w-0 space-y-0.5">
+              <p className="text-body font-medium">{unknown.title}</p>
+              <p className="text-hint leading-relaxed text-muted-foreground">{unknown.detail}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 

@@ -26,6 +26,10 @@ async function mockHost(page: Page, listeners: unknown[] = hostPorts) {
   await mockProxy(page, { included: true })
   // Registered after the proxy tables, so it answers first.
   await page.route("**/api/v1/ports", (route) => json(route, listeners))
+  // No external source enrolled, as on most hosts: a sheet says so.
+  await page.route("**/api/v1/ports/external", (route) =>
+    json(route, { checkedAt: new Date().toISOString(), evidence: [], scopes: [] }),
+  )
 }
 
 function tile(page: Page, label: string) {

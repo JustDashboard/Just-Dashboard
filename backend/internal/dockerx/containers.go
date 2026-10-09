@@ -311,6 +311,7 @@ type MountPoint struct {
 type NetworkBinding struct {
 	Name       string   `json:"name"`
 	IPAddress  string   `json:"ipAddress"`
+	IPv6       string   `json:"ipv6Address,omitempty"`
 	Gateway    string   `json:"gateway"`
 	MacAddress string   `json:"macAddress"`
 	Aliases    []string `json:"aliases"`
@@ -446,7 +447,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (*ContainerDetail, erro
 		for name, ep := range insp.NetworkSettings.Networks {
 			d.Networks = append(d.Networks, name)
 			d.NetworkList = append(d.NetworkList, NetworkBinding{
-				Name: name, IPAddress: ep.IPAddress, Gateway: ep.Gateway,
+				Name: name, IPAddress: ep.IPAddress, IPv6: ep.GlobalIPv6Address, Gateway: ep.Gateway,
 				MacAddress: ep.MacAddress, Aliases: orEmpty(ep.Aliases), NetworkID: ep.NetworkID,
 			})
 		}

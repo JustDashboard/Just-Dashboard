@@ -23,8 +23,12 @@ export function PathReport({ result }: { result: PathResult }) {
         </h2>
         <p className="font-mono text-body break-all">
           {result.scope.family === "inet" ? "IPv4" : "IPv6"} · {result.scope.protocol.toUpperCase()}{" "}
-          / {result.scope.port} · {result.scope.sourceAddress || "source unknown"} →{" "}
-          {result.scope.address || "destination unresolved"}
+          / {result.scope.port} ·{" "}
+          {result.scope.sourceAddress ||
+            (result.scope.vantage === "published_port"
+              ? "any outside address"
+              : "source unknown")}{" "}
+          → {result.scope.address || "destination unresolved"}
           {result.scope.mark && ` · mark ${result.scope.mark}`}
         </p>
         <p className="text-body">{result.comparison}</p>

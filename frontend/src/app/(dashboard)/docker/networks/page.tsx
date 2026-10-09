@@ -3,7 +3,6 @@
 import { Suspense, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Plus } from "@/components/icons"
-import { useConfirm } from "@/components/confirm-dialog"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext } from "@/components/page"
 import { NetworksTab } from "@/components/docker/networks-tab"
@@ -24,7 +23,6 @@ export default function DockerNetworksPage() {
 }
 
 function DockerNetworksContent() {
-  const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
   const [creating, setCreating] = useState(false)
   const [dismissedId, setDismissedId] = useState("")
@@ -39,7 +37,6 @@ function DockerNetworksContent() {
     <Page>
       <PageContext eyebrow="Docker" title="Networks" />
       <NetworksTab
-        confirm={confirm}
         creating={creating || Boolean(initialReservationId)}
         onCreatingChange={onCreatingChange}
         initialReservationId={initialReservationId}
@@ -52,7 +49,6 @@ function DockerNetworksContent() {
           )
         }
       />
-      {dialog}
     </Page>
   )
 }

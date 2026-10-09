@@ -42,6 +42,79 @@ Focused coverage is `network_spec_test.go`, `docker_network_spec_test.go`,
 address families after creation; browser tests cover mobile/desktop payloads, refusals, stale inventory
 and role-specific controls. These fixtures do not constitute native driver or provider acceptance.
 
+`GET /docker/networks/drivers` reads the Engine's driver catalogue when asked
+(`dockerx.NetworkDrivers`: `/info`'s network plugins and `/plugins` with the `networkdriver`
+capability). Each driver is `builtin` or `plugin`, creatable or refused with a reason — `host`/`null`
+are network modes, `overlay` needs this Engine to be a swarm manager, a disabled plugin is refused —
+and built-in drivers carry the option keys Docker documents. Creation checks the same catalogue before
+the Engine is asked (`api.checkNetworkDriver`): a driver this Engine lacks, a refused one, or a
+macvlan/ipvlan `parent` that is not a host device answers `400 driver_unavailable`; any driver but
+`bridge` is refused with `503 drivers_unread` when the catalogue cannot be read. The form suggests the
+creatable drivers, says why one is refused, labels a plugin's options as passed through unchecked, and
+names option keys a built-in driver does not document, which Docker silently ignores. A plugin driver
+is still only as good as the installed plugin; no third-party plugin is installed or accepted here.
+
+### Network ownership, dependencies and guarded changes
+
+Every listed and inspected network carries `owner` (`dockerx.OwnerOfNetwork`, from its labels):
+`system`, `dashboard` (the dashboard's own Compose project, told by the data directory its backend
+mounts — `proxysvc.SelfProject`), `database-link` and `deployment` (managed labels with the
+environment joined to its project's name while it exists), `compose` or `manual`. A failed container
+listing no longer reads as an unused network: the list sets `membersKnown: false` with
+`membersError`, and the detail sets `membersError` and per-member `unread` when a member's inspect
+failed. Members carry their other networks (the containers joining this network to the rest),
+`ingress` for the shared public Caddy (`dockerx.IsIngressContainer`: the provisioned label or name, or an
+adopted Caddy publishing 80 and 443 on every interface) and `dashboard` for the dashboard's own.
+
+Changes are previewed from one fresh reading (`dockerx.NetworkDependencies`: verbose network inspect,
+every container including stopped ones, every network, and an inspect per member and per candidate; a
+failed container or network listing fails the reading, `503 dependencies_unread`, rather than
+reporting no dependents). The pure previews return conflicts at three levels — `block` (refused by the
+mutation as well, `409 network_conflict`), `warn` (a consequence the dialog confirms, recorded as
+`acknowledged` in the audit entry) and `info`:
+
+- `GET /docker/networks/{id}/connect?container=&alias=` (`PreviewConnect`): already attached,
+  host/none/`container:` network modes, a swarm network without `--attachable`, an alias the resolver
+  cannot answer, aliases on the default bridge, every IPv4 pool full (members counted in the pool
+  their address is in) and the dashboard's own network are
+  blocks; a name another member already answers to (Docker returns both), overlapping ranges with the
+  candidate's other networks and attaching to a deployment's or database-link network are warnings.
+- `GET /docker/networks/{id}/disconnect?container=` (`PreviewDisconnect`): the dashboard's own
+  containers, the shared ingress and a database-link network's members are refused; the last network,
+  published ports carried on this network, peers that lose the member's names and a deployment's
+  network are warnings; Compose putting it back is a note. An endpoint whose container the Engine says
+  no longer exists is a stale endpoint, removable with `force`; one whose container was merely unread
+  is refused.
+- `GET /docker/networks/{id}/removal` (`PreviewRemove` plus the dashboard's records): system networks,
+  running members, the dashboard's own stack and a deployment's network whose environment still exists
+  are refused, as is the swarm's routing-mesh network; stopped containers that still name the network
+  (the Engine removes it anyway, and they then fail to start — shown natively below) and shared IPAM
+  reservations still recording it as owner — or reservations that could not be read — are warnings;
+  Compose recreating it and an orphaned managed network are notes. An unreadable deployment record
+  counts as existing.
+- `GET /docker/networks/prune` (`PruneCandidates`): every local network the Engine's own prune would
+  take (swarm networks are their managers'), each `removable` only when nothing blocks or warns. `POST /docker/networks/prune` with `{ids}` removes
+  exactly those reviewed IDs that are still removable now and reports the rest as `skipped`; without
+  ids it removes every removable network. It never runs the Engine's prune. The disk page's cleanup
+  category and the global sweep remove the same removable set (`removableNetworks`), treating every
+  managed network as its deployment's.
+
+The UI draws the owner on each card and in the detail, offers attach on any local network (the old
+non-attachable hint was a swarm-only rule applied to bridges) but not on the dashboard's own, shows no
+detach control for the dashboard's containers or the ingress, and previews every attach (as the draft
+changes, keeping the draft when the preview fails), detach, removal and prune before confirming; a
+refused confirmation reads the preview again and stays disabled until the new reading lands. The
+mutations act on the full ID the reference resolved to, and audit it.
+`docker_network_dependencies_test.go`, `network_dependencies_test.go`, `network_drivers_test.go` and
+`docker-network-maturity.spec.ts` cover these.
+
+The Engine-wire fixture `JD_DOCKER_NETWORK_LIVE=1 go test ./internal/dockerx -run
+'^TestLiveNetworkDependencyPreviewsAgainstTheEngine$' -count=1 -v` creates two uniquely labelled
+internal /28 bridges in free benchmarking space and three owned containers from a cached
+`python:3.11-slim`, runs the previews and the reviewed prune over them, then removes the owned dormant
+network to show the Engine removing a network a stopped container names and that container failing to
+start. Cleanup removes only objects carrying its run's label and verifies none remain.
+
 ### Containers and inventory
 
 - **`ContainerSpec` is the dashboard's shape, not `container.Config` + `HostConfig`.** Those are split on

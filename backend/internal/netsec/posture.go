@@ -39,6 +39,9 @@ type Posture struct {
 	// examine is not present on this host. A check that silently did not run
 	// looks exactly like a check that passed.
 	Skipped []string `json:"skipped"`
+	// Unknowns are the layers of exposure no check could see: provider
+	// policy, and nftables tables no adapter models.
+	Unknowns []PostureUnknown `json:"unknowns"`
 }
 
 // SecurityFinding is one thing worth telling the operator about how exposed
@@ -136,6 +139,13 @@ type AssessInput struct {
 	// prevent rather than one to reproduce.
 	PackageManager    string
 	SecurityFiltering bool
+	// Policy is the nftables ruleset's filtering chains, nil where it was not
+	// read. PublicAddress is a public address on one of this host's
+	// interfaces, empty for none, once PublicAddressRead says it was looked
+	// for.
+	Policy            *PolicyCoverage
+	PublicAddress     string
+	PublicAddressRead bool
 	Now               time.Time
 }
 
@@ -165,7 +175,7 @@ func Assess(in AssessInput) *Posture {
 	if in.Now.IsZero() {
 		in.Now = time.Now()
 	}
-	p := &Posture{Findings: []SecurityFinding{}, CheckedAt: in.Now.UTC(), Skipped: []string{}}
+	p := &Posture{Findings: []SecurityFinding{}, CheckedAt: in.Now.UTC(), Skipped: []string{}, Unknowns: assessUnknowns(in)}
 
 	p.add(assessExposure(in))
 	p.add(assessFirewall(in))

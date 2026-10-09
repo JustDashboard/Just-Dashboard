@@ -1,7 +1,7 @@
 import type { ProbeResult } from "@/lib/types"
 
 export type PathRequest = {
-  sourceKind: "host" | "container"
+  sourceKind: "host" | "container" | "external"
   containerId?: string
   sourceAddress?: string
   target: string
@@ -30,7 +30,7 @@ export type PathEvidence = {
 export type PathResult = {
   request: PathRequest
   scope: {
-    vantage: "dashboard_host" | "container_network_namespace"
+    vantage: "dashboard_host" | "container_network_namespace" | "published_port"
     source: string
     sourceAddress?: string
     target: string

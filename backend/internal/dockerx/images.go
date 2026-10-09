@@ -3,6 +3,7 @@ package dockerx
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"sort"
 	"strings"
@@ -309,6 +310,14 @@ type Network struct {
 	// Bridge is the host device a bridge network is carried on, which is how
 	// the Network pages put a Docker network's name on br-1a2b3c4d5e6f.
 	Bridge string `json:"bridge,omitempty"`
+	// MembersKnown is false where the container listing failed: UsedBy is
+	// then not "nothing is attached" but "not read", and a network must not
+	// look removable on the strength of a failed read.
+	MembersKnown bool   `json:"membersKnown"`
+	MembersError string `json:"membersError,omitempty"`
+	// Owner is who created the network, by its labels. The API sets it,
+	// since telling the dashboard's own project needs its data directory.
+	Owner *NetworkOwner `json:"owner,omitempty"`
 }
 
 func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
@@ -332,7 +341,8 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 	// with the container listing, the same way its mounts do for the volumes
 	// view. An inspect per network would be one round trip per row.
 	members := map[string][]string{}
-	if containers, err := c.listContainerSummaries(ctx, container.ListOptions{All: true}); err == nil {
+	containers, membersErr := c.listContainerSummaries(ctx, container.ListOptions{All: true})
+	if membersErr == nil {
 		for _, ct := range containers {
 			for _, name := range ct.Networks {
 				members[name] = append(members[name], ct.Name)
@@ -348,7 +358,11 @@ func (c *Client) ListNetworks(ctx context.Context) ([]Network, error) {
 			ID: n.ID, Name: n.Name, Driver: n.Driver, Scope: n.Scope,
 			Internal: n.Internal, Attachable: n.Attachable, IPv6: n.EnableIPv6,
 			Created: n.Created.UTC(), Labels: n.Labels, Subnets: []string{},
-			UsedBy: members[n.Name],
+			UsedBy:       members[n.Name],
+			MembersKnown: membersErr == nil,
+		}
+		if membersErr != nil {
+			nw.MembersError = membersErr.Error()
 		}
 		if nw.UsedBy == nil {
 			nw.UsedBy = []string{}
@@ -704,20 +718,55 @@ func (c *Client) PruneAll(ctx context.Context, opts PruneOptions) ([]PruneReport
 	return reports, nil
 }
 
+// pruneNetworks removes the networks nothing names at all — no running and
+// no stopped container — and none a deployment manages. The Engine's own
+// prune also takes a network a stopped container still names, which then
+// fails to start, while the cleanup preview counted it as in use; this
+// removes exactly what the preview counts. Without the dashboard's records a
+// managed network's deployment is assumed to exist, so it is kept.
 func (c *Client) pruneNetworks(ctx context.Context) (PruneReport, error) {
 	cli, err := c.api()
 	if err != nil {
 		return PruneReport{}, err
 	}
-	rep, err := cli.NetworksPrune(ctx, filters.NewArgs())
+	rep := PruneReport{Kind: "networks", Items: []string{}}
+	candidates, err := c.removableNetworks(ctx)
 	if err != nil {
-		return PruneReport{}, err
+		return rep, err
 	}
-	items := rep.NetworksDeleted
-	if items == nil {
-		items = []string{}
+	failures := []string{}
+	for _, candidate := range candidates {
+		if err := cli.NetworkRemove(ctx, candidate.ID); err != nil {
+			failures = append(failures, candidate.Name+": "+err.Error())
+			continue
+		}
+		rep.Items = append(rep.Items, candidate.Name)
 	}
-	return PruneReport{Kind: "networks", Items: items}, nil
+	if len(failures) > 0 {
+		return rep, errors.New(strings.Join(failures, "; "))
+	}
+	return rep, nil
+}
+
+// removableNetworks is what pruneNetworks removes and the cleanup preview
+// counts.
+func (c *Client) removableNetworks(ctx context.Context) ([]PruneCandidate, error) {
+	networks, err := c.ListNetworks(ctx)
+	if err != nil {
+		return nil, err
+	}
+	containers, err := c.listContainerSummaries(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, err
+	}
+	kept := func(int64) (string, bool) { return "", true }
+	out := []PruneCandidate{}
+	for _, candidate := range PruneCandidates(networks, containers, "", kept) {
+		if candidate.Removable {
+			out = append(out, candidate)
+		}
+	}
+	return out, nil
 }
 
 // ImageRef normalises a user-supplied reference so "nginx" pulls nginx:latest

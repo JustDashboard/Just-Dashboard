@@ -1930,6 +1930,28 @@ containers/volumes/networks.
   up from `from` and passing over every host port a container publishes or, stopped, keeps in its
   `PortBindings` (`dockerx.HostPortBindings`, ranges expanded); it answers `{ports, skipped,
   containersChecked}` so the page does not claim to have avoided containers when Docker did not answer.
+  It also passes over claims a bind cannot see (`api.freePortPolicy`, `ports_reservations.go`), each
+  read beside the search under the owner-source bound and consulted in a fixed order: unexpired
+  deployment candidate leases (`deploy_port_leases`, matched by address overlap), the tailnet preview
+  range `selfcfg.TailnetPortMin`–`TailnetPortMax` (for a wildcard or tailnet address only), the kernel's
+  ephemeral range (outgoing connections take ports from it), an enabled firewall's inbound rule already
+  naming the port (admitting it from where the rule says, or refusing it — whatever binds there meets
+  that policy at once; read through `netsec.InboundRuleFor`, so an interface-limited or profile rule is
+  not taken for one covering every address), and an enabled gateway forward translating it away. A
+  loopback search skips the firewall and gateway, which decide only what other hosts reach.
+  `JD_PORT_POLICY_LIVE=1` (`TestLiveFreePortPolicyOnThisHost`, run as root from a compiled test binary)
+  reads every source on the actual host for a wildcard search and lists what each would pass over,
+  binding nothing. `reservations` names each
+  passed-over port (at most 32) and why; `sources` lists every owner consulted with `checked`,
+  `unavailable` (with the reason) or `not_supplied` — provider reservations, for which no adapter
+  exists, always say so rather than being left out.
+  `GET /ports/external` (system.admin, like the external checks it reads) joins the external-check
+  owner's retained checks to their enrolled sources (`ports_external.go`): per check the port, family,
+  source, placement, measured address, whether that address is on this host, lifecycle status and the
+  TCP stage's state and basis — an expired or cancelled check stays `unknown`, never a failed
+  measurement — plus each enrolled, unrevoked source's scopes, so the page can offer a check for a
+  port a scope names. It starts nothing; a check is created through `POST /network/external/checks`.
+  An unavailable owner answers 200 with `error` rather than an empty reading.
   Each listener carries `pids`, every process holding the socket, and on TCP `clients` — the ESTABLISHED
   connections in the same socket tables (`countClients`: same family and local port, the exact address
   before a wildcard listener), with the five busiest remote addresses. `POST /ports/identify`
