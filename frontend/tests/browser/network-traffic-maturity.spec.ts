@@ -242,9 +242,10 @@ test("a loaded program opens into its maps, attachments and cost, and the observ
   await expect(page.getByLabel("eBPF platform")).toContainText(
     "Kernel 6.14.0-37-generic · JIT on · unprivileged loading refused · BTF type information present · bpf filesystem mounted · run statistics off",
   )
-  await expect(
-    page.locator("[data-slot=stat-tile]").filter({ hasText: "On cgroups" }),
-  ).toContainText("41")
+  // The figure counts up once it is on screen.
+  const cgroups = page.locator("[data-slot=stat-tile]").filter({ hasText: "On cgroups" })
+  await cgroups.scrollIntoViewIfNeeded()
+  await expect(cgroups).toContainText("41")
   const row = page.getByRole("row").filter({ hasText: "jd_flow_egress" })
   await expect(row).toContainText("this dashboard’s observer")
   await row.getByRole("button", { name: "Open program 9101" }).click()
@@ -340,7 +341,7 @@ test("a peer opens into its tuples, ages, closes and the layers it crosses", asy
   )
   await row.getByRole("button", { name: "Inspect 198.51.100.23" }).click()
   const sheet = page.getByRole("dialog")
-  const tuples = sheet.getByLabel("Connections with 198.51.100.23")
+  const tuples = sheet.getByLabel("Connections with 198.51.100.23", { exact: true })
   await expect(tuples).toContainText("203.0.113.10:443")
   await expect(tuples).toContainText("51022")
   await expect(tuples).toContainText("≥ 1h 30m")
