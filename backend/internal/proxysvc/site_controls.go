@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -283,7 +284,8 @@ func (s *Service) VerifySiteControls(ctx context.Context, site string, opts Veri
 		return nil, err
 	}
 	out := &ControlsVerification{Site: site, URL: target.url.String(), CheckedAt: time.Now().UTC(), Policy: policy}
-	m := measurer{target: target, scheme: scheme, port: port, host: host, out: out}
+	m := &measurer{target: target, scheme: scheme, port: port, host: host, out: out}
+	defer func() { out.Requests = int(m.requests.Load()) }()
 	// The request limit is measured last: every request the other checks
 	// send counts against it, and a burst sent first would leave them
 	// answered 429.
@@ -363,6 +365,8 @@ type measurer struct {
 	port   int
 	host   string
 	out    *ControlsVerification
+	// requests counts what was sent; the limit check sends at once.
+	requests atomic.Int64
 }
 
 func (m *measurer) client() *http.Client {
@@ -393,7 +397,7 @@ func (m *measurer) get(ctx context.Context, client *http.Client, path string) (i
 	}
 	request.Header.Set("User-Agent", "Just-Dashboard control check")
 	response, err := client.Do(request)
-	m.out.Requests++
+	m.requests.Add(1)
 	if err != nil {
 		return 0, nil, err
 	}
