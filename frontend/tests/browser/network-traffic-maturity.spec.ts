@@ -471,6 +471,10 @@ test.describe("at a phone's width", () => {
     await page.screenshot({ path: testInfo.outputPath("traffic-390.png"), fullPage: true })
     await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
     await expect(page.getByRole("dialog").getByLabel("Upload queue delay")).toBeVisible()
+    // Settled after the sheet's entry animation, so the picture is the sheet.
+    await page.waitForFunction(() =>
+      document.getAnimations().every((a) => a.playState !== "running"),
+    )
     await page.screenshot({ path: testInfo.outputPath("upload-profile-390.png") })
     await page.keyboard.press("Escape")
 
@@ -483,6 +487,10 @@ test.describe("at a phone's width", () => {
       .getByRole("button", { name: "Inspect 198.51.100.23" })
       .click()
     await expect(page.getByRole("dialog").getByLabel("Across the layers")).toBeVisible()
+    // Settled after the sheet's entry animation, so the picture is the sheet.
+    await page.waitForFunction(() =>
+      document.getAnimations().every((a) => a.playState !== "running"),
+    )
     await page.screenshot({ path: testInfo.outputPath("peer-sheet-390.png") })
   })
 })
