@@ -191,7 +191,8 @@ test("a network's detail names its owner, both families and the networks its mem
     own.getByText("The dashboard's own private network takes no other containers."),
   ).toBeVisible()
   await expect(own.getByRole("button", { name: "Attach a container", exact: true })).toHaveCount(0)
-  await expect(own.getByText("This dashboard", { exact: true })).toBeVisible()
+  // The member's own mark, beside the owner line that says the same of the network.
+  await expect(own.locator('[data-slot="tag"]', { hasText: "This dashboard" })).toBeVisible()
   await expect(own.getByRole("button", { name: "Detach jd-frontend", exact: true })).toHaveCount(0)
 })
 
