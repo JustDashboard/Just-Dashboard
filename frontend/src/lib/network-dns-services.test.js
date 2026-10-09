@@ -2,15 +2,19 @@ import { expect, test } from "bun:test"
 import {
   dnsAttemptKey,
   dnsChangeOwnerProblem,
+  dnsChangeName,
   dnsRetainedReview,
   dnsReviewProblem,
   dnsSameProvisionResources,
   dnsSameReviewedIntent,
   readDNSAttempts,
   readDNSChange,
+  readDNSChangeRequest,
+  readDNSCurrentChange,
   readDNSConnection,
   readDNSList,
   readDNSProvision,
+  readDNSRecords,
   readDNSSnapshot,
   readDNSView,
 } from "./network-dns-services"
@@ -347,4 +351,289 @@ test("bootstrap passwords are request-only and never survive a retained setup re
 test("missing inventory is a read failure rather than a healthy empty list", () => {
   expect(() => readDNSList(null, readDNSConnection)).toThrow("incomplete")
   expect(() => readDNSList(Array(65).fill(change()), readDNSChange)).toThrow("retained limit")
+})
+
+const hash = (digit = "a") => digit.repeat(64)
+const records = () => ({
+  zone: "owned.example",
+  type: "Primary",
+  disabled: false,
+  internal: null,
+  nativeVersion: "15.6",
+  dnssec: "Unsigned",
+  fingerprint: hash(),
+  evidence: {
+    state: "native_authority_configuration",
+    basis: "native_api",
+    summary: "Configured authority; publication is unmeasured.",
+  },
+  records: [
+    {
+      name: "host.owned.example",
+      type: "A",
+      value: "198.51.100.9",
+      ttl: 60,
+      disabled: false,
+      editable: true,
+      fingerprint: hash("b"),
+    },
+    {
+      name: "_service.owned.example",
+      type: "TXT",
+      ttl: 60,
+      disabled: false,
+      editable: false,
+      fingerprint: hash("c"),
+    },
+  ],
+})
+const policyChange = (action = "record_add") => {
+  const row = change()
+  row.before.engine = "technitium"
+  row.before.version = "15.6"
+  row.before.records = records()
+  row.before.selectionFingerprint = hash()
+  row.request = {
+    action,
+    zone: "owned.example",
+    record: { name: "new.owned.example", type: "AAAA", value: "2001:db8::9", ttl: 60 },
+  }
+  if (action === "client_groups") {
+    row.before.engine = "pihole"
+    row.before.version = "v6.7.1"
+    delete row.before.records
+    row.before.selectedClient = {
+      address: "198.51.100.9",
+      groups: [0],
+      comment: null,
+      commentFingerprint: hash("b"),
+      otherPolicyFingerprint: hash("c"),
+    }
+    row.request = { action, client: { address: "198.51.100.9", groups: [] } }
+  }
+  if (action === "override_add" || action === "override_remove") {
+    row.before.engine = "adguard"
+    row.before.version = "v0.107.71"
+    delete row.before.records
+    row.request = { action, record: { name: "local.example", type: "A", value: "198.51.100.9" } }
+  }
+  return row
+}
+
+test("closed reviewed actions preserve exact record TTL and explicit empty native groups", () => {
+  for (const action of [
+    "override_add",
+    "override_remove",
+    "record_add",
+    "record_remove",
+    "client_groups",
+  ]) {
+    const row = policyChange(action)
+    const read = readDNSChange(row)
+    expect(read.request).toEqual(row.request)
+    expect(read.before.selectionFingerprint).toBe(hash())
+    expect(dnsChangeName(read.request)).toBeTruthy()
+  }
+  const read = readDNSChange(policyChange("client_groups"))
+  expect(read.request.client.groups).toEqual([])
+  expect(read.before.selectedClient.comment).toBeNull()
+  const metadata = policyChange()
+  delete metadata.before
+  expect(readDNSChange(metadata).before).toBeUndefined()
+})
+
+test("every retained action rejects irrelevant or arbitrary native payload fields", () => {
+  const intents = [
+    { action: "protection", protection: false },
+    { action: "upstreams", upstreams: ["192.0.2.53:53"] },
+    { action: "access", allowedClients: ["192.0.2.0/24"] },
+    { action: "zone_create", zone: "owned.example" },
+    ...["override_add", "override_remove", "record_add", "record_remove", "client_groups"].map(
+      (action) => policyChange(action).request,
+    ),
+  ]
+  for (const request of intents) {
+    expect(readDNSChangeRequest(request)).toBeTruthy()
+    for (const field of ["nativeBody", "token", "command", "proxy"])
+      expect(() => readDNSChangeRequest({ ...request, [field]: {} })).toThrow("unsupported")
+    const irrelevant =
+      request.action === "client_groups"
+        ? { record: { name: "local.example", type: "A", value: "198.51.100.9" } }
+        : { client: { address: "198.51.100.9", groups: [] } }
+    expect(() => readDNSChangeRequest({ ...request, ...irrelevant })).toThrow("unsupported")
+  }
+})
+
+test("record and client reviewed requests enforce canonical grammar, bounds and native engine", () => {
+  for (const delta of [
+    { name: "UPPER.owned.example" },
+    { name: "*.owned.example" },
+    { name: "badowned.example" },
+    { type: "TXT" },
+    { value: "::ffff:198.51.100.9" },
+    { ttl: "60" },
+    { ttl: 0 },
+    { ttl: 86401 },
+    { ttl: 1.5 },
+    { unknown: true },
+  ]) {
+    const request = policyChange().request
+    expect(() =>
+      readDNSChangeRequest({ ...request, record: { ...request.record, ...delta } }),
+    ).toThrow("unsupported")
+  }
+  for (const groups of [
+    undefined,
+    null,
+    ["0"],
+    [0, 0],
+    [-1],
+    [2147483648],
+    Array.from({ length: 65 }, (_, i) => i),
+  ])
+    expect(() =>
+      readDNSChangeRequest({
+        action: "client_groups",
+        client: { address: "198.51.100.9", groups },
+      }),
+    ).toThrow("unsupported")
+  expect(() => readDNSChangeRequest(policyChange().request, "pihole")).toThrow()
+  expect(() => readDNSChangeRequest(policyChange("client_groups").request, "adguard")).toThrow()
+  expect(() => readDNSChangeRequest(policyChange("override_add").request, "technitium")).toThrow()
+  expect(() =>
+    readDNSChangeRequest({ ...policyChange("override_add").request, zone: "owned.example" }),
+  ).toThrow()
+  expect(() =>
+    readDNSChangeRequest({
+      ...policyChange("override_add").request,
+      record: { ...policyChange("override_add").request.record, ttl: 0 },
+    }),
+  ).toThrow()
+  expect(() =>
+    readDNSChangeRequest({ action: "upstreams", upstreams: ["dns.example:53"] }),
+  ).toThrow()
+  expect(() =>
+    readDNSChangeRequest({ action: "access", allowedClients: ["192.0.2.9/24"] }),
+  ).toThrow()
+  expect(() =>
+    readDNSChangeRequest({
+      action: "access",
+      allowedClients: ["192.0.2.0/24"],
+      deniedClients: ["192.0.2.0/24"],
+    }),
+  ).toThrow()
+})
+
+test("record inventory retains nullable classification and unsupported rows without editable claims", () => {
+  const read = readDNSRecords(records(), "owned.example")
+  expect(read.internal).toBeNull()
+  expect(read.nativeVersion).toBe("15.6")
+  expect(read.records[1].type).toBe("TXT")
+  expect(read.records[1].editable).toBe(false)
+  expect(read.records[1].value).toBeUndefined()
+  for (const mutate of [
+    (v) => delete v.internal,
+    (v) => (v.internal = "false"),
+    (v) => (v.nativeVersion = "15.7"),
+    (v) => (v.records[0].ttl = "60"),
+    (v) => (v.records[0].fingerprint = "missing"),
+    (v) => (v.records[0].value = "x".repeat(513)),
+    (v) => (v.records[0].comments = "x".repeat(513)),
+    (v) => (v.records[1].editable = true),
+    (v) => (v.records[0].disabled = true),
+    (v) => (v.records[0].name = "foreign.example"),
+    (v) => (v.records = Array(257).fill(v.records[0])),
+  ]) {
+    const value = records()
+    mutate(value)
+    expect(() => readDNSRecords(value)).toThrow()
+  }
+  expect(() => readDNSRecords(records(), "foreign.example")).toThrow("changed")
+})
+
+test("selected snapshots refuse missing fingerprints, owner/type inconsistencies and malformed client state", () => {
+  for (const mutate of [
+    (v) => delete v.selectionFingerprint,
+    (v) => (v.selectionFingerprint = hash("d")),
+    (v) => (v.engine = "adguard"),
+    (v) => (v.version = "15.7"),
+    (v) => (v.records.internal = true),
+  ]) {
+    const value = policyChange().before
+    mutate(value)
+    expect(() => readDNSSnapshot(value)).toThrow()
+  }
+  for (const mutate of [
+    (v) => delete v.selectedClient.comment,
+    (v) => (v.selectedClient.commentFingerprint = "unknown"),
+    (v) => (v.selectedClient.groups = ["0"]),
+    (v) => (v.selectedClient.address = "hostname.example"),
+  ]) {
+    const value = policyChange("client_groups").before
+    mutate(value)
+    expect(() => readDNSSnapshot(value)).toThrow()
+  }
+  const value = snapshot()
+  value.localOverrides = [
+    { name: "local.example", value: "198.51.100.9", type: "native_rewrite", enabled: false },
+  ]
+  expect(readDNSSnapshot(value).localOverrides[0].enabled).toBe(false)
+  value.localOverrides[0].enabled = "false"
+  expect(() => readDNSSnapshot(value)).toThrow()
+})
+
+test("plain owner inventory cannot replace an exact selected current-review read", () => {
+  for (const action of ["record_add", "client_groups", "override_add"]) {
+    const review = readDNSChange(policyChange(action))
+    const owner = { ...connection(), engine: review.before.engine }
+    const view = { connection: owner, state: "available", snapshot: structuredClone(review.before) }
+    expect(readDNSCurrentChange(view, review).snapshot.selectionFingerprint).toBe(hash())
+    expect(dnsChangeOwnerProblem(review, view)).toBeUndefined()
+    const plain = structuredClone(view)
+    delete plain.snapshot.selectionFingerprint
+    delete plain.snapshot.records
+    delete plain.snapshot.selectedClient
+    expect(() => readDNSCurrentChange(plain, review)).toThrow("exact reviewed")
+    expect(dnsChangeOwnerProblem(review, plain)).toBeTruthy()
+    expect(() =>
+      readDNSCurrentChange({ ...view, connection: { ...owner, generation: 4 } }, review),
+    ).toThrow("generation")
+    const drift = { ...view, snapshot: { ...view.snapshot, policyFingerprint: "changed-policy" } }
+    expect(readDNSCurrentChange(drift, review).state).toBe("available")
+    expect(dnsChangeOwnerProblem(review, drift)).toContain("changed")
+    expect(
+      readDNSCurrentChange(
+        { connection: owner, state: "unavailable", error: "native timeout" },
+        review,
+      ).state,
+    ).toBe("unavailable")
+  }
+})
+
+test("selected metadata remains immutable across confirmation even when a top-level digest is reused", () => {
+  const review = readDNSChange(policyChange())
+  for (const mutate of [
+    (v) => (v.before.records.records[0].ttl = 120),
+    (v) => (v.before.records.records[0].fingerprint = hash("d")),
+    (v) => (v.before.records.internal = false),
+    (v) => (v.before.records.nativeVersion = "15.6.0"),
+    (v) => (v.before.selectionFingerprint = hash("d")),
+  ]) {
+    const next = structuredClone(review)
+    mutate(next)
+    expect(dnsSameReviewedIntent(review, next)).toBe(false)
+  }
+  const client = readDNSChange(policyChange("client_groups"))
+  const next = structuredClone(client)
+  next.before.selectedClient.comment = "other comment"
+  expect(dnsSameReviewedIntent(client, next)).toBe(false)
+  expect(
+    dnsReviewProblem(
+      client,
+      "change",
+      new Set([dnsAttemptKey("change", client.id)]),
+      Date.parse(at),
+      { ...connection(), engine: "pihole" },
+    ),
+  ).toContain("attempted apply")
 })

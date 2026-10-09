@@ -1,3 +1,13 @@
+import {
+  dnsClassicEndpoint,
+  dnsClientAddress,
+  dnsDomainName,
+  dnsLiteralAddress,
+  dnsPrefix,
+  dnsRecordZoneEditable,
+  dnsUnicastAddress,
+} from "./network-dns-service-policy"
+
 export const DNS_SERVICE_BASE = "/network/dns/services"
 export type DNSEngine = "adguard" | "pihole" | "technitium"
 export const DNS_ENGINES: { value: DNSEngine; name: string }[] = [
@@ -43,6 +53,36 @@ export type DNSNativeGroup = {
   domains: string[]
   translations?: Record<string, string>
 }
+export type DNSRecordChange = { name: string; type: "A" | "AAAA"; value: string; ttl?: number }
+export type DNSClientGroupChange = { address: string; groups: number[] }
+export type DNSSelectedClient = {
+  address: string
+  groups: number[]
+  comment: string | null
+  commentFingerprint: string
+  otherPolicyFingerprint: string
+}
+export type DNSZoneRecord = {
+  name: string
+  type: string
+  value?: string
+  ttl: number
+  disabled: boolean
+  editable: boolean
+  comments?: string
+  fingerprint: string
+}
+export type DNSRecordInventory = {
+  zone: string
+  type: string
+  disabled: boolean
+  internal: boolean | null
+  nativeVersion: string
+  dnssec: string
+  records: DNSZoneRecord[]
+  evidence: DNSNativeReading
+  fingerprint: string
+}
 export type DNSServiceSnapshot = {
   policyFingerprint: string
   observedAt: string
@@ -78,7 +118,7 @@ export type DNSServiceSnapshot = {
   filterGroups: DNSNativeGroup[]
   appProtection?: boolean
   appClientEvidence: DNSNativeReading
-  localOverrides: { name: string; value: string; type: string }[]
+  localOverrides: { name: string; value: string; type: string; enabled?: boolean }[]
   overrideEvidence: DNSNativeReading
   queries: {
     at: string
@@ -90,6 +130,9 @@ export type DNSServiceSnapshot = {
   }[]
   queryEvidence: DNSNativeReading
   limitations: string[]
+  records?: DNSRecordInventory
+  selectionFingerprint?: string
+  selectedClient?: DNSSelectedClient
 }
 export type DNSServiceView = {
   connection: DNSConnection
@@ -102,6 +145,13 @@ export type DNSChangeRequest =
   | { action: "upstreams"; upstreams: string[] }
   | { action: "access"; allowedClients: string[]; deniedClients: string[] }
   | { action: "zone_create"; zone: string }
+  | { action: "override_add" | "override_remove"; record: Omit<DNSRecordChange, "ttl"> }
+  | {
+      action: "record_add" | "record_remove"
+      zone: string
+      record: DNSRecordChange & { ttl: number }
+    }
+  | { action: "client_groups"; client: DNSClientGroupChange }
 export type DNSServiceChange = {
   id: string
   connectionId: string
@@ -154,6 +204,8 @@ const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 const text = (value: unknown): value is string => typeof value === "string"
 const optionalText = (value: unknown) => value === undefined || text(value)
+const optionalNativeText = (value: unknown) =>
+  value === undefined || (text(value) && value.length <= 512)
 const date = (value: unknown) => text(value) && Number.isFinite(Date.parse(value))
 const engine = (value: unknown): value is DNSEngine =>
   DNS_ENGINES.some((item) => item.value === value)
@@ -166,6 +218,15 @@ const list = (value: unknown, check: (item: unknown) => boolean) =>
 const reading = (value: unknown) =>
   object(value) && text(value.state) && text(value.basis) && text(value.summary)
 const optionalBool = (value: unknown) => value === undefined || typeof value === "boolean"
+const digest = (value: unknown): value is string => text(value) && /^[a-f0-9]{64}$/.test(value)
+const keys = (value: Record<string, unknown>, allowed: string[]) =>
+  Object.keys(value).every((key) => allowed.includes(key))
+const groups = (value: unknown, max: number): value is number[] =>
+  Array.isArray(value) &&
+  value.length <= max &&
+  value.every((id) => integer(id)) &&
+  new Set(value).size === value.length
+const optionalDate = (value: unknown) => value === undefined || date(value)
 const stringMap = (value: unknown, arrays: boolean) =>
   object(value) &&
   Object.keys(value).length <= 2048 &&
@@ -284,7 +345,7 @@ export function readDNSSnapshot(value: unknown): DNSServiceSnapshot {
     ) ||
     !list(
       value.localOverrides,
-      (v) => object(v) && text(v.name) && text(v.value) && text(v.type),
+      (v) => object(v) && text(v.name) && text(v.value) && text(v.type) && optionalBool(v.enabled),
     ) ||
     !list(
       value.queries,
@@ -308,7 +369,133 @@ export function readDNSSnapshot(value: unknown): DNSServiceSnapshot {
   ) {
     throw new Error("Native DNS runtime identity is incomplete or invalid.")
   }
-  return value as DNSServiceSnapshot
+  if (value.selectionFingerprint !== undefined && !digest(value.selectionFingerprint))
+    throw new Error("Native DNS selected policy fingerprint is invalid.")
+  const records = value.records === undefined ? undefined : readDNSRecords(value.records)
+  const selectedClient =
+    value.selectedClient === undefined ? undefined : readDNSSelectedClient(value.selectedClient)
+  if (
+    ((records || selectedClient) && !digest(value.selectionFingerprint)) ||
+    (records && selectedClient) ||
+    (records &&
+      (value.engine !== "technitium" ||
+        records.nativeVersion !== value.version ||
+        records.fingerprint !== value.selectionFingerprint)) ||
+    (selectedClient && value.engine !== "pihole")
+  )
+    throw new Error("Native DNS selected inventory is inconsistent.")
+  return { ...value, records, selectedClient } as DNSServiceSnapshot
+}
+
+function readDNSSelectedClient(value: unknown): DNSSelectedClient {
+  if (
+    !object(value) ||
+    !text(value.address) ||
+    !dnsClientAddress(value.address) ||
+    !groups(value.groups, 128) ||
+    !(value.comment === null || (text(value.comment) && value.comment.length <= 512)) ||
+    !digest(value.commentFingerprint) ||
+    !digest(value.otherPolicyFingerprint)
+  )
+    throw new Error("Native DNS selected client policy is incomplete or invalid.")
+  return {
+    address: value.address,
+    groups: [...value.groups],
+    comment: value.comment,
+    commentFingerprint: value.commentFingerprint,
+    otherPolicyFingerprint: value.otherPolicyFingerprint,
+  }
+}
+
+export function readDNSRecords(value: unknown, expectedZone?: string): DNSRecordInventory {
+  if (
+    !object(value) ||
+    !text(value.zone) ||
+    !dnsDomainName(value.zone) ||
+    (expectedZone && value.zone !== expectedZone) ||
+    !text(value.type) ||
+    !value.type ||
+    typeof value.disabled !== "boolean" ||
+    !(value.internal === null || typeof value.internal === "boolean") ||
+    !text(value.nativeVersion) ||
+    !value.nativeVersion ||
+    value.nativeVersion.length > 64 ||
+    !text(value.dnssec) ||
+    !reading(value.evidence) ||
+    !digest(value.fingerprint) ||
+    !Array.isArray(value.records) ||
+    value.records.length > 256
+  )
+    throw new Error("Native authoritative record inventory is incomplete or changed.")
+  const inventory = { ...value } as DNSRecordInventory
+  inventory.records = value.records.map((record: unknown) => {
+    if (
+      !object(record) ||
+      !text(record.name) ||
+      !record.name ||
+      record.name.length > 512 ||
+      !(record.name === inventory.zone || record.name.endsWith(`.${inventory.zone}`)) ||
+      !text(record.type) ||
+      !record.type ||
+      record.type.length > 512 ||
+      !optionalNativeText(record.value) ||
+      !integer(record.ttl, 0, 4294967295) ||
+      typeof record.disabled !== "boolean" ||
+      typeof record.editable !== "boolean" ||
+      !optionalNativeText(record.comments) ||
+      !digest(record.fingerprint)
+    )
+      throw new Error("Native authoritative record metadata is incomplete or invalid.")
+    if (
+      record.editable &&
+      (!dnsRecordZoneEditable(inventory) ||
+        record.disabled ||
+        !validRecord(
+          { name: record.name, type: record.type, value: record.value, ttl: record.ttl },
+          true,
+        ))
+    )
+      throw new Error("Unsupported native record cannot be declared editable.")
+    return {
+      name: record.name,
+      type: record.type,
+      value: record.value,
+      ttl: record.ttl,
+      disabled: record.disabled,
+      editable: record.editable,
+      comments: record.comments,
+      fingerprint: record.fingerprint,
+    } as DNSZoneRecord
+  })
+  return {
+    zone: inventory.zone,
+    type: inventory.type,
+    disabled: inventory.disabled,
+    internal: inventory.internal,
+    nativeVersion: inventory.nativeVersion,
+    dnssec: inventory.dnssec,
+    records: inventory.records,
+    evidence: inventory.evidence,
+    fingerprint: inventory.fingerprint,
+  }
+}
+
+function validRecord(value: Record<string, unknown>, authoritative: boolean) {
+  if (
+    !keys(value, authoritative ? ["name", "type", "value", "ttl"] : ["name", "type", "value"]) ||
+    !text(value.name) ||
+    !dnsDomainName(value.name) ||
+    (value.type !== "A" && value.type !== "AAAA") ||
+    !text(value.value) ||
+    !dnsUnicastAddress(value.value, true)
+  )
+    return false
+  const ip = dnsLiteralAddress(value.value)
+  return Boolean(
+    ip &&
+    (value.type === "A" ? ip.bytes.length === 4 : ip.bytes.length === 16) &&
+    (!authoritative || integer(value.ttl, 1, 86400)),
+  )
 }
 
 export function readDNSView(value: unknown, expectedId?: string): DNSServiceView {
@@ -325,22 +512,38 @@ export function readDNSView(value: unknown, expectedId?: string): DNSServiceView
   return { connection, snapshot, state: value.state, error: value.error as string | undefined }
 }
 
-function readChangeRequest(value: unknown): DNSChangeRequest {
+export function readDNSChangeRequest(value: unknown, expectedEngine?: DNSEngine): DNSChangeRequest {
   if (!object(value)) throw new Error("Native DNS review has no intent.")
   switch (value.action) {
     case "protection":
-      if (typeof value.protection === "boolean")
+      if (keys(value, ["action", "protection"]) && typeof value.protection === "boolean")
         return { action: value.action, protection: value.protection }
       break
     case "upstreams":
-      if (strings(value.upstreams) && value.upstreams.length > 0 && value.upstreams.length <= 16)
-        return { action: value.action, upstreams: value.upstreams }
+      if (
+        keys(value, ["action", "upstreams"]) &&
+        strings(value.upstreams) &&
+        value.upstreams.length > 0 &&
+        value.upstreams.length <= 16 &&
+        value.upstreams.every(dnsClassicEndpoint)
+      )
+        return { action: value.action, upstreams: [...value.upstreams] }
       break
     case "access":
       if (
+        (!expectedEngine || expectedEngine === "adguard") &&
+        keys(value, ["action", "allowedClients", "deniedClients"]) &&
         strings(value.allowedClients) &&
         value.allowedClients.length > 0 &&
-        strings(value.deniedClients ?? [])
+        value.allowedClients.length <= 128 &&
+        (value.deniedClients === undefined ||
+          (strings(value.deniedClients) && value.deniedClients.length <= 128)) &&
+        [...value.allowedClients, ...((value.deniedClients as string[] | undefined) ?? [])].every(
+          (prefix) => dnsPrefix(prefix),
+        ) &&
+        new Set([...value.allowedClients, ...((value.deniedClients as string[] | undefined) ?? [])])
+          .size ===
+          value.allowedClients.length + ((value.deniedClients as string[] | undefined) ?? []).length
       )
         return {
           action: value.action,
@@ -349,7 +552,68 @@ function readChangeRequest(value: unknown): DNSChangeRequest {
         }
       break
     case "zone_create":
-      if (text(value.zone) && value.zone) return { action: value.action, zone: value.zone }
+      if (
+        (!expectedEngine || expectedEngine === "technitium") &&
+        keys(value, ["action", "zone"]) &&
+        text(value.zone) &&
+        dnsDomainName(value.zone)
+      )
+        return { action: value.action, zone: value.zone }
+      break
+    case "override_add":
+    case "override_remove":
+      if (
+        (!expectedEngine || expectedEngine === "adguard" || expectedEngine === "pihole") &&
+        keys(value, ["action", "record"]) &&
+        object(value.record) &&
+        validRecord(value.record, false)
+      )
+        return {
+          action: value.action,
+          record: {
+            name: value.record.name as string,
+            type: value.record.type as "A" | "AAAA",
+            value: value.record.value as string,
+          },
+        }
+      break
+    case "record_add":
+    case "record_remove":
+      if (
+        (!expectedEngine || expectedEngine === "technitium") &&
+        keys(value, ["action", "zone", "record"]) &&
+        text(value.zone) &&
+        dnsDomainName(value.zone) &&
+        object(value.record) &&
+        validRecord(value.record, true) &&
+        text(value.record.name) &&
+        (value.record.name === value.zone || value.record.name.endsWith(`.${value.zone}`))
+      )
+        return {
+          action: value.action,
+          zone: value.zone,
+          record: {
+            name: value.record.name,
+            type: value.record.type as "A" | "AAAA",
+            value: value.record.value as string,
+            ttl: value.record.ttl as number,
+          },
+        }
+      break
+    case "client_groups":
+      if (
+        (!expectedEngine || expectedEngine === "pihole") &&
+        keys(value, ["action", "client"]) &&
+        object(value.client) &&
+        keys(value.client, ["address", "groups"]) &&
+        text(value.client.address) &&
+        dnsClientAddress(value.client.address) &&
+        groups(value.client.groups, 64)
+      )
+        return {
+          action: value.action,
+          client: { address: value.client.address, groups: [...value.client.groups] },
+        }
   }
   throw new Error("Native DNS review intent is incomplete or unsupported.")
 }
@@ -364,23 +628,32 @@ export function readDNSChange(value: unknown, expectedId?: string): DNSServiceCh
     !text(value.state) ||
     !date(value.createdAt) ||
     !date(value.expiresAt) ||
-    !optionalText(value.endedAt) ||
+    !optionalDate(value.endedAt) ||
     !optionalText(value.error) ||
     (expectedId && value.id !== expectedId)
   )
     throw new Error("Retained native DNS review is incomplete or changed.")
+  const before = value.before === undefined ? undefined : readDNSSnapshot(value.before)
+  const after = value.after === undefined ? undefined : readDNSSnapshot(value.after)
+  if (before && after && before.engine !== after.engine)
+    throw new Error("Retained native DNS owner changed.")
+  const request = readDNSChangeRequest(value.request, before?.engine ?? after?.engine)
+  for (const snapshot of [before, after]) {
+    if (snapshot && dnsSelectedScopeProblem(request, snapshot))
+      throw new Error("Retained native DNS selection is incomplete or changed.")
+  }
   return {
     id: value.id,
     connectionId: value.connectionId,
     generation: value.generation,
-    request: readChangeRequest(value.request),
+    request,
     state: value.state,
     createdAt: value.createdAt as string,
     expiresAt: value.expiresAt as string,
     endedAt: value.endedAt as string | undefined,
     error: value.error as string | undefined,
-    before: value.before === undefined ? undefined : readDNSSnapshot(value.before),
-    after: value.after === undefined ? undefined : readDNSSnapshot(value.after),
+    before,
+    after,
   }
 }
 
@@ -495,7 +768,51 @@ export function dnsChangeOwnerProblem(change: DNSServiceChange, view?: DNSServic
     view.snapshot.policyFingerprint !== change.before.policyFingerprint
   )
     return "The native policy or connection changed. Read it and create a new review."
+  if (
+    dnsSelectedScopeProblem(change.request, view.snapshot) ||
+    dnsSelectedScopeProblem(change.request, change.before)
+  )
+    return "Refresh the exact reviewed native selection before applying. Ordinary inventory cannot replace it."
   return undefined
+}
+
+function dnsSelectedScopeProblem(request: DNSChangeRequest, snapshot?: DNSServiceSnapshot) {
+  if (
+    !["override_add", "override_remove", "record_add", "record_remove", "client_groups"].includes(
+      request.action,
+    )
+  )
+    return false
+  if (!snapshot || !digest(snapshot.selectionFingerprint)) return true
+  if (request.action === "record_add" || request.action === "record_remove")
+    return (
+      snapshot.engine !== "technitium" ||
+      !snapshot.records ||
+      snapshot.records.zone !== request.zone ||
+      snapshot.records.fingerprint !== snapshot.selectionFingerprint ||
+      Boolean(snapshot.selectedClient)
+    )
+  if (request.action === "client_groups")
+    return (
+      snapshot.engine !== "pihole" ||
+      !snapshot.selectedClient ||
+      snapshot.selectedClient.address !== request.client.address ||
+      Boolean(snapshot.records)
+    )
+  return snapshot.engine === "technitium" || Boolean(snapshot.records || snapshot.selectedClient)
+}
+
+export function readDNSCurrentChange(value: unknown, change: DNSServiceChange): DNSServiceView {
+  const view = readDNSView(value, change.connectionId)
+  if (
+    view.connection.generation !== change.generation ||
+    !change.before ||
+    view.connection.engine !== change.before.engine
+  )
+    throw new Error("The current native DNS review owner or generation changed.")
+  if (view.state === "available" && dnsSelectedScopeProblem(change.request, view.snapshot))
+    throw new Error("The current reading does not cover the exact reviewed native selection.")
+  return view
 }
 
 export function dnsSameProvisionResources(
@@ -535,7 +852,11 @@ export function dnsSameReviewedIntent(
     return (
       before.connectionId === current.connectionId &&
       before.generation === current.generation &&
-      before.before?.policyFingerprint === current.before?.policyFingerprint
+      before.before?.policyFingerprint === current.before?.policyFingerprint &&
+      before.before?.selectionFingerprint === current.before?.selectionFingerprint &&
+      JSON.stringify(before.before?.records) === JSON.stringify(current.before?.records) &&
+      JSON.stringify(before.before?.selectedClient) ===
+        JSON.stringify(current.before?.selectedClient)
     )
   return false
 }
@@ -561,7 +882,8 @@ export function dnsReviewProblem(
       connection.id !== change.connectionId ||
       connection.generation !== change.generation ||
       !change.before ||
-      change.before.engine !== connection.engine
+      change.before.engine !== connection.engine ||
+      dnsSelectedScopeProblem(change.request, change.before)
     ) {
       return "The connection or reviewed baseline changed. Refresh the native reading and review the draft again."
     }
@@ -581,5 +903,15 @@ export function dnsChangeName(request: DNSChangeRequest): string {
       return "Change allowed client scope"
     case "zone_create":
       return `Create primary zone ${request.zone}`
+    case "override_add":
+      return `Add local override ${request.record.name}`
+    case "override_remove":
+      return `Remove local override ${request.record.name}`
+    case "record_add":
+      return `Add ${request.record.type} record ${request.record.name}`
+    case "record_remove":
+      return `Remove ${request.record.type} record ${request.record.name}`
+    case "client_groups":
+      return `Change native client groups for ${request.client.address}`
   }
 }
