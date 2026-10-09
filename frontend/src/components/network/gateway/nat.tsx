@@ -26,7 +26,19 @@ import { Switch } from "@/components/ui/switch"
 import { Cidr } from "@/components/network/address"
 import { ForwardingOff, forwardingFamily } from "@/components/network/gateway/notices"
 import { arrivalDevices } from "@/components/network/gateway/forwards"
-import { compact, natRequest, ownerOf, type NATRequest } from "@/components/network/gateway/reading"
+import { ImpactList, useGatewayPreview } from "@/components/network/gateway/impacts"
+import {
+  compact,
+  natMode,
+  natRequest,
+  natWord,
+  ownerOf,
+  readinessWord,
+  splitList,
+  type NATMode,
+  type NATRequest,
+} from "@/components/network/gateway/reading"
+import { Tag } from "@/components/tag"
 import { useAuth } from "@/hooks/use-auth"
 
 /**
@@ -95,9 +107,16 @@ export function NATList({
                 )
               }
               title={
-                <span className={n.enabled ? undefined : "text-muted-foreground"}>
-                  <Cidr cidr={n.source} /> <span className="text-muted-foreground">→</span>{" "}
-                  <span className="font-mono">{n.interface}</span>
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                  <span className={n.enabled ? undefined : "text-muted-foreground"}>
+                    <Cidr cidr={n.source} /> <span className="text-muted-foreground">→</span>{" "}
+                    <span className="font-mono">{n.interface}</span>
+                  </span>
+                  {n.enabled && n.readiness && readinessWord(n.readiness).tone !== "default" && (
+                    <Tag tone={readinessWord(n.readiness).tone}>
+                      {readinessWord(n.readiness).label}
+                    </Tag>
+                  )}
                 </span>
               }
               verb={owner ? `Open ${owner.name} on the VPN page` : `Edit ${label(n)}`}
@@ -105,13 +124,13 @@ export function NATList({
               description={
                 owner
                   ? `${n.name} · made by ${owner.name}${owner.device ? ` ${owner.device}` : ""} · changed on the VPN page`
-                  : `${n.name} · ${n.toAddress ? `as ${n.toAddress}` : "masqueraded"}`
+                  : `${n.name} · ${natWord(n)}`
               }
               trailing={
                 <span className="flex items-center gap-4">
                   <span className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid">
-                    <span>{compact(n.packets)} packets</span>
-                    <span>{bytes(n.bytes)}</span>
+                    <span>{compact(n.packets + (n.inPackets ?? 0))} packets</span>
+                    <span>{bytes(n.bytes + (n.inBytes ?? 0))}</span>
                   </span>
                   {owner ? (
                     <Status
@@ -144,8 +163,28 @@ export function NATList({
   )
 }
 
-const MASQUERADE = "masquerade"
-const FIXED = "fixed"
+const MODES: { value: NATMode; title: string; hint: string }[] = [
+  {
+    value: "masquerade",
+    title: "The device's own address",
+    hint: "Masquerade: follows the address if the provider changes it.",
+  },
+  {
+    value: "snat",
+    title: "A fixed address",
+    hint: "One of the device's addresses, always the same.",
+  },
+  {
+    value: "one-to-one",
+    title: "One-to-one",
+    hint: "A public address of its own, both ways: arrivals for it reach the private host.",
+  },
+  {
+    value: "nptv6",
+    title: "IPv6 prefix",
+    hint: "A private IPv6 network mapped to a public one of the same length, both ways.",
+  },
+]
 
 /**
  * The editor for one NAT entry: a network, the device its traffic leaves
@@ -174,19 +213,32 @@ export function NATSheet({
   const [name, setName] = useState(entry?.name ?? "")
   const [source, setSource] = useState(entry?.source ?? "")
   const [device, setDevice] = useState(entry?.interface ?? uplink ?? "")
-  const [translate, setTranslate] = useState(entry?.toAddress ? FIXED : MASQUERADE)
+  const [mode, setMode] = useState<NATMode>(entry ? natMode(entry) : "masquerade")
   const [toAddress, setToAddress] = useState(entry?.toAddress ?? "")
+  const [translated, setTranslated] = useState(entry?.translated ?? "")
+  const [destinations, setDestinations] = useState(entry?.destinations?.join(", ") ?? "")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>()
 
+  const mapped = mode === "one-to-one" || mode === "nptv6"
   const body = (): NATRequest => ({
     name: name.trim(),
     source: source.trim(),
     interface: device,
-    toAddress: translate === FIXED ? toAddress.trim() : "",
+    toAddress: mode === "snat" ? toAddress.trim() : "",
+    mode,
+    translated: mapped ? translated.trim() : "",
+    destinations: mapped ? [] : splitList(destinations),
   })
   const ready =
-    name.trim() && source.trim() && device && (translate === MASQUERADE || toAddress.trim())
+    name.trim() &&
+    source.trim() &&
+    device &&
+    (mode === "snat" ? toAddress.trim() : mapped ? translated.trim() : true)
+  const { preview, pending } = useGatewayPreview(
+    ready ? { kind: "nat", id: entry?.id ?? 0, nat: body() } : undefined,
+    Boolean(ready && writable),
+  )
   const submit = async () => {
     setBusy(true)
     setError(undefined)
@@ -324,24 +376,19 @@ export function NATSheet({
           <fieldset className="min-w-0 space-y-1.5">
             <legend className="mb-1.5 text-body font-medium">It goes out as</legend>
             <ChoiceGrid columns={2}>
-              <ChoiceCard
-                selected={translate === MASQUERADE}
-                onClick={() => setTranslate(MASQUERADE)}
-              >
-                <ChoiceCardTitle>The device&rsquo;s own address</ChoiceCardTitle>
-                <ChoiceCardHint>
-                  Masquerade: follows the address if the provider changes it.
-                </ChoiceCardHint>
-              </ChoiceCard>
-              <ChoiceCard selected={translate === FIXED} onClick={() => setTranslate(FIXED)}>
-                <ChoiceCardTitle>A fixed address</ChoiceCardTitle>
-                <ChoiceCardHint>
-                  One of the device&rsquo;s addresses, always the same.
-                </ChoiceCardHint>
-              </ChoiceCard>
+              {MODES.map((m) => (
+                <ChoiceCard
+                  key={m.value}
+                  selected={mode === m.value}
+                  onClick={() => setMode(m.value)}
+                >
+                  <ChoiceCardTitle>{m.title}</ChoiceCardTitle>
+                  <ChoiceCardHint>{m.hint}</ChoiceCardHint>
+                </ChoiceCard>
+              ))}
             </ChoiceGrid>
           </fieldset>
-          {translate === FIXED && (
+          {mode === "snat" && (
             <Field
               label="Address"
               htmlFor="nat-to"
@@ -358,6 +405,46 @@ export function NATSheet({
               />
             </Field>
           )}
+          {mapped && (
+            <Field
+              label={mode === "nptv6" ? "Public IPv6 network" : "Public address or network"}
+              htmlFor="nat-translated"
+              hint={
+                mode === "nptv6"
+                  ? "The same length as the private network, routed to this server by the provider"
+                  : "The same size as the network above; one address must be on that device"
+              }
+              error={refused("translated")}
+            >
+              <Input
+                id="nat-translated"
+                value={translated}
+                placeholder={mode === "nptv6" ? "2001:db8:3::/48" : "203.0.113.25"}
+                onChange={(event) => setTranslated(event.target.value)}
+                className="font-mono"
+                autoComplete="off"
+              />
+            </Field>
+          )}
+          {!mapped && (
+            <Field
+              label="Only to these destinations"
+              htmlFor="nat-destinations"
+              hint="Optional, comma-separated. Empty translates traffic to everywhere."
+              error={refused("destinations")}
+            >
+              <Input
+                id="nat-destinations"
+                value={destinations}
+                placeholder="192.0.2.0/24"
+                onChange={(event) => setDestinations(event.target.value)}
+                className="font-mono"
+                autoComplete="off"
+              />
+            </Field>
+          )}
+
+          <ImpactList preview={preview} pending={pending} />
 
           {family && message ? (
             <ForwardingOff

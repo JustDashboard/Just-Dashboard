@@ -1,9 +1,15 @@
 import type {
+  BlocklistCoverage,
+  BlocklistDiff,
   Conntrack,
+  KernelProfile,
+  LimitProfile,
   ProtectionBlocklist,
   ProtectionLimit,
   ProtectionSetting,
+  ProtectionTrusted,
   ProtectionView,
+  SeriesPoint,
 } from "@/lib/types"
 import type { Tone } from "@/components/tone"
 import { countryName } from "@/lib/countries"
@@ -26,6 +32,8 @@ export type LimitRequest = {
   burst: number
   perSource: boolean
   maxConnections: number
+  globalConnections: number
+  profile: string
   action: ProtectionLimit["action"]
   enabled?: boolean
 }
@@ -39,6 +47,10 @@ export type BlocklistRequest = {
   countries: string[]
   url: string
   preset: string
+  /** A fetched list's schedule; empty keeps the existing one. */
+  refresh?: string
+  signatureUrl?: string
+  publicKey?: string
   enabled?: boolean
 }
 
@@ -65,10 +77,18 @@ export function rateWord(limit: ProtectionLimit) {
   return `${base}${each}${burst}`
 }
 
-/** The ceiling half of a limit: "at most 50 open per address". */
+/** The ceiling half of a limit: "at most 50 open per address, 500 for everyone". */
 export function ceilingWord(limit: ProtectionLimit) {
-  if (limit.maxConnections <= 0) return undefined
-  return `at most ${limit.maxConnections.toLocaleString()} open${limit.perSource ? " per address" : ""}`
+  const each =
+    limit.maxConnections > 0
+      ? `at most ${limit.maxConnections.toLocaleString()} open per address`
+      : undefined
+  const all =
+    (limit.globalConnections ?? 0) > 0
+      ? `${(limit.globalConnections ?? 0).toLocaleString()} open for everyone`
+      : undefined
+  if (each && all) return `${each}, ${all}`
+  return each ?? (all ? `at most ${all}` : undefined)
 }
 
 /** A limit as the line its row carries: "22/tcp · 10 new connections a minute per address · drop". */
@@ -95,6 +115,8 @@ export function limitRequest(limit: ProtectionLimit, enabled?: boolean): LimitRe
     burst: limit.burst,
     perSource: limit.perSource,
     maxConnections: limit.maxConnections,
+    globalConnections: limit.globalConnections ?? 0,
+    profile: limit.profile ?? "",
     action: limit.action,
     ...(enabled === undefined ? {} : { enabled }),
   }
@@ -114,6 +136,8 @@ export function blocklistRequest(
     countries: list.kind === "country" ? list.countries : [],
     url: list.kind === "feed" && !preset ? list.url : "",
     preset: preset ?? "",
+    // The server keeps the pinned key when the same signature is named.
+    ...(list.signatureUrl ? { signatureUrl: list.signatureUrl } : {}),
     ...(enabled === undefined ? {} : { enabled }),
   }
 }
@@ -241,4 +265,128 @@ export function inRange(s: ProtectionSetting, value: string) {
   if (!/^\d+$/.test(value.trim())) return false
   const n = Number(value)
   return n >= s.min && n <= s.max
+}
+
+/** The schedules a fetched list may keep, as the editor offers them. */
+export const REFRESH_CHOICES = [
+  { value: "6h", label: "Every 6 hours" },
+  { value: "12h", label: "Every 12 hours" },
+  { value: "24h", label: "Daily" },
+  { value: "72h", label: "Every 3 days" },
+  { value: "168h", label: "Weekly" },
+  { value: "manual", label: "Only when refreshed by hand" },
+] as const
+
+/** How a fetched list is kept fresh, and when it next is: "daily · next in 3h". */
+export function refreshWord(
+  list: Pick<ProtectionBlocklist, "kind" | "refresh" | "nextRefresh" | "failures" | "stale">,
+  until: (iso: string) => string,
+) {
+  if (list.kind === "manual") return undefined
+  const label = REFRESH_CHOICES.find((c) => c.value === (list.refresh || "24h"))?.label ?? "Daily"
+  const parts = [label.toLowerCase()]
+  if ((list.failures ?? 0) > 0) {
+    parts.push(`failing (${list.failures} ${list.failures === 1 ? "try" : "tries"})`)
+  }
+  if (list.stale) parts.push("stale")
+  if (list.nextRefresh) parts.push(`next fetch ${until(list.nextRefresh)}`)
+  return parts.join(" · ")
+}
+
+/** What a list's last fetch or edit changed: "+12 −3 at the last fetch". */
+export function diffWord(diff: BlocklistDiff | null | undefined) {
+  if (!diff) return undefined
+  if (!diff.baseline) return `${diff.added.toLocaleString()} networks, nothing to compare with`
+  if (diff.added === 0 && diff.removed === 0) return "unchanged at the last fetch"
+  return `+${diff.added.toLocaleString()} −${diff.removed.toLocaleString()} at the last change`
+}
+
+/** How much address space a list takes, rather than how many lines it is. */
+export function coverageWord(c: BlocklistCoverage | undefined) {
+  if (!c) return undefined
+  const parts: string[] = []
+  if (c.ipv4Networks > 0) {
+    const share = c.ipv4Share * 100
+    parts.push(
+      `${compactCount(c.ipv4Addresses)} IPv4 addresses (${share < 0.01 ? "<0.01" : share.toFixed(2)}% of IPv4)`,
+    )
+  }
+  if (c.ipv6Networks > 0) {
+    parts.push(
+      c.ipv6Slash48s >= 1
+        ? `${compactCount(Math.round(c.ipv6Slash48s))} IPv6 /48s`
+        : `${c.ipv6Networks.toLocaleString()} IPv6 networks smaller than a /48`,
+    )
+  }
+  return parts.join(" · ") || undefined
+}
+
+function compactCount(n: number) {
+  return Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n)
+}
+
+/** The expiries the exception and trusted editors offer. */
+export const EXPIRY_CHOICES = [
+  { value: "", label: "Until removed" },
+  { value: "1h", label: "1 hour" },
+  { value: "24h", label: "1 day" },
+  { value: "168h", label: "1 week" },
+  { value: "720h", label: "30 days" },
+] as const
+
+/** An expiry choice as the RFC 3339 instant the server takes, from now. */
+export function expiryFrom(choice: string, now: Date = new Date()) {
+  const hours = Number.parseInt(choice, 10)
+  if (!choice || !Number.isFinite(hours)) return ""
+  return new Date(now.getTime() + hours * 3_600_000).toISOString().replace(/\.\d{3}Z$/, "Z")
+}
+
+/** The kernel values a profile would change, among those this host has. */
+export function profileChanges(settings: ProtectionSetting[], profile: KernelProfile) {
+  return Object.fromEntries(
+    Object.entries(profile.values).filter(([key, value]) =>
+      settings.some((s) => s.key === key && s.available && s.current !== value),
+    ),
+  )
+}
+
+/** A limit profile as the editor's fields. */
+export function limitFromProfile(p: LimitProfile) {
+  return {
+    name: p.name,
+    protocol: p.protocol,
+    ports: p.ports,
+    rate: p.rate ? String(p.rate) : "",
+    per: p.per || ("minute" as const),
+    burst: p.burst ? String(p.burst) : "",
+    perSource: p.perSource,
+    max: p.maxConnections ? String(p.maxConnections) : "",
+    global: p.globalConnections ? String(p.globalConnections) : "",
+    action: p.action,
+  }
+}
+
+/** Who kept a trusted address and why, as its row's second line. */
+export function trustedNoteWord(e: ProtectionTrusted, when: (iso: string) => string) {
+  const parts: string[] = []
+  if (e.reason) parts.push(e.reason)
+  if (e.addedBy) parts.push(`kept by ${e.addedBy}`)
+  if (e.expiresAt) parts.push(e.expired ? "expired" : `until ${when(e.expiresAt)}`)
+  if (e.lastSeen) parts.push(`last signed in ${when(e.lastSeen)}`)
+  else if (e.origin === "kept" || e.origin === "you") parts.push("no sign-in seen in 90 days")
+  return parts.join(" · ")
+}
+
+/** A recorded series as chart rows, by timestamp in milliseconds. */
+export function seriesRows(series: Record<string, SeriesPoint[] | undefined>, keys: string[]) {
+  const byTs = new Map<number, Record<string, number> & { ts: number }>()
+  for (const key of keys) {
+    for (const p of series[key] ?? []) {
+      const ts = p.t * 1000
+      const row = byTs.get(ts) ?? { ts }
+      row[key] = p.value
+      byTs.set(ts, row)
+    }
+  }
+  return [...byTs.values()].sort((a, b) => a.ts - b.ts)
 }

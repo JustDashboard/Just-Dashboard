@@ -12,6 +12,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Tag } from "@/components/tag"
+import { FlowSummary } from "@/components/network/gateway/impacts"
 
 /**
  * What the gateway says before anything is pressed: that this host's firewall
@@ -86,7 +87,7 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
             )}
         </Notice>
       )}
-      {(admission.chains || capability.layers) && (
+      {(admission.chains || capability.layers || Boolean(view.flows?.length)) && (
         <Panel plain>
           <PanelHeader title="Policy evidence" />
           <PanelBody className="space-y-3">
@@ -109,6 +110,17 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
                   </Detail>
                 ))}
             </DetailList>
+            {Boolean(view.flows?.length) && (
+              <div className="space-y-1.5">
+                <p className="text-hint font-medium">Each entry&rsquo;s flow, as modeled</p>
+                <FlowSummary flows={view.flows ?? []} />
+                <p className="text-hint text-muted-foreground">
+                  Each enabled entry&rsquo;s flow is walked through the host&rsquo;s other chains in
+                  their supported rule forms, following jumps. A drop that only names some sources
+                  restricts it rather than blocking it. This is a model, not a packet trace.
+                </p>
+              </div>
+            )}
             {Boolean(capability.layers?.length) && (
               <details className="text-hint text-muted-foreground">
                 <summary className="cursor-pointer focus-ring">Checked policy layers</summary>
@@ -119,7 +131,11 @@ export function GatewayNotices({ view, onRefresh }: { view: GatewayView; onRefre
                         {layer.family} {layer.table} {layer.chain}
                       </span>
                       : {layer.status}
+                      {layer.type === "nat" ? " (nat)" : ""}
                       {layer.reason ? ` — ${layer.reason}` : ""}
+                      {layer.uncertain && layer.uncertain.length > 0 && (
+                        <span className="block pl-4">Not read: {layer.uncertain.join("; ")}</span>
+                      )}
                     </li>
                   ))}
                 </ul>
