@@ -124,6 +124,23 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 		if err != nil || !profile.Editable {
 			t.Fatalf("fresh worker native profile: %+v %v", profile, err)
 		}
+		if mode == "checkpoint-create-lost" {
+			delegate := nativeExecute
+			lost := false
+			nativeExecute = func(ctx context.Context, input []byte, tool string, args ...string) (string, error) {
+				out, err := delegate(ctx, input, tool, args...)
+				if tool == "busctl" && strings.Contains(strings.Join(args, " "), " CheckpointCreate aouu ") && err == nil {
+					lost = true
+					return "", errors.New("fixture lost the actual checkpoint-create reply")
+				}
+				return out, err
+			}
+			_, err = s.EditNativeProfile(WithPendingConfirmation(context.Background(), 7), "d0", NativeEditRequest{Generation: profile.Generation, Intent: nativeFixtureIntent("198.18.8.4", "2001:db8:18::4")}, "127.0.0.1")
+			if lost && err != nil {
+				os.Exit(95)
+			}
+			t.Fatalf("actual native create reply was not lost before activation: %t %v", lost, err)
+		}
 		writer := writeChangeJournal
 		if mode != "apply" {
 			j, err := readChange(s.paths.Dir)
@@ -198,7 +215,7 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 		}
 		ctx, stop := context.WithTimeout(context.Background(), 4*time.Minute)
 		defer stop()
-		unbounded := liveSudo("env", "JD_NETNS_LIVE=1", "JD_NATIVE_MANAGER_NS=1", "JD_NATIVE_MANAGER_CASE="+os.Getenv("JD_NATIVE_MANAGER_CASE"), "JD_NATIVE_MANAGER_NM_ORIGIN="+os.Getenv("JD_NATIVE_MANAGER_NM_ORIGIN"), "JD_NATIVE_MANAGER_HELPER="+helper, "JD_NATIVE_MANAGER_NM_ROOT="+nmRoot, "unshare", "--net", "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--", os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1", "-test.v")
+		unbounded := liveSudo("env", "JD_NETNS_LIVE=1", "JD_NATIVE_MANAGER_NS=1", "JD_NATIVE_MANAGER_CASE="+os.Getenv("JD_NATIVE_MANAGER_CASE"), "JD_NATIVE_MANAGER_NM_ORIGIN="+os.Getenv("JD_NATIVE_MANAGER_NM_ORIGIN"), "JD_NATIVE_MANAGER_CHECKPOINT_CREATE_LOST="+os.Getenv("JD_NATIVE_MANAGER_CHECKPOINT_CREATE_LOST"), "JD_NATIVE_MANAGER_HELPER="+helper, "JD_NATIVE_MANAGER_NM_ROOT="+nmRoot, "unshare", "--net", "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--", os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1", "-test.v")
 		cmd := exec.CommandContext(ctx, unbounded.Path, unbounded.Args[1:]...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -461,6 +478,13 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 				t.Fatal(err)
 			}
 			s.recoveryInstalled = true
+			if os.Getenv("JD_NATIVE_MANAGER_CHECKPOINT_CREATE_LOST") == "1" {
+				if owner != "NetworkManager" {
+					t.Fatal("lost checkpoint-create acceptance requires the isolated nonmigrating keyfile case")
+				}
+				nativeFixtureLostCheckpointCreate(t, ctx, s, p, before)
+				return
+			}
 			candidate := nativeFixtureIntent("198.18.8.3", "2001:db8:18::3")
 			candidate.IPv4.DNS = []string{"127.0.0.2"}
 			candidate.IPv4.Routes = []NativeRoute{{Destination: "198.18.20.0/24", Gateway: "198.18.8.1", Metric: 111, Table: 100}}
@@ -561,4 +585,78 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 			stopOwner()
 		})
 	}
+}
+
+func nativeFixtureLostCheckpointCreate(t *testing.T, ctx context.Context, s *Service, beforeView *NativeProfileView, before NativeIntent) {
+	t.Helper()
+	selected, err := s.readNativeProfile(ctx, "d0")
+	if err != nil || selected == nil || selected.RecoveryStrategy != nativeCheckpointStrategy {
+		t.Fatal("lost-create fixture lacks a verified native checkpoint owner:", err)
+	}
+	worker := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1")
+	worker.Env = append(os.Environ(), "JD_NATIVE_MANAGER_WORKER=checkpoint-create-lost")
+	out, err := worker.CombinedOutput()
+	var exited *exec.ExitError
+	if !errors.As(err, &exited) || exited.ExitCode() != 95 {
+		t.Fatalf("actual checkpoint-create reply loss did not leave its journal: %v %s", err, out)
+	}
+	j, err := readChange(s.paths.Dir)
+	if err != nil || j.Phase != "degraded" || j.Cleanup == "complete" {
+		t.Fatalf("lost-create evidence was discarded: %+v %v", j, err)
+	}
+	u, err := nativeJournalUndo(j)
+	if err != nil || u.Checkpoint != "" || u.CheckpointState != "creating" {
+		t.Fatalf("lost-create object identity was guessed: %+v %v", u, err)
+	}
+	checkpoints := func() []string {
+		t.Helper()
+		objects, err := nativeBusProperty[[]string](nativePinnedBus(ctx, selected.TransportGUID), selected.OwnerBus, nmObject, nmService, "Checkpoints", "ao")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return objects
+	}
+	if len(checkpoints()) != 1 {
+		t.Fatal("actual lost create did not leave its bounded native object")
+	}
+	if _, err := nativeFixtureExecute(ctx, nil, filepath.Join(s.paths.Dir, recoveryBinary), "--network-recover", s.paths.Dir, j.ID); err == nil {
+		t.Fatal("fresh helper guessed an unsaved checkpoint from opaque inventory")
+	}
+	if _, err := s.EditNativeProfile(WithPendingConfirmation(ctx, 7), "d0", NativeEditRequest{Generation: beforeView.Generation, Intent: nativeFixtureIntent("198.18.8.5", "2001:db8:18::5")}, "127.0.0.1"); err == nil {
+		t.Fatal("the next native change replaced unresolved create evidence")
+	}
+	retained, err := readChange(s.paths.Dir)
+	if err != nil || retained.ID != j.ID {
+		t.Fatal("the unresolved native admission journal was replaced:", err)
+	}
+	if err := nativeCurrentFile(selected.File, selected.File.Identity); err != nil {
+		t.Fatal("lost-create admission changed its selected profile before any activation:", err)
+	}
+	p, err := s.NativeProfile(ctx, "d0")
+	if err != nil || p == nil || p.Intent == nil || !nativeIntentEqual(*p.Intent, before) || p.Runtime.Status != "matching" {
+		t.Fatalf("lost-create admission changed real owner/runtime intent: %+v %v", p, err)
+	}
+	deadline := time.Now().Add(130 * time.Second)
+	for len(checkpoints()) != 0 && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			t.Fatal("bounded native timeout cleanup did not finish:", ctx.Err())
+		case <-time.After(time.Second):
+		}
+	}
+	if len(checkpoints()) != 0 {
+		t.Fatal("lost native object survived its recorded 120-second native timeout")
+	}
+	if out, err := nativeFixtureExecute(ctx, nil, filepath.Join(s.paths.Dir, recoveryBinary), "--network-recover", s.paths.Dir, j.ID); err != nil {
+		t.Fatalf("fresh helper could not retry after actual native timeout: %v %s", err, out)
+	}
+	finished, err := readChange(s.paths.Dir)
+	if err != nil || finished.Phase != "recovered" || finished.Cleanup != "complete" {
+		t.Fatalf("lost-create cleanup did not finish durably: %+v %v", finished, err)
+	}
+	p, err = s.NativeProfile(ctx, "d0")
+	if err != nil || p == nil || p.Intent == nil || !nativeIntentEqual(*p.Intent, before) || p.Runtime.Status != "matching" {
+		t.Fatalf("bounded native timeout/fresh helper did not retain prior real intent: %+v %v", p, err)
+	}
+	t.Log("Actual native120-second checkpoint-create reply loss preserved identity-less evidence, refused early helper/next change, then completed only after native timeout removed the opaque object")
 }

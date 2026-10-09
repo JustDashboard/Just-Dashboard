@@ -151,3 +151,9 @@ restart is part of the fixture. Use a workspace-local `TMPDIR` for its helper bu
 `JD_NATIVE_MANAGER_CASE=netplan-NetworkManager` selects authored Netplan with that renderer.
 `JD_NATIVE_MANAGER_NM_ORIGIN=refuse-migration` explicitly requests refusal acceptance for an Ubuntu
 keyfile origin; this is not counted as supported editing.
+`JD_NATIVE_MANAGER_CHECKPOINT_CREATE_LOST=1` with `JD_NATIVE_MANAGER_CASE=NetworkManager`
+selects a separate real keyfile create-reply-loss fixture. Its worker discards the actual create reply
+before any profile replacement/activation; helper and next-change attempts must preserve the opaque
+inventory and journal. The native object has the production 120-second timeout. Only its measured
+automatic disappearance permits the fresh helper to finish exact rollback/cleanup; no inventory
+entry is guessed or destroyed by the adapter. Use the verified nonmigrating NM userland for this case.

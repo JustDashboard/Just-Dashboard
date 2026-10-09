@@ -82,6 +82,51 @@ do not substitute for that native fixture. The required changed gate against `f5
 build/vet and selected netx tests (0.634 seconds); targeted final-source recovery/peer/runtime race
 tests passed in 8.331 seconds. No native resources were started by these gates.
 
+The helper-v3 production source at `10ba5ccd` passed separate final-source native static reruns
+using the updated fixture (its source SHA256 is
+`881817c20782d281792af6d43270f21b5d67fdc35f9d15f62f6032daebaacebe`).
+Ubuntu exact-origin run 14 passed in 20.54 seconds in its private namespace, 39.14 seconds overall;
+raw log SHA256 is `2f39ffbee91613558d2e5f0e16e8e81fef5d2217a2afb0cd6e45f27a75dd88dd`.
+Unpatched Debian keyfile run 15 passed in 11.99 seconds in its namespace, 18.84 seconds overall;
+raw log SHA256 is `8f4c4b1701ee1a401c04c7a77068be627d580819ee0322db23246fef48a4bcef`.
+Both repeated actual static apply/rollback, dual-family DNS/explicit routes, confirmation and all
+actual process/storage/cleanup fault windows. Every owned child was absent afterwards, the original
+production networkd remained, and host `/var/lib/NetworkManager` was absent. Veth automatic
+acquisition and structural transactions are still separately open.
+
+Separate native run 16 passed actual keyfile checkpoint-create reply loss in 122.37 seconds inside
+its namespace, 129.06 seconds overall, on the same frozen v3 source/fixture as runs 14/15. The worker
+discarded the real reply before recording an object path or activating a profile. The fresh helper
+and next native change refused the still-present opaque inventory and retained its identity-less
+creating journal. Only measured disappearance after the production 120-second native timeout
+permitted the fresh helper to finish durable exact recovery and cleanup. Prior real owner/kernel
+intent remained intact; owned children were absent and the host NM state directory remained absent.
+Raw `native-owner-run-16.log` SHA256 is
+`47a153e57e746b2f1c076e37e8f82f9eed38dd7857b7fef6760e1354bffafa99`.
+
+A subsequent minimal owner-name epoch fix (`630dd6d3`) also requires the recorded unique owner to
+still hold its well-known renderer service before checkpoint/recovery effects. Dedicated fixtures
+keep the prior unique destination accessible while returning a different service owner, and prove
+no native effect or file replacement, retained journal/next-change refusal and exact retry only
+when the original owner returns. Targeted race passed in 7.774 seconds; the required changed gate
+passed build/vet/netx in 0.679 seconds. Earlier native logs are evidence of their recorded source,
+not this later fix. Final static run 17 on frozen `630dd6d3` production plus the separately
+recorded lost-create fixture passed networkd 257 (3.41 seconds), Netplan/networkd (7.65 seconds),
+Ubuntu authored exact-origin (19.23 seconds), Ubuntu keyfile safe refusal (0.91 seconds), and actual
+GUID restart refusal. Child total was 31.27 seconds, wrapper 52.74 seconds; the actual fresh helper
+passed all covered static rollback/confirmation/process/storage/cleanup windows. Log SHA256 is
+`00344575d587f8ce35d25bb3b50635574a88c4450cafc7e70776c4ff9d3921e6`.
+
+Separate final run 18 repeated unpatched Debian keyfile native checkpoint rollback/hold/release
+and the actual helper fault windows on the same frozen `630dd6d3` source. It passed in 10.88 seconds
+in the namespace, 16.65 seconds overall; its log SHA256 is
+`de50483c177772a59fcf9a385e932e2dbc61412952c98ad24c14ea0ebf693e55`. Both final runs verified owned children absent, the original production networkd
+unchanged and host `/var/lib/NetworkManager` absent. The root integration has a separate negative
+pending-owner admission test; these fixtures exercise the positive-owner transaction path, not
+a different integration commit. Actual automatic acquisition and structural activation remain open. The separate fixture/evidence
+handoff required changed gate against `630dd6d3` passed build/vet and selected netx tests in
+0.024 seconds. Its native opt-in proofs are the separately recorded runs above.
+
 The required changed gate for the backend checkpoint, against its prior separately committed
 frontend draft `3018e120`, passed build/vet and the selected API/netx tests (9.811/1.411 seconds).
 The complete P11 frontend/backend selection is still reserved for the final integrated tree.
