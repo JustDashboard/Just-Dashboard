@@ -68,6 +68,18 @@ Runtime evidence also refuses DHCP/RA routes when automatic routes are disabled,
 DNS servers when automatic DNS is disabled or the family is manual/disabled. Automatic acquisition
 acceptance remains separate from these refusal checks.
 
+networkd's existing per-protocol `UseDomains` policy is preserved independently of `UseDNS`: explicit
+`yes` retains acquired search domains, `route` retains acquired routing domains and `no` refuses
+acquired domains. The editor changes configured domain lists; it does not expose automatic-domain
+policy controls. Duplicate, unknown or shared/inherited profile policy refuses admission. Unset
+protocol policy is preserved, but a received domain cannot be attributed to an uncaptured daemon
+default. Runtime inspection verifies the domain's DHCPv4/DHCPv6/NDisc source, provider address family,
+enabled addressing method and search-versus-route placement; foreign/runtime-only and extra static
+domains refuse agreement. This uses [systemd's separate domain policy](https://github.com/systemd/systemd/blob/v257/man/systemd.network.xml)
+and [per-domain source/provider evidence](https://github.com/systemd/systemd/blob/v257/src/network/networkd-json.c).
+Raw policy remains fenced by the exact prior/candidate snapshots and ownership generation. Staging
+and recovery decoding refuse a change to that retained policy; the public intent is unchanged.
+
 ## Temporary apply and durable cleanup
 
 Native writes always require a positive authenticated pending owner and independently armed recovery.
@@ -75,9 +87,11 @@ Immediate requests are refused before taking a recovery lock or retrying prior t
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise `jd-native-manager-v3` before admission. The private
-v3 peer vocabulary cannot be admitted by a previously installed v1/v2 helper. Recovery preserves
-earlier v1/v2 journal scope and strategies; a legacy checkpoint journal refuses a migrating writer
+The standalone recovery executable must advertise `jd-native-manager-v4` before admission, including
+the automatic-domain preservation and provenance checks. An older helper is refused before journaling
+or arming a new native change. The private undo payload remains at v3 with its peer vocabulary;
+the domain policy is already captured in existing file snapshots, so no additional raw policy is serialized.
+Recovery preserves earlier v1/v2/v3 journal scope and strategies; a legacy checkpoint journal refuses a migrating writer
 rather than converting that existing journal to a different recovery method.
 Selected files are exchanged atomically with their staged candidates, retaining the displaced inode
 in private staging. A concurrent native writer is verified after the exchange and preserved; it is

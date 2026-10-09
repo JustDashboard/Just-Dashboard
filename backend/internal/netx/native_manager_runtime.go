@@ -61,7 +61,7 @@ func nativeNMDNS(ctx context.Context, p *nativeProfile, family int) ([]string, [
 	return dns, domains, nil
 }
 
-func nativeNetworkdDNS(ctx context.Context, p *nativeProfile) ([]string, []string, error) {
+func nativeNetworkdDNS(ctx context.Context, p *nativeProfile, intent NativeIntent) ([]string, []string, error) {
 	out, err := nativeExecute(ctx, nil, "networkctl", "--no-pager", "--json=short", "status", p.View.Device)
 	if err != nil {
 		return nil, nil, err
@@ -72,12 +72,8 @@ func nativeNetworkdDNS(ctx context.Context, p *nativeProfile) ([]string, []strin
 			Family  int    `json:"Family"`
 			Address []byte `json:"Address"`
 		} `json:"DNS"`
-		Search []struct {
-			Domain string `json:"Domain"`
-		} `json:"SearchDomains"`
-		Routes []struct {
-			Domain string `json:"Domain"`
-		} `json:"RouteDomains"`
+		Search []nativeNetworkdDomain `json:"SearchDomains"`
+		Routes []nativeNetworkdDomain `json:"RouteDomains"`
 	}
 	if json.Unmarshal([]byte(out), &state) != nil || state.Name != p.View.Device {
 		return nil, nil, errors.New("unreadable networkd DNS evidence")
@@ -97,11 +93,13 @@ func nativeNetworkdDNS(ctx context.Context, p *nativeProfile) ([]string, []strin
 			return nil, nil, errors.New("unreadable networkd DNS address")
 		}
 	}
-	for _, domain := range state.Search {
-		domains = append(domains, domain.Domain)
+	data := p.File.Data
+	if p.View.Owner == "netplan" {
+		data = p.Generated.Data
 	}
-	for _, domain := range state.Routes {
-		domains = append(domains, "~"+domain.Domain)
+	domains, err = nativeNetworkdVerifyDomains(data, intent, state.Search, state.Routes)
+	if err != nil {
+		return nil, nil, err
 	}
 	return dns, domains, nil
 }
@@ -140,7 +138,7 @@ func readNativeRuntime(ctx context.Context, p *nativeProfile, in NativeIntent) N
 	}
 	var allDNS, allDomains []string
 	if p.View.Renderer == "networkd" {
-		allDNS, allDomains, err = nativeNetworkdDNS(ctx, p)
+		allDNS, allDomains, err = nativeNetworkdDNS(ctx, p, in)
 		if err != nil {
 			return unknown("The native owner's per-link DNS/domain evidence could not be read.")
 		}

@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v3"
+const nativeRecoveryToken = "jd-native-manager-v4"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {
@@ -140,6 +140,12 @@ func decodeNativeUndo(c recoveryCommand) (*nativeUndo, error) {
 	for _, intent := range []NativeIntent{u.BeforeIntent, u.CandidateIntent} {
 		if _, err := normalizeNativeIntent(intent); err != nil {
 			return nil, errors.New("refused invalid native recovery intent")
+		}
+	}
+	if u.Renderer == "networkd" {
+		profile := u.Files[len(u.Files)-1]
+		if err := nativeNetworkdDomainPolicyEqual(profile.Before.Data, profile.Candidate.Data); err != nil {
+			return nil, err
 		}
 	}
 	return &u, nil

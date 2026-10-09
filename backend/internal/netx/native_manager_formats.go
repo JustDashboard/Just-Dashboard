@@ -39,6 +39,9 @@ func nativeBoolean(s string, fallback bool) (bool, error) {
 
 func parseNativeNetworkd(data []byte, p *nativeProfile) (NativeIntent, error) {
 	in := NativeIntent{IPv4: nativeEmptyFamily("disabled"), IPv6: nativeEmptyFamily("disabled")}
+	if _, err := nativeNetworkdDomainPolicy(data); err != nil {
+		return in, err
+	}
 	blocks, err := parseNativeINI(data)
 	if err != nil {
 		return in, err
@@ -303,7 +306,11 @@ func renderNativeNetworkd(data []byte, in NativeIntent) ([]byte, error) {
 			result = append(result, nativeINIBlock{Section: "Route", Lines: values})
 		}
 	}
-	return result.render(), nil
+	candidate := result.render()
+	if err := nativeNetworkdDomainPolicyEqual(data, candidate); err != nil {
+		return nil, err
+	}
+	return candidate, nil
 }
 
 func parseNativeNM(data []byte, p *nativeProfile) (NativeIntent, error) {

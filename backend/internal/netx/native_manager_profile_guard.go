@@ -21,12 +21,17 @@ func nativeProfileFieldsGuard(p *nativeProfile, data []byte, renderer string) er
 	if err != nil {
 		return err
 	}
+	if renderer == "networkd" {
+		if _, err := nativeNetworkdDomainPolicy(data); err != nil {
+			return err
+		}
+	}
 	networkd := map[string][]string{
 		"Match":        {"Name", "MACAddress"},
 		"Network":      {"Address", "Gateway", "DNS", "Domains", "DHCP", "IPv6AcceptRA", "LinkLocalAddressing"},
-		"DHCPv4":       {"UseDNS", "UseRoutes"},
-		"DHCPv6":       {"UseDNS"},
-		"IPv6AcceptRA": {"UseDNS", "UseGateway", "UseRoutePrefix", "UseOnLinkPrefix"},
+		"DHCPv4":       {"UseDNS", "UseRoutes", "UseDomains"},
+		"DHCPv6":       {"UseDNS", "UseDomains"},
+		"IPv6AcceptRA": {"UseDNS", "UseGateway", "UseRoutePrefix", "UseOnLinkPrefix", "UseDomains"},
 		"Address":      {"Address"},
 		"Route":        {"Destination", "Gateway", "Metric", "Table"},
 		"Link":         {"RequiredForOnline"},
