@@ -90,6 +90,12 @@ exceptions, limit profiles, feed lifecycle, session revocation and ctnetlink pre
 with namespace races, the failed first spec run, the passing gate and the integration correction
 for verdict maps. Off-host forward measurement and timer-independent refresh remain open.
 
+[Routing and host firewall acceptance](network-routing-firewall-acceptance.md) (C024–C038)
+records route history, multipath and reviewed edits, previews, tunnel anchors, forwarding health,
+activity-based firewall ownership, rule plans, access-guarded journaled changes and the owned
+nftables table, with live namespace and real-ufw runs, the failed first gate, the passing gate and
+the integration reruns. VRF traffic, live FRR and live firewalld remain open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
