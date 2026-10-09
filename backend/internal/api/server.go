@@ -176,6 +176,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// traffic chart for three this morning exists only if something was
 	// reading the counters at three.
 	s.modules.network.Start(ctx)
+	// A block made from the connection table with an end is lifted when it
+	// ends, whether or not anybody has the page open.
+	go s.expireBlocks(ctx)
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)

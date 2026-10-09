@@ -21,6 +21,7 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 	r.Route("/firewall", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleFirewallStatus))
 		r.Method(http.MethodGet, "/apps", s.handle(s.handleFirewallApps))
+		s.mountFirewallBlockRoutes(r)
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/rules", s.handle(s.handleFirewallAddRule))

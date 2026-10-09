@@ -33,6 +33,7 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/security/posture", s.handle(s.handleSecurityPosture))
 	r.Method(http.MethodGet, "/security/services", s.handle(s.handleServiceCatalogue))
 	r.Method(http.MethodGet, "/connections", s.handle(s.handleConnections))
+	s.mountConnectionDetailRoutes(r)
 
 	// Listing the logins and ending one are the same subtree, and they have to
 	// be registered in the same place: chi mounts a Route as a subrouter, so a

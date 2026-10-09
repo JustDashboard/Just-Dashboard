@@ -145,7 +145,11 @@ type fwBackend interface {
 	Capabilities() FirewallCapabilities
 }
 
-type Service struct{}
+type Service struct {
+	// conns remembers the connection table between reads (connections.go),
+	// which is how a tuple gets an age and a close is noticed at all.
+	conns connTracker
+}
 
 func New() *Service { return &Service{} }
 

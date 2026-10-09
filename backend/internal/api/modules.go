@@ -86,6 +86,9 @@ type moduleSet struct {
 	dbs           *dbx.Manager
 	linuxUsers    *linuxusers.Service
 	netsec        *netsec.Service
+	// blocks records the remote addresses blocked from the connection table
+	// with why and until when, and lifts the ones that end.
+	blocks *netsec.Blocks
 	// network changes the host's network: devices, routes, the gateway
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
@@ -220,6 +223,7 @@ func (s *Server) initModules() {
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
+	s.modules.blocks = netsec.NewBlocks(s.Store.DB, s.modules.netsec)
 	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
 	s.modules.dnsServices = dnsservice.New(dnsservice.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Runtime: dnsservice.NewDockerRuntime(s.Cfg.DockerHost)})
 	s.modules.network = netx.New(netx.Options{
