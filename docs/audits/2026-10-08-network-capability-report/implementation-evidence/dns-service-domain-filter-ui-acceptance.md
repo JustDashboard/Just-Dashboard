@@ -39,6 +39,16 @@ The selected API and DNS packages pass in 0.462s and 32.942s. Browser selection 
 205 pass and eight optional `JD_NETWORK_SHOTS` captures remain skipped and unverified. This is the
 changed-surface gate; no whole browser suite or `go test ./...` is run.
 
+The separate [focused race run](dns-service-domain-filter-ui/race-final.log) exits zero in
+133.231s, with DNS and API package times of 127.484s and 4.575s. Its
+[record](dns-service-domain-filter-ui/race-final.result.json) retains the exact selection, command
+and unchanged source hashes; a subsequent [collection-only listing](dns-service-domain-filter-ui/race-selection.log)
+confirms 24 DNS and two API tests match the selection. It covers reviewed domain/native metadata,
+private administrator capabilities, no-store replies, sealing, literal-origin TLS identity,
+redirect/proxy boundaries, destructive audit, concurrent single-use consumption and owned-resource
+lifecycle. It uses `go test -race ./internal/dnsservice ./internal/api`, the recorded `-run` pattern,
+`-count=1 -timeout=300s`, Go 1.26.8 and two jobs. No whole package-tree race suite is run.
+
 All 24 custom-domain interactions pass, alongside the 45 existing DNS service cases and 18 filter
 metadata cases. The new cases cover AdGuard allow/deny suffix semantics, Pi-hole explicit group
 zero and empty memberships, removal without replacement groups, native null/empty/text comments,

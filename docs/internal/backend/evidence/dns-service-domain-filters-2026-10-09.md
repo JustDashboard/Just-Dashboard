@@ -4,7 +4,10 @@ The bounded backend/API controls pass scoped checks, focused races and actual ow
 and Pi-hole acceptance. AdGuard uses generated allow/deny domain-suffix rules; Pi-hole uses exact
 domain rows with explicit existing group memberships. This verifies native configuration, retained
 selection/readback, preservation and container restart persistence. Effective client filtering,
-native policy precedence, matching mounted controls and complete P17 acceptance remain open.
+native policy precedence and complete P17 acceptance remain open. Matching mounted acceptance was
+pending at the isolated checkpoint below; the later
+[assembled application record](../../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui-acceptance.md)
+now retains its separate fresh build, reachable checks and viewport evidence.
 
 ## Frozen product and records
 
@@ -160,4 +163,5 @@ both terminal cleanup checks. Cached images require no pulls or host resolver/ma
 This assembled backend proof does not replace the isolated records or establish subscription
 downloads, loaded rule content, effective client filtering, precedence, Technitium domain controls,
 timers or reboot recovery. Protection stays disabled in the fixture. The matching production
-build/browser/capture acceptance is a separate record; broader P17 acceptance remains open.
+[build/browser/capture acceptance](../../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui-acceptance.md)
+is a separate record; broader P17 acceptance remains open.
