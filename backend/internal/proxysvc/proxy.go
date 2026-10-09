@@ -31,6 +31,10 @@ var (
 	// editor must not show: a password file. Its hashes are offline-crackable,
 	// and the editor's read route is open to every signed-in account.
 	ErrProtectedFile = errors.New("this file holds password hashes and is not shown by the config editor")
+	// ErrLoadRefused is a reload whose signal reached nginx's master and
+	// whose configuration the master refused to load: it goes on serving
+	// what it had, and its error log says why.
+	ErrLoadRefused = errors.New("nginx refused the reload")
 )
 
 type Kind string
@@ -621,6 +625,9 @@ type ReloadResult struct {
 	Validation *ValidationResult `json:"validation"`
 	Reloaded   bool              `json:"reloaded"`
 	Output     string            `json:"output"`
+	// LoadProof is what the running nginx showed of the reload; nil for
+	// Caddy, which answers its reload with the outcome.
+	LoadProof *LoadProof `json:"loadProof,omitempty"`
 }
 
 // Reload tests first and refuses to reload a config that does not pass. This
@@ -645,7 +652,6 @@ func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) 
 	default:
 		kind = KindNginx
 		validation, err = runTest(run, "nginx", "-t")
-		reload = hostexec.Command(ctx, "nginx", "-s", "reload")
 	}
 	if err != nil {
 		return nil, err
@@ -654,6 +660,19 @@ func (s *Service) Reload(ctx context.Context, kind Kind) (*ReloadResult, error) 
 	res := &ReloadResult{Validation: validation}
 	if !validation.Valid {
 		return res, ErrInvalidConf
+	}
+	if kind == KindNginx {
+		// The master's side of the reload is the outcome: a refused load
+		// exits 0 here too.
+		reloaded, output, failure, proof := s.reloadProven(ctx, nil, nil)
+		res.Reloaded, res.Output, res.LoadProof = reloaded, output, proof
+		if !reloaded {
+			if proof != nil {
+				return res, fmt.Errorf("%w: %s", ErrLoadRefused, proof.Error)
+			}
+			return res, fmt.Errorf("reload failed: %s", failure)
+		}
+		return res, nil
 	}
 	out, err := reload.CombinedOutput()
 	res.Output = strings.TrimSpace(string(out))

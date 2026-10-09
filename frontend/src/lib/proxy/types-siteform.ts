@@ -1,4 +1,4 @@
-import type { ProxyDiagnostic, ProxyValidation } from "./types-engine"
+import type { LoadProof, ProxyDiagnostic, ProxyValidation } from "./types-engine"
 
 /** A site as the dashboard describes it, not as nginx does. */
 export type SiteLocation = {
@@ -514,5 +514,7 @@ export type SiteResult = {
   reloaded: boolean
   /** Why nginx did not reload a configuration that tested clean. */
   reloadError?: string
+  /** What nginx's master showed of the reload the save asked for. */
+  loadProof?: LoadProof
   output?: string
 }

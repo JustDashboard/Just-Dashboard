@@ -5,6 +5,7 @@ import type {
   SiteResult,
   SiteSpec,
 } from "@/lib/types"
+import { loadProofText, provenLive, reloadState } from "./load-proof"
 
 /**
  * The spec as the server should read it. HSTS and its options go only with
@@ -327,6 +328,15 @@ function savedOutcome(res: SiteResult, { existing }: { existing: boolean }): Sav
       description: `nginx serves sites-enabled/${name}, a file of its own, not this one, so this save changes nothing it serves.`,
     }
   }
+  if (res.reloadError && res.loadProof?.state === "refused") {
+    // The signal reached a running nginx, whose master read the file and
+    // refused it: it serves what it had, and its error log says why.
+    return {
+      tone: "warning",
+      title: `${name} saved; nginx refused the reload`,
+      description: `${loadProofText(res.loadProof)} Fix what it names, then reload nginx.`,
+    }
+  }
   if (res.reloadError) {
     // Nothing about what nginx is serving: the usual cause is an nginx that
     // is not running, which serves nothing at all.
@@ -337,7 +347,13 @@ function savedOutcome(res: SiteResult, { existing }: { existing: boolean }): Sav
     }
   }
   if (!res.enabled) return disabledOutcome(res)
-  const state = res.reloaded ? "is live" : "saved"
+  // "Is live" only of a load nginx's master was seen taking up: the signal
+  // going out says nothing of whether it loaded the file.
+  const state = res.reloaded ? reloadState(res.loadProof) : "saved"
+  const unproven =
+    res.reloaded && res.loadProof && !provenLive(res.loadProof)
+      ? ` ${loadProofText(res.loadProof)}`
+      : ""
   const warnings = res.testWarnings ?? []
   if (res.conflicts && res.conflicts.length > 0) {
     // The warnings go with it rather than being dropped behind it.
@@ -345,17 +361,26 @@ function savedOutcome(res: SiteResult, { existing }: { existing: boolean }): Sav
     return {
       tone: "warning",
       title: `${name} ${state} with a name conflict`,
-      description: conflictsText(res.conflicts, { name, reloaded: res.reloaded }) + also,
+      description: conflictsText(res.conflicts, { name, reloaded: res.reloaded }) + also + unproven,
     }
   }
   if (warnings.length > 0) {
     return {
       tone: "warning",
       title: `${name} ${state} with ${warningsTitle(warnings)}`,
-      description: warningsText(warnings),
+      description: warningsText(warnings) + unproven,
     }
   }
-  if (res.reloaded) return { tone: "success", title: `${name} is live` }
+  if (res.reloaded && unproven) {
+    return { tone: "warning", title: `${name} ${state}`, description: unproven.trim() }
+  }
+  if (res.reloaded) {
+    return {
+      tone: "success",
+      title: `${name} is live`,
+      description: res.loadProof ? loadProofText(res.loadProof) : undefined,
+    }
+  }
   return {
     tone: "success",
     title: `${name} saved`,

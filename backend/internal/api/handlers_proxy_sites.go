@@ -264,6 +264,13 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 			})
 			return httpx.Err(http.StatusConflict, "name_conflict", proxysvc.ConflictSummary(res.Conflicts))
 		}
+		var refused *proxysvc.SiteLoadRefusedError
+		if errors.As(err, &refused) {
+			httpx.SetAudit(r, "proxy.site.apply", req.Spec.Name, map[string]any{
+				"result": "rolled-back", "bindError": refused.BindError,
+			})
+			return httpx.Err(http.StatusConflict, "load_refused", refused.Error())
+		}
 		return mapProxyError(err)
 	}
 	detail := map[string]any{
@@ -272,6 +279,9 @@ func (s *Server) handleSiteApply(w http.ResponseWriter, r *http.Request) error {
 	}
 	if res.ReloadError != "" {
 		detail["reloadError"] = res.ReloadError
+	}
+	if res.LoadProof != nil {
+		detail["load"] = res.LoadProof.State
 	}
 	if len(res.Conflicts) > 0 {
 		detail["conflicts"] = res.Conflicts

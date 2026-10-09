@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // SiteResult reports what happened to a site, in order.
@@ -46,7 +45,10 @@ type SiteResult struct {
 	// up: a running nginx serves what it served before, and one that is not
 	// running — the usual cause — serves nothing until it is started.
 	ReloadError string `json:"reloadError,omitempty"`
-	Output      string `json:"output,omitempty"`
+	// LoadProof is what the running nginx showed of the reload: whether its
+	// master took the saved file up, or refused it and why.
+	LoadProof *LoadProof `json:"loadProof,omitempty"`
+	Output    string     `json:"output,omitempty"`
 }
 
 // ServerNameConflict is one of a site's names that another server block
@@ -323,28 +325,87 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 	if untested != "" {
 		res.Validation.Note = untested
 	}
-	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
-		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
+	record := func() {
+		s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
+			Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
+	}
 	// Only a configuration that passed its test is reloaded. A disabled
 	// site's test failing with it enabled says nothing about the files
 	// nginx reads now, which have not been tested without it.
-	if opts.Reload && res.Validation.Valid {
-		raw, err := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
-		out := strings.TrimSpace(string(raw))
-		res.Output = out
-		if err != nil {
-			// The config tested clean, so a reload failure is about the
-			// running process rather than the file. Undoing the write would
-			// lose the operator's work for a problem it did not cause.
-			res.ReloadError = out
-			if res.ReloadError == "" {
-				res.ReloadError = err.Error()
-			}
-			return res, fmt.Errorf("%w: %s", errSiteReloadFailed, res.ReloadError)
-		}
-		res.Reloaded = true
+	if !opts.Reload || !res.Validation.Valid {
+		record()
+		return res, nil
 	}
+	// The reload is watched from the master's side: the signal going out
+	// says nothing about whether nginx loaded the file.
+	files, binds := map[string]string{full: content}, []bind(nil)
+	if res.Enabled {
+		files, binds = enabledFiles(full, content, link), siteBinds(full, content)
+	}
+	reloaded, out, failure, proof := s.reloadProven(ctx, files, binds)
+	res.Output, res.LoadProof = out, proof
+	if !reloaded && proof != nil && proof.bindError {
+		// nginx could not bind one of the site's own sockets and kept the
+		// configuration it had. Left in place, the file fails every later
+		// reload on the host, so the site goes back to what nginx serves.
+		rollback()
+		return res, s.siteLoadRefusal(ctx, spec.Name, binds, proof.Error)
+	}
+	record()
+	if !reloaded {
+		// The config tested clean, so a reload failure is about the running
+		// process rather than the file. Undoing the write would lose the
+		// operator's work for a problem it did not cause.
+		res.ReloadError = failure
+		return res, fmt.Errorf("%w: %s", errSiteReloadFailed, res.ReloadError)
+	}
+	res.Reloaded = true
 	return res, nil
+}
+
+// SiteLoadRefusedError is a save whose reload nginx refused over one of the
+// site's own sockets — a port another program holds, which `nginx -t` does
+// not check. The site was put back as it was before the save.
+type SiteLoadRefusedError struct {
+	Site      string `json:"site"`
+	BindError string `json:"bindError"`
+	// Holder is the program holding the socket, where it can be named.
+	Holder string `json:"holder,omitempty"`
+	PID    int32  `json:"pid,omitempty"`
+}
+
+func (e *SiteLoadRefusedError) Error() string {
+	msg := "nginx did not take " + e.Site + " up when it reloaded: " + e.BindError
+	if e.Holder != "" {
+		msg += fmt.Sprintf(" — the port is held by %s (pid %d)", e.Holder, e.PID)
+	}
+	return msg + "; the site was put back as it was, and nginx goes on serving what it served before"
+}
+
+// siteLoadRefusal names what holds the socket nginx could not bind, where
+// the host's listener list can.
+func (s *Service) siteLoadRefusal(ctx context.Context, site string, binds []bind, text string) *SiteLoadRefusedError {
+	refused := &SiteLoadRefusedError{Site: site, BindError: text}
+	failure, ok := parseBindFailure(text)
+	if !ok {
+		return refused
+	}
+	listeners, err := readListeners(ctx)
+	if err != nil {
+		return refused
+	}
+	for _, b := range binds {
+		if b.address() != failure.address {
+			continue
+		}
+		for _, l := range listeners {
+			if l.Port == uint32(b.port) && l.Protocol == b.proto() && l.Process != "nginx" && (l.Address == b.addr || net.ParseIP(l.Address).IsUnspecified()) {
+				refused.Holder, refused.PID = l.Process, l.PID
+				return refused
+			}
+		}
+	}
+	return refused
 }
 
 // conflictingNameRe is nginx's warning for a server name a second block

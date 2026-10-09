@@ -2097,13 +2097,39 @@ containers/volumes/networks.
     `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The toast
     says nginx did not pick it up and to start or reload it, never what nginx is serving: the usual cause
     is an nginx that is not running (`open() "/run/nginx.pid" failed`), which serves nothing. The
-    deployment cutovers still get the error, since their recovery is built on it. Not seen: a reload the
-    master refuses after `nginx -s reload` has returned 0, which only says the signal was delivered. The
+    deployment cutovers still get the error, since their recovery is built on it.
+  - **A reload is proven from the master's side** (`reload_proof.go`). `nginx -s reload` returning 0
+    says only that the signal was delivered; the master then reads the files and either opens what they
+    listen on and replaces every worker, or logs `[emerg]` and keeps serving its old configuration. The
     case that matters is a listen address another process holds — `nginx -t` passes it, because its test
-    ignores `EADDRINUSE` — where the master logs `[emerg] bind() … failed (98: Address already in use)`
-    five times and keeps its old configuration (checked against nginx 1.26.3), and the save still says
-    "is live". Catching it needs the reload verified from the master's side (its error log or its
-    workers), which the engine's reload does not do either.
+    ignores `EADDRINUSE` — where the master logs `bind() … failed (98: Address already in use)` five
+    times, half a second apart, then `still could not bind()` (checked against nginx 1.26.3). Every
+    reload a save, a switch, a link removal, a bulk change or the engine's own **Reload** asks for now
+    goes through `reloadProven`: `markLoad` notes the running master (`markReload`: found by the
+    configuration it was started on, as the stream watch finds it), its workers, the end of its error
+    log and the SHA-256 of each file the change wrote (the site's file and its `sites-enabled` link);
+    `awaitLoad` then watches for `loadWait` (3 s). `LoadProof.state` is `loaded` when every worker
+    serving is one that was not there before (`replacedAll`: one new worker beside old ones is a
+    crashed worker replaced on the same load, not a load), each file still holds the digest the change
+    wrote (`held`), and nginx holds every socket the site's `listen` lines ask for (`siteBinds`, read
+    as the stream watch reads them; `listening`); `refused` with nginx's first `[emerg]` line (`error`)
+    when the master logged one after the signal — after a bind failure the watch reads on until the
+    master gives up, so its later attempts are never read as the next reload's; `unconfirmed` with a
+    `note` when none of that was seen in time, a file was written again before the load, or nginx
+    loaded without the site's socket; `unchecked` when the running nginx could not be read. A save
+    whose reload the master refused **over one of the site's own sockets** is put back exactly as a
+    refused test puts it back (file, link and `.bak`) and answered 409 `load_refused` with
+    `SiteLoadRefusedError` naming the program holding the port from the host's listener list (audited
+    `result: rolled-back`): left in place, the file would fail every later reload on the host. Any
+    other refusal keeps the valid file and is `reloaded: false` with `reloadError` ("nginx did not take
+    the reload up: …"). The engine's reload answers a refused load as 502 `load_refused`
+    (`ErrLoadRefused`, audited `result: refused`) and carries `loadProof` otherwise. The site form says
+    "is live" only for `loaded` (or a backend that sends no proof), "saved and reloaded" with the note
+    otherwise, and "nginx refused the reload" with nginx's words (`load-proof.ts`, `site-save.ts`); the
+    engine's Reload toast and the pending strip read the same. `TestLiveReloadIsProvenFromTheMaster`
+    runs the host's nginx binary on a private prefix: a loaded save is proven from the real master's
+    workers and sockets, a save onto a port the test holds is refused by the master, put back, named as
+    held by the test process, and the previous site still answers.
   - `testWarnings` are the test's warnings placed in the site's own file, so "is live" is said only when
     nginx had nothing to say about it: "Saved with 2 warnings" lists them by line, and alongside a
     conflict they are listed after it rather than dropped. A conflict warning names no file, so it is
