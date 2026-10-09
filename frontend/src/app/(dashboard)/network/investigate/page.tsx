@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { PathReport } from "@/components/network/path-report"
 import { SaveInvestigationRun } from "@/components/network/save-investigation-run"
 import { Page, PageContext } from "@/components/page"
@@ -18,17 +19,28 @@ import {
 } from "@/components/ui/select"
 import { useAuth } from "@/hooks/use-auth"
 import { errorMessage, get, post } from "@/lib/api"
-import { newPathDraft, pathRequest } from "@/lib/network-investigator"
+import { pathDraftFromQuery, pathRequest } from "@/lib/network-investigator"
 import type { PathDraft } from "@/lib/network-investigator"
 import type { PathResult, PathSources } from "@/lib/network-investigator-types"
 
+// Another page names the tuple in the query string — a stream's port, say —
+// which the App Router hands out only inside a Suspense boundary.
+export default function NetworkInvestigatorPage() {
+  return (
+    <Suspense>
+      <NetworkInvestigator />
+    </Suspense>
+  )
+}
+
 // A report register: the input selects the evidence to read; it does not stage
 // a network change or draw unmeasured edges as successful packet traversal.
-export default function NetworkInvestigatorPage() {
+function NetworkInvestigator() {
   const { can } = useAuth()
   const admin = can("system.admin")
+  const params = useSearchParams()
   const [sources, setSources] = useState<PathSources>({ containers: [] })
-  const [draft, setDraft] = useState(newPathDraft)
+  const [draft, setDraft] = useState(() => pathDraftFromQuery(params))
   const [result, setResult] = useState<PathResult>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()

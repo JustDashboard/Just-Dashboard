@@ -199,6 +199,9 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 	}
 	result.Evidence = append(result.Evidence, tunnel)
 	proxy := evidence("proxy", "Proxy", "destination owner inventory", "Proxy owner", "/proxy")
+	// streamName is the native stream that owns the matched listener, whose
+	// configuration and backend legs are joined below.
+	streamName := ""
 	owner := evidence("owner", "Destination owner", "local host sockets", "Listener owner", "/ports")
 	proxy.Summary, owner.Summary = "Remote or foreign proxy configuration is unknown.", "Remote service/process ownership is unknown."
 	if req.SourceKind == "container" && selected.Local {
@@ -239,6 +242,9 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 					proxy.Summary = "Native proxy inventory associates this listener with a stream or configured sites; application routing remains unmeasured."
 					proxy.Facts = append(proxy.Facts, Fact{"Stream", listener.Stream}, Fact{"Configured sites", strconv.Itoa(listener.ServedSites)})
 				}
+				if listener.Stream != "" {
+					streamName = listener.Stream
+				}
 			}
 			if owner.Basis == Unknown {
 				owner.Basis, owner.State, owner.Summary = Observed, "absent", "No matching local listener/publication was found in this snapshot; unreadable owners and later changes remain possible."
@@ -246,7 +252,14 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 		}
 	}
 	result.Evidence = append(result.Evidence, proxy, owner)
+	if streamName != "" && p.Stream != nil {
+		result.Evidence = append(result.Evidence, streamEvidence(ctx, streamName, p))
+	}
 	probe := evidence("probe", "Connection measurement", sourceName, "Diagnostics", "/network/tools")
+	// traversed is a connection that reached a stream's listener: nginx logs
+	// where it forwarded it when it closes.
+	var sent time.Time
+	traversed := false
 	probe.State, probe.Summary = "not_requested", "No TCP connection was attempted."
 	if req.Measure {
 		switch {
@@ -260,7 +273,9 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 			probe.State, probe.Summary = "unavailable", "The selected source probe adapter is unavailable."
 		default:
 			req.SourceAddress = selected.Source
+			sent = time.Now()
 			measurement, err := p.Probe(ctx, req)
+			traversed = err == nil && measurement != nil && measurement.OK && streamName != "" && p.StreamSession != nil
 			result.Measurement = measurement
 			if err != nil {
 				probe.failure(err)
@@ -280,6 +295,9 @@ func Investigate(ctx context.Context, request Request, p Providers) (*Result, er
 		}
 	}
 	result.Evidence = append(result.Evidence, probe)
+	if traversed {
+		result.Evidence = append(result.Evidence, streamTraversal(ctx, streamName, selected.Source, sent, p))
+	}
 	return result, nil
 }
 

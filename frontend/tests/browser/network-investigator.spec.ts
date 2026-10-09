@@ -263,3 +263,84 @@ test("read-only accounts cannot start diagnostics or read source attribution", a
   expect(calls).toHaveLength(0)
   expect(inventories).toBe(0)
 })
+
+test("a stream's link opens the tuple, and the report joins the stream and the backend its connection reached", async ({
+  page,
+}) => {
+  const calls: PathRequest[] = []
+  await mockNetwork(page, [])
+  await page.route("**/api/v1/network/investigate/sources", (route) =>
+    json(route, { containers: [] }),
+  )
+  await page.route("**/api/v1/network/investigate", (route) => {
+    const request = route.request().postDataJSON() as PathRequest
+    calls.push(request)
+    const base = report(request)
+    return json(route, {
+      ...base,
+      evidence: [
+        ...base.evidence,
+        {
+          ...evidence(
+            "stream",
+            "Stream proxy",
+            "observed",
+            "live",
+            "nginx forwards TCP on port 6432/tcp to 10.0.0.5:5432.",
+          ),
+          ownerPath: "/proxy/streams?stream=pg",
+          facts: [
+            { label: "Access", value: "allow 10.0.0.0/8, deny everyone else" },
+            { label: "Client sessions now", value: "3" },
+            {
+              label: "backend 10.0.0.5:5432",
+              value: "2 connections from nginx now; 11 sessions in the last hour, 1 failed",
+            },
+          ],
+          limitations: [
+            "Configured forwards and access rules are the stream file's; the connections and sessions are nginx's, not this tuple's.",
+          ],
+        },
+        {
+          ...evidence(
+            "stream_traversal",
+            "Stream backend leg",
+            "measured",
+            "forwarded",
+            "nginx forwarded the measured connection to 10.0.0.5:5432 and logged it as completed.",
+          ),
+          facts: [{ label: "Backend", value: "10.0.0.5:5432" }],
+        },
+      ],
+    })
+  })
+  await page.goto(
+    "/network/investigate?target=127.0.0.1&port=6432&protocol=tcp&family=inet&measure=1",
+  )
+  await expect(page.getByLabel("Destination", { exact: true })).toHaveValue("127.0.0.1")
+  await expect(page.getByLabel("Port", { exact: true })).toHaveValue("6432")
+  await expect(page.getByRole("checkbox", { name: "Measure a TCP connection" })).toBeChecked()
+  await page.getByRole("button", { name: "Investigate", exact: true }).click()
+  await expect.poll(() => calls.length).toBe(1)
+  expect(calls[0]).toMatchObject({
+    target: "127.0.0.1",
+    port: 6432,
+    protocol: "tcp",
+    measure: true,
+  })
+
+  const result = page.getByRole("region", { name: "Connection path report" })
+  const stream = result.locator("#evidence-stream")
+  await expect(stream.getByRole("heading", { name: "Stream proxy" })).toBeVisible()
+  await expect(stream).toContainText("Observed snapshot · live")
+  await expect(stream).toContainText(
+    "2 connections from nginx now; 11 sessions in the last hour, 1 failed",
+  )
+  await expect(stream.getByRole("link", { name: "Open owner" })).toHaveAttribute(
+    "href",
+    "/proxy/streams?stream=pg",
+  )
+  const leg = result.locator("#evidence-stream_traversal")
+  await expect(leg).toContainText("Measured response · forwarded")
+  await expect(leg).toContainText("nginx forwarded the measured connection to 10.0.0.5:5432")
+})

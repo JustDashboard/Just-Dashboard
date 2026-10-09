@@ -3491,7 +3491,11 @@ containers/volumes/networks.
     `GET /proxy/streams/{name}/sessions` lists the ESTABLISHED TCP sockets on the stream's port whose owner
     is nginx or unknown (gopsutil; a UDP-only stream has no per-client socket and says so). All three are
     readable by every account, like the nginx access logs in the log viewer; a Deny or Allow on a client
-    is an ordinary save of the stream (system.admin, audited `proxy.stream.apply`).
+    is an ordinary save of the stream (system.admin, audited `proxy.stream.apply`). The log line's
+    quoted `$upstream_addr` is read too (`streamLogLine.upstream`), and `GET /proxy/streams/{name}/path`
+    (`stream_path.go`, every account) joins the forward, its access list, the client sessions, the
+    connections nginx holds to each backend now and the last hour by backend, for the connection
+    investigator's stream evidence ([network-investigator.md](network-investigator.md#native-streams-on-the-path)).
   - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
     (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
     409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the
