@@ -39,7 +39,7 @@ func nativeBoolean(s string, fallback bool) (bool, error) {
 
 func parseNativeNetworkd(data []byte, p *nativeProfile) (NativeIntent, error) {
 	in := NativeIntent{IPv4: nativeEmptyFamily("disabled"), IPv6: nativeEmptyFamily("disabled")}
-	if _, err := nativeNetworkdDomainPolicy(data); err != nil {
+	if _, err := nativeNetworkdProfileDomainPolicy(data, p); err != nil {
 		return in, err
 	}
 	blocks, err := parseNativeINI(data)
@@ -173,6 +173,7 @@ func parseNativeNetworkd(data []byte, p *nativeProfile) (NativeIntent, error) {
 		}
 		f.Routes = append(f.Routes, NativeRoute{Destination: dest, Gateway: gateway, Table: nativeRouteTable(p)})
 	}
+	netplan := p.View.Owner == "netplan" && p.View.Renderer == "networkd"
 	for i, f := range []*NativeFamilyIntent{&in.IPv4, &in.IPv6} {
 		if f.Method == "disabled" && len(f.Addresses) > 0 {
 			f.Method = "manual"
@@ -182,6 +183,30 @@ func parseNativeNetworkd(data []byte, p *nativeProfile) (NativeIntent, error) {
 		}
 		if f.Method != "disabled" {
 			f.Domains = append([]string{}, domains...)
+		}
+		if netplan {
+			section, shared := "DHCPv4", true
+			if i == 1 {
+				section = "DHCPv6"
+				if f.Method == "slaac" || f.Method == "auto" {
+					section, shared = "IPv6AcceptRA", false
+				}
+			}
+			autoDNS, err := nativeNetplanGeneratedPolicyValue(blocks, section, "UseDNS", shared)
+			useDNS, boolErr := nativeBoolean(autoDNS, true)
+			if err != nil || boolErr != nil {
+				return in, errors.New("unreadable generated native DNS preference")
+			}
+			f.IgnoreAutoDNS = !useDNS
+			if i == 0 {
+				autoRoutes, err := nativeNetplanGeneratedPolicyValue(blocks, section, "UseRoutes", true)
+				useRoutes, boolErr := nativeBoolean(autoRoutes, true)
+				if err != nil || boolErr != nil {
+					return in, errors.New("unreadable generated native route preference")
+				}
+				f.IgnoreAutoRoutes = !useRoutes
+			}
+			continue
 		}
 		section := "DHCPv4"
 		if i == 1 {
@@ -228,7 +253,7 @@ func parseNativeNetworkd(data []byte, p *nativeProfile) (NativeIntent, error) {
 		}
 		f.IgnoreAutoRoutes = !useRoutes
 	}
-	if len(blocks.values("DHCP", "UseDNS"))+len(blocks.values("DHCP", "UseRoutes")) > 0 {
+	if !netplan && len(blocks.values("DHCP", "UseDNS"))+len(blocks.values("DHCP", "UseRoutes")) > 0 {
 		return in, errors.New("shared legacy DHCP overrides require native review")
 	}
 	return normalizeNativeIntent(in)

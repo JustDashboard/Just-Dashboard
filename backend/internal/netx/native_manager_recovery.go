@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v6"
+const nativeRecoveryToken = "jd-native-manager-v8"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {
@@ -143,9 +143,26 @@ func decodeNativeUndo(c recoveryCommand) (*nativeUndo, error) {
 		}
 	}
 	if u.Renderer == "networkd" {
-		profile := u.Files[len(u.Files)-1]
-		if err := nativeNetworkdDomainPolicyEqual(profile.Before.Data, profile.Candidate.Data); err != nil {
-			return nil, err
+		if u.Owner == "netplan" {
+			p := &nativeProfile{View: NativeProfileView{Owner: u.Owner, Renderer: u.Renderer, Version: u.OwnerVersion, Device: u.Device, Kind: u.Kind, Contract: u.Contract}, Device: ipLink{Address: u.MAC}, NetplanID: u.NetplanID, NetplanSection: u.NetplanSection}
+			if err := nativeNetplanRetainsAutomaticPolicy(p, u.Files[0].Before.Data, u.Files[0].Candidate.Data); err != nil {
+				return nil, err
+			}
+			for _, candidate := range []bool{false, true} {
+				p.File, p.Generated, p.View.Intent = u.Files[0].Before, u.Files[1].Before, &u.BeforeIntent
+				if candidate {
+					p.File, p.Generated, p.View.Intent = u.Files[0].Candidate, u.Files[1].Candidate, &u.CandidateIntent
+				}
+				intent, err := parseNativeNetplan(p.File.Data, p)
+				if err != nil || !nativeIntentEqual(intent, *p.View.Intent) || nativeNetplanFieldsGuard(p) != nil {
+					return nil, errors.New("retained authored/generated native recovery policy does not match its exact supported intent")
+				}
+			}
+		} else {
+			profile := u.Files[0]
+			if err := nativeNetworkdDomainPolicyEqual(profile.Before.Data, profile.Candidate.Data); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return &u, nil

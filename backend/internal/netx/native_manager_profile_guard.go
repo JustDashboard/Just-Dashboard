@@ -22,7 +22,7 @@ func nativeProfileFieldsGuard(p *nativeProfile, data []byte, renderer string) er
 		return err
 	}
 	if renderer == "networkd" {
-		if _, err := nativeNetworkdDomainPolicy(data); err != nil {
+		if _, err := nativeNetworkdProfileDomainPolicy(data, p); err != nil {
 			return err
 		}
 	}
@@ -46,6 +46,9 @@ func nativeProfileFieldsGuard(p *nativeProfile, data []byte, renderer string) er
 		"proxy":          {},
 	}
 	allowed := networkd
+	if renderer == "networkd" && p != nil && p.View.Owner == "netplan" && p.View.Renderer == "networkd" {
+		allowed["DHCP"] = []string{"RouteMetric", "UseMTU", "UseDNS", "UseRoutes", "UseDomains"}
+	}
 	if renderer == "NetworkManager" {
 		allowed = nm
 	}
@@ -90,7 +93,11 @@ func nativeNetplanFieldsGuard(p *nativeProfile) error {
 		return errors.New("this Netplan structural profile requires verified native topology before activation")
 	}
 	for i := 0; i < len(profile.Content); i += 2 {
-		if !slices.Contains([]string{"renderer", "match", "set-name", "optional", "link-local", "dhcp4", "dhcp6", "accept-ra", "addresses", "nameservers", "routes", "dhcp4-overrides", "dhcp6-overrides", "networkmanager"}, profile.Content[i].Value) {
+		key := profile.Content[i].Value
+		if key == "ra-overrides" && p.View.Renderer == "networkd" {
+			continue
+		}
+		if !slices.Contains([]string{"renderer", "match", "set-name", "optional", "link-local", "dhcp4", "dhcp6", "accept-ra", "addresses", "nameservers", "routes", "dhcp4-overrides", "dhcp6-overrides", "networkmanager"}, key) {
 			return errors.New("this saved Netplan profile has properties whose active effects are not yet verified")
 		}
 	}

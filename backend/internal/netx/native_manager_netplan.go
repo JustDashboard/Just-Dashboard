@@ -402,6 +402,17 @@ func parseNativeNetplan(data []byte, p *nativeProfile) (NativeIntent, error) {
 	if nativeYAMLGet(profile, "gateway4") != nil || nativeYAMLGet(profile, "gateway6") != nil {
 		return in, errors.New("legacy netplan gateways require native review before route conversion")
 	}
+	if p.View.Owner == "netplan" && p.View.Renderer == "networkd" {
+		policy, err := nativeReadNetplanAutomaticPolicy(p, data)
+		if err != nil {
+			return in, err
+		}
+		in.IPv4.IgnoreAutoDNS, in.IPv4.IgnoreAutoRoutes = !policy.DHCP4.DNS, !policy.DHCP4.Routes
+		in.IPv6.IgnoreAutoDNS, in.IPv6.IgnoreAutoRoutes = !policy.DHCP6.DNS, !policy.DHCP6.Routes
+		if policy.RAActive {
+			in.IPv6.IgnoreAutoDNS = !policy.RA.DNS
+		}
+	}
 	return normalizeNativeIntent(in)
 }
 
@@ -465,6 +476,21 @@ func renderNativeNetplan(data []byte, p *nativeProfile, in NativeIntent) ([]byte
 			return nil, err
 		}
 	}
+	if p.View.Owner == "netplan" && p.View.Renderer == "networkd" && (in.IPv6.Method == "auto" || in.IPv6.Method == "slaac") {
+		if in.IPv6.IgnoreAutoRoutes {
+			return nil, errors.New("this Netplan version cannot persist IPv6 RA route suppression")
+		}
+		overrides := nativeYAMLGet(profile, "ra-overrides")
+		if overrides == nil {
+			if err := nativeYAMLSet(profile, "ra-overrides", map[string]any{}); err != nil {
+				return nil, err
+			}
+			overrides = nativeYAMLGet(profile, "ra-overrides")
+		}
+		if err := nativeYAMLSet(overrides, "use-dns", !in.IPv6.IgnoreAutoDNS); err != nil {
+			return nil, err
+		}
+	}
 	var out bytes.Buffer
 	encoder := yaml.NewEncoder(&out)
 	encoder.SetIndent(2)
@@ -478,6 +504,11 @@ func renderNativeNetplan(data []byte, p *nativeProfile, in NativeIntent) ([]byte
 }
 
 func stageNativeNetplan(ctx context.Context, p *nativeProfile, candidate []byte) ([]byte, error) {
+	if p.View.Renderer == "networkd" {
+		if err := nativeNetplanRetainsAutomaticPolicy(p, p.File.Data, candidate); err != nil {
+			return nil, err
+		}
+	}
 	files, err := nativeNetplanFiles()
 	if err != nil {
 		return nil, err
@@ -514,12 +545,17 @@ func stageNativeNetplan(ctx context.Context, p *nativeProfile, candidate []byte)
 		return nil, errors.New("netplan did not produce the exact selected native artifact with safe ownership")
 	}
 	want, err := parseNativeNetplan(candidate, p)
-	if err != nil || nativeProfileFieldsGuard(p, file.Data, p.View.Renderer) != nil {
+	staged := *p
+	staged.File = nativeProfileFile{Path: p.File.Path, Identity: p.File.Identity, Data: candidate}
+	staged.Generated = *file
+	staged.Generated.Path = p.Generated.Path
+	staged.View.Intent = &want
+	if err != nil || nativeNetplanFieldsGuard(&staged) != nil {
 		return nil, errors.New("netplan produced renderer properties outside the verified native contract; nothing was applied")
 	}
 	var rendered NativeIntent
 	if p.View.Renderer == "networkd" {
-		rendered, err = parseNativeNetworkd(file.Data, p)
+		rendered, err = parseNativeNetworkd(file.Data, &staged)
 	} else {
 		rendered, err = parseNativeNM(file.Data, p)
 	}

@@ -64,11 +64,22 @@ func nativeNetworkdDomainPolicyEqual(before, candidate []byte) error {
 	return nil
 }
 
+func nativeNetworkdProfileDomainPolicy(data []byte, p *nativeProfile) (map[string]string, error) {
+	if p != nil && p.View.Owner == "netplan" && p.View.Renderer == "networkd" {
+		return nativeNetplanGeneratedAutomaticPolicy(p, p.File.Data, data)
+	}
+	return nativeNetworkdDomainPolicy(data)
+}
+
 func nativeNetworkdVerifyDomains(data []byte, intent NativeIntent, search, routes []nativeNetworkdDomain) ([]string, error) {
 	policy, err := nativeNetworkdDomainPolicy(data)
 	if err != nil {
 		return nil, err
 	}
+	return nativeNetworkdVerifyDomainPolicy(policy, intent, search, routes)
+}
+
+func nativeNetworkdVerifyDomainPolicy(policy map[string]string, intent NativeIntent, search, routes []nativeNetworkdDomain) ([]string, error) {
 	if len(search)+len(routes) > 128 {
 		return nil, errors.New("native active domain evidence exceeds its bound")
 	}

@@ -87,6 +87,9 @@ func TestNativeManagerAutomaticOwnerLive(t *testing.T) {
 	}
 	nativeAutomaticAcquired(t, ctx, s, false)
 	nativeAutomaticUnmanaged(t, ctx, p.Renderer)
+	if owner == "netplan" && os.Getenv("JD_NATIVE_NETPLAN_AUTO_POLICY") == "explicit" {
+		nativeAutomaticNetplanRARefusal(t, ctx, s, initial)
+	}
 	t.Logf("%s saved/loaded/applied automatic intent, actual DHCPv4 lease, SLAAC prefix, DHCP/RA default routes and active-owner DNS/domain acquisition verified", owner)
 
 	manual := nativeFixtureIntent("198.18.8.20", "2001:db8:18::20")
@@ -197,8 +200,51 @@ func TestNativeManagerAutomaticOwnerLive(t *testing.T) {
 	t.Log("Owned RA raw socket closed and sender drained; DHCP/manager/bus children reaped; lease/pid files withdrawn; private PID namespace has no remaining child")
 }
 
+func nativeAutomaticNetplanRARefusal(t *testing.T, ctx context.Context, s *Service, initial NativeIntent) {
+	t.Helper()
+	p, err := s.readNativeProfile(ctx, "d0")
+	if err != nil || p == nil || !p.View.Editable {
+		t.Fatalf("Netplan RA refusal lacks editable authored ownership: %+v %v", p, err)
+	}
+	files := []nativeProfileFile{p.File, p.Generated}
+	stages := make([][]string, len(files))
+	for i, file := range files {
+		stages[i], err = filepath.Glob(filepath.Join(filepath.Dir(file.Path), ".jd-native-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	unsupported := initial
+	unsupported.IPv6.IgnoreAutoRoutes = true
+	_, err = s.EditNativeProfile(WithPendingConfirmation(ctx, 7), "d0", NativeEditRequest{Generation: p.View.Generation, Intent: unsupported}, "127.0.0.1")
+	var refusal *ReadOnlyError
+	if !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, "cannot persist") {
+		t.Fatalf("unrepresentable authored RA route policy was not refused: %v", err)
+	}
+	if j, err := readChange(s.paths.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("refused Netplan RA policy created recovery state: %+v %v", j, err)
+	}
+	for i, file := range files {
+		current, err := nativeReadProfile(file.Path)
+		if err != nil || current.Identity != file.Identity || !slices.Equal(current.Data, file.Data) {
+			t.Fatalf("refused Netplan RA policy changed selected bytes/inode: %s %v", file.Path, err)
+		}
+		currentStages, err := filepath.Glob(filepath.Join(filepath.Dir(file.Path), ".jd-native-*"))
+		if err != nil || !slices.Equal(currentStages, stages[i]) {
+			t.Fatalf("refused Netplan RA policy changed private staging: %s %v", file.Path, err)
+		}
+	}
+	nativeAutomaticWait(t, ctx, s, "netplan", initial)
+	nativeAutomaticAcquired(t, ctx, s, false)
+	t.Log("Unrepresentable authored RA route suppression refused before selected-file/staging/journal effects; actual automatic acquisition remains unchanged")
+}
+
 func nativeAutomaticOuter(t *testing.T) {
 	t.Helper()
+	policy := os.Getenv("JD_NATIVE_NETPLAN_AUTO_POLICY")
+	if policy != "" && (policy != "explicit" || os.Getenv("JD_NATIVE_AUTO_CASE") != "netplan") {
+		t.Fatal("explicit authored automatic policy requires the selected netplan/networkd case")
+	}
 	nmRoot := os.Getenv("JD_NATIVE_MANAGER_NM_ROOT")
 	if nmRoot == "" {
 		t.Fatal("set JD_NATIVE_MANAGER_NM_ROOT to the independently verified Debian NetworkManager/nmcli userland")
@@ -239,7 +285,7 @@ func nativeAutomaticOuter(t *testing.T) {
 		t.Run(owner, func(t *testing.T) {
 			ctx, stop := context.WithTimeout(context.Background(), 4*time.Minute)
 			defer stop()
-			unbounded := liveSudo("env", "GOMAXPROCS=2", "JD_NETNS_LIVE=1", "JD_NATIVE_AUTO_NS=1", "JD_NATIVE_AUTO_CASE="+owner, "JD_NATIVE_MANAGER_HELPER="+helper, "JD_NATIVE_MANAGER_NM_ROOT="+nmRoot, "unshare", "--net", "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--", os.Args[0], "-test.run=^TestNativeManagerAutomaticOwnerLive$", "-test.count=1", "-test.timeout=3m", "-test.v")
+			unbounded := liveSudo("env", "GOMAXPROCS=2", "JD_NETNS_LIVE=1", "JD_NATIVE_AUTO_NS=1", "JD_NATIVE_AUTO_CASE="+owner, "JD_NATIVE_NETPLAN_AUTO_POLICY="+policy, "JD_NATIVE_MANAGER_HELPER="+helper, "JD_NATIVE_MANAGER_NM_ROOT="+nmRoot, "unshare", "--net", "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--", os.Args[0], "-test.run=^TestNativeManagerAutomaticOwnerLive$", "-test.count=1", "-test.timeout=3m", "-test.v")
 			cmd := exec.CommandContext(ctx, unbounded.Path, unbounded.Args[1:]...)
 			var out nativeBoundedOutput
 			cmd.Stdout, cmd.Stderr = &out, &out
@@ -311,6 +357,9 @@ func nativeAutomaticIntent(owner string, suppressed bool) NativeIntent {
 		in.IPv4.IgnoreAutoRoutes, in.IPv6.IgnoreAutoRoutes = true, true
 		in.IPv4.DNS, in.IPv6.DNS = []string{"127.0.0.2"}, []string{"::2"}
 		in.IPv4.Domains, in.IPv6.Domains = []string{"manual.test"}, []string{"manual.test"}
+		if owner == "netplan" && os.Getenv("JD_NATIVE_NETPLAN_AUTO_POLICY") == "explicit" {
+			in.IPv6.IgnoreAutoRoutes = false
+		}
 	}
 	return in
 }
@@ -363,6 +412,9 @@ func nativeAutomaticOwner(t *testing.T, ctx context.Context, owner, nmRoot strin
 			activation = "57bc1142-0de1-4ab4-a156-4d2cba203561"
 			metadata = "      networkmanager:\n        uuid: '" + activation + "'\n        name: d0\n"
 			profilePath = "/run/NetworkManager/system-connections/netplan-d0.nmconnection"
+		}
+		if !useNM && os.Getenv("JD_NATIVE_NETPLAN_AUTO_POLICY") == "explicit" {
+			metadata = "      dhcp4-overrides:\n        use-domains: true\n        use-mtu: false\n      ra-overrides:\n        use-domains: true\n"
 		}
 		nativeFixtureWrite(t, "/etc/netplan/20-auto.yaml", "network:\n  version: 2\n  renderer: "+renderer+"\n  ethernets:\n    d0:\n      dhcp4: true\n      dhcp6: "+dhcp6+"\n      accept-ra: true\n"+metadata, 0o600)
 		must("netplan", "generate")
@@ -602,8 +654,9 @@ func nativeAutomaticAcquired(t *testing.T, ctx context.Context, s *Service, supp
 			t.Fatalf("automatic routes: %s %v", out, err)
 		}
 		defaultRoute := false
+		routeSuppressed := suppressed && (index == 0 || p.View.Intent.IPv6.IgnoreAutoRoutes)
 		for _, r := range routes {
-			if suppressed && (r.Protocol == "dhcp" || r.Protocol == "ra") {
+			if routeSuppressed && (r.Protocol == "dhcp" || r.Protocol == "ra") {
 				t.Fatalf("ignore automatic routes retained DHCP/RA route: %+v", r)
 			}
 			gateway, protocol := "198.18.8.1", "dhcp"
@@ -612,7 +665,7 @@ func nativeAutomaticAcquired(t *testing.T, ctx context.Context, s *Service, supp
 			}
 			defaultRoute = defaultRoute || r.Dst == "default" && r.Gateway == gateway && r.Protocol == protocol
 		}
-		if !suppressed && !defaultRoute {
+		if !routeSuppressed && !defaultRoute {
 			t.Fatalf("actual automatic %s default route missing: %s", flag, out)
 		}
 		var dns, domains []string

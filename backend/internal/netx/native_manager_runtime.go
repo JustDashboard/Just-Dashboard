@@ -120,7 +120,11 @@ func nativeNetworkdDNS(ctx context.Context, p *nativeProfile, intent NativeInten
 	if p.View.Owner == "netplan" {
 		data = p.Generated.Data
 	}
-	domains, err = nativeNetworkdVerifyDomains(data, intent, state.Search, state.Routes)
+	policy, err := nativeNetworkdProfileDomainPolicy(data, p)
+	if err != nil {
+		return nil, nil, err
+	}
+	domains, err = nativeNetworkdVerifyDomainPolicy(policy, intent, state.Search, state.Routes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -280,6 +284,9 @@ func nativeContractsEqual(a, b NativeContract) bool {
 }
 
 func nativeL3Contract(p *nativeProfile, in NativeIntent) error {
+	if p.View.Owner == "netplan" && p.View.Renderer == "networkd" && in.IPv6.IgnoreAutoRoutes && slices.Contains([]string{"auto", "dhcp", "slaac"}, in.IPv6.Method) {
+		return &ReadOnlyError{Reason: "This Netplan version cannot persist the selected IPv6 automatic route suppression; review that policy through its native owner."}
+	}
 	if p.View.Contract.Master != "" {
 		return &ReadOnlyError{Reason: "This device is a native port; edit the master's L3 profile instead of competing with its membership."}
 	}
