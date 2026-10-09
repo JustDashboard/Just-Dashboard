@@ -187,7 +187,9 @@ The contracts are the pinned [AdGuard set-rules API](https://github.com/AdguardT
 its [replacement handler](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/http.go),
 [AdGuard DNS filter syntax](https://adguard-dns.io/kb/general/dns-filtering-syntax/) and
 [FTL 6.7.1 exact-domain API](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml).
-Matching mounted controls and complete P17 acceptance remain open pending frontend integration.
+The detail sheet builds those closed engine-specific intents and shows selected native metadata
+before/readback. Unknown Pi-hole group inventory holds additions. Complete assembled browser/native
+acceptance and broader P17 criteria remain separate from isolated backend and frontend checks.
 
 ## Reviewed records and client groups
 

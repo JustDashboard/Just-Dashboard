@@ -204,7 +204,9 @@ function Inventory({
             request = { action, zone }
             break
           default:
-            throw new Error("Complete the selected native record or client form before reviewing.")
+            throw new Error(
+              "Complete the selected native record, client or filter form before reviewing.",
+            )
         }
       }
     } catch (err) {
@@ -260,6 +262,8 @@ function Inventory({
       : [
           { action: "override_add" as const, label: "Add local override" },
           { action: "override_remove" as const, label: "Remove local override" },
+          { action: "filter_add" as const, label: "Add domain filter" },
+          { action: "filter_remove" as const, label: "Remove domain filter" },
         ]),
     ...(view.connection.engine === "pihole"
       ? [{ action: "client_groups" as const, label: "Client groups" }]
@@ -271,6 +275,8 @@ function Inventory({
     "record_add",
     "record_remove",
     "client_groups",
+    "filter_add",
+    "filter_remove",
   ].includes(action)
   if (!admin)
     return (

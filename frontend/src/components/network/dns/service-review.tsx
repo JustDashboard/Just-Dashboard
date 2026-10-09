@@ -338,6 +338,29 @@ export function DNSServiceReview({
                   />
                 </>
               )}
+              {"filter" in change.request && (
+                <>
+                  <ReviewDetail label="Filter domain" value={change.request.filter.domain} mono />
+                  <ReviewDetail
+                    label="Filter disposition"
+                    value={change.request.filter.disposition}
+                  />
+                  <ReviewDetail
+                    label="Filter match"
+                    value={
+                      change.request.filter.match === "suffix"
+                        ? "This domain and its subdomains"
+                        : "Only this exact domain"
+                    }
+                  />
+                  {change.request.filter.groups !== undefined && (
+                    <ReviewDetail
+                      label="New filter group IDs"
+                      value={change.request.filter.groups.join(" · ") || "None · no memberships"}
+                    />
+                  )}
+                </>
+              )}
             </DetailList>
           </Section>
           {change.before && <ReviewedSnapshot title="Before the change" value={change.before} />}
@@ -453,6 +476,65 @@ function ReviewedSnapshot({ title, value }: { title: string; value: DNSServiceSn
                   ? "None (native null)"
                   : value.selectedClient.comment || "Empty native comment"
               }
+            />
+          </>
+        )}
+        {value.selectedFilter && (
+          <>
+            <ReviewDetail label="Selected filter domain" value={value.selectedFilter.domain} mono />
+            <ReviewDetail
+              label="Selected filter disposition"
+              value={value.selectedFilter.disposition}
+            />
+            <ReviewDetail
+              label="Selected filter match"
+              value={
+                value.selectedFilter.match === "suffix"
+                  ? "This domain and its subdomains"
+                  : "Only this exact domain"
+              }
+            />
+            <ReviewDetail
+              label="Native selected filter"
+              value={value.selectedFilter.present ? "Present" : "Absent"}
+            />
+            {value.selectedFilter.enabled !== undefined && (
+              <ReviewDetail
+                label="Selected filter enabled"
+                value={value.selectedFilter.enabled ? "Enabled" : "Disabled"}
+              />
+            )}
+            {value.selectedFilter.groups !== undefined && (
+              <ReviewDetail
+                label="Selected filter group IDs"
+                value={value.selectedFilter.groups.join(" · ") || "None"}
+              />
+            )}
+            <ReviewDetail
+              label="Selected filter comment"
+              value={
+                !value.selectedFilter.commentReported
+                  ? "Unreported"
+                  : value.selectedFilter.comment === null
+                    ? "None (native null)"
+                    : value.selectedFilter.comment || "Empty native comment"
+              }
+            />
+            <ReviewDetail
+              label="Filter configuration evidence"
+              value={`${value.selectedFilter.evidence.state} · ${value.selectedFilter.evidence.basis} · ${value.selectedFilter.evidence.summary}`}
+            />
+            {value.selectedFilter.ruleFingerprint && (
+              <ReviewDetail
+                label="Selected rule fingerprint"
+                value={value.selectedFilter.ruleFingerprint}
+                mono
+              />
+            )}
+            <ReviewDetail
+              label="Unselected filter policy fingerprint"
+              value={value.selectedFilter.otherPolicyFingerprint}
+              mono
             />
           </>
         )}

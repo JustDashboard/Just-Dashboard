@@ -13,7 +13,10 @@ import {
   dnsClientAddress,
   dnsRecordZoneEditable,
   prepareDNSClientGroups,
+  prepareDNSDomainFilterChange,
   prepareDNSRecordChange,
+  type DNSDomainFilterAction,
+  type DNSDomainFilterErrors,
   type DNSRecordAction,
   type DNSRecordErrors,
 } from "@/lib/network-dns-service-policy"
@@ -30,7 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-export type DNSPolicyAction = DNSRecordAction | "client_groups"
+export type DNSPolicyAction = DNSRecordAction | DNSDomainFilterAction | "client_groups"
 type Props = {
   action: DNSPolicyAction
   view: DNSServiceView
@@ -41,6 +44,8 @@ type Props = {
 }
 
 export function DNSServicePolicyForm(props: Props) {
+  if (props.action === "filter_add" || props.action === "filter_remove")
+    return <DomainFilterForm {...props} action={props.action} />
   return props.action === "client_groups" ? (
     <ClientGroupsForm {...props} />
   ) : (
@@ -84,6 +89,160 @@ function FormErrors({
         </ul>
       </Notice>
     </div>
+  )
+}
+
+function DomainFilterForm({
+  action,
+  view,
+  problem,
+  busy,
+  onStage,
+}: Props & { action: DNSDomainFilterAction }) {
+  const id = useId()
+  const [domain, setDomain] = useState("")
+  const [disposition, setDisposition] = useState("deny")
+  const [groups, setGroups] = useState<number[]>([])
+  const [errors, setErrors] = useState<DNSDomainFilterErrors>({})
+  const memberships = view.connection.engine === "pihole" && action === "filter_add"
+  const nativeGroups = view.snapshot?.filterGroups.filter((group) => group.id !== undefined) ?? []
+  const groupProblem =
+    memberships && view.snapshot?.appClientEvidence.state !== "configured"
+      ? "Refresh the native group inventory before reviewing a domain filter."
+      : undefined
+  const held = problem ?? groupProblem
+  const fields = {
+    domain: { label: "Filter domain", id: `${id}-domain` },
+    disposition: { label: "Filter disposition", id: `${id}-disposition` },
+    groups: { label: "Filter group memberships", id: `${id}-groups` },
+  }
+  return (
+    <form
+      className="flex min-w-0 flex-col gap-4"
+      aria-label="Review native domain filter"
+      aria-busy={busy}
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (held || busy) return
+        const result = prepareDNSDomainFilterChange(view.connection.engine, action, {
+          domain,
+          disposition,
+          ...(memberships ? { groups } : {}),
+        })
+        if (memberships && groups.some((id) => !nativeGroups.some((group) => group.id === id)))
+          result.errors.groups = "Choose groups still present in the current native reading."
+        setErrors(result.errors)
+        if (result.request && !Object.values(result.errors).some(Boolean))
+          void onStage(result.request)
+      }}
+    >
+      <FormErrors errors={errors} fields={fields} />
+      <Field
+        label="Filter domain"
+        htmlFor={`${id}-domain`}
+        hint="Use a complete lower-case DNS name, without a wildcard or trailing dot."
+        error={errors.domain && <span id={`${id}-domain-error`}>{errors.domain}</span>}
+      >
+        <Input
+          id={`${id}-domain`}
+          value={domain}
+          onChange={(event) => setDomain(event.target.value)}
+          disabled={Boolean(held) || busy}
+          maxLength={253}
+          spellCheck={false}
+          autoCapitalize="none"
+          autoComplete="off"
+          aria-invalid={Boolean(errors.domain)}
+          aria-describedby={errors.domain ? `${id}-domain-error` : undefined}
+        />
+      </Field>
+      <Field
+        label="Filter disposition"
+        htmlFor={`${id}-disposition`}
+        error={
+          errors.disposition && <span id={`${id}-disposition-error`}>{errors.disposition}</span>
+        }
+      >
+        <Select value={disposition} onValueChange={setDisposition} disabled={Boolean(held) || busy}>
+          <SelectTrigger
+            id={`${id}-disposition`}
+            aria-invalid={Boolean(errors.disposition)}
+            aria-describedby={errors.disposition ? `${id}-disposition-error` : undefined}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="deny">Deny</SelectItem>
+            <SelectItem value="allow">Allow</SelectItem>
+          </SelectContent>
+        </Select>
+      </Field>
+      <p className="text-body text-muted-foreground">
+        {view.connection.engine === "adguard"
+          ? "AdGuard matches this domain and its subdomains."
+          : "Pi-hole matches only this exact domain."}{" "}
+        Native rule configuration does not establish filtering priority or a client decision.
+      </p>
+      {memberships && (
+        <fieldset
+          id={`${id}-groups`}
+          tabIndex={-1}
+          className="min-w-0 space-y-2 focus-ring"
+          aria-describedby={errors.groups ? `${id}-groups-error` : undefined}
+        >
+          <legend className="text-body font-medium">Filter group memberships</legend>
+          {nativeGroups.map((group) => (
+            <label
+              key={group.id}
+              htmlFor={`${id}-group-${group.id}`}
+              className="flex min-h-11 min-w-0 cursor-pointer items-center gap-3 rounded-md py-2 text-body"
+            >
+              <Checkbox
+                id={`${id}-group-${group.id}`}
+                checked={groups.includes(group.id!)}
+                disabled={Boolean(held) || busy}
+                onCheckedChange={(checked) =>
+                  setGroups((prior) =>
+                    checked
+                      ? prior.includes(group.id!)
+                        ? prior
+                        : [...prior, group.id!]
+                      : prior.filter((value) => value !== group.id),
+                  )
+                }
+              />
+              <span className="min-w-0 break-words">
+                {group.name} · ID {group.id}
+                <span className="block text-hint text-muted-foreground">
+                  {group.enabled === undefined
+                    ? "Native group enabled state unreported"
+                    : group.enabled
+                      ? "Native group enabled"
+                      : "Native group disabled"}
+                </span>
+              </span>
+            </label>
+          ))}
+          <p className="text-hint text-muted-foreground">
+            {groups.length
+              ? `Selected native group IDs: ${groups.join(" · ")}`
+              : "No groups assigned."}{" "}
+            Leaving every group unchecked creates an explicit empty membership list.
+          </p>
+          {errors.groups && (
+            <p id={`${id}-groups-error`} className="text-hint text-destructive">
+              {errors.groups}
+            </p>
+          )}
+        </fieldset>
+      )}
+      {held && <p className="text-body text-muted-foreground">{held}</p>}
+      <div>
+        <Button type="submit" disabled={Boolean(held) || busy} pending={busy}>
+          Create retained review
+        </Button>
+      </div>
+    </form>
   )
 }
 

@@ -54,6 +54,15 @@ holding stale or changed confirmations and showing human record/client details b
 The [record/client acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui-acceptance.md)
 keeps its final source, selected browser checks and actual native engine/current-read proofs separate
 from the earlier handoff below. Explicit null and empty client comments have distinct labels.
+Custom-domain controls in the same policy form add `filter_add` and `filter_remove` for AdGuard and
+Pi-hole. The engine fixes the match: AdGuard covers the domain and its subdomains, while Pi-hole
+matches the exact domain. Pi-hole additions use explicit existing native memberships, including
+`[]` and ID zero; removals omit replacement groups. Unknown native group inventory holds additions.
+Retained reviews show selected presence, native enabled/groups/comment metadata and configured
+evidence before/readback. Full selected fingerprints and metadata participate in current-read and
+open-confirmation checks; configured rules do not establish precedence or measured client filtering.
+Technitium custom-domain controls remain unsupported. Matching browser/native assembled acceptance
+is required separately from the isolated contract tests and backend proof.
 `service-filters.tsx` adds a separate native filter reading on read-only or managed connections:
 redacted subscription origins, IDs, counts/update metadata, custom-rule fingerprints and explicit
 native group memberships. Configured inventory, native status, unavailable/manual/app scope and

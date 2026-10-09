@@ -8,6 +8,7 @@ import type {
   DNSServiceProvision,
   DNSServiceSnapshot,
   DNSServiceView,
+  DNSSelectedFilter,
 } from "../../src/lib/network-dns-services"
 import { admin, mockNetwork, type Mutation } from "./network-fixture"
 import type { DNSFilterView } from "../../src/lib/network-dns-filters"
@@ -300,10 +301,12 @@ function selectedSnapshot(
   request: DNSChangeRequest,
   records: DNSRecordInventory,
   comment: string | null = "Keep this existing native client comment",
+  filterComment: string | null = "Keep this existing native filter comment",
 ): DNSServiceSnapshot {
   const snapshot = structuredClone(native)
   delete snapshot.records
   delete snapshot.selectedClient
+  delete snapshot.selectedFilter
   delete snapshot.selectionFingerprint
   if (request.action === "record_add" || request.action === "record_remove") {
     snapshot.records = structuredClone(records)
@@ -320,6 +323,13 @@ function selectedSnapshot(
     snapshot.selectionFingerprint = fingerprint(snapshot.selectedClient)
   } else if (request.action === "override_add" || request.action === "override_remove") {
     snapshot.selectionFingerprint = fingerprint(snapshot.localOverrides)
+  } else if (request.action === "filter_add" || request.action === "filter_remove") {
+    snapshot.selectedFilter = dnsSelectedFilter(
+      request,
+      request.action === "filter_remove",
+      filterComment,
+    )
+    snapshot.selectionFingerprint = fingerprint(snapshot.selectedFilter)
   }
   if (snapshot.selectionFingerprint)
     snapshot.policyFingerprint = fingerprint({
@@ -327,6 +337,34 @@ function selectedSnapshot(
       selected: snapshot.selectionFingerprint,
     })
   return snapshot
+}
+
+function dnsSelectedFilter(
+  request: Extract<DNSChangeRequest, { action: "filter_add" | "filter_remove" }>,
+  present: boolean,
+  comment: string | null,
+): DNSSelectedFilter {
+  const exact = request.filter.match === "exact"
+  return {
+    domain: request.filter.domain,
+    disposition: request.filter.disposition,
+    match: request.filter.match,
+    present,
+    ...(present && exact ? { enabled: true, groups: [...(request.filter.groups ?? [0, 7])] } : {}),
+    comment: present && exact ? comment : null,
+    commentReported: present && exact,
+    ...(present ? { ruleFingerprint: fingerprint({ rule: request.filter }) } : {}),
+    otherPolicyFingerprint: fingerprint({ foreignRules: "unchanged", sources: "unchanged" }),
+    evidence: {
+      state: "configured",
+      basis: "native_configuration",
+      summary:
+        "Native rule configuration; filtering priority and client decisions remain separate.",
+    },
+    owners: present ? 1 : 0,
+    exact: present ? 1 : 0,
+    inventoryCount: present ? 2 : 1,
+  }
 }
 
 export function dnsPolicyChange(
@@ -337,16 +375,23 @@ export function dnsPolicyChange(
       ? "technitium"
       : request.action === "client_groups"
         ? "pihole"
-        : "adguard",
+        : (request.action === "filter_add" || request.action === "filter_remove") &&
+            request.filter.match === "exact"
+          ? "pihole"
+          : "adguard",
   ),
   snapshot = dnsSnapshot(connection.engine),
   records = dnsRecords(),
   comment: string | null = "Keep this existing native client comment",
+  filterComment: string | null = "Keep this existing native filter comment",
 ): DNSServiceChange {
   return {
     ...dnsChange(connection),
     request: structuredClone(request),
-    before: { ...selectedSnapshot(snapshot, request, records, comment), queries: [] },
+    before: {
+      ...selectedSnapshot(snapshot, request, records, comment, filterComment),
+      queries: [],
+    },
   }
 }
 
@@ -385,6 +430,8 @@ export function dnsAppliedSnapshot(change: DNSServiceChange): DNSServiceSnapshot
       if (client.addresses.includes(request.client.address))
         client.groups = [...request.client.groups]
   }
+  if (request.action === "filter_add" || request.action === "filter_remove")
+    after.selectedFilter = dnsSelectedFilter(request, request.action === "filter_add", null)
   if (after.records) {
     after.records.fingerprint = fingerprint({
       original: after.records.fingerprint,
@@ -392,6 +439,7 @@ export function dnsAppliedSnapshot(change: DNSServiceChange): DNSServiceSnapshot
     })
     after.selectionFingerprint = after.records.fingerprint
   } else if (after.selectedClient) after.selectionFingerprint = fingerprint(after.selectedClient)
+  else if (after.selectedFilter) after.selectionFingerprint = fingerprint(after.selectedFilter)
   else if (request.action === "override_add" || request.action === "override_remove")
     after.selectionFingerprint = fingerprint(after.localOverrides)
   after.policyFingerprint = fingerprint({
@@ -440,6 +488,7 @@ export type DNSServicePageControl = {
   view: DNSServiceView
   records: DNSRecordInventory
   clientComment: string | null
+  filterComment: string | null
   changes: DNSServiceChange[]
   provisions: DNSServiceProvision[]
   inspectFailure: boolean
@@ -478,6 +527,7 @@ export async function mockDNSServicePage(
     },
     records: dnsRecords(),
     clientComment: "Keep this existing native client comment",
+    filterComment: "Keep this existing native filter comment",
     changes: [],
     provisions: [],
     inspectFailure: false,
@@ -551,6 +601,7 @@ export async function mockDNSServicePage(
                 current.request,
                 control.records,
                 control.clientComment,
+                control.filterComment,
               ),
         })
       }
@@ -645,6 +696,7 @@ export async function mockDNSServicePage(
         control.view.snapshot,
         control.records,
         control.clientComment,
+        control.filterComment,
       )
       control.changes = [next]
       return reply(next, 201)
@@ -665,6 +717,7 @@ export async function mockDNSServicePage(
         const native = structuredClone(change.after)
         delete native.records
         delete native.selectedClient
+        delete native.selectedFilter
         delete native.selectionFingerprint
         native.queries = control.view.snapshot?.queries ?? []
         native.policyFingerprint = fingerprint({

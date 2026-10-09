@@ -91,6 +91,8 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   memberships. Failed reads retain dated evidence; configured counts do not prove client filtering.
   Reviewed controls include exact A/AAAA local overrides, supported unsigned Technitium primary-zone
   records with explicit TTL, and existing Pi-hole client group assignments, including no memberships.
+  Custom-domain reviews distinguish AdGuard domain-and-subdomain rules from Pi-hole exact-domain
+  rules, retaining native group memberships and unselected policy without claiming client filtering.
   Unsupported records remain visible; fresh selected native policy is checked before apply.
   Optional owned DNS setup reviews an already cached pinned image and exact loopback-only resources;
   creation and removal are separately confirmed, and removal includes both persistent data volumes.
