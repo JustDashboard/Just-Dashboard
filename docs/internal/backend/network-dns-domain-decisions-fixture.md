@@ -16,12 +16,15 @@ through one bounded `O_NOFOLLOW` file descriptor. Its task-account owner, one li
 receipt, exact reviewed SHA256 and ELF without dynamic loader are required. The eventual reviewed
 wrapper supplies `JD_DNS_DECISION_HELPER` and `JD_DNS_DECISION_HELPER_SHA256`.
 
-Only during a separately released live run, a bounded local Docker API build uses a two-file tar
-context: `FROM scratch`, `COPY helper /dns-fixture`, and the frozen executable. It executes no build
-step, uses no subscription, remote context, registry credential or parent pull, and records its exact
-image ID, nonce/digest labels and unique tag. The legacy builder's final full `aux.ID` must agree with
-its terminal short-ID completion and the inspected tag's full ID; a rebound tag acquires no run or
-cleanup authority. The sidecar has a read-only root filesystem, user/group
+Only during a separately released live run, a bounded local Docker API `ImageImport` supplies an
+uncompressed rootfs tar through `fromSrc=-`. It contains exactly one regular `dns-fixture` entry,
+mode 0555, UID/GID zero, with the frozen helper's exact size and digest; there is no Dockerfile,
+link, directory, build step, subscription, remote URL, registry credential or parent pull. Fixed
+`Changes` set Linux/amd64, user/group 65534, `/` working directory, literal executable/nonce argv
+and exactly the nonce/helper-digest labels. The closed one-row response must report a full SHA256
+image ID; it must equal the inspected unique tag's ID. That image must have no parent, exactly the
+rootfs tar's SHA256 layer and the closed expected configuration. A malformed/duplicate/error reply
+or rebound tag acquires no run or cleanup authority. The sidecar has a read-only root filesystem, user/group
 65534, all capabilities dropped, no new privileges, 64 MiB memory/swap, 0.25 CPU, 16 PIDs and bounded
 logs. It has no published port, host mount, volume or extra network. Its exact image/container,
 argv, labels, limits, network ID and observed IPv4/MAC are checked before every query and cleanup.
@@ -92,7 +95,7 @@ The future reviewed runner must retain the existing 235-second Go / 240-second w
 
 Cleanup is registered before any image/container creation. It first verifies/stops/removes the exact
 sidecar, then removes only its captured image ID with labels/tag still matching. It does not prune
-other image parents or build caches. Unknown build outcomes or changed receipts remain failures
+other image parents or build caches. Unknown import outcomes or changed receipts remain failures
 requiring technical review; the fixture grants no cleanup authority over an unrecorded image.
 Only after sidecar cleanup succeeds does ordinary owned provision removal touch the engine, two
 volumes and bridge. The existing `Destroy` extra-endpoint refusal is preserved. All helper listeners,
@@ -119,8 +122,13 @@ receipt failure that exposed named `Entrypoint`/`Cmd` slices compared without co
 draft failures started no native resource. Exact argv comparison remains enforced after converting
 the native named slices. The corrected ownership selection passed with DNS-service child 0.047 s
 and packet-helper child 0.004 s (`decision-ownership-final-preassembly.log`). NativeMan's independent
-read-only review also found the mutable-tag adoption gap; the final full build ID and a meaningful
-changed-tag no-adoption test close it before any released image build. These records establish
+read-only review also found the mutable-tag adoption gap. The legacy builder preparation then bound
+its full returned ID and passed its checks, but root's review identified the unavoidable intermediate
+parent from its appended metadata step. No legacy image build or native decision run occurred.
+That complete `b307456d`/`60c02142` source, helper/race binaries, wrappers and receipts remain separately
+attributed preparation. The replacement local import creates one parentless image and tests the
+sole rootfs entry, exact local request, full result ID, rebound tags and foreign-image cleanup
+refusal. These records establish
 preparation only; final assembled-source checks and native results need their own attribution.
 
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
@@ -129,5 +137,12 @@ The pinned primary contracts are [AdGuard query-log JSON](https://github.com/Adg
 [FTL default client groups](https://github.com/pi-hole/FTL/blob/v6.7.1/src/database/gravity-db.c),
 [allow-before-deny processing](https://github.com/pi-hole/FTL/blob/v6.7.1/src/dnsmasq_interface.c),
 and [bounded native query metadata](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/queries.yaml).
+The exact already-used Docker SDK is Moby v28.5.2: its [import client](https://github.com/moby/moby/blob/v28.5.2/client/image_import.go)
+sends the local reader and fixed changes, the [HTTP route](https://github.com/moby/moby/blob/v28.5.2/api/server/router/image/image_routes.go)
+uses the request body for `fromSrc=-` and emits the returned full ID, and the
+[classic image store](https://github.com/moby/moby/blob/v28.5.2/daemon/images/image_import.go) and
+[containerd image store](https://github.com/moby/moby/blob/v28.5.2/daemon/containerd/image_import.go)
+each create one parentless image with one imported layer. This is a source-level packaging argument;
+the wrapper must still prove the complete image-ID inventory is unchanged after actual cleanup.
 These intended fixed decisions do not establish arbitrary precedence, subscribed rule content,
 Technitium effects, timer/reboot recovery or full product acceptance.

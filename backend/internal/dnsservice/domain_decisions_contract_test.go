@@ -1,10 +1,15 @@
 package dnsservice
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -643,48 +648,166 @@ func TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine(t *testing.T) {
 	}
 }
 
-func TestDNSDomainDecisionBuildRequiresCompletedIDAndRefusesReboundTag(t *testing.T) {
-	resultID := "sha256:" + strings.Repeat("a", 64)
-	aux := fmt.Sprintf("{\"aux\":{\"ID\":%q}}\n", resultID)
-	complete := "{\"stream\":\"Successfully built aaaaaaaaaaaa\\n\"}\n"
-	if got, err := decisionBuildID([]byte(aux + complete)); err != nil || got != resultID {
-		t.Fatal("closed legacy builder full ID/completion refused", got, err)
-	}
-	for _, body := range []string{complete, aux, "null\n" + aux + complete, "{\"error\":\"refused\"}\n" + aux + complete, aux + "{\"stream\":\"Successfully built bbbbbbbbbbbb\\n\"}\n", aux + complete + complete, aux + complete + "{\"aux\":{\"ID\":\"sha256:bad\"}}\n", aux + complete + fmt.Sprintf("{\"aux\":{\"ID\":%q}}\n", "sha256:"+strings.Repeat("b", 64))} {
-		if got, err := decisionBuildID([]byte(body)); err == nil || got != "" {
-			t.Fatal("missing/malformed/contradictory build result acquired image identity", got)
-		}
-	}
-	side := &decisionSidecar{nonce: "012345abcdef", digest: strings.Repeat("d", 64), tag: "jd-dns-decisions:012345abcdef"}
-	inspectCalls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodPost && r.URL.Path == "/v1.51/build" {
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprint(w, aux+complete)
-			return
-		}
-		if r.Method != http.MethodGet || r.URL.Path != "/v1.51/images/"+side.tag+"/json" {
-			t.Error("changed build tag acquired unexpected native authority", r.Method, r.URL.Path)
-			http.Error(w, "refused", 409)
-			return
-		}
-		inspectCalls++
-		if inspectCalls == 1 {
-			w.WriteHeader(http.StatusNotFound)
-			fmt.Fprint(w, `{"message":"not found"}`)
-			return
-		}
-		// Matching labels and all other receipts cannot adopt a rebound tag.
-		json.NewEncoder(w).Encode(map[string]any{"Id": "sha256:" + strings.Repeat("b", 64), "RepoTags": []string{side.tag}, "Config": map[string]any{"Labels": side.labels()}, "Os": "linux", "Architecture": "amd64", "Size": 123, "RootFS": map[string]any{"Layers": []string{"sha256:" + strings.Repeat("c", 64)}}})
-	}))
-	defer server.Close()
-	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.51"))
+func decisionMockImage(side *decisionSidecar, id string) map[string]any {
+	return map[string]any{"Id": id, "Parent": "", "RepoTags": []string{side.tag}, "Config": map[string]any{"Labels": side.labels(), "User": "65534:65534", "WorkingDir": "/", "Entrypoint": []string{"/dns-fixture"}, "Cmd": []string{"serve", side.nonce}}, "Os": "linux", "Architecture": "amd64", "Size": 123, "RootFS": map[string]any{"Type": "layers", "Layers": []string{side.layerID}}}
+}
+
+func TestDNSDomainDecisionRootFSHasOnlyFrozenRegularExecutable(t *testing.T) {
+	helper := []byte("controlled frozen helper bytes")
+	digest := sha256.Sum256(helper)
+	body, layer, err := decisionRootFS(helper, hex.EncodeToString(digest[:]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	side.d = &dockerRuntime{cli: cli}
-	defer side.d.Close()
-	if err := side.build(t.Context(), []byte("controlled mock payload")); err == nil || side.imageID != "" || inspectCalls != 2 {
-		t.Fatal("rebound tag was adopted, or exact build evidence was not compared", err, side.imageID, inspectCalls)
+	hash := sha256.Sum256(body)
+	if layer != "sha256:"+hex.EncodeToString(hash[:]) {
+		t.Fatal("rootfs layer is not bound to exact tar bytes")
+	}
+	reader := tar.NewReader(bytes.NewReader(body))
+	header, err := reader.Next()
+	if err != nil || header.Name != "dns-fixture" || header.Typeflag != tar.TypeReg || header.Mode != 0555 || header.Uid != 0 || header.Gid != 0 || header.Size != int64(len(helper)) || header.Linkname != "" || len(header.PAXRecords) != 0 {
+		t.Fatal("rootfs is not one fixed regular executable", header, err)
+	}
+	actual, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(actual, helper) {
+		t.Fatal("frozen helper bytes changed", err)
+	}
+	if _, err = reader.Next(); err != io.EOF {
+		t.Fatal("rootfs acquired an extra file/link/directory", err)
+	}
+	for _, candidate := range [][]byte{nil, []byte("foreign bytes")} {
+		if _, _, err := decisionRootFS(candidate, hex.EncodeToString(digest[:])); err == nil {
+			t.Fatal("changed/empty helper acquired import authority")
+		}
+	}
+}
+
+func TestDNSDomainDecisionImportRefusesMalformedAndSpoofedReply(t *testing.T) {
+	resultID := "sha256:" + strings.Repeat("a", 64)
+	complete := fmt.Sprintf("{\"status\":%q}\n", resultID)
+	if got, err := decisionImportID([]byte(complete)); err != nil || got != resultID {
+		t.Fatal("closed full imported ID refused", got, err)
+	}
+	for _, body := range []string{"null", "[]", "{}", `{"status":null}`, `{"status":42}`, `{"status":"sha256:bad"}`, `{"error":"refused"}`, complete + complete, fmt.Sprintf(`{"status":%q,"error":"spoof"}`, resultID), fmt.Sprintf(`{"status":"sha256:bad","status":%q}`, resultID), fmt.Sprintf(`{"Status":%q}`, resultID)} {
+		if got, err := decisionImportID([]byte(body)); err == nil || got != "" {
+			t.Fatal("malformed/duplicate/error reply acquired imported image identity", got)
+		}
+	}
+}
+
+func TestDNSDomainDecisionImportBindsLocalTarAndRefusesReboundTag(t *testing.T) {
+	for _, rebound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("rebound=%t", rebound), func(t *testing.T) {
+			resultID := "sha256:" + strings.Repeat("a", 64)
+			helper := []byte("controlled mock payload")
+			hash := sha256.Sum256(helper)
+			side := &decisionSidecar{nonce: "012345abcdef", digest: hex.EncodeToString(hash[:]), tag: "jd-dns-decisions:012345abcdef"}
+			archive, layer, err := decisionRootFS(helper, side.digest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			side.layerID = layer
+			inspectCalls, importCalls := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && r.URL.Path == "/v1.51/images/create" {
+					importCalls++
+					params := r.URL.Query()
+					expected := []string{"USER 65534:65534", "WORKDIR /", `ENTRYPOINT ["/dns-fixture"]`, `CMD ["serve","012345abcdef"]`, fmt.Sprintf("LABEL %s=%s io.justdashboard.dns.decision-helper=%s", decisionLabel, side.nonce, side.digest)}
+					if params.Get("fromSrc") != "-" || params.Get("fromImage") != "" || params.Get("repo") != side.tag || params.Get("platform") != "linux/amd64" || params.Get("message") != "Owned finite DNS decision fixture" || !reflect.DeepEqual(params["changes"], expected) || r.Header.Get("X-Registry-Auth") != "" {
+						t.Error("import acquired remote/pull/arbitrary configuration authority", params)
+					}
+					body, err := io.ReadAll(io.LimitReader(r.Body, int64(len(archive)+1)))
+					if err != nil || !bytes.Equal(body, archive) {
+						t.Error("Docker import did not receive the exact one-entry rootfs", err)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					fmt.Fprintf(w, "{\"status\":%q}\n", resultID)
+					return
+				}
+				if r.Method != http.MethodGet || r.URL.Path != "/v1.51/images/"+side.tag+"/json" {
+					t.Error("changed import tag acquired unexpected native authority", r.Method, r.URL.Path)
+					http.Error(w, "refused", 409)
+					return
+				}
+				inspectCalls++
+				if inspectCalls == 1 {
+					w.WriteHeader(http.StatusNotFound)
+					fmt.Fprint(w, `{"message":"not found"}`)
+					return
+				}
+				// Exact layers/configuration cannot authorize adoption of a different returned image ID.
+				id := resultID
+				if rebound {
+					id = "sha256:" + strings.Repeat("b", 64)
+				}
+				json.NewEncoder(w).Encode(decisionMockImage(side, id))
+			}))
+			defer server.Close()
+			cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.51"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			side.d = &dockerRuntime{cli: cli}
+			defer side.d.Close()
+			err = side.importHelper(t.Context(), helper)
+			if inspectCalls != 2 || importCalls != 1 || rebound && (err == nil || side.imageID != "") || !rebound && (err != nil || side.imageID != resultID || side.layerID != layer) {
+				t.Fatal("completed image identity was not exactly bound before adoption", err, side.imageID, inspectCalls, importCalls)
+			}
+		})
+	}
+}
+
+func TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"ID", func(i map[string]any) { i["Id"] = "sha256:foreign" }},
+		{"tag", func(i map[string]any) { i["RepoTags"] = []string{"foreign:latest"} }},
+		{"parent", func(i map[string]any) { i["Parent"] = "sha256:foreign" }},
+		{"layer", func(i map[string]any) { i["RootFS"].(map[string]any)["Layers"] = []string{"sha256:foreign"} }},
+		{"labels", func(i map[string]any) {
+			i["Config"].(map[string]any)["Labels"] = map[string]string{decisionLabel: "foreign"}
+		}},
+		{"user", func(i map[string]any) { i["Config"].(map[string]any)["User"] = "0" }},
+		{"entrypoint", func(i map[string]any) { i["Config"].(map[string]any)["Entrypoint"] = []string{"/foreign"} }},
+		{"command", func(i map[string]any) { i["Config"].(map[string]any)["Cmd"] = []string{"serve", "foreign"} }},
+		{"volume", func(i map[string]any) {
+			i["Config"].(map[string]any)["Volumes"] = map[string]any{"/foreign": map[string]any{}}
+		}},
+		{"architecture", func(i map[string]any) { i["Architecture"] = "arm64" }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			side := &decisionSidecar{nonce: "012345abcdef", digest: strings.Repeat("a", 64), tag: "jd-dns-decisions:012345abcdef", imageID: "sha256:" + strings.Repeat("b", 64), layerID: "sha256:" + strings.Repeat("c", 64)}
+			info := decisionMockImage(side, side.imageID)
+			var mu sync.Mutex
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				if r.Method != http.MethodGet || r.URL.Path != "/v1.51/images/"+side.imageID+"/json" {
+					t.Error("foreign image acquired remove/prune authority", r.Method, r.URL.Path)
+					http.Error(w, "refused", 409)
+					return
+				}
+				json.NewEncoder(w).Encode(info)
+			}))
+			defer server.Close()
+			cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.51"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			side.d = &dockerRuntime{cli: cli}
+			defer side.d.Close()
+			valid, err := cli.ImageInspect(t.Context(), side.imageID)
+			if err != nil || side.imageIdentity(valid, side.imageID) != nil {
+				t.Fatal("complete captured image receipt refused", err)
+			}
+			mu.Lock()
+			test.mutate(info)
+			mu.Unlock()
+			if err := side.cleanup(t.Context()); err == nil {
+				t.Fatal("foreign image was adopted for cleanup")
+			}
+		})
 	}
 }

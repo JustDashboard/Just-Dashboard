@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
@@ -121,6 +120,7 @@ type decisionSidecar struct {
 	d                        *dockerRuntime
 	nonce, digest, tag       string
 	imageID, containerID     string
+	layerID                  string
 	networkID, address       string
 	mac                      string
 	engineID                 string
@@ -133,85 +133,81 @@ func (s *decisionSidecar) labels() map[string]string {
 	return map[string]string{decisionLabel: s.nonce, "io.justdashboard.dns.decision-helper": s.digest}
 }
 
-func (s *decisionSidecar) build(ctx context.Context, helper []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	if _, err := s.d.cli.ImageInspect(ctx, s.tag); !errdefs.IsNotFound(err) {
-		return errors.New("fixture image tag already exists or is unreadable")
+func decisionRootFS(helper []byte, digest string) ([]byte, string, error) {
+	hash := sha256.Sum256(helper)
+	if len(helper) == 0 || len(helper) > 32<<20 || hex.EncodeToString(hash[:]) != digest {
+		return nil, "", errors.New("sole rootfs helper differs from its frozen size/digest bound")
 	}
 	var archive bytes.Buffer
 	w := tar.NewWriter(&archive)
-	for _, entry := range []struct {
-		name string
-		body []byte
-	}{{"Dockerfile", []byte("FROM scratch\nCOPY helper /dns-fixture\n")}, {"helper", helper}} {
-		if err := w.WriteHeader(&tar.Header{Name: entry.name, Mode: 0555, Size: int64(len(entry.body))}); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.body); err != nil {
-			return err
-		}
+	if err := w.WriteHeader(&tar.Header{Name: "dns-fixture", Mode: 0555, Uid: 0, Gid: 0, Typeflag: tar.TypeReg, Format: tar.FormatUSTAR, Size: int64(len(helper))}); err != nil {
+		return nil, "", err
+	}
+	if _, err := w.Write(helper); err != nil {
+		return nil, "", err
 	}
 	if err := w.Close(); err != nil {
+		return nil, "", err
+	}
+	rootfs := archive.Bytes()
+	hash = sha256.Sum256(rootfs)
+	return rootfs, "sha256:" + hex.EncodeToString(hash[:]), nil
+}
+
+func (s *decisionSidecar) importHelper(ctx context.Context, helper []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if !regexp.MustCompile(`^[a-f0-9]{12}$`).MatchString(s.nonce) || s.tag != "jd-dns-decisions:"+s.nonce {
+		return errors.New("rootfs import requires the closed fixture nonce/tag")
+	}
+	rootfs, layerID, err := decisionRootFS(helper, s.digest)
+	if err != nil {
 		return err
 	}
-	response, err := s.d.cli.ImageBuild(ctx, &archive, build.ImageBuildOptions{Tags: []string{s.tag}, Dockerfile: "Dockerfile", Labels: s.labels(), NoCache: true, Remove: true, ForceRemove: true, PullParent: false, NetworkMode: "none", Version: build.BuilderV1, Memory: 128 << 20, MemorySwap: 128 << 20, CPUPeriod: 100000, CPUQuota: 25000})
+	if _, err := s.d.cli.ImageInspect(ctx, s.tag); !errdefs.IsNotFound(err) {
+		return errors.New("fixture image tag already exists or is unreadable")
+	}
+	changes := []string{"USER 65534:65534", "WORKDIR /", `ENTRYPOINT ["/dns-fixture"]`, fmt.Sprintf(`CMD ["serve",%q]`, s.nonce), fmt.Sprintf("LABEL %s=%s io.justdashboard.dns.decision-helper=%s", decisionLabel, s.nonce, s.digest)}
+	response, err := s.d.cli.ImageImport(ctx, image.ImportSource{Source: bytes.NewReader(rootfs), SourceName: "-"}, s.tag, image.ImportOptions{Platform: "linux/amd64", Message: "Owned finite DNS decision fixture", Changes: changes})
 	if err != nil {
-		return errors.New("owned scratch-image build request failed")
+		return errors.New("owned local rootfs import request failed")
 	}
-	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, (1<<20)+1))
-	if err != nil || len(body) > 1<<20 {
-		return errors.New("scratch-image build evidence exceeds its bound")
+	defer response.Close()
+	body, err := io.ReadAll(io.LimitReader(response, 8193))
+	if err != nil || len(body) > 8192 {
+		return errors.New("rootfs import evidence exceeds its bound")
 	}
-	completedID, err := decisionBuildID(body)
+	completedID, err := decisionImportID(body)
 	if err != nil {
 		return err
 	}
 	info, err := s.d.cli.ImageInspect(ctx, s.tag)
-	if err != nil || info.ID != completedID || info.Config == nil || !reflect.DeepEqual(info.Config.Labels, s.labels()) || info.Size > 40<<20 || len(info.RootFS.Layers) != 1 || info.Os != "linux" || info.Architecture != "amd64" || len(info.RepoTags) != 1 || info.RepoTags[0] != s.tag {
-		return errors.New("built fixture image identity differs from its completed build result")
+	s.layerID = layerID
+	if err != nil || s.imageIdentity(info, completedID) != nil {
+		return errors.New("imported fixture image differs from its completed ID, layer or fixed configuration")
 	}
 	s.imageID = completedID
 	return nil
 }
 
-func decisionBuildID(body []byte) (string, error) {
+func (s *decisionSidecar) imageIdentity(info image.InspectResponse, id string) error {
+	if info.ID != id || info.Parent != "" || info.Config == nil || !reflect.DeepEqual(info.Config.Labels, s.labels()) || info.Config.User != "65534:65534" || info.Config.WorkingDir != "/" || !reflect.DeepEqual(info.Config.Entrypoint, []string{"/dns-fixture"}) || !reflect.DeepEqual(info.Config.Cmd, []string{"serve", s.nonce}) || len(info.Config.Env) != 0 || len(info.Config.ExposedPorts) != 0 || len(info.Config.Volumes) != 0 || info.Config.Healthcheck != nil || len(info.Config.OnBuild) != 0 || len(info.Config.Shell) != 0 || info.Size < 0 || info.Size > 40<<20 || info.RootFS.Type != "layers" || !reflect.DeepEqual(info.RootFS.Layers, []string{s.layerID}) || s.layerID == "" || info.Os != "linux" || info.Architecture != "amd64" || info.Variant != "" || len(info.RepoTags) != 1 || info.RepoTags[0] != s.tag {
+		return errors.New("rootfs image content/configuration/identity differs")
+	}
+	return nil
+}
+
+func decisionImportID(body []byte) (string, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	auxID, completedID := "", ""
-	for {
-		var row *struct {
-			Error  string `json:"error"`
-			Stream string `json:"stream"`
-			Aux    *struct {
-				ID string `json:"ID"`
-			} `json:"aux"`
-		}
-		err := decoder.Decode(&row)
-		if err == io.EOF {
-			break
-		}
-		if err != nil || row == nil || row.Error != "" {
-			return "", errors.New("scratch-image build did not report success")
-		}
-		if row.Aux != nil {
-			if !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(row.Aux.ID) || completedID != "" && row.Aux.ID != completedID {
-				return "", errors.New("scratch-image build reported a malformed or contradictory image ID")
-			}
-			auxID = row.Aux.ID
-		}
-		if strings.HasPrefix(row.Stream, "Successfully built ") {
-			shortID := strings.TrimSuffix(strings.TrimPrefix(row.Stream, "Successfully built "), "\n")
-			if completedID != "" || !regexp.MustCompile(`^[a-f0-9]{12}$`).MatchString(shortID) || auxID == "" || !strings.HasPrefix(strings.TrimPrefix(auxID, "sha256:"), shortID) {
-				return "", errors.New("scratch-image build completion does not bind the full returned image ID")
-			}
-			completedID = auxID
-		}
+	opening, e1 := decoder.Token()
+	key, e2 := decoder.Token()
+	var id string
+	e3 := decoder.Decode(&id)
+	closing, e4 := decoder.Token()
+	if e1 != nil || opening != json.Delim('{') || e2 != nil || key != "status" || e3 != nil || !regexp.MustCompile(`^sha256:[a-f0-9]{64}$`).MatchString(id) || e4 != nil || closing != json.Delim('}') || decoder.Decode(new(any)) != io.EOF {
+		return "", errors.New("rootfs import lacks one closed successful full image ID")
 	}
-	if completedID == "" {
-		return "", errors.New("scratch-image build response lacks an explicit completed image")
-	}
-	return completedID, nil
+	return id, nil
 }
 
 func (s *decisionSidecar) start(ctx context.Context) error {
@@ -290,7 +286,7 @@ func (s *decisionSidecar) cleanup(ctx context.Context) error {
 			return err
 		}
 		if err == nil {
-			if info.ID != s.imageID || info.Config == nil || !reflect.DeepEqual(info.Config.Labels, s.labels()) || len(info.RepoTags) != 1 || info.RepoTags[0] != s.tag {
+			if s.imageIdentity(info, s.imageID) != nil {
 				return errors.New("preserve changed/foreign fixture image")
 			}
 			if _, err = s.d.cli.ImageRemove(ctx, s.imageID, image.RemoveOptions{PruneChildren: false}); err != nil {
@@ -514,7 +510,7 @@ func TestDNSServiceNativeDomainDecisions(t *testing.T) {
 	side.networkID = plan.Resources.NetworkID
 	side.engineID, side.spec = plan.Resources.ContainerID, plan.spec()
 	side.resources = plan.Resources
-	if err = side.build(ctx, helper); err != nil {
+	if err = side.importHelper(ctx, helper); err != nil {
 		t.Fatal(err)
 	}
 	if err = side.start(ctx); err != nil {
