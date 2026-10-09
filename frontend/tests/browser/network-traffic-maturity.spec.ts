@@ -344,7 +344,8 @@ test("a peer opens into its tuples, ages, closes and the layers it crosses", asy
   const tuples = sheet.getByLabel("Connections with 198.51.100.23", { exact: true })
   await expect(tuples).toContainText("203.0.113.10:443")
   await expect(tuples).toContainText("51022")
-  await expect(tuples).toContainText("≥ 1h 30m")
+  // The fixture's ages are fixed when it loads, so a long run reads a little older.
+  await expect(tuples).toContainText(/≥ 1h \d+m/)
   await expect(tuples).toContainText("2.0 GB")
   await expect(tuples).toContainText("no counters")
   await expect(sheet.getByLabel("Closed connections with 198.51.100.23")).toContainText(
@@ -473,7 +474,10 @@ test.describe("at a phone's width", () => {
     await expect(page.getByRole("dialog").getByLabel("Upload queue delay")).toBeVisible()
     // Settled after the sheet's entry animation, so the picture is the sheet.
     await page.waitForFunction(() =>
-      document.getAnimations().every((a) => a.playState !== "running"),
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .every((a) => a.playState !== "running"),
     )
     await page.screenshot({ path: testInfo.outputPath("upload-profile-390.png") })
     await page.keyboard.press("Escape")
@@ -489,7 +493,10 @@ test.describe("at a phone's width", () => {
     await expect(page.getByRole("dialog").getByLabel("Across the layers")).toBeVisible()
     // Settled after the sheet's entry animation, so the picture is the sheet.
     await page.waitForFunction(() =>
-      document.getAnimations().every((a) => a.playState !== "running"),
+      document
+        .getAnimations()
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .every((a) => a.playState !== "running"),
     )
     await page.screenshot({ path: testInfo.outputPath("peer-sheet-390.png") })
   })
