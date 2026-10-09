@@ -39,6 +39,16 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { LinkGlyph } from "@/components/network/marks"
 import { SQMFields } from "./sqm-fields"
 import { sqmDraft, sqmProblem, sqmProfile } from "./sqm-profile"
+import { UploadFields } from "./upload-fields"
+import { uploadDraft, uploadProblem as uploadProfileProblem, uploadProfile } from "./upload-profile"
+import {
+  CakeTins,
+  OffloadLine,
+  QueueParameters,
+  ownershipSentence,
+  tinSummary,
+} from "./queue-evidence"
+import { CongestionComparisonPanel } from "./congestion"
 import {
   formatKbit,
   guarded,
@@ -77,8 +87,17 @@ const num = (value: number) => value.toLocaleString()
  * there is not. A device that cannot be shaped says why in the place its
  * limits would be; one the dashboard shaped can be cleared.
  *
+ * Each device also says what the next change would do with its queues — the
+ * kernel's default replaced and restored, an fq_codel captured and put back,
+ * or a structure somebody else built refused — and a managed one is compared
+ * with the parameters read back when it was applied, so a queue changed in
+ * place reads as drift. Where CAKE runs, the delay it measured in each class
+ * is under the device.
+ *
  * BBR is above it, as the one switch the kernel has for how TCP paces itself —
- * it is the host's, not a device's — with the algorithm now in force.
+ * it is the host's, not a device's — with the algorithm now in force and the
+ * host's own sockets compared by algorithm, now and as they were before the
+ * last switch.
  */
 export function Shaping({
   view,
@@ -115,6 +134,7 @@ export function Shaping({
   return (
     <Section title="Shaping">
       <BBRSwitch bbr={view.bbr} onChanged={onChanged} stale={stale} />
+      <CongestionComparisonPanel />
       <Panel>
         <PanelHeader
           title="Queues"
@@ -244,6 +264,23 @@ function DeviceNote({ device, stat }: { device: ShapeDevice; stat: ShapeDevice["
           {device.verification.reason && ` · ${device.verification.reason}`}
         </span>
       )}
+      {ownershipSentence(device) && (
+        <span className="mt-0.5 block max-w-96 text-hint font-normal whitespace-normal text-muted-foreground">
+          {ownershipSentence(device)}
+        </span>
+      )}
+      {device.upload && (
+        <span className="mt-0.5 block max-w-96 text-hint font-normal whitespace-normal text-muted-foreground">
+          Upload CAKE · {device.upload.diffserv} · {device.upload.flowMode}
+          {device.upload.overhead !== 0 && ` · overhead ${device.upload.overhead}`}
+          {device.upload.linkLayer !== "noatm" && ` · ${device.upload.linkLayer}`}
+        </span>
+      )}
+      {tinSummary(device.root?.tins) && (
+        <span className="mt-0.5 block max-w-96 text-hint font-normal whitespace-normal text-muted-foreground">
+          Upload {tinSummary(device.root?.tins)}
+        </span>
+      )}
       {device.sqm && (
         <span className="mt-1 block max-w-96 text-hint font-normal whitespace-normal text-muted-foreground">
           Download SQM · CAKE on <span className="font-mono">{device.sqm.ifb}</span> ·{" "}
@@ -254,6 +291,10 @@ function DeviceNote({ device, stat }: { device: ShapeDevice; stat: ShapeDevice["
               {bytes(device.sqm.queue.backlog)} held
             </span>
           )}
+          {tinSummary(device.sqm.queue?.tins) && (
+            <span className="block">Download {tinSummary(device.sqm.queue?.tins)}</span>
+          )}
+          <OffloadLine device={device} />
           <span className="block">
             Host helper {device.sqm.helper.status} · loaded boot command {device.sqm.boot.status}
           </span>
@@ -363,12 +404,19 @@ function ShapeSheet({
   const [download, setDownload] = useState(kbitToMbit(device.ingressKbit))
   const [downloadSQM, setDownloadSQM] = useState(Boolean(device.sqm))
   const [profile, setProfile] = useState(() => sqmDraft(device.sqm))
+  const [uploadCake, setUploadCake] = useState(Boolean(device.upload))
+  const [upProfile, setUpProfile] = useState(() => uploadDraft(device.upload))
   const { can } = useAuth()
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string>()
   const uploadProblem = limitProblem(upload, device)
   const downloadProblem = limitProblem(download, device)
   const profileProblem = downloadSQM ? sqmProblem(profile, mbitToKbit(download)) : undefined
+  // A profile shapes CAKE's own upload limit; with another queue or no limit
+  // there is nothing for it to describe.
+  const profileOffered = qdisc === "cake" && mbitToKbit(upload) > 0
+  const upProblem = profileOffered && uploadCake ? uploadProfileProblem(upProfile) : undefined
+  const refused = device.ownership?.verdict === "refused" && !device.managed
 
   const submit = async () => {
     setBusy(true)
@@ -381,6 +429,7 @@ function ShapeSheet({
           egressKbit: mbitToKbit(upload),
           ingressKbit: mbitToKbit(download),
           ...(downloadSQM ? { sqm: sqmProfile(profile) } : {}),
+          ...(profileOffered && uploadCake ? { upload: uploadProfile(upProfile) } : {}),
         },
         { ...(downloadSQM || device.sqm ? { networkApply: "pending" as const } : {}) },
       )
@@ -431,7 +480,8 @@ function ShapeSheet({
               !can("system.admin") ||
               stale ||
               busy ||
-              Boolean(uploadProblem || downloadProblem || profileProblem)
+              refused ||
+              Boolean(uploadProblem || downloadProblem || profileProblem || upProblem)
             }
           >
             Apply
@@ -443,7 +493,15 @@ function ShapeSheet({
         className="flex flex-col gap-6"
         onSubmit={(event) => {
           event.preventDefault()
-          if (!uploadProblem && !downloadProblem && !profileProblem && !busy && !stale)
+          if (
+            !uploadProblem &&
+            !downloadProblem &&
+            !profileProblem &&
+            !upProblem &&
+            !busy &&
+            !stale &&
+            !refused
+          )
             void submit()
         }}
       >
@@ -458,6 +516,8 @@ function ShapeSheet({
             {formatKbit(device.ingressKbit)}
           </FormFact>
         </FormFacts>
+
+        <QueueParameters device={device} />
 
         <FormSection title="Queue">
           <ChoiceGrid columns={2}>
@@ -507,13 +567,29 @@ function ShapeSheet({
               onCheckedChange={setDownloadSQM}
             />
           </OptionList>
-          {(refusal || profileProblem) && (
+          {profileOffered && (
+            <OptionList>
+              <OptionRow
+                title="Use an upload profile"
+                hint="CAKE classes by DSCP, host fairness and the link's framing, verified after apply."
+                checked={uploadCake}
+                disabled={busy}
+                onCheckedChange={setUploadCake}
+              />
+            </OptionList>
+          )}
+          {(refusal || profileProblem || upProblem) && (
             <p role="alert" className="animate-rise text-body text-destructive">
-              {refusal || profileProblem}
+              {refusal || profileProblem || upProblem}
             </p>
           )}
         </FormSection>
+        {profileOffered && uploadCake && (
+          <UploadFields draft={upProfile} onChange={setUpProfile} disabled={busy} />
+        )}
         {downloadSQM && <SQMFields draft={profile} onChange={setProfile} disabled={busy} />}
+        <CakeTins stat={device.root} label="Upload queue delay" />
+        <CakeTins stat={device.sqm?.queue} label="Download queue delay" />
       </form>
     </SidePanel>
   )

@@ -4,8 +4,8 @@ import { Fragment, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { NetworkDevice, Servers } from "@/components/icons"
-import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
+import { plural } from "@/lib/format"
 import type { Connections, PortsMeta } from "@/lib/types"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
@@ -18,7 +18,7 @@ import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/comp
 import { StatGrid, StatLink, StatTile } from "@/components/stat-tile"
 import { EmptyNote, EmptyState, ErrorState, LoadingPanel } from "@/components/state"
 import { PeerIdentity, ProcessList } from "@/components/security/marks"
-import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
+import { addressVerbs } from "@/components/security/address-verbs"
 import { AreaFindings } from "@/components/security/posture-panel"
 import { useSecurity } from "@/components/security/security-context"
 import { ProductLogo, processProduct } from "@/components/product-logo"
@@ -30,6 +30,11 @@ import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { chosenPort, portsHref } from "@/components/proxy/ports-list"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { recentHours, type AddressBlock } from "@/lib/network-traffic"
+import { BlockDialog } from "@/components/network/connections/block-dialog"
+import { BlocksPanel } from "@/components/network/connections/blocks-panel"
+import { PeerSheet } from "@/components/network/connections/peer-sheet"
+import { RecordedConnections } from "@/components/network/connections/recorded"
 import {
   stickyTableHeader,
   Table,
@@ -58,23 +63,42 @@ import {
  * over it count up as they land and carry the counts of every read since the
  * page opened as their trend, so a burst from the internet is a shape rather
  * than a number that was briefly larger.
+ *
+ * Folding keeps what each address used — transports, far-end ports, states —
+ * and an administrator opens an address into its full tuples, how long each
+ * has been seen, what it carried, the ones seen closing, and the layers it
+ * crosses. A past hour is read from the socket history in the same shape. A
+ * block asks why and until when, and can open an incident; the blocks made
+ * here are listed under the table with their end.
  */
 export function ConnectionsPanel() {
   const { can } = useAuth()
-  const { posture, applyFix } = useSecurity()
+  const { posture, applyFix, firewall } = useSecurity()
   const router = useRouter()
   const [filters, setFilters] = useFilterHistory("security.connections.filters", {
     q: "",
     scope: "all",
+    when: "live",
+    hour: "",
   })
   const query = filters.q
   const scope = filters.scope === "public" ? "public" : "all"
+  const admin = can("system.admin")
+  const when = filters.when === "recorded" && admin ? "recorded" : "live"
   const setQuery = (q: string) => setFilters((previous) => ({ ...previous, q }))
   const setScope = (scope: string) => setFilters((previous) => ({ ...previous, scope }), true)
-  const [blocking, setBlocking] = useState<string | null>(null)
+  const setWhen = (when: string) => setFilters((previous) => ({ ...previous, when }), true)
+  const setHour = (hour: string) => setFilters((previous) => ({ ...previous, hour }), true)
+  const hours = useMemo(() => recentHours(new Date(), 24), [])
+  const [inspecting, setInspecting] = useState<string>()
+  const [blockFor, setBlockFor] = useState<{ address: string; context: string }>()
   const { data, error, loading, refresh, lastSuccess } = usePoll<Connections>(
     (signal) => get("/connections", undefined, signal),
     10000,
+  )
+  const blocks = usePoll<AddressBlock[]>(
+    (signal) => get("/firewall/blocks", undefined, signal),
+    30_000,
   )
   // The kernel's ephemeral range tells this host's side of a connection that
   // somebody chose — a listener's port, which the ports page can name — from
@@ -122,20 +146,19 @@ export function ConnectionsPanel() {
     )
   }
 
-  const block = async (ip: string) => {
-    setBlocking(ip)
-    try {
-      await blockAddress(ip, "blocked from connections")
-      notify.success(`${ip} blocked`, {
-        description: "The deny rule sits in front of every allow and does not expire.",
-      })
-      refresh()
-    } catch (err) {
-      notify.error("Could not add the rule", err)
-    } finally {
-      setBlocking(null)
-    }
-  }
+  const askToBlock = (peer: {
+    address: string
+    ports: number[]
+    processes: string[]
+    service?: string
+  }) =>
+    setBlockFor({
+      address: peer.address,
+      context: `connected to ${peer.service ?? peer.processes[0] ?? "this server"}${peer.ports.length ? ` on ${peer.ports.join(", ")}` : ""}`,
+    })
+  const blocked = new Set(
+    (blocks.data ?? []).filter((b) => b.state === "active").map((b) => b.address),
+  )
 
   return (
     <Workspace
@@ -147,7 +170,7 @@ export function ConnectionsPanel() {
       }}
       escape={() => {
         if (!query && scope === "all") return false
-        setFilters({ q: "", scope: "all" }, true)
+        setFilters((previous) => ({ ...previous, q: "", scope: "all" }), true)
         return true
       }}
     >
@@ -220,175 +243,283 @@ export function ConnectionsPanel() {
           opens to ask what is reachable. */}
       <AreaFindings posture={posture} area="ports" onFix={applyFix} />
 
-      <Panel>
-        <PanelHeader
-          title="Live connections"
-          actions={
-            // The shortcuts and the held rows are the table's, so they sit in
-            // its head rather than on a line of their own above the page.
-            <span className="flex flex-wrap items-center gap-3">
-              {held.pending > 0 && (
-                <Button
-                  size="xs"
-                  aria-label={`Show ${held.pending} new addresses`}
-                  onClick={held.reveal}
-                >
-                  <span role="status">{held.pending} new addresses</span> · Show
-                </Button>
-              )}
-              <span className="numeric text-hint text-muted-foreground">
-                {peers.length} addresses · refreshes every 10s
-              </span>
-              <WorkspaceHelp compact />
-            </span>
-          }
+      {admin && (
+        <ToggleGroup
+          type="single"
+          value={when}
+          onValueChange={(next) => next && setWhen(next)}
+          variant="outline"
+          size="sm"
+          aria-label="Which connections"
+          className="self-start"
+        >
+          <ToggleGroupItem value="live" className="px-2.5 text-hint">
+            Live
+          </ToggleGroupItem>
+          <ToggleGroupItem value="recorded" className="px-2.5 text-hint">
+            A past hour
+          </ToggleGroupItem>
+        </ToggleGroup>
+      )}
+
+      {when === "recorded" ? (
+        <RecordedConnections
+          hours={hours}
+          hour={filters.hour}
+          onHour={setHour}
+          query={query}
+          onInspect={setInspecting}
         />
-        {/* One strip, not two. The filter and the search that change which
-            rows are shown belong on the same line as each other. */}
-        <PanelToolbar>
-          <ToggleGroup
-            type="single"
-            value={scope}
-            onValueChange={(next) => next && setScope(next as "all" | "public")}
-            variant="outline"
-            size="sm"
-            aria-label="Which peers to show"
-          >
-            <ToggleGroupItem value="all" className="px-2.5 text-hint">
-              Everything
-            </ToggleGroupItem>
-            <ToggleGroupItem value="public" className="px-2.5 text-hint">
-              From the internet {fromInternet}
-            </ToggleGroupItem>
-          </ToggleGroup>
-          <span className="flex-1" />
-          <SearchInput
-            dense
-            data-workspace-search
-            aria-label="Filter connections"
-            placeholder="Address, port or process"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            containerClassName="sm:w-64"
+      ) : (
+        <Panel>
+          <PanelHeader
+            title="Live connections"
+            actions={
+              // The shortcuts and the held rows are the table's, so they sit in
+              // its head rather than on a line of their own above the page.
+              <span className="flex flex-wrap items-center gap-3">
+                {held.pending > 0 && (
+                  <Button
+                    size="xs"
+                    aria-label={`Show ${held.pending} new addresses`}
+                    onClick={held.reveal}
+                  >
+                    <span role="status">{held.pending} new addresses</span> · Show
+                  </Button>
+                )}
+                <span className="numeric text-hint text-muted-foreground">
+                  {peers.length} addresses · refreshes every 10s
+                </span>
+                <WorkspaceHelp compact />
+              </span>
+            }
           />
-        </PanelToolbar>
-        <PanelBody flush>
-          {peers.length === 0 ? (
-            query.trim() ? (
-              <EmptyNote>No connection matches &ldquo;{query.trim()}&rdquo;.</EmptyNote>
+          {/* One strip, not two. The filter and the search that change which
+            rows are shown belong on the same line as each other. */}
+          <PanelToolbar>
+            <ToggleGroup
+              type="single"
+              value={scope}
+              onValueChange={(next) => next && setScope(next as "all" | "public")}
+              variant="outline"
+              size="sm"
+              aria-label="Which peers to show"
+            >
+              <ToggleGroupItem value="all" className="px-2.5 text-hint">
+                Everything
+              </ToggleGroupItem>
+              <ToggleGroupItem value="public" className="px-2.5 text-hint">
+                From the internet {fromInternet}
+              </ToggleGroupItem>
+            </ToggleGroup>
+            <span className="flex-1" />
+            <SearchInput
+              dense
+              data-workspace-search
+              aria-label="Filter connections"
+              placeholder="Address, port or process"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              containerClassName="sm:w-64"
+            />
+          </PanelToolbar>
+          <PanelBody flush>
+            {peers.length === 0 ? (
+              query.trim() ? (
+                <EmptyNote>No connection matches &ldquo;{query.trim()}&rdquo;.</EmptyNote>
+              ) : (
+                <EmptyState
+                  icon={NetworkDevice}
+                  title={
+                    scope === "public" ? "Nothing connected from the internet" : "No connections"
+                  }
+                  className="mt-3"
+                />
+              )
             ) : (
-              <EmptyState
-                icon={NetworkDevice}
-                title={
-                  scope === "public" ? "Nothing connected from the internet" : "No connections"
-                }
-                className="mt-3"
-              />
-            )
-          ) : (
-            <div className="min-w-0 group-data-[plain]/panel:-mx-4">
-              <Table containerClassName="max-h-[36rem]">
-                <TableHeader className={stickyTableHeader}>
-                  <TableRow>
-                    <TableHead>Remote address</TableHead>
-                    <TableHead className="w-full">Destination</TableHead>
-                    <TableHead className="text-right">Sockets</TableHead>
-                    <TableHead className="w-px">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {peers.map((peer) => (
-                    <TableRow
-                      key={peer.address}
-                      data-workspace-item={peer.address}
-                      data-workspace-name={peer.address}
-                      tabIndex={0}
-                      className="group focus-ring-inset"
-                    >
-                      <TableCell className="py-4">
-                        <PeerIdentity ip={peer.address} />
-                      </TableCell>
-                      <TableCell className="whitespace-normal">
-                        <div className="flex items-center gap-3">
-                          <ProductLogo
-                            id={processProduct(peer.processes[0] ?? "")}
-                            fallback={Servers}
-                            size="sm"
-                            className="hidden sm:flex"
-                          />
-                          <div className="space-y-1">
-                            <span className="text-body font-medium">
-                              {peer.processes[0] || peer.service || "Unknown process"}
-                            </span>
-                            <span className="block font-mono text-hint text-muted-foreground">
-                              {peer.ports.length
-                                ? peer.ports.map((port, i) => (
-                                    <Fragment key={port}>
-                                      {i > 0 && ", "}
-                                      {chosenPort(port, range) ? (
-                                        <Link
-                                          href={portsHref({ q: `:${port}` })}
-                                          aria-label={`What listens on port ${port}`}
-                                          className="rounded-sm underline-offset-4 focus-ring hover:underline"
-                                        >
-                                          {port}
-                                        </Link>
-                                      ) : (
-                                        port
-                                      )}
-                                    </Fragment>
-                                  ))
-                                : "—"}
-                              {peer.service && ` · ${peer.service}`}
-                            </span>
-                            {peer.processes.length > 1 && (
-                              <ProcessList names={peer.processes.slice(1)} />
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="ml-auto w-16 space-y-2 text-right">
-                          <span className="numeric font-medium">{peer.count}</span>
-                          <Meter
-                            value={(peer.count / most) * 100}
-                            size="thin"
-                            label={`${peer.count} sockets`}
-                          />
-                          <span className="block text-hint text-muted-foreground">
-                            {peer.established} active
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <VerbActions
-                          dim
-                          className="justify-end"
-                          verbs={addressVerbs({
-                            ip: peer.address,
-                            block:
-                              can("system.admin") && !peer.private
-                                ? () => void block(peer.address)
-                                : undefined,
-                            blocking: blocking === peer.address,
-                            navigate: (href) => router.push(href),
-                          })}
-                        />
-                      </TableCell>
+              <div className="min-w-0 group-data-[plain]/panel:-mx-4">
+                <Table containerClassName="max-h-[36rem]">
+                  <TableHeader className={stickyTableHeader}>
+                    <TableRow>
+                      <TableHead>Remote address</TableHead>
+                      <TableHead className="w-full">Destination</TableHead>
+                      <TableHead className="text-right">Sockets</TableHead>
+                      <TableHead className="w-px">
+                        <span className="sr-only">Actions</span>
+                      </TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </PanelBody>
-        <PanelFooter className="text-hint text-muted-foreground">
-          {peers.length} of {data?.peers.length ?? 0} addresses · grouped by remote address · socket
-          counts include connections still opening or closing.
-        </PanelFooter>
-      </Panel>
+                  </TableHeader>
+                  <TableBody>
+                    {peers.map((peer) => (
+                      <TableRow
+                        key={peer.address}
+                        data-workspace-item={peer.address}
+                        data-workspace-name={peer.address}
+                        tabIndex={0}
+                        className="group focus-ring-inset"
+                      >
+                        <TableCell className="py-4">
+                          {admin ? (
+                            <button
+                              type="button"
+                              onClick={() => setInspecting(peer.address)}
+                              aria-label={`Inspect ${peer.address}`}
+                              className="rounded-sm text-left focus-ring"
+                            >
+                              <PeerIdentity ip={peer.address} />
+                            </button>
+                          ) : (
+                            <PeerIdentity ip={peer.address} />
+                          )}
+                          {blocked.has(peer.address) && (
+                            <span className="mt-1 block text-hint text-destructive">blocked</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="whitespace-normal">
+                          <div className="flex items-center gap-3">
+                            <ProductLogo
+                              id={processProduct(peer.processes[0] ?? "")}
+                              fallback={Servers}
+                              size="sm"
+                              className="hidden sm:flex"
+                            />
+                            <div className="space-y-1">
+                              <span className="text-body font-medium">
+                                {peer.processes[0] || peer.service || "Unknown process"}
+                              </span>
+                              <span className="block font-mono text-hint text-muted-foreground">
+                                {peer.ports.length
+                                  ? peer.ports.map((port, i) => (
+                                      <Fragment key={port}>
+                                        {i > 0 && ", "}
+                                        {chosenPort(port, range) ? (
+                                          <Link
+                                            href={portsHref({ q: `:${port}` })}
+                                            aria-label={`What listens on port ${port}`}
+                                            className="rounded-sm underline-offset-4 focus-ring hover:underline"
+                                          >
+                                            {port}
+                                          </Link>
+                                        ) : (
+                                          port
+                                        )}
+                                      </Fragment>
+                                    ))
+                                  : "—"}
+                                {peer.service && ` · ${peer.service}`}
+                              </span>
+                              {peer.protocols && peer.protocols.length > 0 && (
+                                <span className="block font-mono text-hint text-muted-foreground">
+                                  {peer.protocols.join("/").toUpperCase()}
+                                  {peer.remotePorts &&
+                                    peer.remotePorts.length > 0 &&
+                                    ` · from ${peer.remotePorts.join(", ")}${peer.morePorts ? ` +${peer.morePorts}` : ""}`}
+                                  {peer.states &&
+                                    ` · ${Object.entries(peer.states)
+                                      .sort(([, a], [, b]) => b - a)
+                                      .map(
+                                        ([state, n]) =>
+                                          `${n} ${state.toLowerCase().replace("_", "-")}`,
+                                      )
+                                      .join(", ")}`}
+                                </span>
+                              )}
+                              {peer.processes.length > 1 && (
+                                <ProcessList names={peer.processes.slice(1)} />
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="ml-auto w-16 space-y-2 text-right">
+                            <span className="numeric font-medium">{peer.count}</span>
+                            <Meter
+                              value={(peer.count / most) * 100}
+                              size="thin"
+                              label={`${peer.count} sockets`}
+                            />
+                            <span className="block text-hint text-muted-foreground">
+                              {peer.established} active
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <VerbActions
+                            dim
+                            className="justify-end"
+                            verbs={addressVerbs({
+                              ip: peer.address,
+                              block:
+                                admin && !peer.private && !blocked.has(peer.address)
+                                  ? () => askToBlock(peer)
+                                  : undefined,
+                              blocking: blockFor?.address === peer.address,
+                              navigate: (href) => router.push(href),
+                            })}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </PanelBody>
+          <PanelFooter className="text-hint text-muted-foreground">
+            {peers.length} of {data?.peers.length ?? 0} addresses · grouped by remote address ·
+            socket counts include connections still opening or closing.
+            {data?.quality && (
+              <span className="block" aria-label="What this read cannot see">
+                {data.quality.intervalSeconds > 0
+                  ? `Read ${Math.round(data.quality.intervalSeconds)}s after the last; connections shorter than that may be missing. `
+                  : "The first read of this table; nothing is known of what came before. "}
+                {data.quality.closedSinceLast > 0 &&
+                  `${plural(data.quality.closedSinceLast, "connection")} closed since the last read. `}
+                {data.quality.unconnectedUdp > 0 &&
+                  `${plural(data.quality.unconnectedUdp, "unconnected UDP socket")} have no peer to list.`}
+              </span>
+            )}
+          </PanelFooter>
+        </Panel>
+      )}
+
+      <BlocksPanel
+        blocks={blocks.data}
+        error={blocks.error}
+        lastSuccess={blocks.lastSuccess}
+        refresh={blocks.refresh}
+      />
+
+      {inspecting && (
+        <PeerSheet
+          address={inspecting}
+          firewall={firewall}
+          blocks={blocks.data}
+          onBlock={(() => {
+            const peer = data?.peers.find((p) => p.address === inspecting)
+            if (!admin || peer?.private) return undefined
+            return () =>
+              setBlockFor({
+                address: inspecting,
+                context: peer
+                  ? `connected to ${peer.service ?? peer.processes[0] ?? "this server"}`
+                  : "seen in the socket history",
+              })
+          })()}
+          onClose={() => setInspecting(undefined)}
+        />
+      )}
+      {blockFor && (
+        <BlockDialog
+          address={blockFor.address}
+          context={blockFor.context}
+          onClose={() => setBlockFor(undefined)}
+          onBlocked={() => {
+            blocks.refresh()
+            refresh()
+          }}
+        />
+      )}
     </Workspace>
   )
 }

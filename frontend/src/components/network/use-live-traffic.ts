@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import { get } from "@/lib/api"
 import type { NetworkLive, NetworkLivePoint } from "@/lib/types"
+import type { TCPLatency, TCPPoint } from "@/lib/network-traffic"
 
 /** The backend keeps fifteen minutes; so does the page. */
 const KEEP = 450
@@ -12,6 +13,13 @@ export type LiveTraffic = {
   series: Record<string, NetworkLivePoint[]>
   /** The newest reading's time, in unix seconds; zero before the first answer. */
   now: number
+  /** When the server's sampler last read the counters, and how often it does. */
+  sampledAt?: number
+  stepSeconds?: number
+  /** The host's TCP over the same steps, and TCP's own round-trip estimate. */
+  tcp: TCPPoint[]
+  tcpError?: string
+  latency?: TCPLatency
   error?: Error
 }
 
@@ -26,8 +34,8 @@ export type LiveTraffic = {
  * its container stops, and a line that never moves again is a stale reading
  * dressed as a live one.
  */
-export function useLiveTraffic(enabled = true, intervalMs = 2000): LiveTraffic {
-  const [state, setState] = useState<LiveTraffic>({ series: {}, now: 0 })
+export function useLiveTraffic(enabled = true, intervalMs = 2000, context = false): LiveTraffic {
+  const [state, setState] = useState<LiveTraffic>({ series: {}, now: 0, tcp: [] })
   const since = useRef(0)
 
   useEffect(() => {
@@ -38,13 +46,26 @@ export function useLiveTraffic(enabled = true, intervalMs = 2000): LiveTraffic {
 
     const tick = async () => {
       try {
+        const query: Record<string, number> = {}
+        if (since.current) query.since = since.current
+        // TCP's latency is read with ss at most every ten seconds on the
+        // server; only the page that shows it asks.
+        if (context) query.latency = 1
         const live = await get<NetworkLive>(
           "/network/traffic/live",
-          since.current ? { since: since.current } : undefined,
+          Object.keys(query).length ? query : undefined,
           controller.signal,
         )
         if (cancelled) return
-        setState((previous) => ({ series: merge(previous.series, live.series), now: live.now }))
+        setState((previous) => ({
+          series: merge(previous.series, live.series),
+          now: live.now,
+          sampledAt: live.sampledAt,
+          stepSeconds: live.stepSeconds,
+          tcp: mergeTCP(previous.tcp, live.tcp ?? []),
+          tcpError: live.tcpError,
+          latency: live.latency ?? previous.latency,
+        }))
         const newest = Math.max(
           since.current,
           ...Object.values(live.series).map((points) => points.at(-1)?.t ?? 0),
@@ -71,9 +92,16 @@ export function useLiveTraffic(enabled = true, intervalMs = 2000): LiveTraffic {
       controller.abort()
       clearTimeout(timer)
     }
-  }, [enabled, intervalMs])
+  }, [enabled, intervalMs, context])
 
   return state
+}
+
+/** The TCP ring with the new steps appended and trimmed to the same fifteen minutes. */
+export function mergeTCP(previous: TCPPoint[], incoming: TCPPoint[]): TCPPoint[] {
+  const last = previous.at(-1)?.t ?? 0
+  const joined = previous.concat(incoming.filter((p) => p.t > last))
+  return joined.length > KEEP ? joined.slice(joined.length - KEEP) : joined
 }
 
 /** The previous rings with the new points appended, trimmed, and gone devices dropped. */

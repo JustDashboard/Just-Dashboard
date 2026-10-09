@@ -116,7 +116,7 @@ export function SQMFields({
   )
 }
 
-function ProfileChoice({
+export function ProfileChoice({
   id,
   label,
   hint,
@@ -151,7 +151,7 @@ function ProfileChoice({
   )
 }
 
-function ProfileNumber({
+export function ProfileNumber({
   id,
   label,
   hint,
