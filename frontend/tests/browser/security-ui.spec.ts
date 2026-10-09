@@ -460,6 +460,45 @@ async function mockSecurity(
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
+      case "/fail2ban/sshd/policy":
+        return json(route, {
+          name: "sshd",
+          rule: "5 failures within 10 minutes earn a 10-minute ban",
+          values: [
+            { key: "bantime", running: "600" },
+            { key: "findtime", running: "600" },
+            { key: "maxretry", running: "5" },
+          ],
+          watches: { kind: "files", files: ["/var/log/auth.log"] },
+          actions: [
+            {
+              name: "iptables-multiport",
+              kind: "firewall",
+              enforces: true,
+              allPorts: false,
+              ports: ["ssh"],
+              words: "drops a banned address on ssh in the firewall",
+            },
+          ],
+          coverage: { service: "sshd", listening: ["22"], covered: ["22"], uncovered: [] },
+          ignoreSelf: true,
+          ignoreIp: ["127.0.0.0/8"],
+          findings: [],
+        })
+      case "/security/blocks":
+        return json(route, {
+          entries: [],
+          distinct: 0,
+          duplicated: 0,
+          covered: 0,
+          communityOnly: 0,
+          truncated: false,
+          engines: [
+            { engine: "fail2ban", read: true, count: 0 },
+            { engine: "crowdsec", read: false, count: 0, note: "not read" },
+            { engine: "firewall", read: true, count: 0 },
+          ],
+        })
       case "/fail2ban/sshd/config":
         return json(route, {
           name: "sshd",

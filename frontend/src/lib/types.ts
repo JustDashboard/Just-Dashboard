@@ -2492,6 +2492,55 @@ export type JailConfig = {
   error?: string
 }
 
+/** What a jail's numbers and actions mean together, read from the running server. */
+export type JailPolicy = {
+  name: string
+  rule: string
+  values: { key: string; running: string; dropIn?: string; drift?: boolean }[]
+  watches: { kind: "files" | "journal" | "none"; files?: string[]; match?: string }
+  actions: {
+    name: string
+    kind: "firewall" | "route" | "edge" | "report" | "unknown"
+    enforces: boolean
+    allPorts: boolean
+    ports?: string[]
+    words: string
+  }[]
+  coverage?: { service: string; listening: string[]; covered: string[]; uncovered: string[] }
+  ignoreSelf: boolean
+  ignoreIp: string[]
+  findings: { level: "critical" | "warning" | "notice"; text: string }[]
+  error?: string
+}
+
+export type BlockEngine = "fail2ban" | "crowdsec" | "firewall"
+
+export type BlockedEntry = {
+  value: string
+  range: boolean
+  sources: {
+    engine: BlockEngine
+    ref: string
+    detail?: string
+    origin?: string
+    until?: string
+    community?: boolean
+  }[]
+  engines: BlockEngine[]
+  coveredBy?: string[]
+}
+
+/** fail2ban's bans, CrowdSec's decisions and the firewall's denies, folded by address. */
+export type BlocksView = {
+  entries: BlockedEntry[]
+  distinct: number
+  duplicated: number
+  covered: number
+  communityOnly: number
+  truncated: boolean
+  engines: { engine: BlockEngine; read: boolean; count: number; note?: string }[]
+}
+
 export type Offender = {
   ip: string
   bans: number

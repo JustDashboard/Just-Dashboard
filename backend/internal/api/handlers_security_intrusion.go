@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -35,6 +36,9 @@ func (s *Server) mountSecurityIntrusionRoutes(r chi.Router) {
 			})
 		})
 	})
+	// Every engine's refused addresses folded by address. Each list is
+	// readable on its own page by any role, so the merge is too.
+	r.Method(http.MethodGet, "/security/blocks", s.handle(s.handleSecurityBlocks))
 	// An alert names the internal hosts it was raised about and the ports they
 	// were reached on, so Suricata is system.admin for the reason the failed
 	// logins are.
@@ -42,6 +46,41 @@ func (s *Server) mountSecurityIntrusionRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodGet, "/", s.handle(s.handleSuricata))
 	})
+}
+
+// handleSecurityBlocks reads the three engines concurrently and merges them.
+// An engine that could not be read is reported as such, never as empty.
+func (s *Server) handleSecurityBlocks(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 40*time.Second)
+	defer cancel()
+	var (
+		wg        sync.WaitGroup
+		f2b       *netsec.Fail2banStatus
+		fw        *netsec.FirewallStatus
+		decisions []netsec.CrowdSecDecision
+		csRead    bool
+	)
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		if st, err := s.modules.netsec.Fail2banStatus(ctx); err == nil {
+			f2b = st
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if st, err := s.modules.netsec.Status(ctx); err == nil {
+			fw = st
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		list, installed, err := s.modules.netsec.CrowdSecDecisions(ctx)
+		decisions, csRead = list, installed && err == nil
+	}()
+	wg.Wait()
+	httpx.JSON(w, http.StatusOK, netsec.MergeBlocks(f2b, decisions, csRead, fw))
+	return nil
 }
 
 func (s *Server) handleCrowdSec(w http.ResponseWriter, r *http.Request) error {

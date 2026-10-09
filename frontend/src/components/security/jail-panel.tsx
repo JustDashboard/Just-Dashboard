@@ -12,7 +12,7 @@ import {
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import type { Fail2banJail, JailConfig, JailParamResult } from "@/lib/types"
+import type { BlocksView, Fail2banJail, JailConfig, JailParamResult, JailPolicy } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
@@ -20,6 +20,7 @@ import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { SidePanel } from "@/components/side-panel"
 import { ProductLogo } from "@/components/product-logo"
+import { heldSentence } from "@/components/security/blocks"
 import { jailProduct } from "@/components/security/marks"
 import { Status } from "@/components/status-dot"
 import { Meter } from "@/components/meter"
@@ -48,12 +49,15 @@ export function JailsPanel({
   jails,
   canManage,
   clientIp,
+  blocks,
   onChanged,
 }: {
   jails: Fail2banJail[]
   canManage: boolean
   /** The address this browser arrived from, offered to the allowlist by name. */
   clientIp?: string
+  /** Every engine's refused addresses, so a ban can say what already holds one. */
+  blocks?: BlocksView
   onChanged: () => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
@@ -241,6 +245,7 @@ export function JailsPanel({
               <div className="flex items-center gap-2">
                 <Input
                   id="jail-ban-address"
+                  aria-describedby="jail-ban-held"
                   value={banning}
                   onChange={(e) => setBanning(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && ban()}
@@ -257,6 +262,11 @@ export function JailsPanel({
                   Ban
                 </Button>
               </div>
+              {heldSentence(banning, blocks) && (
+                <p id="jail-ban-held" className="text-hint text-warning">
+                  {heldSentence(banning, blocks)}
+                </p>
+              )}
               <p className="text-hint leading-relaxed text-muted-foreground">
                 For this jail&rsquo;s ban time, the same as an earned ban. Your own address is
                 refused. A block that should outlive the ban is a firewall rule, from the offenders
@@ -264,6 +274,8 @@ export function JailsPanel({
               </p>
             </div>
           )}
+
+          {selected && <JailPolicySection jail={selected.name} />}
 
           <div>
             <p className="eyebrow mb-1">Banned now</p>
@@ -333,6 +345,111 @@ export function JailsPanel({
           onSaved={onChanged}
         />
       )}
+    </>
+  )
+}
+
+/**
+ * What the jail's numbers and actions mean together: the rule as a sentence,
+ * what it reads, what each action does with a ban, and — for sshd — whether
+ * the ban lands on the port sshd actually listens on. Values the running
+ * server holds that the dashboard's drop-in would change at the next start
+ * are marked, since a restart is when that difference stops being invisible.
+ */
+function JailPolicySection({ jail }: { jail: string }) {
+  const { data, error, loading } = usePoll<JailPolicy>(
+    (signal) => get(`/fail2ban/${encodeURIComponent(jail)}/policy`, undefined, signal),
+    0,
+    [jail],
+  )
+  return (
+    <section aria-label="Policy" className="space-y-3">
+      <p className="eyebrow">Policy</p>
+      {loading && !data ? (
+        <p className="text-body text-muted-foreground">Reading the running server…</p>
+      ) : error && !data ? (
+        <p className="text-body text-muted-foreground">The policy could not be read.</p>
+      ) : data?.error ? (
+        <p className="text-body text-muted-foreground">{data.error}</p>
+      ) : data ? (
+        <>
+          <p className="text-body font-medium">{data.rule}.</p>
+          {data.findings.map((finding) => (
+            <Notice
+              key={finding.text}
+              tone={finding.level === "critical" ? "danger" : "warning"}
+              title={finding.level === "critical" ? "Bans here do not stop the traffic" : "Check"}
+            >
+              {finding.text}
+            </Notice>
+          ))}
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-body">
+            <dt className="text-muted-foreground">Reads</dt>
+            <dd className="min-w-0 font-mono text-hint break-words">
+              {data.watches.kind === "files"
+                ? data.watches.files?.join(", ")
+                : data.watches.kind === "journal"
+                  ? `journal: ${data.watches.match}`
+                  : "nothing"}
+            </dd>
+            {data.actions.map((action) => (
+              <ActionLine key={action.name} action={action} />
+            ))}
+            {data.coverage && (
+              <>
+                <dt className="text-muted-foreground">sshd ports</dt>
+                <dd>
+                  {data.coverage.listening.map((port) => (
+                    <Tag
+                      key={port}
+                      mono
+                      tone={data.coverage!.uncovered.includes(port) ? "danger" : undefined}
+                    >
+                      {port} {data.coverage!.uncovered.includes(port) ? "not covered" : "covered"}
+                    </Tag>
+                  ))}
+                </dd>
+              </>
+            )}
+            {data.values.map((value) => (
+              <PolicyValueLine key={value.key} value={value} />
+            ))}
+          </dl>
+        </>
+      ) : null}
+    </section>
+  )
+}
+
+function ActionLine({ action }: { action: JailPolicy["actions"][number] }) {
+  return (
+    <>
+      <dt className="font-mono text-hint text-muted-foreground">{action.name}</dt>
+      <dd className="min-w-0">
+        <Status
+          verdict={action.enforces ? "ok" : "warning"}
+          label={action.enforces ? action.kind : "blocks nothing"}
+        />{" "}
+        <span className="text-hint text-muted-foreground">{action.words}</span>
+      </dd>
+    </>
+  )
+}
+
+function PolicyValueLine({ value }: { value: JailPolicy["values"][number] }) {
+  return (
+    <>
+      <dt className="font-mono text-hint text-muted-foreground">{value.key}</dt>
+      <dd className="numeric">
+        {value.running}
+        {value.dropIn && (
+          <span
+            className={cn("ml-2 text-hint", value.drift ? "text-warning" : "text-muted-foreground")}
+          >
+            {value.drift ? `restart loads ${value.dropIn}` : "kept in the drop-in"}
+          </span>
+        )}
+      </dd>
     </>
   )
 }

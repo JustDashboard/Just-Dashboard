@@ -550,6 +550,24 @@ func (s *Server) handleJailConfig(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
+func (s *Server) handleJailPolicy(w http.ResponseWriter, r *http.Request) error {
+	jail := chi.URLParam(r, "jail")
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	var ports []string
+	if jail == "sshd" {
+		// Only the listening ports leave this read; the keyed accounts the
+		// full SSH configuration names stay behind system.admin.
+		ports = s.modules.netsec.SSHDStatus(ctx).Ports
+	}
+	policy, err := s.modules.netsec.JailPolicy(ctx, jail, ports)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.JSON(w, http.StatusOK, policy)
+	return nil
+}
+
 type jailParamRequest struct {
 	// Params carries every parameter at once, because they are one policy —
 	// "this many failures inside this window earns this long a ban" — and

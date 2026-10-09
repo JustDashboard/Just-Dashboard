@@ -638,6 +638,111 @@ export const overview = {
   ],
 }
 
+/**
+ * The three engines folded by address, as `/security/blocks` answers for the
+ * jails, decisions and firewall above: the sshd jail and CrowdSec both hold
+ * 203.0.113.9, which also sits inside a /24 the firewall denies.
+ */
+export const blocks = {
+  distinct: 9,
+  duplicated: 2,
+  covered: 2,
+  communityOnly: 4,
+  truncated: false,
+  engines: [
+    { engine: "fail2ban", read: true, count: 2 },
+    { engine: "crowdsec", read: true, count: 7 },
+    { engine: "firewall", read: true, count: 1 },
+  ],
+  entries: [
+    {
+      value: "203.0.113.9",
+      range: false,
+      engines: ["crowdsec", "fail2ban"],
+      sources: [
+        { engine: "fail2ban", ref: "sshd" },
+        {
+          engine: "crowdsec",
+          ref: "11",
+          detail: "crowdsecurity/ssh-bf",
+          origin: "crowdsec",
+          until: until(3, 12),
+        },
+      ],
+      coveredBy: ["203.0.113.0/24"],
+    },
+    {
+      value: "198.51.100.4",
+      range: false,
+      engines: ["crowdsec", "fail2ban"],
+      sources: [
+        { engine: "fail2ban", ref: "sshd" },
+        {
+          engine: "crowdsec",
+          ref: "12",
+          detail: "crowdsecurity/ssh-slow-bf",
+          origin: "crowdsec",
+          until: until(1, 40),
+        },
+      ],
+    },
+    {
+      value: "192.0.2.77",
+      range: false,
+      engines: ["crowdsec"],
+      sources: [{ engine: "crowdsec", ref: "13", detail: "manual", origin: "cscli" }],
+    },
+    {
+      value: "203.0.113.0/24",
+      range: true,
+      engines: ["firewall"],
+      sources: [{ engine: "firewall", ref: "1", detail: "deny" }],
+    },
+  ],
+}
+
+/** The sshd jail's policy on a host whose sshd moved to 2222 while the ban still names ssh. */
+export const sshdPolicy = {
+  name: "sshd",
+  rule: "5 failures within 10 minutes earn a 2-hour ban",
+  values: [
+    { key: "bantime", running: "7200", dropIn: "7200" },
+    { key: "findtime", running: "600" },
+    { key: "maxretry", running: "5", dropIn: "3", drift: true },
+  ],
+  watches: { kind: "journal", match: "_SYSTEMD_UNIT=ssh.service + _COMM=sshd" },
+  actions: [
+    {
+      name: "iptables-multiport",
+      kind: "firewall",
+      enforces: true,
+      allPorts: false,
+      ports: ["ssh"],
+      words: "drops a banned address on ssh in the firewall",
+    },
+    {
+      name: "sendmail-whois",
+      kind: "report",
+      enforces: false,
+      allPorts: false,
+      words: "reports the ban and blocks nothing",
+    },
+  ],
+  coverage: { service: "sshd", listening: ["2222"], covered: [], uncovered: ["2222"] },
+  ignoreSelf: true,
+  ignoreIp: ["127.0.0.0/8", "::1"],
+  findings: [
+    {
+      level: "warning",
+      text: "maxretry is 5 in the running server and 3 in the drop-in, so a restart changes it.",
+    },
+    {
+      level: "critical",
+      text: "sshd listens on 2222, and the ban drops only ssh: a banned address keeps reaching sshd.",
+    },
+  ],
+}
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -693,6 +798,10 @@ export async function mockIntrusion(
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
+      case "/fail2ban/sshd/policy":
+        return json(route, sshdPolicy)
+      case "/security/blocks":
+        return json(route, blocks)
       case "/security/crowdsec/":
         return json(route, crowdsec)
       case "/security/suricata/":

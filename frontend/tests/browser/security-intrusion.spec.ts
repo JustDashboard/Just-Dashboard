@@ -251,6 +251,59 @@ test("with no valid bouncer CrowdSec says nothing is enforcing its decisions", a
   ).toContainText("0 of 0 pulled")
 })
 
+test("every engine's refused addresses are folded into one list by address", async ({ page }) => {
+  await mockIntrusion(page)
+  await page.goto("/security/intrusion")
+  const panel = page.locator("[data-slot=panel]").filter({ hasText: "Blocked across engines" })
+  await expect(panel).toContainText("9 addresses")
+  const held = panel.getByRole("row").filter({ hasText: "203.0.113.9" })
+  await expect(held).toContainText("fail2ban sshd")
+  await expect(held).toContainText("CrowdSec #11")
+  await expect(held).toContainText("held 2 times")
+  await expect(held).toContainText("203.0.113.0/24")
+
+  await panel.getByRole("button", { name: /^Held more than once/ }).click()
+  await expect(panel.getByRole("row")).toHaveCount(1 + 2)
+  await panel.getByRole("button", { name: /^Inside a broader block/ }).click()
+  await expect(panel.getByRole("row")).toHaveCount(1 + 1)
+  await expect(panel).toContainText("4 community decisions touch nothing else")
+})
+
+test("both ban forms say which engine already holds the address", async ({ page }) => {
+  await mockIntrusion(page)
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "Ban an address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Ban an address" })
+  await dialog.getByLabel("Address or range").fill("203.0.113.9")
+  await expect(dialog.getByText(/already held by fail2ban sshd, CrowdSec #11/)).toBeVisible()
+  await dialog.getByLabel("Address or range").fill("203.0.113.200")
+  await expect(
+    dialog.getByText("203.0.113.200 is inside 203.0.113.0/24 (the firewall)."),
+  ).toBeVisible()
+  await dialog.getByLabel("Address or range").fill("198.51.100.99")
+  await expect(dialog.getByText(/already held|is inside/)).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+
+  await page.getByRole("button", { name: "sshd", exact: true }).click()
+  const sheet = page.getByRole("dialog", { name: "sshd" })
+  await sheet.getByLabel("Ban an address now").fill("198.51.100.4")
+  await expect(sheet.getByText(/already held by fail2ban sshd, CrowdSec #12/)).toBeVisible()
+})
+
+test("the sshd jail's policy says its ban misses the port sshd moved to", async ({ page }) => {
+  await mockIntrusion(page)
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "sshd", exact: true }).click()
+  const policy = page.getByRole("dialog", { name: "sshd" }).getByRole("region", { name: "Policy" })
+  await expect(policy).toContainText("5 failures within 10 minutes earn a 2-hour ban.")
+  await expect(policy).toContainText("Bans here do not stop the traffic")
+  await expect(policy).toContainText("sshd listens on 2222, and the ban drops only ssh")
+  await expect(policy).toContainText("journal: _SYSTEMD_UNIT=ssh.service + _COMM=sshd")
+  await expect(policy).toContainText("2222 not covered")
+  await expect(policy).toContainText("blocks nothing")
+  await expect(policy).toContainText("restart loads 3")
+})
+
 test("Suricata reads its mode, its severities, its signatures and its latest alerts", async ({
   page,
 }) => {

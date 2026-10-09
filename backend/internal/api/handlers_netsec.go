@@ -49,6 +49,9 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/history", s.handle(s.handleBanHistory))
 		r.Method(http.MethodGet, "/offenders", s.handle(s.handleBanOffenders))
 		r.Method(http.MethodGet, "/{jail}/config", s.handle(s.handleJailConfig))
+		// What the jail's numbers and actions mean together, and whether its
+		// ban lands on the port the service listens on. Read like the config.
+		r.Method(http.MethodGet, "/{jail}/policy", s.handle(s.handleJailPolicy))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPost, "/{jail}/unban", s.handle(s.handleFail2banUnban))

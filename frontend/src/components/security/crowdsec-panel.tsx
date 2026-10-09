@@ -5,7 +5,7 @@ import { Slash } from "@/components/icons"
 import { del, get, post, ApiError } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { CrowdSecView } from "@/lib/types"
+import type { BlocksView, CrowdSecView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -15,6 +15,7 @@ import { Modal } from "@/components/modal"
 import { InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
+import { heldSentence } from "@/components/security/blocks"
 import { ENFORCEMENT, enforcementOf, goDuration, pullAge } from "@/components/security/enforcement"
 import { Address } from "@/components/security/marks"
 import { useSecurity } from "@/components/security/security-context"
@@ -68,12 +69,25 @@ const ALERTS_SHOWN = 10
  * table stops at fifty rows. Everything else is plain: the alerts that made
  * those decisions, and the bouncers that enforce them.
  */
-export function CrowdSecPanel() {
+export function CrowdSecPanel({
+  blocks,
+  onBlocked,
+}: {
+  /** Every engine's refused addresses, so the ban form can say what already holds one. */
+  blocks?: BlocksView
+  onBlocked?: () => void
+}) {
   const { can } = useAuth()
-  const { data, error, loading, refresh } = usePoll<CrowdSecView>(
-    (signal) => get("/security/crowdsec/", undefined, signal),
-    20_000,
-  )
+  const {
+    data,
+    error,
+    loading,
+    refresh: reload,
+  } = usePoll<CrowdSecView>((signal) => get("/security/crowdsec/", undefined, signal), 20_000)
+  const refresh = () => {
+    reload()
+    onBlocked?.()
+  }
 
   if (loading && !data) return <LoadingPanel />
   if (error && !data) return <ErrorState error={error} onRetry={refresh} />
@@ -189,7 +203,12 @@ export function CrowdSecPanel() {
         </Notice>
       )}
 
-      <DecisionsPanel decisions={data.decisions} canManage={admin} onChanged={refresh} />
+      <DecisionsPanel
+        decisions={data.decisions}
+        canManage={admin}
+        blocks={blocks}
+        onChanged={refresh}
+      />
 
       <div className="grid min-w-0 gap-8 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:gap-12">
         <Panel plain>
@@ -431,10 +450,12 @@ function DecisionValue({ decision }: { decision: Decision }) {
 function DecisionsPanel({
   decisions,
   canManage,
+  blocks,
   onChanged,
 }: {
   decisions: Decision[]
   canManage: boolean
+  blocks?: BlocksView
   onChanged: () => void
 }) {
   const { confirm, dialog } = useConfirm()
@@ -572,7 +593,7 @@ function DecisionsPanel({
         </PanelBody>
       </Panel>
 
-      <BanDialog open={banning} onOpenChange={setBanning} onBanned={onChanged} />
+      <BanDialog open={banning} onOpenChange={setBanning} blocks={blocks} onBanned={onChanged} />
       {dialog}
     </>
   )
@@ -596,10 +617,12 @@ const DURATIONS = [
 function BanDialog({
   open,
   onOpenChange,
+  blocks,
   onBanned,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  blocks?: BlocksView
   onBanned: () => void
 }) {
   const { exposure } = useSecurity()
@@ -674,6 +697,7 @@ function BanDialog({
         >
           <Input
             id="crowdsec-value"
+            aria-describedby="crowdsec-value-held"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             placeholder="203.0.113.77"
@@ -682,6 +706,11 @@ function BanDialog({
             spellCheck={false}
             aria-invalid={error?.field || undefined}
           />
+          {heldSentence(value, blocks) && (
+            <p id="crowdsec-value-held" className="mt-1.5 text-hint text-warning">
+              {heldSentence(value, blocks)}
+            </p>
+          )}
         </Field>
         <Field label="For how long" htmlFor="crowdsec-duration">
           <Select value={duration} onValueChange={setDuration}>
