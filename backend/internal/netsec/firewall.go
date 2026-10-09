@@ -87,8 +87,11 @@ type FirewallStatus struct {
 	Zone         string               `json:"zone,omitempty"`
 	Capabilities FirewallCapabilities `json:"capabilities"`
 	Rules        []Rule               `json:"rules"`
-	Raw          string               `json:"raw,omitempty"`
-	Error        string               `json:"error,omitempty"`
+	// RulesFrom is "configured" when the rules were read from the tool's
+	// configuration because it is not enforcing them (an inactive ufw).
+	RulesFrom string `json:"rulesFrom,omitempty"`
+	Raw       string `json:"raw,omitempty"`
+	Error     string `json:"error,omitempty"`
 	// Detection is every firewall this host could be run by and whether it
 	// is, which is how Backend was chosen.
 	Detection []BackendDetection `json:"detection"`
@@ -239,7 +242,9 @@ func (s *Service) statusOf(ctx context.Context, b fwBackend) (*FirewallStatus, e
 	// supplies its own and they are left alone; the others have no notion of
 	// one at all.
 	for i := range st.Rules {
-		if st.Rules[i].Number == 0 {
+		// Configured rules of an inactive ufw stay unnumbered: ufw numbers
+		// them only once its IPv6 twins are loaded.
+		if st.Rules[i].Number == 0 && st.RulesFrom != "configured" {
 			st.Rules[i].Number = i + 1
 		}
 		annotateRule(&st.Rules[i])
@@ -253,6 +258,9 @@ func (s *Service) statusOf(ctx context.Context, b fwBackend) (*FirewallStatus, e
 		assignRuleIDs(b.Kind(), st.Zones[i].Rules)
 	}
 	st.Findings, st.Analysis = analyzeRules(b.Kind(), st.Rules)
+	if st.RulesFrom == "configured" {
+		st.Findings, st.Analysis = []RuleFinding{}, "ufw is inactive; ordering findings are computed once it is enforcing its rules."
+	}
 	st.Effective = effectivePolicy(ctx, b, st)
 	if st.Detection == nil {
 		st.Detection = []BackendDetection{}

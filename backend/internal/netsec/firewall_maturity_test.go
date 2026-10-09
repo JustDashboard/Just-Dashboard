@@ -626,3 +626,54 @@ func TestRuleHistoryFollowsARuleThroughItsReplacements(t *testing.T) {
 		t.Fatal("history without a database")
 	}
 }
+
+func TestUFWShowAddedIsReadAsTheConfiguredRules(t *testing.T) {
+	rules := parseUFWAdded(`Added user rules (see 'ufw status' for running firewall):
+ufw allow in on fw0 to any port 2222 proto tcp
+ufw allow OpenSSH
+ufw allow 80,443/tcp
+ufw allow from 10.0.0.0/8 to any port 6379 proto tcp
+ufw allow 8443/tcp comment 'dashboard'
+ufw deny out on wg0 to 10.9.0.0/16
+ufw allow from 10.0.0.0/8 to 10.0.0.5 port 5432 proto tcp
+ufw route allow in on fw0 out on eth0
+ufw limit 22/tcp
+ufw allow from 10.2.0.0/16 to any app OpenSSH
+ufw allow from 2001:db8::/32 to any port 53
+`)
+	if len(rules) != 11 {
+		t.Fatalf("rules = %+v", rules)
+	}
+	want := []struct{ action, direction, to, from, port, proto, iface, comment string }{
+		{"ALLOW", "IN", "2222/tcp", "Anywhere", "2222", "tcp", "fw0", ""},
+		{"ALLOW", "IN", "OpenSSH", "Anywhere", "", "", "", ""},
+		{"ALLOW", "IN", "80,443/tcp", "Anywhere", "80,443", "tcp", "", ""},
+		{"ALLOW", "IN", "6379/tcp", "10.0.0.0/8", "6379", "tcp", "", ""},
+		{"ALLOW", "IN", "8443/tcp", "Anywhere", "8443", "tcp", "", "dashboard"},
+		{"DENY", "OUT", "10.9.0.0/16", "Anywhere", "", "", "wg0", ""},
+		{"ALLOW", "IN", "10.0.0.5 5432/tcp", "10.0.0.0/8", "5432", "tcp", "", ""},
+		{"ALLOW", "FWD", "Anywhere", "Anywhere", "", "", "fw0", ""},
+		{"LIMIT", "IN", "22/tcp", "Anywhere", "22", "tcp", "", ""},
+		{"ALLOW", "IN", "OpenSSH", "10.2.0.0/16", "", "", "", ""},
+		{"ALLOW", "IN", "53", "2001:db8::/32", "53", "", "", ""},
+	}
+	for i, w := range want {
+		r := rules[i]
+		if r.Action != w.action || r.Direction != w.direction || r.To != w.to || r.From != w.from || r.Port != w.port || r.Protocol != w.proto || r.Interface != w.iface || r.Comment != w.comment {
+			t.Errorf("rule %d = %+v, want %+v", i+1, r, w)
+		}
+	}
+	if !rules[0].BothFamilies || rules[3].BothFamilies || rules[3].IPv6 || !rules[10].IPv6 {
+		t.Fatalf("families = %+v / %+v / %+v", rules[0], rules[3], rules[10])
+	}
+	// The enforced listing's quirks: "(out)" closes an outbound source, and
+	// an IPv6 source carries no "(v6)" marker.
+	out := parseUFWRule(5, "10.9.0.0/16                DENY OUT    Anywhere on wg0            (out)")
+	if out.From != "Anywhere" || out.Interface != "wg0" || out.Direction != "OUT" {
+		t.Fatalf("outbound = %+v", out)
+	}
+	v6 := parseUFWRule(14, "53                         ALLOW IN    2001:db8::/32")
+	if !v6.IPv6 {
+		t.Fatalf("an IPv6 source rule = %+v", v6)
+	}
+}
