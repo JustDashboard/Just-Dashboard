@@ -224,7 +224,7 @@ func (s *Service) execute(ctx context.Context, run Run, out jobs.Emitter) error 
 	run.Result, run.ResultTruncated = boundedResult(result)
 	run.HasResult = run.Result != nil
 	run.Outcome, run.OutcomeSource = outcome(ctx.Err(), result, err)
-	succeeded := result != nil && result.OK
+	succeeded := result != nil && (result.OK || result.Verdict == netsec.ProbeUnknown)
 	if run.Kind == "investigation" {
 		run.Investigation, run.ResultTruncated = boundedInvestigation(investigation)
 		run.HasResult = run.Investigation != nil
@@ -436,6 +436,20 @@ func outcome(ctxErr error, result *netsec.ProbeResult, runErr error) (string, st
 	}
 	if errors.Is(ctxErr, context.DeadlineExceeded) {
 		return "timed_out", "context"
+	}
+	// A structured verdict is the tool's own reading and outranks guessing
+	// from error text: an unanswered ping is unknown, not a failure.
+	if runErr == nil && result != nil {
+		switch result.Verdict {
+		case netsec.ProbeUnknown:
+			return "completed_with_unknowns", "tool_result"
+		case netsec.ProbeFindings:
+			return "completed_with_findings", "tool_result"
+		case netsec.ProbeOK:
+			if result.OK {
+				return "completed", "tool_result"
+			}
+		}
 	}
 	message := ""
 	if result != nil {

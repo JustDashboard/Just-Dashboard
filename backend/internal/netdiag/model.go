@@ -122,6 +122,10 @@ func scopeFor(req netsec.ProbeRequest) Scope {
 		s.Limitations = append(s.Limitations, "Packet summaries may include sensitive decoded fields; no PCAP or payload dump is retained.")
 	case "wol":
 		s.Family, s.Interface, s.Protocol = "not_applicable", req.Option, "ethernet"
+		if req.Verify != "" {
+			s.Address = req.Verify
+			s.Limitations = append(s.Limitations, "Wake verification watches the given address after sending; an answer measures reachability, and silence does not prove the device stayed asleep.")
+		}
 	case "ping", "traceroute", "mtu":
 		s.Protocol = "tool_selected"
 	case "port", "scan", "banner", "ssh":
@@ -130,6 +134,8 @@ func scopeFor(req netsec.ProbeRequest) Scope {
 		s.Protocol = "tcp"
 	case "dns", "dnsauth", "dnsbl", "mx":
 		s.Protocol = "resolver_selected"
+	case "route":
+		s.Protocol = req.Option
 	}
 	return s
 }
@@ -172,17 +178,150 @@ func boundedResult(result *netsec.ProbeResult) (*netsec.ProbeResult, bool) {
 		trimmed = trimmed || next
 		copy.Records = append(copy.Records, record)
 	}
+	// A quick result's server-side handle is never part of a saved run.
+	copy.ResultID = ""
+	copy.Verdict, _ = clip(copy.Verdict, 32)
+	copy.Summary, next = clip(copy.Summary, 2048)
+	trimmed = trimmed || next
+	trimmed = boundStructure(&copy, result) || trimmed
 	for {
 		encoded, _ := json.Marshal(copy)
 		if len(encoded) <= MaxArtifactBytes {
 			break
 		}
 		trimmed = true
-		if len(copy.Output) > 0 {
+		switch {
+		case len(copy.Output) > 0:
 			copy.Output, _ = clip(copy.Output, len(copy.Output)/2)
-		} else {
+		case largestTable(copy.Tables) >= 0:
+			i := largestTable(copy.Tables)
+			copy.Tables[i].Rows = copy.Tables[i].Rows[:len(copy.Tables[i].Rows)/2]
+			if len(copy.Tables[i].RowLinks) > len(copy.Tables[i].Rows) {
+				copy.Tables[i].RowLinks = copy.Tables[i].RowLinks[:len(copy.Tables[i].Rows)]
+			}
+		case len(copy.Records) > 0:
 			copy.Records = copy.Records[:len(copy.Records)/2]
+		default:
+			copy.Facts, copy.Findings, copy.Stages = nil, nil, nil
 		}
 	}
 	return &copy, trimmed
+}
+
+// Structured evidence limits. Each list and string is copied and clipped so a
+// tool cannot grow a saved run past its artifact bound.
+const (
+	maxFacts       = 64
+	maxStages      = 32
+	maxTables      = 8
+	maxTableRows   = 256
+	maxTableCols   = 12
+	maxFindings    = 64
+	maxLinks       = 16
+	maxMetrics     = 32
+	maxLimitations = 16
+)
+
+func clipAll(values []string, limit, each int) ([]string, bool) {
+	trimmed := len(values) > limit
+	out := make([]string, 0, min(len(values), limit))
+	for i, v := range values {
+		if i == limit {
+			break
+		}
+		v, next := clip(v, each)
+		trimmed = trimmed || next
+		out = append(out, v)
+	}
+	return out, trimmed
+}
+
+func boundStructure(copy, source *netsec.ProbeResult) bool {
+	trimmed := false
+	field := func(v string) string {
+		out, next := clip(v, MaxRecordBytes)
+		trimmed = trimmed || next
+		return out
+	}
+	copy.Facts = nil
+	for i, f := range source.Facts {
+		if i == maxFacts {
+			trimmed = true
+			break
+		}
+		copy.Facts = append(copy.Facts, netsec.ProbeFact{Label: field(f.Label), Value: field(f.Value), Basis: field(f.Basis)})
+	}
+	copy.Stages = nil
+	for i, st := range source.Stages {
+		if i == maxStages {
+			trimmed = true
+			break
+		}
+		copy.Stages = append(copy.Stages, netsec.ProbeStage{ID: field(st.ID), Label: field(st.Label), Status: field(st.Status), Detail: field(st.Detail), Duration: field(st.Duration)})
+	}
+	copy.Tables = nil
+	for i, t := range source.Tables {
+		if i == maxTables {
+			trimmed = true
+			break
+		}
+		next := netsec.ProbeTable{ID: field(t.ID), Title: field(t.Title), Note: field(t.Note)}
+		var cut bool
+		next.Columns, cut = clipAll(t.Columns, maxTableCols, 256)
+		trimmed = trimmed || cut
+		for j, row := range t.Rows {
+			if j == maxTableRows {
+				trimmed = true
+				break
+			}
+			cells, cut := clipAll(row, maxTableCols, MaxRecordBytes)
+			trimmed = trimmed || cut
+			next.Rows = append(next.Rows, cells)
+		}
+		if len(t.RowLinks) > 0 {
+			next.RowLinks, cut = clipAll(t.RowLinks, len(next.Rows), MaxRecordBytes)
+			trimmed = trimmed || cut
+		}
+		copy.Tables = append(copy.Tables, next)
+	}
+	copy.Findings = nil
+	for i, f := range source.Findings {
+		if i == maxFindings {
+			trimmed = true
+			break
+		}
+		copy.Findings = append(copy.Findings, netsec.ProbeFinding{ID: field(f.ID), Level: field(f.Level), Title: field(f.Title), Detail: field(f.Detail), Owner: field(f.Owner), Action: field(f.Action), Href: field(f.Href)})
+	}
+	copy.Links = nil
+	for i, l := range source.Links {
+		if i == maxLinks {
+			trimmed = true
+			break
+		}
+		copy.Links = append(copy.Links, netsec.ProbeLink{Label: field(l.Label), Href: field(l.Href)})
+	}
+	copy.Metrics = nil
+	for i, m := range source.Metrics {
+		if i == maxMetrics {
+			trimmed = true
+			break
+		}
+		copy.Metrics = append(copy.Metrics, netsec.ProbeMetric{Key: field(m.Key), Label: field(m.Label), Value: m.Value, Unit: field(m.Unit)})
+	}
+	var cut bool
+	copy.Limitations, cut = clipAll(source.Limitations, maxLimitations, MaxRecordBytes)
+	if len(copy.Limitations) == 0 {
+		copy.Limitations = nil
+	}
+	return trimmed || cut
+}
+
+func largestTable(tables []netsec.ProbeTable) int {
+	best, rows := -1, 1
+	for i, t := range tables {
+		if len(t.Rows) > rows {
+			best, rows = i, len(t.Rows)
+		}
+	}
+	return best
 }

@@ -22,6 +22,13 @@ func (s *Server) mountNetworkDiagnosticRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/investigate", s.handle(s.handleDiagnosticInvestigation))
 		r.Method(http.MethodGet, "/policy", s.handle(s.handleDiagnosticPolicy))
 		r.Method(http.MethodGet, "/compare", s.handle(s.handleDiagnosticCompare))
+		r.Method(http.MethodPost, "/results", s.handle(s.handleDiagnosticSaveResult))
+		r.Method(http.MethodGet, "/ssh-trust", s.handle(s.handleSSHTrustList))
+		r.Method(http.MethodPut, "/ssh-trust", s.handle(s.handleSSHTrustSave))
+		r.Method(http.MethodGet, "/wol-devices", s.handle(s.handleWakeDeviceList))
+		r.Method(http.MethodPost, "/wol-devices", s.handle(s.handleWakeDeviceSave))
+		r.Method(http.MethodPut, "/wol-devices/{device}", s.handle(s.handleWakeDeviceSave))
+		r.Method(http.MethodGet, "/{id}/history", s.handle(s.handleDiagnosticHistory))
 		r.Method(http.MethodGet, "/{id}", s.handle(s.handleDiagnosticGet))
 		r.Method(http.MethodPatch, "/{id}", s.handle(s.handleDiagnosticSave))
 		r.Method(http.MethodPost, "/{id}/cancel", s.handle(s.handleDiagnosticCancel))
@@ -31,6 +38,10 @@ func (s *Server) mountNetworkDiagnosticRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/{id}", s.handle(s.handleDiagnosticDelete))
 			// Reducing retention can erase finished records immediately.
 			r.Method(http.MethodPut, "/policy", s.handle(s.handleDiagnosticPolicySet))
+			// Forgetting a trusted fingerprint or a saved device erases what
+			// later comparisons and wakes rely on.
+			r.Method(http.MethodDelete, "/ssh-trust", s.handle(s.handleSSHTrustForget))
+			r.Method(http.MethodDelete, "/wol-devices/{device}", s.handle(s.handleWakeDeviceDelete))
 		})
 	})
 }
@@ -43,7 +54,7 @@ func mapDiagnosticError(err error) error {
 		return httpx.BadRequest("%v", err)
 	case errors.Is(err, netdiag.ErrUnavailable):
 		return httpx.Err(http.StatusServiceUnavailable, "diagnostics_unavailable", err.Error()).Retry()
-	case errors.Is(err, netdiag.ErrBusy), errors.Is(err, netdiag.ErrNotRunning), errors.Is(err, netdiag.ErrRunning), errors.Is(err, netdiag.ErrIncompatible):
+	case errors.Is(err, netdiag.ErrBusy), errors.Is(err, netdiag.ErrNotRunning), errors.Is(err, netdiag.ErrRunning), errors.Is(err, netdiag.ErrIncompatible), errors.Is(err, netdiag.ErrTooMany):
 		return httpx.Err(http.StatusConflict, "diagnostic_conflict", err.Error())
 	default:
 		return httpx.Internal(err)

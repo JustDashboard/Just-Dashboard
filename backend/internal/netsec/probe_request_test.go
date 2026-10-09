@@ -35,9 +35,44 @@ func TestProbeRequestClosedVocabularyAndNormalisation(t *testing.T) {
 			t.Errorf("accepted %+v as %+v", req, got)
 		}
 	}
-	for _, tool := range []string{"ping", "traceroute", "scan", "whois", "dnsauth", "mtu", "tls", "tlssurvey", "httpsec", "siteaudit", "banner", "egress", "neigh", "capabilities"} {
+	for _, tool := range []string{"ping", "traceroute", "scan", "whois", "mtu", "tls", "tlssurvey", "httpsec", "siteaudit", "banner", "egress", "neigh", "capabilities"} {
 		if _, err := ValidateProbeRequest(ProbeRequest{Tool: tool, Target: "127.0.0.1", Port: 443}); err != nil {
 			t.Errorf("closed tool %s rejected: %v", tool, err)
+		}
+	}
+}
+
+func TestProbeRequestNormalisesNewOptions(t *testing.T) {
+	stubLANDiagnostics(t)
+	for _, tc := range []struct {
+		request ProbeRequest
+		want    ProbeRequest
+	}{
+		{ProbeRequest{Tool: "route", Target: "192.0.2.1"}, ProbeRequest{Tool: "route", Target: "192.0.2.1"}},
+		{ProbeRequest{Tool: "route", Target: "192.0.2.1", Option: "udp"}, ProbeRequest{Tool: "route", Target: "192.0.2.1"}},
+		{ProbeRequest{Tool: "route", Target: "2001:db8::1", Port: 443}, ProbeRequest{Tool: "route", Target: "2001:db8::1", Port: 443, Option: "tcp"}},
+		{ProbeRequest{Tool: "route", Target: "192.0.2.1", Port: 53, Option: "UDP"}, ProbeRequest{Tool: "route", Target: "192.0.2.1", Port: 53, Option: "udp"}},
+		{ProbeRequest{Tool: "httpsec", Target: "example.test"}, ProbeRequest{Tool: "httpsec", Target: "example.test", Port: 443, Option: "auto"}},
+		{ProbeRequest{Tool: "httpsec", Target: "example.test", Option: "API"}, ProbeRequest{Tool: "httpsec", Target: "example.test", Port: 443, Option: "api"}},
+		{ProbeRequest{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Verify: " 192.168.1.50 ", Port: 22}, ProbeRequest{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Verify: "192.168.1.50", Port: 22}},
+		{ProbeRequest{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Verify: "192.168.1.50"}, ProbeRequest{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Verify: "192.168.1.50"}},
+		{ProbeRequest{Tool: "ping", Target: "example.test", Verify: "192.0.2.1"}, ProbeRequest{Tool: "ping", Target: "example.test"}},
+	} {
+		got, err := ValidateProbeRequest(tc.request)
+		if err != nil || got != tc.want {
+			t.Errorf("%+v => %+v, %v; want %+v", tc.request, got, err, tc.want)
+		}
+	}
+	for _, req := range []ProbeRequest{
+		{Tool: "route", Target: "192.0.2.1", Port: 443, Option: "icmp"}, {Tool: "route", Target: "192.0.2.1", Port: 70000},
+		{Tool: "httpsec", Target: "example.test", Option: "grade-everything"},
+		{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Port: 22},
+		{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Verify: "nas.example.test"},
+		{Tool: "wol", Target: "02:11:22:33:44:55", Option: "eno1", Verify: "127.0.0.1"},
+		{Tool: "dnsauth", Target: "192.0.2.1"},
+	} {
+		if got, err := ValidateProbeRequest(req); err == nil {
+			t.Errorf("accepted %+v as %+v", req, got)
 		}
 	}
 }

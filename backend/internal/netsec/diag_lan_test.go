@@ -62,10 +62,10 @@ func TestPathMTUUsesIPv6AndReportsMissingTool(t *testing.T) {
 		if cmd != "tracepath" || !reflect.DeepEqual(args, []string{"-n", "-m", "20", "-6", "2001:db8::1"}) {
 			t.Fatalf("unexpected command %s %v", cmd, args)
 		}
-		return "pmtu 1500", "1ms", nil
+		return " 1?: [LOCALHOST]                        0.010ms pmtu 1500\n 1:  2001:db8::1                            0.300ms reached\n     Resume: pmtu 1500 hops 1 back 1", "1ms", nil
 	}
 	res, err := New().PathMTU(t.Context(), "2001:db8::1")
-	if err != nil || !res.OK || !strings.Contains(res.Output, "pmtu 1500") {
+	if err != nil || !res.OK || res.Verdict != ProbeOK || !strings.Contains(res.Output, "pmtu 1500") {
 		t.Fatalf("%+v %v", res, err)
 	}
 	diagnosticHas = func(string) bool { return false }
@@ -102,8 +102,20 @@ func TestPacketSnapshotBoundsCaptureAndClosesFilter(t *testing.T) {
 	}
 }
 
+// stubNeighbourCache answers the cache read Wake-on-LAN makes before sending.
+func stubNeighbourCache(t *testing.T, cache string) {
+	t.Helper()
+	diagnosticRun = func(_ context.Context, _ time.Duration, cmd string, args ...string) (string, string, error) {
+		if cmd != "ip" || !reflect.DeepEqual(args, []string{"neigh", "show"}) {
+			t.Fatalf("unexpected command %s %v", cmd, args)
+		}
+		return cache, "1ms", nil
+	}
+}
+
 func TestWakeOnLANFramesAndLocalInterface(t *testing.T) {
 	stubLANDiagnostics(t)
+	stubNeighbourCache(t, "")
 	calls := 0
 	wakeSend = func(index int, packet []byte) error {
 		calls++
@@ -117,19 +129,19 @@ func TestWakeOnLANFramesAndLocalInterface(t *testing.T) {
 		}
 		return nil
 	}
-	res, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1")
+	res, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "", 0)
 	if err != nil || !res.OK || calls != 1 || !strings.Contains(res.Output, "does not confirm") {
 		t.Fatalf("%+v %v calls=%d", res, err, calls)
 	}
 	for _, bad := range []string{"00:00:00:00:00:00", "ff:ff:ff:ff:ff:ff", "01:11:22:33:44:55", "192.0.2.1", "02:11:22:33:44:55:66:77"} {
-		if _, err := New().WakeOnLAN(t.Context(), bad, "eno1"); err == nil {
+		if _, err := New().WakeOnLAN(t.Context(), bad, "eno1", "", 0); err == nil {
 			t.Fatalf("accepted MAC %q", bad)
 		}
 	}
 	lanInterface = func(name string) (*net.Interface, error) {
 		return &net.Interface{Name: name, Index: 12, Flags: net.FlagUp | net.FlagPointToPoint}, nil
 	}
-	if _, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "wg0"); err == nil {
+	if _, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "wg0", "", 0); err == nil {
 		t.Fatal("accepted a tunnel as the LAN segment")
 	}
 	if calls != 1 {
@@ -139,8 +151,9 @@ func TestWakeOnLANFramesAndLocalInterface(t *testing.T) {
 
 func TestWakeOnLANReportsRawSocketFailure(t *testing.T) {
 	stubLANDiagnostics(t)
+	stubNeighbourCache(t, "")
 	wakeSend = func(int, []byte) error { return errors.New("operation not permitted") }
-	res, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1")
+	res, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "", 0)
 	if err != nil || res.OK || !strings.Contains(res.Error, "CAP_NET_RAW") {
 		t.Fatalf("%+v %v", res, err)
 	}
@@ -152,10 +165,13 @@ func TestEgressSupportsIPv6OnlyHosts(t *testing.T) {
 		if args[0] == "-4" {
 			return "", "1ms", errors.New("network unreachable")
 		}
-		return "default via fe80::1 dev eth0 src 2001:db8::2", "1ms", nil
+		if args[2] == "show" {
+			return "default via fe80::1 dev eth0 proto ra metric 1024 pref medium", "1ms", nil
+		}
+		return "2606:4700:4700::1111 from :: via fe80::1 dev eth0 proto ra src 2001:db8::2 metric 1024 pref medium", "1ms", nil
 	}
 	res, err := New().Egress(t.Context())
-	if err != nil || !res.OK || !reflect.DeepEqual(res.Records, []string{"2001:db8::2"}) || !strings.Contains(res.Output, "IPv4:") || !strings.Contains(res.Output, "IPv6:") {
+	if err != nil || !res.OK || !reflect.DeepEqual(res.Records, []string{"2001:db8::2", "ipv6 dev eth0 via fe80::1"}) || res.Summary != "IPv6 only: the other family has no route from this host." || !strings.Contains(res.Output, "IPv4:") || !strings.Contains(res.Output, "IPv6:") {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
