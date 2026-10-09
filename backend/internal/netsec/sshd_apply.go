@@ -50,6 +50,49 @@ type SSHApplyPlan struct {
 	existed  bool
 }
 
+// PlannedFile is one file an apply writes, with its whole new content.
+type PlannedFile struct {
+	Path    string
+	Content string
+}
+
+// Files names every file ApplySSHPlan will write, so a caller enrolling the
+// apply in a recovery journal can snapshot each one before the first write.
+func (p *SSHApplyPlan) Files() []PlannedFile {
+	files := []PlannedFile{{Path: p.File, Content: p.Content}}
+	if p.SocketPort != "" && p.Socket.DropIn != "" {
+		files = append(files, PlannedFile{
+			Path:    p.Socket.DropIn,
+			Content: socketDropIn(p.Socket.Unit, p.SocketPort, p.Socket.Listen),
+		})
+	}
+	return files
+}
+
+// SocketUnit is the socket unit the apply restarts, or empty.
+func (p *SSHApplyPlan) SocketUnit() string {
+	if p.SocketPort == "" {
+		return ""
+	}
+	return p.Socket.Unit
+}
+
+// Failure is the reason a finished apply did not leave the requested
+// configuration in force. A written file that sshd did not pick up, or a
+// socket that kept its old port, is a success for an immediate apply's report
+// and a failure for a pending one, which must then restore the previous state.
+func (r *SSHApplyResult) Failure() error {
+	switch {
+	case r == nil:
+		return fmt.Errorf("the SSH apply did not run")
+	case r.SocketError != "":
+		return fmt.Errorf("%s did not move to the new port: %s", r.SocketUnit, r.SocketError)
+	case r.ReloadError != "":
+		return fmt.Errorf("sshd did not reload: %s", r.ReloadError)
+	}
+	return nil
+}
+
 // SSHApplyResult reports what happened, in the order it happened, so a
 // partial success reads as one.
 type SSHApplyResult struct {

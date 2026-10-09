@@ -340,6 +340,38 @@ func TestSSHApplyRefusesACertainLockout(t *testing.T) {
 	}
 }
 
+// A pending SSH apply ends in the reconnection protocol, which only an
+// administrator's interactive session can complete. Both refusals happen
+// before the plan is read; the body is one the lockout guard refuses as well,
+// so nothing here can reach a real sshd.
+func TestPendingSSHApplyNeedsAnAdministratorSession(t *testing.T) {
+	c, s := newClient(t)
+	body := `{"settings":{"passwordauthentication":"no","pubkeyauthentication":"no"}}`
+	if w := c.do(http.MethodPost, "/api/v1/ssh/config", body,
+		map[string]string{"X-JD-Network-Apply": "later"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown apply mode=%d %s", w.Code, w.Body.String())
+	}
+	var adminID int64
+	if err := s.Store.DB.QueryRow(`SELECT id FROM users WHERE username='tester'`).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.Auth.UserByID(t.Context(), adminID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Auth.CreateAPIToken(t.Context(), user, "ssh-pending", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenClient := &client{t: t, h: s.Routes()}
+	w := tokenClient.do(http.MethodPost, "/api/v1/ssh/config", body, map[string]string{
+		"Authorization": "Bearer " + token, "X-JD-Network-Apply": "pending",
+	})
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "session_required") {
+		t.Fatalf("token pending apply=%d %s", w.Code, w.Body.String())
+	}
+}
+
 // The site builder renders on the server so there is one implementation of
 // what a spec means. This is that contract at the HTTP layer.
 func TestSitePreviewRendersNginx(t *testing.T) {

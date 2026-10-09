@@ -41,6 +41,10 @@ export function NetworkChangeConfirmation() {
   const pending = change?.phase === "awaiting_confirmation"
   const cleanupPending = change?.cleanup === "pending" || change?.cleanup === "failed"
   const owned = state.data?.owned === true
+  // An SSH apply rides the same journal and watchdog; only its words differ.
+  const ssh = change?.subsystem === "sshd"
+  const subject = ssh ? "SSH" : "Network"
+  const settings = ssh ? "SSH configuration" : "network settings"
   const deadline = change?.expiresAt ? Date.parse(change.expiresAt) : 0
   const seconds = Math.max(0, Math.ceil((deadline - now) / 1000))
 
@@ -101,9 +105,10 @@ export function NetworkChangeConfirmation() {
   const recover = () => {
     if (!change) return
     void confirm({
-      title: "Restore previous network settings",
-      description:
-        "Undo this pending change now. The host will restore the network and boot files captured before the apply.",
+      title: `Restore previous ${settings}`,
+      description: ssh
+        ? "Undo this pending change now. The host will restore sshd's files captured before the apply and reload it."
+        : "Undo this pending change now. The host will restore the network and boot files captured before the apply.",
       confirmLabel: "Restore settings",
       action: async () => {
         await post(`/network/changes/${change.id}/recover`)
@@ -137,10 +142,10 @@ export function NetworkChangeConfirmation() {
   return (
     <aside aria-label="Network change confirmation" className="mx-4 my-3 min-w-0">
       {pending ? (
-        <Notice tone="warning" title="Network change is awaiting confirmation">
+        <Notice tone="warning" title={`${subject} change is awaiting confirmation`}>
           <p>
             {seconds > 0
-              ? `The host will restore the previous settings unless confirmed within ${seconds} seconds.`
+              ? `The host will restore the previous ${ssh ? "SSH configuration" : "settings"} unless confirmed within ${seconds} seconds.`
               : "The recovery deadline has passed. Waiting for the host's recovery status."}
             {deadline > 0 && ` Deadline: ${new Date(deadline).toLocaleTimeString()}.`}
           </p>
@@ -176,7 +181,7 @@ export function NetworkChangeConfirmation() {
                 }
                 onClick={() => void save()}
               >
-                Confirm network change
+                Confirm {ssh ? "SSH" : "network"} change
               </Button>
               {can("destructive") && (
                 <Button size="sm" variant="outline" disabled={busy} onClick={recover}>
@@ -191,17 +196,17 @@ export function NetworkChangeConfirmation() {
           tone={change.phase === "degraded" || cleanupPending ? "warning" : "default"}
           title={
             change.phase === "confirmed"
-              ? "Network change confirmed"
+              ? `${subject} change confirmed`
               : change.phase === "recovered"
-                ? "Previous network settings restored"
-                : "Network recovery needs attention"
+                ? `Previous ${settings} restored`
+                : `${subject} recovery needs attention`
           }
         >
           <p>
             {change.phase === "confirmed"
               ? "The applying session received and confirmed a fresh dashboard response. The settings are retained."
               : change.phase === "recovered"
-                ? "The host restored the captured network settings."
+                ? `The host restored the captured ${settings}.`
                 : "Recovery could not restore every step. Further changes remain blocked."}
           </p>
           {change.recoveryErrors?.map((failure) => (

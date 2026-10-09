@@ -94,10 +94,13 @@ type ChangeStatus struct {
 	Boot           string    `json:"boot"`
 	RecoveryErrors []string  `json:"recoveryErrors,omitempty"`
 	Cleanup        string    `json:"cleanup,omitempty"`
-	OwnerUserID    int64     `json:"ownerUserId,omitempty"`
-	ExpiresAt      time.Time `json:"expiresAt,omitzero"`
-	AppliedAt      time.Time `json:"appliedAt,omitzero"`
-	VerifiedAt     time.Time `json:"verifiedAt,omitzero"`
+	// Subsystem names a journal enrolled by another owner than the network
+	// spec. "sshd" is the only one: its files and undo are a closed set.
+	Subsystem   string    `json:"subsystem,omitempty"`
+	OwnerUserID int64     `json:"ownerUserId,omitempty"`
+	ExpiresAt   time.Time `json:"expiresAt,omitzero"`
+	AppliedAt   time.Time `json:"appliedAt,omitzero"`
+	VerifiedAt  time.Time `json:"verifiedAt,omitzero"`
 }
 
 type recoverySnapshot struct {
@@ -379,6 +382,12 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 }
 
 func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot bool) error {
+	if j.Subsystem != "" {
+		if j.Subsystem != sshSubsystem {
+			return fmt.Errorf("refused unexpected recovery subsystem %s", j.Subsystem)
+		}
+		return recoverSSHJournal(ctx, j, boot)
+	}
 	for _, c := range j.Commands {
 		if c.Tool == "native" {
 			return recoverNativeJournal(ctx, j)

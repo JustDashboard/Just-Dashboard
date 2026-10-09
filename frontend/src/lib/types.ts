@@ -6886,6 +6886,8 @@ export type NetworkChangeStatus = {
   boot: "not_verified" | "enabled" | "unsupported" | "failed" | "unknown" | "not_applicable"
   recoveryErrors?: string[]
   cleanup?: "pending" | "failed" | "complete"
+  /** A journal enrolled by another owner than the network spec: sshd's apply. */
+  subsystem?: "sshd"
   ownerUserId?: number
   expiresAt?: string
   appliedAt?: string

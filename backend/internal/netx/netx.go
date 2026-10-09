@@ -139,6 +139,10 @@ type Paths struct {
 	Hosts string
 	// WireGuard is wg-quick's configuration directory.
 	WireGuard string
+	// SSH is sshd's configuration directory. A pending SSH apply may journal
+	// only its main file, the dashboard's drop-in and the socket drop-in
+	// beside the boot unit.
+	SSH string
 }
 
 // DefaultPaths are the host's own.
@@ -150,6 +154,7 @@ func DefaultPaths() Paths {
 		Resolved:  "/etc/systemd/resolved.conf.d/90-just-dashboard.conf",
 		Hosts:     "/etc/hosts",
 		WireGuard: "/etc/wireguard",
+		SSH:       "/etc/ssh",
 	}
 }
 
