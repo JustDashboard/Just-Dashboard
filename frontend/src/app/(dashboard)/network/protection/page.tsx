@@ -93,10 +93,15 @@ export default function NetworkProtectionPage() {
   const table = view.conntrack
   const listTotal = lists.reduce((n, l) => n + (l.total?.packets ?? 0), 0)
   const limitTotal = view.limits.reduce((n, l) => n + (l.total?.packets ?? 0), 0)
-  const since = [...lists, ...view.limits]
-    .map((e) => e.total?.since)
-    .filter((t): t is string => Boolean(t))
-    .sort()[0]
+  // The earliest a group's totals reach; a group with none yet says only what
+  // the loaded table counted.
+  const sinceOf = (entries: { total?: { since: string | null } }[]) =>
+    entries
+      .map((e) => e.total?.since)
+      .filter((t): t is string => Boolean(t))
+      .sort()[0]
+  const listsSince = sinceOf(lists)
+  const limitsSince = sinceOf(view.limits)
   const counts = pressure.data?.series["conntrack:count"]?.map((p) => p.value) ?? []
   const exceptions = view.exceptions ?? []
 
@@ -124,8 +129,8 @@ export default function NetworkProtectionPage() {
           value={<NumberTicker value={byLists} />}
           trailing="packets"
           hint={
-            since
-              ? `${bytes(byListsBytes)} since load · ${listTotal.toLocaleString()} since ${calendarDate(since)}`
+            listsSince
+              ? `${bytes(byListsBytes)} since load · ${listTotal.toLocaleString()} since ${calendarDate(listsSince)}`
               : `${bytes(byListsBytes)} since the table was loaded`
           }
         />
@@ -134,8 +139,8 @@ export default function NetworkProtectionPage() {
           value={<NumberTicker value={byLimits} />}
           trailing="packets"
           hint={
-            since
-              ? `${bytes(byLimitsBytes)} since load · ${limitTotal.toLocaleString()} since ${calendarDate(since)}`
+            limitsSince
+              ? `${bytes(byLimitsBytes)} since load · ${limitTotal.toLocaleString()} since ${calendarDate(limitsSince)}`
               : `${bytes(byLimitsBytes)} · ${plural(view.limits.filter((l) => l.enabled).length, "limit")} in force`
           }
         />
