@@ -1221,6 +1221,9 @@ export async function mockNetwork(
         return json(route, [])
       case "/network/overview":
         return json(route, overview)
+      case "/network/dns/services":
+      case "/network/dns/services/provisions":
+        return json(route, [])
       case "/network/links":
         return json(route, links)
       case "/connections":
