@@ -528,3 +528,31 @@ device rules.
   by a reboot of a real host.
 - **Route history** is sampled every 30 seconds, not event-driven.
 - **Application connections** moved by a routing change are reported, not refused.
+
+## Integration with the earlier packages
+
+Merging this package after the VPN, diagnostics, topology and gateway packages (`86bd86a4`) needed
+these corrections beyond text conflicts:
+
+- **One owner for WireGuard transport anchors.** The VPN package had already anchored every
+  kernel-reported WireGuard transport (`wgTransportAnchors`): its route may move between native
+  devices but never into a tunnel, and an already captured transport is not anchored so moving it
+  back out stays possible. This package's endpoint discovery also anchored WireGuard endpoints,
+  but compared them strictly, which would refuse that repair and double-read the dump.
+  `tunnelAnchorTargets` now discovers Tailscale direct paths only; WireGuard transports keep the VPN
+  guard. `TestTailscaleDirectPathsAreAnchorsAskedWithTailscaledsMark` and the VPN transport-guard
+  cases cover both.
+- **One three-valued type.** The routing decision model and the gateway flow model each declared
+  `tri`; `matchNo`/`matchYes`/`matchUnknown` are now names for the gateway model's values.
+- **One boot unit renderer.** The owned firewall table is restored through the topology package's
+  `unitFor`, which also carries bridge commands, instead of a second renderer call.
+- **The route form** keeps both the topology package's device handoff (`?route=new&device=`) and
+  this package's reviewed route edits.
+
+On the assembled source, `go build ./...`, `go vet`, the `netx`, `store`, `netsec` and whole `api`
+tests, 3,310 Bun tests, `tsc`, ESLint and Prettier passed. Twelve live namespace tests from the
+VPN, topology, gateway and routing packages plus the real-ufw test passed with the host's
+namespaces, WireGuard links, nft tables and ip rules unchanged
+([log](network-routing-firewall-integration-live.log)). A production build of the assembled source
+passed the routing, network UI, topology/interface and audit specs: 76 passed, 14 optional
+captures skipped ([log](network-routing-firewall-integration-browser.log)).

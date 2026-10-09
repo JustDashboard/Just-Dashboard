@@ -1,0 +1,98 @@
+source 86bd86a4, 2026-10-09T19:27:00Z
+
+Running 90 tests using 4 workers
+
+  ✓   3 [chromium] › tests/browser/network-audit.spec.ts:35:5 › read-only VPN visits do not request administrator-only peer data (2.7s)
+  ✓   2 [chromium] › tests/browser/network-audit.spec.ts:54:7 › Path MTU sends its real API parameters (3.1s)
+  ✓   4 [chromium] › tests/browser/network-audit.spec.ts:54:7 › Route lookup sends its real API parameters (3.0s)
+  ✓   6 [chromium] › tests/browser/network-audit.spec.ts:54:7 › Packet snapshot sends its real API parameters (2.3s)
+  ✓   5 [chromium] › tests/browser/network-audit.spec.ts:54:7 › Host support sends its real API parameters (2.6s)
+  ✓   7 [chromium] › tests/browser/network-audit.spec.ts:54:7 › Wake-on-LAN sends its real API parameters (3.2s)
+  ✓   8 [chromium] › tests/browser/network-audit.spec.ts:99:5 › a failed diagnostic keeps its error beside the inputs and can be retried (2.4s)
+  ✓   9 [chromium] › tests/browser/network-audit.spec.ts:118:5 › namespaces and historical traffic show failed reads instead of empty results (3.8s)
+  ✓  10 [chromium] › tests/browser/network-audit.spec.ts:135:5 › DNS lookup uses effective policy until named comparison is selected (3.1s)
+  ✓  11 [chromium] › tests/browser/network-audit.spec.ts:148:5 › turning off a WireGuard exit requires confirmation before sending its mutation (3.1s)
+  ✓   1 [chromium] › tests/browser/network-audit.spec.ts:13:5 › read-only accounts see network state and cannot submit mutations (13.6s)
+  ✓  12 [chromium] › tests/browser/network-audit.spec.ts:163:5 › WireGuard setup keeps automatic ports optional and refuses malformed explicit ports (4.0s)
+  ✓  14 [chromium] › tests/browser/network-audit.spec.ts:213:5 › static routes send a validated preferred source and show returned sources (3.4s)
+  ✓  13 [chromium] › tests/browser/network-audit.spec.ts:198:5 › IPv6 policy rules carry the selected family to the backend (4.8s)
+  ✓  15 [chromium] › tests/browser/network-audit.spec.ts:237:5 › an outgoing-interface policy rule sends its selector and note (4.0s)
+  ✓  16 [chromium] › tests/browser/network-audit.spec.ts:258:5 › IPv6 GRE creation reaches the existing endpoint with IPv6 ends (4.4s)
+  ✓  18 [chromium] › tests/browser/network-audit.spec.ts:296:5 › failed interface address writes retain the user's draft (3.7s)
+  ✓  17 [chromium] › tests/browser/network-audit.spec.ts:273:5 › invalid VXLAN ports cannot silently create a tunnel on the default port (4.6s)
+  ✓  19 [chromium] › tests/browser/network-audit.spec.ts:314:5 › private DNS verification names accompany upstream changes (3.2s)
+  ✓  21 [chromium] › tests/browser/network-audit.spec.ts:355:5 › unrelated resolver changes preserve managed fallback and cache choices (2.7s)
+  ✓  20 [chromium] › tests/browser/network-audit.spec.ts:328:5 › DNS fallback endpoints and cache policy reach the confirmed resolver apply (4.3s)
+  ✓  24 [chromium] › tests/browser/network-routing-firewall.spec.ts:73:5 › a target narrows every table to its covering routes and the history to its changes (1.9s)
+  ✓  23 [chromium] › tests/browser/network-routing-firewall.spec.ts:25:5 › the reply decision names the kernel's table and the evaluated rule, and says when it cannot (3.0s)
+  ✓  26 [chromium] › tests/browser/network-routing-firewall.spec.ts:187:5 › a managed route is edited by applying exactly the plan that was reviewed (2.8s)
+  ✓  22 [chromium] › tests/browser/network-audit.spec.ts:377:5 › failed polling marks retained gateway readings until a fresh read succeeds (6.8s)
+  ✓  25 [chromium] › tests/browser/network-routing-firewall.spec.ts:122:5 › a multipath route sends each leg, and a discard route is added only after its preview (4.6s)
+  ✓  28 [chromium] › tests/browser/network-routing-firewall.spec.ts:347:5 › forwarding shows its measured health and how Docker was counted (1.8s)
+  ✓  29 [chromium] › tests/browser/network-routing-firewall.spec.ts:389:5 › BGP shows each neighbour's filters, OSPF adjacencies and a bounded route browser (2.3s)
+  ✓  30 [chromium] › tests/browser/network-routing-firewall.spec.ts:469:5 › a pending routing change shows what it was checked against and the connections it moved (2.0s)
+  ✓  27 [chromium] › tests/browser/network-routing-firewall.spec.ts:249:5 › a policy rule takes UID, TOS and goto selectors and previews its effect before it is added (5.2s)
+  ✓  31 [chromium] › tests/browser/network-routing-firewall.spec.ts:641:5 › the firewall page says which firewall is in charge, its zones, policy by family and preserved access (3.1s)
+  ✓  32 [chromium] › tests/browser/network-routing-firewall.spec.ts:668:5 › enabling shows the preflight's refusal before anything is sent, and sends nothing on cancel (2.7s)
+  ✓  33 [chromium] › tests/browser/network-routing-firewall.spec.ts:724:5 › rules carry their identity, findings and history, and removal names the identity (3.7s)
+  ✓  34 [chromium] › tests/browser/network-routing-firewall.spec.ts:788:5 › several rule changes are staged, reviewed and applied as one plan (4.1s)
+  ✓  36 [chromium] › tests/browser/network-routing-firewall.spec.ts:919:5 › with temporary apply on, a firewall change asks the host to recover it unless confirmed (3.0s)
+  ✓  35 [chromium] › tests/browser/network-routing-firewall.spec.ts:844:5 › an inactive ufw's configured rules and the owned nftables table say what is enforced (3.5s)
+  ✓  37 [chromium] › tests/browser/network-topology-interfaces.spec.ts:31:5 › the identity says both forwarding families and keeps a translated source from posing as public (3.7s)
+  ✓  38 [chromium] › tests/browser/network-topology-interfaces.spec.ts:71:5 › paths in use come from tracked flows and pointing at a node lights who it trades with (3.7s)
+  ✓  39 [chromium] › tests/browser/network-topology-interfaces.spec.ts:100:5 › a failed connection-tracking read is said, not drawn as no traffic (3.0s)
+  ✓  40 [chromium] › tests/browser/network-topology-interfaces.spec.ts:125:5 › throughput says how old its newest reading is and turns stale when the ring stops (5.6s)
+  ✓  43 [chromium] › tests/browser/network-topology-interfaces.spec.ts:211:5 › a failed reading is its own finding, and history keeps unobserved incidents open (3.3s)
+  ✓  41 [chromium] › tests/browser/network-topology-interfaces.spec.ts:152:5 › a failed live poll keeps the ring with a dated retry (4.2s)
+  ✓  44 [chromium] › tests/browser/network-topology-interfaces.spec.ts:269:5 › interfaces flag Docker devices that could not be joined instead of hiding them (2.3s)
+  ✓  45 [chromium] › tests/browser/network-topology-interfaces.spec.ts:300:5 › a device sheet reads its driver, offloads, error counters and address origins (3.5s)
+  ✓  46 [chromium] › tests/browser/network-topology-interfaces.spec.ts:329:5 › namespaces keep a failed item visible and open as their own network (3.3s)
+  ✓  47 [chromium] › tests/browser/network-topology-interfaces.spec.ts:363:5 › a later namespaces poll failure keeps the list with a dated retry (2.4s)
+  ✓  50 [chromium] › tests/browser/network-topology-interfaces.spec.ts:453:5 › a refused bridge move is previewed with what it would leave behind and cannot be applied (4.2s)
+  ✓  48 [chromium] › tests/browser/network-topology-interfaces.spec.ts:383:5 › a veth hands off to the namespace it leads into and a container's to the investigator (5.6s)
+  ✓  51 [chromium] › tests/browser/network-topology-interfaces.spec.ts:489:5 › a VXLAN's readiness names its checks and limits and edits its flood ends (3.2s)
+  ✓  49 [chromium] › tests/browser/network-topology-interfaces.spec.ts:419:5 › a managed bridge reads as a switch and a port's VLAN policy is applied and confirmed (8.9s)
+  ✓  42 [chromium] › tests/browser/network-topology-interfaces.spec.ts:182:5 › the throughput tiles and the chart drill into the devices under them (16.0s)
+  ✓  52 [chromium] › tests/browser/network-topology-interfaces.spec.ts:558:5 › bridges, macvlans and dummies explain themselves before they are made (4.9s)
+  -  56 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network at 390
+  -  57 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/interfaces at 390
+  -  58 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/routing at 390
+  -  59 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/vpn at 390
+  -  60 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/firewall at 390
+  -  61 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/connections at 390
+  -  62 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/tools at 390
+  -  63 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network at 1440
+  -  64 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/interfaces at 1440
+  -  65 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/routing at 1440
+  -  66 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/vpn at 1440
+  -  67 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/firewall at 1440
+  -  68 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/connections at 1440
+  -  69 [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/tools at 1440
+  ✓  53 [chromium] › tests/browser/network-topology-interfaces.spec.ts:583:5 › a dummy's sheet hands a route into it to the routing page (3.1s)
+  ✓  55 [chromium] › tests/browser/network-topology-interfaces.spec.ts:674:7 › a macvlan sheet shows what this host can establish about it (2.5s)
+  ✓  54 [chromium] › tests/browser/network-topology-interfaces.spec.ts:674:7 › a gre sheet shows what this host can establish about it (2.6s)
+  ✓  71 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/interfaces keeps the design system's structural rules (1.7s)
+  ✓  72 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/routing keeps the design system's structural rules (1.9s)
+  ✓  73 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/vpn keeps the design system's structural rules (2.3s)
+  ✓  70 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network keeps the design system's structural rules (4.4s)
+  ✓  74 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/firewall keeps the design system's structural rules (2.5s)
+  ✓  76 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/tools keeps the design system's structural rules (1.8s)
+  ✓  75 [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/connections keeps the design system's structural rules (2.4s)
+  ✓  78 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/interfaces never scrolls sideways (1.5s)
+  ✓  79 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/routing never scrolls sideways (1.2s)
+  ✓  80 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/vpn never scrolls sideways (1.7s)
+  ✓  77 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network never scrolls sideways (3.0s)
+  ✓  81 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/firewall never scrolls sideways (1.6s)
+  ✓  82 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/connections never scrolls sideways (1.6s)
+  ✓  83 [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/tools never scrolls sideways (1.4s)
+  ✓  84 [chromium] › tests/browser/network-ui.spec.ts:130:5 › the old Security addresses lead to the Network pages, keeping their questions (4.5s)
+  ✓  86 [chromium] › tests/browser/network-ui.spec.ts:158:5 › a device opens its sheet, and only what may change offers to (4.3s)
+  ✓  85 [chromium] › tests/browser/network-ui.spec.ts:142:5 › the overview draws the topology, the readings and the attention list (4.8s)
+  ✓  87 [chromium] › tests/browser/network-ui.spec.ts:170:5 › a new VLAN sends exactly what the create route takes (4.4s)
+  ✓  88 [chromium] › tests/browser/network-ui.spec.ts:197:5 › the routing page lights the rule that answers this browser (1.8s)
+  ✓  89 [chromium] › tests/browser/network-ui.spec.ts:206:5 › a peer opens its sheet and shows its QR code again (2.5s)
+  ✓  90 [chromium] › tests/browser/network-ui.spec.ts:222:5 › every control in the forms has a name (6.7s)
+
+  14 skipped
+  76 passed (1.3m)
+specs exit=0 after 194s
