@@ -1,0 +1,25 @@
+=== RUN   TestNativeManagerAutomaticOwnerLive
+    native_manager_auto_live_test.go:35: Actual standalone helper SHA256=f7d1ebda899a05e35168e807265f030c3eeddbdcad9b634f4022286125a03ad5 capability=jd-native-manager-v6
+=== RUN   TestNativeManagerAutomaticOwnerLive/NetworkManager
+    native_manager_auto_live_test.go:252: automatic owner acceptance:
+        === RUN   TestNativeManagerAutomaticOwnerLive
+            native_manager_auto_live_test.go:85: Native selected connection Unsaved=false read_error=<nil>
+            native_manager_auto_live_test.go:85: Native GetSettings D-Bus types (names only, no values): 802-3-ethernet.auto-negotiate:b, 802-3-ethernet.s390-options:a{ss}, connection.id:s, connection.interface-name:s, connection.permissions:as, connection.timestamp:t, connection.type:s, connection.uuid:s, ipv4.address-data:aa{sv}, ipv4.addresses:aau, ipv4.method:s, ipv4.route-data:aa{sv}, ipv4.routes:aau, ipv6.address-data:aa{sv}, ipv6.addresses:a(ayuay), ipv6.method:s, ipv6.route-data:aa{sv}, ipv6.routes:a(ayuayu)
+            native_manager_auto_live_test.go:85: Native GetSettings controlled supported-intent projection: {IPv4:{Method:auto Addresses:[] DNS:[] Domains:[] IgnoreAutoDNS:false IgnoreAutoRoutes:false Routes:[]} IPv6:{Method:auto Addresses:[] DNS:[] Domains:[] IgnoreAutoDNS:false IgnoreAutoRoutes:false Routes:[]}} read_error=<nil>
+            native_manager_auto_live_test.go:85: Native GetAppliedConnection D-Bus types (names only, no values): 802-3-ethernet.auto-negotiate:b, 802-3-ethernet.s390-options:a{ss}, connection.id:s, connection.interface-name:s, connection.permissions:as, connection.type:s, connection.uuid:s, ipv4.address-data:aa{sv}, ipv4.addresses:aau, ipv4.method:s, ipv4.route-data:aa{sv}, ipv4.routes:aau, ipv6.address-data:aa{sv}, ipv6.addresses:a(ayuay), ipv6.method:s, ipv6.route-data:aa{sv}, ipv6.routes:a(ayuayu)
+            native_manager_auto_live_test.go:85: Native GetAppliedConnection controlled supported-intent projection: {IPv4:{Method:auto Addresses:[] DNS:[] Domains:[] IgnoreAutoDNS:false IgnoreAutoRoutes:false Routes:[]} IPv6:{Method:auto Addresses:[] DNS:[] Domains:[] IgnoreAutoDNS:false IgnoreAutoRoutes:false Routes:[]}} read_error=<nil>
+            native_manager_auto_live_test.go:86: Native Ip4Config.Domains: [auto.test]
+            native_manager_auto_live_test.go:86: Native Ip4Config.Searches: []
+            native_manager_auto_live_test.go:86: Native Ip6Config.Domains: []
+            native_manager_auto_live_test.go:86: Native Ip6Config.Searches: [auto.test]
+            native_manager_auto_live_test.go:86: Native Dhcp4Config.Options controlled domain/provider provenance: dhcp_client_identifier:s, dhcp_lease_time:s, dhcp_server_identifier:s=198.18.8.1, domain_name:s=auto.test, domain_name_servers:s=198.18.8.53, expiry:s, ip_address:s, requested_broadcast_address:s, requested_domain_name:s=1, requested_domain_name_servers:s=1, requested_domain_search:s=1, requested_host_name:s, requested_interface_mtu:s, requested_ms_classless_static_routes:s, requested_nis_domain:s=1, requested_nis_servers:s, requested_ntp_servers:s, requested_rfc3442_classless_static_routes:s, requested_root_path:s, requested_routers:s, requested_static_routes:s, requested_subnet_mask:s, requested_time_offset:s, requested_wpad:s, routers:s, subnet_mask:s
+            native_manager_auto_live_test.go:86: Native Dhcp6Config has no active object
+            native_manager_auto_live_test.go:90: NetworkManager saved/loaded/applied automatic intent, actual DHCPv4 lease, SLAAC prefix, DHCP/RA default routes and active-owner DNS/domain acquisition verified
+            native_manager_auto_live_test.go:170: Fresh helper refused foreign selected bytes/inode, released the exact owned checkpoint, retained phase=degraded cleanup=pending errors=[native recovery preserved foreign candidate ownership or bytes before any owner effect]; foreign file and both stages unchanged past actual 3-second rollback deadline. Fixture cleanup alone restores captured candidate inode. Helper evidence: native recovery preserved foreign candidate ownership or bytes before any owner effect
+            native_manager_auto_live_test.go:174: NetworkManager actual auto/manual activation, automatic DNS/routes suppression, independent rollback, applying-backend death, durable confirmation and cleanup retry verified; timer/reboot unmeasured
+            native_manager_auto_live_test.go:197: Owned RA raw socket closed and sender drained; DHCP/manager/bus children reaped; lease/pid files withdrawn; private PID namespace has no remaining child
+        --- PASS: TestNativeManagerAutomaticOwnerLive (30.96s)
+        PASS
+--- PASS: TestNativeManagerAutomaticOwnerLive (59.57s)
+    --- PASS: TestNativeManagerAutomaticOwnerLive/NetworkManager (32.14s)
+PASS

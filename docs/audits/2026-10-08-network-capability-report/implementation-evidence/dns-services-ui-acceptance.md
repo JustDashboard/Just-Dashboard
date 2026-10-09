@@ -38,8 +38,9 @@ The additional [review viewport assertion](dns-services-ui-review-viewport.txt) 
 unchanged application: moving from the long upstream inventory to a retained review opens with its
 reviewed metadata in the viewport. No application correction was needed for that hypothesis.
 
-The combined backend/frontend gate against `ac9d6e42` is recorded separately after completion.
-These focused passes do not claim that an unfinished combined invocation succeeded.
+The [combined backend/frontend gate](native-dns-integrated-acceptance.md) against `ac9d6e42`
+subsequently exited 0, with all 410 executable selected browser cases passing and 60 optional skips.
+It records the native/API/store/DNS tests separately from these focused UI passes.
 
 ## Visual inspection
 

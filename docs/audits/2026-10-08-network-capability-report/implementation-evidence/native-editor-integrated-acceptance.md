@@ -49,7 +49,8 @@ Its [source manifest](native-v6-source-validation.json) records all six file has
 The [required changed check](native-v6-required-final.log) passed Go build/vet and selected tests in
 1.321 seconds. The [focused recovery race lane](native-v6-race-final.log) passed in 14.088 seconds.
 Actual same-helper networkd and NetworkManager automatic recovery/deadline containment evidence
-is recorded separately, together with the combined final-source reachable gate.
+is recorded separately, together with the [combined final-source reachable gate and exact assembled
+Ubuntu generated-origin pass](native-dns-integrated-acceptance.md).
 
 ## Scope still open
 

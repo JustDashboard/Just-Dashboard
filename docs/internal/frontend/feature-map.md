@@ -44,7 +44,8 @@ Only explicit native `verified` state reports verification. Owned removal separa
 container, bridge and both data volumes and refuses changed identities. This UI exposes the backend's
 closed supported actions; broader zone/view/client editing remains outside this first handoff.
 Its [source-matched build, 13 interaction cases and phone/desktop inspection](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-services-ui-acceptance.md)
-pass. Combined reachable checks and broader P17 acceptance remain separate.
+pass, as do the [combined reachable checks](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
+Broader P17 acceptance remains open.
 
 Network interface sheets add the administrator-only native persistent profile editor
 (`components/network/interfaces/native-profile.tsx`). It reads the supported existing owner, including

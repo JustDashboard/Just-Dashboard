@@ -168,6 +168,12 @@ the evidence for native-owner review.
 
 ## Local acceptance
 
+The [assembled editor/DNS checkpoint](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md)
+records the matching production build, selected package tests and retained UI controls. The
+[automatic owner record](evidence/native-manager-automatic-2026-10-09.md) separately attributes
+actual DHCPv4/SLAAC and final-helper rollback/deadline proof to frozen source. Netplan automatic
+admission, wider platform owners and host reboot remain open; source ancestry is not interchangeable.
+
 `native_manager_recovery_test.go` uses bounded root-owned file fixtures and injected storage failures
 to check durable confirmation before cleanup, cleanup retry after checkpoint release, foreign-stage
 preservation, next-change refusal, old-bus object refusal and conservative boot-epoch recovery.

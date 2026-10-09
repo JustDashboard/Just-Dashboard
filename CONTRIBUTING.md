@@ -92,6 +92,10 @@ to the contribution terms above, including the additional licence grant to the p
   `/etc`, `/run` and `/var/lib`, and explicit private NetworkManager state paths. It builds the actual
   standalone recovery executable with a workspace-local `TMPDIR`. Native-owner activation does not
   substitute for the separate systemd timer, DHCP/SLAAC, boot or structural bond/VRF requirements.
+  The [automatic addressing/deadline fixture](docs/internal/backend/evidence/native-manager-automatic-2026-10-09.md)
+  has explicit `JD_NATIVE_AUTO_CASE=networkd` or `NetworkManager` selections for its verified direct
+  owner slices. Its default all-owner opt-in also runs the still-open Netplan admission cases; those
+  known refusals remain failed acceptance rather than successful skips.
 - The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
   Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
   to compile the narrow test binary and run it as root. It creates a network-none fixture with no

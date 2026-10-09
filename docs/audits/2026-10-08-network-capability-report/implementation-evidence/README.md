@@ -4,6 +4,11 @@ This directory records scoped acceptance for successive implementation checkpoin
 The [implementation ledger](../implementation-status.md) preserves the full outstanding scope;
 these checks do not turn the historical report scores into 10/10 ratings.
 
+[Native/DNS combined acceptance](native-dns-integrated-acceptance.md) records the assembled
+production application, passing selected API/netx/store/DNS checks and all 410 executable browser
+cases with 60 optional skips. Native ancestry, earlier failures and remaining full-scope criteria
+are attributed separately.
+
 [Integrated native editor acceptance](native-editor-integrated-acceptance.md) records its matching
 production build, selected API/Go tests, all 898 executable browser cases, the preserved original
 nonzero invocation and exact unchanged-source timeout rerun. The subsequent v6 recovery checkpoint

@@ -109,11 +109,11 @@ policy and immutable review checks hold stale confirmations; account-scoped atte
 the UI from replaying an uncertain apply after navigation or reload. The matching production build,
 3,232 fast logic tests, 13 mounted service interaction cases and phone/desktop inspection pass;
 the [UI acceptance record](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-services-ui-acceptance.md)
-separates those checks from combined reachable acceptance. Broader native zone/view/client policy
-editing remains follow-up work under P17.
+separates those checks from the [passing combined reachable gate](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
+Broader native zone/view/client policy editing remains follow-up work under P17.
 
-P17 remains in progress: all three pinned engine fixtures and the retained UI slice pass, while
-combined reachable checks and complete query/zone/view/client-policy coverage remain open.
+P17 remains in progress: all three pinned engine fixtures, the retained UI slice and combined
+reachable checks pass, while complete query/zone/view/client-policy coverage remains open.
 Pure/HTTP fixtures do not establish real native-engine compatibility, and native container restart
 is not a host reboot proof.
 
@@ -152,7 +152,7 @@ cleaned before corrected runs; they are not passing evidence.
 Pinned primary contracts include [AdGuard's native API](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/openapi/openapi.yaml),
 [FTL's configuration API](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/config.yaml),
 [FTL's process PID/millisecond uptime implementation](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/info.c),
-and [Technitium's version 15.6 API](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6/APIDOCS.md).
+and [Technitium's version 15.6 API](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/APIDOCS.md).
 Installed native app configuration contracts are distinct from packet-level view selection.
 
 The opt-in owned fixture requires a reachable Docker Engine and all three reviewed images already

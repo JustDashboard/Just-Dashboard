@@ -39,6 +39,14 @@ and logs its hash/capability before namespace entry. Final hashes:
 
 ## Passing actual runs
 
+The compact passing records and original source/binary manifests are also checked in under
+[`native-manager-automatic-2026-10-09/`](native-manager-automatic-2026-10-09/):
+[v5 networkd](native-manager-automatic-2026-10-09/run11-networkd-v5-suppression.log),
+[v5 NetworkManager](native-manager-automatic-2026-10-09/run12-debian-nm-v5-lifecycle.log),
+[v6 NetworkManager/deadline](native-manager-automatic-2026-10-09/run16-debian-nm-v6-foreign-deadline.log),
+[v6 networkd](native-manager-automatic-2026-10-09/run17-networkd-v6-lifecycle.log), and
+[v6 source/binary hashes](native-manager-automatic-2026-10-09/run16-source-binary.sha256).
+
 All records below have zero skips. Earlier v5 proof remains separate from final v6 preflight proof.
 
 | Run | Owner/source | Wrapper / child | Raw record |
