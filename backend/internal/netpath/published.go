@@ -300,7 +300,11 @@ func InvestigatePublished(ctx context.Context, request PublishedRequest, p Publi
 			}
 			if len(earlier) > 0 {
 				firewall.State = "docker_admits_unless_earlier"
-				firewall.Summary += " " + strings.Join(earlier, " and ") + " come first and could still drop it; they are not evaluated."
+				verb := "comes first and could still drop it; it is not evaluated."
+				if len(earlier) > 1 {
+					verb = "come first and could still drop it; they are not evaluated."
+				}
+				firewall.Summary += " " + strings.Join(earlier, " and ") + " " + verb
 				forwarded += ", unless " + strings.Join(earlier, " or ") + " drops it first (not evaluated)"
 			}
 		case dockerFirst:
