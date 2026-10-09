@@ -72,9 +72,8 @@ func readDecisionInventory(t *testing.T, ctx context.Context, c *nativeClient, e
 	if err = c.request(ctx, http.MethodGet, path, nil, &clients); err != nil {
 		t.Fatal(err)
 	}
-	var rows []map[string]json.RawMessage
-	if json.Unmarshal(clients["clients"], &rows) != nil || rows == nil || len(rows) > 128 {
-		t.Fatal("complete persistent client rows required")
+	if _, err := decisionClientRows(engine, clients); err != nil {
+		t.Fatal(err)
 	}
 	if engine == AdGuard {
 		if len(inv.Rules) < 3 || inv.Rules[0] != "# owned unselected decision fixture comment" || inv.Rules[1] != "" || inv.Rules[2] != "||"+parent+"^" {
@@ -154,10 +153,27 @@ func assertDecisionSeed(t *testing.T, ctx context.Context, c *nativeClient, engi
 	}
 }
 
-func decisionClientScope(engine Engine, clients map[string]json.RawMessage, groups []map[string]json.RawMessage, address, mac string) error {
+func decisionClientRows(engine Engine, clients map[string]json.RawMessage) ([]map[string]json.RawMessage, error) {
+	raw, present := clients["clients"]
+	if !present {
+		return nil, errors.New("native persistent-client field is missing")
+	}
+	// AdGuard 0.107.71 appends to a nil slice, so an empty persistent
+	// inventory is explicitly null. Missing data and Pi-hole null stay unknown.
+	if engine == AdGuard && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return []map[string]json.RawMessage{}, nil
+	}
 	var rows []map[string]json.RawMessage
-	if json.Unmarshal(clients["clients"], &rows) != nil || rows == nil || len(rows) > 128 {
-		return errors.New("complete bounded native client inventory required")
+	if json.Unmarshal(raw, &rows) != nil || rows == nil || len(rows) > 128 {
+		return nil, errors.New("complete bounded native client inventory required")
+	}
+	return rows, nil
+}
+
+func decisionClientScope(engine Engine, clients map[string]json.RawMessage, groups []map[string]json.RawMessage, address, mac string) error {
+	rows, err := decisionClientRows(engine, clients)
+	if err != nil {
+		return err
 	}
 	if engine == AdGuard {
 		// This fixture creates no persistent AdGuard client, so every request
@@ -207,7 +223,10 @@ func verifyDecisionClient(t *testing.T, ctx context.Context, c *nativeClient, en
 	if engine == PiHole {
 		path = "/api/clients"
 	}
-	if err = c.request(ctx, http.MethodGet, path, nil, &clients); err != nil || decisionClientScope(engine, clients, inv.Groups, address, mac) != nil {
+	if err = c.request(ctx, http.MethodGet, path, nil, &clients); err == nil {
+		err = decisionClientScope(engine, clients, inv.Groups, address, mac)
+	}
+	if err != nil {
 		t.Fatal("actual source/default native client scope not established", err)
 	}
 	if engine == AdGuard {
@@ -466,8 +485,27 @@ func TestDNSDomainDecisionDefaultClientRefusesUnknown(t *testing.T) {
 			t.Fatal("unproved group zero accepted", id)
 		}
 	}
-	if decisionClientScope(AdGuard, map[string]json.RawMessage{"clients": json.RawMessage("[]")}, nil, "172.20.0.3", "02:00:00:00:00:03") != nil || decisionClientScope(AdGuard, map[string]json.RawMessage{"clients": json.RawMessage("null")}, nil, "172.20.0.3", "02:00:00:00:00:03") == nil {
-		t.Fatal("empty and unknown AdGuard overrides conflated")
+}
+
+func TestDNSDomainDecisionAdGuardEmptyClientWriter(t *testing.T) {
+	for _, body := range []string{`null`, `[]`, ` null `} {
+		t.Run(body, func(t *testing.T) {
+			clients := map[string]json.RawMessage{"clients": json.RawMessage(body), "auto_clients": json.RawMessage(`[{"ip":"172.20.0.3","name":"runtime-only"}]`)}
+			if err := decisionClientScope(AdGuard, clients, nil, "172.20.0.3", "02:00:00:00:00:03"); err != nil {
+				t.Fatal("pinned writer's empty persistent inventory was refused", err)
+			}
+			if string(clients["clients"]) != body {
+				t.Fatal("raw persistent-client evidence was replaced")
+			}
+		})
+	}
+	for _, body := range []string{"", `{}`, `true`, `"null"`, `[null]`, `[{"ids":["172.20.0.3"]}]`} {
+		if decisionClientScope(AdGuard, map[string]json.RawMessage{"clients": json.RawMessage(body)}, nil, "172.20.0.3", "02:00:00:00:00:03") == nil {
+			t.Fatal("unknown or nonempty persistent-client evidence accepted", body)
+		}
+	}
+	if decisionClientScope(AdGuard, map[string]json.RawMessage{"auto_clients": json.RawMessage(`[]`)}, nil, "172.20.0.3", "02:00:00:00:00:03") == nil {
+		t.Fatal("missing persistent-client field became empty")
 	}
 }
 

@@ -53,6 +53,11 @@ Complete persistent-client and enabled default-group inventories must prove the 
 inherits global AdGuard policy or unmatched Pi-hole group zero. Native local rewrites/hosts/CNAMEs
 must be explicitly empty; AdGuard filtering must be enabled. Actual native null-IP blocking mode
 and the reviewed protection switch are checked, rather than inferred from configured rule counts.
+AdGuard 0.107.71's pinned client writer starts with a nil persistent-client slice: its present
+`clients: null` field means that inventory is empty, as does `clients: []`. This version-specific
+fixture interpretation preserves the raw value and excludes separate auto-discovered runtime
+clients from persistent policy. Missing, malformed or nonempty persistent inventories still
+refuse the fixture; Pi-hole `clients: null` remains unknown and is refused.
 
 | Controlled name | Before reviewed edits | After additions | After removals |
 | --- | --- | --- | --- |
@@ -117,7 +122,8 @@ selection is `go test ./internal/dnsservice ./internal/dnsservice/testdata/nativ
 `TMPDIR`. The corresponding focused race selection and `scripts/test-changed.sh d427809d` must pass
 before freezing the final fixture. Compile the helper with `CGO_ENABLED=0`, Linux/amd64 and ordinary
 executable mode; compile the separate DNS-service race binary from that same clean final checkout.
-Compilation is preparation and does not opt into either native fixture.
+Both frozen executables must have no group/other write permissions; the reviewed root preparation
+uses mode 0555. Compilation is preparation and does not opt into either native fixture.
 
 The original preparation logs remain in
 `/home/ubuntu/Just-Dashboard-network-dns-domain-decisions-artifacts`. These include compiler-only
@@ -142,7 +148,20 @@ nullable/missing/malformed/negative/overflow/future times and explicit old epoch
 selected-client log describes absence of a selected override; the preserved foreign Pi-hole client
 remains present. Historical preparation records are retained, without relabeling any native pass.
 
+The first actual decision attempt used clean `16501fb2` and stopped before client questions because
+the fixture refused the pinned writer's empty `clients: null`. The exact native failure was retained:
+17.372 seconds, no skip, no filtering acceptance, unchanged host/socket/source/binaries, restored
+complete image inventory and zero remaining owned Docker/process/TMP entries. Pi-hole was not
+dispatched. Root separately corrected the frozen executables' group-write permissions and the
+wrapper's TMP accounting to retain held parent/task directory descriptors, recheck their captured
+identities and preserve replaced scope. Five pure directory-ownership regressions passed before
+that attempt. The client-shape correction now tests the pinned null/empty shape, preserves raw
+client evidence, and refuses missing/wrong-type/nonempty overrides without relaxing Pi-hole scope.
+Any later actual attempt requires a new clean-source race binary and separately frozen receipt;
+the original failure and preparation records retain their original attribution.
+
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
+[persistent-client JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/home/clientshttp.go#L86),
 [filter application and precedence](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/filtering.go),
 [null-IP response construction](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/dnsforward/msg.go),
 [FTL default client groups](https://github.com/pi-hole/FTL/blob/v6.7.1/src/database/gravity-db.c),
