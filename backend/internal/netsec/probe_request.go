@@ -15,18 +15,26 @@ type ProbeRequest struct {
 	Port   int    `json:"port,omitempty"`
 	Record string `json:"record,omitempty"`
 	Option string `json:"option,omitempty"`
+	// Verify is the address a Wake-on-LAN run watches for an answer after
+	// sending; Port then selects TCP, and zero selects ICMP echo.
+	Verify string `json:"verify,omitempty"`
 }
 
 // ValidateProbeRequest performs the existing tools' validation before work is
 // queued. Normalising unused fields makes saved comparisons about the same test.
 func ValidateProbeRequest(req ProbeRequest) (ProbeRequest, error) {
 	req.Target = strings.TrimSpace(req.Target)
+	req.Verify = strings.TrimSpace(req.Verify)
 	req.Record = strings.ToUpper(strings.TrimSpace(req.Record))
 	rawOption := strings.TrimSpace(req.Option)
 	req.Option = strings.ToLower(rawOption)
 	needsTarget, usesPort := true, false
 	switch req.Tool {
-	case "ping", "traceroute", "scan", "whois", "dnsauth", "mtu":
+	case "ping", "traceroute", "scan", "whois", "mtu":
+	case "dnsauth":
+		if net.ParseIP(req.Target) != nil {
+			return req, fmt.Errorf("an authority check takes a domain name, not an IP address")
+		}
 	case "dns":
 		if req.Record == "" {
 			req.Record = "A"
@@ -44,10 +52,21 @@ func ValidateProbeRequest(req ProbeRequest) (ProbeRequest, error) {
 		if req.Port == 0 {
 			req.Port = 22
 		}
-	case "http", "tls", "tlssurvey", "httpsec", "siteaudit":
+	case "http", "tls", "tlssurvey", "siteaudit":
 		usesPort = true
 		if req.Port == 0 {
 			req.Port = 443
+		}
+	case "httpsec":
+		usesPort = true
+		if req.Port == 0 {
+			req.Port = 443
+		}
+		if req.Option == "" {
+			req.Option = "auto"
+		}
+		if req.Option != "auto" && req.Option != "page" && req.Option != "api" {
+			return req, fmt.Errorf("the response profile must be auto, page or api")
 		}
 	case "starttls":
 		usesPort = true
@@ -77,6 +96,22 @@ func ValidateProbeRequest(req ProbeRequest) (ProbeRequest, error) {
 			return req, fmt.Errorf("route lookup takes an IPv4 or IPv6 address without a zone")
 		}
 		req.Target = a.Unmap().String()
+		// A port asks for the policy, NAT and firewall layers of that flow
+		// too; without one the lookup is the kernel route alone.
+		if req.Port < 0 || req.Port > 65535 {
+			return req, fmt.Errorf("port must be between 1 and 65535, or empty for the route alone")
+		}
+		if req.Port == 0 {
+			req.Option = ""
+		} else {
+			usesPort = true
+			if req.Option == "" {
+				req.Option = "tcp"
+			}
+			if req.Option != "tcp" && req.Option != "udp" {
+				return req, fmt.Errorf("protocol must be tcp or udp")
+			}
+		}
 	case "listeners", "egress", "neigh", "capabilities":
 		needsTarget = false
 		req.Target = ""
@@ -105,6 +140,17 @@ func ValidateProbeRequest(req ProbeRequest) (ProbeRequest, error) {
 		if iface.Flags&net.FlagBroadcast == 0 || iface.Flags&net.FlagLoopback != 0 || len(iface.HardwareAddr) != 6 {
 			return req, fmt.Errorf("Wake-on-LAN needs a broadcast-capable Ethernet interface, bridge or VLAN")
 		}
+		if req.Verify == "" && req.Port != 0 {
+			return req, fmt.Errorf("a verification port needs a verification address")
+		}
+		if req.Verify != "" {
+			verify, err := ValidWakeVerification(req.Verify, req.Port)
+			if err != nil {
+				return req, err
+			}
+			req.Verify = verify
+			usesPort = req.Port != 0
+		}
 	default:
 		return req, fmt.Errorf("unknown network diagnostic tool %q", req.Tool)
 	}
@@ -120,8 +166,11 @@ func ValidateProbeRequest(req ProbeRequest) (ProbeRequest, error) {
 	if req.Tool != "dns" {
 		req.Record = ""
 	}
-	if req.Tool != "starttls" && req.Tool != "capture" && req.Tool != "wol" {
+	if req.Tool != "starttls" && req.Tool != "capture" && req.Tool != "wol" && req.Tool != "httpsec" && req.Tool != "route" {
 		req.Option = ""
+	}
+	if req.Tool != "wol" {
+		req.Verify = ""
 	}
 	return req, nil
 }

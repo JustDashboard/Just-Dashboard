@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,16 @@ const MaxDiffLines = 128
 type ValueChange struct {
 	Before string `json:"before"`
 	After  string `json:"after"`
+}
+
+// MetricChange is one structured number on either side; a side without it
+// is nil rather than zero.
+type MetricChange struct {
+	Key    string   `json:"key"`
+	Label  string   `json:"label"`
+	Unit   string   `json:"unit,omitempty"`
+	Before *float64 `json:"before,omitempty"`
+	After  *float64 `json:"after,omitempty"`
 }
 
 type Difference struct {
@@ -38,6 +49,7 @@ type Comparison struct {
 	DurationDeltaMS      *float64            `json:"durationDeltaMs,omitempty"`
 	Records              Difference          `json:"records"`
 	Output               Difference          `json:"output"`
+	Metrics              []MetricChange      `json:"metrics,omitempty"`
 	Partial              bool                `json:"partial"`
 	Limitations          []string            `json:"limitations"`
 }
@@ -95,6 +107,9 @@ func (s *Service) Compare(ctx context.Context, beforeID, afterID string) (Compar
 			c.DurationDeltaMS = &delta
 		}
 	}
+	if a.Kind != "investigation" {
+		c.Metrics = metricChanges(a.Result.Metrics, b.Result.Metrics)
+	}
 	if a.Kind == "investigation" {
 		c.Limitations = append(c.Limitations, "Investigation differences compare retained layer evidence, including actual selected source/destination. Unknown layers remain unknown; successful report completion does not prove connectivity.")
 	}
@@ -111,7 +126,8 @@ func sameRequest(a, b Run) bool {
 
 func comparisonArtifact(run Run) (string, []string, []string) {
 	if run.Kind != "investigation" {
-		return run.Result.Duration, run.Result.Records, strings.Split(run.Result.Output, "\n")
+		records := append(append([]string{}, run.Result.Records...), structuredLines(run.Result)...)
+		return run.Result.Duration, records, strings.Split(run.Result.Output, "\n")
 	}
 	report := run.Investigation
 	records := []string{"selected source: " + report.Scope.SourceAddress, "selected destination: " + report.Scope.Address}
@@ -171,4 +187,67 @@ func difference(before, after []string) Difference {
 		}
 	}
 	return d
+}
+
+// volatileFact and volatileColumn name readings that change on every run —
+// timings, timestamps and ephemeral source ports — and would turn every
+// comparison into a difference.
+var volatileFact = regexp.MustCompile(`(?i)^checked at$|^local source$`)
+
+var volatileColumn = regexp.MustCompile(`(?i)time|round trip|\(ms\)|first byte|total|checked at|^dns$|^connect$|^tls$`)
+
+// structuredLines renders a result's structured evidence as comparable
+// lines: the verdict, facts, stage outcomes, table rows without timing
+// columns, and findings.
+func structuredLines(result *netsec.ProbeResult) []string {
+	var lines []string
+	if result.Verdict != "" {
+		lines = append(lines, "verdict: "+result.Verdict)
+	}
+	for _, f := range result.Facts {
+		if !volatileFact.MatchString(f.Label) {
+			lines = append(lines, "fact "+f.Label+": "+f.Value)
+		}
+	}
+	for _, st := range result.Stages {
+		lines = append(lines, "stage "+st.Label+": "+st.Status)
+	}
+	for _, t := range result.Tables {
+		keep := make([]bool, len(t.Columns))
+		for i, column := range t.Columns {
+			keep[i] = !volatileColumn.MatchString(column)
+		}
+		for _, row := range t.Rows {
+			var cells []string
+			for i, cell := range row {
+				if i < len(keep) && keep[i] {
+					cells = append(cells, cell)
+				}
+			}
+			lines = append(lines, t.Title+": "+strings.Join(cells, " | "))
+		}
+	}
+	for _, f := range result.Findings {
+		lines = append(lines, "finding "+f.Level+": "+f.Title)
+	}
+	return lines
+}
+
+func metricChanges(before, after []netsec.ProbeMetric) []MetricChange {
+	var out []MetricChange
+	index := map[string]int{}
+	for _, m := range before {
+		v := m.Value
+		index[m.Key] = len(out)
+		out = append(out, MetricChange{Key: m.Key, Label: m.Label, Unit: m.Unit, Before: &v})
+	}
+	for _, m := range after {
+		v := m.Value
+		if i, ok := index[m.Key]; ok {
+			out[i].After = &v
+			continue
+		}
+		out = append(out, MetricChange{Key: m.Key, Label: m.Label, Unit: m.Unit, After: &v})
+	}
+	return out
 }

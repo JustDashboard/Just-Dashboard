@@ -371,13 +371,18 @@ func (s *Server) handleNetworkProbe(w http.ResponseWriter, r *http.Request) erro
 	if req.Option != "" {
 		detail["option"] = req.Option
 	}
+	if req.Verify != "" {
+		detail["verify"], detail["port"] = req.Verify, req.Port
+	}
 	httpx.SetAudit(r, "network.probe", req.Tool, detail)
 	ctx, cancel := timeoutCtx(r, 90*time.Second)
 	defer cancel()
+	started := time.Now()
 	res, err := s.executeNetworkProbe(ctx, req)
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	res.ResultID = quickResults.keep(httpx.MustPrincipal(r).Username(), req, res, started, time.Now())
 	httpx.JSON(w, http.StatusOK, res)
 	return nil
 }
@@ -395,6 +400,9 @@ func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeReques
 		res, err = s.modules.netsec.Lookup(ctx, req.Target, req.Record)
 	case "port":
 		res, err = s.modules.netsec.PortCheck(ctx, req.Target, req.Port)
+		if err == nil {
+			s.correlatePortCheck(ctx, req, res)
+		}
 	case "scan":
 		res, err = s.modules.netsec.PortScan(ctx, req.Target)
 	case "http":
@@ -409,6 +417,9 @@ func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeReques
 		res, err = s.modules.netsec.BannerGrab(ctx, req.Target, req.Port)
 	case "ssh":
 		res, err = s.modules.netsec.SSHScan(ctx, req.Target, req.Port)
+		if err == nil {
+			s.compareSSHTrust(ctx, req, res)
+		}
 	case "starttls":
 		res, err = s.modules.netsec.STARTTLSCheck(ctx, req.Target, req.Port, req.Option)
 	case "tlssurvey":
@@ -420,9 +431,12 @@ func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeReques
 	case "mx":
 		res, err = s.modules.netsec.MXCheck(ctx, req.Target)
 	case "httpsec":
-		res, err = s.modules.netsec.HTTPSecurity(ctx, req.Target, req.Port)
+		res, err = s.modules.netsec.HTTPSecurity(ctx, req.Target, req.Port, req.Option)
 	case "siteaudit":
 		res, err = s.modules.netsec.SiteAudit(ctx, req.Target, req.Port)
+		if err == nil {
+			netsec.AttributeSiteOwner(res, s.proxySiteFor(ctx, req.Target))
+		}
 	case "listeners":
 		res, err = s.modules.netsec.Listeners(ctx)
 	case "egress":
@@ -431,12 +445,15 @@ func (s *Server) executeNetworkProbe(ctx context.Context, req netsec.ProbeReques
 		res, err = s.modules.netsec.Neighbours(ctx)
 	case "route":
 		res, err = s.modules.netsec.RouteLookup(ctx, req.Target)
+		if err == nil && req.Port > 0 {
+			s.joinRouteLayers(ctx, req, res)
+		}
 	case "mtu":
 		res, err = s.modules.netsec.PathMTU(ctx, req.Target)
 	case "capture":
 		res, err = s.modules.netsec.PacketSnapshot(ctx, req.Target, req.Option)
 	case "wol":
-		res, err = s.modules.netsec.WakeOnLAN(ctx, req.Target, req.Option)
+		res, err = s.modules.netsec.WakeOnLAN(ctx, req.Target, req.Option, req.Verify, req.Port)
 	case "capabilities":
 		res = networkSupportProbe(s.modules.network.HostSupport(ctx))
 	default:

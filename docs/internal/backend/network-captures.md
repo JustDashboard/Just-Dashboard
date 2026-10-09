@@ -2,7 +2,10 @@
 
 `internal/netcapture` owns explicitly launched private PCAP jobs. `/network/captures` is a reading
 page: retained captures, their dated progress and results, original artifact access and an explicit
-setup dialog. The existing quick packet summary remains in Tools and does not retain a PCAP.
+setup dialog. The existing quick packet summary remains in Tools and does not retain a PCAP; its
+result links to `/network/captures?interface=…&protocol=…`, which opens the setup dialog with that
+interface, protocol (family `inet6` for `icmp6`) and a follow-up name. Arriving never starts a
+capture; the operator still presses start.
 
 ## Request and native scope
 
@@ -99,3 +102,12 @@ observing tcpdump, proves the capture survives briefly and then verifies the ind
 removes every PID from that namespace. It removes only that namespace. It does not capture production interfaces,
 start public listeners or change host networking. Offload, provider paths, encrypted application
 contents, long-running production overhead and real provider acceptance remain separate.
+
+`TestLiveCaptureCostAtFullBounds` (same gate) measures one job at its largest bounds in its own
+disposable namespace: a loopback UDP flood against 10,000 packets / 2 MiB / 512-byte snapshots, and
+an idle run to a ten-second time bound. It records wall time, the native process tree's CPU and
+peak RSS (`RUSAGE_CHILDREN`), the backend's CPU and peak heap growth, and fails if the artifact
+exceeds its cap, heap grows past 32 MiB, the native tree peaks above 128 MiB or an idle capture uses
+over two seconds of CPU. The sender runs in its own process group so stopping it cannot leak into
+the next scenario. These are host-side measurements of the capture path on this machine, not of a
+production interface under real traffic.

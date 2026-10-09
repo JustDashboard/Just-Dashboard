@@ -149,3 +149,92 @@ export function SaveRunSnapshot({
     </>
   )
 }
+
+/**
+ * Keep a quick result exactly as it was shown. The server held it briefly
+ * under an ID; saving sends no new traffic, and an expired hold says so rather
+ * than quietly running the tool again.
+ */
+export function SaveHeldResult({
+  resultId,
+  label,
+  target,
+}: {
+  resultId: string
+  label: string
+  target: string
+}) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  const [name, setName] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<Error>()
+  const problem = diagnosticNameProblem(name)
+  const save = async () => {
+    if (problem || busy) return
+    setBusy(true)
+    setError(undefined)
+    try {
+      const saved = await post<DiagnosticRun>("/network/diagnostics/results", {
+        resultId,
+        name: name.trim(),
+      })
+      router.push(`/network/runs?run=${encodeURIComponent(saved.id)}`)
+      setOpen(false)
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          setName(`${label} · ${target || "this host"}`)
+          setError(undefined)
+          setOpen(true)
+        }}
+      >
+        Save this result
+      </Button>
+      {open && (
+        <Modal
+          open
+          title="Save this result"
+          onOpenChange={(next) => !next && !busy && setOpen(false)}
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button onClick={save} disabled={Boolean(problem) || busy} pending={busy}>
+                Save result
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <Field label="Run name" htmlFor="held-result-name" error={problem}>
+              <Input
+                id="held-result-name"
+                autoFocus
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                aria-invalid={Boolean(problem)}
+              />
+            </Field>
+            <p className="text-hint text-muted-foreground">
+              Saves the result shown above to Saved runs without running the tool again. Results are
+              held for fifteen minutes after they arrive.
+            </p>
+            {error && <ErrorState error={error} />}
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}

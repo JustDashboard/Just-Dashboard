@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { calcSubnet } from "./subnet-math"
+import { calcSubnet, prefixRelation } from "./subnet-math"
 
 test("IPv4 host bits are masked, /31 and /32 preserve point-to-point and host ranges", () => {
   expect(calcSubnet("192.168.1.20/24")).toMatchObject({
@@ -56,4 +56,16 @@ test("private and special-use address ranges are not called public", () => {
   expect(calcSubnet("198.18.1.1/24").note).toContain("Benchmarking")
   expect(calcSubnet("fc00::1/64").note).toContain("Unique local")
   expect(calcSubnet("fe80::1/64").note).toContain("Link-local")
+})
+
+test("prefix relations are exact in both families and never partial", () => {
+  expect(prefixRelation("10.0.0.0/8", "10.20.0.0/16").relation).toBe("contains")
+  expect(prefixRelation("10.20.30.0/24", "10.0.0.0/8").relation).toBe("inside")
+  expect(prefixRelation("192.168.1.77/24", "192.168.1.0/24").relation).toBe("same")
+  expect(prefixRelation("192.168.1.0/24", "192.168.2.0/24").relation).toBe("separate")
+  expect(prefixRelation("192.168.1.0/24", "2001:db8::/32").relation).toBe("family")
+  expect(prefixRelation("2001:db8::/32", "2001:db8:ffff:ffff::/64").relation).toBe("contains")
+  expect(prefixRelation("2001:db8::/48", "2001:db9::/48").relation).toBe("separate")
+  expect(prefixRelation("::/0", "fd00::/8").sentence).toBe("::/0 contains fd00::/8; they overlap.")
+  expect(() => prefixRelation("10.0.0.0/8", "not a prefix")).toThrow()
 })

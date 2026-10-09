@@ -187,3 +187,49 @@ function calcIPv6(address: string, prefix: number): SubnetInfo {
     note,
   }
 }
+
+type ParsedPrefix = { family: 4 | 6; start: bigint; end: bigint; cidr: string }
+
+function parsePrefix(input: string): ParsedPrefix {
+  const info = calcSubnet(input)
+  const [network, bits] = info.cidr.split("/")
+  const prefix = Number(bits)
+  if (network.includes(":")) {
+    const start = parseIPv6(network)
+    return {
+      family: 6,
+      start,
+      end: start | ((BigInt(1) << BigInt(128 - prefix)) - BigInt(1)),
+      cidr: info.cidr,
+    }
+  }
+  const octets = parseOctets(network)!
+  const start = BigInt(toNum(octets))
+  return { family: 4, start, end: start + BigInt(2 ** (32 - prefix)) - BigInt(1), cidr: info.cidr }
+}
+
+export type PrefixRelation = {
+  relation: "same" | "contains" | "inside" | "separate" | "family"
+  sentence: string
+}
+
+/**
+ * How two prefixes relate, exactly, in either family. Two CIDR blocks are
+ * either nested or disjoint; a partial overlap cannot happen.
+ */
+export function prefixRelation(a: string, b: string): PrefixRelation {
+  const left = parsePrefix(a)
+  const right = parsePrefix(b)
+  if (left.family !== right.family)
+    return {
+      relation: "family",
+      sentence: `${left.cidr} and ${right.cidr} are in different address families and cannot overlap.`,
+    }
+  if (left.start === right.start && left.end === right.end)
+    return { relation: "same", sentence: `${left.cidr} and ${right.cidr} are the same network.` }
+  if (left.start <= right.start && right.end <= left.end)
+    return { relation: "contains", sentence: `${left.cidr} contains ${right.cidr}; they overlap.` }
+  if (right.start <= left.start && left.end <= right.end)
+    return { relation: "inside", sentence: `${left.cidr} sits inside ${right.cidr}; they overlap.` }
+  return { relation: "separate", sentence: `${left.cidr} and ${right.cidr} do not overlap.` }
+}
