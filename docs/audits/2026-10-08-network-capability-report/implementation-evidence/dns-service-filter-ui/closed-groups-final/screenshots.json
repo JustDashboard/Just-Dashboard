@@ -1,0 +1,98 @@
+[
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguar-3f604--filter-reading-fits-1720px-chromium/native-filters-adguard-1720.png",
+    "name": "native-filters-adguard-1720.png",
+    "sha256": "1a1ccb34c2e206ee652d67d6ddab729412b9fa46df21b78b23a1b45b1e5b05a5",
+    "bytes": 124839,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguar-df428--filter-reading-fits-1280px-chromium/native-filters-adguard-1280.png",
+    "name": "native-filters-adguard-1280.png",
+    "sha256": "1a9af985f6734febc6e88f3aa82d5fe532f88145313fcf9cddaa7a1b2e0d11cb",
+    "bytes": 88878,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguard-native-filter-reading-fits-390px-chromium/native-filter-rules-adguard-390.png",
+    "name": "native-filter-rules-adguard-390.png",
+    "sha256": "cd2146c8022cc02a7b6c83cbeecb51c56649b8b62a6302c13389a014db4ceef1",
+    "bytes": 41333,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguard-native-filter-reading-fits-390px-chromium/native-filters-adguard-390.png",
+    "name": "native-filters-adguard-390.png",
+    "sha256": "11c2089649700b94d94799878f5ab6301e4d80dde2a371c38ff15aaf2c32cb24",
+    "bytes": 50699,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-1280px-chromium/native-filters-pihole-1280.png",
+    "name": "native-filters-pihole-1280.png",
+    "sha256": "9e1c430700494015ada055430f9853fdb980906ec67dda04ed782023eabe5b78",
+    "bytes": 88576,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-1720px-chromium/native-filters-pihole-1720.png",
+    "name": "native-filters-pihole-1720.png",
+    "sha256": "6af8207cf1ddf6a5000f7f628c26f475aa3d436bd1021ce798c958358123837b",
+    "bytes": 123950,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-390px-chromium/native-filter-rules-pihole-390.png",
+    "name": "native-filter-rules-pihole-390.png",
+    "sha256": "907db2e465cf5c1994886b93f61ec0b52b2b191570ca302af00742f2978e6909",
+    "bytes": 43027,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-390px-chromium/native-filters-pihole-390.png",
+    "name": "native-filters-pihole-390.png",
+    "sha256": "8bc88ad38005609dd7a128bb18b9fff19e49d100aa4aface66baf24fa98e1efc",
+    "bytes": 52938,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-2dacd--filter-reading-fits-1280px-chromium/native-filters-technitium-1280.png",
+    "name": "native-filters-technitium-1280.png",
+    "sha256": "ce34c3a430e9f18d6552b44ec55226858f2a91e58c4857b75358bae185e33cec",
+    "bytes": 89608,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-a11dc-e-filter-reading-fits-390px-chromium/native-filter-rules-technitium-390.png",
+    "name": "native-filter-rules-technitium-390.png",
+    "sha256": "6bc7a6e0fc3f8cffc551b507c7ae621495756f851b9430f592ef0bf1960605f1",
+    "bytes": 41127,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-a11dc-e-filter-reading-fits-390px-chromium/native-filters-technitium-390.png",
+    "name": "native-filters-technitium-390.png",
+    "sha256": "1406d3dc28bdc72312b13de0a13e63e9125f1883f6123724e09288ae4e82039c",
+    "bytes": 51302,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-d7a68--filter-reading-fits-1720px-chromium/native-filters-technitium-1720.png",
+    "name": "native-filters-technitium-1720.png",
+    "sha256": "52aa371bbead308531e0afb702584ec58a247a48d77e022d882f8ab0e48e889e",
+    "bytes": 125087,
+    "source": "e945fcea61f56ace9dfee48135bb1a9fc14f838f",
+    "scope": "final rebuilt mocked native metadata; settled sheet containment and overflow checks"
+  }
+]

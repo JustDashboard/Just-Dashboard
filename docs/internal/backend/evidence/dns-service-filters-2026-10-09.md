@@ -7,10 +7,10 @@ filtering. Filter edits, manual/app rule contents and broader P17 acceptance rem
 matching frontend has [separate assembled acceptance](../../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui-acceptance.md);
 these backend records do not validate its browser behavior.
 
-## Frozen sources and records
+## Isolated implementation sources and records
 
 The isolated branch starts at public `6ebbf2d744c2680e5b163e9010b97e1659275f4d`. The initial
-implementation is `b0f803b235a2ccfff6c10f85511578bcf7b2c819`; the corrected final product is
+implementation is `b0f803b235a2ccfff6c10f85511578bcf7b2c819`; that phase's corrected product is
 `dab8f9d7ee66d9b455e677317c2f0499e1032028`. Subsequent evidence changes do not change its Go
 source. Both native race binaries were compiled with Go 1.26.8, `GOMAXPROCS=2`, `GOFLAGS=-p=2`
 and an explicit short workspace `TMPDIR`. The final binary reports `-race=true`, `CGO_ENABLED=1`
@@ -115,3 +115,22 @@ Section metadata is intentionally redacted and fingerprinted; missing evidence i
 healthy policy. Runtime status is separate from loaded contents and client decisions. There is
 no filter mutation, arbitrary payload/proxy, subscription fetch or frontend-completion claim in
 this slice.
+
+## Final assembled shape corrections
+
+The later assembled application is `e945fcea61f56ace9dfee48135bb1a9fc14f838f`. It refuses
+AdGuard null/non-string rule elements, empty Pi-hole source destinations and malformed raw native
+group elements independently of the exact pinned whole-collection null compatibility above.
+Client-group requests refuse null/non-integer/duplicate/out-of-range memberships before connection
+selection; malformed native client/group inventories remain unknown and cannot supply a review
+baseline. Actual empty memberships and ID zero remain supported. Unknown client/group inventory
+counts are withheld in the mounted detail sheet.
+
+The [final assembled acceptance](../../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui-acceptance.md#closed-native-shapes-and-final-engine-proof)
+retains all 1,860 backend Go hashes, both module hashes, the exact final race binary, runner,
+raw native logs and independent cleanup/host witnesses. AdGuard, Pi-hole and Technitium all pass
+without skips on that source in 43.324s, 72.962s and 26.033s wrapper time. They repeat the native
+metadata/persistence and existing reviewed DNS operations on the corrected source; malformed JSON
+checks and nonempty redacted sources remain controlled fixtures. The final fresh reachable gate
+passes API 0.591s and DNS 25.063s alongside the rebuilt UI. These later records preserve the
+original failure and isolated `dab8f9d7` proofs above without relabeling their hashes or results.

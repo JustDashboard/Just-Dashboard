@@ -1,0 +1,28 @@
+=== RUN   TestDNSServiceClientGroupJSONRejectsNullAndKeepsExplicitZeroAndEmpty
+--- PASS: TestDNSServiceClientGroupJSONRejectsNullAndKeepsExplicitZeroAndEmpty (0.54s)
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-null-group
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-bool-group
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-decimal-group
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-missing-groups
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-id
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-missing-id
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-enabled
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-negative-id
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-duplicate-id
+--- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused (2.60s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-null-group (0.23s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-bool-group (0.26s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-decimal-group (0.28s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-missing-groups (0.28s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-id (0.28s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-missing-id (0.42s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-enabled (0.30s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-negative-id (0.27s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-duplicate-id (0.28s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	3.144s
+=== RUN   TestDNSServiceClientGroupAPIRejectsMalformedMembershipBeforeSelection
+--- PASS: TestDNSServiceClientGroupAPIRejectsMalformedMembershipBeforeSelection (0.25s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.309s

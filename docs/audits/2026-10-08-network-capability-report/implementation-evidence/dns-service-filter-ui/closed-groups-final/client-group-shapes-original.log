@@ -1,0 +1,35 @@
+=== RUN   TestDNSServiceClientGroupJSONRejectsNullAndKeepsExplicitZeroAndEmpty
+    policy_groups_test.go:13: malformed request groups [null] decoded
+--- FAIL: TestDNSServiceClientGroupJSONRejectsNullAndKeepsExplicitZeroAndEmpty (0.00s)
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-null-group
+    policy_groups_test.go:68: malformed membership became a configured native client
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-bool-group
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-decimal-group
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-missing-groups
+    policy_groups_test.go:68: malformed membership became a configured native client
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-id
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-missing-id
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-enabled
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-negative-id
+    policy_groups_test.go:71: malformed group identity became a configured or partial inventory
+=== RUN   TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-duplicate-id
+    policy_groups_test.go:71: malformed group identity became a configured or partial inventory
+--- FAIL: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused (2.18s)
+    --- FAIL: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-null-group (0.26s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-bool-group (0.25s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-decimal-group (0.24s)
+    --- FAIL: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/client-missing-groups (0.22s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-id (0.25s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-missing-id (0.24s)
+    --- PASS: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-null-enabled (0.22s)
+    --- FAIL: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-negative-id (0.24s)
+    --- FAIL: TestDNSServiceClientGroupMalformedNativePolicyRemainsUnknownAndRefused/group-duplicate-id (0.25s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	2.189s
+=== RUN   TestDNSServiceClientGroupAPIRejectsMalformedMembershipBeforeSelection
+    handlers_network_dns_client_groups_test.go:20: invalid membership reached selection: 404 "groups":[null]
+--- FAIL: TestDNSServiceClientGroupAPIRejectsMalformedMembershipBeforeSelection (0.39s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.455s
+FAIL
