@@ -56,6 +56,10 @@ type Finding struct {
 	// unhealthy containers, the mount — so a fix can be offered per thing
 	// rather than as a link to a page that lists them again.
 	Subjects []Subject `json:"subjects,omitempty"`
+	// Correlated are saved diagnostic runs from this server that met trouble
+	// in the same stretch, for network findings and only for a reader who
+	// may open them.
+	Correlated []ProbeEvidence `json:"correlated,omitempty"`
 }
 
 // Fact is one labelled measurement behind a finding.
@@ -255,15 +259,17 @@ func (r *Recorder) Assess(ctx context.Context, snap *sysinfo.Snapshot) Health {
 		}
 	}
 	links := r.links.observe(snap.Net, time.Now())
+	tcp := r.tcp.observe(snap.TCP, time.Now())
 
 	h.Findings = append(h.Findings, storageFindings(snap)...)
 	h.Findings = append(h.Findings, memoryFindings(snap)...)
 	h.Findings = append(h.Findings, cpuFindings(snap, recent)...)
 	h.Findings = append(h.Findings, pressureFindings(snap)...)
 	h.Findings = append(h.Findings, networkFindings(snap, links)...)
+	h.Findings = append(h.Findings, tcpFindings(snap, tcp, recent)...)
 	h.Findings = append(h.Findings, hardwareFindings(snap)...)
 
-	hostAreas(&h, snap, links)
+	hostAreas(&h, snap, links, tcp)
 	// Runtime evidence is read by the API layer; until it is merged these
 	// two are honestly unread rather than absent.
 	h.SetArea(AreaServices, "not read", false)
@@ -720,7 +726,7 @@ func hardwareFindings(snap *sysinfo.Snapshot) []Finding {
 
 // hostAreas reads the five host areas into the verdict. The runtime areas
 // are the API layer's, which holds the service manager and Docker.
-func hostAreas(h *Health, snap *sysinfo.Snapshot, links linkWindows) {
+func hostAreas(h *Health, snap *sysinfo.Snapshot, links linkWindows, tcp *tcpDelta) {
 	switch {
 	case snap.Pressure.Supported:
 		h.SetArea(AreaCPU, fmt.Sprintf("%s stalled", percent(snap.Pressure.CPUSome60)), true)
@@ -760,14 +766,17 @@ func hostAreas(h *Health, snap *sysinfo.Snapshot, links linkWindows) {
 		for _, w := range links.windows {
 			worst = max(worst, w.lossPercent())
 		}
+		summary := percent(worst) + " loss"
 		switch {
 		case worst == 0:
-			h.SetArea(AreaNetwork, "no drops", true)
+			summary = "no drops"
 		case worst < 0.1:
-			h.SetArea(AreaNetwork, "<0.1% loss", true)
-		default:
-			h.SetArea(AreaNetwork, percent(worst)+" loss", true)
+			summary = "<0.1% loss"
 		}
+		if extra := tcpSummary(snap, tcp); extra != "" {
+			summary += " · " + extra
+		}
+		h.SetArea(AreaNetwork, summary, true)
 	}
 
 	var parts []string
