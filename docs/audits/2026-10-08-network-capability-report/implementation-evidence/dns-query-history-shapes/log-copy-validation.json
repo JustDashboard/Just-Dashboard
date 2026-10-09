@@ -1,0 +1,66 @@
+[
+  {
+    "name": "focused",
+    "raw_bytes": 73,
+    "raw_sha256": "d09234ed15ea7eb4e45f808dd36d7f26a1625c1fec550b9c936b42a216ffa7eb",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "07a92b683b5c314d087b82fc0e536c3bd1ef96f974cf72032041ba4ebe8adf21",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "required",
+    "raw_bytes": 176,
+    "raw_sha256": "29c00fe0d69989a17928de7876a8336eea5eab26ae6d5a0780bf96a1b2fbf147",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "963c34ae8ec9a14c5d1c649081c25e25bdd4223e2ebb42c34ea0357f0c62e703",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "race",
+    "raw_bytes": 18705,
+    "raw_sha256": "f23d5a3c7cea9a0235a32fee27a598c7956fd256b7214011efe07f5643d29721",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "216b21a849f5228bf3a6823d0848d2016d3e69401ed30fa1b5954726a86405e8",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "api-race",
+    "raw_bytes": 66,
+    "raw_sha256": "5b043a4ece8b547c80b6e9d2749b83cc3853c267998d059d457d667cb31bbf4f",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "395820e27d4b59adba3157190de5797504066ffbbcfdf9fb8d03c3521478e553",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "compile",
+    "raw_bytes": 0,
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "native-adguard",
+    "raw_bytes": 5452,
+    "raw_sha256": "f8c7881f6a32b04171f47818881a4074b24dbf8cbebe07837e303bde3a4e6dcf",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "65ca456529eedd6ccd722f1a9a2a9f65e60a01ef1f446dcdf35fcf6e495424e7",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "native-pihole",
+    "raw_bytes": 3869,
+    "raw_sha256": "ad9d4678a110967e240842a4002816be4dc883c4374f54610f8497c41cb90d79",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "d529f44ebaaf5f18fde98c57e6ae040ab0b82c2e3491d55125387c117878a9e6",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "native-technitium",
+    "raw_bytes": 2404,
+    "raw_sha256": "83ff57e10c8cb408068db7a02f76151ee965f59b2814711f9c3b57d144a38a65",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "82539266ed8dc078875674e8eab0350c926ade893ddf90446ea02aaa9aa563bd",
+    "gzip_roundtrip_byte_exact": true
+  }
+]

@@ -21,6 +21,11 @@ adds bounded mounted AdGuard suffix/Pi-hole exact controls, complete selected-po
 explicit native group membership and separate assembled engine/restart/cleanup proof. Its fresh
 reachable gate passes 205 executable browser cases; wider criteria and all existing statuses remain open.
 
+The [native query decoding checkpoint](implementation-evidence/dns-query-history-shapes-acceptance.md)
+corrects AdGuard question names and keeps malformed/null row evidence unknown, with retained-query
+privacy checks and separately attributed current-source three-engine lifecycle acceptance. This
+does not establish complete query coverage or measured filtering, and changes no ledger status.
+
 ## Concrete findings
 
 | Requirement | Status | Evidence / remaining acceptance |

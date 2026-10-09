@@ -1,0 +1,16 @@
+{
+  "source": "4ce967f1f4c8e604ab2f39ecfe02fc4e756a6be3",
+  "binary_sha256": "b262c01738792ca6c964056a2f3b578c5ed394a44d1db6f1ed8f5a6375dd592c",
+  "argv": [
+    "/home/ubuntu/jd-network-validation-tmp/dns-query-history-shapes/dns-query-native.test",
+    "-test.run",
+    "^TestDNS(QueryHistory|ServiceSealsCredentialsAndKeepsReadOnlyClosed|ServiceRetainedHistoryIsBoundedPrivateMetadataWithoutNativeAccess|NativeTLSIdentityRedirectAndProxyBoundary)",
+    "-test.count=1",
+    "-test.timeout=90s",
+    "-test.v"
+  ],
+  "elapsed_seconds": 13.687782460823655,
+  "exit_code": 0,
+  "raw_bytes": 18705,
+  "raw_sha256": "f23d5a3c7cea9a0235a32fee27a598c7956fd256b7214011efe07f5643d29721"
+}

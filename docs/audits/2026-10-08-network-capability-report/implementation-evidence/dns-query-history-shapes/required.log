@@ -1,0 +1,3 @@
+Against d427809d81492945396bd5386395dec4010b7916: 5 changed files.
+Go packages: ./internal/dnsservice
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	29.461s

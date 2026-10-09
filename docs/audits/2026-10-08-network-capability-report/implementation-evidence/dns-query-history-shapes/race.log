@@ -1,0 +1,191 @@
+=== RUN   TestDNSServiceRetainedHistoryIsBoundedPrivateMetadataWithoutNativeAccess
+--- PASS: TestDNSServiceRetainedHistoryIsBoundedPrivateMetadataWithoutNativeAccess (2.70s)
+=== RUN   TestDNSNativeTLSIdentityRedirectAndProxyBoundary
+2026/10/09 07:38:28 http: TLS handshake error from 127.0.0.1:54968: remote error: tls: bad certificate
+2026/10/09 07:38:28 http: TLS handshake error from 127.0.0.1:54978: remote error: tls: bad certificate
+--- PASS: TestDNSNativeTLSIdentityRedirectAndProxyBoundary (0.03s)
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/adguard
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/pihole
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/technitium
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/adguard_protocol_unreported
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/pihole_zero_timestamp_nullable_status
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/technitium_missing_native_question
+=== RUN   TestDNSQueryHistoryNativeFieldsAndNullableContracts/technitium_explicit_empty_question
+--- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts (0.02s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/adguard (0.01s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/pihole (0.01s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/technitium (0.01s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/adguard_protocol_unreported (0.00s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/pihole_zero_timestamp_nullable_status (0.00s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/technitium_missing_native_question (0.00s)
+    --- PASS: TestDNSQueryHistoryNativeFieldsAndNullableContracts/technitium_explicit_empty_question (0.00s)
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/array_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/time_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/time_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/client_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/client_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/reason_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.name_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/null_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/empty_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/string_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/reason_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/client_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/reason_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.name_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.type_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.type_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/legacy_host_without_name
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/protocol_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/time_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.name_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.type_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/protocol_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/timestamp_negative
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/null_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/array_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/type_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/domain_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/status_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client.ip_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/time_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/type_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client.ip_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/timestamp_string
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/time_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/time_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/type_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client.ip_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/timestamp_overflow
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/empty_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/string_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/domain_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/domain_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/status_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/empty_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/timestamp_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/timestamp_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/clientIpAddress_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/responseType_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/responseType_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/null_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/string_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/timestamp_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/clientIpAddress_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/protocol_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/question_name_only_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/clientIpAddress_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/protocol_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/responseType_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qname_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qtype_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/array_row
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/protocol_null
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qname_wrong_type
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qtype_missing
+=== RUN   TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/question_type_only_null
+--- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory (0.03s)
+    --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard (0.01s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/array_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/time_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/time_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/client_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/client_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/reason_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.name_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/null_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/empty_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/string_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/reason_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/client_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/reason_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.name_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.type_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.type_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/legacy_host_without_name (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/protocol_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/time_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.name_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/question.type_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/adguard/protocol_wrong_type (0.00s)
+    --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole (0.01s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/timestamp_negative (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/null_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/array_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/type_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/domain_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/status_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client.ip_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/time_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/type_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client.ip_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/timestamp_string (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/time_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/time_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/type_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/client.ip_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/timestamp_overflow (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/empty_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/string_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/domain_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/domain_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/pihole/status_missing (0.00s)
+    --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium (0.01s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/empty_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/timestamp_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/timestamp_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/clientIpAddress_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/responseType_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/responseType_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/null_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/string_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/timestamp_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/clientIpAddress_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/protocol_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/question_name_only_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/clientIpAddress_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/protocol_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/responseType_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qname_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qtype_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/array_row (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/protocol_null (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qname_wrong_type (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/qtype_missing (0.00s)
+        --- PASS: TestDNSQueryHistoryRejectsMalformedRowsWithoutPartialHistory/technitium/question_type_only_null (0.00s)
+=== RUN   TestDNSQueryHistoryRedactsAllReportedFields
+=== RUN   TestDNSQueryHistoryRedactsAllReportedFields/adguard
+=== RUN   TestDNSQueryHistoryRedactsAllReportedFields/pihole
+=== RUN   TestDNSQueryHistoryRedactsAllReportedFields/technitium
+--- PASS: TestDNSQueryHistoryRedactsAllReportedFields (0.01s)
+    --- PASS: TestDNSQueryHistoryRedactsAllReportedFields/adguard (0.00s)
+    --- PASS: TestDNSQueryHistoryRedactsAllReportedFields/pihole (0.00s)
+    --- PASS: TestDNSQueryHistoryRedactsAllReportedFields/technitium (0.00s)
+=== RUN   TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews
+=== RUN   TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews/adguard
+=== RUN   TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews/pihole
+=== RUN   TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews/technitium
+--- PASS: TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews (7.27s)
+    --- PASS: TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews/adguard (2.38s)
+    --- PASS: TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews/pihole (2.35s)
+    --- PASS: TestDNSQueryHistoryUnknownSectionKeepsNativePolicyAndPrivateReviews/technitium (2.54s)
+=== RUN   TestDNSServiceSealsCredentialsAndKeepsReadOnlyClosed
+--- PASS: TestDNSServiceSealsCredentialsAndKeepsReadOnlyClosed (2.50s)
+PASS

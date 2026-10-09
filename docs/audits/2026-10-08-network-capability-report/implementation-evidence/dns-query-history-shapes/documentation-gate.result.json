@@ -1,0 +1,12 @@
+{
+  "base": "4ce967f1f4c8e604ab2f39ecfe02fc4e756a6be3",
+  "argv": [
+    "scripts/test-changed.sh",
+    "4ce967f1f4c8e604ab2f39ecfe02fc4e756a6be3"
+  ],
+  "elapsed_seconds": 0.04278302378952503,
+  "exit_code": 0,
+  "raw_bytes": 68,
+  "raw_sha256": "560cc257d3e1bd0a33f9bb1bb291b8777c7b6258a35b2965f104a98a733c1546",
+  "qualification": "Documentation/evidence-only gate after the complete required d427 gate and unchanged frozen source proof; no additional Go/frontend tests selected."
+}

@@ -32,6 +32,12 @@ the matching production build, all 205 reachable executable browser cases, twelv
 separate final assembled AdGuard/Pi-hole configuration/restart/cleanup proof. Original browser and
 native preflight failures remain preserved; complete P17/C074 and client filtering remain open.
 
+[Native query-history decoding acceptance](dns-query-history-shapes-acceptance.md) corrects AdGuard's
+question-name mapping and rejects fabricated or partial rows from malformed native collections.
+It records explicit empty/zero/native-null distinctions, private retained-review exclusion, the
+changed-file gate, selected query/API races and separately attributed current-source three-engine
+owned lifecycle proof. Actual installed Technitium logger rows and broader P17/C074 remain open.
+
 [Kernel observer acceptance](observer-kernel-acceptance.md) records the bounded native observer,
 owned detach/retry, durable batch receipts and actual Docker/process-death fixtures.
 [Observer UI acceptance](observer-ui-acceptance.md) records its separate measurement channels,

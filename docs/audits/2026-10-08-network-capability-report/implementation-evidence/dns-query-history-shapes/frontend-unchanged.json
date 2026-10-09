@@ -1,0 +1,9 @@
+{
+  "query_source": "4ce967f1f4c8e604ab2f39ecfe02fc4e756a6be3",
+  "reference_worktree": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui",
+  "reference_commit": "d427809d81492945396bd5386395dec4010b7916",
+  "frontend_inputs_checked": 1538,
+  "mismatches": [],
+  "new_frontend_build_or_browser_claim": false,
+  "reason": "The incremental change alters only native backend query decoding; frontend DTO, components, fixtures, package and lock are unchanged."
+}

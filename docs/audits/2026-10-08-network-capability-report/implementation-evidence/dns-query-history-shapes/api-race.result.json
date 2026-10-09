@@ -1,0 +1,17 @@
+{
+  "source": "4ce967f1f4c8e604ab2f39ecfe02fc4e756a6be3",
+  "argv": [
+    "go",
+    "test",
+    "-race",
+    "./internal/api",
+    "-run",
+    "^TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit$",
+    "-count=1",
+    "-timeout=90s"
+  ],
+  "elapsed_seconds": 81.44431660883129,
+  "exit_code": 0,
+  "raw_bytes": 66,
+  "raw_sha256": "5b043a4ece8b547c80b6e9d2749b83cc3853c267998d059d457d667cb31bbf4f"
+}
