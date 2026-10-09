@@ -263,33 +263,114 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
 
 ## DNS
 
-Files: `dns.go`, `dns_hosts.go`, `dns_lookup.go`, `dns_wire.go`, `dns_evidence*.go`,
+Files: `dns.go`, `dns_owner.go`, `dns_verify.go`, `dns_hosts.go`, `dns_hosts_evidence.go`,
+`dns_lookup.go`, `dns_private.go`, `dns_wire.go`, `dns_tls.go`, `dns_dnssec.go`, `dns_evidence*.go`,
 `dns_alias.go`.
 
 The resolver chain includes `/etc/resolv.conf` (ordinary whitespace, including tabs), global/per-link
-systemd-resolved scopes/statistics, port-53 listeners and existing AdGuard Home/Pi-hole services.
+systemd-resolved scopes/statistics, port-53 listeners and existing AdGuard Home, Pi-hole and
+Technitium services. The view and the owner adapter read the host's file through `dnsHostRoot`
+(`/host` in the dashboard's container), following symbolic links component by component inside that
+root, so an absolute target such as `/run/NetworkManager/resolv.conf` or a `/var/run` link is read on
+the host's side and Docker's overlaid copy is never mistaken for the host's.
+
+### Resolver owner
+
+`DNSView.owner` (`dns_owner.go`) names who writes `/etc/resolv.conf` and what programs ask, instead
+of treating systemd-resolved as universal. It classifies systemd-resolved (stub or uplink links, or a
+plain copy of its file), NetworkManager (link to `/run/NetworkManager/…`, its header, its dnsmasq
+plugin), Debian resolvconf, openresolv, SUSE netconfig, dhcpcd, dhclient, Tailscale, WSL, a loopback
+cache answering on port 53, a plain file, a missing file and unrecognised links. Evidence comes from
+the link target, the file's first signed header line, `[main] dns=`/`rc-manager=` merged from
+`NetworkManager.conf` and the `/usr/lib`, `/run` and `/etc` `conf.d` snippets (an `/etc` snippet shadows
+one of the same name, then name order), `/etc/resolvconf/resolv.conf.d`, `/etc/resolvconf.conf`,
+`NETCONFIG_DNS_POLICY`, the port-53 listeners and the running services; `systemctl is-active
+NetworkManager` is asked only on a host that shows signs of NetworkManager. `chain` is stub, uplink,
+local-cache, direct or missing; `confidence` is confirmed (file and owner's own service or
+configuration agree), declared (only the file says so), inferred or unknown; `dashboardWrites` says
+whether the resolved drop-in reaches what programs ask. Disagreements — resolved running while
+NetworkManager writes the file, `dns=systemd-resolved` without the stub link, a stale header with
+`rc-manager=unmanaged`, the uplink mode's loss of routing domains/DoT/DNSSEC, Tailscale's rewrites —
+are listed as `conflicts`. `handoff` says where DNS is changed for that owner, with a dashboard route
+where one exists (`#dns-links` for resolved's per-link scopes, `/network/interfaces` for a native
+profile). A refused change on a host without resolved and the post-apply warning name the owner and
+its handoff. The adapter only reads; it never edits an owner's configuration.
+
+### Upstreams, clearing and the verification plan
+
 Upstreams support custom ports, scoped IPv6 and TLS names. Nonempty upstream/fallback/domain lists
 reset preceding list assignments, then replace them in
-`/etc/systemd/resolved.conf.d/90-just-dashboard.conf`. Empty lists omit the key and inherit global
-defaults; this API cannot explicitly clear a global list. Each set rewrites the managed drop-in:
-omitted managed DNSSEC/DoT/cache settings inherit defaults, while unrelated host/per-link files are
-untouched. The UI preserves existing managed fallback/cache settings and exposes both as drafts.
-The module restarts resolved and tests resolution; optional `verificationName` selects a private LAN
-name instead of the default public checks. With a disabled port-53 stub it verifies via `resolvectl`.
-Verification accepts A or AAAA within a short per-query budget. Unreadable old drop-ins refuse writes
-before mutation. Set/restart failure attempts to restore the old file and restart with an independent
-thirty-second context; failed recovery is returned to the caller. Reset removes the managed drop-in
-and restores it if restart fails. If default DNS fails verification after a successful restart, reset
-keeps the drop-in removed and reports `verified: false` for the caller to inspect.
+`/etc/systemd/resolved.conf.d/90-just-dashboard.conf`. An empty list omits the key and inherits the
+host's list. `clear` (any of `servers`, `fallback`, `domains`) instead writes only the empty
+assignment: it removes what `resolved.conf` and earlier drop-ins set, and an empty `FallbackDNS=` turns
+off resolved's compiled-in fallback. A list cannot be both given values and cleared; `ManagedDNS.cleared`
+reports cleared lists on read-back. Each set rewrites the managed drop-in: omitted managed
+DNSSEC/DoT/cache settings inherit defaults, while unrelated host/per-link files are untouched.
+
+`POST /dns/verification-plan` returns, without changing anything, the `DNSVerification` a change will
+be held to; the UI shows it in the confirmation. Checks are: `readback` (required: `resolvectl status`
+must report the servers, fallback, domains, DNSSEC and DoT written, compared in the drop-in's server
+normalisation — a later drop-in or `resolved.conf` that overrides them fails the change);
+`resolution` for each of up to eight `verificationNames` (or the older single `verificationName`, or
+`cloudflare.com`/`example.com` when none is given), each labelled with the scope resolved routes it
+to — `~corp.example on wg0`, `default route via global upstreams` — computed from the request's global
+scope and the links as they are; `transport` when DoT is `yes` (required) or `opportunistic`
+(reported); and `dnssec` when DNSSEC is `yes` or `allow-downgrade` (reported). `unverified` names what
+no check reaches: a routing domain the request sets with no verification name under it, the default
+route when every name is link-routed, fallback servers, links inheriting the global DNSSEC/DoT setting
+and the unreported cache mode.
+
+The module restarts resolved and runs the plan. Resolution accepts A or AAAA within a short per-query
+budget; with a disabled port-53 stub it verifies via `resolvectl query`. Transport and DNSSEC read the
+first answer back through the [native policy adapter](network-dns-evidence.md) with fresh-network
+flags: required DoT passes only on native-reported confidential transport (with strict TLS identity
+policy reported as such) and an unencrypted fresh answer fails it; opportunistic DoT reports a fallback
+to classic DNS as a warning; a native DNSSEC failure fails the change, an unauthenticated answer is a
+warning. Where the native adapter is unavailable (a foreign chain, resolved older than 256) those two
+checks are `unknown`, never passed. Any failed required check restores the old file and restarts with
+an independent thirty-second context; the 409 refusal carries the complete `verification` beside its
+error and failed recovery is returned to the caller. Unreadable old drop-ins refuse writes before
+mutation. Reset removes the managed drop-in, restores it if restart fails, and reports its default-route
+check without rolling back.
+
+### Per-link split DNS
+
+Global settings stay in the drop-in; a link's servers and domains belong to its network manager. The
+DNS page lists every link resolved holds DNS for (servers, search and `~routing` domains, default-route
+state, DoT and DNSSEC) and, for an administrator, edits a link's split DNS through the existing
+[native profile adapter](network-native-managers.md): it reads `GET /network/native/profiles/{device}`,
+shows the owner and any refusal, and writes `PUT /network/native/profiles/{device}` with the complete
+current intent where only the DNS servers (split by family), the shared link-level routing and search
+domains (the same list on every enabled family, as networkd requires) and the ignore-automatic-DNS
+choice change. The write is always a temporary apply with the account/session-bound reconnection
+confirmation and independent watchdog recovery; the native adapter's generation, ownership, runtime
+agreement and recovery rules apply unchanged. The page states resolved's automatic default-route rule
+for the draft (routing-only domains without `~.` stop a link answering unclaimed names) without claiming
+a manager that sets the default route itself follows it.
+
+### Host records
 
 Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` reaches the real host;
 bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
-writes. This is not a DNS server or an AdGuard/Pi-hole configuration adapter.
+writes. `POST /dns/hosts/preview` validates records as a save would and, changing nothing, returns the
+block it would write, added/removed records and overlaps: `duplicate` (same name and address twice in
+the block), `conflict` (one name, two addresses of a family in the block), `shadowed` (a line before the
+block gives the name another address of the family — returned first), `overrides` (a later foreign line
+disagrees) and `repeated` (a foreign line already says the same). The UI previews before saving and
+stops on a conflict or shadowing until the reader saves again. `GET /dns/hosts/resolution` asks the
+host's NSS (`getent ahostsv4`/`ahostsv6` through `hostexec` in the host namespace, explicit argv, at most
+sixteen names, three seconds each) what each managed name resolves to and reports `matches`,
+`includes` (another address first), `differs`, `unresolved` or `unknown`, with the `hosts:` line of
+`nsswitch.conf`. A name missing from the files source goes on to DNS like any program's lookup. This is
+not a DNS server or an AdGuard/Pi-hole configuration adapter.
 
 The separate [native DNS services module](network-dns-services.md) provides sealed connections to
-AdGuard Home, Pi-hole FTL and Technitium, private configured-policy/query inventory, retained reviewed
-native changes and bounded owned Docker provisions. These default to dashboard read-only and do not
-redirect the host resolver or treat local overrides as authoritative zones.
+AdGuard Home, Pi-hole FTL and Technitium, private configured-policy/query inventory, read-only DHCP
+inventory, retained reviewed native changes and bounded owned Docker provisions. These default to
+dashboard read-only and do not redirect the host resolver or treat local overrides as authoritative
+zones. `GET /dns/services/handoffs` joins the servers this page detects to those connections.
+
+### Lookups and the private-name guard
 
 `POST /dns/lookup` defaults to `mode: "effective"`. When the actual host chain delegates to a supported
 systemd-resolved stub, it uses the [native policy adapter](network-dns-evidence.md), including explicit
@@ -297,20 +378,48 @@ CNAME checks before each target question. Native stub ownership, version and com
 must be readable; failure never tries another resolver. Merely running resolved does not establish
 the host chain's ownership. The chain and comparison inventory are read in the host namespace,
 avoiding Docker's overlaid resolver file; unreadable/malformed host chains stop effective lookup.
-Other resolv.conf chains use their configured servers sequentially and
-retain explicit unknowns for split policy and recursive alias disclosure. The response includes
+Other resolv.conf chains use their configured servers sequentially. The response includes
 routing-domain evidence, named comparison targets, omissions and limits. Both paths exclude hosts/NSS
 and search expansion; the native path additionally excludes DNAME and local/cache answers.
+
+The effective test never hands a private name to a public resolver (`dns_private.go`). A private name
+is one under the chain's search domains or resolved's link routing/search domains, a single-label
+name, a special-use or commonly private suffix (`local`, `localhost`, `localdomain`, `home.arpa`,
+`internal`, `intranet`, `lan`, `home`, `corp`, `private`, `test`, `invalid`, `onion`, `alt`) or the
+reverse name of an RFC 1918, unique-local, link-local, loopback or shared CGNAT address. On the native
+path, such a name that no link claims would go to resolved's default route; when a server there is
+public the lookup is refused (`409 dns_private_name_public_upstream`) before any question. On a
+foreign chain the first public server refuses it the same way; when every server is private its own
+forwarding is unseen, so the lookup needs `acknowledgeForwarding: true` (`409
+dns_private_name_unknown_forwarding` otherwise) and then goes only to the configured resolver.
 
 `mode: "compare"` requires explicit configured/preset `destinations` and
 `acknowledgeDisclosure: true`; the UI names those destinations and explains that private names leave
 their normal policy scope. The old `includePublic` fan-out flag no longer authorizes comparison.
 Direct classic DNS supports A/AAAA/CNAME/MX/TXT/NS/PTR/SRV, retaining custom ports and IPv6 scope,
 validating response identity/question/answer ownership/canonical chains and retrying truncated UDP
-over TCP. Fan-out is bounded at sixteen and each query at three seconds. CNAME queries return the
-immediate alias; other types use terminal data in that response without a follow-up query. Neither
-lookup mode claims verified DoT/DoH transport or independent DNSSEC signature validation. Detailed
-retained investigations separately label native-reported encryption, strict TLS policy and DNSSEC.
+over TCP. `transport: "tls"` asks each selected destination over DNS over TLS to its published or
+configured identity (presets carry theirs; a configured server its `#name`), verifying the certificate
+against the host's trust store; a selected destination without an identity is listed in
+`omittedTargets` with the reason and not asked. `dnssec: true` sets the EDNS DO bit and reports each
+destination's AD claim and returned RRSIG count; neither is validation by the dashboard. Fan-out is
+bounded at sixteen and each query at three seconds. CNAME queries return the immediate alias; other
+types use terminal data in that response without a follow-up query. Transport, AD and TLS version are
+per-answer fields; effective lookups leave them empty because resolved chooses its own transport.
+
+### Certificates and the DNSSEC chain
+
+`POST /dns/tls-check` (`read`) opens the dashboard's own TLS session to each configured DNS-over-TLS
+server (global, fallback, per-link and the drop-in's) on its DoT port, or to named presets, verifies the
+certificate for the configured name against the host's trust store and asks the root's NS records —
+which carry nothing private — over the session. Each check is `trusted`, `untrusted` (hostname,
+authority or validity failure), `no-answer` or `unreachable`, with TLS version, subject, issuer,
+names, expiry, SHA-256 fingerprint and verified chain length. Unnamed servers are listed as omitted:
+opportunistic TLS cannot authenticate them. Only inventory servers can be selected, at most sixteen.
+`POST /dns/dnssec-chain` (`system.admin`) walks a name's chain of trust through the native adapter, as
+[documented with the evidence adapter](network-dns-evidence.md#dnssec-chain-of-trust). Neither lookup
+mode nor the certificate check claims verified resolver transport for a particular answer; retained
+investigations separately label native-reported encryption, strict TLS policy and DNSSEC.
 
 ## Diagnostics and host support
 
@@ -351,9 +460,9 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |
-| DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |
+| DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` and `POST /dns/tls-check` (read), `GET /dns/hosts/resolution` (read), `POST /dns/verification-plan`, `POST /dns/hosts/preview` and `POST /dns/dnssec-chain` (admin, unaudited reads) |
 | Private DNS evidence | `GET`/`POST /dns/evidence/`, `GET`/`DELETE /dns/evidence/{id}`, `GET /dns/evidence/{id}/export` (admin; deletion destructive) |
-| Native DNS services | `/dns/services/` connections, `/{id}/zones/{zone}/records` authority inventory, `/{id}/changes` review, `/changes/{id}/current` exact current selection and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |
+| Native DNS services | `/dns/services/` connections, `/handoffs` detected-server joins, `/{id}/dhcp` read-only DHCP, `/{id}/zones/{zone}/records` authority inventory, `/{id}/changes` review, `/changes/{id}/current` exact current selection and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |
 | Traffic | `GET /traffic/processes`, `GET /traffic/containers`, `GET /ebpf` |
 | Diagnostics | `POST /probe` (26 tools) |
 

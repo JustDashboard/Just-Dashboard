@@ -99,6 +99,41 @@ DoH, container clients, upstream forwarding, provider layers, authority/delegati
 remain unknown unless a separate supported measurement establishes them. No result claims generic
 connectivity or whole-path health.
 
+## Reuse by resolver changes and lookups
+
+The resolver change verification ([network.md](network.md#upstreams-clearing-and-the-verification-plan))
+reads its first answer back through `InvestigateDNS` with the same identity, delegation, policy and
+fresh-flag rules: transport and DNSSEC checks report exactly these native readings, and an unavailable
+adapter leaves them `unknown`. The effective lookup's private-name guard runs before the adapter: a
+private name no link claims is refused when resolved's default route reaches a public server, so the
+adapter is never asked to disclose it.
+
+## DNSSEC chain of trust
+
+`POST /api/v1/network/dns/dnssec-chain` (`system.admin`, not retained, not audited — it changes
+nothing) walks one name's chain from its own labels to the root. It identifies the native owner as
+above, reads one complete policy snapshot and asks only ancestors whose best-match native scope is the
+name's own: once an ancestor falls in a different scope (a private name's public parents, say) it and
+every level above are `not_queried`, so a private zone's ancestry is never disclosed to another scope.
+Each level asks `ResolveRecord` for DNSKEY with the fresh-network flags; a zone apex then asks DS (the
+root compares instead). Every set keeps resolved's own authentication only when the reply reports
+fresh network DNS without cache/synthetic/zone/trust-anchor origin. Native NODATA/NXDOMAIN become
+`absent`/`not_found`, the first-line `DNSSEC validation failed:` diagnostic `validation_failed`.
+
+The dashboard then checks each delegation itself: it parses every DNSKEY (RFC 4034 key tag, algorithm,
+SEP flag), recomputes the DS digest (SHA-1, SHA-256, SHA-384) from the child's canonical owner name and
+DNSKEY RDATA, and matches it to the parent's DS records by tag, algorithm and digest — never by tag
+alone. The root's keys are hashed against the IANA root anchors KSK-2017 (20326) and KSK-2024 (38696),
+the same pair systemd-resolved 257 carries built in. Levels report `digest_match`, `digest_mismatch`,
+`no_ds`, `root_anchor`, `root_anchor_mismatch` or `not_checked`. The verdict is `secure` (every link
+recomputed to an IANA anchor and every set authenticated), `anchored` (secure up to the top zone asked,
+which is locally anchored or the edge of the scope), `insecure` (no DS for a delegation, or
+unauthenticated sets), `broken` (a digest or root mismatch, or a native validation failure) or
+`unknown`. resolved refuses explicit RRSIG questions, so signatures remain the native validator's word,
+and its API does not say whether an absent DS was proven by NSEC/NSEC3; both are stated limitations.
+A walk is bounded to twelve levels, twenty-four questions and the twenty-second budget, and stops on
+an owner change.
+
 ## Retention, routes and startup
 
 The additive `network_dns_evidence` SQLite table holds immutable normalized question/scope, actor,
@@ -168,3 +203,23 @@ sudo env GOMAXPROCS=2 "$fixture_dir/dns-evidence.test" -test.run '^TestDNSEviden
 
 Running the Go test as an ordinary contributor skips this namespace fixture; the root test binary
 provides the native acceptance. It opens no production resolver configuration.
+
+`TestDNSResolverMaturityNativeDisposable` (`dns_verify_live_test.go`) is the resolver-maturity
+acceptance in the same kind of disposable namespaces. It serves a signed hierarchy of its own — a root
+anchored only inside the namespace (replacing resolved's built-in anchor), `example` with a DS in the
+root and `corp.example` with a DS in `example`, NSEC-proven NODATA and signed SOA — from a strict-DoT
+server on a public-looking `203.0.113.53`, a private DoT link server, a classic-only server and a private
+plain server on `10.53.0.53`. `SetDNS` writes the namespace's drop-in, and `systemctl restart` is
+answered by restarting the namespace's resolved and re-pushing the link's policy as a link manager
+would; any other `systemctl` call fails the fixture, so it never reaches the host. It checks the owner
+verdict, a strict-DoT change with a cleared fallback and two verification names in two scopes
+(read-back, scope labels, native strict transport, DNSSEC), an opportunistic fallback warning, a wrong
+TLS identity and an overriding later drop-in each rolled back onto the previous drop-in, the independent
+certificate check, the chain walk (recomputed DS digests accepted by resolved itself, the namespace root
+refused as an IANA anchor, a private name's ancestors not asked), the private-name guard on the native
+and foreign paths with zero public questions for refused names, the NSS resolution of managed host
+names and the hosts overlap preview. Run it like the evidence fixture:
+
+```bash
+sudo env GOMAXPROCS=2 "$fixture_dir/dns-evidence.test" -test.run '^TestDNSResolverMaturityNativeDisposable$' -test.count=1 -test.v
+```

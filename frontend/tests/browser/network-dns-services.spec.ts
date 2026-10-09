@@ -1105,3 +1105,35 @@ for (const width of [390, 1280, 1720]) {
     expect(posts(control)).toHaveLength(1)
   })
 }
+
+test("a detected server without a connection opens the connection form with its origin", async ({
+  page,
+}) => {
+  await mockDNSServicePage(page, { handoff: "unconnected" })
+  await page.getByRole("button", { name: "Connect AdGuard Home at http://127.0.0.1:3000" }).click()
+  const panel = page.getByRole("dialog")
+  await expect(panel.getByRole("heading", { name: "Connect native DNS engine" })).toBeVisible()
+  await expect(panel.getByLabel("Management origin")).toHaveValue("http://127.0.0.1:3000")
+  await expect(panel.getByLabel("Connection name")).toHaveValue("AdGuard Home (adguardhome)")
+  await expect(panel.getByRole("button", { name: "Select AdGuard Home" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+})
+
+test("a detected server's connection opens its inventory and reads its native DHCP", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { handoff: "connected" })
+  await page
+    .getByRole("button", { name: `Inspect AdGuard Home through ${control.view.connection.name}` })
+    .click()
+  const panel = page.getByRole("dialog")
+  await panel.getByRole("button", { name: "Read native DHCP" }).click()
+  const dhcp = panel.getByRole("region", { name: "Native DHCP server" })
+  await expect(dhcp.getByText("DHCP server disabled")).toBeVisible()
+  await expect(dhcp.getByRole("list", { name: "DHCP ranges" })).toContainText("192.168.1.100")
+  await expect(dhcp.getByRole("list", { name: "DHCP leases" })).toContainText("aa:bb:cc:dd:ee:02")
+  expect(control.reads).toContain(`/network/dns/services/${control.view.connection.id}/dhcp`)
+  expect(control.unexpectedReads).toEqual([])
+})

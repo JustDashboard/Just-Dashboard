@@ -413,9 +413,31 @@ func dnsMaturityFixture(t *testing.T) {
 	start("dbus-daemon", "--config-file="+busPath, "--nofork", "--nopidfile")
 
 	log := &questionLog{names: map[string][]string{}}
+	// A panic in a server goroutine would end the child before its cleanups
+	// stop the namespace's daemons; answer SERVFAIL and record it instead.
+	var answerFaults []string
+	var faultMu sync.Mutex
 	answer := func(server string) func([]byte) []byte {
-		return func(req []byte) []byte { return zoneAnswer(req, keys, log.record(server)) }
+		return func(req []byte) (out []byte) {
+			defer func() {
+				if r := recover(); r != nil {
+					faultMu.Lock()
+					answerFaults = append(answerFaults, fmt.Sprint(r))
+					faultMu.Unlock()
+					_, kind, qend := parseQuestion(req)
+					out = buildResponse(req, qend, kind, dnsBehavior{rcode: 2})
+				}
+			}()
+			return zoneAnswer(req, keys, log.record(server))
+		}
 	}
+	t.Cleanup(func() {
+		faultMu.Lock()
+		defer faultMu.Unlock()
+		if len(answerFaults) > 0 {
+			t.Errorf("fixture answer faults: %v", answerFaults)
+		}
+	})
 	// The global DoT server is on a public-looking address: the private-name
 	// guard judges it as a public resolver.
 	dnsEvidenceServeTLS(t, "203.0.113.53:853", certificate, answer("public"))

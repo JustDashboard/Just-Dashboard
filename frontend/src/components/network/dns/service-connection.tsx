@@ -18,29 +18,42 @@ import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { dnsConnectionDraft, prepareDNSConnection, type DNSFormErrors } from "./service-form"
+import {
+  dnsConnectionDraft,
+  prepareDNSConnection,
+  type DNSConnectionSeed,
+  type DNSFormErrors,
+} from "./service-form"
 
 export function DNSServiceConnectionForm(props: {
   connection?: DNSConnection
+  seed?: DNSConnectionSeed
   onConnected: (view: DNSServiceView) => void
   onCancel?: () => void
 }) {
-  return <ConnectionEditor key={props.connection?.id ?? "new"} {...props} />
+  return (
+    <ConnectionEditor
+      key={props.connection?.id ?? `new:${props.seed?.engine ?? ""}:${props.seed?.endpoint ?? ""}`}
+      {...props}
+    />
+  )
 }
 
 function ConnectionEditor({
   connection,
+  seed,
   onConnected,
   onCancel,
 }: {
   connection?: DNSConnection
+  seed?: DNSConnectionSeed
   onConnected: (view: DNSServiceView) => void
   onCancel?: () => void
 }) {
   const { can } = useAuth()
   const admin = can("system.admin")
   const id = useId()
-  const [draft, setDraft] = useState(() => dnsConnectionDraft(connection))
+  const [draft, setDraft] = useState(() => dnsConnectionDraft(connection, seed))
   const [baseline] = useState(connection?.generation)
   const [busy, setBusy] = useState(false)
   const [errors, setErrors] = useState<DNSFormErrors>({})

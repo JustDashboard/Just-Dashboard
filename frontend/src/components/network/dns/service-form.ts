@@ -19,11 +19,17 @@ export type DNSConnectionDraft = {
 }
 export type DNSFormErrors = Partial<Record<keyof DNSConnectionDraft, string>>
 
-export function dnsConnectionDraft(connection?: DNSConnection): DNSConnectionDraft {
+/** A detected server's engine, origin and name, handed to a new connection's form. */
+export type DNSConnectionSeed = Pick<DNSConnectionDraft, "name" | "engine" | "endpoint">
+
+export function dnsConnectionDraft(
+  connection?: DNSConnection,
+  seed?: DNSConnectionSeed,
+): DNSConnectionDraft {
   return {
-    name: connection?.name ?? "",
-    engine: connection?.engine ?? "adguard",
-    endpoint: connection?.endpoint ?? "",
+    name: connection?.name ?? seed?.name ?? "",
+    engine: connection?.engine ?? seed?.engine ?? "adguard",
+    endpoint: connection?.endpoint ?? seed?.endpoint ?? "",
     serverName: connection?.serverName ?? "",
     customCA: connection?.customCA ?? false,
     ca: "",

@@ -4,9 +4,12 @@ import {
   dnsView,
   dnsViewManaged,
   ebpfMissing,
+  ens3Profile,
   mockNetworkWrites,
+  networkManagerOwner,
   overrides,
   processTrafficWarming,
+  rolledBack,
   type Refusal,
 } from "./network-dns-fixture"
 
@@ -26,6 +29,7 @@ type Setup = {
   charts?: boolean
   overrides?: Record<string, unknown>
   refuse?: Refusal
+  forwardingRefusal?: boolean
 }
 
 async function open(page: Page, path: string, setup: Setup = {}) {
@@ -36,7 +40,10 @@ async function open(page: Page, path: string, setup: Setup = {}) {
   await mockNetwork(page, mutations, {
     overrides: { ...overrides, ...quiet, ...setup.overrides },
   })
-  await mockNetworkWrites(page, mutations, { refuse: setup.refuse })
+  await mockNetworkWrites(page, mutations, {
+    refuse: setup.refuse,
+    forwardingRefusal: setup.forwardingRefusal,
+  })
   await page.goto(path)
   return mutations
 }
@@ -222,6 +229,239 @@ test.describe("DNS", () => {
     expect(mutations).toEqual([])
   })
 
+  test("names the resolver owner, what programs ask and where DNS is changed", async ({ page }) => {
+    await open(page, "/network/dns")
+    const owner = page.getByRole("definition").filter({ hasText: "systemd-resolved" }).first()
+    await expect(owner).toBeVisible()
+    await expect(page.getByText("Reaches what programs ask")).toBeVisible()
+    await expect(page.getByRole("list", { name: "Owner evidence" })).toContainText(
+      "points at ../run/systemd/resolve/stub-resolv.conf",
+    )
+    await expect(page.getByRole("link", { name: "Per-link DNS" })).toHaveAttribute(
+      "href",
+      "#dns-links",
+    )
+  })
+
+  test("a NetworkManager-owned file says the drop-in does not reach programs and hands off", async ({
+    page,
+  }) => {
+    await open(page, "/network/dns", {
+      overrides: { "/network/dns/": { ...dnsView, owner: networkManagerOwner } },
+    })
+    await expect(page.getByText("Does not reach what programs ask")).toBeVisible()
+    await expect(page.getByText("The sources disagree")).toBeVisible()
+    await expect(
+      page.getByText(/programs ask 198\.51\.100\.53 because NetworkManager/),
+    ).toBeVisible()
+    await expect(page.getByRole("link", { name: "Open the interfaces" })).toHaveAttribute(
+      "href",
+      "/network/interfaces",
+    )
+  })
+
+  test("applying shows the server's verification plan first and each check's result after", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns")
+    await page.getByRole("button", { name: /^Quad9/ }).click()
+    await page.getByRole("textbox", { name: "Verification names" }).fill("nas.lan\nexample.com")
+    await page.getByRole("button", { name: "Apply", exact: true }).click()
+    const dialog = page.getByRole("dialog")
+    const plan = dialog.getByRole("list", { name: "Verification plan" })
+    await expect(plan).toContainText("Read back")
+    await expect(plan).toContainText("~lan on ens3")
+    await expect(dialog.getByRole("list", { name: "Not checked" })).toContainText(
+      "default route through the global upstreams",
+    )
+    expect(mutations.find((m) => m.path === "/network/dns/verification-plan")?.body).toMatchObject({
+      verificationNames: ["nas.lan", "example.com"],
+    })
+    await dialog.getByRole("button", { name: "Apply" }).click()
+    const results = page.getByRole("list", { name: "Verification results" })
+    await expect(results).toContainText("104.16.132.229")
+    await expect(results.getByText("Passed")).toHaveCount(3)
+    expect(
+      mutations.find((m) => m.method === "POST" && m.path === "/network/dns/")?.body,
+    ).toMatchObject({
+      verificationNames: ["nas.lan", "example.com"],
+    })
+  })
+
+  test("a change put back by a failed check says which check failed", async ({ page }) => {
+    await open(page, "/network/dns", {
+      refuse: {
+        path: /^\/network\/dns\/$/,
+        status: 409,
+        code: "dns_upstream_unreachable",
+        message:
+          "systemd-resolved is not running with the settings written: global servers are 9.9.9.9. The previous settings were put back.",
+        extra: rolledBack,
+      },
+    })
+    await page.getByRole("button", { name: /^Quad9/ }).click()
+    await page.getByRole("button", { name: "Apply", exact: true }).click()
+    await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click()
+    await expect(page.getByText("Put back: a required check failed")).toBeVisible()
+    const results = page.getByRole("list", { name: "Verification results" })
+    await expect(results.getByText("Failed")).toBeVisible()
+    await expect(results).toContainText(
+      "A later drop-in or the host's resolved.conf overrides them",
+    )
+  })
+
+  test("clearing the fallback list sends it as cleared, not as the host's default", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns")
+    await page
+      .getByRole("checkbox", {
+        name: "No fallback servers: turns off resolved's built-in fallback",
+      })
+      .check()
+    await page.getByRole("button", { name: "Apply", exact: true }).click()
+    await expect(page.getByRole("dialog")).toContainText("Fallback: none")
+    await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click()
+    await expect(page.getByText("resolved in")).toBeVisible()
+    expect(
+      mutations.find((m) => m.method === "POST" && m.path === "/network/dns/")?.body,
+    ).toMatchObject({
+      fallback: [],
+      clear: ["fallback"],
+    })
+  })
+
+  test("split DNS for a link goes through its native profile as a temporary apply", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns", {
+      overrides: { "/network/native/profiles/ens3": ens3Profile },
+    })
+    await page.getByRole("button", { name: "Edit split DNS for ens3" }).click()
+    const panel = page.getByRole("dialog")
+    await panel.getByLabel("DNS servers").fill("10.0.0.53\nfd00::53")
+    await panel.getByLabel("Routing domains").fill("corp.example")
+    await expect(panel.getByRole("list", { name: "What resolved will do" })).toContainText(
+      "Names under corp.example go only to ens3's servers",
+    )
+    await panel.getByRole("button", { name: "Apply temporary split DNS" }).click()
+    const put = page.waitForRequest(
+      (request) =>
+        request.method() === "PUT" && request.url().endsWith("/network/native/profiles/ens3"),
+    )
+    await page.getByRole("dialog").getByRole("button", { name: "Apply temporary settings" }).click()
+    expect((await put).headers()["x-jd-network-apply"]).toBe("pending")
+    await expect.poll(() => mutations.find((m) => m.method === "PUT")).toBeTruthy()
+    const body = mutations.find((m) => m.method === "PUT")?.body as {
+      generation: string
+      intent: typeof ens3Profile.intent
+    }
+    expect(body.generation).toBe("gen-ens3-1")
+    expect(body.intent.ipv4).toMatchObject({
+      dns: ["10.0.0.53"],
+      domains: ["~corp.example"],
+      addresses: ["198.51.100.20/24"],
+      routes: ens3Profile.intent.ipv4.routes,
+    })
+    expect(body.intent.ipv6).toMatchObject({ dns: ["fd00::53"], domains: ["~corp.example"] })
+  })
+
+  test("a link whose native owner is not edited here says why instead of offering a form", async ({
+    page,
+  }) => {
+    await open(page, "/network/dns")
+    await page.getByRole("button", { name: "Edit split DNS for tailscale0" }).click()
+    await expect(page.getByText("This link's DNS is not edited here")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Apply temporary split DNS" })).toHaveCount(0)
+  })
+
+  test("the certificate check lists each server's trust and what it could not check", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns")
+    await page.getByRole("button", { name: "Check certificates" }).click()
+    const checks = page.getByRole("region", { name: "Certificate checks" })
+    await expect(checks.getByText("Trusted", { exact: true })).toBeVisible()
+    await expect(checks.getByText("Untrusted", { exact: true })).toBeVisible()
+    await expect(checks).toContainText("not valid for cloudflare-dns.com")
+    await expect(checks).toContainText("198.51.100.2")
+    expect(mutations.find((m) => m.path === "/network/dns/tls-check")?.body).toEqual({})
+  })
+
+  test("the DNSSEC chain shows each delegation and the root anchor", async ({ page }) => {
+    const mutations = await open(page, "/network/dns")
+    await page.getByLabel("Name to trace").fill("www.example.com")
+    await page.getByRole("button", { name: "Trace" }).click()
+    const chain = page.getByRole("region", { name: "Chain of trust for www.example.com" })
+    await expect(chain.getByText("Secure to the root")).toBeVisible()
+    await expect(chain.getByText("DS digest recomputed and matched").first()).toBeVisible()
+    await expect(chain.getByText("Matches an IANA root anchor")).toBeVisible()
+    expect(mutations.find((m) => m.path === "/network/dns/dnssec-chain")?.body).toEqual({
+      name: "www.example.com",
+    })
+  })
+
+  test("a host record that a line before the block shadows is previewed before it is saved", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns")
+    await page.getByRole("button", { name: "Add record" }).click()
+    await page.getByLabel("Address of record 3").fill("192.0.2.44")
+    await page.getByLabel("Names of record 3").fill("vps-edge-01")
+    await page.getByRole("button", { name: "Save", exact: true }).click()
+    await expect(page.getByText(/line 2, before the block, gives vps-edge-01/)).toBeVisible()
+    expect(mutations.some((m) => m.method === "PUT")).toBe(false)
+    await page.getByRole("button", { name: "Save anyway" }).click()
+    await expect.poll(() => mutations.find((m) => m.method === "PUT")).toBeTruthy()
+    const resolution = page.getByRole("region", { name: "Local resolution" })
+    await expect(resolution.getByText("Resolves as written").first()).toBeVisible()
+    await expect(resolution.getByText("Resolves elsewhere")).toBeVisible()
+  })
+
+  test("comparing over DNS over TLS with the DO bit sends both and shows transport and AD", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns")
+    await page.getByLabel("Name", { exact: true }).fill("example.com")
+    await page.getByRole("button", { name: "Resolve" }).click()
+    await page.getByRole("switch", { name: "Compare named resolvers" }).check()
+    await page.getByLabel("Transport").click()
+    await page.getByRole("option", { name: "DNS over TLS" }).click()
+    await page.getByRole("checkbox", { name: "Request DNSSEC records" }).check()
+    await page.getByRole("checkbox", { name: "Cloudflare 1.1.1.1" }).check()
+    await page.getByRole("checkbox", { name: "Acknowledge private-name disclosure" }).check()
+    await page.getByRole("button", { name: "Resolve", exact: true }).click()
+    const race = page.getByRole("region", { name: "Answers for example.com" })
+    await expect(race).toContainText("TLS TLS 1.3 · cloudflare-dns.com · AD set · 1 RRSIG")
+    expect(mutations.filter((m) => m.path === "/network/dns/lookup").at(-1)?.body).toEqual({
+      name: "example.com",
+      type: "A",
+      mode: "compare",
+      destinations: ["1.1.1.1"],
+      acknowledgeDisclosure: true,
+      transport: "tls",
+      dnssec: true,
+    })
+  })
+
+  test("a private name with unseen forwarding is sent only after it is acknowledged", async ({
+    page,
+  }) => {
+    const mutations = await open(page, "/network/dns", { forwardingRefusal: true })
+    await page.getByLabel("Name", { exact: true }).fill("nas.lan")
+    await page.getByRole("button", { name: "Resolve" }).click()
+    await expect(page.getByText(/whose own forwarding this page cannot see/)).toBeVisible()
+    await page.getByRole("checkbox", { name: "Acknowledge unknown forwarding" }).check()
+    await page.getByRole("button", { name: "Resolve" }).click()
+    await expect(page.getByRole("region", { name: "Answers for nas.lan" })).toBeVisible()
+    expect(mutations.filter((m) => m.path === "/network/dns/lookup").at(-1)?.body).toEqual({
+      name: "nas.lan",
+      type: "A",
+      mode: "effective",
+      acknowledgeForwarding: true,
+    })
+  })
+
   test("every button on the page has an accessible name", async ({ page }) => {
     await open(page, "/network/dns")
     await expect(page.getByRole("button", { name: /^Quad9/ })).toBeVisible()
@@ -393,6 +633,37 @@ test.describe("screenshots", () => {
         await open(page, "/network/traffic", { charts: true })
         await page.waitForTimeout(3000)
         await page.screenshot({ path: `${dir}/traffic-charts-${width}.png` })
+      })
+      test(`/network/dns checks at ${width}`, async ({ page }) => {
+        await open(page, "/network/dns", {
+          overrides: { "/network/native/profiles/ens3": ens3Profile },
+        })
+        await page.getByRole("button", { name: /^Quad9/ }).click()
+        await page.getByRole("textbox", { name: "Verification names" }).fill("nas.lan")
+        await page.getByRole("button", { name: "Apply", exact: true }).click()
+        await expect(page.getByRole("list", { name: "Verification plan" })).toBeVisible()
+        await page.waitForTimeout(400)
+        await page.screenshot({ path: `${dir}/dns-checks-${width}-plan.png` })
+        await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click()
+        const results = page.getByRole("list", { name: "Verification results" })
+        await results.scrollIntoViewIfNeeded()
+        await page.waitForTimeout(400)
+        await page.screenshot({ path: `${dir}/dns-checks-${width}-results.png` })
+        await page.getByRole("button", { name: "Check certificates" }).click()
+        const checks = page.getByRole("region", { name: "Certificate checks" })
+        await checks.scrollIntoViewIfNeeded()
+        await page.waitForTimeout(400)
+        await page.screenshot({ path: `${dir}/dns-checks-${width}-certificates.png` })
+        await page.getByLabel("Name to trace").fill("www.example.com")
+        await page.getByRole("button", { name: "Trace" }).click()
+        const chain = page.getByRole("region", { name: "Chain of trust for www.example.com" })
+        await chain.scrollIntoViewIfNeeded()
+        await page.waitForTimeout(400)
+        await page.screenshot({ path: `${dir}/dns-checks-${width}-chain.png` })
+        await page.getByRole("button", { name: "Edit split DNS for ens3" }).click()
+        await page.getByRole("dialog").getByLabel("Routing domains").fill("corp.example")
+        await page.waitForTimeout(400)
+        await page.screenshot({ path: `${dir}/dns-checks-${width}-split.png` })
       })
       for (const path of ["/network/dns", "/network/traffic"]) {
         test(`${path} at ${width}`, async ({ page }) => {

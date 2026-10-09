@@ -7141,7 +7141,35 @@ export type DNSPreset = {
   blocksMalware: boolean
 }
 
+/** Who decides /etc/resolv.conf, and where a DNS change is made on this host. */
+export type ResolverOwner = {
+  id:
+    | "systemd-resolved"
+    | "networkmanager"
+    | "resolvconf"
+    | "openresolv"
+    | "netconfig"
+    | "dhcpcd"
+    | "dhclient"
+    | "tailscale"
+    | "wsl"
+    | "local-cache"
+    | "static"
+    | "missing"
+    | "unknown"
+  name: string
+  chain: "stub" | "uplink" | "local-cache" | "direct" | "missing"
+  resolver: string
+  confidence: "confirmed" | "declared" | "inferred" | "unknown"
+  dashboardWrites: boolean
+  handoff: string
+  handoffHref?: string
+  evidence: { source: string; detail: string }[]
+  conflicts: string[]
+}
+
 export type DNSView = {
+  owner: ResolverOwner
   resolvConf: {
     path: string
     mode: "stub" | "uplink" | "static" | "link" | "missing"
@@ -7192,13 +7220,15 @@ export type DNSView = {
       | "other"
   }[]
   adblock: {
-    kind: "adguardhome" | "pihole"
+    kind: "adguardhome" | "pihole" | "technitium"
     name: string
     runsAs: "container" | "process"
     container?: string
+    containerId?: string
     image?: string
     answering: boolean
     webPort?: number
+    webAddress?: string
   }[]
   managed: {
     path: string
@@ -7209,8 +7239,144 @@ export type DNSView = {
     dnssec: string
     dnsOverTLS: string
     cache: string
+    /** Lists the drop-in empties on purpose rather than leaving to the host. */
+    cleared?: DNSClearableList[]
   }
   presets: DNSPreset[]
+}
+
+export type DNSClearableList = "servers" | "fallback" | "domains"
+
+export type DNSVerificationCheck = {
+  kind: "readback" | "resolution" | "transport" | "dnssec"
+  scope: string
+  name?: string
+  required: boolean
+  state: "planned" | "passed" | "failed" | "warning" | "unknown" | "skipped"
+  answer?: string
+  type?: string
+  millis?: number
+  detail?: string
+}
+
+/** The checks a resolver change is held to, and the scopes none of them reaches. */
+export type DNSVerification = {
+  checks: DNSVerificationCheck[]
+  unverified: string[]
+}
+
+export type DNSTLSCheck = {
+  server: string
+  scope: string
+  address: string
+  tlsName: string
+  state: "trusted" | "untrusted" | "no-answer" | "unreachable"
+  version?: string
+  subject?: string
+  issuer?: string
+  names?: string[]
+  notAfter?: string
+  fingerprint?: string
+  chainLength?: number
+  latencyMs: number
+  error?: string
+}
+
+export type DNSTLSReport = {
+  checkedAt: string
+  checks: DNSTLSCheck[]
+  omitted: { server: string; label: string; reason?: string }[]
+  limitations: string[]
+}
+
+export type DNSSECSet = {
+  state:
+    | "authenticated"
+    | "unauthenticated"
+    | "absent"
+    | "not_found"
+    | "validation_failed"
+    | "error"
+    | "not_asked"
+  records: number
+  detail?: string
+}
+
+export type DNSSECLevel = {
+  zone: string
+  role: "apex" | "not_apex" | "not_queried" | "unavailable"
+  scope?: string
+  dnskey: DNSSECSet
+  ds: DNSSECSet
+  keys: { keyTag: number; algorithm: number; flags: number; sep: boolean }[]
+  links: {
+    keyTag: number
+    algorithm: number
+    digestType: number
+    digest: string
+    matched: boolean
+    matchedKey?: number
+    supported: boolean
+  }[]
+  link:
+    | "digest_match"
+    | "digest_mismatch"
+    | "no_ds"
+    | "root_anchor"
+    | "root_anchor_mismatch"
+    | "not_checked"
+  detail: string
+}
+
+export type DNSSECChain = {
+  name: string
+  startedAt: string
+  endedAt: string
+  owner: string
+  ownerVersion?: string
+  policyMatch?: string
+  policyStable: boolean
+  levels: DNSSECLevel[]
+  verdict: "secure" | "anchored" | "insecure" | "broken" | "unknown"
+  summary: string
+  questions: number
+  error?: string
+  limitations: string[]
+}
+
+export type HostRecordIssue = {
+  kind: "duplicate" | "conflict" | "shadowed" | "overrides" | "repeated"
+  name: string
+  address: string
+  record: number
+  other?: string
+  line?: number
+  detail: string
+}
+
+export type HostRecordsPreview = {
+  records: { address: string; names: string[] }[]
+  block: string[]
+  added: { address: string; names: string[] }[]
+  removed: { address: string; names: string[] }[]
+  issues: HostRecordIssue[]
+}
+
+export type HostNameResolution = {
+  name: string
+  configured: string[]
+  ipv4: string[]
+  ipv6: string[]
+  state: "matches" | "includes" | "differs" | "unresolved" | "unknown"
+  detail: string
+}
+
+export type HostResolutionEvidence = {
+  checkedAt: string
+  hosts: string
+  names: HostNameResolution[]
+  omitted: number
+  limitations: string[]
 }
 
 export type DNSSummary = {
@@ -7229,6 +7395,7 @@ export type DNSApplied = {
   millis?: number
   warning?: string
   managed: DNSView["managed"] | null
+  verification?: DNSVerification
 }
 
 export type HostRecords = {
@@ -7244,9 +7411,20 @@ export type DNSLookup = {
   mode: "effective" | "compare"
   route: string
   note: string
-  comparisonTargets: { server: string; label: string; reason?: string }[]
-  omittedTargets: { server: string; label: string; reason?: string }[]
-  results: { server: string; label: string; answers: string[]; latencyMs: number; error?: string }[]
+  comparisonTargets: { server: string; label: string; tlsName?: string; reason?: string }[]
+  omittedTargets: { server: string; label: string; tlsName?: string; reason?: string }[]
+  results: {
+    server: string
+    label: string
+    answers: string[]
+    latencyMs: number
+    error?: string
+    transport?: "udp" | "tcp" | "tls"
+    tlsName?: string
+    tlsVersion?: string
+    authenticatedData?: boolean
+    signatures?: number
+  }[]
 }
 
 export type ProcessTraffic = {

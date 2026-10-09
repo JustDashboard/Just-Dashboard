@@ -30,26 +30,47 @@ import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { DNSServiceConnectionForm } from "./service-connection"
+import type { DNSConnectionSeed } from "./service-form"
 import { DNSServiceInventory } from "./service-inventory"
 import { DNSServiceProvisionForm } from "./service-provision"
 import { DNSReviewStatus, DNSServiceReview } from "./service-review"
 
 type Screen =
-  | { kind: "connect" }
+  | { kind: "connect"; seed?: DNSConnectionSeed }
   | { kind: "edit"; connection: DNSConnection }
   | { kind: "provision" }
   | { kind: "connection"; id: string; name: string }
   | { kind: "change"; id: string; initial?: DNSServiceChange }
   | { kind: "setup"; id: string; initial?: DNSServiceProvision }
 
-export function DNSServiceManager() {
+/**
+ * A request from elsewhere on the page — the detected-server handoff — to open
+ * a new connection's form for a server, or an existing connection. The nonce
+ * makes pressing the same button twice open it twice.
+ */
+export type DNSServiceAsk =
+  { kind: "connect"; seed: DNSConnectionSeed } | { kind: "connection"; id: string; name: string }
+export type DNSServiceRequest = { nonce: number } & DNSServiceAsk
+
+export function DNSServiceManager({ request }: { request?: DNSServiceRequest }) {
   const { can, status } = useAuth()
   if (!can("system.admin") || !status?.user) return null
-  return <DNSServiceAdmin key={status.user.id} account={status.user.id} />
+  return <DNSServiceAdmin key={status.user.id} account={status.user.id} request={request} />
 }
 
-function DNSServiceAdmin({ account }: { account: number }) {
+function DNSServiceAdmin({ account, request }: { account: number; request?: DNSServiceRequest }) {
   const [screen, setScreen] = useState<Screen>()
+  // Derived while rendering from the last request handled, so a handoff opens
+  // its panel without an effect.
+  const [handled, setHandled] = useState<number>()
+  if (request && request.nonce !== handled) {
+    setHandled(request.nonce)
+    setScreen(
+      request.kind === "connect"
+        ? { kind: "connect", seed: request.seed }
+        : { kind: "connection", id: request.id, name: request.name },
+    )
+  }
   const connections = usePoll(
     async (signal) =>
       readDNSList(await get(DNS_SERVICE_BASE, undefined, signal), readDNSConnection, 32),
@@ -167,8 +188,13 @@ function DNSServiceAdmin({ account }: { account: number }) {
       >
         {screen?.kind === "connect" || screen?.kind === "edit" ? (
           <DNSServiceConnectionForm
-            key={screen.kind === "edit" ? screen.connection.id : "new"}
+            key={
+              screen.kind === "edit"
+                ? screen.connection.id
+                : `new:${screen.seed?.engine ?? ""}:${screen.seed?.endpoint ?? ""}`
+            }
             connection={screen.kind === "edit" ? screen.connection : undefined}
+            seed={screen.kind === "connect" ? screen.seed : undefined}
             onCancel={close}
             onConnected={(view) => {
               refresh()

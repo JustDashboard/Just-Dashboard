@@ -32,6 +32,8 @@ removed before snapshots become reviewed or retained change state.
 | `GET /`, `POST /` | Metadata-only `Connection[]`; connect with `ConnectionRequest` returns an authenticated `View`. |
 | `GET /{id}`, `PUT /{id}`, `DELETE /{id}` | Fresh `View`; full credential/config replacement on the same engine and origin; disconnect only foreign-connected metadata. |
 | `GET /{id}/filters` | Fresh read-only `FilterView` of bounded native subscription/custom-rule metadata. Connection generation and owned-resource identity are rechecked after native reads. |
+| `GET /{id}/dhcp` | Fresh read-only `DHCPView`: native DHCP enablement, ranges/scopes and the engine's own lease table. Generation and ownership are rechecked after native reads. |
+| `GET /handoffs` | Servers the DNS page detects, each joined to the connections that reach it and the loopback origin a new connection would use. Contacts no engine. |
 | `GET /{id}/zones/{zone}/records` | Technitium-only fresh `RecordInventory` for an explicit lower-case zone, including native version, owner/type/DNSSEC, nullable internal classification, at most 256 records, metadata fingerprints and per-record editability. Read-only connections may inspect it. |
 | `GET /{id}/changes`, `POST /{id}/changes` | Latest 64 metadata-only `Change[]`; `ChangeRequest` creates a five-minute retained reviewed `Change`. |
 | `GET /changes/{id}`, `POST /changes/{id}/apply` | Full retained `Change`; single-use native apply/readback returns the terminal `Change`. |
@@ -62,6 +64,36 @@ readback. Sequential native APIs provide no cross-call CAS or atomic snapshot. D
 consumed plan; missing/mismatched readback leaves `needs_review`. The dashboard does not repeat an
 uncertain native mutation or restore foreign policy. Native client filter groups, local rewrites
 and authoritative zones remain distinct; configured DNSSEC status is not cryptographic proof.
+
+## Detected-server handoff
+
+The DNS page detects AdGuard Home, Pi-hole and Technitium as containers (by image, including
+`technitium/dns-server`) and as processes, with the published or listening web port and its bind
+address. `GET /handoffs` (administrator, private like every route here) lists each detected server with
+its engine and the connections that already reach it: `container` when an owned connection's
+`containerId` is that container, `endpoint` when a connection of the same engine has a loopback (or the
+exact bound) origin on the server's web port. Where none does, `endpoint` is the origin a new
+connection would use — `http://127.0.0.1:<port>`, since loopback HTTP is the only cleartext origin a
+credential may go to — or `endpointProblem` says why there is none (no published port, or a port bound
+only to another address). The page's Connect opens the ordinary connection form with that engine,
+origin and name filled in; Inspect opens the existing connection's inventory, queries, filters,
+clients and DHCP. The join reads Docker and the socket table only; it contacts no engine, creates
+nothing and makes no connection on its own.
+
+## Read-only native DHCP
+
+`GET /{id}/dhcp` reads the engine's DHCP half for read-only and managed connections alike. AdGuard Home
+0.107 reports `/control/dhcp/status` (enabled, interface, IPv4/IPv6 range, dynamic and static leases);
+Pi-hole FTL 6 reports `/api/config/dhcp` (active, range, `MAC,IP[,name]` static hosts, IPv6 RA flag) and
+`/api/dhcp/leases` (expiry seconds, `*` meaning no hostname); Technitium 15 reports
+`/api/dhcp/scopes/list` and `/api/dhcp/leases/list` (scope, `Reserved`/`Dynamic`, hardware address,
+expiry). Field names were taken from the pinned images' own binaries. Addresses must be literals of the
+expected family, hardware addresses parse as MACs and are normalised, times as RFC 3339, at most 256
+leases and 64 scopes; a malformed, null or missing collection leaves its section `unknown` and returns
+no partial table, and an unsupported version is `unsupported`. Configuration and lease evidence are
+separate readings; lease rows are the engine's table, not observed DHCP packets. Nothing starts, stops
+or changes a DHCP server, and a containerised server on a bridge does not reach the LAN's broadcast
+domain without host networking, which the reading states.
 
 ## Native query history
 

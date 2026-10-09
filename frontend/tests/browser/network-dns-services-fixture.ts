@@ -502,6 +502,36 @@ export type DNSServicePageControl = {
   unexpectedReads: string[]
   connectFailure: boolean
   apply: "verified" | "needs_review" | "lost"
+  handoffs: unknown[]
+}
+
+/** The engine's DHCP reading: disabled, one range, one static lease. */
+export function dnsDHCP(connection: DNSConnection) {
+  return {
+    connection,
+    state: "available",
+    inventory: {
+      engine: connection.engine,
+      nativeVersion: "v0.107.71",
+      observedAt: time(),
+      transport: reading("verified_https", "Management completed verified TLS."),
+      enabled: false,
+      configuration: reading(
+        "configured",
+        "AdGuard Home's DHCP setting, interface and ranges as it reports them.",
+      ),
+      interface: "eth0",
+      ranges: [{ family: "ipv4", start: "192.168.1.100", end: "192.168.1.200" }],
+      leases: [
+        { address: "192.168.1.10", hardware: "aa:bb:cc:dd:ee:02", hostname: "nas", static: true },
+      ],
+      leaseEvidence: reading(
+        "reported",
+        "Dynamic and static leases from AdGuard Home's own table.",
+      ),
+      limitations: ["Read-only: the dashboard does not start, stop or change a DHCP server."],
+    },
+  }
 }
 
 export async function mockDNSServicePage(
@@ -511,6 +541,8 @@ export async function mockDNSServicePage(
     empty?: boolean
     management?: boolean
     engine?: DNSConnection["engine"]
+    /** Join the page's detected AdGuard Home to this connection, or leave it unconnected. */
+    handoff?: "connected" | "unconnected"
   } = {},
 ): Promise<DNSServicePageControl> {
   const mutations: Mutation[] = []
@@ -540,6 +572,29 @@ export async function mockDNSServicePage(
     unexpectedReads: [],
     connectFailure: false,
     apply: "verified",
+    handoffs: options.handoff
+      ? [
+          {
+            detected:
+              overrides["/network/dns/"] &&
+              (overrides["/network/dns/"] as { adblock: unknown[] }).adblock[0],
+            engine: "adguard",
+            endpoint: "http://127.0.0.1:3000",
+            connections:
+              options.handoff === "connected"
+                ? [
+                    {
+                      id: connection.id,
+                      name: connection.name,
+                      management: connection.management,
+                      ownership: connection.ownership,
+                      match: "endpoint",
+                    },
+                  ]
+                : [],
+          },
+        ]
+      : [],
   }
   await mockNetwork(page, mutations, {
     session: options.reader
@@ -557,6 +612,9 @@ export async function mockDNSServicePage(
       reads.push(path)
       if (path === base) return reply(control.connections)
       if (path === `${base}/provisions`) return reply(control.provisions)
+      if (path === `${base}/handoffs`) return reply(control.handoffs)
+      if (path === `${base}/${control.view.connection.id}/dhcp`)
+        return reply(dnsDHCP(control.view.connection))
       if (path === `${base}/${control.view.connection.id}/changes`)
         return reply(
           control.changes.map((change) => ({ ...change, before: undefined, after: undefined })),
