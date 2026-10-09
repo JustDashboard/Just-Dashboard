@@ -22,7 +22,7 @@ func TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit(t *testing.T) {
 	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "native-dns-reader", auth.RoleReadOnly)}
 	base := "/api/v1/network/dns/services/"
 	id := strings.Repeat("a", 32)
-	for _, route := range []struct{ method, path, body string }{{"GET", base, ""}, {"POST", base, `{}`}, {"GET", base + id, ""}, {"PUT", base + id, `{}`}, {"DELETE", base + id, ""}, {"POST", base + id + "/changes", `{}`}, {"GET", base + "changes/" + id, ""}, {"GET", base + "changes/" + id + "/current", ""}, {"POST", base + "changes/" + id + "/apply", `{}`}, {"GET", base + "provisions", ""}, {"POST", base + "provisions", `{}`}, {"GET", base + "provisions/" + id, ""}, {"POST", base + "provisions/" + id + "/apply", `{}`}, {"DELETE", base + "provisions/" + id, ""}} {
+	for _, route := range []struct{ method, path, body string }{{"GET", base, ""}, {"POST", base, `{}`}, {"GET", base + id, ""}, {"GET", base + id + "/filters", ""}, {"PUT", base + id, `{}`}, {"DELETE", base + id, ""}, {"POST", base + id + "/changes", `{}`}, {"GET", base + "changes/" + id, ""}, {"GET", base + "changes/" + id + "/current", ""}, {"POST", base + "changes/" + id + "/apply", `{}`}, {"GET", base + "provisions", ""}, {"POST", base + "provisions", `{}`}, {"GET", base + "provisions/" + id, ""}, {"POST", base + "provisions/" + id + "/apply", `{}`}, {"DELETE", base + "provisions/" + id, ""}} {
 		if w := viewer.do(route.method, route.path, route.body, nil); w.Code != http.StatusForbidden {
 			t.Fatalf("private native route %s %s returned %d", route.method, route.path, w.Code)
 		}
@@ -82,6 +82,7 @@ func TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit(t *testing.T) {
 		t.Fatal("owned API preview did not retain sealed bootstrap credentials", err)
 	}
 	var mutations atomic.Int32
+	var failFilters atomic.Bool
 	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, password, ok := r.BasicAuth()
 		if !ok || user != "fixture-user" || password != "native-password-kept-sealed" {
@@ -104,6 +105,12 @@ func TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit(t *testing.T) {
 			value = map[string]any{"clients": []any{}}
 		case "/control/rewrite/list":
 			value = []any{}
+		case "/control/filtering/status":
+			if failFilters.Load() {
+				http.Error(w, "native URL-password query-secret private-error", http.StatusServiceUnavailable)
+				return
+			}
+			value = map[string]any{"enabled": true, "interval": 24, "filters": []any{map[string]any{"id": 1, "enabled": false, "name": "private subscription", "url": "https://user:subscription-password@filters.example/path-secret?token=query-secret", "rules_count": 0}}, "whitelist_filters": []any{}, "user_rules": []string{"||private-rule.example^"}}
 		case "/control/querylog":
 			value = map[string]any{"data": []any{map[string]any{"client": "10.0.0.2", "question": map[string]string{"host": "private.example", "type": "A"}}}}
 		default:
@@ -123,6 +130,33 @@ func TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit(t *testing.T) {
 	if err = json.Unmarshal(w.Body.Bytes(), &view); err != nil || view.Connection.Management || strings.Contains(w.Body.String(), req.Credential.Password) {
 		t.Fatalf("default/secret contract: %s %v", w.Body.String(), err)
 	}
+	filterPath := base + view.Connection.ID + "/filters"
+	filterResponse := admin.do(http.MethodGet, filterPath, "", nil)
+	var filters dnsservice.FilterView
+	if filterResponse.Code != 200 || filterResponse.Header().Get("Cache-Control") != "private, no-store" || json.Unmarshal(filterResponse.Body.Bytes(), &filters) != nil || filters.State != "available" || filters.Inventory == nil || filters.Inventory.Sources.Entries[0].Origin != "https://filters.example" || filters.Connection.Management || mutations.Load() != 0 {
+		t.Fatalf("private read-only filter contract: %d %s", filterResponse.Code, filterResponse.Body.String())
+	}
+	for _, secret := range []string{req.Credential.Password, "subscription-password", "path-secret", "query-secret", "private-rule.example", "private subscription"} {
+		if strings.Contains(filterResponse.Body.String(), secret) {
+			t.Fatal("private filter response exposed native content", secret)
+		}
+	}
+	if response := narrow.do(http.MethodGet, filterPath, "", map[string]string{"Authorization": "Bearer " + token}); response.Code != 403 {
+		t.Fatal("narrow token accessed private filter inventory", response.Code)
+	}
+	if response := admin.do(http.MethodGet, base+strings.Repeat("b", 32)+"/filters", "", nil); response.Code != 404 || response.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatal("private filter missing-owner response", response.Code)
+	}
+	if response := admin.do(http.MethodPost, filterPath, `{}`, nil); response.Code != 405 || mutations.Load() != 0 {
+		t.Fatal("filter inventory admitted an effect", response.Code)
+	}
+	failFilters.Store(true)
+	failedFilters := admin.do(http.MethodGet, filterPath, "", nil)
+	var partial dnsservice.FilterView
+	if failedFilters.Code != 200 || failedFilters.Header().Get("Cache-Control") != "private, no-store" || json.Unmarshal(failedFilters.Body.Bytes(), &partial) != nil || partial.State != "partial" || partial.Inventory == nil || partial.Inventory.Sources.Evidence.State != "unknown" || partial.Inventory.Fingerprint != "" || strings.Contains(failedFilters.Body.String(), "private-error") || strings.Contains(failedFilters.Body.String(), "query-secret") || mutations.Load() != 0 {
+		t.Fatal("native filter failure became healthy, secret or mutating", failedFilters.Code)
+	}
+	failFilters.Store(false)
 	if w = admin.do(http.MethodPost, base+view.Connection.ID+"/changes", `{"action":"protection","protection":false}`, nil); w.Code != 403 || mutations.Load() != 0 {
 		t.Fatalf("read-only staging %d mutations %d", w.Code, mutations.Load())
 	}

@@ -27,6 +27,7 @@ removed before snapshots become reviewed or retained change state.
 | --- | --- |
 | `GET /`, `POST /` | Metadata-only `Connection[]`; connect with `ConnectionRequest` returns an authenticated `View`. |
 | `GET /{id}`, `PUT /{id}`, `DELETE /{id}` | Fresh `View`; full credential/config replacement on the same engine and origin; disconnect only foreign-connected metadata. |
+| `GET /{id}/filters` | Fresh read-only `FilterView` of bounded native subscription/custom-rule metadata. Connection generation and owned-resource identity are rechecked after native reads. |
 | `GET /{id}/zones/{zone}/records` | Technitium-only fresh `RecordInventory` for an explicit lower-case zone, including native version, owner/type/DNSSEC, nullable internal classification, at most 256 records, metadata fingerprints and per-record editability. Read-only connections may inspect it. |
 | `GET /{id}/changes`, `POST /{id}/changes` | Latest 64 metadata-only `Change[]`; `ChangeRequest` creates a five-minute retained reviewed `Change`. |
 | `GET /changes/{id}`, `POST /changes/{id}/apply` | Full retained `Change`; single-use native apply/readback returns the terminal `Change`. |
@@ -57,6 +58,55 @@ readback. Sequential native APIs provide no cross-call CAS or atomic snapshot. D
 consumed plan; missing/mismatched readback leaves `needs_review`. The dashboard does not repeat an
 uncertain native mutation or restore foreign policy. Native client filter groups, local rewrites
 and authoritative zones remain distinct; configured DNSSEC status is not cryptographic proof.
+
+## Read-only native filter metadata
+
+`GET /{id}/filters` also works for dashboard read-only connections. It returns a `FilterView` with
+connection metadata, optional `inventory`, and `available`, `partial`, `unavailable` or `unsupported`
+state. It makes no native policy change, refresh request, subscription download or DNS question.
+The ordinary `Snapshot`, retained review selection and mutation contract remain unchanged.
+
+`FilterInventory` separates `sources` and `rules` sections, each with configured/unknown/unsupported
+`evidence`, intentionally redacted `identity`, `entries` and an optional native metadata fingerprint.
+Missing, null where unsupported, malformed or oversized collections stay unknown; their empty output
+array must never be read as a known empty policy. A complete supported collection can explicitly be
+empty. Every entry retains a full fingerprint; native numerical IDs remain distinct even when
+subscription origins are equal. Fingerprints cover selected original JSON metadata, including
+unknown per-entry fields, not the redacted display identity. They are read-only comparison evidence,
+not an apply authorization or an atomic native revision.
+
+AdGuard reads block/allow subscriptions and custom rules from `filtering/status`; its protection
+switch, filtering enable state and DNS-running status stay distinct. Pi-hole reads persistent lists
+and exact/regex allow/deny domain-rule metadata, preserving native enable flags and explicit group
+arrays, including `[]`. Native counts, update times and numeric list statuses are retained only when
+reported; absent values remain unreported. Technitium reads built-in block/allow subscriptions and
+comment entries from settings. Only its pinned 15.6/15.6.0 response writer's explicit `blockListUrls:
+null` establishes no configured subscription entries; a missing field or another version's null
+stays unknown. Its manual Allowed/Blocked zone trees and installed app rule contents remain
+explicitly unsupported here, separate from existing app group inventory.
+
+Each source/custom-rule collection is bounded to 256 entries; Technitium's native subscription
+contract is 255 entries of at most 255 bytes and an update interval of 0–168 hours. Other native
+source/rule identities are at most 4096 bytes, groups at most 64 unique nonnegative 32-bit IDs,
+responses at most 512 KiB and the returned inventory at most 192 KiB. Reads share a 20-second
+deadline and the existing pinned literal origin, verified TLS, scoped authentication and no-redirect
+transport. Cancelled reads return no available inventory; replacement generations/ownership refuse
+the old result. Native version refusal is explicit `unsupported`. Other section failures retain
+unknown evidence without echoing native response bodies.
+
+Only an HTTP(S) subscription's scheme and host can appear as `origin`. URL credentials, path, query
+and fragment, local file paths, native names/comments and rule contents stay fingerprint-only.
+Optional `runtime` evidence describes an authenticated native status, or remains unknown; neither
+configured membership nor reported counts prove loaded/compiled rule content or a measured client
+filtering decision. All reads remain `system.admin`, private/no-store; administrator API tokens have
+the same existing capability contract as sessions.
+
+The pinned metadata contracts are [AdGuard 0.107.71](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/openapi/openapi.yaml),
+[FTL 6.7.1 lists](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/lists.yaml)
+and [domain rules](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml),
+plus Technitium's [15.6.0 settings writer](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/WebServiceSettingsApi.cs)
+and [block-list manager](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/Dns/ZoneManagers/BlockListZoneManager.cs).
+Filter mutation, full rule contents, manual/app filtering and wider P17 acceptance remain open.
 
 ## Reviewed records and client groups
 

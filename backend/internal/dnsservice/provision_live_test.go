@@ -168,6 +168,23 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	if connection.Management {
 		t.Fatal("native administrator credential opened default dashboard management")
 	}
+	filterRead := func(wantRules int) *FilterInventory {
+		t.Helper()
+		filters, e := s.Filters(ctx, connection.ID)
+		if e != nil || filters.State != "available" || filters.Inventory == nil || filters.Inventory.Sources.Evidence.State != "configured" || filters.Inventory.Fingerprint == "" || len(filters.Inventory.Sources.Entries) != 0 {
+			t.Fatalf("native %s filter inventory: state=%s err=%v evidence=%+v", engine, filters.State, e, filters.Inventory)
+		}
+		if engine == Technitium {
+			if filters.Inventory.Rules.Evidence.State != "unsupported" || filters.Inventory.AppRules.State != "unsupported" {
+				t.Fatal("native unsupported filter content inferred as empty")
+			}
+		} else if filters.Inventory.Rules.Evidence.State != "configured" || len(filters.Inventory.Rules.Entries) != wantRules {
+			t.Fatal("native custom-rule inventory did not report the seeded count")
+		}
+		t.Logf("engine=%s nativeFilterVersion=%s sources=%d rules=%d ruleEvidence=%s fingerprint=%s subscriptions=not_fetched decisions=unmeasured", engine, filters.Inventory.NativeVersion, len(filters.Inventory.Sources.Entries), len(filters.Inventory.Rules.Entries), filters.Inventory.Rules.Evidence.State, filters.Inventory.Fingerprint)
+		return filters.Inventory
+	}
+	initialFilters := filterRead(0)
 	if _, err = s.Preview(ctx, connection.ID, ChangeRequest{Action: "upstreams", Upstreams: []string{"192.0.2.54:5353"}}); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("native read-only staging allowed: %v", err)
 	}
@@ -204,9 +221,12 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	defer nativeClient.logout()
 	switch engine {
 	case AdGuard:
-		err = nil
+		err = nativeClient.request(ctx, http.MethodPost, "/control/filtering/set_rules", map[string]any{"rules": []string{"||filter-fixture.invalid^"}}, nil)
 	case PiHole:
 		err = nativeClient.request(ctx, http.MethodPost, "/api/clients", map[string]any{"client": "198.51.100.77", "comment": "owned fixture client comment", "groups": []int{0}}, nil)
+		if err == nil {
+			err = nativeClient.request(ctx, http.MethodPost, "/api/domains/deny/exact", map[string]any{"domain": "filter-fixture.invalid", "enabled": true, "groups": []int{0}, "comment": "owned rule fixture"}, nil)
+		}
 	case Technitium:
 		zone, zoneErr := s.Preview(ctx, connection.ID, ChangeRequest{Action: "zone_create", Zone: name})
 		if zoneErr != nil {
@@ -219,7 +239,11 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		err = nil
 	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("owned native rule seed", err)
+	}
+	seededFilters := filterRead(1)
+	if engine != Technitium && initialFilters.Rules.Fingerprint == seededFilters.Rules.Fingerprint {
+		t.Fatal("native seeded rule metadata did not change its raw fingerprint")
 	}
 	policyRequests := []ChangeRequest{{Action: "override_add", Record: &RecordChange{Name: name, Type: "A", Value: "198.51.100.99"}}, {Action: "override_add", Record: &RecordChange{Name: "v6." + name, Type: "AAAA", Value: "2001:db8::99"}}}
 	if engine == Technitium {
@@ -295,6 +319,10 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 			t.Fatal("native credential/config did not persist after restart")
 		case <-time.After(250 * time.Millisecond):
 		}
+	}
+	persistedFilters := filterRead(1)
+	if seededFilters.Sources.Fingerprint != persistedFilters.Sources.Fingerprint || seededFilters.Rules.Fingerprint != persistedFilters.Rules.Fingerprint {
+		t.Fatal("native filter metadata did not persist after restart")
 	}
 	nativeDNSAnswer(t, "udp", dnsPort, name, engine == Technitium)
 	nativeDNSAAAAAnswer(t, "tcp", dnsPort, "v6."+name, engine == Technitium)
