@@ -670,7 +670,7 @@ func TestFirstShapingFailureRestoresSupportedForeignQueueParameters(t *testing.T
 	if err := h.SetShaping(context.Background(), "eth0", ShapeRequest{Qdisc: "cake", EgressKbit: 50000}, gwClient, "ops"); err == nil {
 		t.Fatal("expected failure")
 	}
-	want := "tc qdisc replace dev eth0 root handle 5: fq_codel limit 1000 flows 1024 quantum 1514 target 4999us interval 99999us memory_limit 33554432 drop_batch 64 noecn"
+	want := "tc qdisc replace dev eth0 root handle 5: fq_codel limit 1000 flows 1024 quantum 1514 target 5000us interval 100000us memory_limit 33554432 drop_batch 64 noecn"
 	if !h.rec.ran(want) {
 		t.Fatalf("original queue parameters not restored: %v", h.tcCommands())
 	}

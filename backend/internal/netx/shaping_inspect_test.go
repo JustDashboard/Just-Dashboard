@@ -61,7 +61,7 @@ func TestUnmanagedRootVerdicts(t *testing.T) {
 		})
 	}
 	lines, _, _ := unmanagedRoot("eth0", qdiscsJSON(t, `[{"kind":"fq_codel","handle":"0:","root":true,"options":`+fqCodelOptions+`}]`), clear, "fq_codel")
-	if lines[0] != "qdisc replace dev eth0 root handle 0: fq_codel limit 10240 flows 1024 quantum 1514 target 4999us interval 99999us memory_limit 33554432 drop_batch 64 ecn" {
+	if lines[0] != "qdisc replace dev eth0 root handle 0: fq_codel limit 10240 flows 1024 quantum 1514 target 5000us interval 100000us memory_limit 33554432 drop_batch 64 ecn" {
 		t.Fatalf("baseline = %q", lines[0])
 	}
 }

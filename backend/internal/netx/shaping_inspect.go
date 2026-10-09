@@ -190,6 +190,11 @@ func unmanagedRoot(device string, qs []tcQdisc, filtersClear func() (bool, error
 		}
 		suffix := ""
 		if key == "target" || key == "interval" {
+			// fq_codel keeps times in 1024 ns units and prints them truncated
+			// to microseconds; writing the printed figure back truncates
+			// again and loses a unit on every restore. One microsecond more
+			// lands in exactly the unit that was read.
+			value++
 			suffix = "us"
 		}
 		line += fmt.Sprintf(" %s %d%s", key, value, suffix)
