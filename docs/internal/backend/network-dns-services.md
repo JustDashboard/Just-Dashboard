@@ -106,13 +106,16 @@ The first retained UI mounts administrator-only native connection/inventory, rev
 owned setup/removal sheets on the existing DNS reading page, independent of host resolver read
 availability. It preserves the backend's closed action scope and native provenance. Fresh matching
 policy and immutable review checks hold stale confirmations; account-scoped attempt IDs prevent
-the UI from replaying an uncertain apply after navigation or reload. This UI source is implemented,
-with pure guards and static checks passing; source-matched build/browser/screenshot acceptance is
-still pending. Broader native zone/view/client policy editing remains follow-up work under P17.
+the UI from replaying an uncertain apply after navigation or reload. The matching production build,
+3,232 fast logic tests, 13 mounted service interaction cases and phone/desktop inspection pass;
+the [UI acceptance record](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-services-ui-acceptance.md)
+separates those checks from combined reachable acceptance. Broader native zone/view/client policy
+editing remains follow-up work under P17.
 
-P17 remains in progress until all three actual pinned engines, private API, retained UI and the
-fresh integrated reachable checks pass. Pure/HTTP fixtures do not establish real native-engine
-compatibility, and native container restart is not a host reboot proof.
+P17 remains in progress: all three pinned engine fixtures and the retained UI slice pass, while
+combined reachable checks and complete query/zone/view/client-policy coverage remain open.
+Pure/HTTP fixtures do not establish real native-engine compatibility, and native container restart
+is not a host reboot proof.
 
 The 2026-10-09 final-source race binary passed actual AdGuard Home 0.107.71 (25.17 seconds),
 Pi-hole FTL 6.7.1 (46.21 seconds) and Technitium 15.6 (16.69 seconds), without skips. The

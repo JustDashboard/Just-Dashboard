@@ -1,0 +1,66 @@
+bun test v1.3.11 (af24e281)
+
+src/lib/network-dns-services.test.js:
+(pass) retained history readers do not mistake the row index for an expected identity [5.00ms]
+(pass) native owner refresh holds a stale or unavailable baseline before confirmation
+(pass) owned removal retains exact resource identities while its confirmation is open [1.00ms]
+(pass) only bounded review identities survive the browser attempt record
+(pass) late reads preserve terminal native responses while newer cleanup results remain visible [1.00ms]
+(pass) an open confirmation and its result retain the exact native owner and reviewed intent
+(pass) private connection reads retain permissions and discard unexpected credentials
+(pass) native unknown and unsupported evidence survives a successful HTTP reading [1.00ms]
+(pass) native DNS refuses missing query inventory before the inventory can render it
+(pass) native DNS refuses unknown listener port before the inventory can render it
+(pass) native DNS refuses invalid client groups before the inventory can render it
+(pass) native DNS refuses missing zone evidence before the inventory can render it [1.00ms]
+(pass) native DNS refuses unknown protection value before the inventory can render it
+(pass) native DNS refuses a malformed query before the inventory can render it
+(pass) native DNS refuses invalid native group before the inventory can render it
+(pass) native DNS refuses missing named networks before the inventory can render it
+(pass) native DNS refuses an unknown engine before the inventory can render it
+(pass) a reading for another connection or engine cannot replace the selected owner
+(pass) retained history metadata is readable without decrypted snapshots or query rows
+(pass) unknown retained intent and mismatched review identity refuse apply preparation [1.00ms]
+(pass) only a planned fresh review on the same managed generation can apply
+(pass) HTTP success with verified never authorizes another native apply
+(pass) HTTP success with applying never authorizes another native apply
+(pass) HTTP success with refused never authorizes another native apply
+(pass) HTTP success with needs_review never authorizes another native apply
+(pass) HTTP success with interrupted never authorizes another native apply
+(pass) HTTP success with future_state never authorizes another native apply
+(pass) expiry and invalid clocks refuse both native mutation and owned setup
+(pass) an uncertain first apply remains consumed when the retained server state is still planned
+(pass) bootstrap passwords are request-only and never survive a retained setup read [1.00ms]
+(pass) missing inventory is a read failure rather than a healthy empty list
+
+src/components/network/dns/service-form.test.js:
+(pass) native DNS connection draft > new connections default read-only and sealed fields are never prefilled [2.00ms]
+(pass) native DNS connection draft > adguard sends only its native credential
+(pass) native DNS connection draft > pihole sends only its native credential
+(pass) native DNS connection draft > technitium sends only its native credential
+(pass) native DNS connection draft > unsupported management origin is refused: http://192.0.2.1:8080
+(pass) native DNS connection draft > unsupported management origin is refused: https://dns.example.test:8443
+(pass) native DNS connection draft > unsupported management origin is refused: https://192.0.2.1
+(pass) native DNS connection draft > unsupported management origin is refused: https://192.0.2.1:8443/private
+(pass) native DNS connection draft > unsupported management origin is refused: https://192.0.2.1:8443/?token=secret
+(pass) native DNS connection draft > unsupported management origin is refused: https://native-user:secret@192.0.2.1:8443
+(pass) native DNS connection draft > unsupported management origin is refused: https://0.0.0.0:8443
+(pass) native DNS connection draft > unsupported management origin is refused: https://224.0.0.1:8443
+(pass) native DNS connection draft > unsupported management origin is refused: https://[::]:8443
+(pass) native DNS connection draft > unsupported management origin is refused: https://[ff02::1]:8443
+(pass) native DNS connection draft > unsupported management origin is refused: http://[2001:db8::1]:8080
+(pass) native DNS connection draft > unsupported management origin is refused: https://999.2.3.4:8443
+(pass) native DNS connection draft > unsupported management origin is refused: https://127.1:8443
+(pass) native DNS connection draft > explicit literal origin remains valid: http://[::1]:8080
+(pass) native DNS connection draft > explicit literal origin remains valid: http://127.0.0.1:80
+(pass) native DNS connection draft > explicit literal origin remains valid: https://[2001:db8::1]:443
+(pass) native DNS connection draft > replacement keeps the same engine/origin and requires custom CA re-entry [2.00ms]
+(pass) native DNS connection draft > HTTPS identity/trust cannot silently accompany a cleartext connection
+(pass) native DNS connection draft > credentials are re-entered verbatim, and invalid credential bounds block requests
+(pass) native DNS retained review eligibility > only an administrator's fresh, available, manageable view can stage
+(pass) native DNS retained review eligibility > bounded draft entries retain their deliberate order and cannot duplicate scope [1.00ms]
+
+ 56 pass
+ 0 fail
+ 132 expect() calls
+Ran 56 tests across 2 files. [95.00ms]

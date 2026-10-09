@@ -1,0 +1,3 @@
+Against 4f9f2b4f: 67 changed files.
+Checking formatting...
+All matched files use Prettier code style!

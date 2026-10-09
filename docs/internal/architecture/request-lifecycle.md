@@ -127,6 +127,12 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   are audited, and successful private PCAP/support downloads use `httpx.AuditRead`. Original bytes
   remain sensitive; only the separate support metadata is redacted. See
   [capture lifecycle](../backend/network-captures.md).
+- **Native DNS services.** Every `/network/dns/services` connection, native inventory, retained review
+  and owned setup route requires `system.admin` and returns private, no-store responses. Credentials
+  and custom trust material remain sealed/request-only; retained history omits native query entries.
+  Connection deletion, reviewed native apply, owned setup apply and owned resource removal use
+  `s.destructive`. All mutations record redacted audit metadata; a nonverified HTTP 200 outcome must
+  remain a retained review state ([native DNS services](../backend/network-dns-services.md)).
 - **Controlled probe identities.** Optional `/probe-agent/{enroll,poll,result}` routes run behind
   the global allowlist and a dedicated limiter before human authentication. One-use enrollment
   proofs or durable sequence-bound machine signatures grant only the closed probe protocol;

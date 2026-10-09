@@ -4,6 +4,16 @@ This directory records scoped acceptance for successive implementation checkpoin
 The [implementation ledger](../implementation-status.md) preserves the full outstanding scope;
 these checks do not turn the historical report scores into 10/10 ratings.
 
+[Integrated native editor acceptance](native-editor-integrated-acceptance.md) records its matching
+production build, selected API/Go tests, all 898 executable browser cases, the preserved original
+nonzero invocation and exact unchanged-source timeout rerun. The subsequent v6 recovery checkpoint
+and DNS service integration have separate final-source evidence; full P11 remains open.
+
+[Native DNS service UI acceptance](dns-services-ui-acceptance.md) records the mounted private
+connection/inventory and retained review controls, matching production build, 13 browser interactions,
+lost-response single-use behavior and phone/desktop inspection. The native engine record and combined
+reachable gate remain separate evidence; broader P17 query/zone/view/client controls remain open.
+
 [Kernel observer acceptance](observer-kernel-acceptance.md) records the bounded native observer,
 owned detach/retry, durable batch receipts and actual Docker/process-death fixtures.
 [Observer UI acceptance](observer-ui-acceptance.md) records its separate measurement channels,
