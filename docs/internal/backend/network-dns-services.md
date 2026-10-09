@@ -89,6 +89,19 @@ connection identity after native reads. Native unavailability is an unavailable 
 scope is a bad request and changed generation/ownership is a conflict. Valid expired or consumed
 reviews remain inspectable without becoming applicable again. The single-use apply claim and expiry
 checks remain authoritative.
+
+The administrator engine sheet mounts these bounded record/client forms. Technitium records require
+an explicit fresh zone inventory; unsupported native RR types remain visible and read-only. The
+form can copy one eligible native A/AAAA row with its exact TTL for review. Local overrides have
+neither a zone selector nor a caller-selected TTL. Pi-hole group assignment selects an existing
+literal client and native group IDs; selecting none explicitly removes its memberships. Field
+refusals keep the draft, focus a linked error summary and associate each error with its control.
+The retained sheet shows the exact owner/type/value/zone/TTL or client/group request and selected
+native before/readback policy. Its freshness poll uses `/changes/{id}/current`, including for earlier
+policy actions; a failed read, replaced owner, changed selection or changed retained intent holds
+apply even while confirmation is open. Attempt IDs and single-use server claims continue to prevent
+replay after a lost response or reload.
+
 AdGuard `LocalOverride.enabled` retains the optional native boolean; missing stays unreported.
 Its pinned add/delete body explicitly selects an enabled entry. Enable-state drift refuses a retained
 review, and unreadable or unknown rewrite policy fields prevent an incomplete mutation.
@@ -113,7 +126,8 @@ without repeating the operation or restoring native foreign policy.
 The backend controls passed focused policy/private API races and actual source-matched AdGuard,
 Pi-hole and Technitium acceptance; the [raw results, commands, hashes and original failures](evidence/dns-service-policy-2026-10-09/)
 retain this bounded proof. The matching retained UI and fresh integrated reachable acceptance are
-required before this product slice is considered verified. AdGuard client-specific
+recorded separately in the [assembled record/client acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui-acceptance.md),
+including actual exact-selection current reads before/after every owned engine operation. AdGuard client-specific
 settings, client/group creation, filter-list content, other RR types, signed/secondary/forwarder zone
 edits, native APP/view mutation, encrypted listener management and clustering remain outside this
 bounded request contract. P17's broader requirements remain open.

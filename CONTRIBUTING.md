@@ -128,6 +128,10 @@ to the contribution terms above, including the additional licence grant to the p
   [native DNS service acceptance](docs/internal/backend/network-dns-services.md#acceptance-status)
   for the selected test binary, required already-cached images and exact owned cleanup scope.
   These fixtures publish explicit high loopback ports and never redirect the host resolver.
+  Record/client UI changes also run the selected DNS service browser spec against a fresh production
+  build. Its mocks must supply `/changes/{id}/current` for the exact retained selection; ordinary
+  connection inventory cannot stand in for selected record/client freshness. Browser mocks and
+  actual engine acceptance remain separately attributed.
 - Controlled probe-agent changes also run from `backend/`:
   `JD_NETVANTAGE_LIVE=1 go test -race ./internal/netvantage -run '^TestControlledVantageSeparateNamespace$' -count=1 -v`.
   This lane uses passwordless sudo to create an owned loopback namespace, then runs as the contributor

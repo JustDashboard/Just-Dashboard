@@ -1,0 +1,31 @@
+{
+  "source": "1fe294f9432e7ecd4feecb871f190f7ad6bae292",
+  "activeBase": "7be11ba08c63252fd94fd1d7f86b0ee6683d837e",
+  "completeChangedFiles": 644,
+  "changedMarkdownFiles": 58,
+  "localLinksChecked": 524,
+  "missingLinks": [],
+  "requirements": 187,
+  "uniqueRequirements": 187,
+  "statuses": {
+    "in progress": 53,
+    "verified": 6,
+    "pending": 128
+  },
+  "completeProtectedDiff": [],
+  "documentationReview": {
+    "docs/internal": "Reviewed backend DNS behavior, route/capability/security boundaries, native schema/version/selection policy, frontend feature/data ownership and evidence; updated owning guides and retained original proof attribution. Documented the separately observed v8 equal-byte inode classification defect and networkd INI render instability; unshipped corrections remain pending actual acceptance.",
+    "AGENTS.md": "Reviewed complete diff and contributor essentials; no additional update needed for this bounded DNS policy slice or the documented native limitations.",
+    "README.md": "Updated operator-facing supported A/AAAA/zone/TTL/client-group controls and selected-policy freshness.",
+    "CONTRIBUTING.md": "Added current-selection mock precision and separate native/browser acceptance attribution; no dependency/licensing/CI/workflow additions."
+  },
+  "validation": {
+    "integrated": "156 pass /7 fail /8 optional skip; source777; failures retained",
+    "finalScoped": "45 pass /0fail /0skip; source1fe test-only corrections; exit0;135.33s",
+    "uniqueReachableExecutablePassing": 163,
+    "native": "all3 actualPASS/noSKIP;28currentreads;source22/hash/binary exact;ownedcleanup0",
+    "scope": "Full187 retained; no10/10 or broader completion claim"
+  },
+  "independentReview": "DNS agent verified all22 native hashes/binary, actual3engine timings/currentcounts/cleanup, final45 browserguard assertions unchanged andpassing, appmatches9d source, configured/null-versus-browser distinction andfinalowningdocs. Added external controlledsession130 metadata for interrupted rawwrapperexit0; native claims compare retained state andbefore/readback fingerprints.",
+  "logPreservation": "All original workspace outputs preserved. Checked-in copies normalize only terminal/trailing whitespace in build/first browser/first required; 3actualnative logs byte-identical. Copy normalization hashes and original failedartifact manifests retained."
+}

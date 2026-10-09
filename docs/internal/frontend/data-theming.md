@@ -96,6 +96,15 @@ replays a native action. Open confirmations check current capabilities, read fre
 policy fingerprint and immutable reviewed intent again before sending. Owned removal checks the exact
 current owner/image/resource identities separately. HTTP 200 with a nonverified state remains a
 retained outcome requiring review. A late planned read cannot overwrite a terminal native response.
+Record/client forms retain typed drafts through field/native refusals, with linked focused error
+summaries and associated inline errors. Authoritative records require a fresh explicit zone reading;
+unsupported RR types stay read-only. Existing Pi-hole clients use native group IDs, with an explicit
+empty membership list. Successful refreshes preserve edited group choices and refuse staging if a
+selected client or group has disappeared. Retained reviews wait for their full baseline before
+polling `/changes/{id}/current`; ordinary connection inventory cannot supply selected-policy
+freshness. The current read retains raw record/client fingerprints, while open confirmations also
+compare the complete immutable request and selected metadata. Explicit null and empty client
+comments have distinct labels and remain unchanged in native readback.
 WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
 and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
 containment; successful setup says configured when native runtime is not up.

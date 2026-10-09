@@ -3,7 +3,8 @@
 This backend/API slice adds reviewed A/AAAA local overrides on AdGuard and Pi-hole, supported
 unsigned Primary-zone A/AAAA records on Technitium, existing Pi-hole client group assignment, and
 private authoritative record inventory. The matching typed UI and fresh integrated reachable checks
-remain required. Broader P17 is open; these results do not establish arbitrary zone/view/client
+are recorded separately by the later [assembled record/client checkpoint](../../../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui-acceptance.md).
+The source and raw results here keep their original attribution. Broader P17 is open; these results do not establish arbitrary zone/view/client
 editing, remote publication, a measured filtering decision or host reboot acceptance.
 
 The final race binary is `0b258ada8afc8c9b9f447e655f508a623b9d3829a14ce84ffa76d80a5dacc7eb`.
@@ -97,3 +98,6 @@ without changing native mutation or owned lifecycle paths. Tests prove all selec
 connection replacement before/during reads, malformed retained fields, bounded failure/cancellation,
 private capability/no-store behavior and expired/consumed inspection without replay. The three
 native engine proofs above predate this read-only seam; no new engine-acceptance claim is made.
+The later assembled checkpoint runs its separate final race binary against all three actual engines
+with exact-selection current reads before and after reviewed effects. Its hashes, raw logs and
+cleanup evidence live with that checkpoint; they do not change the provenance of these earlier runs.

@@ -19,6 +19,12 @@ connection/inventory and retained review controls, matching production build, 13
 lost-response single-use behavior and phone/desktop inspection. The native engine record and combined
 reachable gate remain separate evidence; broader P17 query/zone/view/client controls remain open.
 
+[Reviewed DNS record/client acceptance](dns-service-policy-ui-acceptance.md) extends the mounted
+forms with bounded A/AAAA overrides, exact unsigned primary-zone records/TTL and existing Pi-hole
+group assignment. It records selected-policy current-read freshness, immutable confirmations,
+native null/empty comments and separate actual three-engine current-read/cleanup proof. Broader
+P17 controls remain open; the original failed browser runs remain attributed separately.
+
 [Kernel observer acceptance](observer-kernel-acceptance.md) records the bounded native observer,
 owned detach/retry, durable batch receipts and actual Docker/process-death fixtures.
 [Observer UI acceptance](observer-ui-acceptance.md) records its separate measurement channels,

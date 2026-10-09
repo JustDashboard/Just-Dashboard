@@ -1,0 +1,53 @@
+{
+  "changes": "Only terminal carriage returns and trailing line/EOF whitespace in checked-in copies; original workspace logs remain unchanged.",
+  "files": [
+    {
+      "file": "browser-first.log",
+      "originalSha256": "3be4421c65318445b8eddfd796d55582a379329a65b57ba8556d9a1a33d18310",
+      "checkedInSha256": "692c7c0d3c9cfb81f67c44b9c6a6edb54f93f2db8125a5bd2f3dca2e74cb198a",
+      "whitespaceChanged": true
+    },
+    {
+      "file": "build.log",
+      "originalSha256": "0c834f61aec5b759a37f9f9000d76f522549ec08ff4762c2bcfb1109c0958b79",
+      "checkedInSha256": "759f97d213d954fd2c825b88fd48ef473469b72a0b6c00ad9a945d257ceb8563",
+      "whitespaceChanged": true
+    },
+    {
+      "file": "native-adguard-assembled.log",
+      "originalSha256": "00092a3fbe074e47fb49f303d40096fc34ead1af72eda85f3406c400d9796579",
+      "checkedInSha256": "00092a3fbe074e47fb49f303d40096fc34ead1af72eda85f3406c400d9796579",
+      "whitespaceChanged": false
+    },
+    {
+      "file": "native-pihole-assembled.log",
+      "originalSha256": "59438123c550e3d9f4dd9073076e5f0e64a278f37c3680c2c87e12b9ed4c33e1",
+      "checkedInSha256": "59438123c550e3d9f4dd9073076e5f0e64a278f37c3680c2c87e12b9ed4c33e1",
+      "whitespaceChanged": false
+    },
+    {
+      "file": "native-technitium-assembled.log",
+      "originalSha256": "40b55f77acdce12b51b3144310183a8fd1f6e736bb880a31b456ce6738b464c8",
+      "checkedInSha256": "40b55f77acdce12b51b3144310183a8fd1f6e736bb880a31b456ce6738b464c8",
+      "whitespaceChanged": false
+    },
+    {
+      "file": "required-final.log",
+      "originalSha256": "fee7a3b87acde58e02f51eca8e452640443b09034f5ca0d4180a29a2e646c099",
+      "checkedInSha256": "fee7a3b87acde58e02f51eca8e452640443b09034f5ca0d4180a29a2e646c099",
+      "whitespaceChanged": false
+    },
+    {
+      "file": "required-first.log",
+      "originalSha256": "4a219400d01c501f1a46918832847a56a2461d9c11322fc771d053832802b6cb",
+      "checkedInSha256": "70685b9ce7e9bac85d9f02e244297f37fde9ca46029a5bddb4bda4adb33ef159",
+      "whitespaceChanged": true
+    },
+    {
+      "file": "required-interrupted.log",
+      "originalSha256": "17d3038d03becf1b305025377ba85d7156bffc043529b76145d59d4b78e24e92",
+      "checkedInSha256": "17d3038d03becf1b305025377ba85d7156bffc043529b76145d59d4b78e24e92",
+      "whitespaceChanged": false
+    }
+  ]
+}

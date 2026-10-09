@@ -43,6 +43,17 @@ an attempted apply stays held across navigation/reload through account-scoped br
 Only explicit native `verified` state reports verification. Owned removal separately names the
 container, bridge and both data volumes and refuses changed identities. This UI exposes the backend's
 closed supported actions; broader zone/view/client editing remains outside this first handoff.
+Record/client controls in `service-policy-form.tsx` extend that scope with A/AAAA local overrides,
+explicit unsigned Primary-zone records and TTL, and existing Pi-hole client group assignments.
+The closed actions are `override_add`, `override_remove`, `record_add`, `record_remove` and
+`client_groups`, validated by `lib/network-dns-service-policy.ts` and the retained DTO parser.
+Authoritative zone reads show unsupported RR types without offering edits. Empty group membership
+is an explicit request. Drafts survive field/native refusals; error summaries focus and link to the
+associated controls. Retained review polls `/changes/{id}/current` for the selected native policy,
+holding stale or changed confirmations and showing human record/client details before and after.
+The [record/client acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui-acceptance.md)
+keeps its final source, selected browser checks and actual native engine/current-read proofs separate
+from the earlier handoff below. Explicit null and empty client comments have distinct labels.
 Its [source-matched build, 13 interaction cases and phone/desktop inspection](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-services-ui-acceptance.md)
 pass, as do the [combined reachable checks](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
 Broader P17 acceptance remains open.
