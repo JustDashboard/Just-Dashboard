@@ -1968,7 +1968,10 @@
         "host_unchanged": true
       },
       "harness_note": "Corrected cwd backend/internal/netx; captured fixture equality failure preserved. No fixture byte diff was captured after namespace teardown; parser growth is independently reproducible from source.",
-      "raw_file": "networkd-run02.raw.txt"
+      "raw_file": "networkd-run02.raw.txt.gz",
+      "raw_file_encoding": "gzip",
+      "raw_file_sha256": "31a27cba499ac69e3b7a3c7137690d72d02b767f049e46ccb5b0c2e5cbf00f4b",
+      "raw_uncompressed_sha256": "2f10e0dac0ff95ede64ccddb3a724cba008f8811ea20e717b757079fc34fd543"
     },
     "NetworkManager-run03": {
       "execution": {
