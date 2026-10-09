@@ -8,7 +8,7 @@ proposed statuses are in the final report of the change, for the ledger owner to
 
 Worktree `/home/ubuntu/Just-Dashboard-net-topology`, branch
 `implement/network-topology-interfaces-maturity`, based on `origin/research/network-capability-report`
-at `4338e6cc`. Raw logs are in `/home/ubuntu/Just-Dashboard-net-topology-artifacts/`.
+at `4338e6cc`. Raw logs are kept beside this record in [`network-topology-interfaces/`](network-topology-interfaces/).
 
 The host is a live production server. No host interface, route, firewall rule, DNS setting or sysctl
 was changed. Kernel-backed tests ran only in throwaway namespaces held by `unshare --net --mount`
@@ -290,18 +290,20 @@ browser worker, and stopped the server afterwards.
 | Check | Command | Result |
 | --- | --- | --- |
 | netx unit tests | `go test ./internal/netx -count=1` | pass, 25.8 s |
-| Owned-namespace kernel acceptance | `sudo -n env JD_NETNS_LIVE=1 netx.test -test.run 'TestLiveConntrack\|TestLiveBridgeVLANs\|TestLiveMacvlanBridgeMode\|TestLiveBootFile\|TestLiveMutationsAgainst'` | 5 pass, 7 s (`netx-live-final.txt`) |
-| Process-death recovery | `JD_NETNS_LIVE=1 go test ./internal/netx -run 'TestLiveBridgeVLANRecovery\|TestBridgeRecoveryProcessFixture'` | 2 pass (`netx-live-bridge-recovery.txt`) |
-| First focused browser run | new spec + `network-ui.spec.ts`, against a fresh 140 s build | 38 pass, 14 optional screenshot skips (`first-run.txt`) |
-| Changed-file gate (validation run) | `scripts/test-changed.sh 4338e6cc` | pass: Prettier, ESLint, `tsc`, 3,277 Bun tests (14,776 assertions); `go build ./...`, `go vet` and tests of `internal/api`, `internal/netx`, `internal/store`; 29 browser specs, 516 cases passed, 60 optional skips, 17.8 min (`test-changed-2.txt`, 1,199 s command, 1,856 s with the lock wait) |
+| Owned-namespace kernel acceptance | `sudo -n env JD_NETNS_LIVE=1 netx.test -test.run 'TestLiveConntrack\|TestLiveBridgeVLANs\|TestLiveMacvlanBridgeMode\|TestLiveBootFile\|TestLiveMutationsAgainst'` | 5 pass, 7 s ([`netx-live-final`](network-topology-interfaces/netx-live-final.log)) |
+| Process-death recovery | `JD_NETNS_LIVE=1 go test ./internal/netx -run 'TestLiveBridgeVLANRecovery\|TestBridgeRecoveryProcessFixture'` | 2 pass ([`netx-live-bridge-recovery`](network-topology-interfaces/netx-live-bridge-recovery.log)) |
+| First focused browser run | new spec + `network-ui.spec.ts`, against a fresh 140 s build | 38 pass, 14 optional screenshot skips ([`first-run`](network-topology-interfaces/first-run.log)) |
+| Changed-file gate (validation run) | `scripts/test-changed.sh 4338e6cc` | pass: Prettier, ESLint, `tsc`, 3,277 Bun tests (14,776 assertions); `go build ./...`, `go vet` and tests of `internal/api`, `internal/netx`, `internal/store`; 29 browser specs, 516 cases passed, 60 optional skips, 17.8 min ([`test-changed-2`](network-topology-interfaces/test-changed-2.log), 1,199 s command, 1,856 s with the lock wait) |
 
 The 19 cases of `network-topology-interfaces.spec.ts` are part of that gate. Review screenshots at
 390 and 1440 pixels of the Overview, the ens3/jd-lab/vlan30/vx42 device sheets and the lab namespace
-sheet are in `shots/` (fixture data, not committed).
+sheet were reviewed; four are kept: [Overview, 1440](network-topology-interfaces/overview-1440.png),
+[Overview, 390](network-topology-interfaces/overview-390.png), [VXLAN readiness sheet, 390](network-topology-interfaces/device-vx42-390-mid.png) and
+[lab namespace sheet, 1440](network-topology-interfaces/namespace-lab-1440.png) (fixture data).
 
 The final gate ran on the committed head `5d66048b` (code identical to the validation run):
 `scripts/test-changed.sh 4338e6cc` passed — Prettier, ESLint, `tsc`, 3,277 Bun tests; `go build ./...`,
 `go vet` and the beside-file tests of `internal/api`, `internal/netx` and `internal/store` (served
 from Go's test cache, the inputs being unchanged); 29 browser specs with 516 cases passed, including
 all 19 new cases, and 60 optional screenshot cases skipped, in 18.7 minutes
-(`test-changed-final.txt`; 1,235 s command, 3,006 s including the wait for the shared lock).
+([`test-changed-final`](network-topology-interfaces/test-changed-final.log); 1,235 s command, 3,006 s including the wait for the shared lock).

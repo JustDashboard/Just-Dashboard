@@ -1,0 +1,13 @@
+=== RUN   TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel
+--- PASS: TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel (1.01s)
+=== RUN   TestLiveMacvlanBridgeModeConnectivity
+--- PASS: TestLiveMacvlanBridgeModeConnectivity (1.20s)
+=== RUN   TestLiveBootFileLoadsWithoutOneError
+--- PASS: TestLiveBootFileLoadsWithoutOneError (0.19s)
+=== RUN   TestLiveMutationsAgainstARealKernel
+=== RUN   TestLiveMutationsAgainstARealKernel/refusals
+--- PASS: TestLiveMutationsAgainstARealKernel (4.20s)
+=== RUN   TestLiveConntrackDumpReadsAnOwnedNamespace
+--- PASS: TestLiveConntrackDumpReadsAnOwnedNamespace (0.04s)
+PASS
+wall=7s

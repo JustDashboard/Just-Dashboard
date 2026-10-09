@@ -77,6 +77,13 @@ server-held quick results, metric history and the measured owned-namespace captu
 the failed first gate, the review fixes and the passing gate beside it. Production capture cost
 and a real woken device remain open.
 
+[Overview, topology and interface acceptance](network-topology-interfaces-acceptance.md)
+(C007–C023) records per-family identity, connection-tracking topology edges, incident history,
+device/bridge/readiness/namespace detail, bridge VLAN and VXLAN flood-end management and
+fresh-process VLAN recovery, with owned-namespace kernel runs, the passing gates and four review
+captures. Manager-backed VLAN and owner-profile edits, provisioning transactions and EVPN remain
+open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
