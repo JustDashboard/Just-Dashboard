@@ -609,24 +609,44 @@ test("refreshing native clients preserves edited group choices and an empty-grou
 })
 
 for (const comment of [null, ""] as const) {
+  const width = comment === null ? 390 : 1280
   test(`native ${comment === null ? "null" : "empty"} client comment stays explicit before and after group assignment`, async ({
     page,
-  }) => {
+  }, info) => {
+    await page.setViewportSize({ width, height: 960 })
     const control = await mockDNSServicePage(page, { engine: "pihole" })
     control.clientComment = comment
     await selectedClient(page)
     await sheet(page)
       .getByRole("checkbox", { name: /^No filtering group · ID 7(?:\s|$)/ })
       .uncheck()
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({
+      path: info.outputPath(`dns-client-groups-${width}.png`),
+      fullPage: true,
+    })
     await createReview(page).click()
     const label = comment === null ? "None (native null)" : "Empty native comment"
     await expect(detail(section(page, "Before the change"), "Client comment")).toHaveText(label)
+    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({
+      path: info.outputPath(`dns-client-review-${width}.png`),
+      fullPage: true,
+    })
     expect(control.changes[0].before!.selectedClient!.comment).toBe(comment)
     const originalFingerprint = control.changes[0].before!.selectedClient!.commentFingerprint
     await expect(applyReview(page)).toBeEnabled()
     const dialog = await confirmation(page)
     await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
     await expect(detail(section(page, "Native readback"), "Client comment")).toHaveText(label)
+    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({
+      path: info.outputPath(`dns-client-readback-${width}.png`),
+      fullPage: true,
+    })
     expect(control.changes[0].after!.selectedClient!.comment).toBe(comment)
     expect(control.changes[0].after!.selectedClient!.commentFingerprint).toBe(originalFingerprint)
     expect(control.mutations[0].body).toEqual({
