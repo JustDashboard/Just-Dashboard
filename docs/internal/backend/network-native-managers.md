@@ -44,6 +44,9 @@ its UUID and exact interface binding. Its offline client stages a profile; the s
 loads and activates it. networkd stages the selected `.network` file and reconfigures the device.
 Netplan preserves its exact YAML origin, generates in a private root, then replaces only the selected
 source and generated renderer artifact. It does not run a global `netplan apply`.
+Native INI rendering preserves comments and intentional blank lines in retained sections. Its
+terminal LF ends the last line, so repeated rendering of unchanged networkd address, DNS, domain and
+route intent does not create another blank line. A missing final LF is normalized once.
 The running NetworkManager image is also inspected for the Ubuntu Netplan writer integration.
 That build migrates persistent origins while restoring a native checkpoint. Existing keyfile origins
 on that build remain refused. A selected authored Netplan origin instead uses the independent

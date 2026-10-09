@@ -16,7 +16,8 @@ func parseNativeINI(data []byte) (nativeINI, error) {
 		return nil, errors.New("invalid bounded native profile")
 	}
 	blocks := nativeINI{{}}
-	for _, line := range strings.Split(string(data), "\n") {
+	// A terminal LF ends the last line; splitting it would invent a blank line.
+	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
 		trim := strings.TrimSpace(line)
 		if strings.HasPrefix(trim, "[") {
 			if !strings.HasSuffix(trim, "]") || strings.Count(trim, "[") != 1 {
