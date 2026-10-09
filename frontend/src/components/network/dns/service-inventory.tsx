@@ -7,6 +7,7 @@ import {
   DNS_SERVICE_BASE,
   dnsEngineName,
   readDNSChange,
+  readDNSChangeRequest,
   type DNSChangeRequest,
   type DNSNativeGroup,
   type DNSNativeReading,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { dnsDraftLines, dnsStageProblem } from "./service-form"
+import { DNSServicePolicyForm, type DNSPolicyAction } from "./service-policy-form"
 
 function InventorySection({
   title,
@@ -158,44 +160,51 @@ function Inventory({
   }, [])
   const admin = can("system.admin")
   const problem = dnsStageProblem(view, stale, admin)
-  const stage = async () => {
+  const stage = async (prepared?: DNSChangeRequest) => {
     if (inFlight.current || problem) return
     setError(undefined)
     setFieldError(undefined)
     let request: DNSChangeRequest
     try {
-      switch (action) {
-        case "protection":
-          request = { action, protection }
-          break
-        case "upstreams":
-          request = { action, upstreams: dnsDraftLines(upstreams, 16, true) }
-          break
-        case "access":
-          if (view.connection.engine !== "adguard")
-            throw new Error("Allowed-client changes require AdGuard Home.")
-          request = {
-            action,
-            allowedClients: dnsDraftLines(allowedClients, 128, true),
-            deniedClients: dnsDraftLines(deniedClients, 128),
-          }
-          if (
-            new Set([...request.allowedClients, ...request.deniedClients]).size !==
-            request.allowedClients.length + request.deniedClients.length
-          )
-            throw new Error("Allowed and denied client scopes must be unique across both lists.")
-          break
-        case "zone_create":
-          if (view.connection.engine !== "technitium")
-            throw new Error("Primary-zone creation requires Technitium.")
-          if (
-            !zone.includes(".") ||
-            zone.length > 253 ||
-            !zone.split(".").every((part) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part))
-          )
-            throw new Error("Enter a lower-case primary-zone DNS name with complete labels.")
-          request = { action, zone }
-          break
+      if (prepared) {
+        if (prepared.action !== action) throw new Error("The selected native action changed.")
+        request = readDNSChangeRequest(prepared, view.connection.engine)
+      } else {
+        switch (action) {
+          case "protection":
+            request = { action, protection }
+            break
+          case "upstreams":
+            request = { action, upstreams: dnsDraftLines(upstreams, 16, true) }
+            break
+          case "access":
+            if (view.connection.engine !== "adguard")
+              throw new Error("Allowed-client changes require AdGuard Home.")
+            request = {
+              action,
+              allowedClients: dnsDraftLines(allowedClients, 128, true),
+              deniedClients: dnsDraftLines(deniedClients, 128),
+            }
+            if (
+              new Set([...request.allowedClients, ...request.deniedClients]).size !==
+              request.allowedClients.length + request.deniedClients.length
+            )
+              throw new Error("Allowed and denied client scopes must be unique across both lists.")
+            break
+          case "zone_create":
+            if (view.connection.engine !== "technitium")
+              throw new Error("Primary-zone creation requires Technitium.")
+            if (
+              !zone.includes(".") ||
+              zone.length > 253 ||
+              !zone.split(".").every((part) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part))
+            )
+              throw new Error("Enter a lower-case primary-zone DNS name with complete labels.")
+            request = { action, zone }
+            break
+          default:
+            throw new Error("Complete the selected native record or client form before reviewing.")
+        }
       }
     } catch (err) {
       setFieldError(errorMessage(err))
@@ -242,9 +251,26 @@ function Inventory({
       ? [{ action: "access" as const, label: "Client access" }]
       : []),
     ...(view.connection.engine === "technitium"
-      ? [{ action: "zone_create" as const, label: "Primary zone" }]
+      ? [
+          { action: "zone_create" as const, label: "Primary zone" },
+          { action: "record_add" as const, label: "Add zone record" },
+          { action: "record_remove" as const, label: "Remove zone record" },
+        ]
+      : [
+          { action: "override_add" as const, label: "Add local override" },
+          { action: "override_remove" as const, label: "Remove local override" },
+        ]),
+    ...(view.connection.engine === "pihole"
+      ? [{ action: "client_groups" as const, label: "Client groups" }]
       : []),
   ]
+  const policyAction = [
+    "override_add",
+    "override_remove",
+    "record_add",
+    "record_remove",
+    "client_groups",
+  ].includes(action)
   if (!admin)
     return (
       <p className="text-body text-muted-foreground">
@@ -422,6 +448,11 @@ function Inventory({
                   className="min-w-0 py-3 font-mono text-body break-all"
                 >
                   {override.name} · {override.type} → {override.value}
+                  {override.enabled === undefined
+                    ? " · Native enabled state unspecified"
+                    : override.enabled
+                      ? " · Enabled"
+                      : " · Disabled"}
                 </li>
               ))}
             </ul>
@@ -515,116 +546,127 @@ function Inventory({
             />
           ))}
         </ChoiceGrid>
-        <form
-          className="flex min-w-0 flex-col gap-4"
-          aria-label="Review native DNS change"
-          aria-busy={busy}
-          onSubmit={(event) => {
-            event.preventDefault()
-            void stage()
-          }}
-        >
-          {action === "protection" && (
-            <OptionRow
-              title="Native protection"
-              checked={protection}
-              disabled={Boolean(problem) || busy}
-              onCheckedChange={setProtection}
-              hint="The review sets persistent native protection; installed-app protection remains a separate reading."
-            />
-          )}
-          {action === "upstreams" && (
-            <Field
-              label="Classic DNS upstream endpoints"
-              htmlFor={`${id}-upstreams`}
-              error={fieldError}
-              hint="1–16 literal IP:port endpoints, one per line; bracket IPv6. This review replaces the native upstream list with classic DNS."
-            >
-              <Textarea
-                id={`${id}-upstreams`}
-                className="font-mono"
-                value={upstreams}
-                onChange={(event) => setUpstreams(event.target.value)}
+        {policyAction ? (
+          <DNSServicePolicyForm
+            action={action as DNSPolicyAction}
+            view={view}
+            problem={problem}
+            stale={stale}
+            busy={busy}
+            onStage={stage}
+          />
+        ) : (
+          <form
+            className="flex min-w-0 flex-col gap-4"
+            aria-label="Review native DNS change"
+            aria-busy={busy}
+            onSubmit={(event) => {
+              event.preventDefault()
+              void stage()
+            }}
+          >
+            {action === "protection" && (
+              <OptionRow
+                title="Native protection"
+                checked={protection}
                 disabled={Boolean(problem) || busy}
-                maxLength={8192}
-                spellCheck={false}
-                aria-invalid={Boolean(fieldError)}
+                onCheckedChange={setProtection}
+                hint="The review sets persistent native protection; installed-app protection remains a separate reading."
               />
-            </Field>
-          )}
-          {action === "access" && (
-            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+            )}
+            {action === "upstreams" && (
               <Field
-                label="Allowed client prefixes"
-                htmlFor={`${id}-allowed`}
+                label="Classic DNS upstream endpoints"
+                htmlFor={`${id}-upstreams`}
                 error={fieldError}
-                hint="1–128 canonical IP prefixes, one per line. This is an explicit allow scope."
+                hint="1–16 literal IP:port endpoints, one per line; bracket IPv6. This review replaces the native upstream list with classic DNS."
               >
                 <Textarea
-                  id={`${id}-allowed`}
+                  id={`${id}-upstreams`}
                   className="font-mono"
-                  value={allowedClients}
-                  onChange={(event) => setAllowedClients(event.target.value)}
+                  value={upstreams}
+                  onChange={(event) => setUpstreams(event.target.value)}
                   disabled={Boolean(problem) || busy}
                   maxLength={8192}
                   spellCheck={false}
                   aria-invalid={Boolean(fieldError)}
                 />
               </Field>
+            )}
+            {action === "access" && (
+              <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+                <Field
+                  label="Allowed client prefixes"
+                  htmlFor={`${id}-allowed`}
+                  error={fieldError}
+                  hint="1–128 canonical IP prefixes, one per line. This is an explicit allow scope."
+                >
+                  <Textarea
+                    id={`${id}-allowed`}
+                    className="font-mono"
+                    value={allowedClients}
+                    onChange={(event) => setAllowedClients(event.target.value)}
+                    disabled={Boolean(problem) || busy}
+                    maxLength={8192}
+                    spellCheck={false}
+                    aria-invalid={Boolean(fieldError)}
+                  />
+                </Field>
+                <Field
+                  label="Denied client prefixes"
+                  htmlFor={`${id}-denied`}
+                  hint="Up to 128 canonical prefixes; none may overlap an identical allowed entry."
+                >
+                  <Textarea
+                    id={`${id}-denied`}
+                    className="font-mono"
+                    value={deniedClients}
+                    onChange={(event) => setDeniedClients(event.target.value)}
+                    disabled={Boolean(problem) || busy}
+                    maxLength={8192}
+                    spellCheck={false}
+                  />
+                </Field>
+              </div>
+            )}
+            {action === "zone_create" && (
               <Field
-                label="Denied client prefixes"
-                htmlFor={`${id}-denied`}
-                hint="Up to 128 canonical prefixes; none may overlap an identical allowed entry."
+                label="Primary zone name"
+                htmlFor={`${id}-zone`}
+                error={fieldError}
+                hint="A lower-case Technitium primary zone, separate from local overrides."
               >
-                <Textarea
-                  id={`${id}-denied`}
+                <Input
+                  id={`${id}-zone`}
                   className="font-mono"
-                  value={deniedClients}
-                  onChange={(event) => setDeniedClients(event.target.value)}
+                  value={zone}
+                  onChange={(event) => setZone(event.target.value)}
                   disabled={Boolean(problem) || busy}
-                  maxLength={8192}
+                  maxLength={253}
                   spellCheck={false}
+                  aria-invalid={Boolean(fieldError)}
                 />
               </Field>
+            )}
+            {problem && <p className="text-body text-muted-foreground">{problem}</p>}
+            <div>
+              <Button type="submit" disabled={Boolean(problem) || busy} pending={busy}>
+                Create retained review
+              </Button>
             </div>
-          )}
-          {action === "zone_create" && (
-            <Field
-              label="Primary zone name"
-              htmlFor={`${id}-zone`}
-              error={fieldError}
-              hint="A lower-case Technitium primary zone, separate from local overrides."
-            >
-              <Input
-                id={`${id}-zone`}
-                className="font-mono"
-                value={zone}
-                onChange={(event) => setZone(event.target.value)}
-                disabled={Boolean(problem) || busy}
-                maxLength={253}
-                spellCheck={false}
-                aria-invalid={Boolean(fieldError)}
-              />
-            </Field>
-          )}
-          {problem && <p className="text-body text-muted-foreground">{problem}</p>}
-          {(error || fieldError) && (
-            <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-sm focus-ring">
-              <Notice tone="warning" title="Native review unavailable">
-                <p>{error || fieldError}</p>
-                <p>
-                  Your draft is retained. Refresh the native reading before retrying if its owner or
-                  baseline changed.
-                </p>
-              </Notice>
-            </div>
-          )}
-          <div>
-            <Button type="submit" disabled={Boolean(problem) || busy} pending={busy}>
-              Create retained review
-            </Button>
+          </form>
+        )}
+        {(error || fieldError) && (
+          <div ref={errorRef} role="alert" tabIndex={-1} className="rounded-sm focus-ring">
+            <Notice tone="warning" title="Native review unavailable">
+              <p>{error || fieldError}</p>
+              <p>
+                Your draft is retained. Refresh the native reading before retrying if its owner or
+                baseline changed.
+              </p>
+            </Notice>
           </div>
-        </form>
+        )}
       </InventorySection>
     </div>
   )

@@ -311,6 +311,33 @@ export function DNSServiceReview({
                   />
                 </>
               )}
+              {"record" in change.request && (
+                <>
+                  <ReviewDetail label="Record name" value={change.request.record.name} mono />
+                  <ReviewDetail label="Record type" value={change.request.record.type} />
+                  <ReviewDetail label="Record value" value={change.request.record.value} mono />
+                  {"zone" in change.request && (
+                    <ReviewDetail label="Authoritative zone" value={change.request.zone} mono />
+                  )}
+                  {"ttl" in change.request.record && (
+                    <ReviewDetail
+                      label="Record TTL"
+                      value={`${change.request.record.ttl} seconds`}
+                    />
+                  )}
+                </>
+              )}
+              {change.request.action === "client_groups" && (
+                <>
+                  <ReviewDetail label="Client address" value={change.request.client.address} mono />
+                  <ReviewDetail
+                    label="New group IDs"
+                    value={
+                      change.request.client.groups.join(" · ") || "None · remove all memberships"
+                    }
+                  />
+                </>
+              )}
             </DetailList>
           </Section>
           {change.before && <ReviewedSnapshot title="Before the change" value={change.before} />}
@@ -375,6 +402,60 @@ function ReviewedSnapshot({ title, value }: { title: string; value: DNSServiceSn
               .join("; ") || value.zoneEvidence.summary
           }
         />
+        <ReviewDetail
+          label="Local overrides"
+          value={
+            value.localOverrides
+              .map(
+                (record) =>
+                  `${record.name} · ${record.type} → ${record.value} · ${record.enabled === undefined ? "Enabled state unspecified" : record.enabled ? "Enabled" : "Disabled"}`,
+              )
+              .join("; ") || "None reported"
+          }
+          mono
+        />
+        {value.records && (
+          <>
+            <ReviewDetail label="Selected zone" value={value.records.zone} mono />
+            <ReviewDetail
+              label="Zone policy"
+              value={`${value.records.type} · ${value.records.disabled ? "Disabled" : "Enabled"} · ${value.records.dnssec} · ${value.records.internal === null ? "Internal category unreported" : value.records.internal ? "Internal zone" : "External zone"} · native ${value.records.nativeVersion}`}
+            />
+            <ReviewDetail
+              label="Native record inventory"
+              value={
+                value.records.records
+                  .map(
+                    (record) =>
+                      `${record.name} · ${record.type} → ${record.value ?? "Native value outside this control"} · TTL ${record.ttl}s · ${record.disabled ? "Disabled" : "Enabled"}${record.comments ? ` · ${record.comments}` : ""}`,
+                  )
+                  .join("; ") || "No records reported"
+              }
+              mono
+            />
+          </>
+        )}
+        {value.selectedClient && (
+          <>
+            <ReviewDetail
+              label="Selected client address"
+              value={value.selectedClient.address}
+              mono
+            />
+            <ReviewDetail
+              label="Selected client group IDs"
+              value={value.selectedClient.groups.join(" · ") || "None"}
+            />
+            <ReviewDetail
+              label="Client comment"
+              value={
+                value.selectedClient.comment === null
+                  ? "Unreported"
+                  : value.selectedClient.comment || "None"
+              }
+            />
+          </>
+        )}
         <ReviewDetail
           label="Runtime evidence"
           value={`${value.runtime.state} · ${value.runtime.basis} · ${value.runtime.summary}`}

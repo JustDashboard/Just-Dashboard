@@ -14,6 +14,7 @@ import {
   readDNSAttempts,
   readDNSChange,
   readDNSConnection,
+  readDNSCurrentChange,
   readDNSList,
   readDNSProvision,
   readDNSView,
@@ -437,10 +438,15 @@ function RetainedReview({
   const review = dnsRetainedReview(returned, retained.data ?? screen.initial)
   const ownerId = review && !("resources" in review) ? review.connectionId : undefined
   const owner = usePoll(
-    async (signal) =>
-      readDNSView(await get(`${DNS_SERVICE_BASE}/${ownerId}`, undefined, signal), ownerId),
+    async (signal) => {
+      if (!review || "resources" in review) throw new Error("No native change is selected.")
+      return readDNSCurrentChange(
+        await get(`${DNS_SERVICE_BASE}/changes/${screen.id}/current`, undefined, signal),
+        review,
+      )
+    },
     5000,
-    [ownerId],
+    [ownerId, screen.id, review && !("resources" in review) ? review.generation : undefined],
     { enabled: Boolean(ownerId) },
   )
   const ownerProblem =
