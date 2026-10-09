@@ -6,7 +6,7 @@ import { useParams } from "next/navigation"
 import { ArrowLeft, Globe, Logs, Pencil } from "@/components/icons"
 import { get } from "@/lib/api"
 import { forgetSessionState } from "@/lib/view-state"
-import type { SiteSpec, VHost } from "@/lib/types"
+import type { SiteSpec, UpstreamReport, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { Page, PageContext, PageState } from "@/components/page"
@@ -25,6 +25,8 @@ import { SiteForm } from "@/components/proxy/site-form"
 import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
+import { SiteBalancing } from "@/components/proxy/site-balancing"
+import { poolsOfSite } from "@/components/proxy/upstream-pools"
 
 /** The site's file read back: the form's fields, and where it logs. */
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
@@ -75,9 +77,19 @@ function SiteBody({ name }: { name: string }) {
     [name],
     { enabled: nginx },
   )
+  // How nginx spreads the site's requests, and what it logged meeting each
+  // server: read with every route's, which the server checks at most every
+  // fifteen seconds whoever asks.
+  const upstreams = usePoll(
+    (signal) => get<UpstreamReport>("/proxy/upstreams", undefined, signal),
+    30_000,
+    [],
+    { enabled: nginx },
+  )
   const refresh = () => {
     vhosts.refresh()
     read.refresh()
+    upstreams.refresh()
   }
   const openForm = () => setForm((f) => ({ open: true, session: f.session + 1 }))
 
@@ -172,6 +184,12 @@ function SiteBody({ name }: { name: string }) {
         destinationLabel={destinationLabel(spec)}
         destination={target || "Served by configuration"}
       />
+      {nginx && upstreams.data && (
+        <SiteBalancing
+          pools={poolsOfSite(upstreams.data, vhost.path)}
+          evidence={upstreams.data.evidence}
+        />
+      )}
 
       {nginx && !spec && read.error ? (
         // Where an nginx site logs is its file's to say. Unread, the page

@@ -913,6 +913,74 @@ test("/proxy/sites/app.example.com's upstream figure opens its failures, and let
   )
 })
 
+test("/proxy/sites/app.example.com says who balances its requests and what nginx logged of each server", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockLogs(page)
+  const path = "/etc/nginx/sites-available/app.example.com"
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: new Date().toISOString(),
+      targets: [],
+      evidence: {
+        since: new Date(Date.now() - 3_600_000).toISOString(),
+        logs: ["/var/log/nginx/error.log"],
+        complete: true,
+      },
+      pools: [
+        {
+          name: "jd_app_example_com_pool",
+          kind: "http",
+          sites: ["app.example.com"],
+          files: [path],
+          method: "least_conn",
+          balancing: "native",
+          verdict: "degraded",
+          noLive: 2,
+          members: [
+            { address: "10.0.0.1:3000", weight: 3, state: "up", ms: 2 },
+            {
+              address: "10.0.0.2:3000",
+              maxFails: 1,
+              failTimeout: "30s",
+              state: "refused",
+              failures: { refused: 4, disabled: 1 },
+            },
+            { address: "10.0.0.3:3000", backup: true, state: "up", ms: 1 },
+          ],
+        },
+        {
+          kind: "http",
+          sites: ["other.example.com"],
+          files: ["/etc/nginx/sites-available/other"],
+          balancing: "single",
+          verdict: "serving",
+          members: [{ address: "127.0.0.1:9000", state: "up" }],
+        },
+      ],
+    }),
+  )
+  await page.goto("/proxy/sites/app.example.com")
+
+  const panel = page.getByRole("region", { name: "Balancing · jd_app_example_com_pool" })
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText("Degraded")).toBeVisible()
+  await expect(
+    panel.getByText(
+      "nginx sends requests to the server with the fewest active connections across 2 servers, and sets one aside after it fails. Its backup takes over only when every primary has failed.",
+    ),
+  ).toBeVisible()
+  await expect(panel.getByText("nginx had nowhere to send 2 requests")).toBeVisible()
+  const refused = panel.getByRole("row", { name: /10\.0\.0\.2:3000/ })
+  await expect(refused).toContainText("primary, set aside after 1 failure for 30s")
+  await expect(refused).toContainText("refused")
+  await expect(refused).toContainText("refused 4×, set aside 1×")
+  await expect(panel.getByRole("row", { name: /10\.0\.0\.3:3000/ })).toContainText("backup")
+  // Another site's single endpoint is not this site's.
+  await expect(page.getByText("127.0.0.1:9000")).toHaveCount(0)
+})
+
 test("/proxy/sites/legacy.example.com says why it has no requests to read, and reads nginx's shared error log for its names", async ({
   page,
 }) => {

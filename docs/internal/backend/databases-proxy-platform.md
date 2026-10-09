@@ -3967,6 +3967,33 @@ containers/volumes/networks.
   for 15 s with concurrent readers sharing one, so polling cannot amplify outbound traffic.
   `POST /proxy/upstreams/check` (system.admin, audited `proxy.upstreams.check`) skips the cache. 503
   `no_nginx` on a host without nginx, 503 `invalid_config` when `nginx -T` refuses.
+  **Pools** (`upstream_pools.go`): the same report carries `pools`, the destinations grouped as nginx
+  spreads them — one per upstream block a route forwards to (its method: round-robin, `least_conn`,
+  `ip_hash`, `hash <key>`, `random`; `keepalive`; every `server` with weight, `max_fails`,
+  `fail_timeout`, `backup` and `down`, the down ones listed but never dialled) and one per direct
+  address — each with the routes and site files that use it. `balancing` says who spreads the requests:
+  `native` for a block of several servers nginx chooses among, `native-dns` for one server named by a
+  host name that resolves to several addresses from here now (nginx resolves it when it loads and
+  balances across every address; what it resolved then may differ), and `single` for one address,
+  whose spreading — a provider's load balancer, a floating address, a Kubernetes Service — nginx
+  cannot see and whose failure is the route's; `provider` names the managed balancer a single
+  endpoint's host-name suffix suggests (`.elb.amazonaws.com`, `.run.app`, `.svc.cluster.local` and a
+  dozen more), as a hint and never proof. Each member carries the check's state and, from nginx's own
+  error logs over the last hour (`requestErrorLogs`: every `error_log` the loaded tree names, main,
+  http and server, confined to `/var/log/nginx` like the site logs, or the default there), what nginx
+  met at it by kind — `refused`, `timeout`, `reset`, `closed`, `disabled` (nginx setting the server aside
+  after `max_fails`, logged at warn, so absent where the log level is error), `other` — and when it
+  last did; a member written as a name is matched under each address it resolves to, and nginx's
+  `no live upstreams` (every server set aside) is counted on the block (`noLive`). `verdict` is what a
+  visitor meets: `serving` (every primary up), `degraded` (some), `on-backup` (no primary, a backup),
+  `down`, or `unknown` (nothing checkable). `evidence` names the logs read, the window's start and
+  whether a log's 8 MB bound cut into it. A site's page draws each of its pools as a plain
+  **Balancing** panel (`site-balancing.tsx`, `upstream-pools.ts`): who balances and how, the verdict,
+  `no live upstreams`, and per server its role, check and what nginx logged. Tests:
+  `TestUpstreamPoolsSayWhoBalances`, `TestUpstreamPoolVerdicts`, `TestUpstreamPoolsCountWhatNginxLogged`,
+  `TestRequestErrorLogsStayInsideTheLogDirectory`, and `TestLivePoolOutcomesComeFromNginxItself`, where
+  the host's nginx binary balances a private pool with a refusing member and the report reads the
+  refusals from nginx's own log.
 - **Site traffic and error log** (`proxysvc/site_logs.go`, `proxysvc/site_errors.go`,
   `api/handlers_proxy_traffic.go`): `SiteLogsFor` finds an nginx site by its listed name (never a
   joined path) and reads the `access_log`/`error_log` its file sets at file or server level;
