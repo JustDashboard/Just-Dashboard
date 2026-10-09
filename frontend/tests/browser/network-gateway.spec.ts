@@ -539,8 +539,11 @@ test.describe("installed, measured and previewed", () => {
     const game = page.getByRole("listitem").filter({ hasText: "Game server" })
     await expect(game.getByText("Admission missing")).toBeVisible()
     await expect(page.getByText("Live counters belong to table generation 41")).toBeVisible()
-    // The one-to-one mapping reads as one.
+    // The one-to-one mapping reads as one, in its row and in the picture.
     await expect(page.getByText("Mail host · one-to-one with 203.0.113.25/32")).toBeVisible()
+    await expect(
+      page.getByRole("region", { name: "Goes to" }).getByText("one-to-one with 203.0.113.25/32"),
+    ).toBeVisible()
   })
 
   test("the editor checks the target, shows external evidence and re-decides", async ({ page }) => {

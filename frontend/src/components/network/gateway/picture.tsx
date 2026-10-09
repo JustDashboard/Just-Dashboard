@@ -15,6 +15,8 @@ import { ArrivalMark, Endpoint, Port, TargetMark } from "@/components/network/ga
 import {
   addressWord,
   forwardTitle,
+  natMode,
+  natWord,
   ownerOf,
   PROTOCOL_WORD,
   sourcesWord,
@@ -462,11 +464,12 @@ export function buildNodes(
           {n.interface}
         </span>
       ),
-      hint: n.toAddress ? (
-        <span className="block truncate font-mono">as {n.toAddress}</span>
-      ) : (
-        "masqueraded"
-      ),
+      hint:
+        natMode(n) === "masquerade" && !(n.destinations ?? []).length ? (
+          "masqueraded"
+        ) : (
+          <span className="block truncate font-mono">{natWord(n)}</span>
+        ),
       ...state,
     })
   }
