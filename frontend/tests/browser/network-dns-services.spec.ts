@@ -1,9 +1,65 @@
-import { expect, test, type Page } from "@playwright/test"
-import { dnsChange, dnsProvision, mockDNSServicePage } from "./network-dns-services-fixture"
+import { expect, test, type Locator, type Page } from "@playwright/test"
+import {
+  dnsChange,
+  dnsPolicyChange,
+  dnsProvision,
+  dnsRecords,
+  mockDNSServicePage,
+} from "./network-dns-services-fixture"
 
 const sheet = (page: Page) => page.locator("[data-slot=sheet-content]")
 const posts = (control: Awaited<ReturnType<typeof mockDNSServicePage>>) =>
   control.mutations.filter((mutation) => mutation.path.endsWith("/apply"))
+const section = (page: Page, name: string) =>
+  sheet(page)
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name, exact: true }) })
+const detail = (root: Locator, label: string) =>
+  root
+    .locator("dt")
+    .filter({ hasText: new RegExp(`^${label}$`) })
+    .locator("xpath=following-sibling::dd[1]")
+const createReview = (page: Page) =>
+  sheet(page).getByRole("button", { name: "Create retained review", exact: true })
+const applyReview = (page: Page) =>
+  sheet(page).getByRole("button", { name: "Apply reviewed native change", exact: true })
+
+async function select(page: Page, label: string, option: string) {
+  await sheet(page).getByLabel(label, { exact: true }).click()
+  await page.getByRole("option", { name: option, exact: true }).click()
+}
+
+async function selectZone(page: Page) {
+  await sheet(page).getByLabel("Authoritative zone", { exact: true }).click()
+  await page.getByRole("option", { name: /^authority\.example\.test · / }).click()
+  await expect(
+    sheet(page).getByRole("button", { name: "Read zone records", exact: true }),
+  ).toBeEnabled()
+  await expect(
+    sheet(page).getByText("_policy._tcp.authority.example.test", { exact: false }).first(),
+  ).toBeVisible()
+}
+
+async function recordDraft(
+  page: Page,
+  verb: string,
+  name: string,
+  value: string,
+  type: "A" | "AAAA" = "A",
+) {
+  await openInventory(page)
+  await sheet(page).getByRole("button", { name: verb, exact: true }).click()
+  await sheet(page).getByLabel("DNS record name", { exact: true }).fill(name)
+  await select(page, "Record type", type)
+  await sheet(page).getByLabel("Record value", { exact: true }).fill(value)
+}
+
+async function selectedClient(page: Page, address = "192.0.2.10") {
+  await openInventory(page)
+  await sheet(page).getByRole("button", { name: "Review client groups", exact: true }).click()
+  await sheet(page).getByLabel("Existing Pi-hole client", { exact: true }).click()
+  await page.getByRole("option").filter({ hasText: address }).click()
+}
 
 async function openInventory(page: Page) {
   await page.getByRole("button", { name: "Inspect Fixture DNS", exact: true }).click()
@@ -180,6 +236,7 @@ test("upstream draft becomes a retained review before any native apply", async (
     upstreams: ["192.0.2.54:53", "[2001:db8::54]:53"],
   })
   expect(posts(control)).toEqual([])
+  expect(control.reads).toContain("/network/dns/services/changes/change-fixture/current")
 })
 
 test("an expired retained review stays readable and cannot apply", async ({ page }) => {
@@ -235,7 +292,7 @@ test("an open confirmation refuses a failed native owner refresh", async ({ page
   control.changes = [dnsChange()]
   await openChange(page)
   const dialog = await confirmation(page)
-  control.inspectFailure = true
+  control.currentFailure = true
   await page.clock.fastForward(5500)
   await expect(
     sheet(page)
@@ -331,3 +388,596 @@ test("owned resource preview and removal name the exact bridge/container and bot
     { path: "/network/dns/services/provisions/setup-fixture" },
   ])
 })
+
+test("a local A override has an exact retained intent and human native readback", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page)
+  await recordDraft(page, "Review add local override", "local.example.test", "198.51.100.9")
+  await expect(sheet(page).getByLabel("Authoritative zone", { exact: true })).toHaveCount(0)
+  await expect(sheet(page).getByLabel("TTL (seconds)", { exact: true })).toHaveCount(0)
+  await createReview(page).click()
+  const reviewed = section(page, "Reviewed native change")
+  await expect(detail(reviewed, "Record name")).toHaveText("local.example.test")
+  await expect(detail(reviewed, "Record type")).toHaveText("A")
+  await expect(detail(reviewed, "Record value")).toHaveText("198.51.100.9")
+  expect(control.mutations).toMatchObject([
+    {
+      body: {
+        action: "override_add",
+        record: { name: "local.example.test", type: "A", value: "198.51.100.9" },
+      },
+    },
+  ])
+  expect(control.mutations[0].body).not.toHaveProperty("zone")
+  expect(control.mutations[0].body).not.toHaveProperty("record.ttl")
+  expect(posts(control)).toEqual([])
+  await expect(applyReview(page)).toBeEnabled()
+  const dialog = await confirmation(page)
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(section(page, "Native readback")).toContainText("local.example.test")
+  await expect(section(page, "Native readback")).toContainText("198.51.100.9")
+  await expect(section(page, "Before the change")).not.toContainText("local.example.test")
+  expect(posts(control)).toHaveLength(1)
+  expect(control.unexpectedReads).toEqual([])
+})
+
+test("a Pi-hole AAAA override removal retains its exact address without authoritative TTL", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "pihole" })
+  control.view.snapshot!.localOverrides = [
+    { name: "retired.example.test", type: "AAAA", value: "2001:db8::9" },
+  ]
+  await recordDraft(
+    page,
+    "Review remove local override",
+    "retired.example.test",
+    "2001:db8::9",
+    "AAAA",
+  )
+  await createReview(page).click()
+  await expect(applyReview(page)).toBeEnabled()
+  expect(control.mutations[0].body).toEqual({
+    action: "override_remove",
+    record: { name: "retired.example.test", type: "AAAA", value: "2001:db8::9" },
+  })
+  await expect(section(page, "Before the change")).toContainText("retired.example.test")
+  const dialog = await confirmation(page)
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(section(page, "Native readback")).toBeVisible()
+  await expect(section(page, "Native readback")).not.toContainText("retired.example.test")
+  expect(posts(control)).toHaveLength(1)
+})
+
+test("an authoritative AAAA add reads its explicit zone and retains exact TTL and native metadata", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "technitium" })
+  await recordDraft(
+    page,
+    "Review add zone record",
+    "new.authority.example.test",
+    "2001:db8::9",
+    "AAAA",
+  )
+  await selectZone(page)
+  await sheet(page).getByLabel("TTL (seconds)", { exact: true }).fill("86400")
+  await expect(
+    sheet(page)
+      .getByText(/Unreported/i)
+      .first(),
+  ).toBeVisible()
+  await expect(
+    sheet(page).getByRole("button", {
+      name: /^Use record _policy\._tcp\.authority\.example\.test TXT(?:\s|$)/,
+    }),
+  ).toHaveCount(0)
+  await createReview(page).click()
+  await expect(applyReview(page)).toBeEnabled()
+  expect(control.mutations[0].body).toEqual({
+    action: "record_add",
+    zone: "authority.example.test",
+    record: { name: "new.authority.example.test", type: "AAAA", value: "2001:db8::9", ttl: 86400 },
+  })
+  const reviewed = section(page, "Reviewed native change")
+  await expect(detail(reviewed, "Authoritative zone")).toHaveText("authority.example.test")
+  await expect(detail(reviewed, "Record TTL")).toContainText("86400")
+  await expect(section(page, "Before the change")).toContainText(
+    "_policy._tcp.authority.example.test",
+  )
+  const dialog = await confirmation(page)
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(section(page, "Native readback")).toContainText("new.authority.example.test")
+  await expect(section(page, "Native readback")).toContainText("2001:db8::9")
+  await expect(section(page, "Native readback")).toContainText("86400")
+  await expect(section(page, "Native readback")).toContainText(
+    "_policy._tcp.authority.example.test",
+  )
+  expect(control.reads).toContain(
+    "/network/dns/services/dns-fixture/zones/authority.example.test/records",
+  )
+  expect(control.reads).toContain("/network/dns/services/changes/change-fixture/current")
+  expect(posts(control)).toHaveLength(1)
+  expect(control.unexpectedReads).toEqual([])
+})
+
+test("using an editable native row preserves exact owner, family, value and TTL for removal", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "technitium" })
+  await openInventory(page)
+  await sheet(page).getByRole("button", { name: "Review remove zone record", exact: true }).click()
+  await selectZone(page)
+  await sheet(page)
+    .getByRole("button", {
+      name: "Use record existing.authority.example.test A 192.0.2.91",
+      exact: true,
+    })
+    .click()
+  await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
+    "existing.authority.example.test",
+  )
+  await expect(sheet(page).getByLabel("Record value", { exact: true })).toHaveValue("192.0.2.91")
+  await expect(sheet(page).getByLabel("TTL (seconds)", { exact: true })).toHaveValue("300")
+  await createReview(page).click()
+  expect(control.mutations[0].body).toEqual({
+    action: "record_remove",
+    zone: "authority.example.test",
+    record: { name: "existing.authority.example.test", type: "A", value: "192.0.2.91", ttl: 300 },
+  })
+  await expect(applyReview(page)).toBeEnabled()
+  const dialog = await confirmation(page)
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(section(page, "Before the change")).toContainText("existing.authority.example.test")
+  await expect(section(page, "Native readback")).not.toContainText(
+    "existing.authority.example.test",
+  )
+  await expect(section(page, "Native readback")).toContainText("v6.authority.example.test")
+  expect(posts(control)).toHaveLength(1)
+})
+
+for (const empty of [false, true]) {
+  test(`Pi-hole existing-client groups retain ${empty ? "an explicit empty list" : "exact native IDs"} and unchanged comment`, async ({
+    page,
+  }) => {
+    const control = await mockDNSServicePage(page, { engine: "pihole" })
+    await selectedClient(page)
+    const defaultGroup = sheet(page).getByRole("checkbox", {
+      name: /^Default filtering group · ID 0(?:\s|$)/,
+    })
+    const officeGroup = sheet(page).getByRole("checkbox", {
+      name: /^No filtering group · ID 7(?:\s|$)/,
+    })
+    await expect(officeGroup).toBeChecked()
+    await officeGroup.uncheck()
+    if (!empty) {
+      await defaultGroup.check()
+      await officeGroup.check()
+    }
+    await createReview(page).click()
+    expect(control.mutations[0].body).toEqual({
+      action: "client_groups",
+      client: { address: "192.0.2.10", groups: empty ? [] : [0, 7] },
+    })
+    const reviewed = section(page, "Reviewed native change")
+    await expect(detail(reviewed, "Client address")).toHaveText("192.0.2.10")
+    await expect(detail(reviewed, "New group IDs")).toHaveText(
+      empty ? /None|empty|No groups/i : /0.*7/,
+    )
+    const before = section(page, "Before the change")
+    await expect(detail(before, "Selected client address")).toHaveText("192.0.2.10")
+    await expect(detail(before, "Selected client group IDs")).toHaveText("7")
+    await expect(detail(before, "Client comment")).toHaveText(
+      "Keep this existing native client comment",
+    )
+    await expect(applyReview(page)).toBeEnabled()
+    const dialog = await confirmation(page)
+    await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+    const after = section(page, "Native readback")
+    await expect(detail(after, "Selected client group IDs")).toHaveText(
+      empty ? /None|empty|No groups/i : /0.*7/,
+    )
+    await expect(detail(after, "Client comment")).toHaveText(
+      "Keep this existing native client comment",
+    )
+    expect(posts(control)).toHaveLength(1)
+  })
+}
+
+test("refreshing native clients preserves edited group choices and an empty-group client remains selectable", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "pihole" })
+  await selectedClient(page)
+  const group = sheet(page).getByRole("checkbox", {
+    name: /^No filtering group · ID 7(?:\s|$)/,
+  })
+  await group.uncheck()
+  await sheet(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
+  await expect(group).not.toBeChecked()
+  await sheet(page).getByLabel("Existing Pi-hole client", { exact: true }).click()
+  await page.getByRole("option").filter({ hasText: "198.51.100.0/24" }).click()
+  await expect(group).not.toBeChecked()
+  await createReview(page).click()
+  expect(control.mutations[0].body).toEqual({
+    action: "client_groups",
+    client: { address: "198.51.100.0/24", groups: [] },
+  })
+  expect(posts(control)).toEqual([])
+})
+
+test("record draft validation keeps invalid TTL, family and owner fields without staging", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "technitium" })
+  await recordDraft(
+    page,
+    "Review add zone record",
+    "new.authority.example.test",
+    "2001:db8::9",
+    "AAAA",
+  )
+  await selectZone(page)
+  const ttl = sheet(page).getByLabel("TTL (seconds)", { exact: true })
+  await ttl.fill("0")
+  await createReview(page).click()
+  await expect(
+    sheet(page)
+      .getByRole("alert")
+      .getByText(/exact TTL from 1 to 86400/i),
+  ).toBeVisible()
+  await expect(ttl).toHaveValue("0")
+  expect(control.mutations).toEqual([])
+  await ttl.fill("600")
+  await sheet(page).getByLabel("DNS record name", { exact: true }).fill("outside.example.test")
+  await createReview(page).click()
+  await expect(
+    sheet(page)
+      .getByRole("alert")
+      .getByText(/containing Technitium primary zone/i),
+  ).toBeVisible()
+  await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
+    "outside.example.test",
+  )
+  expect(control.mutations).toEqual([])
+  await sheet(page)
+    .getByLabel("DNS record name", { exact: true })
+    .fill("new.authority.example.test")
+  await sheet(page).getByLabel("Record value", { exact: true }).fill("198.51.100.9")
+  await createReview(page).click()
+  await expect(
+    sheet(page)
+      .getByRole("alert")
+      .getByText(/canonical unicast IP of the selected record family/i),
+  ).toBeVisible()
+  await expect(sheet(page).getByLabel("Record value", { exact: true })).toHaveValue("198.51.100.9")
+  await expect(ttl).toHaveValue("600")
+  expect(control.mutations).toEqual([])
+})
+
+test("a refused native record preview keeps its complete draft and sends no apply", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page)
+  control.stageFailure = true
+  await recordDraft(
+    page,
+    "Review add local override",
+    "retained.example.test",
+    "2001:db8::9",
+    "AAAA",
+  )
+  await createReview(page).click()
+  await expect(sheet(page).getByText(/Fixture selected native policy review refused/)).toBeVisible()
+  await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
+    "retained.example.test",
+  )
+  await expect(sheet(page).getByLabel("Record type", { exact: true })).toContainText("AAAA")
+  await expect(sheet(page).getByLabel("Record value", { exact: true })).toHaveValue("2001:db8::9")
+  expect(control.mutations).toHaveLength(1)
+  expect(posts(control)).toEqual([])
+})
+
+for (const [name, patch] of [
+  ["internal", { internal: true }],
+  ["signed", { dnssec: "SignedWithNSEC3" }],
+  ["secondary", { type: "Secondary" }],
+  ["unreported on an unverified version", { nativeVersion: "15.7", internal: null }],
+] as const) {
+  test(`a ${name} zone remains visible without editable record rows or review`, async ({
+    page,
+  }) => {
+    const control = await mockDNSServicePage(page, { engine: "technitium" })
+    control.records = dnsRecords(patch)
+    control.view.snapshot!.version = control.records.nativeVersion
+    control.view.snapshot!.zones[0] = {
+      name: control.records.zone,
+      type: control.records.type,
+      disabled: control.records.disabled,
+      dnssec: control.records.dnssec,
+    }
+    await recordDraft(page, "Review add zone record", "new.authority.example.test", "192.0.2.9")
+    await selectZone(page)
+    await expect(sheet(page).getByRole("button", { name: /^Use record / })).toHaveCount(0)
+    await expect(createReview(page)).toBeDisabled()
+    expect(control.mutations).toEqual([])
+    expect(control.reads).toContain(
+      "/network/dns/services/dns-fixture/zones/authority.example.test/records",
+    )
+  })
+}
+
+test("AdGuard override enabled, disabled and unreported state remain distinct", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page)
+  control.view.snapshot!.localOverrides = [
+    { name: "enabled.example.test", type: "A", value: "192.0.2.91", enabled: true },
+    { name: "disabled.example.test", type: "A", value: "192.0.2.92", enabled: false },
+    { name: "unreported.example.test", type: "A", value: "192.0.2.93" },
+  ]
+  await openInventory(page)
+  const overrides = sheet(page).getByLabel("Local overrides", { exact: true })
+  for (const [name, state] of [
+    ["enabled.example.test", /Enabled/],
+    ["disabled.example.test", /Disabled/],
+    ["unreported.example.test", /unreported|unspecified/i],
+  ] as const) {
+    const row = overrides.locator("li").filter({ hasText: name })
+    await expect(row).toContainText(state)
+  }
+  expect(control.mutations).toEqual([])
+})
+
+test("native refusal of a disabled AdGuard override preserves the removal draft", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page)
+  control.view.snapshot!.localOverrides = [
+    { name: "disabled.example.test", type: "A", value: "192.0.2.92", enabled: false },
+  ]
+  await recordDraft(page, "Review remove local override", "disabled.example.test", "192.0.2.92")
+  await createReview(page).click()
+  await expect(
+    sheet(page).getByText(/Fixture disabled native override cannot be removed/),
+  ).toBeVisible()
+  await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
+    "disabled.example.test",
+  )
+  await expect(sheet(page).getByLabel("Record value", { exact: true })).toHaveValue("192.0.2.92")
+  expect(control.mutations[0].body).toEqual({
+    action: "override_remove",
+    record: { name: "disabled.example.test", type: "A", value: "192.0.2.92" },
+  })
+  expect(control.changes).toEqual([])
+  expect(posts(control)).toEqual([])
+})
+
+test("a failed zone-record refresh keeps the exact record draft and blocks staging", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "technitium" })
+  await recordDraft(page, "Review add zone record", "new.authority.example.test", "192.0.2.9")
+  await selectZone(page)
+  await sheet(page).getByLabel("TTL (seconds)", { exact: true }).fill("600")
+  control.recordsFailure = true
+  await sheet(page).getByRole("button", { name: "Read zone records", exact: true }).click()
+  await expect(sheet(page).getByText(/Fixture authoritative record read failed/)).toBeVisible()
+  await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
+    "new.authority.example.test",
+  )
+  await expect(sheet(page).getByLabel("Record value", { exact: true })).toHaveValue("192.0.2.9")
+  await expect(sheet(page).getByLabel("TTL (seconds)", { exact: true })).toHaveValue("600")
+  await expect(createReview(page)).toBeDisabled()
+  expect(control.mutations).toEqual([])
+})
+
+for (const failure of [
+  "drift",
+  "unavailable",
+  "missing-selection",
+  "read-failure",
+  "generation",
+] as const) {
+  test(`an open zone-record confirmation is held after selection-aware ${failure}`, async ({
+    page,
+  }) => {
+    await page.clock.install()
+    const control = await mockDNSServicePage(page, { engine: "technitium" })
+    const change = dnsPolicyChange(
+      {
+        action: "record_remove",
+        zone: "authority.example.test",
+        record: {
+          name: "existing.authority.example.test",
+          type: "A",
+          value: "192.0.2.91",
+          ttl: 300,
+        },
+      },
+      control.view.connection,
+      control.view.snapshot,
+      control.records,
+    )
+    control.changes = [change]
+    await openChange(page)
+    await expect(applyReview(page)).toBeEnabled()
+    const dialog = await confirmation(page)
+    if (failure === "drift") {
+      control.records.records[0].comments = "Native comment changed after review"
+      control.records.fingerprint = "f".repeat(64)
+    } else if (failure === "unavailable") {
+      control.currentView = {
+        connection: control.view.connection,
+        state: "unavailable",
+        error: "Fixture selected native owner unavailable.",
+      }
+    } else if (failure === "missing-selection") control.currentMissingSelection = true
+    else if (failure === "generation") control.view.connection.generation++
+    else control.currentFailure = true
+    await page.clock.fastForward(5500)
+    await expect(applyReview(page)).toBeDisabled()
+    await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+    await expect(
+      sheet(page)
+        .getByText(/Refresh the retained review and its native owner/)
+        .last(),
+    ).toBeVisible()
+    await expect(section(page, "Before the change")).toContainText(
+      "existing.authority.example.test",
+    )
+    expect(posts(control)).toEqual([])
+    expect(control.reads).toContain("/network/dns/services/changes/change-fixture/current")
+  })
+}
+
+test("an open client-group confirmation refuses raw comment drift although group IDs match", async ({
+  page,
+}) => {
+  await page.clock.install()
+  const control = await mockDNSServicePage(page, { engine: "pihole" })
+  const change = dnsPolicyChange(
+    { action: "client_groups", client: { address: "192.0.2.10", groups: [] } },
+    control.view.connection,
+    control.view.snapshot,
+  )
+  control.changes = [change]
+  await openChange(page)
+  await expect(applyReview(page)).toBeEnabled()
+  const dialog = await confirmation(page)
+  const fresh = structuredClone(change.before!)
+  fresh.selectedClient!.comment = "Native comment changed without group reassignment"
+  fresh.selectedClient!.commentFingerprint = "b".repeat(64)
+  fresh.selectionFingerprint = "c".repeat(64)
+  fresh.policyFingerprint = "d".repeat(64)
+  control.currentView = { connection: control.view.connection, state: "available", snapshot: fresh }
+  await page.clock.fastForward(5500)
+  await expect(applyReview(page)).toBeDisabled()
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(
+    sheet(page)
+      .getByText(/Refresh the retained review and its native owner/)
+      .last(),
+  ).toBeVisible()
+  expect(posts(control)).toEqual([])
+})
+
+test("an open confirmation refuses changed retained record metadata even with reused fingerprints", async ({
+  page,
+}) => {
+  await page.clock.install()
+  const control = await mockDNSServicePage(page, { engine: "technitium" })
+  control.changes = [
+    dnsPolicyChange(
+      {
+        action: "record_remove",
+        zone: "authority.example.test",
+        record: {
+          name: "existing.authority.example.test",
+          type: "A",
+          value: "192.0.2.91",
+          ttl: 300,
+        },
+      },
+      control.view.connection,
+      control.view.snapshot,
+      control.records,
+    ),
+  ]
+  await openChange(page)
+  await expect(applyReview(page)).toBeEnabled()
+  const dialog = await confirmation(page)
+  control.changes[0].before!.records!.records[0].comments = "Retained record metadata changed"
+  await page.clock.fastForward(5500)
+  await expect(section(page, "Before the change")).toContainText("Retained record metadata changed")
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(
+    sheet(page).getByText(/This review changed or already has an attempted apply/),
+  ).toBeVisible()
+  expect(posts(control)).toEqual([])
+})
+
+test("an uncertain client-group apply stays single-use after reload with selected review readable", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "pihole" })
+  control.changes = [
+    dnsPolicyChange(
+      { action: "client_groups", client: { address: "192.0.2.10", groups: [] } },
+      control.view.connection,
+      control.view.snapshot,
+    ),
+  ]
+  control.apply = "lost"
+  await openChange(page)
+  await expect(applyReview(page)).toBeEnabled()
+  const dialog = await confirmation(page)
+  await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+  await expect(sheet(page).getByText(/this review will not be applied again/)).toBeVisible()
+  await page.reload()
+  await openInventory(page)
+  await sheet(page)
+    .getByRole("button", { name: "Read DNS change change-fixture", exact: true })
+    .click()
+  await expect(section(page, "Before the change")).toContainText(
+    "Keep this existing native client comment",
+  )
+  await expect(
+    sheet(page)
+      .getByText(/Fixture native outcome needs review/)
+      .first(),
+  ).toBeVisible()
+  await expect(applyReview(page)).toHaveCount(0)
+  expect(posts(control)).toHaveLength(1)
+})
+
+for (const width of [390, 1280, 1720]) {
+  test(`native records and reviewed readback stay flat and within ${width}px`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height: 960 })
+    const control = await mockDNSServicePage(page, { engine: "technitium" })
+    await recordDraft(
+      page,
+      "Review add zone record",
+      "new.authority.example.test",
+      "2001:db8::9",
+      "AAAA",
+    )
+    await selectZone(page)
+    await sheet(page).getByLabel("TTL (seconds)", { exact: true }).fill("600")
+    await expect(page.locator("[data-slot=page]").last()).toHaveAttribute(
+      "data-register",
+      "reading",
+    )
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true)
+    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({
+      path: info.outputPath(`dns-record-inventory-${width}.png`),
+      fullPage: true,
+    })
+    await createReview(page).click()
+    await expect(applyReview(page)).toBeEnabled()
+    await expect(section(page, "Before the change")).toContainText(
+      "_policy._tcp.authority.example.test",
+    )
+    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({
+      path: info.outputPath(`dns-record-review-${width}.png`),
+      fullPage: true,
+    })
+    const dialog = await confirmation(page)
+    expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+    await expect(section(page, "Native readback")).toContainText("new.authority.example.test")
+    expect(await sheet(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+    await page.screenshot({
+      path: info.outputPath(`dns-record-readback-${width}.png`),
+      fullPage: true,
+    })
+    expect(posts(control)).toHaveLength(1)
+  })
+}
