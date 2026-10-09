@@ -64,6 +64,24 @@ children were absent afterwards, production networkd PID 883 was unchanged, and 
 `/var/lib/NetworkManager` remained absent. The preserved `native-owner-run-12.log` SHA256 is
 `545535ecabb74cc243ab780c048cd0adb0dfb5530d13c62c3e15d720f27534b6`.
 
+Separate run 13 passed the actual unpatched Debian NetworkManager 1.52.1 keyfile strategy against
+`20248233`: 15.49 seconds in its private namespace and 24.61 seconds including the helper build.
+It exercised native checkpoint rollback, confirmation timeout hold/release, failed confirmed storage,
+applying-process death, death after durable confirmation and lost terminal cleanup progress with the
+actual fresh helper. All owned children were absent and the host NetworkManager state directory
+remained absent. The official HTTPS packages were verified against their published SHA256/size;
+archive-signature verification is not claimed. `native-owner-run-13.log` SHA256 is
+`82fc2590554cb7ceedf0e692b3d64a7d82c6ea6ac3c8529497d3b67126fda1af`.
+
+The subsequent standalone-veth gate records an exact reciprocal same-namespace peer privately and
+requires the v3 helper before admission. Focused root-owned fixtures preserve the selected candidate
+and failed journal when a peer disappears or changes index/MAC, block the next journal, and restore
+only after the original exact pair returns. Runtime refusal fixtures also reject forbidden DHCP/RA
+routes and extra manual-family DNS. Real automatic-address acquisition remains open; these tests
+do not substitute for that native fixture. The required changed gate against `f5b3e9c` passed
+build/vet and selected netx tests (0.634 seconds); targeted final-source recovery/peer/runtime race
+tests passed in 8.331 seconds. No native resources were started by these gates.
+
 The required changed gate for the backend checkpoint, against its prior separately committed
 frontend draft `3018e120`, passed build/vet and the selected API/netx tests (9.811/1.411 seconds).
 The complete P11 frontend/backend selection is still reserved for the final integrated tree.

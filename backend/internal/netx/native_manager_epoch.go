@@ -70,7 +70,7 @@ func nativeVerifyEpoch(ctx context.Context, u *nativeUndo) error {
 	if err != nil || owner != u.OwnerBus {
 		return errors.New("native service ownership changed; its prior unique owner and recovery evidence were preserved")
 	}
-	return nil
+	return nativeVerifyPeer(ctx, u)
 }
 
 // Only an observed different kernel boot permits adopting new native process
@@ -90,6 +90,9 @@ func nativeRebindAfterBoot(ctx context.Context, j *changeJournal, u *nativeUndo)
 	}
 	if u.RecoveryStrategy != "" && (p.RecoveryStrategy != u.RecoveryStrategy || p.NMWriter != u.NMWriter) {
 		return errors.New("native boot recovery found a different recovery strategy or persistent writer")
+	}
+	if (p.Peer == nil) != (u.Peer == nil) || u.Peer != nil && (p.Peer.Device != u.Peer.Device || p.Peer.MAC != u.Peer.MAC) {
+		return errors.New("native boot recovery found a different reciprocal veth peer")
 	}
 	selected := []nativeProfileFile{p.File}
 	if u.Owner == "netplan" {
@@ -131,7 +134,7 @@ func nativeRebindAfterBoot(ctx context.Context, j *changeJournal, u *nativeUndo)
 	}
 	u.OwnerBus, u.BusID, u.TransportGUID, u.BootID = p.OwnerBus, p.BusID, p.TransportGUID, boot
 	u.DeviceObject, u.ConnectionObject = p.DeviceObject, p.ConnectionObject
-	u.IfIndex = p.Device.IfIndex
+	u.IfIndex, u.Peer = p.Device.IfIndex, p.Peer
 	if u.Checkpoint != "" {
 		u.CheckpointState = "recovered"
 	} else {

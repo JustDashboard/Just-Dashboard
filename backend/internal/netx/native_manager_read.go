@@ -19,6 +19,7 @@ type nativeProfile struct {
 	View             NativeProfileView
 	File             nativeProfileFile
 	Device           ipLink
+	Peer             *nativePeerIdentity
 	UUID             string
 	DeviceObject     string
 	ConnectionObject string
@@ -270,8 +271,12 @@ func (s *Service) readNativeProfile(ctx context.Context, device string) (*native
 	}
 	p.View.Kind = nativeLinkKind(p.Device)
 	p.View.Contract = nativeContract(p.Device, links)
-	if !slices.Contains([]string{"physical", "dummy", "vlan", "bridge", "bond", "vrf"}, p.View.Kind) || strings.HasPrefix(device, "tailscale") || isDockerBridgeName(device) || device == "docker0" {
+	if !slices.Contains([]string{"physical", "dummy", "veth", "vlan", "bridge", "bond", "vrf"}, p.View.Kind) || strings.HasPrefix(device, "tailscale") || isDockerBridgeName(device) || device == "docker0" {
 		return refuse("This device remains with its existing subsystem; this native profile adapter does not edit it.")
+	}
+	p.Peer, err = nativePeer(p.Device, links)
+	if err != nil {
+		return refuse(err.Error())
 	}
 	sp, err := s.loadSpec()
 	if err != nil {
@@ -455,7 +460,8 @@ func nativeGeneration(p *nativeProfile) string {
 		IfIndex                                                                                 int
 		Identity                                                                                nativeFileIdentity
 		Contract                                                                                NativeContract
-	}{Owner: p.View.Owner, Renderer: p.View.Renderer, Version: p.View.Version, Path: p.File.Path, UUID: p.UUID, MAC: p.Device.Address, Kind: p.View.Kind, OwnerBus: p.OwnerBus, BusID: p.BusID, BootID: p.BootID, TransportGUID: p.TransportGUID, DeviceObject: p.DeviceObject, ConnectionObject: p.ConnectionObject, RecoveryStrategy: p.RecoveryStrategy, NMWriter: p.NMWriter, IfIndex: p.Device.IfIndex, Identity: p.File.Identity, Contract: p.View.Contract})
+		Peer                                                                                    *nativePeerIdentity
+	}{Owner: p.View.Owner, Renderer: p.View.Renderer, Version: p.View.Version, Path: p.File.Path, UUID: p.UUID, MAC: p.Device.Address, Kind: p.View.Kind, OwnerBus: p.OwnerBus, BusID: p.BusID, BootID: p.BootID, TransportGUID: p.TransportGUID, DeviceObject: p.DeviceObject, ConnectionObject: p.ConnectionObject, RecoveryStrategy: p.RecoveryStrategy, NMWriter: p.NMWriter, IfIndex: p.Device.IfIndex, Identity: p.File.Identity, Contract: p.View.Contract, Peer: p.Peer})
 	meta = append(meta, p.File.Data...)
 	if p.View.Owner == "netplan" {
 		generated, _ := json.Marshal(p.Generated)

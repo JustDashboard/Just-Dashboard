@@ -6,8 +6,9 @@ current surface edits IPv4/IPv6 addressing methods, per-family static addresses,
 domains, and explicit unicast routes in an existing selected persistent profile. The full P11 scope
 also includes structural bond and supported VRF editing; that work and its acceptance remain open.
 Its prepared owner/member scope is described in [native structure preparation](network-native-structure.md).
-Existing virtual/controller/member profiles remain refused until saved, loaded, applied and kernel
-topology are verified together; their observed relationships are still reported.
+Existing controller/member profiles remain refused until saved, loaded, applied and kernel
+topology are verified together; their observed relationships are still reported. Existing standalone
+veth Ethernet profiles additionally require a reciprocal peer in the same inspected namespace.
 
 `GET /network/native/managers` reports version capability and observed devices.
 `GET /network/native/profiles/{device}` reports the selected owner, renderer, supported intent and an
@@ -51,8 +52,17 @@ A pass on an unpatched keyfile build does not cover this separate Ubuntu strateg
 
 The observed device index, MAC, kind, master, members, bond mode and VRF table are part of the transaction
 contract. Observing those relationships does not prove that reactivating the saved profile will
-retain them. Structural profile validation and transactions remain required before those controls
+retain them. A standalone veth profile records the peer name, index and MAC privately; both endpoints
+must identify each other by reciprocal indices in the same inventory. Generation, runtime inspection
+and every recovery epoch check fence that pair. Missing or foreign peers preserve the journal and
+refuse activation/restoration. Only a different verified kernel boot can rebind indices after exact
+peer-name/MAC and reciprocal-relationship proof; this is not a measured reboot claim.
+Structural profile validation and transactions remain required before those controls
 can be enabled; arbitrary native topology takeover is not authorized by an L3 intent.
+
+Runtime evidence also refuses DHCP/RA routes when automatic routes are disabled, and extra per-family
+DNS servers when automatic DNS is disabled or the family is manual/disabled. Automatic acquisition
+acceptance remains separate from these refusal checks.
 
 ## Temporary apply and durable cleanup
 
@@ -61,10 +71,10 @@ Immediate requests are refused before taking a recovery lock or retrying prior t
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise `jd-native-manager-v2` before admission. The new
-closed strategy vocabulary cannot be admitted by a previously installed v1 helper. Recovery retains
-the earlier v1 journal's checkpoint strategy and refuses a migrating writer rather than converting
-that existing journal to a different recovery method.
+The standalone recovery executable must advertise `jd-native-manager-v3` before admission. The private
+v3 peer vocabulary cannot be admitted by a previously installed v1/v2 helper. Recovery preserves
+earlier v1/v2 journal scope and strategies; a legacy checkpoint journal refuses a migrating writer
+rather than converting that existing journal to a different recovery method.
 Selected files are exchanged atomically with their staged candidates, retaining the displaced inode
 in private staging. A concurrent native writer is verified after the exchange and preserved; it is
 never overwritten by a candidate rename. Files and containing directories are synced before progress

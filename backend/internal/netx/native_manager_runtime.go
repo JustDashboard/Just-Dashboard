@@ -120,6 +120,10 @@ func readNativeRuntime(ctx context.Context, p *nativeProfile, in NativeIntent) N
 			if link.IfIndex != p.Device.IfIndex || link.Address != p.Device.Address || nativeLinkKind(link) != p.View.Kind || !nativeContractsEqual(nativeContract(link, links), p.View.Contract) {
 				return drift("Native source identity or bond/VRF relationships changed.")
 			}
+			peer, err := nativePeer(link, links)
+			if err != nil || !nativePeersEqual(peer, p.Peer) {
+				return drift("The native veth reciprocal peer identity changed.")
+			}
 			break
 		}
 	}
@@ -181,6 +185,11 @@ func readNativeRuntime(ctx context.Context, p *nativeProfile, in NativeIntent) N
 		if json.Unmarshal([]byte(out), &routes) != nil || routes == nil {
 			return unknown("Native family route evidence is unreadable.")
 		}
+		for _, r := range routes {
+			if f.IgnoreAutoRoutes && (r.Protocol == "dhcp" || r.Protocol == "ra") {
+				return drift("The native owner retained a DHCP/RA route while automatic routes are disabled.")
+			}
+		}
 		for _, required := range f.Routes {
 			matched := false
 			for _, r := range routes {
@@ -230,8 +239,8 @@ func readNativeRuntime(ctx context.Context, p *nativeProfile, in NativeIntent) N
 				return drift("A configured native DNS server is absent from its active owner.")
 			}
 		}
-		if f.IgnoreAutoDNS && len(familyDNS) != len(f.DNS) {
-			return drift("The native owner has extra DNS servers while automatic DNS is disabled.")
+		if (f.IgnoreAutoDNS || f.Method == "manual" || f.Method == "disabled") && len(familyDNS) != len(f.DNS) {
+			return drift("The native owner has extra DNS servers outside its configured automatic DNS policy.")
 		}
 		for _, required := range f.Domains {
 			if !slices.Contains(domains, required) {

@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v2"
+const nativeRecoveryToken = "jd-native-manager-v3"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {
@@ -32,32 +32,33 @@ type nativeUndoFile struct {
 // This is a private root-only recovery payload. Its closed vocabulary derives
 // all commands from a native owner and exact profile/device identities.
 type nativeUndo struct {
-	Version          int              `json:"version"`
-	Transaction      string           `json:"transaction"`
-	Owner            string           `json:"owner"`
-	Renderer         string           `json:"renderer"`
-	OwnerVersion     string           `json:"ownerVersion"`
-	OwnerBus         string           `json:"ownerBus"`
-	BusID            string           `json:"busId"`
-	TransportGUID    string           `json:"transportGuid"`
-	BootID           string           `json:"bootId"`
-	RecoveryStrategy string           `json:"recoveryStrategy,omitempty"`
-	NMWriter         string           `json:"nmWriter,omitempty"`
-	Device           string           `json:"device"`
-	IfIndex          int              `json:"ifIndex"`
-	Kind             string           `json:"kind"`
-	MAC              string           `json:"mac"`
-	Contract         NativeContract   `json:"contract"`
-	UUID             string           `json:"uuid,omitempty"`
-	DeviceObject     string           `json:"deviceObject,omitempty"`
-	ConnectionObject string           `json:"connectionObject,omitempty"`
-	NetplanID        string           `json:"netplanId,omitempty"`
-	NetplanSection   string           `json:"netplanSection,omitempty"`
-	BeforeIntent     NativeIntent     `json:"beforeIntent"`
-	CandidateIntent  NativeIntent     `json:"candidateIntent"`
-	Files            []nativeUndoFile `json:"files"`
-	Checkpoint       string           `json:"checkpoint,omitempty"`
-	CheckpointState  string           `json:"checkpointState"`
+	Version          int                 `json:"version"`
+	Transaction      string              `json:"transaction"`
+	Owner            string              `json:"owner"`
+	Renderer         string              `json:"renderer"`
+	OwnerVersion     string              `json:"ownerVersion"`
+	OwnerBus         string              `json:"ownerBus"`
+	BusID            string              `json:"busId"`
+	TransportGUID    string              `json:"transportGuid"`
+	BootID           string              `json:"bootId"`
+	RecoveryStrategy string              `json:"recoveryStrategy,omitempty"`
+	NMWriter         string              `json:"nmWriter,omitempty"`
+	Device           string              `json:"device"`
+	IfIndex          int                 `json:"ifIndex"`
+	Kind             string              `json:"kind"`
+	MAC              string              `json:"mac"`
+	Contract         NativeContract      `json:"contract"`
+	Peer             *nativePeerIdentity `json:"peer,omitempty"`
+	UUID             string              `json:"uuid,omitempty"`
+	DeviceObject     string              `json:"deviceObject,omitempty"`
+	ConnectionObject string              `json:"connectionObject,omitempty"`
+	NetplanID        string              `json:"netplanId,omitempty"`
+	NetplanSection   string              `json:"netplanSection,omitempty"`
+	BeforeIntent     NativeIntent        `json:"beforeIntent"`
+	CandidateIntent  NativeIntent        `json:"candidateIntent"`
+	Files            []nativeUndoFile    `json:"files"`
+	Checkpoint       string              `json:"checkpoint,omitempty"`
+	CheckpointState  string              `json:"checkpointState"`
 }
 
 var nativeObjectID = regexp.MustCompile(`^/org/freedesktop/NetworkManager/(?:Devices|Settings|Checkpoint)/[0-9]+$`)
@@ -85,7 +86,7 @@ func decodeNativeUndo(c recoveryCommand) (*nativeUndo, error) {
 	if d.Decode(&u) != nil || d.Decode(new(any)) != io.EOF {
 		return nil, errors.New("refused unreadable native recovery evidence")
 	}
-	if !slices.Contains([]int{1, 2}, u.Version) || !nativeTransaction.MatchString(u.Transaction) || !nativeBusOwner.MatchString(u.OwnerBus) || !nativeTransaction.MatchString(u.BusID) || !nativeTransaction.MatchString(u.TransportGUID) || u.TransportGUID == strings.Repeat("0", 32) || !nativeUUID.MatchString(u.BootID) || u.IfIndex < 1 || u.IfIndex > 2147483647 || ValidIfName(u.Device) != nil || !slices.Contains([]string{"physical", "dummy", "vlan", "bridge", "bond", "vrf"}, u.Kind) || !slices.Contains([]string{"NetworkManager", "networkd", "netplan"}, u.Owner) || !slices.Contains([]string{"NetworkManager", "networkd"}, u.Renderer) || !nativeVersionSupported(u.Owner, u.OwnerVersion) || len(u.MAC) != 17 || len(u.Files) < 1 || len(u.Files) > 2 {
+	if !slices.Contains([]int{1, 2, 3}, u.Version) || !nativeTransaction.MatchString(u.Transaction) || !nativeBusOwner.MatchString(u.OwnerBus) || !nativeTransaction.MatchString(u.BusID) || !nativeTransaction.MatchString(u.TransportGUID) || u.TransportGUID == strings.Repeat("0", 32) || !nativeUUID.MatchString(u.BootID) || u.IfIndex < 1 || u.IfIndex > 2147483647 || ValidIfName(u.Device) != nil || !slices.Contains([]string{"physical", "dummy", "veth", "vlan", "bridge", "bond", "vrf"}, u.Kind) || !slices.Contains([]string{"NetworkManager", "networkd", "netplan"}, u.Owner) || !slices.Contains([]string{"NetworkManager", "networkd"}, u.Renderer) || !nativeVersionSupported(u.Owner, u.OwnerVersion) || len(u.MAC) != 17 || len(u.Files) < 1 || len(u.Files) > 2 {
 		return nil, errors.New("refused unexpected native owner identities")
 	}
 	mac, macErr := net.ParseMAC(u.MAC)
@@ -106,8 +107,14 @@ func decodeNativeUndo(c recoveryCommand) (*nativeUndo, error) {
 	if err := nativeRecoveryStrategyScope(&u); err != nil {
 		return nil, err
 	}
-	if u.Version == 1 && (u.RecoveryStrategy != "" || u.NMWriter != "") || u.Version == 2 && u.RecoveryStrategy == "" {
+	if u.Version == 1 && (u.RecoveryStrategy != "" || u.NMWriter != "") || u.Version >= 2 && u.RecoveryStrategy == "" {
 		return nil, errors.New("refused mismatched native helper recovery vocabulary")
+	}
+	if u.Version < 3 && (u.Peer != nil || u.Kind == "veth") || (u.Kind == "veth") != (u.Peer != nil) {
+		return nil, errors.New("refused mismatched native peer recovery vocabulary")
+	}
+	if u.Peer != nil && nativeValidatePeer(u.Device, u.IfIndex, u.Peer) != nil {
+		return nil, errors.New("refused invalid native veth peer identity")
 	}
 	if u.Renderer == "NetworkManager" && (!nativeUUID.MatchString(u.UUID) || !nativeObjectID.MatchString(u.DeviceObject) || !strings.Contains(u.DeviceObject, "/Devices/") || !nativeObjectID.MatchString(u.ConnectionObject) || !strings.Contains(u.ConnectionObject, "/Settings/")) {
 		return nil, errors.New("refused unexpected native connection identity")
@@ -267,7 +274,7 @@ func nativeActivate(ctx context.Context, u *nativeUndo) error {
 func nativeVerifyUndo(ctx context.Context, j *changeJournal, u *nativeUndo, candidate bool) error {
 	ctx = nativePinnedBus(ctx, u.TransportGUID)
 	p, err := New(Options{Paths: j.Paths}).readNativeProfile(ctx, u.Device)
-	if err != nil || p == nil || !p.View.Editable || p.OwnerBus != u.OwnerBus || p.BusID != u.BusID || p.BootID != u.BootID || p.Device.IfIndex != u.IfIndex || p.View.Owner != u.Owner || p.View.Renderer != u.Renderer || p.Device.Address != u.MAC || p.View.Kind != u.Kind || !nativeContractsEqual(p.View.Contract, u.Contract) || (u.Renderer == "NetworkManager" && p.UUID != u.UUID) {
+	if err != nil || p == nil || !p.View.Editable || p.OwnerBus != u.OwnerBus || p.BusID != u.BusID || p.BootID != u.BootID || p.Device.IfIndex != u.IfIndex || p.View.Owner != u.Owner || p.View.Renderer != u.Renderer || p.Device.Address != u.MAC || p.View.Kind != u.Kind || !nativeContractsEqual(p.View.Contract, u.Contract) || !nativePeersEqual(p.Peer, u.Peer) || (u.Renderer == "NetworkManager" && p.UUID != u.UUID) {
 		return errors.New("native owner/runtime/persistence/boot evidence could not be verified; inspect current ownership before retrying")
 	}
 	want := u.BeforeIntent

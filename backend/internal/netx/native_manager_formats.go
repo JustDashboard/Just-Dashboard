@@ -324,7 +324,7 @@ func parseNativeNM(data []byte, p *nativeProfile) (NativeIntent, error) {
 	if e != nil || !slices.Contains([]string{"ethernet", "802-3-ethernet", "dummy", "vlan", "bridge", "bond", "vrf"}, typeName) {
 		return in, errors.New("this NetworkManager connection type is outside the secret-free adapter")
 	}
-	if typeName != p.View.Kind && !(p.View.Kind == "physical" && slices.Contains([]string{"ethernet", "802-3-ethernet"}, typeName)) {
+	if typeName != p.View.Kind && !((p.View.Kind == "physical" || p.View.Kind == "veth" && p.Peer != nil) && slices.Contains([]string{"ethernet", "802-3-ethernet"}, typeName)) {
 		return in, errors.New("the saved NetworkManager connection type differs from the observed device kind")
 	}
 	auto, e := blocks.one("connection", "autoconnect")
