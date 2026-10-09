@@ -6,11 +6,12 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { setNetworkPendingApply } from "@/lib/network-pending"
-import type { NetworkConfirmationView } from "@/lib/types"
+import type { BoundaryAfterVerify, NetworkConfirmationView } from "@/lib/types"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/confirm-dialog"
+import { BoundaryChanges } from "@/components/security/boundary-view"
 
 /** The pending change survives navigation, polling failures and backend restarts in the host journal. */
 export function NetworkChangeConfirmation() {
@@ -31,7 +32,11 @@ export function NetworkChangeConfirmation() {
   const refresh = state.refresh
   const [enabled, setEnabled] = useState(true)
   const [dismissed, setDismissed] = useState<string>()
-  const [verification, setVerification] = useState<{ id: string; challenge: string }>()
+  const [verification, setVerification] = useState<{
+    id: string
+    challenge: string
+    boundary?: BoundaryAfterVerify
+  }>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [now, setNow] = useState(() => Date.now())
@@ -73,8 +78,10 @@ export function NetworkChangeConfirmation() {
     setBusy(true)
     setError(undefined)
     try {
-      const result = await post<{ challenge: string }>(`/network/changes/${change.id}/verify`)
-      setVerification({ id: change.id, challenge: result.challenge })
+      const result = await post<{ challenge: string; boundary?: BoundaryAfterVerify }>(
+        `/network/changes/${change.id}/verify`,
+      )
+      setVerification({ id: change.id, challenge: result.challenge, boundary: result.boundary })
       refresh()
     } catch (failure) {
       setVerification(undefined)
@@ -164,6 +171,9 @@ export function NetworkChangeConfirmation() {
               {error}
             </p>
           )}
+          {verification?.id === change.id && verification.boundary && (
+            <BoundaryChanges boundary={verification.boundary} />
+          )}
           {owned && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
@@ -181,7 +191,9 @@ export function NetworkChangeConfirmation() {
                 }
                 onClick={() => void save()}
               >
-                Confirm {ssh ? "SSH" : "network"} change
+                {verification?.id === change.id && (verification.boundary?.lost ?? 0) > 0
+                  ? "Confirm anyway"
+                  : `Confirm ${ssh ? "SSH" : "network"} change`}
               </Button>
               {can("destructive") && (
                 <Button size="sm" variant="outline" disabled={busy} onClick={recover}>

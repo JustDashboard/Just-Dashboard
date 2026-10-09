@@ -802,6 +802,10 @@ export async function mockIntrusion(
         return json(route, sshdPolicy)
       case "/security/blocks":
         return json(route, blocks)
+      case "/security/boundary/check":
+        return json(route, { impacts: [] })
+      case "/network/changes/current":
+        return json(route, { available: false, owned: false, change: null })
       case "/security/crowdsec/":
         return json(route, crowdsec)
       case "/security/suricata/":

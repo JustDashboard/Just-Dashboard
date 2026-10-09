@@ -40,6 +40,8 @@ import { ReadingTile, useLensReadings } from "@/components/logs/lens-readings"
 import { Status, StatusDot } from "@/components/status-dot"
 import { BASTION_PROFILE, JUMP_KEYS, JumpHost } from "@/components/security/bastion"
 import { SSHPicture } from "@/components/security/ssh-picture"
+import { boundaryVerdict } from "@/components/security/boundary"
+import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -147,6 +149,10 @@ export function SSHPanel({
     [pending, data],
   )
   const dirty = Object.keys(changes).length > 0
+  // Port, forwarding and AllowUsers decide who can still open a tunnel to the
+  // dashboard; the staged change is judged against the boundary as it is made.
+  const boundary = useBoundaryCheck(dirty ? { kind: "ssh", settings: changes } : undefined)
+  const crossing = boundaryVerdict(boundary.impacts ?? [])
 
   const header = <PageContext eyebrow="Security" title="SSH" />
 
@@ -230,6 +236,7 @@ export function SSHPanel({
             parser and put back if the test fails. Existing sessions are not disconnected by a
             reload.
           </p>
+          <BoundaryImpacts impacts={boundary.impacts} />
           {pendingApply ? (
             <p>
               The previous files are kept by the host. Unless you verify a new dashboard response
@@ -254,7 +261,10 @@ export function SSHPanel({
           // worked" is not the same as knowing the daemon came back.
           const job = await post<Job>(
             "/ssh/config",
-            { settings: changes },
+            {
+              settings: changes,
+              ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
+            },
             { confirm: c, networkApply: pendingApply ? "pending" : undefined },
           )
           console_.attach(job)
@@ -574,7 +584,11 @@ export function SSHPanel({
               <Button size="sm" variant="ghost" onClick={() => setPending({})} disabled={busy}>
                 Discard
               </Button>
-              <Button size="sm" onClick={apply} disabled={busy}>
+              <Button
+                size="sm"
+                onClick={apply}
+                disabled={busy || boundary.checking || crossing === "refused"}
+              >
                 Test and apply
               </Button>
             </div>

@@ -633,3 +633,43 @@ func TestFailedLoginSummaryIsAdminOnly(t *testing.T) {
 		t.Fatalf("unexpected status %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// The boundary is read for any signed-in role and judges a proposal with a
+// GET, so asking is never audited as a change.
+func TestAccessBoundaryAndItsCheckAreReads(t *testing.T) {
+	c, _ := newClient(t)
+	w := c.do(http.MethodGet, "/api/v1/security/boundary", "", nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("boundary=%d %s", w.Code, w.Body.String())
+	}
+	var b netsec.AccessBoundary
+	if err := json.Unmarshal(w.Body.Bytes(), &b); err != nil || len(b.Checks) != 5 {
+		t.Fatalf("boundary=%+v %v", b, err)
+	}
+	if w := c.do(http.MethodGet, "/api/v1/security/boundary/check?kind=reboot", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("unknown kind=%d", w.Code)
+	}
+	w = c.do(http.MethodGet, "/api/v1/security/boundary/check?kind=ssh&setting=allowtcpforwarding=no", "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"level":"cuts"`) {
+		t.Fatalf("a tunnel session turning forwarding off=%d %s", w.Code, w.Body.String())
+	}
+}
+
+// A ban that refuses a network the allowlist admits is refused until the
+// request says the operator saw it. The refusal comes before fail2ban is
+// asked anything, so no host is touched.
+func TestABanInsideTheAllowlistNeedsAcknowledgement(t *testing.T) {
+	s := testServer(t)
+	_, office, _ := net.ParseCIDR("10.20.0.0/16")
+	s.Cfg.AllowedCIDRs = append(s.Cfg.AllowedCIDRs, office)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	w := c.do(http.MethodPost, "/api/v1/fail2ban/sshd/ban", `{"ip":"10.20.4.4"}`, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "boundary_acknowledgement_required") ||
+		!strings.Contains(w.Body.String(), "10.20.0.0/16") {
+		t.Fatalf("unacknowledged ban=%d %s", w.Code, w.Body.String())
+	}
+	w = c.do(http.MethodPost, "/api/v1/security/crowdsec/decisions", `{"value":"10.20.0.0/24","duration":"4h"}`, nil)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "boundary_acknowledgement_required") {
+		t.Fatalf("unacknowledged decision=%d %s", w.Code, w.Body.String())
+	}
+}

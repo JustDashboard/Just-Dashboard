@@ -460,6 +460,50 @@ async function mockSecurity(
         return json(route, jails)
       case "/fail2ban/offenders":
         return json(route, offenders)
+      case "/security/boundary":
+        return json(route, {
+          checkedAt: new Date().toISOString(),
+          allowlist: ["127.0.0.1/32", "100.64.0.0/10"],
+          client: "100.110.34.9",
+          caddyPort: 8443,
+          sshPorts: ["22"],
+          tailnetIp: "100.110.34.31",
+          previewMin: 21000,
+          previewMax: 21999,
+          checks: [
+            {
+              id: "ingress",
+              state: "held",
+              title: "Caddy is the only routable listener",
+              detail: "Caddy holds port 8443 on 100.110.34.31:8443, 127.0.0.1:8443.",
+            },
+            {
+              id: "allowlist",
+              state: "held",
+              title: "The allowlist admits this session before sign-in",
+              detail: "100.110.34.9 is inside the allowlist that runs before authentication.",
+            },
+            {
+              id: "tailnet",
+              state: "held",
+              title: "The tailnet path is up",
+              detail: "tailscale0 is up with 100.110.34.31.",
+            },
+            {
+              id: "ssh",
+              state: "held",
+              title: "SSH answers for a tunnel",
+              detail: "Port 22 is listening.",
+            },
+            {
+              id: "previews",
+              state: "broken",
+              title: "Previews stay tailnet-only",
+              detail:
+                "Preview ports outside the boundary: 21001 is funnelled or serves something other than a loopback port.",
+            },
+          ],
+        })
       case "/fail2ban/sshd/policy":
         return json(route, {
           name: "sshd",
@@ -1442,6 +1486,18 @@ test("a new diagnostic deep link overrides only that tool's saved input and neve
   )
   await expect(page.getByRole("combobox", { name: "Record type", exact: true })).toContainText("MX")
   expect(mutations).toEqual([])
+})
+
+test("the overview reads the access boundary and names the part that broke", async ({ page }) => {
+  await mockSecurity(page)
+  await page.goto("/security")
+  const boundary = page.locator("[data-slot=panel]").filter({ hasText: "Access boundary" })
+  await expect(boundary).toContainText("4 of 5 held")
+  await expect(boundary).toContainText("Caddy is the only routable listener")
+  await expect(boundary.getByRole("listitem").filter({ hasText: "Previews stay" })).toContainText(
+    "broken",
+  )
+  await expect(boundary).toContainText("21001 is funnelled")
 })
 
 test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {

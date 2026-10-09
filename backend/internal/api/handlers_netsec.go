@@ -278,6 +278,9 @@ func (s *Server) handleFail2banStatus(w http.ResponseWriter, r *http.Request) er
 
 type banRequest struct {
 	IP string `json:"ip"`
+	// AcknowledgeBoundary is the operator having seen what the ban does to
+	// the dashboard's boundary — an allowlisted network, the tailnet.
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
 }
 
 func (s *Server) handleFail2banUnban(w http.ResponseWriter, r *http.Request) error {
@@ -301,6 +304,9 @@ func (s *Server) handleFail2banBan(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	jail := chi.URLParam(r, "jail")
+	if err := s.boundaryGate(r, "fail2ban.ban", netsec.BoundaryProposal{Kind: "ban", Target: req.IP}, req.AcknowledgeBoundary); err != nil {
+		return err
+	}
 	// The caller's own address goes down with the request for the reason it
 	// does on the firewall route: a ban is a drop rule, and banning yourself
 	// ends this session and every future one from here.

@@ -2513,6 +2513,64 @@ export type JailPolicy = {
   error?: string
 }
 
+export type BoundaryState = "held" | "broken" | "unknown"
+
+export type BoundaryCheck = {
+  id: "ingress" | "allowlist" | "tailnet" | "ssh" | "previews"
+  state: BoundaryState
+  title: string
+  detail: string
+  facts?: string[]
+}
+
+/** How the dashboard and its previews are reached, read as they are. */
+export type AccessBoundary = {
+  checks: BoundaryCheck[]
+  checkedAt: string
+  allowlist: string[]
+  client?: string
+  operator?: string
+  caddyPort: number
+  sshPorts: string[]
+  tailnetIp?: string
+  previewMin: number
+  previewMax: number
+}
+
+export type BoundaryProposal = {
+  kind: "ban" | "firewall.rule" | "firewall.policy" | "ssh"
+  target?: string
+  action?: string
+  port?: string
+  protocol?: string
+  policy?: string
+  settings?: Record<string, string>
+}
+
+/** A cut ends this session's way in and is refused; an effect needs acknowledgement. */
+export type BoundaryImpact = {
+  boundary: BoundaryCheck["id"]
+  level: "cuts" | "affects"
+  text: string
+}
+
+export type BoundaryChange = {
+  id: BoundaryCheck["id"]
+  title: string
+  before: BoundaryState
+  after: BoundaryState
+  detail: string
+  lost: boolean
+}
+
+/** What a reconnection verification says about the boundary after a pending apply. */
+export type BoundaryAfterVerify = {
+  before: boolean
+  checks: BoundaryCheck[]
+  changes: BoundaryChange[]
+  lost: number
+}
+
 export type BlockEngine = "fail2ban" | "crowdsec" | "firewall"
 
 export type BlockedEntry = {

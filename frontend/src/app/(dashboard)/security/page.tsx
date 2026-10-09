@@ -26,6 +26,7 @@ import { ExposureIdentity } from "@/components/security/exposure-panel"
 import { Perimeter } from "@/components/security/perimeter"
 import { PostureBadge, PosturePanel, worstLevel } from "@/components/security/posture-panel"
 import { PostureStrip } from "@/components/security/posture-strip"
+import { BoundaryPanel } from "@/components/security/boundary-view"
 import { useSecurity } from "@/components/security/security-context"
 
 type Fail2banReply = { available: boolean; running: boolean; jails: Fail2banJail[] }
@@ -269,6 +270,11 @@ export default function SecurityOverviewPage() {
           />
         </PanelBody>
       </Panel>
+
+      {/* The ways in as boundaries every change is judged against: Caddy
+          alone on a routable address, the allowlist before sign-in, the
+          tailnet, SSH for a tunnel and tailnet-only previews. */}
+      <BoundaryPanel />
 
       <PosturePanel
         posture={posture}

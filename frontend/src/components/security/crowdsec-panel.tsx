@@ -16,6 +16,8 @@ import { InstallHandoff } from "@/components/network/install"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
 import { heldSentence } from "@/components/security/blocks"
+import { boundaryVerdict } from "@/components/security/boundary"
+import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
 import { ENFORCEMENT, enforcementOf, goDuration, pullAge } from "@/components/security/enforcement"
 import { Address } from "@/components/security/marks"
 import { useSecurity } from "@/components/security/security-context"
@@ -631,6 +633,10 @@ function BanDialog({
   const [reason, setReason] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ field: boolean; message: string }>()
+  const boundary = useBoundaryCheck(
+    open && value.trim() ? { kind: "ban", target: value.trim() } : undefined,
+  )
+  const crossing = boundaryVerdict(boundary.impacts ?? [])
 
   if (!open) return null
 
@@ -642,6 +648,7 @@ function BanDialog({
         value: value.trim(),
         duration,
         reason: reason.trim() || undefined,
+        ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
       })
       notify.success(
         `${value.trim()} banned for ${DURATIONS.find((d) => d.value === duration)?.label}`,
@@ -671,7 +678,12 @@ function BanDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" form="crowdsec-ban" pending={busy} disabled={busy || !value.trim()}>
+          <Button
+            type="submit"
+            form="crowdsec-ban"
+            pending={busy}
+            disabled={busy || !value.trim() || boundary.checking || crossing === "refused"}
+          >
             Ban
           </Button>
         </>
@@ -712,6 +724,7 @@ function BanDialog({
             </p>
           )}
         </Field>
+        <BoundaryImpacts impacts={boundary.impacts} />
         <Field label="For how long" htmlFor="crowdsec-duration">
           <Select value={duration} onValueChange={setDuration}>
             <SelectTrigger id="crowdsec-duration" className="w-full">

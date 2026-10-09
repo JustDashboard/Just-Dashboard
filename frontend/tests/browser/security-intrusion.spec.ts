@@ -304,6 +304,113 @@ test("the sshd jail's policy says its ban misses the port sshd moved to", async 
   await expect(policy).toContainText("restart loads 3")
 })
 
+test("a ban across the access boundary is shown first and sent acknowledged", async ({ page }) => {
+  const mutations: Mutation[] = []
+  const impacts = [
+    {
+      boundary: "allowlist",
+      level: "affects",
+      text: "100.64.0.12 overlaps 100.64.0.0/10, which the allowlist admits: a ban refuses the dashboard's port to anyone else arriving from it.",
+    },
+  ]
+  await mockIntrusion(page, mutations, { overrides: { "/security/boundary/check": { impacts } } })
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "Ban an address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Ban an address" })
+  await dialog.getByLabel("Address or range").fill("100.64.0.12")
+  await expect(dialog.getByText("This crosses the dashboard's access boundary")).toBeVisible()
+  await expect(dialog.getByText(/which the allowlist admits/)).toBeVisible()
+  await dialog.getByRole("button", { name: "Ban", exact: true }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/security/crowdsec/decisions")?.body)
+    .toEqual({ value: "100.64.0.12", duration: "4h", acknowledgeBoundary: true })
+})
+
+test("a ban that would cut this session cannot be sent", async ({ page }) => {
+  const mutations: Mutation[] = []
+  await mockIntrusion(page, mutations, {
+    overrides: {
+      "/security/boundary/check": {
+        impacts: [
+          {
+            boundary: "allowlist",
+            level: "cuts",
+            text: "100.110.34.0/24 covers 100.110.34.9, the address this session arrives from: a ban would end it.",
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security/intrusion")
+  await page.getByRole("button", { name: "sshd", exact: true }).click()
+  const sheet = page.getByRole("dialog", { name: "sshd" })
+  await sheet.getByLabel("Ban an address now").fill("100.110.34.0/24")
+  await expect(sheet.getByText("This would cut your way in")).toBeVisible()
+  await expect(sheet.getByRole("button", { name: "Ban", exact: true })).toBeDisabled()
+  expect(mutations).toHaveLength(0)
+})
+
+test("an SSH change applies until confirmed, with what it does to the tunnel shown first", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  const headers: Record<string, string>[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/v1/ssh/config"))
+      headers.push(request.headers())
+  })
+  await mockIntrusion(page, mutations, {
+    overrides: {
+      "/network/changes/current": { available: true, owned: false, change: null },
+      "/security/boundary/check": {
+        impacts: [
+          {
+            boundary: "ssh",
+            level: "affects",
+            text: "sshd moves from 22 to 2222: every SSH tunnel to the dashboard must be opened on 2222.",
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security/ssh")
+  await page.getByRole("textbox", { name: "Port" }).fill("2222")
+  await expect(
+    page.getByRole("switch", { name: "Restore unless confirmed after reconnecting" }),
+  ).toBeChecked()
+  await page.getByRole("button", { name: "Test and apply" }).click()
+  const dialog = page.getByRole("dialog", { name: "Apply SSH changes" })
+  await expect(dialog).toContainText("sshd moves from 22 to 2222")
+  await expect(dialog).toContainText("the host restores them and reloads sshd")
+  await dialog.getByRole("button", { name: "Test and apply" }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/ssh/config")?.body)
+    .toEqual({ settings: { port: "2222" }, acknowledgeBoundary: true })
+  expect(headers[0]["x-jd-network-apply"]).toBe("pending")
+})
+
+test("an SSH change on a host without the watchdog applies immediately as before", async ({
+  page,
+}) => {
+  const headers: Record<string, string>[] = []
+  page.on("request", (request) => {
+    if (request.method() === "POST" && request.url().endsWith("/api/v1/ssh/config"))
+      headers.push(request.headers())
+  })
+  await mockIntrusion(page)
+  await page.goto("/security/ssh")
+  await page.getByRole("textbox", { name: "Sessions per connection" }).fill("4")
+  await expect(
+    page.getByRole("switch", { name: "Restore unless confirmed after reconnecting" }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "Test and apply" }).click()
+  const dialog = page.getByRole("dialog", { name: "Apply SSH changes" })
+  await expect(dialog).toContainText("confirm you can still log in from a second terminal")
+  await dialog.getByRole("button", { name: "Test and apply" }).click()
+  await expect.poll(() => headers.length).toBe(1)
+  expect(headers[0]["x-jd-network-apply"]).toBeUndefined()
+})
+
 test("Suricata reads its mode, its severities, its signatures and its latest alerts", async ({
   page,
 }) => {

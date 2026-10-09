@@ -75,6 +75,7 @@ func (s *Server) mountSecurityRoutes(r chi.Router) {
 	// owns everything under /network.
 
 	s.mountSecurityIntrusionRoutes(r)
+	s.mountSecurityBoundaryRoutes(r)
 }
 
 // handleSecurityPosture gathers every input and grades the host.
@@ -264,6 +265,9 @@ func (s *Server) handleSSHConfig(w http.ResponseWriter, r *http.Request) error {
 
 type sshApplyRequest struct {
 	Settings map[string]string `json:"settings"`
+	// AcknowledgeBoundary says the operator saw what the change does to the
+	// way the dashboard is reached (a moved port, forwarding, AllowUsers).
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
 }
 
 // handleSSHApply plans synchronously and applies as a job.
@@ -293,6 +297,9 @@ func (s *Server) handleSSHApply(w http.ResponseWriter, r *http.Request) error {
 	}
 	pending, err := s.pendingSSHApply(r)
 	if err != nil {
+		return err
+	}
+	if err := s.boundaryGate(r, "ssh.config", netsec.BoundaryProposal{Kind: "ssh", Settings: req.Settings}, req.AcknowledgeBoundary); err != nil {
 		return err
 	}
 	plan, err := s.modules.netsec.PlanSSHSettings(r.Context(), req.Settings)
@@ -363,11 +370,15 @@ func (s *Server) startPendingSSHApply(w http.ResponseWriter, r *http.Request, pl
 		files = append(files, netx.SSHFile{Path: f.Path, Candidate: []byte(f.Content)})
 	}
 	ctx := netx.WithPendingConfirmation(r.Context(), httpx.MustPrincipal(r).UserID())
+	readCtx, cancel := timeoutCtx(r, 30*time.Second)
+	before := s.accessBoundary(readCtx, r)
+	cancel()
 	change, err := s.modules.network.BeginSSHChange(ctx, files, plan.SocketUnit())
 	if err != nil {
 		httpx.SetAudit(r, "ssh.config", plan.File, map[string]any{"result": "refused_pending", "pending": true})
 		return mapNetworkConfirmationError(err)
 	}
+	rememberBoundary(change.ID, before)
 	httpx.SetAudit(r, "ssh.config", plan.File,
 		map[string]any{"applied": plan.Applied, "streamed": true, "pending": true, "change": change.ID})
 	w.Header().Set("X-JD-Network-Change", change.ID)

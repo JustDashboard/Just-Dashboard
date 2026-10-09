@@ -69,11 +69,17 @@ func (s *Server) pendingNetworkApply(next http.Handler) http.Handler {
 			return
 		}
 		r = r.WithContext(netx.WithPendingConfirmation(r.Context(), p.UserID()))
+		// The access boundary as it stood before the change, so the session
+		// confirming it is shown which boundaries still hold.
+		readCtx, cancel := timeoutCtx(r, 30*time.Second)
+		before := s.accessBoundary(readCtx, r)
+		cancel()
 		response := &pendingResponse{header: make(http.Header)}
 		next.ServeHTTP(response, r)
 		if s.modules.network != nil {
 			view, err := s.modules.network.ConfirmationStatus(r.Context(), p.UserID())
 			if err == nil && view.Owned && view.Change != nil && view.Change.Phase == "awaiting_confirmation" {
+				rememberBoundary(view.Change.ID, before)
 				response.header.Set("X-JD-Network-Change", view.Change.ID)
 				response.header.Set("X-JD-Network-Expires", view.Change.ExpiresAt.Format(time.RFC3339Nano))
 			}
@@ -120,8 +126,13 @@ func (s *Server) handleNetworkChangeVerify(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return mapNetworkConfirmationError(err)
 	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
 	w.Header().Set("Cache-Control", "no-store")
-	httpx.JSON(w, http.StatusOK, result)
+	httpx.JSON(w, http.StatusOK, struct {
+		*netx.ReconnectionVerification
+		Boundary *boundaryAfterVerify `json:"boundary"`
+	}{result, s.boundaryAfter(ctx, r, id)})
 	return nil
 }
 

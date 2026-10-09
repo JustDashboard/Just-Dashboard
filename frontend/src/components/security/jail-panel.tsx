@@ -21,6 +21,8 @@ import { DimActions, IconAction } from "@/components/icon-action"
 import { SidePanel } from "@/components/side-panel"
 import { ProductLogo } from "@/components/product-logo"
 import { heldSentence } from "@/components/security/blocks"
+import { boundaryVerdict } from "@/components/security/boundary"
+import { BoundaryImpacts, useBoundaryCheck } from "@/components/security/boundary-view"
 import { jailProduct } from "@/components/security/marks"
 import { Status } from "@/components/status-dot"
 import { Meter } from "@/components/meter"
@@ -79,6 +81,11 @@ export function JailsPanel({
   }
 
   const selected = jails.find((j) => j.name === open)
+  // What the typed ban does to the way the dashboard is reached, before it is made.
+  const boundary = useBoundaryCheck(
+    selected && banning.trim() ? { kind: "ban", target: banning.trim() } : undefined,
+  )
+  const crossing = boundaryVerdict(boundary.impacts ?? [])
   // A ban by hand. The route has been on the server since the jail controls
   // shipped and nothing on the page reached it — so the address that kept
   // appearing in the log could be blocked forever at the firewall, or not at
@@ -87,7 +94,10 @@ export function JailsPanel({
     if (!selected || !banning.trim()) return
     const ip = banning.trim()
     void act(async () => {
-      await post(`/fail2ban/${encodeURIComponent(selected.name)}/ban`, { ip })
+      await post(`/fail2ban/${encodeURIComponent(selected.name)}/ban`, {
+        ip,
+        ...(crossing === "acknowledge" && { acknowledgeBoundary: true }),
+      })
       setBanning("")
     }, `${ip} banned in ${selected.name}`)
   }
@@ -256,7 +266,7 @@ export function JailsPanel({
                   size="sm"
                   variant="outline"
                   onClick={ban}
-                  disabled={busy || !banning.trim()}
+                  disabled={busy || !banning.trim() || boundary.checking || crossing === "refused"}
                 >
                   <Slash className="size-3.5" />
                   Ban
@@ -267,6 +277,7 @@ export function JailsPanel({
                   {heldSentence(banning, blocks)}
                 </p>
               )}
+              <BoundaryImpacts impacts={boundary.impacts} />
               <p className="text-hint leading-relaxed text-muted-foreground">
                 For this jail&rsquo;s ban time, the same as an earned ban. Your own address is
                 refused. A block that should outlive the ban is a firewall rule, from the offenders

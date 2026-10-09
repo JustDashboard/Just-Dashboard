@@ -155,3 +155,66 @@ test("another administrator sees pending recovery evidence without owner actions
   await expect(banner(page).getByRole("button", { name: "Verify reconnection" })).toHaveCount(0)
   await expect(banner(page).getByRole("button", { name: "Confirm network change" })).toHaveCount(0)
 })
+
+test("verification shows the access boundary after the change and names what was lost", async ({
+  page,
+}) => {
+  await setup(page, true)
+  const challenge = "received-response".padEnd(64, "b")
+  await page.route("**/api/v1/network/changes/*/verify", (route) =>
+    json(route, {
+      challenge,
+      verifiedAt: new Date().toISOString(),
+      boundary: {
+        before: true,
+        lost: 1,
+        checks: [],
+        changes: [
+          {
+            id: "ingress",
+            title: "Caddy is the only routable listener",
+            before: "held",
+            after: "held",
+            detail: "Caddy holds port 8443.",
+            lost: false,
+          },
+          {
+            id: "tailnet",
+            title: "The tailnet path is up",
+            before: "held",
+            after: "broken",
+            detail:
+              "The allowlist admits the tailnet and no tailscale interface is up on this host.",
+            lost: true,
+          },
+        ],
+      },
+    }),
+  )
+  await page.goto("/network/traffic")
+  await banner(page).getByRole("button", { name: "Verify reconnection", exact: true }).click()
+  const after = banner(page).getByLabel("Access boundary after this change")
+  await expect(after).toContainText("Caddy is the only routable listener")
+  await expect(after).toContainText("lost")
+  await expect(after).toContainText("no tailscale interface is up")
+  await expect(
+    banner(page).getByRole("button", { name: "Confirm anyway", exact: true }),
+  ).toBeEnabled()
+})
+
+test("a pending SSH apply is confirmed through the same banner in SSH's words", async ({
+  page,
+}) => {
+  const { state } = await setup(page, true)
+  state.change = { ...pendingChange(), subsystem: "sshd", boot: "not_applicable" } as ReturnType<
+    typeof pendingChange
+  >
+  await page.goto("/network/traffic")
+  await expect(banner(page)).toContainText("SSH change is awaiting confirmation")
+  await expect(banner(page)).toContainText("restore the previous SSH configuration")
+  await expect(
+    banner(page).getByRole("button", { name: "Confirm SSH change", exact: true }),
+  ).toBeDisabled()
+  state.change = { ...state.change!, phase: "recovered", watchdog: "recovered" }
+  await expect(banner(page)).toContainText("Previous SSH configuration restored")
+})

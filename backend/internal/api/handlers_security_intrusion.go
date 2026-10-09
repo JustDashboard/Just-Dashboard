@@ -98,11 +98,17 @@ type crowdSecDecisionRequest struct {
 	Value    string `json:"value"`
 	Duration string `json:"duration"`
 	Reason   string `json:"reason"`
+	// AcknowledgeBoundary is the operator having seen what the decision does
+	// to the dashboard's boundary.
+	AcknowledgeBoundary bool `json:"acknowledgeBoundary,omitempty"`
 }
 
 func (s *Server) handleCrowdSecAdd(w http.ResponseWriter, r *http.Request) error {
 	var req crowdSecDecisionRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if err := s.boundaryGate(r, "crowdsec.decision.add", netsec.BoundaryProposal{Kind: "ban", Target: req.Value}, req.AcknowledgeBoundary); err != nil {
 		return err
 	}
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
