@@ -905,6 +905,138 @@ func TestDNSDomainDecisionRefusalRetainsOriginalReadWithoutExecOrReread(t *testi
 	}
 }
 
+func TestDNSDomainDecisionRestartAdmitsOnlyFreshEngineEndpoint(t *testing.T) {
+	type engineRead struct {
+		endpoint, address, mac, bridgeMAC string
+		pid                               int
+	}
+	freshMAC := "02:00:00:00:00:08"
+	for _, test := range []struct {
+		name   string
+		mutate func(*engineRead, *network.Inspect, *container.InspectResponse, map[string]any)
+		stage  string
+	}{
+		{"fresh_endpoint_mac_and_pid", func(*engineRead, *network.Inspect, *container.InspectResponse, map[string]any) {}, ""},
+		{"unrestarted_pid", func(e *engineRead, _ *network.Inspect, _ *container.InspectResponse, _ map[string]any) { e.pid = 100 }, "restart_transition"},
+		{"changed_engine_ip", func(e *engineRead, _ *network.Inspect, _ *container.InspectResponse, _ map[string]any) {
+			e.address = "172.20.0.8"
+		}, "restart_transition"},
+		{"malformed_engine_mac", func(e *engineRead, _ *network.Inspect, _ *container.InspectResponse, _ map[string]any) {
+			e.mac = "private-native-password"
+		}, "restart_transition"},
+		{"split_engine_endpoint", func(e *engineRead, _ *network.Inspect, _ *container.InspectResponse, _ map[string]any) {
+			e.bridgeMAC = "02:00:00:00:00:09"
+		}, "restart_transition"},
+		{"changed_engine_config", func(_ *engineRead, _ *network.Inspect, _ *container.InspectResponse, config map[string]any) {
+			config["Env"] = []string{"TOKEN=changed"}
+		}, "restart_transition"},
+		{"restarted_client", func(_ *engineRead, _ *network.Inspect, side *container.InspectResponse, _ map[string]any) {
+			side.State.Pid = 201
+		}, "restart_transition"},
+		{"changed_client_mac", func(_ *engineRead, _ *network.Inspect, side *container.InspectResponse, _ map[string]any) {
+			side.NetworkSettings.Networks["owned"].MacAddress = "02:00:00:00:00:09"
+		}, "sidecar_identity"},
+		{"extra_endpoint", func(_ *engineRead, bridge *network.Inspect, _ *container.InspectResponse, _ map[string]any) {
+			bridge.Containers["foreign"] = network.EndpointResource{}
+		}, "restart_transition"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			id := strings.Repeat("e", 32)
+			resources := provisionIntent(id)
+			resources.NetworkID, resources.ContainerID = strings.Repeat("a", 64), strings.Repeat("c", 64)
+			spec := provisionSpec{ID: id, Owner: strings.Repeat("f", 32), Image: pinnedImages[AdGuard], ImageID: "sha256:" + strings.Repeat("1", 64), Request: ProvisionRequest{Engine: AdGuard, Username: "admin", Password: "private-native-password", ManagementPort: 43081, DNSPort: 43053, MemoryMiB: 256, CPUs: 0.5, Upstreams: []string{"192.0.2.53:5353"}}}
+			fixture := &dockerProvisionFixture{t: t, spec: spec, resources: resources, volumes: map[string]bool{}, seeds: map[string]string{}}
+			side := &decisionSidecar{nonce: "012345abcdef", digest: strings.Repeat("2", 64), imageID: "sha256:" + strings.Repeat("3", 64), containerID: strings.Repeat("b", 64), networkID: resources.NetworkID, address: "172.20.0.3", mac: "02:00:00:00:00:03", engineID: resources.ContainerID, engineAddress: "172.20.0.2", engineMAC: "02:00:00:00:00:02", spec: spec}
+			pids := int64(16)
+			sideInfo := container.InspectResponse{ContainerJSONBase: &container.ContainerJSONBase{ID: side.containerID, Name: "/jd-dns-decisions-" + side.nonce, Image: side.imageID, State: &container.State{Running: true, Pid: 200}, HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(side.networkID), ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 64 << 20, MemorySwap: 64 << 20, NanoCPUs: 250000000, PidsLimit: &pids}, RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}}}, Config: &container.Config{Image: side.imageID, User: "65534:65534", Entrypoint: []string{"/dns-fixture"}, Cmd: []string{"serve", side.nonce}, Labels: side.labels()}, NetworkSettings: &container.NetworkSettings{Networks: map[string]*network.EndpointSettings{"owned": {NetworkID: side.networkID, EndpointID: strings.Repeat("4", 64), IPAddress: side.address, MacAddress: side.mac}}}}
+			bridge := network.Inspect{ID: side.networkID, Driver: "bridge", Scope: "local", Labels: ownedLabels(spec), Containers: map[string]network.EndpointResource{side.containerID: {EndpointID: strings.Repeat("4", 64), IPv4Address: side.address + "/16", MacAddress: side.mac}}}
+			engine := engineRead{strings.Repeat("5", 64), side.engineAddress, side.engineMAC, side.engineMAC, 100}
+			prepared := false
+			effects := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				path := strings.TrimPrefix(r.URL.Path, "/v1.51")
+				if prepared && r.Method != http.MethodGet {
+					effects++
+					http.Error(w, "refused", http.StatusConflict)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if prepared && path == "/containers/"+side.containerID+"/json" {
+					json.NewEncoder(w).Encode(sideInfo)
+					return
+				}
+				if prepared && path == "/networks/"+side.networkID {
+					observed := bridge
+					observed.Containers = map[string]network.EndpointResource{side.engineID: {EndpointID: engine.endpoint, IPv4Address: engine.address + "/16", MacAddress: engine.bridgeMAC}}
+					for key, value := range bridge.Containers {
+						observed.Containers[key] = value
+					}
+					json.NewEncoder(w).Encode(observed)
+					return
+				}
+				if prepared && path == "/containers/"+resources.ContainerID+"/json" {
+					capture := httptest.NewRecorder()
+					fixture.serve(capture, r)
+					var info map[string]any
+					if err := json.Unmarshal(capture.Body.Bytes(), &info); err != nil {
+						t.Error(err)
+					}
+					info["NetworkSettings"] = map[string]any{"Networks": map[string]any{resources.NetworkName: map[string]any{"NetworkID": side.networkID, "EndpointID": engine.endpoint, "IPAddress": engine.address, "MacAddress": engine.mac}}}
+					info["State"] = map[string]any{"Running": true, "Restarting": false, "Pid": engine.pid}
+					json.NewEncoder(w).Encode(info)
+					return
+				}
+				fixture.serve(w, r)
+			}))
+			defer server.Close()
+			cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.51"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := &dockerRuntime{cli: cli}
+			defer d.Close()
+			side.d = d
+			side.resources, err = d.Prepare(t.Context(), spec, provisionIntent(id), func(ProvisionResources) error { return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			fixture.running, prepared = true, true
+			before, err := side.queryGuard(t.Context())
+			if err != nil {
+				t.Fatal("complete original pre-restart receipt unavailable", err)
+			}
+			engine = engineRead{strings.Repeat("8", 64), side.engineAddress, freshMAC, freshMAC, 101}
+			test.mutate(&engine, &bridge, &sideInfo, fixture.config)
+			after, err := side.restarted(t.Context(), before)
+			if test.stage == "" {
+				if err != nil || side.engineMAC != freshMAC || after.BridgeEngine.ID != strings.Repeat("8", 64) || after.Engine.PID != 101 {
+					t.Fatal("exact restart endpoint transition refused", err, after)
+				}
+				if _, err = side.queryGuard(t.Context()); err != nil {
+					t.Fatal("strict query guard refused the reviewed transition", err)
+				}
+				// A later endpoint change is ordinary drift, not another transition.
+				engine.mac, engine.bridgeMAC = "02:00:00:00:00:0a", "02:00:00:00:00:0a"
+				var refusal *decisionQueryRefusal
+				if _, err = side.queryGuard(t.Context()); !errors.As(err, &refusal) || refusal.Code != "engine_endpoint_changed" {
+					t.Fatal("restart transition admitted later endpoint drift", err)
+				}
+			} else {
+				var refusal *decisionQueryRefusal
+				if !errors.As(err, &refusal) || refusal.Stage != test.stage || side.engineMAC != "02:00:00:00:00:02" {
+					t.Fatal("changed restart gained query authority", err, side.engineMAC)
+				}
+				if test.stage == "restart_transition" && refusal.Code != "engine_restart_transition_changed" {
+					t.Fatal("restart transition refusal lost its closed code", refusal.Code)
+				}
+			}
+			if effects != 0 {
+				t.Fatal("restart transition performed a native effect", effects)
+			}
+		})
+	}
+}
+
 func TestDNSDomainDecisionDiagnosticErrorsAndHelperCodesStayBounded(t *testing.T) {
 	for _, original := range []error{errors.New("native password=private-value\nquery=unrelated-name.invalid"), context.Canceled, context.DeadlineExceeded} {
 		err := decisionRefusal("exec_create", original, decisionRuntimeReceipt{})

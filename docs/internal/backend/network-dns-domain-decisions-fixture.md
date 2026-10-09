@@ -212,6 +212,28 @@ churn; it does not identify the cause of the preserved `438830d7` failure. Any l
 endpoint transition requires its own explicit before/after ownership/configuration evidence and
 unchanged sidecar client identity/two-endpoint roster, rather than admitting arbitrary drift.
 
+Clean `053f0951` was then dispatched once for AdGuard with those diagnostics. Questions 1–108 and
+the first history corroboration passed again; attempts 109–124 were all refused before any exec at
+`bridge_identity`/`engine_endpoint_changed`. The retained receipts show the cause: after the owned
+restart the engine kept its container ID, image, configuration/host/mount digests, single network
+and IPv4 `10.0.3.2`, while Docker assigned a fresh endpoint ID and MAC and a new PID. The sidecar
+receipt, bridge identity and two-endpoint roster were byte-identical. AdGuard was therefore never
+questioned after restart. The 55.894-second failure retained zero owned Docker/process/TMP entries
+and unchanged host/socket/source/binaries and complete image inventory; Pi-hole was not dispatched.
+The original raw is
+`/home/ubuntu/Just-Dashboard-network-dns-decision-restart-artifacts/native-decision-restart-adguard.log`
+(SHA256 `622323e624f0c3b18cfabfce25496a6815c5225a61ca2a6221b3836289390b39`).
+
+The fixture now performs exactly one planned transition immediately after its own successful
+restart. One sidecar, engine and bridge read must reproduce the complete pre-restart receipt except
+the engine PID (which must differ), the engine endpoint ID and the engine MAC (which must be
+well-formed and identical in the container and bridge reads). The engine IPv4 must remain the
+question target. Only then is the captured engine MAC replaced, and the unchanged strict bridge
+predicate must accept that same read. Any other difference refuses with
+`restart_transition`/`engine_restart_transition_changed` and keeps the old MAC; later endpoint
+changes remain ordinary `engine_endpoint_changed` refusals. Both receipts are logged. The query
+budget, settling rounds/deadline, client predicates and production container guard are unchanged.
+
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
 [the AdGuard encryption enum](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/qlog.go#L53),
 [persistent-client JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/home/clientshttp.go#L86),

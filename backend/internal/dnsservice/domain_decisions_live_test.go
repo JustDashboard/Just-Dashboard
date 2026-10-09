@@ -271,6 +271,7 @@ func decisionRefusal(stage string, original error, receipt decisionRuntimeReceip
 		"exact ordinary owned bridge and two endpoints required":      "bridge_owner_or_roster_changed",
 		"owned engine bridge endpoint differs":                        "engine_endpoint_changed",
 		"observed default-client bridge endpoint differs":             "client_endpoint_changed",
+		"owned engine restart changed more than its endpoint":         "engine_restart_transition_changed",
 	}[original.Error()]
 	if code == "" {
 		code = "unreported_native_error"
@@ -513,6 +514,44 @@ func (s *decisionSidecar) queryGuard(ctx context.Context) (decisionRuntimeReceip
 		refusal.Runtime = receipt
 	}
 	return receipt, err
+}
+
+// Pinned Moby restart reconnects the same container through a fresh endpoint,
+// so only the engine PID, endpoint ID and MAC may differ from the pre-restart
+// receipt. The questions keep targeting the unchanged engine address.
+func (s *decisionSidecar) restarted(ctx context.Context, before decisionRuntimeReceipt) (decisionRuntimeReceipt, error) {
+	info, err := s.inspect(ctx)
+	sidecar := decisionContainer(info, s.networkID)
+	if err != nil {
+		receipt := decisionRuntimeReceipt{Sidecar: sidecar}
+		return receipt, decisionRefusal("sidecar_identity", err, receipt)
+	}
+	info, err = s.d.containerIdentity(ctx, s.spec, s.resources)
+	engine := decisionContainer(info, s.networkID)
+	if err != nil {
+		receipt := decisionRuntimeReceipt{Engine: engine, Sidecar: sidecar}
+		return receipt, decisionRefusal("engine_identity", err, receipt)
+	}
+	nw, err := s.d.cli.NetworkInspect(ctx, s.networkID, network.InspectOptions{})
+	receipt := s.bridgeReceipt(nw)
+	receipt.Engine, receipt.Sidecar = engine, sidecar
+	if err != nil {
+		return receipt, decisionRefusal("bridge_inspect", err, receipt)
+	}
+	want := before
+	want.Engine.PID, want.Engine.Endpoint.ID, want.Engine.Endpoint.MAC = engine.PID, engine.Endpoint.ID, engine.Endpoint.MAC
+	want.BridgeEngine.ID, want.BridgeEngine.MAC = engine.Endpoint.ID, engine.Endpoint.MAC
+	fresh := engine.Endpoint.ID != "" && engine.Endpoint.ID != "malformed" && engine.Endpoint.MAC != "" && engine.Endpoint.MAC != "malformed"
+	if receipt != want || !fresh || engine.PID == before.Engine.PID || before.Engine.Endpoint.Address != s.engineAddress {
+		return receipt, decisionRefusal("restart_transition", errors.New("owned engine restart changed more than its endpoint"), receipt)
+	}
+	previous := s.engineMAC
+	s.engineMAC = nw.Containers[s.engineID].MacAddress
+	if err = s.bridgeIdentity(nw); err != nil {
+		s.engineMAC = previous
+		return receipt, decisionRefusal("bridge_identity", err, receipt)
+	}
+	return receipt, nil
 }
 
 func (s *decisionSidecar) bridgeIdentity(nw network.Inspect) error {
@@ -867,6 +906,12 @@ func TestDNSServiceNativeDomainDecisions(t *testing.T) {
 	t.Logf("decision runtime before owned restart runtime=%s", restartBody)
 	if err = d.cli.ContainerRestart(ctx, plan.Resources.ContainerID, container.StopOptions{Timeout: &seconds}); err != nil {
 		t.Fatal(decisionRefusal("owned_restart", err, restartBefore))
+	}
+	restartAfter, err := side.restarted(ctx, restartBefore)
+	restartBody, _ = json.Marshal(restartAfter)
+	t.Logf("decision runtime after owned restart runtime=%s", restartBody)
+	if err != nil {
+		t.Fatal(err)
 	}
 	queries.settle(decisionCase{allow, false}, decisionCase{deny, true})
 	// Restart invalidates the FTL session. Renew authentication only; no
