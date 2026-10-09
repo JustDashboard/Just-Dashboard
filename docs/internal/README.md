@@ -49,6 +49,7 @@ strategy, and feature ownership behind those rules.
 - [`backend/network-dns-services.md`](backend/network-dns-services.md) — sealed native engine connections, reviewed changes, bounded filter metadata and owned Docker provisions.
 - [`backend/network-sqm.md`](backend/network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`backend/wireguard-dual-stack.md`](backend/wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
+- [`backend/wireguard-lifecycle.md`](backend/wireguard-lifecycle.md) — the WireGuard record, alerts, transport anchors, peer editing, budgets, site verification, archive restore, the Linux kill switch and Tailscale/Headscale inspection.
 - [`backend/network-flow-observer.md`](backend/network-flow-observer.md) — explicit bounded kernel
   telemetry, owned link recovery, durable batch acknowledgement, transport byte subtotals and quality.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,

@@ -26,6 +26,8 @@ import { AddPeer, PeerSheet } from "@/components/network/vpn/peers"
 import { WireGuardSetup } from "@/components/network/vpn/setup"
 import { WireGuardFamilyEvidence } from "@/components/network/vpn/family-evidence"
 import { TailscaleBlock } from "@/components/network/vpn/tailscale"
+import { TunnelAlerts, TunnelRecord } from "@/components/network/vpn/record"
+import { ArchivedTunnels } from "@/components/network/vpn/archive"
 import { Modal } from "@/components/modal"
 
 /**
@@ -102,6 +104,7 @@ function NetworkVPNContent() {
   const { wireguard, tailscale, headscale } = vpn.data
   const peers = wireguard.interfaces.flatMap((t) => t.peers)
   const online = peers.filter((p) => p.online).length
+  const alerts = wireguard.interfaces.reduce((n, t) => n + (t.alerts?.length ?? 0), 0)
   const moved = peers.reduce((n, p) => n + p.rxBytes + p.txBytes, 0)
   const tsOnline = tailscale.peers.filter((p) => p.online).length
   const exits = [
@@ -146,7 +149,7 @@ function NetworkVPNContent() {
           trailing={wireguard.interfaces.length ? "peers online" : undefined}
           hint={
             wireguard.interfaces.length
-              ? `${plural(wireguard.interfaces.length, "tunnel")} · ${wireguard.interfaces.map((t) => t.name).join(", ")}`
+              ? `${plural(wireguard.interfaces.length, "tunnel")} · ${wireguard.interfaces.map((t) => t.name).join(", ")}${alerts ? ` · ${plural(alerts, "alert")}` : ""}`
               : wireguard.installed
                 ? "one step to set up"
                 : "wireguard-tools is not installed"
@@ -234,6 +237,7 @@ function NetworkVPNContent() {
             />
           ))
         )}
+        {wireguard.installed && <ArchivedTunnels onRestored={vpn.refresh} />}
       </Section>
       {wireguard.installed && wireguard.interfaces.length > 0 && (
         <Modal
@@ -316,6 +320,7 @@ function TunnelBlock({
 }) {
   const { confirm, dialog } = useConfirm()
   const [busy, setBusy] = useState(false)
+  const [record, setRecord] = useState(false)
   const base = `/network/vpn/wireguard/${encodeURIComponent(tunnel.name)}`
   const act = async (run: () => Promise<unknown>, label: string) => {
     setBusy(true)
@@ -415,6 +420,9 @@ function TunnelBlock({
               tone={tunnel.up ? "running" : "stopped"}
               label={tunnel.up ? `${online} of ${tunnel.peers.length} online` : "Down"}
             />
+            <Button size="xs" variant="ghost" onClick={() => setRecord(true)}>
+              History
+            </Button>
             {tunnel.managed && (
               <>
                 <label className="flex items-center gap-2 text-hint text-muted-foreground">
@@ -476,6 +484,7 @@ function TunnelBlock({
         }
       />
       <PanelBody>
+        <TunnelAlerts tunnel={tunnel} />
         <WireGuardFamilyEvidence tunnel={tunnel} />
         {!tunnel.managed && (
           <Notice title="Written by hand">
@@ -484,6 +493,7 @@ function TunnelBlock({
         )}
         <TunnelPicture tunnel={tunnel} onPeer={onPeer} onAdd={onAdd} />
       </PanelBody>
+      {record && <TunnelRecord tunnel={tunnel.name} open onOpenChange={setRecord} />}
       {dialog}
     </Panel>
   )

@@ -6,12 +6,13 @@ import { get, post } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { HeadscaleView, TailscaleView } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
+import { keyExpiry } from "./record-logic"
 import { HostFact, FactDot, HostIdentity } from "@/components/metrics/host-identity"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -111,6 +112,8 @@ export function TailscaleBlock({
   }
   const routes = tailscale.prefs.advertiseRoutes
   const online = tailscale.peers.filter((p) => p.online).length
+  const routeState = (route: string) =>
+    tailscale.approval?.routes.find((r) => r.route === route)?.state
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
@@ -136,6 +139,12 @@ export function TailscaleBlock({
                 <HostFact>v{tailscale.version.split("-")[0]}</HostFact>
               </>
             )}
+            {self?.keyExpiry ? (
+              <>
+                <FactDot />
+                <HostFact>{keyExpiry(self.keyExpiry).label}</HostFact>
+              </>
+            ) : null}
           </>
         }
         aside={
@@ -152,10 +161,19 @@ export function TailscaleBlock({
         }
       />
       {tailscale.warnings.map((w) => (
-        <Notice key={w} title="Tailscale">
+        <Notice key={w} title="Tailscale" tone={/key expire/.test(w) ? "warning" : "default"}>
           {w}
         </Notice>
       ))}
+      {tailscale.health.length > 0 && (
+        <Notice title="Tailscale reports">
+          <ul className="space-y-1" aria-label="Tailscale health">
+            {tailscale.health.map((h) => (
+              <li key={h}>{h}</li>
+            ))}
+          </ul>
+        </Notice>
+      )}
 
       <div className="grid min-w-0 gap-x-10 gap-y-6 md:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-2">
@@ -178,6 +196,16 @@ export function TailscaleBlock({
               aria-label="Offer as an exit node"
             />
           </div>
+          {tailscale.prefs.advertisingExitNode && tailscale.approval?.exitNode && (
+            <Status
+              tone={tailscale.approval.exitNode === "serving" ? "running" : "warning"}
+              label={
+                tailscale.approval.exitNode === "serving"
+                  ? "Offered to the tailnet"
+                  : "Awaiting approval on the control server"
+              }
+            />
+          )}
           {tailscale.prefs.usingExitNode && (
             <p className="text-hint text-warning">
               This server sends its own traffic through another exit node.
@@ -193,9 +221,16 @@ export function TailscaleBlock({
             {routes.map((r) => (
               <span
                 key={r}
-                className="inline-flex items-center gap-1 rounded-md border border-hairline px-2 py-0.5 font-mono text-xs"
+                className="inline-flex items-center gap-1.5 rounded-md border border-hairline px-2 py-0.5 font-mono text-xs"
               >
                 {r}
+                {routeState(r) && (
+                  <Status
+                    tone={routeState(r) === "serving" ? "running" : "warning"}
+                    label={routeState(r) === "serving" ? "served" : "not served"}
+                    className="font-sans"
+                  />
+                )}
                 <button
                   type="button"
                   aria-label={`Stop offering ${r}`}
@@ -238,6 +273,13 @@ export function TailscaleBlock({
               </Button>
             </form>
           </div>
+          {routes.some((r) => routeState(r) === "not_serving") && (
+            <p className="text-hint text-muted-foreground">
+              A subnet not served is awaiting approval on the control server, or another router of
+              the same subnet is primary for it. Approval and the tailnet&rsquo;s policy are managed
+              there.
+            </p>
+          )}
           {routeError && (
             <div
               id="tailscale-route-error"
@@ -336,47 +378,87 @@ export function TailscaleBlock({
         </PanelBody>
       </Panel>
 
-      {headscale.installed && (
-        <Panel plain>
-          <PanelHeader
-            title={
-              <span className="inline-flex items-center gap-2">
-                <ProductGlyph id="headscale" />
-                Headscale
-              </span>
-            }
-            actions={
-              <span className="text-hint text-muted-foreground">
-                {headscale.container ? `container ${headscale.container}` : "on this server"} ·{" "}
-                {headscale.nodes.length} node{headscale.nodes.length === 1 ? "" : "s"}
-              </span>
-            }
-          />
-          <PanelBody>
-            {headscale.error ? (
-              <p className="text-body text-muted-foreground">{headscale.error}</p>
-            ) : (
-              <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {headscale.nodes.map((n) => (
-                  <li key={n.id} className="flex min-w-0 items-center gap-2 text-body">
-                    <span
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        n.online ? "bg-success" : "bg-muted-foreground",
-                      )}
-                    />
-                    <span className="truncate">{n.givenName || n.name}</span>
-                    <span className="truncate font-mono text-hint text-muted-foreground">
-                      {n.ipAddresses[0]}
-                    </span>
-                    <span className="ml-auto text-hint text-muted-foreground">{n.user}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PanelBody>
-        </Panel>
-      )}
+      {(headscale.installed || headscale.container) && <HeadscalePanel headscale={headscale} />}
     </div>
+  )
+}
+
+/**
+ * A Headscale this server runs, as a binary or in a container, read and never
+ * changed: its users, its nodes with their key expiry, and each node's routes
+ * as advertised against approved. Enrolment, keys, approval and policy stay
+ * on the control server.
+ */
+function HeadscalePanel({ headscale }: { headscale: HeadscaleView }) {
+  return (
+    <Panel plain>
+      <PanelHeader
+        title={
+          <span className="inline-flex items-center gap-2">
+            <ProductGlyph id="headscale" />
+            Headscale
+          </span>
+        }
+        actions={
+          <span className="text-hint text-muted-foreground">
+            {headscale.container ? `container ${headscale.container}` : "on this server"} ·{" "}
+            {headscale.nodes.length} node{headscale.nodes.length === 1 ? "" : "s"} ·{" "}
+            {headscale.users.length} user{headscale.users.length === 1 ? "" : "s"}
+          </span>
+        }
+      />
+      <PanelBody>
+        {headscale.error && (
+          <p className="mb-3 text-body text-muted-foreground">{headscale.error}</p>
+        )}
+        {headscale.users.length > 0 && (
+          <p className="mb-3 text-hint text-muted-foreground" aria-label="Headscale users">
+            {headscale.users.map((u) => `${u.name} (${u.nodes})`).join(" · ")}
+          </p>
+        )}
+        <RowList aria-label="Headscale nodes">
+          {headscale.nodes.map((n) => {
+            const pending = (n.availableRoutes ?? []).filter(
+              (r) => !(n.approvedRoutes ?? []).includes(r),
+            )
+            const expiry = n.expiry ? keyExpiry(n.expiry) : undefined
+            const expired = Boolean(expiry?.expired)
+            return (
+              <Row
+                key={n.id}
+                title={n.givenName || n.name}
+                subtitle={[
+                  n.ipAddresses[0],
+                  n.user,
+                  expiry?.label,
+                  n.routesKnown && (n.approvedRoutes ?? []).length > 0
+                    ? `routes ${(n.approvedRoutes ?? []).join(", ")}`
+                    : undefined,
+                  n.routesKnown && pending.length > 0
+                    ? `awaiting approval ${pending.join(", ")}`
+                    : undefined,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+                trailing={
+                  <Status
+                    tone={expired ? "danger" : n.online ? "running" : "stopped"}
+                    label={
+                      expired
+                        ? "Key expired"
+                        : n.online
+                          ? "Online"
+                          : n.lastSeen
+                            ? `Seen ${relativeTime(new Date(n.lastSeen * 1000).toISOString())}`
+                            : "Offline"
+                    }
+                  />
+                }
+              />
+            )
+          })}
+        </RowList>
+      </PanelBody>
+    </Panel>
   )
 }

@@ -3,15 +3,16 @@
 import { useCallback, useState } from "react"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import type { WGInterface } from "@/lib/types"
+import type { WGEndpointEvidence, WGInterface } from "@/lib/types"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { Field, FieldRow } from "@/components/form"
+import { Disclosure, Field, FieldRow } from "@/components/form"
 import { ProductGlyph } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { portProblem } from "../tools/tool-input"
 import { wireGuardIPv6Payload, wireGuardIPv6Problem } from "./ipv6-input"
+import { mtuProblem, networkList, resolversProblem } from "./record-logic"
 import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
 import type { IPAMReservation } from "@/lib/network-ipam"
 
@@ -71,6 +72,8 @@ export function WireGuardSetup({
   const [ipv6, setIPv6] = useState(false)
   const [subnet6, setSubnet6] = useState("")
   const [exit6, setExit6] = useState(false)
+  const [mtu, setMtu] = useState("")
+  const [customDNS, setCustomDNS] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
   const [reservations, setReservations] = useState<IPAMReservation[]>([])
@@ -116,9 +119,13 @@ export function WireGuardSetup({
   )
   const portError = port ? portProblem(port) : undefined
   const ipv6Error = ipv6 ? wireGuardIPv6Problem(subnet6) : undefined
+  const mtuError = mtuProblem(mtu)
+  const dnsError = resolversProblem(customDNS)
+  const custom = networkList(customDNS)
 
   const submit = async () => {
-    if (busy || portError || ipv6Error || activeSeed || ipamUnavailable) return
+    if (busy || portError || ipv6Error || mtuError || dnsError || activeSeed || ipamUnavailable)
+      return
     setBusy(true)
     setError(undefined)
     try {
@@ -126,12 +133,14 @@ export function WireGuardSetup({
         interface: WGInterface
         warnings: string[]
         firewall: { opened: boolean; reason?: string }
+        endpointEvidence?: WGEndpointEvidence
       }>("/network/vpn/wireguard", {
         name: name.trim() || undefined,
         endpoint: endpoint.trim() || undefined,
         port: port ? Number(port.trim()) : undefined,
         subnet: subnet.trim() || undefined,
-        dns: RESOLVERS.find((r) => r.id === resolver)?.servers,
+        dns: custom.length ? custom : RESOLVERS.find((r) => r.id === resolver)?.servers,
+        mtu: mtu.trim() ? Number(mtu.trim()) : undefined,
         exitNode,
         ipv6: wireGuardIPv6Payload(ipv6, subnet6, exitNode && exit6),
         ...(reservations.length ? { ipamReservationIds: reservations.map((row) => row.id) } : {}),
@@ -139,9 +148,12 @@ export function WireGuardSetup({
       notify.success(
         `${made.interface.name} ${made.interface.up ? "is up" : "is configured"} on udp ${made.interface.listenPort}`,
         {
-          description: made.firewall.opened
-            ? "The firewall now admits its port."
-            : made.firewall.reason,
+          description: [
+            made.firewall.opened ? "The firewall now admits its port." : made.firewall.reason,
+            made.endpointEvidence?.explanation,
+          ]
+            .filter(Boolean)
+            .join(" "),
         },
       )
       for (const w of made.warnings) notify.warning(w)
@@ -326,6 +338,45 @@ export function WireGuardSetup({
           </label>
         </Field>
       </FieldRow>
+      <Disclosure
+        summary="Advanced"
+        facts={[mtu.trim() && `MTU ${mtu.trim()}`, custom.length > 0 && "own resolvers"]
+          .filter(Boolean)
+          .join(" · ")}
+      >
+        <FieldRow>
+          <Field
+            label="MTU"
+            htmlFor="wg-mtu"
+            hint="1420 when empty, which fits WireGuard over IPv6 on a 1500-byte link"
+            error={mtuError}
+          >
+            <Input
+              id="wg-mtu"
+              inputMode="numeric"
+              value={mtu}
+              placeholder="1420"
+              aria-invalid={Boolean(mtuError)}
+              onChange={(event) => setMtu(event.target.value)}
+            />
+          </Field>
+          <Field
+            label="Own resolvers"
+            htmlFor="wg-dns"
+            hint="Addresses clients are told to resolve with, in place of the choice above"
+            error={dnsError}
+          >
+            <Input
+              id="wg-dns"
+              value={customDNS}
+              placeholder="10.0.4.53, fd00::53"
+              aria-invalid={Boolean(dnsError)}
+              onChange={(event) => setCustomDNS(event.target.value)}
+              className="font-mono"
+            />
+          </Field>
+        </FieldRow>
+      </Disclosure>
       {error && (
         <p role="alert" className="animate-rise text-body text-destructive">
           {error}
@@ -339,6 +390,8 @@ export function WireGuardSetup({
             busy ||
             Boolean(portError) ||
             Boolean(ipv6Error) ||
+            Boolean(mtuError) ||
+            Boolean(dnsError) ||
             Boolean(activeSeed) ||
             ipamUnavailable
           }

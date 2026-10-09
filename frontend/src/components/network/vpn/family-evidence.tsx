@@ -24,6 +24,13 @@ export function WireGuardFamilyEvidence({ tunnel }: { tunnel: WGInterface }) {
                     Exit {exit.configured ? "configured" : "off"}
                     {exit.interface ? ` through ${exit.interface}` : ""}
                   </span>
+                  {exit.translated !== undefined && (
+                    <span className="numeric text-muted-foreground">
+                      {exit.translated === 1
+                        ? "1 client connection translated"
+                        : `${exit.translated.toLocaleString()} client connections translated`}
+                    </span>
+                  )}
                   {exit.runtime !== "disabled" && (
                     <Status
                       label={
@@ -55,7 +62,8 @@ export function WireGuardFamilyEvidence({ tunnel }: { tunnel: WGInterface }) {
         })}
       </DetailList>
       <p className="text-hint text-muted-foreground">
-        Rules and a fresh route from the first client address are local evidence. Public endpoint,
+        Rules and a fresh route from the first client address are local evidence, and the
+        translation count is measured use of this exit since its rules were loaded. Public endpoint,
         provider reachability and another client&rsquo;s source policy remain untested.
       </p>
     </div>

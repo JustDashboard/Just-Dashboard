@@ -225,7 +225,7 @@ resources. Measured fixture latency is separate from a general production perfor
 
 ## VPN
 
-Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `qr.go`, `vpn_store.go`, `tailscale.go`, `headscale.go`.
+Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `wgdual.go`, `wgrecord.go`, `wgsite.go`, `wgendpoint.go`, `wgarchive.go`, `wgkillswitch.go`, `qr.go`, `vpn_store.go`, `tailscale.go`, `headscale.go`.
 
 - **WireGuard** is read from `wg show all dump` joined with `/etc/wireguard/*.conf`; inventories omit private and
   preshared keys. Generated client secrets leave through explicit admin-only config/QR exports and
@@ -251,6 +251,15 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
   per-family route/forwarding/admission evidence. Legacy IPv4 full tunnels keep IPv6 capture/block
   containment; this is neither IPv6 egress nor a general client kill switch. Existing native peer
   drift prevents unsafe opt-in edits. See [dual-stack WireGuard](wireguard-dual-stack.md).
+  A five-minute record keeps per-peer trends, daily usage, endpoint history and a lifecycle with
+  recovery outcomes; stale always-on handshakes, transports routed into a tunnel and passed usage
+  budgets are alerts. Peers can be edited (a device's own routes regenerated from its sealed copy
+  with the same keys), given alert-only budgets and, for sites, verified end to end. Removed
+  tunnels are restorable from their archive. WireGuard endpoints the kernel reports are client-path
+  anchors, so a guarded change that would route one into a tunnel is put back. Creation reports
+  endpoint evidence and steers automatic allocations around held IPAM reservations; each exit
+  reports its translated connections; full-tunnel devices have an opt-in Linux kill-switch
+  export. See [the WireGuard record and lifecycle](wireguard-lifecycle.md).
 - **Tailscale** is read from `tailscale status --json` and `debug prefs`. The only changes offered are
   what this server offers the tailnet — an exit node and subnet routes — through `tailscale set`; using
   another node as an exit, shields up, down and logout are never run, because each can cut off the
@@ -260,6 +269,10 @@ Files: `wireguard.go`, `wgconf.go`, `wgkeys.go`, `wgserver.go`, `wgpeers.go`, `q
   External CLI writers are outside this process lock. **Headscale** is read where its binary or container runs.
   `prefsReadable` explicitly distinguishes failed preference reads from empty advertised routes; the
   editor retains a rejected subnet draft and retries against refreshed authoritative preferences.
+  `approval` says which advertised offers the tailnet serves from this node's own status, and the
+  node's key expiry warns before it takes the server off the tailnet. Headscale reads snake_case
+  and camelCase output, node expiry and advertised/approved routes (node-level or the older
+  `routes list`), including a Headscale in a container.
 
 ## DNS
 
@@ -337,9 +350,10 @@ upstream router/provider restriction. All probes remain admin-only and audited.
 All under `/api/v1/network` (`handlers_network*.go`). Reads are `read`, except `/vpn/*` and
 `/traffic/processes`, which name who connects and are `system.admin`. Every mutation is `system.admin`;
 removals, setting a device down, turning forwarding off, disabling a forward, NAT entry, limit or
-blocklist, weakening a kernel protection, turning a WireGuard exit off, withdrawing what this server
+blocklist, weakening a kernel protection, turning a WireGuard exit off, withdrawing a site's network
+or changing where it is dialled, clearing a peer's usage budget, withdrawing what this server
 offers the tailnet and changing the resolver are inside `s.destructive` (by path, or by content in the
-handler for the PUTs and posts). No route takes a typed phrase.
+handler for the PUTs, PATCHes and posts). No route takes a typed phrase.
 
 | Area | Routes |
 | --- | --- |
@@ -350,7 +364,7 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
 | Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
-| VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |
+| VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET /vpn/wireguard/{iface}/history`, `/endpoint`, `PATCH`/`DELETE /vpn/wireguard/{iface}/peers/{id}`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config` (`?variant=linux-killswitch`), `PUT`/`DELETE /vpn/wireguard/{iface}/peers/{id}/quota`, `POST /vpn/wireguard/{iface}/peers/{id}/verify`, `GET /vpn/archive`, `POST /vpn/archive/{file}/restore`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |
 | Private DNS evidence | `GET`/`POST /dns/evidence/`, `GET`/`DELETE /dns/evidence/{id}`, `GET /dns/evidence/{id}/export` (admin; deletion destructive) |
 | Native DNS services | `/dns/services/` connections, `/{id}/zones/{zone}/records` authority inventory, `/{id}/changes` review, `/changes/{id}/current` exact current selection and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |

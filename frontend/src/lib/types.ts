@@ -6972,9 +6972,122 @@ export type WGPeer = {
   rxBytes: number
   txBytes: number
   keepalive: number
+  /**
+   * online; stale when a peer that keeps its session alive has gone quiet;
+   * idle when one that does not is quiet (a phone with its tunnel off); never.
+   */
+  handshakeState?: "online" | "stale" | "idle" | "never"
   /** The client's configuration is kept, sealed, and can be shown again. */
   hasConfig: boolean
+  /** A device's own AllowedIPs as last generated here; absent when unknown. */
+  clientRoutes?: string[]
   createdAt?: string
+  transport?: WGTransport
+  quota?: WGQuota
+}
+
+/** Where a peer's encrypted packets are routed, as last checked. */
+export type WGTransport = {
+  endpoint: string
+  state: "native" | "captured" | "unroutable" | "unknown"
+  device?: string
+  reason?: string
+  /** Unix seconds. */
+  checkedAt: number
+}
+
+/** A peer's usage budget: an alert threshold, never enforced. */
+export type WGQuota = {
+  period: "day" | "week" | "month"
+  limitBytes: number
+  usedBytes: number
+  /** Unix seconds. */
+  periodStart: number
+  state: "ok" | "warning" | "exceeded" | "unmeasured"
+  enforced: boolean
+  createdBy?: string
+}
+
+export type WGAlert = {
+  kind: "stale_handshake" | "transport_captured" | "quota_warning" | "quota_exceeded"
+  peer?: string
+  peerName?: string
+  /** Unix seconds. */
+  since?: number
+  message: string
+}
+
+export type WGEvent = {
+  id: number
+  iface: string
+  /** Unix seconds. */
+  at: number
+  kind: string
+  outcome: "ok" | "failed" | "degraded" | "recovered"
+  peer?: string
+  peerName?: string
+  actor?: string
+  detail?: string
+}
+
+export type WGHistory = {
+  iface: string
+  peer?: string
+  recording: boolean
+  window: number
+  bucket: number
+  points: { t: number; rx: number; tx: number }[]
+  endpoints: { endpoint: string; firstSeen: number; lastSeen: number; observations: number }[]
+  events: WGEvent[]
+  usage: { day: number; rx: number; tx: number }[]
+}
+
+export type WGEndpointEvidence = {
+  endpoint: string
+  host: string
+  port: number
+  kind: "address" | "hostname"
+  resolution: "literal" | "resolved" | "failed"
+  resolutionError?: string
+  addresses: { address: string; public: boolean; onHost: boolean; device?: string }[]
+  uplink?: string
+  uplinkPublic: boolean
+  listening: boolean
+  verdict: "on_host_public" | "provider_mapped" | "elsewhere" | "private" | "unresolved"
+  explanation: string
+  reachability: "not_tested"
+  checkedAt: number
+}
+
+export type WGArchived = {
+  file: string
+  name: string
+  /** Unix seconds. */
+  archivedAt: number
+  listenPort: number
+  addresses: string[]
+  endpoint: string
+  peers: number
+  restorable: boolean
+  refusal?: string
+}
+
+export type WGSiteVerification = {
+  peer: string
+  peerName: string
+  at: number
+  outcome: "verified" | "partial" | "failed"
+  checks: { name: string; status: "pass" | "fail" | "warn" | "skipped"; detail: string }[]
+  remoteSteps: string[]
+}
+
+export type WGPeerEdited = {
+  peer: WGPeer
+  clientChanged: boolean
+  config?: string
+  qr?: string
+  reloaded: boolean
+  warnings: string[]
 }
 
 export type WGInterface = {
@@ -7000,6 +7113,7 @@ export type WGInterface = {
   }
   endpointReachability?: "not_tested"
   peers: WGPeer[]
+  alerts?: WGAlert[]
 }
 
 export type WGFamilyState = {
@@ -7013,6 +7127,8 @@ export type WGFamilyState = {
     runtime: "disabled" | "verified" | "degraded" | "unknown"
     reason?: string
     capability: GatewayCapability
+    /** Client connections the owned masquerade rule has translated since it loaded. */
+    translated?: number
   }
 }
 
@@ -7065,6 +7181,8 @@ export type TailscaleView = {
     exitNodeOption: boolean
     primaryRoutes?: string[]
     relay: string
+    /** Unix seconds; absent when the node key does not expire. */
+    keyExpiry?: number
   } | null
   magicDnsSuffix: string
   tailnet: string
@@ -7081,6 +7199,11 @@ export type TailscaleView = {
   }
   controlServer: "tailscale" | "self-hosted"
   controlUrl: string
+  /** What the tailnet grants of what this server advertises, from its own status. */
+  approval?: {
+    exitNode?: "serving" | "not_serving"
+    routes: { route: string; state: "serving" | "not_serving" }[]
+  }
   clientOnTailnet: boolean
   forwarding: { ipv4: boolean; ipv6: boolean }
   warnings: string[]
@@ -7096,9 +7219,17 @@ export type HeadscaleView = {
     givenName: string
     ipAddresses: string[]
     online: boolean
-    lastSeen?: string
+    /** Unix seconds; zero for never. */
+    lastSeen?: number
     user: string
     forcedTags?: string[]
+    validTags?: string[]
+    /** Unix seconds; zero when the key does not expire. */
+    expiry?: number
+    availableRoutes?: string[]
+    approvedRoutes?: string[]
+    /** False when this Headscale reported no routes, so empty lists say nothing. */
+    routesKnown?: boolean
   }[]
   users: { id: string; name: string; nodes: number }[]
   error?: string

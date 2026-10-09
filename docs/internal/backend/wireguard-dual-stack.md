@@ -54,7 +54,9 @@ exit on a new dual-stack server leaves the client's IPv6 default captured rather
 onto a native default route. `wg-quick` can retain more-specific local routes outside either full
 tunnel. These profiles do not add a client kill switch: taking the interface down restores ordinary
 client routing. The native test checks failure while the interface remains up, not a system-wide
-client firewall guarantee. See the upstream [wg-quick route behavior](https://git.zx2c4.com/wireguard-tools/about/src/man/wg-quick.8)
+client firewall guarantee. A separate opt-in Linux kill-switch export of a full-tunnel profile
+closes the local-route and lost-interface leaks; see
+[the WireGuard lifecycle](wireguard-lifecycle.md#linux-kill-switch). See the upstream [wg-quick route behavior](https://git.zx2c4.com/wireguard-tools/about/src/man/wg-quick.8)
 and [WireGuard routing guidance](https://www.wireguard.com/netns/).
 
 ## Exit prerequisites and transaction ownership
@@ -94,7 +96,8 @@ watchdog to WireGuard provisioning or prove tunnel recovery after process loss.
 
 The VPN response exposes `ipv6Enabled`, `endpointReachability: "not_tested"`, and independent
 `families.ipv4`/`families.ipv6` records: configured subnet, actual-address runtime state, configured
-exit/uplink, runtime rule outcome, capability and refusal reason. `exitNode` remains the IPv4 exit
+exit/uplink, runtime rule outcome, capability, refusal reason and, once the rules verify, the
+owned masquerade rule's count of translated client connections. `exitNode` remains the IPv4 exit
 field for older clients. Peers add optional `address6`. The page distinguishes configured intent,
 local rules and unknown provider reachability, and retains the dated last successful read after a
 later poll fails. Creation failures retain the opt-in/subnet draft.

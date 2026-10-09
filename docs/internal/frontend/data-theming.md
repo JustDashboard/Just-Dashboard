@@ -126,7 +126,11 @@ immutable selected-filter baseline. Native readback shows configured policy rath
 filter priority or client decisions.
 WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
 and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
-containment; successful setup says configured when native runtime is not up.
+containment; successful setup says configured when native runtime is not up. Its Advanced fold
+checks an MTU and hand-typed resolver addresses before submitting. Peer edits send only changed
+fields, keep the draft and show the refusal when rejected, and confirm a site withdrawal before
+the request; budgets parse binary units as `bytes` prints them. The record's trend, endpoint and
+lifecycle reads poll per peer and window and keep their last data with a retry after a failure.
 SQM retains its entire bounded profile after rejected writes and requires pending reconnection
 even when the global preference is off. Failed native shaping polls block edits until fresh reads.
 IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
