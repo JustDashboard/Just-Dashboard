@@ -181,10 +181,18 @@ for (const width of [390, 1280, 1720]) {
       await page.setViewportSize({ width, height: 1000 })
       const control = await mockDNSServicePage(page, { engine, management: false })
       await open(page)
-      await filters(page).scrollIntoViewIfNeeded()
+      await filters(page).evaluate((node) => node.scrollIntoView({ block: "start" }))
       const overflow = await sheet(page).evaluate((node) => node.scrollWidth - node.clientWidth)
       expect(overflow).toBeLessThanOrEqual(1)
       await page.screenshot({ path: testInfo.outputPath(`native-filters-${engine}-${width}.png`) })
+      if (width === 390) {
+        await filters(page)
+          .getByRole("heading", { name: "Custom filter rules", exact: true })
+          .evaluate((node) => node.scrollIntoView({ block: "start" }))
+        await page.screenshot({
+          path: testInfo.outputPath(`native-filter-rules-${engine}-${width}.png`),
+        })
+      }
       expect(control.mutations).toEqual([])
     })
   }
