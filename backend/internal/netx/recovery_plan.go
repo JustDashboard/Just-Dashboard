@@ -108,6 +108,13 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 		add("ip", strings.Fields(line), false, true)
 	}
 	commands = append(commands, properties...)
+	// VLAN memberships and flood destinations go back once each device and
+	// its bridge port are back.
+	bridged := map[string]bool{}
+	for _, l := range old.Links {
+		bridged[l.Name] = true
+	}
+	commands = append(commands, bridgeRecovery(old, next, bridged)...)
 	for _, a := range differing(old.Addresses, next.Addresses, addressKey) {
 		add("ip", addressRecoveryArgs(old, a, "add"), false, true)
 	}

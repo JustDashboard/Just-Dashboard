@@ -420,7 +420,7 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 			if _, err := validateSQMRecoveryArgs(c.Args); err != nil {
 				return err
 			}
-		case "ip", "tc", "nft", "sysctl", "iptables", "ip6tables":
+		case "ip", "tc", "nft", "sysctl", "iptables", "ip6tables", "bridge":
 		default:
 			return fmt.Errorf("refused unexpected recovery tool %s", c.Tool)
 		}

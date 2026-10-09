@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"sort"
@@ -35,7 +37,23 @@ type networkOverview struct {
 	Gateway         overviewGateway         `json:"gateway"`
 	Made            overviewMade            `json:"made"`
 	Findings        []netx.Finding          `json:"findings"`
+	// Identity is each family's way out and what it establishes about the
+	// address the internet sees; Flows the topology's edges as connection
+	// tracking holds them.
+	Identity []netx.EgressIdentity `json:"identity"`
+	Flows    netx.TopologyFlows    `json:"flows"`
+	// Observations say which readings above arrived, so a failed one is shown
+	// as failed rather than as an empty answer.
+	Observations []netx.Observation `json:"observations"`
+	// Incidents are the findings over time; IncidentsError why they could
+	// not be read or recorded.
+	Incidents      []netx.Incident `json:"incidents"`
+	IncidentsError string          `json:"incidentsError,omitempty"`
+	ReadAt         time.Time       `json:"readAt"`
 }
+
+// overviewIncidents bounds the history the Overview carries.
+const overviewIncidents = 50
 
 // overviewDockerNet is a Docker network as the topology draws it: its bridge
 // and the containers on it, each as the image it runs.
@@ -110,14 +128,31 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	out := networkOverview{
 		Links: []netx.Link{}, DockerNetworks: []overviewDockerNet{},
 		PublicAddresses: []string{}, Defaults: []netx.DefaultRoute{},
+		Identity: []netx.EgressIdentity{}, Incidents: []netx.Incident{},
 	}
 
 	var (
-		wg       sync.WaitGroup
-		inv      netx.Inventory
-		linksErr error
-		errs     map[string]uint64
+		wg           sync.WaitGroup
+		inv          netx.Inventory
+		linksErr     error
+		errs         map[string]uint64
+		observations = map[string]netx.Observation{}
+		observedMu   sync.Mutex
 	)
+	observe := func(source, label, href string, err error) {
+		o := netx.Observation{Source: source, Label: label, Href: href, State: "ok"}
+		var missing *netx.UnavailableError
+		switch {
+		case errors.As(err, &missing):
+			// A tool this host does not have is absent, not a failed read.
+			o.State, o.Error = "unavailable", err.Error()
+		case err != nil:
+			o.State, o.Error = "failed", err.Error()
+		}
+		observedMu.Lock()
+		observations[source] = o
+		observedMu.Unlock()
+	}
 	do := func(fn func()) {
 		wg.Add(1)
 		go func() {
@@ -130,15 +165,26 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 			out.Hostname = host.Hostname
 		}
 	})
-	do(func() { out.Client, _ = s.modules.network.ClientPath(ctx, client) })
+	do(func() {
+		var err error
+		out.Client, err = s.modules.network.ClientPath(ctx, client)
+		observe("client", "The route back to your browser", "/network/routing", err)
+	})
 	do(func() { out.Defaults = netx.DefaultRoutes(ctx) })
-	do(func() { errs = s.modules.network.Sampler().RecentErrors(ctx, time.Hour) })
+	do(func() { out.Identity = s.modules.network.EgressIdentities(ctx) })
+	do(func() {
+		var err error
+		errs, err = s.modules.network.Sampler().RecentErrors(ctx, time.Hour)
+		observe("history", "Recorded interface errors", "/network/traffic", err)
+	})
 	do(func() {
 		inv = s.networkInventory(ctx)
 		out.Links, linksErr = s.modules.network.ReadLinks(ctx, inv, client)
 	})
 	do(func() {
-		if st, err := s.modules.netsec.Status(ctx); err == nil {
+		st, err := s.modules.netsec.Status(ctx)
+		observe("firewall", "The host firewall", "/network/firewall", err)
+		if err == nil {
 			out.Firewall = overviewFirewall{
 				Backend: string(st.Backend), Available: st.Available, Enabled: st.Enabled,
 				Incoming: st.Policy.Incoming,
@@ -151,7 +197,9 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 		}
 	})
 	do(func() {
-		if c, err := s.modules.netsec.Connections(ctx); err == nil {
+		c, err := s.modules.netsec.Connections(ctx)
+		observe("connections", "Connections", "/network/connections", err)
+		if err == nil {
 			out.Connections = overviewConnections{Total: c.Total, Peers: len(c.Peers), Listening: c.Listening}
 			for _, p := range c.Peers {
 				if !p.Private {
@@ -163,11 +211,46 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	do(func() { out.Persistence = s.modules.network.PersistenceStatus(ctx) })
 	do(func() { out.VPN = s.modules.network.VPNSummary(ctx) })
 	do(func() { out.DNS = s.cachedDNSSummary(ctx) })
-	do(func() { out.Gateway = s.overviewGateway(ctx, client) })
+	do(func() {
+		var gwErr, protErr error
+		out.Gateway, gwErr, protErr = s.overviewGateway(ctx, client)
+		observe("gateway", "The gateway table", "/network/gateway", gwErr)
+		observe("protection", "Blocklists and limits", "/network/protection", protErr)
+	})
 	wg.Wait()
 	if linksErr != nil {
 		return mapNetworkError(linksErr)
 	}
+	out.ReadAt = time.Now().UTC()
+	if s.modules.docker != nil {
+		var containersErr, networksErr error
+		if inv.ContainersError != "" {
+			containersErr = errors.New(inv.ContainersError)
+		} else if len(inv.UnjoinedContainers) > 0 {
+			containersErr = fmt.Errorf("the devices of %s could not be read", strings.Join(inv.UnjoinedContainers, ", "))
+		}
+		if inv.DockerNetworksError != "" {
+			networksErr = errors.New(inv.DockerNetworksError)
+		}
+		observe("docker.containers", "Docker's containers", "/docker", containersErr)
+		observe("docker.networks", "Docker's networks", "/docker/networks", networksErr)
+	}
+	var forwardingErr error
+	for _, id := range out.Identity {
+		var err error
+		if id.Error != "" {
+			err = errors.New(id.Error)
+		}
+		label := "The IPv4 way out"
+		if id.Family == "inet6" {
+			label = "The IPv6 way out"
+		}
+		observe("identity."+id.Family, label, "/network/routing", err)
+		if id.ForwardingError != "" && forwardingErr == nil {
+			forwardingErr = errors.New(id.ForwardingError)
+		}
+	}
+	observe("forwarding", "The forwarding switches", "/network/routing", forwardingErr)
 	if out.Defaults == nil {
 		out.Defaults = []netx.DefaultRoute{}
 	}
@@ -184,6 +267,10 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 		}
 	}
 	out.DockerNetworks = dockerTopology(inv, out.Links)
+	out.Flows = s.modules.network.TopologyFlows(ctx, out.Links, inv.Networks)
+	if out.Flows.State == "failed" {
+		observe("flows", "Connection tracking", "/network/connections", errors.New(out.Flows.Error))
+	}
 
 	spec, err := s.modules.network.Spec()
 	if err == nil {
@@ -198,12 +285,25 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 		on := out.DNS.DNSOverTLS == "yes" || out.DNS.DNSOverTLS == "opportunistic"
 		encrypted = &on
 	}
+	out.Observations = make([]netx.Observation, 0, len(observations))
+	for _, o := range observations {
+		out.Observations = append(out.Observations, o)
+	}
+	sort.Slice(out.Observations, func(i, j int) bool { return out.Observations[i].Source < out.Observations[j].Source })
 	out.Findings = netx.OverviewFindings(netx.OverviewInput{
 		Links: out.Links, Spec: spec, Persistence: out.Persistence, Forwarding: out.Forwarding,
 		LinkHistoryErrors: errs, FirewallAvailable: out.Firewall.Available,
 		FirewallEnabled: out.Firewall.Enabled, ConntrackPercent: conntrackPercent(out.Gateway.Conntrack),
-		EncryptedDNS: encrypted,
+		EncryptedDNS: encrypted, Observations: out.Observations,
 	})
+	if err := s.modules.network.RecordFindings(ctx, out.ReadAt, out.Findings, out.Observations); err != nil {
+		out.IncidentsError = "The incident history could not be recorded: " + err.Error()
+	}
+	if incidents, err := s.modules.network.Incidents(ctx, overviewIncidents); err != nil {
+		out.IncidentsError = "The incident history could not be read: " + err.Error()
+	} else {
+		out.Incidents = incidents
+	}
 	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
@@ -277,10 +377,12 @@ func (s *Server) cachedDNSSummary(ctx context.Context) *netx.DNSSummary {
 }
 
 // overviewGateway reads the gateway's and the protections' counters; each
-// read is one `nft -j list table`, so the Overview's poll costs two.
-func (s *Server) overviewGateway(ctx context.Context, client string) overviewGateway {
+// read is one `nft -j list table`, so the Overview's poll costs two. Each
+// read's failure is returned so the page says it, not zero.
+func (s *Server) overviewGateway(ctx context.Context, client string) (overviewGateway, error, error) {
 	g := overviewGateway{Conntrack: netx.CurrentConntrack()}
-	if gw, err := s.modules.network.Gateway(ctx); err == nil {
+	gw, gwErr := s.modules.network.Gateway(ctx)
+	if gwErr == nil {
 		g.Loaded, g.Writable, g.Reason = gw.Loaded, gw.Capability.Writable, gw.Capability.Reason
 		for _, f := range gw.Forwards {
 			if f.Enabled {
@@ -293,7 +395,8 @@ func (s *Server) overviewGateway(ctx context.Context, client string) overviewGat
 			}
 		}
 	}
-	if p, err := s.modules.network.Protection(ctx, client); err == nil {
+	p, protErr := s.modules.network.Protection(ctx, client)
+	if protErr == nil {
 		for _, l := range p.Limits {
 			if l.Enabled {
 				g.Limits++
@@ -307,7 +410,7 @@ func (s *Server) overviewGateway(ctx context.Context, client string) overviewGat
 			g.Dropped += b.Packets
 		}
 	}
-	return g
+	return g, gwErr, protErr
 }
 
 // conntrackPercent is the table's fullness, negative where it cannot be read.

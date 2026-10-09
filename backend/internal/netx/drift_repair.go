@@ -39,7 +39,7 @@ func (s *Service) driftRenderFiles(sp *Spec) rendered {
 		filepath.Join(s.paths.Dir, rules6File):  []byte(renderIPv6Rules(sp)),
 		filepath.Join(s.paths.Dir, shapingFile): []byte(renderShaping(sp)),
 		s.paths.Sysctl:                          []byte(renderSysctl(sp)),
-		s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery, hasSQM(sp))),
+		s.paths.Unit:                            []byte(s.unitFor(sp)),
 	}
 	if err == nil {
 		files[filepath.Join(s.paths.Dir, gatewayFile)] = []byte(gateway)

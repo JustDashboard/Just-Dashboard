@@ -19,6 +19,12 @@ import (
 // and only taking a device down can cost the operator access.
 func (s *Server) mountNetworkLinkRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/namespaces", s.handle(s.handleNetworkNamespaces))
+	r.Method(http.MethodGet, "/namespaces/{name}", s.handle(s.handleNetworkNamespaceDetail))
+	r.Method(http.MethodGet, "/namespaces/{name}/lookup", s.handle(s.handleNetworkNamespaceLookup))
+	r.Method(http.MethodGet, "/links/{name}/detail", s.handle(s.handleNetworkLinkDetail))
+	r.Method(http.MethodGet, "/links/{name}/bridge", s.handle(s.handleNetworkBridge))
+	r.Method(http.MethodGet, "/links/{name}/readiness", s.handle(s.handleNetworkLinkReadiness))
+	r.Method(http.MethodGet, "/links/{name}/master/preview", s.handle(s.handleNetworkLinkMasterPreview))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodPost, "/namespaces", s.handle(s.handleNetworkNamespaceCreate))
@@ -27,6 +33,10 @@ func (s *Server) mountNetworkLinkRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/links/{name}/mtu", s.handle(s.handleNetworkLinkMTU))
 		r.Method(http.MethodPost, "/links/{name}/master", s.handle(s.handleNetworkLinkMaster))
 		r.Method(http.MethodPost, "/links/{name}/addresses", s.handle(s.handleNetworkAddressAdd))
+		// Replacing a port's VLANs or a VXLAN's flood ends is destructive
+		// only when it takes one away; the handlers decide by content.
+		r.Method(http.MethodPut, "/links/{name}/vlans", s.handle(s.handleNetworkPortVLANs))
+		r.Method(http.MethodPut, "/links/{name}/remotes", s.handle(s.handleNetworkVXLANRemotes))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/namespaces/{name}", s.handle(s.handleNetworkNamespaceDelete))
 			r.Method(http.MethodDelete, "/links/{name}", s.handle(s.handleNetworkLinkDelete))
@@ -208,6 +218,138 @@ func (s *Server) handleNetworkAddressRemove(w http.ResponseWriter, r *http.Reque
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
+	return nil
+}
+
+// handleNetworkLinkDetail is one device's driver, offloads and every error
+// counter, read when its sheet opens.
+func (s *Server) handleNetworkLinkDetail(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	detail, err := s.modules.network.LinkDetail(ctx, chi.URLParam(r, "name"))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+	return nil
+}
+
+// handleNetworkBridge is a bridge's settings, port VLANs and learned entries.
+func (s *Server) handleNetworkBridge(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	view, err := s.modules.network.Bridge(ctx, chi.URLParam(r, "name"))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, view)
+	return nil
+}
+
+// handleNetworkLinkReadiness is what this host can establish about whether a
+// tunnel or virtual device can carry traffic. It sends nothing.
+func (s *Server) handleNetworkLinkReadiness(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	readiness, err := s.modules.network.Readiness(ctx, chi.URLParam(r, "name"))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, readiness)
+	return nil
+}
+
+// handleNetworkLinkMasterPreview previews a bridge membership change; a
+// read, so it changes nothing and needs no administrator.
+func (s *Server) handleNetworkLinkMasterPreview(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	preview, err := s.modules.network.PreviewMaster(ctx, chi.URLParam(r, "name"), r.URL.Query().Get("master"), s.networkClient(r))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, preview)
+	return nil
+}
+
+type portVLANsRequest struct {
+	VLANs []netx.PortVLAN `json:"vlans"`
+}
+
+func (s *Server) handleNetworkPortVLANs(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	var req portVLANsRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "network.link.vlans", name, req)
+	if sp, err := s.modules.network.Spec(); err == nil && netx.RemovesPortVLAN(sp, name, req.VLANs) {
+		if err := s.requireDestructive(r, "netvlan", "taking a VLAN off a port"); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	change, err := s.modules.network.SetPortVLANs(ctx, name, req.VLANs, s.networkClient(r), actor(r))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, change)
+	return nil
+}
+
+type vxlanRemotesRequest struct {
+	Remotes []string `json:"remotes"`
+}
+
+func (s *Server) handleNetworkVXLANRemotes(w http.ResponseWriter, r *http.Request) error {
+	name := chi.URLParam(r, "name")
+	var req vxlanRemotesRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "network.link.remotes", name, req)
+	if sp, err := s.modules.network.Spec(); err == nil && netx.RemovesVXLANRemote(sp, name, req.Remotes) {
+		if err := s.requireDestructive(r, "netvxlan", "removing a VXLAN's other end"); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	change, err := s.modules.network.SetVXLANRemotes(ctx, name, req.Remotes, s.networkClient(r), actor(r))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, change)
+	return nil
+}
+
+// handleNetworkNamespaceDetail reads one namespace as its own network.
+func (s *Server) handleNetworkNamespaceDetail(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	detail, err := s.modules.network.NamespaceDetail(ctx, r.URL.Query().Get("kind"), chi.URLParam(r, "name"), s.networkInventory(ctx))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, detail)
+	return nil
+}
+
+// handleNetworkNamespaceLookup asks a namespace's kernel how it routes to a
+// literal address; it sends nothing.
+func (s *Server) handleNetworkNamespaceLookup(w http.ResponseWriter, r *http.Request) error {
+	q := r.URL.Query()
+	if q.Get("target") == "" {
+		return httpx.BadRequest("target is a literal IPv4 or IPv6 address")
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	path, err := s.modules.network.NamespaceLookup(ctx, q.Get("kind"), chi.URLParam(r, "name"), q.Get("target"), q.Get("source"), s.networkInventory(ctx))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, path)
 	return nil
 }
 

@@ -76,12 +76,33 @@ type LinkSpec struct {
 	PeerNamespace string `json:"peerNamespace,omitempty"`
 	MTU           int    `json:"mtu,omitempty"`
 	STP           bool   `json:"stp,omitempty"`
+	// VLANFiltering makes a bridge forward by VLAN: each port carries only
+	// the VLANs it is a member of, tagged or untagged.
+	VLANFiltering bool `json:"vlanFiltering,omitempty"`
+	// MulticastSnooping, where set, overrides the kernel's default (on).
+	MulticastSnooping *bool `json:"multicastSnooping,omitempty"`
 	// Master is the bridge this device was made a port of.
 	Master string `json:"master,omitempty"`
+	// VLANs are this device's memberships on the VLAN-filtering bridge it is
+	// a port of (or, on such a bridge itself, the bridge's own). Empty keeps
+	// the kernel's default: VLAN 1, untagged and the port's native VLAN.
+	VLANs []PortVLAN `json:"vlans,omitempty"`
+	// Remotes are a unicast VXLAN's further flood destinations beside
+	// Remote: head-end replication to every other end of the segment.
+	Remotes []string `json:"remotes,omitempty"`
 	// Addresses are CIDRs, the host bits kept.
 	Addresses []string `json:"addresses,omitempty"`
 	Up        bool     `json:"up"`
 	Made
+}
+
+// PortVLAN is one VLAN a bridge port carries. PVID makes it the VLAN an
+// untagged frame arriving on the port belongs to; Untagged sends the VLAN's
+// frames out of the port without a tag.
+type PortVLAN struct {
+	VID      int  `json:"vid"`
+	PVID     bool `json:"pvid,omitempty"`
+	Untagged bool `json:"untagged,omitempty"`
 }
 
 // AddressSpec is an address added to a device the dashboard did not create.

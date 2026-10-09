@@ -155,6 +155,7 @@ func (s *Server) networkInventory(ctx context.Context) netx.Inventory {
 			if !ok {
 				pid, err = s.modules.docker.ContainerPID(ctx, c.ID)
 				if err != nil {
+					inv.UnjoinedContainers = append(inv.UnjoinedContainers, c.Name)
 					continue
 				}
 				networkPIDs.Lock()
@@ -172,6 +173,8 @@ func (s *Server) networkInventory(ctx context.Context) netx.Inventory {
 			}
 		}
 		networkPIDs.Unlock()
+	} else {
+		inv.ContainersError = err.Error()
 	}
 	if networks, err := s.modules.docker.ListNetworks(ctx); err == nil {
 		for _, n := range networks {
@@ -181,6 +184,7 @@ func (s *Server) networkInventory(ctx context.Context) netx.Inventory {
 		}
 	} else {
 		inv.DockerNetworksUnknown = true
+		inv.DockerNetworksError = err.Error()
 	}
 	return inv
 }

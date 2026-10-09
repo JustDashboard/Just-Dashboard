@@ -31,3 +31,48 @@ func TestOverviewForwardingFindingsRespectAddressFamily(t *testing.T) {
 		})
 	}
 }
+
+func TestOverviewFailedReadingsAreNotJudgedAsAbsence(t *testing.T) {
+	uplink := Link{Name: "ens3", Uplink: true, AdminUp: true, Carrier: true}
+	failed := []Observation{
+		{Source: "firewall", Label: "The host firewall", State: "failed", Error: "ufw status: timed out", Href: "/network/firewall"},
+		{Source: "history", Label: "Recorded interface errors", State: "failed", Error: "database is locked", Href: "/network/traffic"},
+		{Source: "forwarding", Label: "The forwarding switches", State: "failed", Error: "permission denied", Href: "/network/routing"},
+	}
+	findings := OverviewFindings(OverviewInput{
+		Links:             []Link{uplink},
+		Spec:              &Spec{NAT: []NATSpec{{Source: "10.0.0.0/24", Enabled: true}}},
+		LinkHistoryErrors: map[string]uint64{"ens3": 40},
+		FirewallAvailable: false,
+		ConntrackPercent:  -1,
+		Observations:      failed,
+	})
+	ids := map[string]Finding{}
+	for _, f := range findings {
+		ids[f.ID] = f
+	}
+	for _, absent := range []string{"firewall.none", "firewall.off", "link.errors.ens3", "forwarding.off.ipv4"} {
+		if _, ok := ids[absent]; ok {
+			t.Fatalf("%s was judged from a failed reading: %+v", absent, findings)
+		}
+	}
+	for _, o := range failed {
+		f, ok := ids["observation."+o.Source]
+		if !ok || f.Source != o.Source || f.Href != o.Href || !strings.Contains(f.Detail, o.Error) || !strings.Contains(f.Detail, "not evidence") {
+			t.Fatalf("a failed %s reading must be its own finding: %+v", o.Source, findings)
+		}
+	}
+	ok := OverviewFindings(OverviewInput{Links: []Link{uplink}, LinkHistoryErrors: map[string]uint64{"ens3": 40}, ConntrackPercent: -1})
+	found := false
+	for _, f := range ok {
+		if f.ID == "firewall.none" && f.Source == "firewall" {
+			found = true
+		}
+		if f.ID == "link.errors.ens3" && (f.Source != "history" || f.Href != "/network/interfaces?device=ens3") {
+			t.Fatalf("an uplink's errors open its own sheet: %+v", f)
+		}
+	}
+	if !found {
+		t.Fatalf("a successful reading still reports an absent firewall: %+v", ok)
+	}
+}
