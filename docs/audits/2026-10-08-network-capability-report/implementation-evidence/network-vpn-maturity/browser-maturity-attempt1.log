@@ -1,0 +1,141 @@
+specs start 2026-10-09T14:46:32Z: tests/browser/network-vpn-maturity.spec.ts
+
+Running 14 tests using 1 worker
+
+  ✓   1 [chromium] › tests/browser/network-vpn-maturity.spec.ts:244:5 › stale handshakes, captured transports and passed budgets are called out on the tunnel (1.7s)
+  ✓   2 [chromium] › tests/browser/network-vpn-maturity.spec.ts:256:5 › a peer's record shows its trend, where it dialled from and its history (2.0s)
+  ✘   3 [chromium] › tests/browser/network-vpn-maturity.spec.ts:275:5 › a budget is set per period, read as an alert and cleared after confirmation (2.1s)
+  ✓   4 [chromium] › tests/browser/network-vpn-maturity.spec.ts:303:5 › editing a device's routes regenerates its configuration with the same keys (2.6s)
+  ✓   5 [chromium] › tests/browser/network-vpn-maturity.spec.ts:339:5 › taking a network away from a site is confirmed before the edit is sent (2.6s)
+  ✓   6 [chromium] › tests/browser/network-vpn-maturity.spec.ts:372:5 › a site is verified end to end with the steps for its own end (2.1s)
+  ✘   7 [chromium] › tests/browser/network-vpn-maturity.spec.ts:414:5 › forgetting a saved copy says it does not revoke the peer (2.7s)
+  ✓   8 [chromium] › tests/browser/network-vpn-maturity.spec.ts:431:5 › a full-tunnel device offers its Linux kill-switch file as a download (2.6s)
+  ✓   9 [chromium] › tests/browser/network-vpn-maturity.spec.ts:453:5 › exits show how many client connections they translated (1.1s)
+  ✓  10 [chromium] › tests/browser/network-vpn-maturity.spec.ts:461:5 › the tunnel record checks its endpoint and lists its lifecycle with outcomes (2.2s)
+  ✓  11 [chromium] › tests/browser/network-vpn-maturity.spec.ts:496:5 › an archived tunnel is restored after confirmation and a refused one says why (1.8s)
+  ✓  12 [chromium] › tests/browser/network-vpn-maturity.spec.ts:548:5 › setup's advanced settings send the MTU and own resolvers it checked (1.8s)
+  ✘  13 [chromium] › tests/browser/network-vpn-maturity.spec.ts:583:5 › the tailnet says which offers it serves, when this node's key expires and what it reports (1.4s)
+  ✓  14 [chromium] › tests/browser/network-vpn-maturity.spec.ts:596:5 › a Headscale in a container shows its users, expired keys and routes awaiting approval (2.1s)
+
+
+  1) [chromium] › tests/browser/network-vpn-maturity.spec.ts:275:5 › a budget is set per period, read as an alert and cleared after confirmation 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('dialog').getByLabel('Office budget')
+    Expected substring: "3.0 GB of 2.0 GB"
+    Error: strict mode violation: getByRole('dialog').getByLabel('Office budget') resolved to 2 elements:
+        1) <div class="space-y-1.5" aria-label="Office budget">…</div> aka getByLabel('Office budget', { exact: true })
+        2) <div role="meter" aria-valuemin="0" aria-valuenow="100" aria-valuemax="100" aria-label="Office budget used" class="relative w-full overflow-hidden rounded-full bg-meter-track h-1.5">…</div> aka getByRole('meter', { name: 'Office budget used' })
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByRole('dialog').getByLabel('Office budget')
+
+
+      282 |   const sheet = page.getByRole("dialog")
+      283 |   const budget = sheet.getByLabel("Office budget")
+    > 284 |   await expect(budget).toContainText("3.0 GB of 2.0 GB")
+          |                        ^
+      285 |   await expect(budget).toContainText("passed")
+      286 |   await expect(budget).toContainText("An alert, not a limit")
+      287 |   await sheet.getByRole("radio", { name: "week" }).click()
+        at /home/ubuntu/Just-Dashboard-net-vpn/frontend/tests/browser/network-vpn-maturity.spec.ts:284:24
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-vpn-maturity-a-bud-a910a--cleared-after-confirmation-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-vpn-maturity-a-bud-a910a--cleared-after-confirmation-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-vpn-maturity-a-bud-a910a--cleared-after-confirmation-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-vpn-maturity-a-bud-a910a--cleared-after-confirmation-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests/browser/network-vpn-maturity.spec.ts:414:5 › forgetting a saved copy says it does not revoke the peer 
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    - Expected  - 1
+    + Received  + 7
+
+    - Array []
+    + Array [
+    +   Object {
+    +     "body": null,
+    +     "method": "GET",
+    +     "path": "history?window=24h&peer=TabletPublicKeyAAAAAAAAAAAAAAAAAAAAAAAAAAA%3D",
+    +   },
+    + ]
+
+      422 |   await page.getByRole("dialog").getByRole("button", { name: "Forget the saved copy" }).click()
+      423 |   await expect(page.getByText("This does not revoke Tablet")).toBeVisible()
+    > 424 |   expect(mutations).toEqual([])
+          |                     ^
+      425 |   await page.getByRole("button", { name: "Forget", exact: true }).click()
+      426 |   await expect
+      427 |     .poll(() => mutations.find((m) => m.method === "DELETE")?.path)
+        at /home/ubuntu/Just-Dashboard-net-vpn/frontend/tests/browser/network-vpn-maturity.spec.ts:424:21
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-vpn-maturity-forge-f7769-it-does-not-revoke-the-peer-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-vpn-maturity-forge-f7769-it-does-not-revoke-the-peer-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-vpn-maturity-forge-f7769-it-does-not-revoke-the-peer-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-vpn-maturity-forge-f7769-it-does-not-revoke-the-peer-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [chromium] › tests/browser/network-vpn-maturity.spec.ts:583:5 › the tailnet says which offers it serves, when this node's key expires and what it reports 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('Awaiting approval on the control server')
+    Expected: visible
+    Error: strict mode violation: getByText('Awaiting approval on the control server') resolved to 2 elements:
+        1) <span class="text-warning">Awaiting approval on the control server</span> aka getByText('Awaiting approval on the control server', { exact: true })
+        2) <p class="text-hint text-muted-foreground">A subnet not served is awaiting approval on the c…</p> aka getByText('A subnet not served is')
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByText('Awaiting approval on the control server')
+
+
+      586 |   await open(page, [])
+      587 |   await page.goto("/network/vpn")
+    > 588 |   await expect(page.getByText("Awaiting approval on the control server")).toBeVisible()
+          |                                                                           ^
+      589 |   await expect(page.getByText("served", { exact: true })).toBeVisible()
+      590 |   await expect(page.getByText("not served", { exact: true })).toBeVisible()
+      591 |   await expect(page.getByText(/^key expires/)).toBeVisible()
+        at /home/ubuntu/Just-Dashboard-net-vpn/frontend/tests/browser/network-vpn-maturity.spec.ts:588:75
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-vpn-maturity-the-t-e1935-expires-and-what-it-reports-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-vpn-maturity-the-t-e1935-expires-and-what-it-reports-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-vpn-maturity-the-t-e1935-expires-and-what-it-reports-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-vpn-maturity-the-t-e1935-expires-and-what-it-reports-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3 failed
+    [chromium] › tests/browser/network-vpn-maturity.spec.ts:275:5 › a budget is set per period, read as an alert and cleared after confirmation 
+    [chromium] › tests/browser/network-vpn-maturity.spec.ts:414:5 › forgetting a saved copy says it does not revoke the peer 
+    [chromium] › tests/browser/network-vpn-maturity.spec.ts:583:5 › the tailnet says which offers it serves, when this node's key expires and what it reports 
+  11 passed (34.0s)
+specs exit 1 2026-10-09T14:47:07Z

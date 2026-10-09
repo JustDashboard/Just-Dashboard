@@ -63,6 +63,14 @@ Its per-question UI still requires the integrated production-build/browser gate.
 inspection or metadata creation and the final-source native selected repair/recovery fixture.
 Its global-preference-off browser regression remains pending the integrated build at this checkpoint.
 
+## Feature-by-feature maturity packages
+
+[VPN and mesh maturity acceptance](network-vpn-maturity-acceptance.md) (C056–C065) records the
+WireGuard record and lifecycle, peer editing, alert-only budgets, site verification, transport
+guard, archive restore, Linux kill switch and tailnet/Headscale approval readings. It keeps the
+changed-file gate, owned-namespace WireGuard races, failed iterations and screenshots beside it.
+P16 workflows, off-host reachability and live control servers remain open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

@@ -7,7 +7,7 @@ P16 (peer key rotation, expiring invitations, groups, route approval, enrolment)
 package and was not implemented here, so the parts of C058, C059, C064 and C065 that belong to it
 remain open. This evidence changes no ledger status; proposed statuses are listed at the end.
 
-Raw logs are kept outside the tree in `/home/ubuntu/Just-Dashboard-net-vpn-artifacts/`, listed
+Raw logs are kept beside this record in [`network-vpn-maturity/`](network-vpn-maturity/), listed
 under each check.
 
 ## Per row
@@ -171,15 +171,14 @@ to run; shapes follow its CLI's encoding of the protobuf messages.
 
 ## Checks
 
-All on application source `9b77e305` unless noted. Raw logs are in
-`/home/ubuntu/Just-Dashboard-net-vpn-artifacts/`.
+All on application source `9b77e305` unless noted.
 
 | Check | Result | Raw log |
 | --- | --- | --- |
-| `JD_BROWSER_BASE_URL=http://127.0.0.1:43215 JD_BROWSER_WORKERS=1 scripts/test-changed.sh 4338e6cc` against a production build of the same tree | **exit 0 in 590 s**: Prettier, ESLint and `tsc` clean; 3,276 Bun tests; `go build`/`go vet`; `internal/api`, `internal/netipam`, `internal/netx`, `internal/store` passed; **217 browser passes, 28 optional screenshot skips, 0 failures** across ten selected specs including all 14 `network-vpn-maturity` cases | `test-changed-final.txt` (+ `.build`, `.server`) |
-| `JD_NETNS_LIVE=1 go test -race ./internal/netx -run '^TestLiveWireGuard'` with task-owned `wireguard-tools` 1.0.20210914 on `PATH` | **PASS in 77.8 s**: P10 dual-stack fixture (both transports), kill-switch fixture (IPv4 and IPv6 exits each translated 2 client connections), site fixture (verified, degraded, refused capture, removed/restored, exact history) | `wireguard-live-race-final.txt` |
-| Earlier selected browser run: maturity, network-ui/audit/report/wireguard-dual/ipam and design-system specs | 164 passed, 14 optional skips | `browser-vpn-selected-attempt2.txt` |
-| Whole `internal/netx` package (non-live), first integration | ok, 25.6 s | `netx-package-initial.txt` |
+| `JD_BROWSER_BASE_URL=http://127.0.0.1:43215 JD_BROWSER_WORKERS=1 scripts/test-changed.sh 4338e6cc` against a production build of the same tree | **exit 0 in 590 s**: Prettier, ESLint and `tsc` clean; 3,276 Bun tests; `go build`/`go vet`; `internal/api`, `internal/netipam`, `internal/netx`, `internal/store` passed; **217 browser passes, 28 optional screenshot skips, 0 failures** across ten selected specs including all 14 `network-vpn-maturity` cases | [log](network-vpn-maturity/test-changed-final.log) |
+| `JD_NETNS_LIVE=1 go test -race ./internal/netx -run '^TestLiveWireGuard'` with task-owned `wireguard-tools` 1.0.20210914 on `PATH` | **PASS in 77.8 s**: P10 dual-stack fixture (both transports), kill-switch fixture (IPv4 and IPv6 exits each translated 2 client connections), site fixture (verified, degraded, refused capture, removed/restored, exact history) | [log](network-vpn-maturity/wireguard-live-race-final.log) |
+| Earlier selected browser run: maturity, network-ui/audit/report/wireguard-dual/ipam and design-system specs | 164 passed, 14 optional skips | [log](network-vpn-maturity/browser-vpn-selected-attempt2.log) |
+| Whole `internal/netx` package (non-live), first integration | ok, 25.6 s | [log](network-vpn-maturity/netx-package-initial.log) |
 
 No host interface, route, firewall rule, Tailscale state or service was changed. Every WireGuard
 interface, route, nftables table and process in the native fixtures lived in task-owned
@@ -187,13 +186,13 @@ namespaces; after each run no `jdt*` namespace and no host WireGuard link remain
 
 ### Failed iterations retained
 
-- `browser-maturity-attempt1.txt`: the first run of the new spec, 11 passed and 3 failed. All
+- [`browser-maturity-attempt1`](network-vpn-maturity/browser-maturity-attempt1.log): the first run of the new spec, 11 passed and 3 failed. All
   three were test locators — a label matching both the budget block and its meter, a history GET
   the spec itself recorded among the mutations, and a text matching both a status and a sentence.
   Only the locators were changed.
-- `site-live-attempt1.txt`: the first site fixture failed after its verification and guard steps
+- [`site-live-attempt1`](network-vpn-maturity/site-live-attempt1.log): the first site fixture failed after its verification and guard steps
   because the test read `Device "jdst" does not exist.` as the interface still existing; the
-  check now uses the command's exit status. `site-live-attempt2/3` and the final run pass.
+  check now uses the command's exit status. [`site-live-attempt2`](network-vpn-maturity/site-live-attempt2.log), [`site-live-attempt3`](network-vpn-maturity/site-live-attempt3.log) and the final run pass; the separate [kill-switch run](network-vpn-maturity/killswitch-live-attempt1.log) passed first time.
 
 ### Screenshots
 
