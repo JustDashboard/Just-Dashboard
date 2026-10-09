@@ -3,6 +3,10 @@ export function supportsPendingNetworkMutation(path: string, method: string): bo
   if (!["POST", "PUT", "DELETE"].includes(method.toUpperCase())) return false
   const clean = path.split("?")[0].replace(/\/$/, "")
   if (clean === "/network/drift/repairs") return method.toUpperCase() === "POST"
+  // Egress group changes are journaled; a simulation and the automation
+  // switch change no route.
+  if (clean === "/network/egress" || clean.startsWith("/network/egress/"))
+    return !clean.endsWith("/simulate") && !clean.includes("/automation/")
   return [
     "/network/links",
     "/network/native/profiles",
