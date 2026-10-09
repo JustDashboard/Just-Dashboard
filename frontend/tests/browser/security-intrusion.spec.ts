@@ -411,6 +411,47 @@ test("an SSH change on a host without the watchdog applies immediately as before
   expect(headers[0]["x-jd-network-apply"]).toBeUndefined()
 })
 
+test("Suricata's setup moves the capture, fetches rules and reads the queue it depends on", async ({
+  page,
+}) => {
+  const mutations: Mutation[] = []
+  await mockIntrusion(page, mutations, {
+    overrides: { "/security/suricata/": { ...suricata, active: false } },
+  })
+  await page.goto("/security/intrusion")
+  const section = page.getByRole("region", { name: "Suricata" })
+  const setup = section.locator("[data-slot=panel]").filter({ hasText: "Setup" })
+  await expect(setup).toContainText("af-packet in suricata.yaml · eth0")
+  await expect(setup).toContainText("1,824,113 packets captured")
+  await expect(setup).toContainText("capturing")
+  await expect(setup).toContainText("47,213 rules enabled")
+  await expect(setup).toContainText("et/open")
+
+  await setup.getByRole("combobox", { name: "Capture interface" }).click()
+  await page.getByRole("option", { name: "ens4" }).click()
+  await setup.getByRole("button", { name: "Move capture" }).click()
+  const dialog = page.getByRole("dialog", { name: "Capture on ens4" })
+  await expect(dialog).toContainText("suricata -T")
+  expect(mutations).toHaveLength(0)
+  await dialog.getByRole("button", { name: "Test and move" }).click()
+  await expect
+    .poll(() => mutations.find((m) => m.path === "/security/suricata/interface")?.body)
+    .toEqual({ interface: "ens4" })
+
+  await setup.getByRole("button", { name: "Update rules" }).click()
+  await expect
+    .poll(() => mutations.some((m) => m.path === "/security/suricata/rules/update"))
+    .toBe(true)
+  await setup.getByRole("button", { name: "Start Suricata" }).click()
+  await expect.poll(() => mutations.some((m) => m.path === "/security/suricata/start")).toBe(true)
+
+  const inline = section.locator("[data-slot=panel]").filter({ hasText: "Inline queue" })
+  await expect(inline).toContainText("A queue fails closed")
+  await expect(inline).toContainText("FORWARD → queue 0")
+  await expect(inline).toContainText("fails closed")
+  await expect(inline).toContainText("never changed")
+})
+
 test("Suricata reads its mode, its severities, its signatures and its latest alerts", async ({
   page,
 }) => {

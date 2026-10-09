@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { get } from "@/lib/api"
-import { percent, timestamp } from "@/lib/format"
+import { percent, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { healthInvestigation } from "@/lib/server-advisor"
 import type { HealthFinding, Snapshot } from "@/lib/types"
@@ -125,6 +125,33 @@ function Diagnosis({ finding }: { finding: HealthFinding }) {
             </div>
           ))}
         </dl>
+      )}
+      {/* Saved probes from this server that met trouble in the same stretch:
+          the host's counters and the path's own answers, side by side. */}
+      {!!finding.correlated?.length && (
+        <div aria-label="Probes in the same stretch" className="border-t border-hairline pt-3">
+          <p className="eyebrow mb-1.5">Probes in the same stretch</p>
+          <ul className="space-y-1">
+            {finding.correlated.map((run) => (
+              <li key={run.id} className="flex flex-wrap items-baseline gap-x-2 text-body">
+                <Link
+                  href={`/network/runs?run=${encodeURIComponent(run.id)}`}
+                  className="font-medium underline-offset-2 focus-ring hover:underline"
+                >
+                  {run.name}
+                </Link>
+                <span className="font-mono text-hint text-muted-foreground">
+                  {run.tool}
+                  {run.target ? ` ${run.target}` : ""}
+                </span>
+                <span className="text-hint text-warning">{run.outcome.replaceAll("_", " ")}</span>
+                <span className="numeric text-hint text-muted-foreground">
+                  {relativeTime(run.endedAt)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
     </section>
   )

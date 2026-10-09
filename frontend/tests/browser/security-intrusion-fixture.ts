@@ -470,6 +470,34 @@ export const suricata = {
   ],
   rulesLoaded: 47213,
   logPath: "/var/log/suricata/eve.json",
+  capture: {
+    at: iso(1),
+    uptimeSeconds: 7200,
+    kernelPackets: 1824113,
+    kernelDrops: 12,
+    decoderPackets: 1824101,
+  },
+  interfaces: { configured: ["eth0"], candidates: ["eth0", "ens4", "tailscale0"], editable: true },
+  rules: {
+    file: "/var/lib/suricata/rules/suricata.rules",
+    updatedAt: iso(60 * 26),
+    sources: ["et/open"],
+    updater: true,
+  },
+  inline: {
+    queues: [
+      {
+        source: "iptables-save",
+        chain: "FORWARD",
+        queue: "0",
+        bypass: false,
+        rule: "-A FORWARD -j NFQUEUE --queue-num 0",
+      },
+    ],
+    failOpen: false,
+    words:
+      "A queue rule without bypass drops what it queues whenever Suricata is not reading — a stopped or restarting Suricata then cuts that traffic, the dashboard's included if it is queued.",
+  },
 }
 
 /**

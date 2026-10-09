@@ -70,6 +70,8 @@ export type Snapshot = {
   mounts: MountStats[]
   net: NetStats[]
   uptimeSeconds: number
+  /** How connections fare: TCP's own rates and established connections' RTT. */
+  tcp?: TCPStats
   pressure: Pressure
   sockets: Sockets
   procs: ProcCounts
@@ -134,6 +136,18 @@ export type Pressure = {
   memFull: number
   ioSome: number
   ioFull: number
+}
+
+export type TCPStats = {
+  supported: boolean
+  outSegsRate: number
+  retransRate: number
+  attemptFailsRate: number
+  estabResetsRate: number
+  listenDropsRate: number
+  retransPercent: number
+  /** The kernel's smoothed RTT of established connections to peers elsewhere. */
+  latency: { supported: boolean; sockets: number; medianMs: number; p90Ms: number }
 }
 
 export type Sockets = {
@@ -208,6 +222,17 @@ export type MetricsHistoryPoint = {
   tcpConns: number
   tcpConnsPeak: number
   tcpTimeWait: number
+
+  /** Null where the bucket holds no measurement — before these were sampled. */
+  retransPct: number | null
+  retransPctPeak: number | null
+  attemptFails: number | null
+  attemptFailsPeak: number | null
+  resets: number | null
+  listenDrops: number | null
+  listenDropsPeak: number | null
+  rtt: number | null
+  rttPeak: number | null
 
   load5: number
   load15: number
@@ -341,6 +366,15 @@ export type HealthFinding = {
   /** The measured facts behind the verdict, already worded by the server. */
   evidence?: { label: string; value: string }[]
   subjects?: HealthSubject[]
+  /** Saved diagnostic runs that met trouble in the same stretch (administrators only). */
+  correlated?: {
+    id: string
+    name: string
+    tool: string
+    target?: string
+    outcome: string
+    endedAt: string
+  }[]
 }
 
 /** One area's verdict, so a clean area reads as checked rather than as absent. */
@@ -7878,6 +7912,34 @@ export type SuricataView = {
   logPath: string
   logRefused?: string
   logError?: string
+  /** The newest stats event in eve.json: whether the capture sees packets. */
+  capture?: {
+    at: string
+    uptimeSeconds: number
+    kernelPackets: number
+    kernelDrops: number
+    decoderPackets: number
+  }
+  interfaces: {
+    configured: string[]
+    candidates: string[]
+    editable: boolean
+    reason?: string
+  }
+  rules: { file: string; updatedAt?: string; sources: string[]; updater: boolean }
+  /** Read only: the queue rules an inline deployment depends on. */
+  inline: {
+    queues: {
+      source: string
+      chain: string
+      queue: string
+      bypass: boolean
+      rule: string
+    }[]
+    failOpen: boolean
+    words: string
+    error?: string
+  }
 }
 
 type NetworkMade = { createdAt: string; createdBy?: string }
