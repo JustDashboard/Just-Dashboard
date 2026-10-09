@@ -1,19 +1,18 @@
 $ node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build
-monaco: /home/ubuntu/Just-Dashboard-network-kernel-observer-ui/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard-network-kernel-observer-ui/frontend/public/monaco/vs
+monaco: /home/ubuntu/Just-Dashboard-network-next/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard-network-next/frontend/public/monaco/vs
 ▲ Next.js 16.3.5 (Turbopack)
-✓ Running next.config.ts took 43ms
+✓ Running next.config.ts took 40ms
 
   Creating an optimized production build ...
-✓ Compiled successfully in 89s
+✓ Compiled successfully in 8.2s
   Running TypeScript ...
-✓ Finished writing to filesystem cache in 10.3s
-  Finished TypeScript in 96s ...
+  Finished TypeScript in 13.3s ...
   Collecting page data using 7 workers ...
   Generating static pages using 7 workers (0/73) ...
   Generating static pages using 7 workers (18/73)
   Generating static pages using 7 workers (36/73)
   Generating static pages using 7 workers (54/73)
-✓ Generating static pages using 7 workers (73/73) in 1879ms
+✓ Generating static pages using 7 workers (73/73) in 1533ms
   Finalizing page optimization ...
 
 Route (app)
@@ -131,3 +130,4 @@ Route (app)
 
 ○  (Static)   prerendered as static content
 ƒ  (Dynamic)  server-rendered on demand
+

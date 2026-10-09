@@ -24,4 +24,3 @@ Running 15 tests using 1 worker
 Running 1 test using 1 worker
   ✓  1 [chromium] › tests/browser/terminal-ui.spec.ts:1005:9 › terminal splits › splits in all four directions without remounting the shell with webgl (19.3s)
   1 passed (21.9s)
-
