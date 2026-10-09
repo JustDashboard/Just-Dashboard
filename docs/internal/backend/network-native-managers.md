@@ -97,6 +97,9 @@ Native unique D-Bus names are pinned within a saved bus/boot epoch. The method-l
 authenticated transport GUID are recorded separately; they are not assumed equal. Every
 transaction-effect transport also requires that saved authentication GUID before sending any method. Restarting the
 system bus between preflight and an effect therefore refuses even if names or object paths are reused.
+The epoch also verifies that the recorded unique owner still holds its well-known renderer service
+before any checkpoint, activation or recovery effect. A still-live prior unique destination is
+insufficient after service handoff; the journal and selected files are retained for owner review.
 An observed new kernel boot
 permits conservative revalidation of the same persistent owner/device contract before rollback;
 old checkpoint object paths are never used on that new boot. Netplan's generated `/run` artifact

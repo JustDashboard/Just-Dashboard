@@ -62,6 +62,14 @@ func nativeVerifyEpoch(ctx context.Context, u *nativeUndo) error {
 	if err != nil || bus != u.BusID {
 		return errors.New("native bus restarted; its old object identities were preserved for review")
 	}
+	service := networkdService
+	if u.Renderer == "NetworkManager" {
+		service = nmService
+	}
+	owner, err := nativeOwnerIdentity(ctx, service)
+	if err != nil || owner != u.OwnerBus {
+		return errors.New("native service ownership changed; its prior unique owner and recovery evidence were preserved")
+	}
 	return nil
 }
 

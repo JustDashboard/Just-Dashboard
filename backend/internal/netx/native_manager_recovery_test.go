@@ -234,6 +234,8 @@ func TestNativeConfirmedCleanupRetriesWithoutRollback(t *testing.T) {
 			return "BusID=" + f.u.TransportGUID + "\n", nil
 		case tool == "busctl" && strings.HasSuffix(joined, " GetId"):
 			return bus("s", f.u.BusID)
+		case tool == "busctl" && strings.HasSuffix(joined, " GetNameOwner s "+nmService):
+			return bus("s", f.u.OwnerBus)
 		case tool == "busctl" && strings.HasSuffix(joined, " Checkpoints"):
 			list := []string{}
 			if checkpointPresent {
