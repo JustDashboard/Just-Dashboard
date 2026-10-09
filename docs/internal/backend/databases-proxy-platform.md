@@ -3704,10 +3704,19 @@ containers/volumes/networks.
   (provider firewall, security group, CDN, NAT) is always `unknown`; then the host firewall, added by the
   handler with `netsec.JudgeFirewallFrom` (`netsec/reach_source.go`: JudgeFirewall's rule order for one
   source — the first inbound rule whose source holds the address and whose target covers the route's
-  port decides, else the inbound default; a rule whose source is an interface or a set cannot be judged
-  for an address and is counted as passed over, and an iptables refusal is never trusted, as before),
-  judged for the source as the connecting address; then the server block's rewrite-phase checks the
-  site form writes — maintenance (`$jd_<id>_maint` with its `geo $jd_<id>_maint_ip` bypass list and the
+  port decides, else the inbound default), judged for the source as the connecting address. A rule
+  that may concern the port but cannot be judged for an address from its listing is passed over and
+  returned rather than dropped, as `JudgeFirewall` drops it: a source that is not an address or a
+  range, a ufw rule
+  limited to an interface (`443/tcp on tailscale0`, as `ufw allow in on tailscale0` prints it) or
+  written as a profile the host does not define (a defined one is read through `ufw app info`), an
+  iptables rule limited to an input interface other than loopback, carrying a match other than its
+  ports, a connection state, a comment and a REJECT's answer, or jumping to a chain that is not read
+  (a state match without `NEW` never meets a new connection and is not one). When any of them acts
+  otherwise than the verdict (`netsec.FirewallUndecided`), the layer is `unknown`, naming the rules and
+  the verdict past them; otherwise the verdict stands and says how many were passed over
+  (`TestJudgeFirewallFromOneSource`, `…ReadsUFWProfiles`, `…ReadsIPTablesListing`, on ufw's and
+  iptables' own listings). Then the server block's rewrite-phase checks the site form writes — maintenance (`$jd_<id>_maint` with its `geo $jd_<id>_maint_ip` bypass list and the
   always-exempt ACME and page paths: 503 unless bypassed), Cloudflare only (`$jd_<id>_edge` over the
   Cloudflare geo file: 444 unless the address is one of Cloudflare's), the crawler block (by User-Agent,
   so an ordinary browser is let through); CORS preflight and hotlink checks answer particular requests
