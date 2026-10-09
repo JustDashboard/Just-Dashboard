@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v8"
+const nativeRecoveryToken = "jd-native-manager-v10"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {
@@ -411,12 +411,10 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 		if err != nil {
 			return errors.New("native recovery cannot read its exact profile")
 		}
-		if bytes.Equal(current.Data, f.Before.Data) {
-			// A native checkpoint may already have restored the same bytes with
-			// a new inode. No file is adopted or overwritten in this case.
+		if nativeMatchesPriorProfile(current, f) {
 			continue
 		}
-		if current.Identity != f.Candidate.Identity || !bytes.Equal(current.Data, f.Candidate.Data) {
+		if !nativeMatchesCandidateProfile(current, f) {
 			return errors.New("native recovery found a foreign profile change; it was preserved for native-owner review")
 		}
 		rollback := f.Before

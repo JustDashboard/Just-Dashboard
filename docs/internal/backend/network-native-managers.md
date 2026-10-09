@@ -107,7 +107,7 @@ Immediate requests are refused before taking a recovery lock or retrying prior t
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise `jd-native-manager-v8` before admission, including
+The standalone recovery executable must advertise `jd-native-manager-v10` before admission, including
 networkd automatic-domain preservation/provenance, both NetworkManager active domain properties and
 selected-file/stage ownership checks before checkpoint rollback or restored-profile activation,
 and exact authored/generated Netplan policy validation across automatic/manual transitions.
@@ -131,6 +131,14 @@ Exact-origin admission and recovery refuse foreign native checkpoints, a changed
 or any selected origin, UUID, byte or inode change outside the recorded transaction.
 When the displaced authored inode is still retained in staging, rollback exchanges that exact inode
 back into its selected name; reconstructed runtime artifacts retain their separately recorded boot proof.
+Prior and candidate state are classified by their exact recorded inode and bytes together. Identical
+bytes alone cannot identify a prior state: an unchanged candidate still has its captured candidate
+inode and must return the retained authored inode during rollback. Equal-byte foreign inodes and
+changed restore stages remain refusals before owner effects, including persistent new-boot rebinding.
+Helper v10 supplies this correction while preserving the shipped undo versions 1/2/3 and their
+owner/domain-policy interpretation. An older helper cannot satisfy the new admission capability.
+Existing v8 source-specific native evidence remains attributed to v8; actual v10 owner/no-op
+acceptance is a separate required check. Private structural v9 journals are outside this adapter.
 Pending recovery verifies every selected candidate's recorded inode and bytes, both captured restore
 stages and the absence of unexpected cleanup claims before asking a native checkpoint writer to act.
 It repeats those checks at the checkpoint effect boundary and after that writer returns, before

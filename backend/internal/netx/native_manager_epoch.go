@@ -107,11 +107,8 @@ func nativeRebindAfterBoot(ctx context.Context, j *changeJournal, u *nativeUndo)
 			return errors.New("native boot recovery preserved a foreign profile change")
 		}
 		if i == 0 {
-			if bytes.Equal(current.Data, f.Candidate.Data) && current.Identity != f.Candidate.Identity {
-				return errors.New("native boot recovery preserved a replaced persistent profile")
-			}
-			if bytes.Equal(current.Data, f.Before.Data) && current.Identity != f.Before.Identity && current.Identity != f.RollbackID {
-				return errors.New("native boot recovery preserved a replaced prior persistent profile inode")
+			if !nativeMatchesPriorProfile(&current, *f) && !nativeMatchesCandidateProfile(&current, *f) {
+				return errors.New("native boot recovery preserved a replaced persistent profile inode")
 			}
 			continue
 		}

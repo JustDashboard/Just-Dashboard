@@ -13,6 +13,14 @@ type nativeRecoveryOwnership struct {
 	UnprovenPrior bool
 }
 
+func nativeMatchesPriorProfile(current *nativeProfileFile, file nativeUndoFile) bool {
+	return bytes.Equal(current.Data, file.Before.Data) && (current.Identity == file.Before.Identity || current.Identity == file.RollbackID)
+}
+
+func nativeMatchesCandidateProfile(current *nativeProfileFile, file nativeUndoFile) bool {
+	return current.Identity == file.Candidate.Identity && bytes.Equal(current.Data, file.Candidate.Data)
+}
+
 // Refusing an explicit rollback does not stop the same checkpoint's automatic
 // writer. Release only the saved, scoped object before reporting containment;
 // its original files and independent journal remain available for review.
@@ -76,22 +84,22 @@ func nativeRecoveryOwnershipPreflight(u *nativeUndo) (nativeRecoveryOwnership, e
 		if err != nil {
 			return state, errors.New("native recovery cannot read its exact selected profile before any owner effect")
 		}
-		prior := bytes.Equal(current.Data, file.Before.Data)
-		if prior {
-			if current.Identity != file.Before.Identity && current.Identity != file.RollbackID {
-				if !nativeUsesCheckpoint(u) {
-					return state, errors.New("native recovery preserved a replaced prior profile inode before any owner effect")
-				}
-				// The native timeout or an interrupted rollback may have returned
-				// prior bytes with a new inode. This is read-only evidence: it can
-				// never authorize another rollback, file exchange or activation.
-				state.UnprovenPrior = true
-			}
-		} else {
+		prior := nativeMatchesPriorProfile(current, file)
+		switch {
+		case prior:
+		case nativeMatchesCandidateProfile(current, file):
+			// A retained profile can have equal prior/candidate bytes. Its exact
+			// candidate inode still needs the captured prior inode restored.
 			state.AllPrior = false
-			if current.Identity != file.Candidate.Identity || !bytes.Equal(current.Data, file.Candidate.Data) {
-				return state, errors.New("native recovery preserved foreign candidate ownership or bytes before any owner effect")
+		case bytes.Equal(current.Data, file.Before.Data):
+			if !nativeUsesCheckpoint(u) {
+				return state, errors.New("native recovery preserved a replaced prior profile inode before any owner effect")
 			}
+			// An interrupted native writer may have returned prior bytes with a
+			// new inode. This only permits full read-only prior verification.
+			prior, state.UnprovenPrior = true, true
+		default:
+			return state, errors.New("native recovery preserved foreign candidate ownership or bytes before any owner effect")
 		}
 		candidate, err := nativeReadOwnedRecoveryStage(file.CandidatePath, file.Before, file.Candidate)
 		if err != nil {
