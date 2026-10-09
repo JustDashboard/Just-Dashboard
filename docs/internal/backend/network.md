@@ -67,6 +67,11 @@ File writes fsync the file and its containing directory; the journal makes an in
 recoverable rather than pretending several filesystem renames are one atomic transaction. Recovery
 collects failed writes and commands, exposes them as degraded, and blocks further journaled changes.
 Native-owned state/MTU/bridge edits retain observed undo without creating managed boot files.
+Selected persistent NetworkManager/networkd/netplan profiles have a separate
+[native profile adapter](network-native-managers.md): it stages through the actual owner, requires
+temporary apply, and keeps its own closed recovery vocabulary in the same serialized journal.
+Native profile reads/writes require administrator sessions; profile bytes and private checkpoint
+identities never reach the browser. Structural bond/VRF edits remain part of the open P11 scope.
 See [network recovery](network-recovery.md) for host prerequisites, phases and acceptance boundaries.
 Interactive covered mutations support a ninety-second temporary apply and account/session/source-bound
 reconnection confirmation. The host recovers an unconfirmed journal independently; ordinary API

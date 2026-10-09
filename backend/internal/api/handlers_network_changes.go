@@ -23,7 +23,7 @@ func supportsPendingNetworkApply(path string) bool {
 	if path == "/network/drift/repairs" {
 		return true
 	}
-	for _, prefix := range []string{"/network/links", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted"} {
+	for _, prefix := range []string{"/network/links", "/network/native/profiles", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted"} {
 		if path == prefix || strings.HasPrefix(path, prefix+"/") {
 			return true
 		}
@@ -98,6 +98,7 @@ func (s *Server) mountNetworkChangeRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/changes/{id}/confirm", s.handle(s.handleNetworkChangeConfirm))
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/changes/{id}/recover", s.handle(s.handleNetworkChangeRecover))
+			r.Method(http.MethodPost, "/changes/{id}/cleanup", s.handle(s.handleNetworkChangeCleanup))
 		})
 	})
 }
@@ -148,6 +149,19 @@ func (s *Server) handleNetworkChangeRecover(w http.ResponseWriter, r *http.Reque
 	defer cancel()
 	result, err := s.modules.network.RecoverOwnedChange(ctx, id, httpx.MustPrincipal(r).UserID())
 	httpx.SetAudit(r, "network.change.recover", id, nil)
+	if err != nil {
+		return mapNetworkConfirmationError(err)
+	}
+	httpx.JSON(w, http.StatusOK, result)
+	return nil
+}
+
+func (s *Server) handleNetworkChangeCleanup(w http.ResponseWriter, r *http.Request) error {
+	id := chi.URLParam(r, "id")
+	ctx, cancel := applyContext(r, 60*time.Second)
+	defer cancel()
+	result, err := s.modules.network.CleanupOwnedChange(ctx, id, httpx.MustPrincipal(r).UserID())
+	httpx.SetAudit(r, "network.change.cleanup", id, nil)
 	if err != nil {
 		return mapNetworkConfirmationError(err)
 	}

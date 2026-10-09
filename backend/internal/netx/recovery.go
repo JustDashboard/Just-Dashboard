@@ -93,6 +93,7 @@ type ChangeStatus struct {
 	Persistence    string    `json:"persistence"`
 	Boot           string    `json:"boot"`
 	RecoveryErrors []string  `json:"recoveryErrors,omitempty"`
+	Cleanup        string    `json:"cleanup,omitempty"`
 	OwnerUserID    int64     `json:"ownerUserId,omitempty"`
 	ExpiresAt      time.Time `json:"expiresAt,omitzero"`
 	AppliedAt      time.Time `json:"appliedAt,omitzero"`
@@ -184,6 +185,8 @@ func readChange(dir string) (*changeJournal, error) {
 	return &j, nil
 }
 
+var writeChangeJournal = writeFileAtomic
+
 func (j *changeJournal) save() error {
 	j.UpdatedAt = time.Now().UTC()
 	b, err := json.MarshalIndent(j, "", "  ")
@@ -193,19 +196,29 @@ func (j *changeJournal) save() error {
 	if len(b)+1 > maxRecoveryJournalBytes {
 		return fmt.Errorf("the network recovery snapshot exceeds its %d MB limit; nothing further can be applied safely", maxRecoveryJournalBytes>>20)
 	}
-	return writeFileAtomic(filepath.Join(j.Paths.Dir, recoveryFile), append(b, '\n'), 0o600)
+	return writeChangeJournal(filepath.Join(j.Paths.Dir, recoveryFile), append(b, '\n'), 0o600)
 }
 
 func changeTerminal(phase string) bool {
 	return phase == "saved" || phase == "confirmed" || phase == "recovered" || phase == "boot_degraded"
 }
 
+func finishPriorChange(ctx context.Context, dir string) error {
+	prior, err := readChange(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !changeTerminal(prior.Phase) {
+		return &ReadOnlyError{Reason: "An earlier network change needs confirmation or recovery; its journal has been preserved."}
+	}
+	return finalizeNativeChange(ctx, prior)
+}
+
 func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, previous map[string]savedNetworkFile, spec []byte, extra []recoveryCommand, extraFiles []recoverySnapshot) (*changeJournal, error) {
-	if prior, err := readChange(s.paths.Dir); err == nil {
-		if !changeTerminal(prior.Phase) {
-			return nil, &ReadOnlyError{Reason: "An earlier network change needs recovery; its journal has been preserved."}
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	if err := finishPriorChange(ctx, s.paths.Dir); err != nil {
 		return nil, err
 	}
 	if pendingOwner(ctx) > 0 && (!s.independentRecovery || !has("systemctl") || !has("systemd-run")) {
@@ -352,8 +365,11 @@ func recoverNetwork(ctx context.Context, dir, id string, boot bool) error {
 	if err != nil {
 		return err
 	}
-	if id != "pending" && id != j.ID || changeTerminal(j.Phase) {
+	if id != "pending" && id != j.ID {
 		return nil
+	}
+	if changeTerminal(j.Phase) {
+		return finalizeNativeChange(ctx, j)
 	}
 	return recoverChangeWithDependencies(ctx, j, boot)
 }
@@ -363,6 +379,11 @@ func recoverChange(ctx context.Context, j *changeJournal) error {
 }
 
 func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot bool) error {
+	for _, c := range j.Commands {
+		if c.Tool == "native" {
+			return recoverNativeJournal(ctx, j)
+		}
+	}
 	allowed := map[string]bool{
 		filepath.Join(j.Paths.Dir, linksFile): true, filepath.Join(j.Paths.Dir, rules6File): true,
 		filepath.Join(j.Paths.Dir, shapingFile): true, filepath.Join(j.Paths.Dir, gatewayFile): true,

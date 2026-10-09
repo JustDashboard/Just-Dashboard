@@ -86,6 +86,12 @@ to the contribution terms above, including the additional licence grant to the p
   `backend/`, `JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1`. It needs root or
   passwordless sudo and does everything inside throwaway network namespaces it removes, never on the
   host's own interfaces, firewall or tailscaled.
+- Persistent native profile changes also follow the bounded
+  [native-owner acceptance](docs/internal/backend/network-native-managers.md#local-acceptance).
+  The fixture requires verified native userland and uses private net/mount/PID namespaces, private
+  `/etc`, `/run` and `/var/lib`, and explicit private NetworkManager state paths. It builds the actual
+  standalone recovery executable with a workspace-local `TMPDIR`. Native-owner activation does not
+  substitute for the separate systemd timer, DHCP/SLAAC, boot or structural bond/VRF requirements.
 - The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
   Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
   to compile the narrow test binary and run it as root. It creates a network-none fixture with no

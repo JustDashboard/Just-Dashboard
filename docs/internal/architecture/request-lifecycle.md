@@ -99,6 +99,11 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   /network/protection/settings` does the same when a value weakens a kernel protection. Setting a
   device down and turning forwarding off are their own paths (`/down`, `/off`) inside `s.destructive`,
   so the two directions of one switch never share a route ([network module](../backend/network.md#routes)).
+- **Native network profiles.** Capability/profile reads and writes require an administrator session.
+  The native PUT accepts a typed generation/intent rather than filenames and always requires pending
+  confirmation. Editing and terminal cleanup retries use `s.destructive` and audit the selected device
+  or change ID. Cleanup is restricted to the current account's confirmed/recovered native journal and
+  never turns a confirmed decision into rollback ([native profiles](../backend/network-native-managers.md)).
 - **Container specs.** Container creation and recreation use `api.authoriseSpec`: privileged mode, added
   capabilities/devices, host/shared network namespaces and bind mounts require `system.admin`. Referenced
   network drivers and named-volume drivers/options are inspected too; a named volume cannot hide a host

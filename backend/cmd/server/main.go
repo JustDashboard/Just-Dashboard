@@ -56,6 +56,10 @@ func main() {
 		}
 		return
 	}
+	if len(os.Args) == 2 && os.Args[1] == "--network-native-check" {
+		fmt.Println(netx.NativeRecoveryCapability())
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "--network-recovery-check" {
 		return
 	}

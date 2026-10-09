@@ -7,6 +7,10 @@ WireGuard configuration, Tailscale preferences and netsec firewall changes have 
 are not covered by this journal. Their existing synchronous rollback does not imply independent
 recovery.
 
+[Selected persistent native profiles](network-native-managers.md) also use this journal with a
+closed native owner/checkpoint recovery payload. Their addressing, DNS/domain and explicit-route
+edits always require pending confirmation; they do not create dashboard-managed boot files.
+
 ## Durable phases
 
 The journal is a private mode-0600 regular file containing the candidate generation, random change
@@ -27,6 +31,9 @@ The serialized snapshot has a 32 MiB limit and refuses an oversized change befor
   boot unit failed. This is not a successful boot test.
 - `runtime`, `persistence`, `boot` and `watchdog` remain separate. For native-owned runtime edits,
   persistence and boot are `not_applicable`.
+- Native profile changes expose `cleanup: pending | failed | complete` separately. A confirmed or
+  recovered decision is saved before checkpoint release or rollback-stage deletion. Failed cleanup
+  remains visible, preserves foreign stages and blocks replacement by the next journaled change.
 
 `saved` does not prove that a browser or application can reach the host. The kernel path guards still
 check client/source/anchor routes, and deliberately permit source changes that preserve device and
@@ -46,7 +53,8 @@ unsupported; immediate synchronous recovery is still available.
 <change-id|pending>` starts before normal server configuration and operates without the API,
 database, credentials or container. It reads the private journal, validates snapshot paths/tools,
 restores prior files, runs typed undo and records all failures. An old timer cannot undo a later
-change because its random ID must match; completed journals are no-ops. The standalone helper stays
+change because its random ID must match; completed ordinary journals are no-ops, while terminal native
+journals retry their idempotent owned cleanup. The standalone helper stays
 in the namespaces in which systemd starts it; API-side host commands use `hostexec`.
 Boot uses `--network-recover-boot`: after restoring files it reconstructs the prior managed link and
 namespace dependencies before targeted undo. The [boot recovery guide](network-boot-recovery.md)
@@ -79,6 +87,11 @@ session/source or old ID cannot confirm. A changed session/source can obtain its
 Only explicit confirmation terminates the pending watchdog; polling does not confirm. The
 `/recover` route additionally requires the destructive capability and restores the owned pending
 generation with a bounded cancellation-independent context.
+
+`POST /network/changes/{id}/cleanup` requires the same account's administrator session and destructive
+capability, and audits a retry of terminal native cleanup. Failed cleanup never authorizes rollback
+of a durable confirmed candidate. Native checkpoint timeout holds and owner bus/boot identities are
+private journal evidence; the native adapter guide explains their failure/restart boundaries.
 
 Confirmation establishes a returned dashboard response, not application, tunnel or provider health.
 The UI retains pending evidence during disconnection and waits for recovered/degraded host evidence

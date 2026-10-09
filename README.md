@@ -85,6 +85,10 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   and shaping expose kernel evidence separately from saved settings. DNS tests use the host's
   configured resolver chain, checking native split policy when supported and reporting unknowns
   for other paths; direct comparisons require named destinations and a disclosure acknowledgment.
+  Existing native profiles expose owner, saved intent and current evidence separately. The
+  [native profile adapter and its current limits](docs/internal/backend/network-native-managers.md)
+  describe conservative L3 editing, durable terminal cleanup, and the structural and Ubuntu
+  Netplan/NetworkManager integration work still awaiting acceptance.
   Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
   measurement. Saved runs retain quick-tool and source-sensitive investigation evidence, stages and
   outcomes across restarts; Drift compares

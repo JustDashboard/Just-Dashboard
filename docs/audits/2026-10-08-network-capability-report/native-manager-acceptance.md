@@ -1,0 +1,44 @@
+# Native manager acceptance record
+
+P11 remains in progress. Typed persistent L3 adapters and durable cleanup tests are implemented;
+existing bond mode/member and supported VRF table/member transactions and automatic-address native
+acceptance are still required. The version eligibility ranges do not imply acceptance across all
+versions. Creation/adoption remains refused for this adapter.
+
+The local owner fixture runs its actual recovery executable and native daemons in private network,
+mount and PID namespaces. Timer admission is stubbed in that fixture and is not timer-dispatch proof.
+Each rerun preserves its raw bounded output outside the checkout.
+
+The first owner run failed and exposed a fixture containment omission: NetworkManager's default
+`/var/lib/NetworkManager` was not private. The only newly created directory and comment-only internal
+configuration were verified by inode, creation time, root ownership, exact directory inventory and
+expected bytes before their exact cleanup. No production native owner or unrelated file was removed.
+The fixture was corrected to mount private `/var/lib` as well as `/etc` and `/run`, and to supply
+explicit private NetworkManager state, internal configuration and PID paths before further runs.
+
+Subsequent failures exposed real busctl property/method JSON framing, private-bus account admission,
+networkd runtime-directory ownership, explicit offline boot-enablement inspection, and a recovery
+helper too large for the private 64 MiB runtime mount. Those issues were corrected; the helper is now
+the exact compiled artifact bound read-only into the private runtime directory.
+
+The GUID experiment also disproved equality between the method-level `org.freedesktop.DBus.GetId`
+and the authenticated GUID on the actual private daemon. Recovery records both separately and pins
+the transport GUID obtained by `busctl status` during effect authentication. Actual mismatch/restart
+acceptance passed in the actual private PID/mount/network namespace. The all-zero GUID is refused
+because sd-bus treats it as an unspecified expected ID. Credential augmentation is disabled for
+the status inspection; authenticated kernel credentials are sufficient for this GUID read.
+
+The subsequent actual owner run passed networkd 257 and netplan 1.1.2 static dual-family addresses,
+DNS/domains, metric/table routes, independently executed rollback, authenticated confirmation and
+applying-backend death recovery. Its Ubuntu NetworkManager 1.52.0 build applied the candidate but
+crashed during native checkpoint rollback in libnetplan YAML serialization. Inspection of the
+Ubuntu source patch confirmed that this persistent writer migrates keyfile origins to Netplan YAML.
+The adapter now refuses that running-image feature before admitting edits; covering authored
+Netplan/NetworkManager profiles without origin migration remains open. The failure is retained and
+is not counted as a successful restore.
+
+Root-owned fault/race fixtures pass for failed durable confirmation, failure after checkpoint
+destruction, retry without rollback after confirmation, foreign stage preservation, next ordinary
+and native journal refusal, boot-epoch revalidation, profile-exchange races and cleanup-claim races.
+They retain failed evidence and verify the confirmed candidate survives cleanup failure. These
+fixtures do not substitute for actual native DHCP/SLAAC, structural owner activation or a reboot.

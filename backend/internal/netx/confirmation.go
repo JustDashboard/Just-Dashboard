@@ -138,6 +138,12 @@ func (s *Service) ConfirmChange(ctx context.Context, id string, userID int64, se
 		return nil, err
 	}
 	defer unlockChange(lock)
+	if prior, err := readChange(s.paths.Dir); err == nil && prior.ID == id && prior.OwnerUserID == userID && userID > 0 && sessionID != "" && transport != "" && prior.Phase == "confirmed" && hasNativeRecovery(prior) {
+		if err := finalizeNativeChange(ctx, prior); err != nil {
+			return &prior.ChangeStatus, err
+		}
+		return &prior.ChangeStatus, nil
+	}
 	j, err := s.pendingChange(ctx, id, userID)
 	if err != nil {
 		return nil, err
@@ -147,10 +153,22 @@ func (s *Service) ConfirmChange(ctx context.Context, id string, userID int64, se
 	if sessionID == "" || transport == "" || j.VerificationTransport != transport || j.VerificationSession != sessionID || len(challenge) != 64 || j.VerificationDigest == "" || subtle.ConstantTimeCompare([]byte(encoded), []byte(j.VerificationDigest)) != 1 || !j.VerifiedAt.After(j.AppliedAt) || time.Now().After(j.VerifiedAt.Add(verificationFreshness)) {
 		return nil, &ConfirmationError{"Verify a fresh dashboard reconnection from this session before confirming the change."}
 	}
+	if err := verifyNativeConfirmation(ctx, j); err != nil {
+		return nil, err
+	}
+	if err := holdNativeCheckpoint(ctx, j); err != nil {
+		return nil, err
+	}
+	if !time.Now().Before(j.ExpiresAt) {
+		return nil, &ConfirmationError{"Native verification crossed the confirmation deadline; recover and review the current change before retrying."}
+	}
 	j.Phase, j.Watchdog = "confirmed", "completed"
 	j.VerificationDigest, j.VerificationSession, j.VerificationTransport = "", "", ""
 	if err := j.save(); err != nil {
 		return nil, err
+	}
+	if err := finalizeNativeChange(ctx, j); err != nil {
+		return &j.ChangeStatus, err
 	}
 	return &j.ChangeStatus, nil
 }
@@ -169,6 +187,25 @@ func (s *Service) RecoverOwnedChange(ctx context.Context, id string, userID int6
 		return nil, &ConfirmationError{"This account has no recoverable pending change with that ID."}
 	}
 	if err := recoverChange(ctx, j); err != nil {
+		return &j.ChangeStatus, err
+	}
+	return &j.ChangeStatus, nil
+}
+
+func (s *Service) CleanupOwnedChange(ctx context.Context, id string, userID int64) (*ChangeStatus, error) {
+	lock, err := lockChange(s.paths.Dir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlockChange(lock)
+	j, err := readChange(s.paths.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if userID <= 0 || j.ID != id || j.OwnerUserID != userID || !hasNativeRecovery(j) || (j.Phase != "confirmed" && j.Phase != "recovered") {
+		return nil, &ConfirmationError{"This account has no terminal native cleanup with that ID."}
+	}
+	if err := finalizeNativeChange(ctx, j); err != nil {
 		return &j.ChangeStatus, err
 	}
 	return &j.ChangeStatus, nil
