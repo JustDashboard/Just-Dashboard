@@ -2793,6 +2793,24 @@ containers/volumes/networks.
   and time. One pass at a time: a caller waiting for a scheduled pass waits only as long as its own budget.
   Every check also goes into `watched_checks` (days left, fingerprint, error; 2000 per endpoint and 90
   days, cascading with the endpoint), read at `GET /certificates/watched/{id}/history`.
+  **Network probes are watched endpoints of their own kind**, not a second monitor:
+  `watched_endpoints.kind` is `tls` (a handshake and its certificate, every row before this) or `tcp`
+  (`POST /certificates/watched {domain, port, ip?, kind: "tcp"}`), checked by the same `TLSMonitor` pass
+  on the same interval through `CheckTCP` — one connection, at the pinned address where there is one,
+  nothing sent, closed — kept as `ProbeCheck` (`ok`, `state`: connected, refused, timeout, unresolvable,
+  error; the address dialled; connect time) in `watched_endpoints.probe`, and in `watched_checks` with
+  its error and `ms`. The two tables moved from `proxySchema` into `schema` because they gained columns
+  after shipping (`kind`, `probe`, `ms`, brought to older installs by `addedColumns`; every existing row
+  reads `tls`). A probe where a TLS watch already exists is 409 `already_watched` (the handshake checks
+  the connection too); a TLS watch where a probe exists takes it over and is checked on the next pass.
+  The `watch_unreachable` alert judges a probe by whether it connected ("No TCP connection (refused):
+  …"); the untrusted and grade rules and the fleet scan leave probes out. The list (`watched-domains.tsx`)
+  draws a probe with its connection and connect-time trend and no TLS report; the Network Tools page's
+  TCP port check offers **Watch on a schedule**, and the Network runs page lists **Watched probes**
+  (`watched-probes.tsx`, `lib/watched-probes.ts`) with check-now and stop. Tests:
+  `TestWatchedEndpointsGainProbeColumns`, `TestTheWatchMonitorProbesNetworkEndpoints`,
+  `TestCheckTCPConnectsOrSaysWhyNot`, `TestNetworkProbesAreWatchedEndpoints` (a real loopback listener
+  watched, checked, its history, the unreachable alert after it closes, and the kind rules).
 - **TLS report history.** Every quick scan that runs to its end (not one its caller cancelled) is stored in
   `tls_scans` (grade, days left, fingerprint, reachability and the report as JSON; 100 per target and 180
   days). `GET /certificates/reports?domain=&port=` lists a target's reports newest first and

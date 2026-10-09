@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -311,4 +312,75 @@ func TestTheWatchCheckKeepsToItsBudget(t *testing.T) {
 	check(w.Body.Bytes())
 	stored := admin.do(http.MethodGet, "/api/v1/certificates/watched?check=false", "", nil)
 	check(stored.Body.Bytes())
+}
+
+// A network probe is a watched endpoint of its own kind: it is checked on the
+// same schedule by connecting, keeps its connect time in the history, is
+// judged by the unreachable alert, and never stands where a TLS watch already
+// asks more.
+func TestNetworkProbesAreWatchedEndpoints(t *testing.T) {
+	admin, s := newClient(t)
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conn.Close()
+		}
+	}()
+	port := strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	w := admin.do(http.MethodPost, "/api/v1/certificates/watched", `{"domain":"127.0.0.1","port":`+port+`,"kind":"tcp"}`, nil)
+	var probe watchedDomain
+	if err := json.Unmarshal(w.Body.Bytes(), &probe); err != nil || w.Code != http.StatusCreated || probe.Kind != "tcp" {
+		t.Fatalf("add probe: %d %s", w.Code, w.Body.String())
+	}
+	if w := admin.do(http.MethodPost, "/api/v1/certificates/watched", `{"domain":"127.0.0.1","port":`+port+`,"kind":"udp"}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("an unknown kind: %d", w.Code)
+	}
+	if w := admin.do(http.MethodPost, "/api/v1/certificates/watched/check", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("check: %d %s", w.Code, w.Body.String())
+	}
+	w = admin.do(http.MethodGet, "/api/v1/certificates/watched", "", nil)
+	var rows []watchedDomain
+	if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil || len(rows) != 1 {
+		t.Fatalf("list: %s", w.Body.String())
+	}
+	if rows[0].Probe == nil || !rows[0].Probe.OK || rows[0].Cert != nil || rows[0].CheckedAt == nil {
+		t.Fatalf("probe row = %+v", rows[0])
+	}
+	w = admin.do(http.MethodGet, "/api/v1/certificates/watched/"+strconv.FormatInt(probe.ID, 10)+"/history", "", nil)
+	var history []watchedCheck
+	if err := json.Unmarshal(w.Body.Bytes(), &history); err != nil || len(history) != 1 || history[0].DaysLeft != nil || history[0].Error != "" {
+		t.Fatalf("history: %s", w.Body.String())
+	}
+
+	// The unreachable rule judges a probe by whether it connected.
+	ln.Close()
+	domains, ok := s.checkWatchedDomains(context.Background())
+	if !ok || len(domains) != 1 || domains[0].Probe == nil || domains[0].Probe.OK {
+		t.Fatalf("alert pass = %+v", domains)
+	}
+	reading := watchAlertReading(proxyAlertRule{Kind: proxyAlertWatchUnreachable}, domains)
+	if len(reading.Firing) != 1 || !strings.Contains(reading.Firing[0].Detail, "No TCP connection (refused)") {
+		t.Fatalf("reading = %+v", reading)
+	}
+	if untrusted := watchAlertReading(proxyAlertRule{Kind: proxyAlertWatchUntrusted}, domains); len(untrusted.Firing)+len(untrusted.Unknown) != 0 {
+		t.Fatalf("the untrusted rule judged a probe: %+v", untrusted)
+	}
+
+	// A TLS watch takes a probe over; a probe never replaces a TLS watch.
+	w = admin.do(http.MethodPost, "/api/v1/certificates/watched", `{"domain":"127.0.0.1","port":`+port+`}`, nil)
+	var upgraded watchedDomain
+	if err := json.Unmarshal(w.Body.Bytes(), &upgraded); err != nil || upgraded.ID != probe.ID || upgraded.Kind != "tls" {
+		t.Fatalf("tls over the probe: %d %s", w.Code, w.Body.String())
+	}
+	if w := admin.do(http.MethodPost, "/api/v1/certificates/watched", `{"domain":"127.0.0.1","port":`+port+`,"kind":"tcp"}`, nil); w.Code != http.StatusConflict {
+		t.Fatalf("a probe over the TLS watch: %d %s", w.Code, w.Body.String())
+	}
 }

@@ -2,18 +2,26 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Globe, Inspect, RefreshClockwise, Trash } from "@/components/icons"
+import { Connection, Globe, Inspect, RefreshClockwise, Trash } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { ApiError, del, get, post, put } from "@/lib/api"
 import { calendarDate, duration, plural, relativeTime } from "@/lib/format"
 import { parseScanTarget, scanSuggestions, targetLabel, tlsReportHref } from "@/lib/scan-target"
 import type { Certificate, VHost } from "@/lib/types"
+import {
+  connectTimes,
+  isProbe,
+  probeStatus,
+  type WatchedCheck,
+  type WatchedEndpoint,
+} from "@/lib/watched-probes"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
 import { Field, FormSection, FormSections } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Sparkline } from "@/components/metrics/sparkline"
 import { ErrorState, LoadingRows } from "@/components/state"
+import { Status } from "@/components/status-dot"
 import { VerbBar } from "@/components/verbs"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { certificateProduct } from "@/components/proxy/marks"
@@ -27,18 +35,11 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-type Watched = {
-  id: number
-  domain: string
-  port: number
-  /** The address the name is reached at instead of where DNS points. */
-  ip?: string
-  /** When the certificate was read; absent until the first check. */
+type Watched = WatchedEndpoint & {
+  /** When the certificate, or a probe's connection, was read; absent until the first check. */
   checkedAt?: string
   certificate?: Certificate
 }
-
-type WatchedCheck = { checkedAt: string; daysLeft?: number; fingerprint?: string; error?: string }
 
 /** The schedule's choices, in seconds; the server takes 60 to 86400. */
 const INTERVALS = [
@@ -343,15 +344,21 @@ export function WatchedDomains({
               {rows.map((row) => (
                 <ChoiceRow
                   key={row.id}
-                  verb={admin ? `Inspect ${endpointLabel(row)}` : endpointLabel(row)}
-                  disabled={!admin}
+                  verb={
+                    admin && !isProbe(row) ? `Inspect ${endpointLabel(row)}` : endpointLabel(row)
+                  }
+                  disabled={!admin || isProbe(row)}
                   busy={removing === row.id}
-                  href={admin ? tlsReportHref({ host: row.domain, port: row.port }) : undefined}
+                  href={
+                    admin && !isProbe(row)
+                      ? tlsReportHref({ host: row.domain, port: row.port })
+                      : undefined
+                  }
                   leading={
                     <ProductLogo
-                      id={certificateProduct(row.certificate)}
+                      id={isProbe(row) ? undefined : certificateProduct(row.certificate)}
                       size="sm"
-                      fallback={Globe}
+                      fallback={isProbe(row) ? Connection : Globe}
                     />
                   }
                   title={
@@ -370,19 +377,33 @@ export function WatchedDomains({
                     </>
                   }
                   description={
-                    row.certificate &&
-                    [
-                      row.certificate.issuer,
-                      // A handshake that failed carries Go's zero time.
-                      new Date(row.certificate.notAfter).getUTCFullYear() > 1 &&
-                        `until ${calendarDate(row.certificate.notAfter)}`,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")
+                    isProbe(row)
+                      ? `Network probe: connects over TCP${row.probe?.address ? ` to ${row.probe.address}` : ""}`
+                      : row.certificate &&
+                        [
+                          row.certificate.issuer,
+                          // A handshake that failed carries Go's zero time.
+                          new Date(row.certificate.notAfter).getUTCFullYear() > 1 &&
+                            `until ${calendarDate(row.certificate.notAfter)}`,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
                   }
-                  trailing={<ExpiryStatus cert={row.certificate} />}
+                  trailing={
+                    isProbe(row) ? (
+                      <Status
+                        tone={probeStatus(row.probe).tone}
+                        label={probeStatus(row.probe).label}
+                      />
+                    ) : (
+                      <ExpiryStatus cert={row.certificate} />
+                    )
+                  }
                   className="gap-3 p-4"
                 >
+                  {row.probe?.error && (
+                    <p className="text-hint break-all text-destructive">{row.probe.error}</p>
+                  )}
                   {row.certificate?.error && (
                     <p className="text-hint break-all text-destructive">{row.certificate.error}</p>
                   )}
@@ -401,20 +422,26 @@ export function WatchedDomains({
                             ? `checked ${relativeTime(row.checkedAt)}`
                             : "waiting for its first check"}
                       </p>
-                      <CheckTrend id={row.id} checkedAt={row.checkedAt} />
+                      <CheckTrend id={row.id} checkedAt={row.checkedAt} probe={isProbe(row)} />
                     </div>
                     {admin && (
                       <VerbBar
                         menuLabel={`More actions for ${endpointLabel(row)}`}
                         verbs={[
-                          {
-                            key: "scan",
-                            label: "TLS report",
-                            icon: Inspect,
-                            inline: true,
-                            run: () =>
-                              router.push(tlsReportHref({ host: row.domain, port: row.port })),
-                          },
+                          ...(isProbe(row)
+                            ? []
+                            : [
+                                {
+                                  key: "scan",
+                                  label: "TLS report",
+                                  icon: Inspect,
+                                  inline: true,
+                                  run: () =>
+                                    router.push(
+                                      tlsReportHref({ host: row.domain, port: row.port }),
+                                    ),
+                                },
+                              ]),
                           {
                             key: "remove",
                             label: "Stop watching",
@@ -442,7 +469,16 @@ export function WatchedDomains({
  * them failed. A renewal shows as a jump up; a line that only falls is a
  * certificate nothing is renewing.
  */
-function CheckTrend({ id, checkedAt }: { id: number; checkedAt?: string }) {
+export function CheckTrend({
+  id,
+  checkedAt,
+  probe,
+}: {
+  id: number
+  checkedAt?: string
+  /** A network probe's trend is its connect time, not days left. */
+  probe?: boolean
+}) {
   const history = usePoll(
     (signal) => get<WatchedCheck[]>(`/certificates/watched/${id}/history`, undefined, signal),
     0,
@@ -450,12 +486,17 @@ function CheckTrend({ id, checkedAt }: { id: number; checkedAt?: string }) {
     { enabled: checkedAt !== undefined },
   )
   const checks = history.data ?? []
-  const days = checks.flatMap((check) => (check.daysLeft === undefined ? [] : [check.daysLeft]))
+  const values = probe
+    ? connectTimes(checks)
+    : checks.flatMap((check) => (check.daysLeft === undefined ? [] : [check.daysLeft]))
   const failed = checks.filter((check) => check.error).length
   if (checks.length < 2) return null
   return (
     <span className="flex items-center gap-2 text-hint text-muted-foreground">
-      <Sparkline values={days} label="Days left over the recent checks" />
+      <Sparkline
+        values={values}
+        label={probe ? "Connect time over the recent checks" : "Days left over the recent checks"}
+      />
       {failed > 0 && <span className="numeric">{plural(failed, "failed check")}</span>}
     </span>
   )

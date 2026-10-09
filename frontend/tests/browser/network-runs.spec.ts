@@ -468,3 +468,62 @@ for (const width of [375, 1280, 1720]) {
     await page.screenshot({ path: info.outputPath(`saved-runs-${width}.png`), fullPage: true })
   })
 }
+
+test("watched probes are the watch list's own, checked and stopped from the runs page", async ({
+  page,
+}) => {
+  await fixture(page)
+  let rows = [
+    {
+      id: 7,
+      domain: "db.example.test",
+      port: 5432,
+      kind: "tcp",
+      checkedAt: new Date(Date.now() - 60_000).toISOString(),
+      probe: { ok: true, state: "connected", ms: 3, address: "10.0.0.5:5432" },
+    },
+    {
+      id: 8,
+      domain: "cache.example.test",
+      port: 6379,
+      kind: "tcp",
+      checkedAt: new Date(Date.now() - 60_000).toISOString(),
+      probe: {
+        ok: false,
+        state: "refused",
+        error: "dial tcp 10.0.0.6:6379: connect: connection refused",
+      },
+    },
+    { id: 9, domain: "app.example.test", port: 443, kind: "tls" },
+  ]
+  const calls: string[] = []
+  await page.route("**/api/v1/certificates/watched**", async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    calls.push(`${request.method()} ${path}`)
+    if (path.endsWith("/history")) return json(route, [])
+    if (request.method() === "DELETE") {
+      rows = rows.filter((row) => !path.endsWith(`/${row.id}`))
+      return route.fulfill({ status: 204 })
+    }
+    return json(route, rows)
+  })
+  await page.goto("/network/runs")
+  const panel = page.getByRole("region", { name: "Watched probes" })
+  await expect(panel.getByText("db.example.test:5432")).toBeVisible()
+  await expect(panel.getByText("connects in 3 ms")).toBeVisible()
+  await expect(panel.getByText("refused", { exact: true })).toBeVisible()
+  await expect(panel.getByText("connect: connection refused")).toBeVisible()
+  // A TLS watch is the certificates page's, not a probe.
+  await expect(panel.getByText("app.example.test")).toHaveCount(0)
+  await expect(panel.getByRole("link", { name: "Watch list" })).toHaveAttribute(
+    "href",
+    "/proxy/certificates",
+  )
+
+  await panel.getByRole("button", { name: "Check now" }).click()
+  await expect.poll(() => calls.includes("POST /api/v1/certificates/watched/check")).toBe(true)
+  await panel.getByRole("button", { name: "Stop watching cache.example.test:6379" }).click()
+  await expect(panel.getByText("cache.example.test:6379")).toHaveCount(0)
+  expect(calls).toContain("DELETE /api/v1/certificates/watched/8")
+})

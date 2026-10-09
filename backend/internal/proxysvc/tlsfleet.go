@@ -58,6 +58,11 @@ func FleetTargets(vhosts []VHost, watched []WatchedEndpoint) []FleetTarget {
 		}
 	}
 	for _, e := range watched {
+		// A network probe connects and nothing more; it has no certificate
+		// to grade.
+		if e.Kind == WatchTCP {
+			continue
+		}
 		t, err := ParseScanTarget(e.Domain, e.Port)
 		if err != nil {
 			continue

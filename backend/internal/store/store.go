@@ -907,6 +907,49 @@ CREATE TABLE IF NOT EXISTS watched_domains (
   created_at INTEGER NOT NULL
 );
 
+-- Watched endpoints. watched_domains holds one row per name, so watching
+-- mail.example.com on 993 replaced it on 443. An endpoint is a name, a port
+-- and an address to reach the name at ('' for the name's own), and keeps its
+-- last live check, which the server makes on its own schedule. kind is what
+-- the check asks: 'tls', a handshake and its certificate (kept in
+-- certificate), or 'tcp', a network probe that only connects (kept in
+-- probe) — the network page's watched probes, on the same schedule, history
+-- and alerts. Here rather than in proxySchema because it gained columns after
+-- shipping, which addedColumns brings to an older table first.
+CREATE TABLE IF NOT EXISTS watched_endpoints (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain      TEXT NOT NULL,
+  port        INTEGER NOT NULL DEFAULT 443,
+  ip          TEXT NOT NULL DEFAULT '',
+  created_at  INTEGER NOT NULL,
+  checked_at  INTEGER NOT NULL DEFAULT 0,
+  certificate TEXT NOT NULL DEFAULT '',
+  kind        TEXT NOT NULL DEFAULT 'tls',
+  probe       TEXT NOT NULL DEFAULT '',
+  UNIQUE(domain, port, ip)
+);
+
+-- The watch list as watched_domains had it. This runs on every boot and
+-- brings back nothing removed since, because removing an endpoint removes
+-- its watched_domains row as well; watched_domains is otherwise left as it
+-- was, for a downgrade to find.
+INSERT OR IGNORE INTO watched_endpoints(domain, port, ip, created_at)
+  SELECT domain, port, '', created_at FROM watched_domains;
+
+-- Every check of a watched endpoint, by the schedule or an administrator,
+-- so a row can show how its days left, or a probe's connect time, moved and
+-- when its certificate changed. Kept to 2000 per endpoint and 90 days.
+CREATE TABLE IF NOT EXISTS watched_checks (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  endpoint_id INTEGER NOT NULL REFERENCES watched_endpoints(id) ON DELETE CASCADE,
+  checked_at  INTEGER NOT NULL,
+  days_left   INTEGER,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  error       TEXT NOT NULL DEFAULT '',
+  ms          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_watched_checks_endpoint ON watched_checks(endpoint_id, checked_at);
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -1335,6 +1378,12 @@ var addedColumns = []struct{ table, column, spec string }{
 	// configuration; this unsealed copy lets an edit start from them. Empty for
 	// a peer made before it existed, which reads as unknown, never as none.
 	{"network_vpn_clients", "client_routes", "TEXT NOT NULL DEFAULT ''"},
+	// A watched endpoint may be a network probe that only connects, checked
+	// on the TLS watch's schedule with the same history and alerts, rather
+	// than a handshake; a probe's check keeps its connect time.
+	{"watched_endpoints", "kind", "TEXT NOT NULL DEFAULT 'tls'"},
+	{"watched_endpoints", "probe", "TEXT NOT NULL DEFAULT ''"},
+	{"watched_checks", "ms", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

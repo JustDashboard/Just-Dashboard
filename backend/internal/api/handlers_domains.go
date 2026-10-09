@@ -24,11 +24,16 @@ type watchedDomain struct {
 	Port   int    `json:"port"`
 	// IP is the address the name is reached at instead of where DNS points,
 	// "" for DNS.
-	IP        string    `json:"ip,omitempty"`
+	IP string `json:"ip,omitempty"`
+	// Kind is "tls", a handshake and its certificate, or "tcp", a network
+	// probe that only connects.
+	Kind      string    `json:"kind"`
 	CreatedAt time.Time `json:"createdAt"`
-	// CheckedAt is when Cert was read; absent until the first check.
+	// CheckedAt is when Cert, or a probe's Probe, was read; absent until the
+	// first check.
 	CheckedAt *time.Time            `json:"checkedAt,omitempty"`
 	Cert      *proxysvc.Certificate `json:"certificate,omitempty"`
+	Probe     *proxysvc.ProbeCheck  `json:"probe,omitempty"`
 }
 
 // handleWatchedDomains lists the watched endpoints with what their last check
@@ -48,7 +53,7 @@ func (s *Server) handleWatchedDomains(w http.ResponseWriter, r *http.Request) er
 
 func (s *Server) watchedEndpoints(ctx context.Context) ([]*watchedDomain, error) {
 	rows, err := s.Store.DB.QueryContext(ctx,
-		`SELECT id, domain, port, ip, created_at, checked_at, certificate
+		`SELECT id, domain, port, ip, kind, created_at, checked_at, certificate, probe
 		   FROM watched_endpoints ORDER BY domain, port, ip`)
 	if err != nil {
 		return nil, err
@@ -58,13 +63,19 @@ func (s *Server) watchedEndpoints(ctx context.Context) ([]*watchedDomain, error)
 	for rows.Next() {
 		var d watchedDomain
 		var created, checked int64
-		var cert string
-		if err := rows.Scan(&d.ID, &d.Domain, &d.Port, &d.IP, &created, &checked, &cert); err != nil {
+		var cert, probe string
+		if err := rows.Scan(&d.ID, &d.Domain, &d.Port, &d.IP, &d.Kind, &created, &checked, &cert, &probe); err != nil {
 			return nil, err
 		}
 		d.CreatedAt = time.Unix(created, 0).UTC()
-		if checked > 0 && cert != "" {
-			at := time.Unix(checked, 0).UTC()
+		at := time.Unix(checked, 0).UTC()
+		switch {
+		case checked > 0 && d.Kind == proxysvc.WatchTCP && probe != "":
+			d.CheckedAt = &at
+			if err := json.Unmarshal([]byte(probe), &d.Probe); err != nil {
+				return nil, err
+			}
+		case checked > 0 && d.Kind != proxysvc.WatchTCP && cert != "":
 			d.CheckedAt = &at
 			if err := json.Unmarshal([]byte(cert), &d.Cert); err != nil {
 				return nil, err
@@ -81,6 +92,9 @@ type watchDomainRequest struct {
 	// IP is optional: the address to reach Domain at, for an origin behind a
 	// CDN or one server of several behind one name.
 	IP string `json:"ip,omitempty"`
+	// Kind is "tls" (the default) or "tcp", a network probe that connects
+	// and checks nothing more.
+	Kind string `json:"kind,omitempty"`
 }
 
 // handleWatchDomain adds an endpoint, read the way the scan reads its field:
@@ -99,10 +113,17 @@ func (s *Server) handleWatchDomain(w http.ResponseWriter, r *http.Request) error
 	if err != nil {
 		return httpx.BadRequest("%v", err)
 	}
+	kind := req.Kind
+	if kind == "" {
+		kind = proxysvc.WatchTLS
+	}
+	if kind != proxysvc.WatchTLS && kind != proxysvc.WatchTCP {
+		return httpx.BadRequest("a watch is tls or tcp")
+	}
 	res, err := s.Store.DB.ExecContext(r.Context(),
-		`INSERT INTO watched_endpoints(domain, port, ip, created_at) VALUES(?,?,?,?)
+		`INSERT INTO watched_endpoints(domain, port, ip, kind, created_at) VALUES(?,?,?,?,?)
 		 ON CONFLICT(domain, port, ip) DO NOTHING`,
-		target.Host, target.Port, ip, time.Now().Unix())
+		target.Host, target.Port, ip, kind, time.Now().Unix())
 	if err != nil {
 		return httpx.Internal(err)
 	}
@@ -110,12 +131,27 @@ func (s *Server) handleWatchDomain(w http.ResponseWriter, r *http.Request) error
 	d := watchedDomain{Domain: target.Host, Port: target.Port, IP: ip}
 	var created int64
 	if err := s.Store.DB.QueryRowContext(r.Context(),
-		`SELECT id, created_at FROM watched_endpoints WHERE domain = ? AND port = ? AND ip = ?`,
-		target.Host, target.Port, ip).Scan(&d.ID, &created); err != nil {
+		`SELECT id, created_at, kind FROM watched_endpoints WHERE domain = ? AND port = ? AND ip = ?`,
+		target.Host, target.Port, ip).Scan(&d.ID, &created, &d.Kind); err != nil {
 		return httpx.Internal(err)
 	}
+	switch {
+	case d.Kind == proxysvc.WatchTLS && kind == proxysvc.WatchTCP:
+		// A handshake opens the connection first, so the TLS watch already
+		// answers what the probe would ask.
+		return httpx.Err(http.StatusConflict, "already_watched",
+			"This endpoint is already watched for TLS, whose handshake checks the connection too.")
+	case d.Kind == proxysvc.WatchTCP && kind == proxysvc.WatchTLS:
+		// A probe is the lesser question; watching its certificate takes it
+		// over, checked on the next pass.
+		if _, err := s.Store.DB.ExecContext(r.Context(),
+			`UPDATE watched_endpoints SET kind = 'tls', probe = '', checked_at = 0 WHERE id = ?`, d.ID); err != nil {
+			return httpx.Internal(err)
+		}
+		d.Kind, added = proxysvc.WatchTLS, 1
+	}
 	d.CreatedAt = time.Unix(created, 0).UTC()
-	httpx.SetAudit(r, "certificates.watch.add", target.Host, map[string]any{"port": target.Port, "ip": ip})
+	httpx.SetAudit(r, "certificates.watch.add", target.Host, map[string]any{"port": target.Port, "ip": ip, "kind": kind})
 	status := http.StatusOK
 	if added > 0 {
 		status = http.StatusCreated

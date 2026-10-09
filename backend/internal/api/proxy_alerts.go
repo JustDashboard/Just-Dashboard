@@ -1080,14 +1080,14 @@ func (s *Server) readUpstreamAlert(ctx context.Context) proxyAlertReading {
 
 // checkWatchedDomains handshakes every watched endpoint once for the pass.
 func (s *Server) checkWatchedDomains(ctx context.Context) ([]watchedDomain, bool) {
-	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, domain, port, ip FROM watched_endpoints ORDER BY domain, port, ip`)
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, domain, port, ip, kind FROM watched_endpoints ORDER BY domain, port, ip`)
 	if err != nil {
 		return nil, false
 	}
 	domains := []watchedDomain{}
 	for rows.Next() {
 		var d watchedDomain
-		if err := rows.Scan(&d.ID, &d.Domain, &d.Port, &d.IP); err != nil {
+		if err := rows.Scan(&d.ID, &d.Domain, &d.Port, &d.IP, &d.Kind); err != nil {
 			rows.Close()
 			return nil, false
 		}
@@ -1107,6 +1107,12 @@ func (s *Server) checkWatchedDomains(ctx context.Context) ([]watchedDomain, bool
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
+			if d.Kind == proxysvc.WatchTCP {
+				if probe, err := proxysvc.CheckTCP(check, d.Domain, d.IP, d.Port); err == nil {
+					d.Probe = probe
+				}
+				return
+			}
 			if cert, err := proxysvc.CheckEndpointAt(check, d.Domain, d.IP, d.Port); err == nil {
 				d.Cert = cert
 			}
@@ -1120,6 +1126,21 @@ func watchAlertReading(rule proxyAlertRule, domains []watchedDomain) proxyAlertR
 	reading := newProxyAlertReading()
 	for _, d := range domains {
 		subject := watchSubject(d)
+		if d.Kind == proxysvc.WatchTCP {
+			// A network probe has no certificate: only the unreachable rule
+			// judges it, by whether it connected.
+			switch {
+			case rule.Kind != proxyAlertWatchUnreachable:
+			case d.Probe == nil:
+				reading.Unknown[subject] = true
+			case !d.Probe.OK:
+				reading.Firing = append(reading.Firing, proxyAlertFinding{subject, proxyAlertFiringLevel, subject,
+					"No TCP connection (" + d.Probe.State + "): " + d.Probe.Error})
+			default:
+				reading.Now[subject] = fmt.Sprintf("Accepts connections, %d ms to connect.", d.Probe.Ms)
+			}
+			continue
+		}
 		if d.Cert == nil {
 			reading.Unknown[subject] = true
 			continue
