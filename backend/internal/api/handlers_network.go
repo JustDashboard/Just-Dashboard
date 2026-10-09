@@ -49,6 +49,9 @@ func (s *Server) mountNetworkRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/overview", s.handle(s.handleNetworkOverview))
 		r.Method(http.MethodGet, "/links", s.handle(s.handleNetworkLinks))
 		r.Method(http.MethodGet, "/capabilities", s.handle(s.handleNetworkCapabilities))
+		// What followed an install: phases read from the modules that own
+		// each tool, at the standing the pages that offer the install have.
+		r.Method(http.MethodGet, "/handoffs/{package}", s.handle(s.handleNetworkHandoff))
 		r.Method(http.MethodGet, "/traffic/live", s.handle(s.handleNetworkTrafficLive))
 		r.Method(http.MethodGet, "/traffic/history", s.handle(s.handleNetworkTrafficHistory))
 
@@ -84,35 +87,70 @@ func (s *Server) handleNetworkLinks(w http.ResponseWriter, r *http.Request) erro
 }
 
 // handleNetworkTrafficLive is the two-second ring for every device since a
-// moment, so a poll draws only what it has not drawn.
+// moment, so a poll draws only what it has not drawn, with the host's TCP
+// counters over the same steps and how old the newest reading is. The
+// latency figure is TCP's own estimate over every non-loopback socket,
+// folded to a distribution: it names nobody, so it is a reading like the
+// rates are.
 func (s *Server) handleNetworkTrafficLive(w http.ResponseWriter, r *http.Request) error {
 	since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
-	httpx.JSON(w, http.StatusOK, map[string]any{
-		"now":    time.Now().Unix(),
-		"series": s.modules.network.Sampler().Live(since),
-	})
+	view := s.modules.network.Sampler().LiveView(since, time.Now())
+	if r.URL.Query().Get("latency") == "1" {
+		ctx, cancel := timeoutCtx(r, 5*time.Second)
+		defer cancel()
+		view.Latency = s.modules.network.TCPLatency(ctx)
+	}
+	httpx.JSON(w, http.StatusOK, view)
 	return nil
 }
 
-// handleNetworkTrafficHistory is the recorded window, bucketed in SQL.
+// handleNetworkTrafficHistory is the recorded window, bucketed in SQL, with
+// each device's percentiles over its raw intervals. The window is a range
+// back from now (`window=6h`) or an explicit `from`/`to` (unix seconds or
+// RFC3339), which is what a dragged span or a typed range sends.
 func (s *Server) handleNetworkTrafficHistory(w http.ResponseWriter, r *http.Request) error {
-	window := time.Hour
-	if raw := r.URL.Query().Get("window"); raw != "" {
+	q := r.URL.Query()
+	to := time.Now()
+	from := to.Add(-time.Hour)
+	if raw := q.Get("window"); raw != "" {
 		d, err := metrics.ParseWindow(raw)
 		if err != nil || d <= 0 || d > 31*24*time.Hour {
 			return httpx.BadRequest("window is a duration up to 31d, such as 1h, 6h, 24h or 7d")
 		}
-		window = d
+		from = to.Add(-d)
+	}
+	if raw := q.Get("to"); raw != "" {
+		at, err := parseInstant(raw)
+		if err != nil {
+			return httpx.BadRequest("to: %v", err)
+		}
+		if at.After(to) {
+			at = to
+		}
+		to = at
+		if q.Get("from") == "" {
+			from = to.Add(-time.Hour)
+		}
+	}
+	if raw := q.Get("from"); raw != "" {
+		at, err := parseInstant(raw)
+		if err != nil {
+			return httpx.BadRequest("from: %v", err)
+		}
+		from = at
+	}
+	if !from.Before(to) || to.Sub(from) > 31*24*time.Hour {
+		return httpx.BadRequest("the window is a positive span of at most 31 days")
 	}
 	points := 240
-	if raw := r.URL.Query().Get("points"); raw != "" {
+	if raw := q.Get("points"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 2 || n > 1000 {
 			return httpx.BadRequest("points is between 2 and 1000")
 		}
 		points = n
 	}
-	h, err := s.modules.network.Sampler().History(r.Context(), window, points, r.URL.Query().Get("iface"))
+	h, err := s.modules.network.Sampler().HistoryRange(r.Context(), from, to, points, q.Get("iface"))
 	if err != nil {
 		return httpx.Internal(err)
 	}

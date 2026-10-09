@@ -1,0 +1,1 @@
+[{"id":1,"type":"cgroup","prog_id":30,"cgroup_id":1,"attach_type":"cgroup_sysctl"},{"id":2,"type":"tcx","prog_id":72,"ifindex":2,"attach_type":"tcx_ingress"}]

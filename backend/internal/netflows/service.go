@@ -367,3 +367,34 @@ func (s *Service) Export(ctx context.Context, q Query) ([]byte, error) {
 		return nil, fmt.Errorf("%w: metadata exceeds export byte cap", ErrUnavailable)
 	}
 }
+
+// Standing is what another page needs to know about the socket history
+// without reading it: whether it records, since when, for how long, and
+// which loaded kernel programs are this dashboard's own observer. It never
+// collects and never touches a row.
+type Standing struct {
+	Recording          bool       `json:"recording"`
+	KernelObserver     bool       `json:"kernelObserver"`
+	Since              *time.Time `json:"since,omitempty"`
+	RetentionDays      int        `json:"retentionDays"`
+	ObserverProgramIDs []uint32   `json:"observerProgramIds"`
+}
+
+func (s *Service) Standing() Standing {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := Standing{ObserverProgramIDs: []uint32{}}
+	if !s.started {
+		return st
+	}
+	st.Recording = s.state.Settings.Enabled
+	st.KernelObserver = s.state.Settings.KernelObserverEnabled
+	st.Since = s.state.Since
+	st.RetentionDays = s.state.Settings.RetentionDays
+	if s.observer != nil {
+		if ev := s.observer.Status(); ev.AttachmentsRetained {
+			st.ObserverProgramIDs = append(st.ObserverProgramIDs, ev.ProgramIDs...)
+		}
+	}
+	return st
+}

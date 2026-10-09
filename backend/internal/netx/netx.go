@@ -112,6 +112,8 @@ type Service struct {
 	vpn                 *VPNStore
 	wg                  *wgRecord
 	flows               *flowSampler
+	latency             latencySampler
+	congestion          congestionReader
 	independentRecovery bool
 	recoveryInstalled   bool
 }

@@ -21,7 +21,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = networkProbeSchema + networkIPAMSchema + networkWireGuardSchema + `
+const schema = networkProbeSchema + networkIPAMSchema + networkWireGuardSchema + networkTrafficSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -1335,6 +1335,15 @@ var addedColumns = []struct{ table, column, spec string }{
 	// configuration; this unsealed copy lets an edit start from them. Empty for
 	// a peer made before it existed, which reads as unknown, never as none.
 	{"network_vpn_clients", "client_routes", "TEXT NOT NULL DEFAULT ''"},
+
+	// A device's recorded interval carries its exact counter growth and the
+	// seconds it covered, so a transfer budget is measured rather than inferred
+	// from a mean rate. Unknown (NULL) for rows recorded before, never zero.
+	{"metric_interface_samples", "rx_bytes", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "tx_bytes", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "rx_packets", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "tx_packets", "INTEGER DEFAULT NULL"},
+	{"metric_interface_samples", "span", "INTEGER DEFAULT NULL"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on
