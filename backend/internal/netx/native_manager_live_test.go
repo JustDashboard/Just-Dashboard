@@ -153,7 +153,7 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 		}
 		ctx, stop := context.WithTimeout(context.Background(), 4*time.Minute)
 		defer stop()
-		unbounded := liveSudo("env", "JD_NETNS_LIVE=1", "JD_NATIVE_MANAGER_NS=1", "JD_NATIVE_MANAGER_CASE="+os.Getenv("JD_NATIVE_MANAGER_CASE"), "JD_NATIVE_MANAGER_HELPER="+helper, "JD_NATIVE_MANAGER_NM_ROOT="+nmRoot, "unshare", "--net", "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--", os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1", "-test.v")
+		unbounded := liveSudo("env", "JD_NETNS_LIVE=1", "JD_NATIVE_MANAGER_NS=1", "JD_NATIVE_MANAGER_CASE="+os.Getenv("JD_NATIVE_MANAGER_CASE"), "JD_NATIVE_MANAGER_NM_ORIGIN="+os.Getenv("JD_NATIVE_MANAGER_NM_ORIGIN"), "JD_NATIVE_MANAGER_HELPER="+helper, "JD_NATIVE_MANAGER_NM_ROOT="+nmRoot, "unshare", "--net", "--mount", "--pid", "--fork", "--kill-child=SIGKILL", "--mount-proc", "--propagation", "private", "--", os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1", "-test.v")
 		cmd := exec.CommandContext(ctx, unbounded.Path, unbounded.Args[1:]...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -332,7 +332,42 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 				if p != nil && p.Editable && p.Owner == owner {
 					break
 				}
+				if owner == "NetworkManager" && os.Getenv("JD_NATIVE_MANAGER_NM_ORIGIN") == "refuse-migration" && p != nil && strings.Contains(p.Refusal, "migrates saved profiles through Netplan") {
+					break
+				}
 				time.Sleep(200 * time.Millisecond)
+			}
+			if owner == "NetworkManager" && os.Getenv("JD_NATIVE_MANAGER_NM_ORIGIN") == "refuse-migration" {
+				if p == nil || p.Editable || !strings.Contains(p.Refusal, "migrates saved profiles through Netplan") {
+					t.Fatalf("actual migrating native writer was not refused: %+v", p)
+				}
+				path := "/etc/NetworkManager/system-connections/d0.nmconnection"
+				beforeFile, err := nativeReadProfile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.EditNativeProfile(WithPendingConfirmation(ctx, 7), "d0", NativeEditRequest{Generation: p.Generation, Intent: nativeFixtureIntent("198.18.8.3", "2001:db8:18::3")}, "127.0.0.1"); err == nil {
+					t.Fatal("migrating writer admitted a native profile change")
+				}
+				if err := nativeCurrentFile(*beforeFile, beforeFile.Identity); err != nil {
+					t.Fatalf("writer refusal changed the selected origin: %v", err)
+				}
+				if j, err := readChange(s.paths.Dir); !errors.Is(err, os.ErrNotExist) || j != nil {
+					t.Fatalf("writer refusal created a pending transaction: %+v %v", j, err)
+				}
+				unique, err := nativeOwnerIdentity(ctx, nmService)
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkpoints, err := nativeBusProperty[[]string](ctx, unique, nmObject, nmService, "Checkpoints", "ao")
+				if err != nil || len(checkpoints) != 0 {
+					t.Fatalf("writer refusal left a native checkpoint: %v %v", checkpoints, err)
+				}
+				if sources, err := os.ReadDir("/etc/netplan"); !errors.Is(err, os.ErrNotExist) && (err != nil || len(sources) != 0) {
+					t.Fatalf("writer refusal migrated an authored origin: %v %v", sources, err)
+				}
+				t.Log("Actual Ubuntu Netplan-writer image refused before profile mutation, journal creation, checkpoint creation or origin migration; this is refusal acceptance, not supported editing")
+				return
 			}
 			if p == nil || !p.Editable || p.Owner != owner {
 				t.Logf("native owner capabilities: %+v %+v %+v", nativeCapability(ctx, "NetworkManager"), nativeCapability(ctx, "networkd"), nativeCapability(ctx, "netplan"))

@@ -37,6 +37,14 @@ The adapter now refuses that running-image feature before admitting edits; cover
 Netplan/NetworkManager profiles without origin migration remains open. The failure is retained and
 is not counted as a successful restore.
 
+Final core run 10 passed against the conservative field/ownership guards: the isolated child took
+10.51 seconds and the complete wrapper/helper build took 30.84 seconds. networkd and netplan repeated
+the full static transaction/death flow. The actual Ubuntu writer image was refused before any
+profile, journal, checkpoint or authored-origin mutation; this is refusal acceptance, not supported
+editing. All owned private children were absent afterwards, only the original production networkd
+remained, and the host `/var/lib/NetworkManager` was still absent. Raw output is retained as
+`native-owner-run-10.log` in the task's external acceptance artifacts.
+
 Root-owned fault/race fixtures pass for failed durable confirmation, failure after checkpoint
 destruction, retry without rollback after confirmation, foreign stage preservation, next ordinary
 and native journal refusal, boot-epoch revalidation, profile-exchange races and cleanup-claim races.
