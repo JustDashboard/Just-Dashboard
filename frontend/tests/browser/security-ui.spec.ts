@@ -1448,3 +1448,48 @@ test("workspace: security filters are shareable and Back restores the previous q
   await expect(query).toHaveValue("")
   await expect(page.locator("[data-workspace-item]").first()).toBeFocused()
 })
+
+/**
+ * The verdict says what its checks could not see: provider policy always,
+ * since no provider adapter exists, and an nftables table no adapter models.
+ * Neither is a finding, and a clean list beside them does not say "passed".
+ */
+test("the posture names the layers its checks could not see", async ({ page }) => {
+  await mockSecurity(page, [], {
+    overrides: {
+      "/security/posture": {
+        ...posture,
+        status: "ok",
+        skipped: [],
+        findings: [],
+        unknowns: [
+          {
+            id: "unknown.provider",
+            layer: "provider",
+            title: "Provider policy is not visible",
+            detail:
+              "No provider adapter is configured. Security groups, provider firewalls, upstream NAT and load balancers in front of this host are unseen. This host has no public address on any interface, so traffic from the internet reaches it only through a provider's translation.",
+          },
+          {
+            id: "unknown.nftables",
+            layer: "nftables",
+            title: "Foreign nftables decisions are not modeled",
+            detail:
+              "1 chain outside the firewall adapter can drop or redirect inbound traffic with rules this check does not evaluate: inet crowdsec crowdsec-chain (input hook, policy accept).",
+            subjects: ["inet crowdsec crowdsec-chain (input hook, policy accept)"],
+          },
+        ],
+      },
+    },
+  })
+  await page.goto("/security")
+  const unseen = page.getByRole("region", { name: "Not seen by these checks" })
+  await expect(unseen.getByText("Provider policy is not visible", { exact: true })).toBeVisible()
+  await expect(unseen.getByText(/reaches it only through a provider's translation/)).toBeVisible()
+  await expect(
+    unseen.getByText("Foreign nftables decisions are not modeled", { exact: true }),
+  ).toBeVisible()
+  await expect(unseen.getByText(/inet crowdsec crowdsec-chain/)).toBeVisible()
+  await expect(page.getByText("No findings in the layers these checks can see")).toBeVisible()
+  await expect(page.getByText("All security checks passed")).toHaveCount(0)
+})
