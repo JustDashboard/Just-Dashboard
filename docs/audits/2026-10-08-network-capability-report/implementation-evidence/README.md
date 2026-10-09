@@ -96,6 +96,12 @@ activity-based firewall ownership, rule plans, access-guarded journaled changes 
 nftables table, with live namespace and real-ufw runs, the failed first gate, the passing gate and
 the integration reruns. VRF traffic, live FRR and live firewalld remain open.
 
+[DNS and resolver acceptance](network-dns-resolver-maturity-acceptance.md) (C066–C074, F10)
+records resolver ownership, per-link split DNS, explicit clears, DoT and DNSSEC checks,
+verification plans, hosts previews, encrypted comparisons, native DNS handoffs and private-name
+refusal, with real resolved namespace runs, live engine DHCP reads, retained failures and the
+passing gate. Other distributions, live NetworkManager split DNS and DHCP leases remain open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
