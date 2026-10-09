@@ -3,8 +3,10 @@
 This records the implementation of ledger rows C066–C074 ("DNS and resolver configuration") and the
 completion of concrete finding F10 on branch `implement/network-dns-resolver-maturity`, started from
 PR #173 head `4338e6cc`. It changes no ledger status; the proposed statuses at the end are for the
-ledger owner to apply. Raw logs, screenshots and fixture output are kept outside the tree in
-`/home/ubuntu/Just-Dashboard-net-resolver-artifacts/` under the file names quoted below.
+ledger owner to apply. The raw logs sit beside this document as `network-dns-resolver-maturity-*.log`
+files, copied byte for byte except that this host's tailnet search domain and hostname are replaced
+by `[redacted-tailnet]` and `[redacted-hostname]`. Review screenshots and the original files remain in
+the task's artifact directory outside the tree.
 
 Every live check ran on this production host without touching its resolver: the resolver fixtures
 run actual systemd-resolved 257 in new network and mount namespaces with a private `/etc`,
@@ -63,9 +65,13 @@ Tests: `split-dns.test.js` (draft extraction, family split, disabled families, s
 limits, effect sentences); browser "split DNS for a link goes through its native profile as a
 temporary apply" (asserts the PUT body keeps addresses/routes, carries both families' servers and the
 routing domain, and sends `X-JD-Network-Apply: pending`) and "a link whose native owner is not edited
-here says why…". Live: `TestNativeManagerOwnerLive` networkd case extended with a split-DNS step
-(routing and search domains, per-family servers) applied temporarily, confirmed and verified against
-networkd's runtime (result in "Final checks").
+here says why…". Live: `TestNativeManagerOwnerLive` gained a split-DNS step after its existing
+confirmed edit: the profile's own intent with `~corp.test` and `lab.test` on both families and
+per-family servers, applied temporarily through the native owner, confirmed through the reconnection
+challenge with complete cleanup, then verified as configured/runtime agreement and in networkd's own
+JSON report. The networkd owner and the Netplan owner rendering to networkd both passed in isolated
+namespaces with the freshly built recovery helper ([networkd](network-dns-resolver-maturity-split-dns-networkd.log),
+[Netplan](network-dns-resolver-maturity-split-dns-netplan.log)).
 
 Limits: NetworkManager and Netplan/NetworkManager owners are not runnable on this host (no verified
 NetworkManager userland root), so their split-DNS acceptance rests on the existing P11 native owner
@@ -207,8 +213,15 @@ Tests: `TestDNSServiceHandoffsJoinDetectionAndConnections`, `TestDNSServiceHando
 `TestDNSServiceDHCPRouteIsPrivate`, `TestNativeDHCPInventoryAcrossEngines`,
 `TestNativeDHCPMalformedSectionsStayUnknown`, `network-dns-dhcp.test.js`; browser "a detected server
 without a connection opens the connection form with its origin", "a detected server's connection
-opens its inventory and reads its native DHCP"; owned engine fixtures extended with the DHCP reading
-(results in "Final checks").
+opens its inventory and reads its native DHCP". Live: `TestDNSServiceNativeOwnedEngine` now reads DHCP
+on each freshly provisioned owned engine. All three pinned engines passed serially under the shared
+lock with their owned containers, networks and volumes removed: AdGuard Home v0.107.71 (disabled, no
+range, empty readable table), Pi-hole FTL v6.7.1 (disabled, one configured range, empty table) and
+Technitium 15.6 (one disabled scope, empty table)
+([AdGuard](network-dns-resolver-maturity-dhcp-adguard.log),
+[Pi-hole](network-dns-resolver-maturity-dhcp-pihole.log),
+[Technitium](network-dns-resolver-maturity-dhcp-technitium.log)). Lease-row parsing is covered by the
+unit fixtures only: an owned engine on a bridge network has no DHCP clients.
 
 Limits: DHCP is read-only; nothing starts, stops or reserves leases. The handoff points at
 connections; it creates none on its own. Measured filtering decisions remain the separate P17
@@ -238,4 +251,57 @@ resolver's onward forwarding is acknowledged, not measured.
 
 ## Final checks
 
-(filled in below after the final runs)
+| Check | Result | Log |
+| --- | --- | --- |
+| `scripts/test-changed.sh 4338e6cc` (final, against tree `fb523d18` plus this document) | exit 0 in 4,138 s wall (most of it waiting for the shared lock): Prettier, ESLint, `tsc`, 3,277 `bun test` cases, `go build`/`go vet`, the Go tests beside every changed file in `api`, `netx` and `dnsservice`, and 251 browser cases passed with 10 skipped (gated screenshot and optional cases) | [final](network-dns-resolver-maturity-test-changed-final.log) |
+| Resolver maturity and evidence namespace fixtures, `-race`, root, actual systemd-resolved 257 | both pass; nine namespace resolver restarts, zero public questions for refused or private names | [pass](network-dns-resolver-maturity-namespace-race-pass.log), [evidence regression](network-dns-resolver-maturity-evidence-fixture-regression.log) |
+| Native split DNS through networkd and Netplan/networkd, isolated namespaces, fresh recovery helper | both pass with temporary apply, confirmation, complete cleanup and runtime agreement | [networkd](network-dns-resolver-maturity-split-dns-networkd.log), [Netplan](network-dns-resolver-maturity-split-dns-netplan.log) |
+| Owned engine fixtures with the DHCP reading, serial, shared lock | AdGuard Home, Pi-hole and Technitium pass; owned resources removed | [AdGuard](network-dns-resolver-maturity-dhcp-adguard.log), [Pi-hole](network-dns-resolver-maturity-dhcp-pihole.log), [Technitium](network-dns-resolver-maturity-dhcp-technitium.log) |
+| Read-only owner verdict for this host | systemd-resolved, stub, confirmed, drop-in reaches programs | [log](network-dns-resolver-maturity-owner-this-host.log) |
+| DNS page review screenshots at 390 and 1440 px (gated `screenshots` cases) | owner, per-link rows, plan dialog, results, certificates, chain and split-DNS panel reviewed; per-link rows reflowed for phones after the first capture | artifact directory |
+
+## Corrected failures
+
+The fixtures found real defects, each fixed in source before the passes above; the failing runs are
+kept.
+
+- The first namespace run failed the strict change's read-back: `resolvectl status` prints a link's
+  loopback-addressed server under Global too, so the read-back saw an extra global server
+  ([log](network-dns-resolver-maturity-namespace-first-failure-readback.log)). The read-back now
+  discounts link loopback servers it was not asked to write (`TestReadbackDiscountsALinksLoopbackServer`).
+- The next run showed strict DoT never earning native strict trust for global upstreams: resolved
+  reports the reply's arrival interface (7) rather than scope zero
+  ([log](network-dns-resolver-maturity-namespace-failure-global-trust.log)). With the global scope as
+  the only candidate its policy now covers that reply (`TestDNSEvidenceGlobalScopeReplyInterface`);
+  the existing evidence fixture still passes.
+- The chain walk then failed at the root with `DNSSEC validation failed: no-signature`: excluding trust
+  anchors made resolved ask a DS for the root itself
+  ([log](network-dns-resolver-maturity-namespace-failure-root-dnskey.log)). The root's keys are now
+  asked with anchors in play, and the fixture anchors its root in the DS form resolved's built-in
+  anchors take. One intermediate fixture run panicked in its own answer function and left that
+  namespace's D-Bus and resolved running; both were stopped by PID (the host resolver, PID 487 in the
+  host namespace, was never touched) and the fixture now recovers answer panics.
+- The first browser run failed three cases ([log](network-dns-resolver-maturity-browser-initial.log)):
+  the cache tile's ticker stayed at 0 because the owner panel pushed it below the fold (the panel now
+  follows the readings), the editable profile fixture lacked `matching` lifecycle evidence, and a
+  preset selector named two cards. The rerun ([log](network-dns-resolver-maturity-browser-rerun.log))
+  then exposed a real defect: the split-DNS confirmation compared a freshly derived intent by identity
+  and refused every apply; it now checks the retained draft, as the native profile editor does.
+- The first `test-changed` run ([log](network-dns-resolver-maturity-test-changed-first.log)) failed two
+  existing audit cases written for the single verification name and an apply with no plan request;
+  they now assert the plan-then-apply contract and the `verificationNames` body.
+
+## Proposed ledger statuses
+
+| Row | Proposal | Reason |
+| --- | --- | --- |
+| C066 | implemented / acceptance pending | The adapter, UI and tests pass and this Ubuntu host is verified live, but other distributions are proven by staged trees, not live hosts. |
+| C067 | verified | Per-link scopes and split DNS through the native owner pass unit, browser and live networkd and Netplan/networkd acceptance with temporary apply and confirmation. |
+| C068 | verified | Explicit clearing is implemented, read back from actual resolved in the namespace fixture and covered by unit and browser cases. |
+| C069 | verified | Transport, fallback and trust verification and the independent certificate check pass unit, browser and actual-resolved acceptance; DoH/DoQ is out of resolved's scope and stated. |
+| C070 | verified | The chain diagnostic recomputes DS digests that actual resolved also accepted and refuses a non-IANA root, with unit and browser coverage; signature checking stays resolved's, as stated. |
+| C071 | verified | The plan/result flow, read-back and rollbacks pass unit, API, browser and actual-resolved acceptance. |
+| C072 | verified | Overlap preview and NSS resolution evidence pass unit, API, browser and namespace NSS acceptance. |
+| C073 | verified | DoT/DNSSEC comparison and explicit omissions pass unit, API and browser cases with a local verified DoT server. |
+| C074 | implemented / acceptance pending | Detection-to-connection handoff and read-only DHCP pass unit, browser and three-engine live reads, but lease rows were only unit-tested (owned engines have no clients) and DHCP stays read-only. |
+| F10 | verified | Private names are refused before any public question on native and foreign chains, with acknowledgement for unseen forwarding, in unit, browser and actual-resolved acceptance; container client vantages remain outside this finding's modelled scope. |

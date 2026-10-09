@@ -1,0 +1,10 @@
+=== RUN   TestResolverOwnerReadsThisHost
+    dns_owner_test.go:306: owner=systemd-resolved chain=stub confidence=confirmed dashboardWrites=true handoff="Global upstreams, fallback, DNS over TLS, DNSSEC and the cache are set on this page in resolved's drop-in. Per-link servers and domains come from each link's network manager; split DNS for a link is edited through its native profile."
+    dns_owner_test.go:308: evidence /etc/resolv.conf link: points at ../run/systemd/resolve/stub-resolv.conf
+    dns_owner_test.go:308: evidence /etc/resolv.conf header: This is /run/systemd/resolve/stub-resolv.conf managed by man:systemd-resolved(8).
+    dns_owner_test.go:308: evidence /etc/resolv.conf nameservers: 127.0.0.53
+    dns_owner_test.go:308: evidence /etc/resolv.conf search: [redacted-tailnet].ts.net openstacklocal
+    dns_owner_test.go:308: evidence systemd-resolved: systemd-resolved is running; it reads /etc/resolv.conf as stub
+--- PASS: TestResolverOwnerReadsThisHost (0.03s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.051s

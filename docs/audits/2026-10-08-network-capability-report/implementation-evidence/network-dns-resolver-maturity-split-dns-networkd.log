@@ -1,0 +1,19 @@
+=== RUN   TestNativeManagerOwnerLive
+    native_manager_live_test.go:224: native owner acceptance:
+        === RUN   TestNativeManagerOwnerLive
+        === RUN   TestNativeManagerOwnerLive/transport-epoch
+            native_manager_live_test.go:322: Authenticated transport GUID is pinned; mismatched and actual prior-bus epochs refuse before RequestName effects
+        === RUN   TestNativeManagerOwnerLive/networkd
+            native_manager_live_test.go:534: networkd unchanged-profile actual bound helper SHA256=c65fb18aa5cbd55bd5c016fd280b6ffe9acbbcb45a6b67505831f16bbdb0278c
+            native_manager_live_test.go:534: networkd canonical unchanged-intent path=/etc/systemd/network/20-d0.network SHA256=e22ff4ca1a1886837aee1a808ec65f89d38420cecef7ace4bc4cb999e6cf679f beforeInode=15 candidateInode=17 retainedAuthoredInode=15
+            native_manager_live_test.go:534: networkd canonical unchanged-intent path=/etc/systemd/network/20-d0.network SHA256=e22ff4ca1a1886837aee1a808ec65f89d38420cecef7ace4bc4cb999e6cf679f beforeInode=15 candidateInode=19 retainedAuthoredInode=15
+            native_manager_live_test.go:534: networkd shipped helper v10 equal-byte candidate rollback restored exact authored inodes; unchanged-intent confirmation and terminal fresh-helper retry retained exact candidate inodes and full configured/runtime/boot agreement
+            native_manager_live_test.go:620: networkd split-DNS routing/search domains and per-family servers applied temporarily, confirmed and verified against native runtime
+            native_manager_live_test.go:621: networkd actual IPv4/IPv6 addresses, DNS, metric/table routes, rollback, confirmation and backend-death helper recovery passed
+        --- PASS: TestNativeManagerOwnerLive (4.84s)
+            --- PASS: TestNativeManagerOwnerLive/transport-epoch (0.03s)
+            --- PASS: TestNativeManagerOwnerLive/networkd (4.81s)
+        PASS
+--- PASS: TestNativeManagerOwnerLive (36.41s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	36.440s
