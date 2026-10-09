@@ -1435,3 +1435,58 @@ test("recent renewal runs wrap in the renewal column, each told apart by its tim
   expect(overflow).toBeLessThanOrEqual(1)
   await page.screenshot({ path: testInfo.outputPath("renewal-recent-1280.png") })
 })
+
+test("a failed renewal says where validation failed and whose it is to fix", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page, {
+    health: renewalHealth({
+      problems: [
+        {
+          stage: "connect",
+          stageTitle: "Reaching port 80",
+          owner: "A firewall in front of port 80: this host's or the provider's",
+          domain: "app.example.com",
+          address: "203.0.113.5",
+          here: true,
+          detail:
+            "203.0.113.5: Fetching http://app.example.com/.well-known/acme-challenge/x1: Timeout during connect (likely firewall problem)",
+          action:
+            "The authority's connection went unanswered: open port 80 to the internet in the host firewall and any provider firewall or security group.",
+          links: [
+            { label: "The host firewall", href: "/network/firewall" },
+            { label: "Check from outside", href: "/network/external" },
+          ],
+        },
+        {
+          stage: "dns",
+          stageTitle: "Name resolution",
+          owner: "The DNS provider or registrar",
+          domain: "www.example.com",
+          detail: "DNS problem: NXDOMAIN looking up A for www.example.com",
+          action:
+            "Create an A or AAAA record for the name pointing at this server, then try again.",
+          links: [
+            { label: "Look the name up", href: "/network/tools?tool=dns&target=www.example.com" },
+          ],
+        },
+      ],
+    }),
+  })
+  await page.goto("/proxy/certificates")
+  const where = page.getByRole("region", { name: "Where it failed" })
+  await expect(where).toBeVisible()
+  const connect = where.getByRole("listitem").filter({ hasText: "app.example.com" })
+  await expect(connect).toContainText("Reaching port 80 — A firewall in front of port 80")
+  await expect(connect).toContainText("203.0.113.5 (this host): Fetching http://app.example.com/")
+  await expect(connect).toContainText("Timeout during connect (likely firewall problem)")
+  await expect(connect.getByRole("link", { name: "The host firewall" })).toHaveAttribute(
+    "href",
+    "/network/firewall",
+  )
+  const dns = where.getByRole("listitem").filter({ hasText: "www.example.com" })
+  await expect(dns).toContainText("Name resolution — The DNS provider or registrar")
+  await expect(dns.getByRole("link", { name: "Look the name up" })).toHaveAttribute(
+    "href",
+    "/network/tools?tool=dns&target=www.example.com",
+  )
+})

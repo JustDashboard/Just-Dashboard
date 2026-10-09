@@ -24,6 +24,7 @@ import { Status } from "@/components/status-dot"
 import { VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { IssuanceProblems } from "@/components/proxy/issuance-problems"
 
 /**
  * What the renewal schedule did, not only whether there is one.
@@ -117,6 +118,7 @@ export function RenewalRecord({
           ) : (
             health.reason && <p className="break-words">{health.reason}</p>
           )}
+          <IssuanceProblems problems={health.problems ?? []} />
           <HookFailures health={health} />
           {health.error && <p className="break-words text-muted-foreground">{health.error}</p>}
           {actions}

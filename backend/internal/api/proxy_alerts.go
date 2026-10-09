@@ -966,6 +966,18 @@ func renewalAlertReading(state *proxysvc.CertbotState) proxyAlertReading {
 		if len(parts) == 0 {
 			parts = append(parts, "the last renewal run failed")
 		}
+		// Where validation failed and whose it is to fix, so the message
+		// sends the reader to the right owner rather than to certbot.
+		for _, problem := range health.Problems {
+			if problem.Stage == proxysvc.StageUnknownRun {
+				continue
+			}
+			at := problem.StageTitle
+			if problem.Domain != "" {
+				at = problem.Domain + " at " + strings.ToLower(at)
+			}
+			parts = append(parts, fmt.Sprintf("%s — %s", at, problem.Owner))
+		}
 		reading.Firing = append(reading.Firing, proxyAlertFinding{
 			Subject: subject, Level: proxyAlertFiringLevel, Label: "Certbot renewal failed", Detail: strings.Join(parts, "; "),
 		})

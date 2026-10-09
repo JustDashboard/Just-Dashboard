@@ -3149,6 +3149,35 @@ containers/volumes/networks.
   lineage or import — unless `force`, which the page sends only after its dialog has named those
   sites. Host-Caddy `tls` file references are not detected. The page's "Delete expired and unused"
   checklist offers expired certbot/imported certificates whose `UsedBy` is empty and never forces.
+- **Where an issuance or a renewal failed, and whose it is to fix** (`issue_diagnosis.go`).
+  `DiagnoseIssuance` reads a certbot run's output — the authority's per-domain report (`Domain:`,
+  `Type:`, `Detail:`), or for a run that failed before or beside validation its meaningful lines, never
+  progress such as "Account registered." — into problems, each with a stage and that stage's owner:
+  `dns` (NXDOMAIN: the DNS provider or registrar; SERVFAIL, timeouts, refusals: the authoritative
+  nameservers), `caa` (the zone's CAA records), `connect` (a timeout: a firewall in front of port 80,
+  this host's or the provider's; refused on this host's address: whatever answers port 80 here; any
+  failure at an address that is not this host's: whoever holds it — the record points there, or a
+  provider maps it here), `challenge` (an invalid response: the web server answering the name on
+  port 80), `dns-plugin` (the plugin's credentials or zone), `dns-01` (a TXT record not found or wrong:
+  the provider and the propagation wait), `rate-limit`, `account`, `local-port` (certbot's own server
+  on an occupied port 80), `installer` (the nginx plugin) or `unknown`. The address the authority
+  reached is taken from its words, and `here` says whether it is one of this host's interfaces' —
+  set only where that can be said: a host with no public address of its own in that family may be
+  behind the provider's NAT. Each problem carries an action and links to the page holding the owner's
+  evidence: the Network DNS lookup and delegation tools, the TLS page's DNS and CAA panel, the host
+  firewall, external checks, the listening ports on 80, the Sites page's URL resolver, the HTTP tool
+  on the challenge path, the rate-limit and account panels. `GET /certificates/jobs/{id}/diagnosis`
+  (`system.admin`) reads a failed `certbot.*` job's held output (404 for another kind; a job that did
+  not fail has none), and `RenewalHealth.problems` carries the last failed renewal run's, which the
+  `renewal_failed` alert appends as "domain at stage — owner". The Certificates page's issuance
+  console and a site form's certificate step show **Where it failed** under a failed job
+  (`issuance-problems.tsx`), and the renewal notice shows the renewal's. Tests:
+  `TestDiagnoseIssuanceReadsEachDomainsStageAndOwner`, `TestDiagnoseIssuanceReadsRunFailures`,
+  `TestFailedRenewalRunCarriesItsProblems`, `TestCertJobDiagnosisReadsTheFailedRun`, and
+  `TestLiveCertbotFailureIsReadByStage`, where the host's certbot orders over webroot, into private
+  directories, from a certificate authority on loopback that fails the challenge as a real one does
+  (connection, DNS, unauthorized and CAA problems), and its real output is read into each stage —
+  no request leaves the host and no certificate exists.
 - **Issuing (`certbot_issue.go`, `PlanIssue`).** `IssueRequest` takes `keyType` (`ecdsa`/`rsa`),
   `rsaKeySize` (2048/3072/4096) and `certName` (`certNameRe`, passed as `--cert-name`: names are
   added to a lineage by resending its whole list under its name, which avoids `--expand`). A key of

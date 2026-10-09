@@ -101,9 +101,43 @@ export type RenewalHealth = {
   failingSince?: string
   /** Hooks the last run ran that exited with an error; certbot only warns, so the run passes. */
   hookFailures?: HookFailure[]
+  /** What the last failed run's authority or certbot reported, by stage and owner. */
+  problems?: IssuanceProblem[]
   /** Why the record could not be read. */
   error?: string
 }
+
+/**
+ * One problem a certbot run reported, at the stage of validation it failed
+ * and that stage's owner, with the pages that hold the owner's evidence.
+ */
+export type IssuanceProblem = {
+  stage:
+    | "dns"
+    | "caa"
+    | "connect"
+    | "challenge"
+    | "dns-01"
+    | "dns-plugin"
+    | "rate-limit"
+    | "account"
+    | "local-port"
+    | "installer"
+    | "unknown"
+  stageTitle: string
+  owner: string
+  domain?: string
+  /** The address the authority reached the name at. */
+  address?: string
+  /** Whether that address is this host's own, where it can be said. */
+  here?: boolean
+  detail: string
+  action: string
+  links: { label: string; href: string }[]
+}
+
+/** GET /certificates/jobs/{id}/diagnosis */
+export type IssuanceDiagnosis = { job: string; status: string; problems: IssuanceProblem[] }
 
 /** A hook certbot ran that exited with an error. */
 export type HookFailure = {
