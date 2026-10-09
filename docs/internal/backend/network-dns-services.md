@@ -102,6 +102,14 @@ removes both owned data volumes; ordinary connection deletion cannot bypass it.
 
 ## Acceptance status
 
+The first retained UI mounts administrator-only native connection/inventory, reviewed changes and
+owned setup/removal sheets on the existing DNS reading page, independent of host resolver read
+availability. It preserves the backend's closed action scope and native provenance. Fresh matching
+policy and immutable review checks hold stale confirmations; account-scoped attempt IDs prevent
+the UI from replaying an uncertain apply after navigation or reload. This UI source is implemented,
+with pure guards and static checks passing; source-matched build/browser/screenshot acceptance is
+still pending. Broader native zone/view/client policy editing remains follow-up work under P17.
+
 P17 remains in progress until all three actual pinned engines, private API, retained UI and the
 fresh integrated reachable checks pass. Pure/HTTP fixtures do not establish real native-engine
 compatibility, and native container restart is not a host reboot proof.

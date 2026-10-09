@@ -15,6 +15,7 @@ import { Adblock } from "@/components/network/dns/adblock"
 import { HostRecordsEditor } from "@/components/network/dns/host-records"
 import { LookupRace } from "@/components/network/dns/lookup-race"
 import { DNSPolicyEvidence } from "@/components/network/dns/policy-evidence"
+import { DNSServiceManager } from "@/components/network/dns/services"
 import { ResolverChain, viaStub } from "@/components/network/dns/resolver-chain"
 import { encryptionOf, splitServer } from "@/components/network/dns/resolvers"
 import { UpstreamEditor } from "@/components/network/dns/upstreams"
@@ -63,6 +64,7 @@ export default function NetworkDNSPage() {
       <Page className="animate-rise">
         <PageContext eyebrow="Network" title="DNS" />
         {dns.error ? <ErrorState error={dns.error} onRetry={dns.refresh} /> : <LoadingPanel />}
+        <DNSServiceManager key="native-dns-services" />
       </Page>
     )
   }
@@ -124,6 +126,8 @@ export default function NetworkDNSPage() {
           </PanelBody>
         </Panel>
       </Section>
+
+      <DNSServiceManager key="native-dns-services" />
 
       {hosts.data ? (
         <HostRecordsEditor records={hosts.data} onSaved={hosts.refresh} />

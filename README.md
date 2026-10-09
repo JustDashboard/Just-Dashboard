@@ -85,6 +85,11 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   and shaping expose kernel evidence separately from saved settings. DNS tests use the host's
   configured resolver chain, checking native split policy when supported and reporting unknowns
   for other paths; direct comparisons require named destinations and a disclosure acknowledgment.
+  Administrators can connect supported native AdGuard Home, Pi-hole or Technitium engines read-only
+  by default, inspect their separate configured/runtime evidence and review supported policy changes.
+  Optional owned DNS setup reviews an already cached pinned image and exact loopback-only resources;
+  creation and removal are separately confirmed, and removal includes both persistent data volumes.
+  Retained outcomes remain inspectable after uncertainty; the dashboard does not replay an apply.
   Existing native profiles expose owner, saved intent and current evidence separately. The
   [native profile adapter and its current limits](docs/internal/backend/network-native-managers.md)
   describe conservative L3 editing, durable terminal cleanup, separate verified Ubuntu

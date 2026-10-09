@@ -87,6 +87,15 @@ the same safe native adapter; its optional typed `hops` retain each question, al
 policy fingerprint. Failed launches/history reads retain
 dated evidence and the query draft. Reload never reruns a private question or grants direct-query
 disclosure consent.
+Native DNS service sheets are private administrator surfaces and issue no service reads for reader
+accounts. `lib/network-dns-services.ts` validates connection, inventory and retained-review envelopes;
+an incomplete response is a read error. Credentials, tokens, CA material and bootstrap passwords stay
+request-only and are cleared after submission; only bounded review IDs are stored in account-scoped
+session storage to hold an uncertain apply across navigation/reload. Retained history never starts or
+replays a native action. Open confirmations check current capabilities, read freshness, generation,
+policy fingerprint and immutable reviewed intent again before sending. Owned removal checks the exact
+current owner/image/resource identities separately. HTTP 200 with a nonverified state remains a
+retained outcome requiring review. A late planned read cannot overwrite a terminal native response.
 WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
 and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
 containment; successful setup says configured when native runtime is not up.

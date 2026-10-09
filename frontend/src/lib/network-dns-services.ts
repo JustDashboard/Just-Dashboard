@@ -446,10 +446,99 @@ export function readDNSProvision(value: unknown, expectedId?: string): DNSServic
 export function readDNSList<T>(value: unknown, read: (item: unknown) => T, limit = 64): T[] {
   if (!Array.isArray(value) || value.length > limit)
     throw new Error("Native DNS list is incomplete or exceeds its retained limit.")
-  return value.map(read)
+  return value.map((item) => read(item))
 }
 
 export const dnsAttemptKey = (kind: "change" | "provision", id: string) => `${kind}:${id}`
+
+export function readDNSAttempts(value: string | null): Set<string> {
+  if (value === null) return new Set()
+  const parsed: unknown = JSON.parse(value)
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length > 256 ||
+    parsed.some(
+      (item) => typeof item !== "string" || !/^(change|provision):[A-Za-z0-9_-]{1,128}$/.test(item),
+    )
+  )
+    throw new Error(
+      "Saved DNS attempts are unreadable. Apply remains held; inspect the retained result.",
+    )
+  return new Set(parsed)
+}
+
+export function dnsRetainedReview<T extends DNSServiceChange | DNSServiceProvision>(
+  local: T | undefined,
+  remote: T | undefined,
+): T | undefined {
+  if (!local) return remote
+  if (!remote) return local
+  if (local.id !== remote.id) return remote
+  // A late read must not erase the terminal response of the mutation just completed.
+  if (local.state === "removed" && remote.state !== "removed") return local
+  if (local.state !== "planned" && remote.state === "planned") return local
+  if (local.endedAt && remote.state === "applying") return local
+  if (local.endedAt && remote.endedAt && Date.parse(local.endedAt) > Date.parse(remote.endedAt))
+    return local
+  return remote
+}
+
+export function dnsChangeOwnerProblem(change: DNSServiceChange, view?: DNSServiceView) {
+  if (!view || view.state !== "available" || view.error || !view.snapshot)
+    return "The native owner could not be read. Refresh its current policy before applying."
+  if (
+    view.connection.id !== change.connectionId ||
+    view.connection.generation !== change.generation ||
+    !view.connection.management ||
+    !change.before ||
+    view.snapshot.engine !== change.before.engine ||
+    view.snapshot.policyFingerprint !== change.before.policyFingerprint
+  )
+    return "The native policy or connection changed. Read it and create a new review."
+  return undefined
+}
+
+export function dnsSameProvisionResources(
+  before: DNSServiceProvision,
+  current: DNSServiceProvision,
+) {
+  return (
+    before.id === current.id &&
+    before.state === current.state &&
+    before.owner === current.owner &&
+    before.imageId === current.imageId &&
+    JSON.stringify(before.resources) === JSON.stringify(current.resources)
+  )
+}
+
+export function dnsSameReviewedIntent(
+  before: DNSServiceChange | DNSServiceProvision,
+  current: DNSServiceChange | DNSServiceProvision,
+) {
+  if (
+    before.id !== current.id ||
+    before.createdAt !== current.createdAt ||
+    before.expiresAt !== current.expiresAt ||
+    JSON.stringify(before.request) !== JSON.stringify(current.request)
+  )
+    return false
+  if ("resources" in before && "resources" in current)
+    return (
+      before.owner === current.owner &&
+      before.imageId === current.imageId &&
+      before.image === current.image &&
+      before.resources.containerName === current.resources.containerName &&
+      before.resources.networkName === current.resources.networkName &&
+      JSON.stringify(before.resources.volumes) === JSON.stringify(current.resources.volumes)
+    )
+  if (!("resources" in before) && !("resources" in current))
+    return (
+      before.connectionId === current.connectionId &&
+      before.generation === current.generation &&
+      before.before?.policyFingerprint === current.before?.policyFingerprint
+    )
+  return false
+}
 
 export function dnsReviewProblem(
   review: DNSServiceChange | DNSServiceProvision,

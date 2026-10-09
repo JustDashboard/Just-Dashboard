@@ -32,6 +32,19 @@ hiding a control through `useAuth().can()` is affordance only.
 | `/system-users` | Host account inventory under four readings (accounts with the people as faces, administrators, who can sign in, the last sign-in and where from); the accounts as lit cards that open their SSH keys — a person as their initials in their hue, a daemon's account as its product — shelved into people and system accounts, with All, Can sign in, Administrators and Locked chips; create, lock and delete; the keys sheet opening on the account's mark with each key drawn as the service its comment names | system-users page, `components/system-users/marks.tsx` (unit-tested); backend contract in [`../backend/git-backups-users.md`](../backend/git-backups-users.md#host-users-and-ssh-keys); checked by `tests/browser/system-ui.spec.ts` |
 | `/terminal` | Direct PTY sessions held on the host so they outlive the dashboard (opened and closed, nothing else — no folders, renaming or pinning), windows with retained screens and connections while switching, directional nested splits with pointer/keyboard divider resizing and focused input, Codex/Claude run in the focused shell (a sibling window only when that terminal is holding a program), a window strip that scrolls without a scrollbar behind edge fades and chevrons, tabs and rows named after what the shell is doing (without the agent's own title glyph) with a working mark and the running program's own logo (a terminal's where it has none), a Files and Git companion column (full-width tabs; files open with a floating Save that appears only once edited; the Git tab is the repository's changes read file by file, branch switching and checking out an open pull request, with a link to the Git page for everything else), the last-open session and window remembered across navigation, side tools, replay, a dropped socket reconnecting by itself, clipboard upload, renderer, and keyboard customization | terminal page, `components/terminal/`, `components/xterm-pane.tsx`; see [`features-terminal.md`](features-terminal.md#the-terminal-panel) |
 
+The DNS page also mounts `components/network/dns/services.tsx` for administrators, including while
+the host resolver reading is unavailable. Native connections default read-only; replacement requires
+the complete native credential and selected custom CA again. Engine sheets keep listeners, runtime,
+upstreams, client access/settings, authoritative zones, local overrides, native views, filtering groups,
+named networks/translations and bounded native query history distinct, with their native evidence
+basis and unknowns. Retained native changes and owned Docker setup reviews open separate sheets.
+Apply requires a fresh matching owner/policy, unchanged reviewed intent and explicit confirmation;
+an attempted apply stays held across navigation/reload through account-scoped browser attempt IDs.
+Only explicit native `verified` state reports verification. Owned removal separately names the
+container, bridge and both data volumes and refuses changed identities. This UI exposes the backend's
+closed supported actions; broader zone/view/client editing remains outside this first handoff.
+Its fresh build, browser interaction and screenshot acceptance remain pending until recorded.
+
 Network interface sheets add the administrator-only native persistent profile editor
 (`components/network/interfaces/native-profile.tsx`). It reads the supported existing owner, including
 standalone veth profiles verified by the backend's private reciprocal-peer fences, and retains

@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test"
 import {
   dnsAttemptKey,
+  dnsChangeOwnerProblem,
+  dnsRetainedReview,
   dnsReviewProblem,
+  dnsSameProvisionResources,
+  dnsSameReviewedIntent,
+  readDNSAttempts,
   readDNSChange,
   readDNSConnection,
   readDNSList,
@@ -9,6 +14,110 @@ import {
   readDNSSnapshot,
   readDNSView,
 } from "./network-dns-services"
+
+test("retained history readers do not mistake the row index for an expected identity", () => {
+  const reviews = [change(), { ...change(), id: "change-two" }]
+  expect(readDNSList(reviews, readDNSChange).map((row) => row.id)).toEqual([
+    "change-one",
+    "change-two",
+  ])
+  const setups = [provision(), { ...provision(), id: "setup-two" }]
+  expect(readDNSList(setups, readDNSProvision).map((row) => row.id)).toEqual([
+    "setup-one",
+    "setup-two",
+  ])
+})
+
+test("native owner refresh holds a stale or unavailable baseline before confirmation", () => {
+  const review = change()
+  const view = { connection: connection(), state: "available", snapshot: snapshot() }
+  expect(dnsChangeOwnerProblem(review, view)).toBeUndefined()
+  for (const next of [
+    undefined,
+    { ...view, state: "unavailable" },
+    { ...view, error: "native timeout" },
+    { ...view, snapshot: undefined },
+  ])
+    expect(dnsChangeOwnerProblem(review, next)).toContain("could not be read")
+  for (const next of [
+    { ...view, snapshot: { ...view.snapshot, policyFingerprint: "foreign-change" } },
+    { ...view, connection: { ...view.connection, generation: 4 } },
+    { ...view, connection: { ...view.connection, management: false } },
+  ])
+    expect(dnsChangeOwnerProblem(review, next)).toContain("changed")
+})
+
+test("owned removal retains exact resource identities while its confirmation is open", () => {
+  const setup = provision()
+  expect(dnsSameProvisionResources(setup, structuredClone(setup))).toBe(true)
+  for (const next of [
+    { ...setup, state: "verified" },
+    { ...setup, owner: "other-install" },
+    { ...setup, imageId: "other-image" },
+    { ...setup, resources: { ...setup.resources, volumes: ["foreign-data"] } },
+    { ...setup, resources: { ...setup.resources, containerId: "replaced" } },
+  ])
+    expect(dnsSameProvisionResources(setup, next)).toBe(false)
+})
+
+test("only bounded review identities survive the browser attempt record", () => {
+  expect([...readDNSAttempts(null)]).toEqual([])
+  expect([...readDNSAttempts('["change:change-one","provision:setup-one"]')]).toEqual([
+    "change:change-one",
+    "provision:setup-one",
+  ])
+  for (const value of [
+    '["password:secret"]',
+    '["change:"]',
+    "{}",
+    "broken",
+    JSON.stringify(Array(257).fill("change:x")),
+  ])
+    expect(() => readDNSAttempts(value)).toThrow()
+})
+
+test("late reads preserve terminal native responses while newer cleanup results remain visible", () => {
+  const done = { ...change(), state: "verified", endedAt: "2026-10-09T12:01:00Z" }
+  expect(dnsRetainedReview(done, change())).toBe(done)
+  expect(dnsRetainedReview(done, { ...change(), state: "applying" })).toBe(done)
+  const removed = { ...provision(), state: "removed", endedAt: "2026-10-09T12:02:00Z" }
+  expect(dnsRetainedReview(removed, { ...provision(), state: "verified" })).toBe(removed)
+  const removing = { ...provision(), state: "removing" }
+  expect(
+    dnsRetainedReview({ ...provision(), state: "verified", endedAt: done.endedAt }, removing),
+  ).toBe(removing)
+  const newer = { ...done, state: "needs_review", endedAt: "2026-10-09T12:03:00Z" }
+  expect(dnsRetainedReview(done, newer)).toBe(newer)
+})
+
+test("an open confirmation and its result retain the exact native owner and reviewed intent", () => {
+  const native = change()
+  expect(dnsSameReviewedIntent(native, { ...native, state: "verified" })).toBe(true)
+  for (const next of [
+    { ...native, generation: 4 },
+    { ...native, connectionId: "replacement-owner" },
+    { ...native, before: { ...native.before, policyFingerprint: "other-policy" } },
+    { ...native, request: { action: "protection", protection: true } },
+    { ...native, expiresAt: "2026-10-09T13:05:00Z" },
+  ])
+    expect(dnsSameReviewedIntent(native, next)).toBe(false)
+  const setup = provision()
+  expect(
+    dnsSameReviewedIntent(setup, {
+      ...setup,
+      state: "verified",
+      resources: { ...setup.resources, phase: "verified", containerId: "new-owned-id" },
+    }),
+  ).toBe(true)
+  for (const next of [
+    { ...setup, owner: "other-owner" },
+    { ...setup, imageId: "unreviewed-image" },
+    { ...setup, request: { ...setup.request, dnsPort: 5353 } },
+    { ...setup, resources: { ...setup.resources, volumes: ["different-data"] } },
+  ])
+    expect(dnsSameReviewedIntent(setup, next)).toBe(false)
+  expect(dnsSameReviewedIntent(native, setup)).toBe(false)
+})
 
 const at = "2026-10-09T12:00:00Z"
 const connection = () => ({
