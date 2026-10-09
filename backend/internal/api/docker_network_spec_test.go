@@ -22,6 +22,9 @@ func TestNetworkCreationGatesHostDriversOptionsAndReservedOwnerLabels(t *testing
 		{"limited driver", auth.RoleLimited, `{"name":"test","driver":"macvlan"}`, http.StatusForbidden},
 		{"limited options", auth.RoleLimited, `{"name":"test","options":{"parent":"eth0"}}`, http.StatusForbidden},
 		{"admin driver", auth.RoleAdmin, `{"name":"test","driver":"macvlan","options":{"parent":"eth0"}}`, http.StatusCreated},
+		{"absent driver", auth.RoleAdmin, `{"name":"test","driver":"calico"}`, http.StatusBadRequest},
+		{"absent parent", auth.RoleAdmin, `{"name":"test","driver":"macvlan","options":{"parent":"eth9"}}`, http.StatusBadRequest},
+		{"swarm driver without swarm", auth.RoleAdmin, `{"name":"test","driver":"overlay"}`, http.StatusBadRequest},
 		{"reserved deployment", auth.RoleAdmin, `{"name":"test","labels":{"io.just-dashboard.managed":"true"}}`, http.StatusBadRequest},
 		{"reserved compose", auth.RoleAdmin, `{"name":"test","labels":{"com.docker.compose.project":"foreign"}}`, http.StatusBadRequest},
 		{"invalid allocation", auth.RoleAdmin, `{"name":"test","subnet":"192.0.2.0/24","gateway":"198.51.100.1"}`, http.StatusBadRequest},
@@ -31,6 +34,9 @@ func TestNetworkCreationGatesHostDriversOptionsAndReservedOwnerLabels(t *testing
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			s, router := gatewayRouter(t, test.role, false)
+			original := hostInterfaces
+			hostInterfaces = func() []string { return []string{"lo", "eth0"} }
+			t.Cleanup(func() { hostInterfaces = original })
 			calls := 0
 			engine := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == "/_ping" {
@@ -48,13 +54,24 @@ func TestNetworkCreationGatesHostDriversOptionsAndReservedOwnerLabels(t *testing
 					_, _ = w.Write([]byte(`{"Id":"fixture","Name":"test","Driver":"bridge"}`))
 					return
 				}
+				// Reading the driver catalogue is not a creation.
+				if strings.HasSuffix(r.URL.Path, "/info") {
+					calls--
+					_, _ = w.Write([]byte(`{"Plugins":{"Network":["bridge","host","macvlan","null"]},"Swarm":{"LocalNodeState":"inactive"}}`))
+					return
+				}
+				if strings.HasSuffix(r.URL.Path, "/plugins") {
+					calls--
+					_, _ = w.Write([]byte(`[]`))
+					return
+				}
 				t.Errorf("unexpected Engine request %s %s", r.Method, r.URL.Path)
 				w.WriteHeader(http.StatusNotFound)
 			}))
 			defer engine.Close()
-			original := s.modules.docker
+			originalDocker := s.modules.docker
 			s.modules.docker = dockerx.New(engine.URL)
-			t.Cleanup(func() { _ = s.modules.docker.Close(); s.modules.docker = original })
+			t.Cleanup(func() { _ = s.modules.docker.Close(); s.modules.docker = originalDocker })
 			s.mountDockerRoutes(router)
 			request := httptest.NewRequest(http.MethodPost, "/docker/networks/", strings.NewReader(test.body))
 			request.Header.Set("Content-Type", "application/json")

@@ -412,10 +412,10 @@ func TestSelfProjectPrefersTheBackendWhereSeveralMountTheData(t *testing.T) {
 		{Name: "nightly-backup", Project: "backups", Service: "job", Mounts: []string{"/var/lib/just-dashboard"}},
 		{Name: "just-dashboard-backend-1", Project: "just-dashboard", Service: "backend", Mounts: []string{"/var/lib/just-dashboard"}},
 	}
-	if got := selfProject(containers, "/var/lib/just-dashboard"); got != "just-dashboard" {
+	if got := SelfProject(containers, "/var/lib/just-dashboard"); got != "just-dashboard" {
 		t.Errorf("selfProject = %q, want just-dashboard", got)
 	}
-	if got := selfProject(containers[:1], ""); got != "" {
+	if got := SelfProject(containers[:1], ""); got != "" {
 		t.Errorf("with no data directory, selfProject = %q", got)
 	}
 }

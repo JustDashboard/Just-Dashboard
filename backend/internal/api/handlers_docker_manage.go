@@ -500,6 +500,9 @@ func (s *Server) handleNetworkCreate(w http.ResponseWriter, r *http.Request) err
 	if err := s.authoriseNetworkSpec(r, spec); err != nil {
 		return err
 	}
+	if err := s.checkNetworkDriver(r.Context(), spec); err != nil {
+		return err
+	}
 	prefixes := make([]string, 0, len(spec.IPAM))
 	for _, pool := range spec.IPAM {
 		prefixes = append(prefixes, pool.Subnet)
@@ -539,10 +542,21 @@ func (s *Server) handleNetworkConnect(w http.ResponseWriter, r *http.Request) er
 	if req.Container == "" {
 		return httpx.BadRequest("a container is required")
 	}
-	if err := s.modules.docker.ConnectNetwork(r.Context(), id, req.Container, req.Aliases); err != nil {
+	req.Aliases = cleanAliases(req.Aliases)
+	ctx, cancel := timeoutCtx(r, networkDependencyTimeout)
+	defer cancel()
+	deps, err := s.networkDependencies(ctx, id, req.Container)
+	if err != nil {
+		return err
+	}
+	conflicts := dockerx.PreviewConnect(deps, req.Container, req.Aliases)
+	if dockerx.Blocking(conflicts) {
+		return conflictRefusal(conflicts)
+	}
+	if err := s.modules.docker.ConnectNetwork(ctx, deps.Network.ID, req.Container, req.Aliases); err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.connect", id, map[string]any{"container": req.Container, "aliases": req.Aliases})
+	httpx.SetAudit(r, "docker.network.connect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "aliases": req.Aliases, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }
@@ -559,22 +573,96 @@ func (s *Server) handleNetworkDisconnect(w http.ResponseWriter, r *http.Request)
 	if req.Container == "" {
 		return httpx.BadRequest("a container is required")
 	}
-	if err := s.modules.docker.DisconnectNetwork(r.Context(), id, req.Container, req.Force); err != nil {
+	ctx, cancel := timeoutCtx(r, networkDependencyTimeout)
+	defer cancel()
+	deps, err := s.networkDependencies(ctx, id, req.Container)
+	if err != nil {
+		return err
+	}
+	// The dashboard's own containers, the shared ingress and a deployment's
+	// database links are refused here as well as in the preview, so no
+	// client can detach them by skipping it.
+	conflicts := dockerx.PreviewDisconnect(deps, req.Container)
+	if dockerx.Blocking(conflicts) {
+		return conflictRefusal(conflicts)
+	}
+	if err := s.modules.docker.DisconnectNetwork(ctx, deps.Network.ID, req.Container, req.Force); err != nil {
 		return s.dockerErr(err)
 	}
-	httpx.SetAudit(r, "docker.network.disconnect", id, map[string]any{"container": req.Container})
+	httpx.SetAudit(r, "docker.network.disconnect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "acknowledged": conflictCodes(conflicts)})
 	httpx.NoContent(w)
 	return nil
 }
 
+// networkPruneSkip is a reviewed network a prune did not remove, and why.
+type networkPruneSkip struct {
+	ID     string `json:"id"`
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason"`
+}
+
+// handleNetworkPrune removes the reviewed networks: the ids the operator
+// confirmed from GET /docker/networks/prune, each rechecked now and removed
+// only while it is still removable. Without ids it removes every network
+// that is removable now. It never runs the Engine's own prune, which also
+// takes networks stopped containers still name.
 func (s *Server) handleNetworkPrune(w http.ResponseWriter, r *http.Request) error {
-	rep, err := s.modules.docker.PruneNetworks(r.Context())
-	if err != nil {
-		return s.dockerErr(err)
+	var req struct {
+		IDs []string `json:"ids"`
 	}
-	httpx.SetAudit(r, "docker.network.prune", "", map[string]any{"deleted": rep.Items})
-	httpx.JSON(w, http.StatusOK, rep)
+	if r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(r, &req); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 2*networkDependencyTimeout)
+	defer cancel()
+	candidates, err := s.pruneCandidates(ctx)
+	if err != nil {
+		return err
+	}
+	byID := map[string]dockerx.PruneCandidate{}
+	wanted := req.IDs
+	for _, c := range candidates {
+		byID[c.ID] = c
+		if req.IDs == nil && c.Removable {
+			wanted = append(wanted, c.ID)
+		}
+	}
+	out := struct {
+		dockerx.PruneReport
+		Skipped []networkPruneSkip `json:"skipped"`
+	}{PruneReport: dockerx.PruneReport{Kind: "networks", Items: []string{}}, Skipped: []networkPruneSkip{}}
+	for _, id := range wanted {
+		candidate, ok := byID[id]
+		switch {
+		case !ok:
+			out.Skipped = append(out.Skipped, networkPruneSkip{ID: id, Reason: "It is no longer unused, or no longer exists."})
+			continue
+		case !candidate.Removable:
+			out.Skipped = append(out.Skipped, networkPruneSkip{ID: id, Name: candidate.Name, Reason: firstConflict(candidate.Conflicts)})
+			continue
+		}
+		if err := s.modules.docker.RemoveNetwork(ctx, id); err != nil {
+			out.Skipped = append(out.Skipped, networkPruneSkip{ID: id, Name: candidate.Name, Reason: err.Error()})
+			continue
+		}
+		out.Items = append(out.Items, candidate.Name)
+	}
+	httpx.SetAudit(r, "docker.network.prune", "", map[string]any{"deleted": out.Items, "requested": req.IDs, "skipped": len(out.Skipped)})
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+func firstConflict(conflicts []dockerx.NetworkConflict) string {
+	for _, level := range []string{dockerx.ConflictBlock, dockerx.ConflictWarn} {
+		for _, c := range conflicts {
+			if c.Level == level {
+				return c.Message
+			}
+		}
+	}
+	return "It is not removable now."
 }
 
 // ---------------------------------------------------------------- stacks ---

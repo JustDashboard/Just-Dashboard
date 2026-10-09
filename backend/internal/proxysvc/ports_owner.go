@@ -314,7 +314,7 @@ func AttributeOwners(listeners []Listener, in OwnerInput) []Listener {
 	for _, u := range in.SocketUnits {
 		units[bindingKey{u.Protocol, u.Address, u.Port}] = u
 	}
-	self := selfProject(in.Containers, in.DataDir)
+	self := SelfProject(in.Containers, in.DataDir)
 	isSelf := func(l *Listener) bool {
 		if in.SelfPID > 0 && l.PID == in.SelfPID {
 			return true
@@ -429,13 +429,13 @@ func containerOf(c *RunningContainer, published bool) *ListenerContainer {
 	}
 }
 
-// selfProject is the compose project of the dashboard's own container: the
+// SelfProject is the compose project of the dashboard's own container: the
 // one mounting its data directory, which holds the database this process
 // has open. Two dashboards on one host have two data directories. Where
 // several containers mount it, the compose service named backend is the
 // dashboard's; where none does, the dashboard is not a container, and only
 // its own PID is its own.
-func selfProject(containers []RunningContainer, dataDir string) string {
+func SelfProject(containers []RunningContainer, dataDir string) string {
 	if dataDir == "" {
 		return ""
 	}
