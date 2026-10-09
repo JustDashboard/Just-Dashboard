@@ -175,6 +175,35 @@ test("reader accounts never request native filter metadata", async ({ page }) =>
   expect(control.mutations).toEqual([])
 })
 
+test("unreadable native clients and groups keep unknown evidence without a zero-policy count", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "pihole", management: false })
+  const snapshot = control.view.snapshot!
+  snapshot.clients = []
+  snapshot.filterGroups = []
+  snapshot.clientEvidence = {
+    state: "unknown",
+    basis: "unavailable",
+    summary: "Native client memberships are unreadable.",
+  }
+  snapshot.appClientEvidence = {
+    state: "unknown",
+    basis: "unavailable",
+    summary: "Native group identities are unreadable.",
+  }
+  await open(page)
+  for (const [title, label] of [
+    ["Native client settings", "Client evidence · unknown"],
+    ["Native filtering groups", "App client evidence · unknown"],
+  ]) {
+    const region = sheet(page).getByRole("region", { name: title, exact: true })
+    await expect(region.getByText(label, { exact: true })).toBeVisible()
+    await expect(region.getByLabel(`0 ${title.toLowerCase()}`, { exact: true })).toHaveCount(0)
+  }
+  expect(control.mutations).toEqual([])
+})
+
 for (const width of [390, 1280, 1720]) {
   for (const engine of ["adguard", "pihole", "technitium"] as const) {
     test(`${engine} native filter reading fits ${width}px`, async ({ page }, testInfo) => {

@@ -105,6 +105,8 @@ polling `/changes/{id}/current`; ordinary connection inventory cannot supply sel
 freshness. The current read retains raw record/client fingerprints, while open confirmations also
 compare the complete immutable request and selected metadata. Explicit null and empty client
 comments have distinct labels and remain unchanged in native readback.
+Unreadable native client memberships or group identities keep their own unknown evidence;
+their section headers withhold counts rather than presenting an unknown inventory as zero policy.
 Filter metadata uses the separate bounded `lib/network-dns-filters.ts` decoder and `/filters` read.
 It checks complete connection identity and generation, redacted HTTP(S) origins, closed per-engine
 entry kinds and configured/fingerprint consistency. Native unavailable or transport failures retain

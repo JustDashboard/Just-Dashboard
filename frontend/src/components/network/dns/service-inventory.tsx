@@ -399,7 +399,12 @@ function Inventory({
               </div>
             </div>
           </InventorySection>
-          <InventorySection title="Native client settings" count={snapshot.clients.length}>
+          <InventorySection
+            title="Native client settings"
+            count={
+              snapshot.clientEvidence.state === "configured" ? snapshot.clients.length : undefined
+            }
+          >
             <Reading label="Client evidence" value={snapshot.clientEvidence} />
             <ul className="divide-panel-border min-w-0 divide-y">
               {snapshot.clients.map((client, index) => (
@@ -489,7 +494,14 @@ function Inventory({
               . Mappings are listed with their native view groups.
             </p>
           </InventorySection>
-          <InventorySection title="Native filtering groups" count={snapshot.filterGroups.length}>
+          <InventorySection
+            title="Native filtering groups"
+            count={
+              snapshot.appClientEvidence.state === "configured"
+                ? snapshot.filterGroups.length
+                : undefined
+            }
+          >
             <p className="text-body">
               Installed-app protection:{" "}
               {snapshot.appProtection === undefined

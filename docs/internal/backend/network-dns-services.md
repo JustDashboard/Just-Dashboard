@@ -155,6 +155,7 @@ remain valid; collection/element null, wrong numeric types, duplicate or out-of-
 refused before selection. Native client/group reads apply the same presence-aware contract:
 unreadable memberships or null/duplicate/invalid group identities and enable fields stay unknown,
 with no partial configured inventory or replacement baseline.
+The detail sheet withholds client/group counts while their native inventory evidence is unknown.
 
 | Action | Engine and reviewed scope |
 | --- | --- |
