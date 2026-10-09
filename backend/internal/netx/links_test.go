@@ -1,6 +1,9 @@
 package netx
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -92,5 +95,88 @@ func TestAnnotateNamesOwnersRolesAndGuards(t *testing.T) {
 	}
 	if by["eth0"].SpeedMbps != 1000 || by["eth0"].RxRate != 1200 {
 		t.Fatal("speed and rate not joined")
+	}
+}
+
+func TestAnnotateFlagsIncompleteDockerJoins(t *testing.T) {
+	annotated := func(inv Inventory, veths map[int]ContainerNet) map[string]Link {
+		links, err := parseLinks(fixture(t, "ip-link.json"), fixture(t, "ip-addr.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		annotate(links, annotation{uplinks: map[string]bool{"eth0": true}, spec: emptySpec(), inv: inv, veths: veths})
+		by := map[string]Link{}
+		for _, l := range links {
+			by[l.Name] = l
+		}
+		return by
+	}
+	web := []DockerNet{{ID: "0123456789abcdef", Name: "web", Bridge: "br-0123456789ab"}}
+
+	joined := annotated(Inventory{Networks: web}, map[int]ContainerNet{66193: {Name: "postgres"}})
+	if joined["veth6e4f828"].DockerJoin != "" || joined["br-0123456789ab"].DockerJoin != "" {
+		t.Fatalf("a complete join carries no flag: %+v", joined["veth6e4f828"])
+	}
+
+	listFailed := annotated(Inventory{Networks: web, ContainersError: "Cannot connect to the Docker daemon"}, nil)
+	if v := listFailed["veth6e4f828"]; v.DockerJoin != "unresolved" || !strings.Contains(v.DockerJoinReason, "container list could not be read") || !strings.Contains(v.DockerJoinReason, "Cannot connect") {
+		t.Fatalf("a failed container list must flag the veth: %+v", v)
+	}
+
+	unjoined := annotated(Inventory{Networks: web, UnjoinedContainers: []string{"redis", "api"}}, nil)
+	if v := unjoined["veth6e4f828"]; v.DockerJoin != "unresolved" || !strings.Contains(v.DockerJoinReason, "api, redis") {
+		t.Fatalf("unreadable containers are named: %+v", v)
+	}
+
+	networksFailed := annotated(Inventory{DockerNetworksUnknown: true, DockerNetworksError: "context deadline exceeded"}, map[int]ContainerNet{66193: {Name: "postgres"}})
+	if b := networksFailed["br-0123456789ab"]; b.DockerJoin != "unknown" || !strings.Contains(b.DockerJoinReason, "network list could not be read") {
+		t.Fatalf("a Docker-named bridge without a network list is unknown: %+v", b)
+	}
+	if networksFailed["eth0"].DockerJoin != "" || networksFailed["wg0"].DockerJoin != "" {
+		t.Fatal("only Docker's devices carry a join flag")
+	}
+}
+
+func TestContainerVethsNameUnreadableContainers(t *testing.T) {
+	root := t.TempDir()
+	prev := procRoot
+	procRoot = root
+	t.Cleanup(func() { procRoot = prev })
+	dir := filepath.Join(root, "41", "root", "sys", "class", "net", "eth0")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "iflink"), []byte("66193\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	veths, unreadable := containerVeths([]ContainerNet{{Name: "postgres", PID: 41}, {Name: "gone", PID: 42}, {Name: "nopid"}})
+	if veths[66193].Name != "postgres" || len(unreadable) != 1 || unreadable[0] != "gone" {
+		t.Fatalf("veths=%v unreadable=%v", veths, unreadable)
+	}
+}
+
+func TestParseLinksNamesWhereEachAddressCameFrom(t *testing.T) {
+	addrs := `[{"ifname":"ens3","addr_info":[
+{"family":"inet","local":"203.0.113.20","prefixlen":24,"scope":"global","dynamic":true,"valid_life_time":83020,"preferred_life_time":83020},
+{"family":"inet6","local":"2001:db8::13","prefixlen":128,"scope":"global","valid_life_time":4294967295,"preferred_life_time":4294967295},
+{"family":"inet6","local":"2001:db8:1::f816:3eff:fe00:1","prefixlen":64,"scope":"global","dynamic":true,"mngtmpaddr":true,"valid_life_time":86400,"preferred_life_time":14400},
+{"family":"inet6","local":"2001:db8:1::a1b2","prefixlen":64,"scope":"global","dynamic":true,"temporary":true,"valid_life_time":600,"preferred_life_time":300},
+{"family":"inet6","local":"2001:db8:2::5","prefixlen":128,"scope":"global","dynamic":true,"valid_life_time":7200,"preferred_life_time":3600},
+{"family":"inet6","local":"fe80::1","prefixlen":64,"scope":"link","protocol":"kernel_ll","valid_life_time":4294967295,"preferred_life_time":4294967295}]}]`
+	links, err := parseLinks(`[{"ifindex":2,"ifname":"ens3","flags":["UP"],"mtu":1500,"operstate":"UP"}]`, addrs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"dhcp", "static", "slaac", "temporary", "dynamic", "link-local"}
+	for i, a := range links[0].Addresses {
+		if a.Origin != want[i] {
+			t.Errorf("%s: origin %s, want %s", a.CIDR, a.Origin, want[i])
+		}
+	}
+	if v := links[0].Addresses[0].ValidSeconds; v == nil || *v != 83020 {
+		t.Fatalf("a lease's lifetime is kept: %v", v)
+	}
+	if links[0].Addresses[1].ValidSeconds != nil {
+		t.Fatal("a forever lifetime reads as none")
 	}
 }

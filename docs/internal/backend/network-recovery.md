@@ -1,7 +1,10 @@
 # Recovering network changes
 
 `Service.commit` protects managed links, addresses, routes, rules, namespaces, forwarding, gateway,
-protection and shaping changes with `/etc/just-dashboard/network/change.json`. Native-owned link
+protection and shaping changes with `/etc/just-dashboard/network/change.json`. Managed bridge-port VLAN
+memberships and VXLAN flood ends are part of the spec; their undo is typed `bridge vlan`/`bridge fdb`
+commands derived from the previous spec, and the boot unit restores them with conditional
+failure-tolerant `bridge` lines. Native-owned link
 state, MTU and bridge membership changes use the same journal but remain runtime-only. DNS and
 WireGuard configuration, Tailscale preferences and netsec firewall changes have separate owners and
 are not covered by this journal. Their existing synchronous rollback does not imply independent

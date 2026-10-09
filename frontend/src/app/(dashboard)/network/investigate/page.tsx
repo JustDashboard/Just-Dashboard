@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { PathReport } from "@/components/network/path-report"
 import { SaveInvestigationRun } from "@/components/network/save-investigation-run"
 import { Page, PageContext } from "@/components/page"
+import { LoadingPanel } from "@/components/state"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Disclosure, Field, FieldRow } from "@/components/form"
 import { Button } from "@/components/ui/button"
@@ -24,8 +26,20 @@ import type { PathResult, PathSources } from "@/lib/network-investigator-types"
 
 // A report register: the input selects the evidence to read; it does not stage
 // a network change or draw unmeasured edges as successful packet traversal.
+// A device sheet hands a container over by name (`?container=postgres`); the
+// source is chosen once the investigator's own container list names it.
 export default function NetworkInvestigatorPage() {
+  return (
+    <Suspense fallback={<LoadingPanel />}>
+      <NetworkInvestigator />
+    </Suspense>
+  )
+}
+
+function NetworkInvestigator() {
   const { can } = useAuth()
+  const params = useSearchParams()
+  const [handoff] = useState(() => params.get("container") ?? undefined)
   const admin = can("system.admin")
   const [sources, setSources] = useState<PathSources>({ containers: [] })
   const [draft, setDraft] = useState(newPathDraft)
@@ -36,14 +50,18 @@ export default function NetworkInvestigatorPage() {
     if (!admin) return
     const abort = new AbortController()
     get<PathSources>("/network/investigate/sources", undefined, abort.signal)
-      .then(setSources)
+      .then((found) => {
+        setSources(found)
+        const chosen = handoff && found.containers.find((c) => c.name === handoff)
+        if (chosen) setDraft((current) => ({ ...current, source: chosen.id }))
+      })
       .catch((err) => {
         if (!abort.signal.aborted) {
           setSources({ containers: [], error: errorMessage(err) })
         }
       })
     return () => abort.abort()
-  }, [admin])
+  }, [admin, handoff])
   const change = <K extends keyof PathDraft>(key: K, value: PathDraft[K]) =>
     setDraft((current) => ({ ...current, [key]: value }))
   const request = pathRequest(draft)

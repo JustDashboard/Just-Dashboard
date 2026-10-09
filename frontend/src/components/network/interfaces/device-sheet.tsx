@@ -1,12 +1,13 @@
 "use client"
 
+import Link from "next/link"
 import { useAuth } from "@/hooks/use-auth"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Plus, Trash } from "@/components/icons"
-import { del, post } from "@/lib/api"
+import { del, errorMessage, get, post } from "@/lib/api"
 import { bytes, rate } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { NetworkLink, NetworkLivePoint } from "@/lib/types"
+import type { NetworkLink, NetworkLivePoint, NetworkMasterPreview } from "@/lib/types"
 import { SidePanel } from "@/components/side-panel"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Detail, DetailList } from "@/components/page"
@@ -28,6 +29,10 @@ import { Cidr } from "@/components/network/address"
 import { RX, TX } from "@/components/network/rate-pair"
 import { LinkMark, OWNER_LABEL, ROLE_LABEL, kindLabel } from "@/components/network/marks"
 import { NativeProfileEditor } from "./native-profile"
+import { DeviceHardware } from "./device-detail"
+import { DeviceReadiness, READINESS_KINDS } from "./device-readiness"
+import { BridgeSwitch, PortVlans } from "./bridge-switch"
+import { addressProvenance } from "./device-reading"
 
 const SERIES = [
   { key: "rx", label: "In", color: RX, kind: "area" as const },
@@ -50,6 +55,7 @@ export function DeviceSheet({
   open,
   onOpenChange,
   onChanged,
+  onOpenNamespace,
 }: {
   link: NetworkLink | undefined
   links: NetworkLink[]
@@ -57,6 +63,8 @@ export function DeviceSheet({
   open: boolean
   onOpenChange: (open: boolean) => void
   onChanged: () => void
+  /** Opens the namespace a veth leads into: a managed one by name, or a container's. */
+  onOpenNamespace?: (kind: "named" | "container", name: string) => void
 }) {
   const { can } = useAuth()
   const admin = can("system.admin")
@@ -66,6 +74,32 @@ export function DeviceSheet({
   const [mtu, setMtu] = useState("")
   const [address, setAddress] = useState("")
   const [bridge, setBridge] = useState<string>()
+  const [preview, setPreview] = useState<{
+    key: string
+    value?: NetworkMasterPreview
+    error?: string
+  }>()
+
+  // The membership change is read before it is offered: what it would leave
+  // behind, and whether the guards allow it at all.
+  const linkName = link?.name
+  const previewKey = linkName && bridge !== undefined ? `${linkName}>${bridge}` : undefined
+  useEffect(() => {
+    if (!linkName || bridge === undefined || !previewKey) return
+    const abort = new AbortController()
+    const master = bridge === "__none" ? "" : bridge
+    get<NetworkMasterPreview>(
+      `/network/links/${encodeURIComponent(linkName)}/master/preview`,
+      { master },
+      abort.signal,
+    )
+      .then((value) => setPreview({ key: previewKey, value }))
+      .catch((err) => {
+        if (!abort.signal.aborted) setPreview({ key: previewKey, error: errorMessage(err) })
+      })
+    return () => abort.abort()
+  }, [linkName, bridge, previewKey])
+  const shownPreview = preview?.key === previewKey ? preview : undefined
 
   const rows = useMemo(
     () => (points ?? []).map((p) => ({ ts: p.t * 1000, rx: p.rx, tx: p.tx })),
@@ -217,6 +251,55 @@ export function DeviceSheet({
       >
         <div className="flex flex-col gap-6">
           {link.guard && <Notice title="Guarded">{link.guard}</Notice>}
+          {link.dockerJoin && (
+            <Notice tone="warning" title="Docker join incomplete">
+              {link.dockerJoinReason}
+            </Notice>
+          )}
+          {(link.peerNamespace || link.container) && (
+            <Panel plain>
+              <PanelHeader title="Leads into" />
+              <PanelBody>
+                <div className="flex flex-wrap items-center gap-2">
+                  {link.peerNamespace && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onOpenNamespace?.("named", link.peerNamespace!)}
+                    >
+                      Open namespace {link.peerNamespace}
+                    </Button>
+                  )}
+                  {link.container && (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onOpenNamespace?.("container", link.container!)}
+                      >
+                        Open {link.container}&rsquo;s namespace
+                      </Button>
+                      {admin && (
+                        <Button size="sm" variant="ghost" asChild>
+                          <Link
+                            href={`/network/investigate?container=${encodeURIComponent(link.container)}`}
+                          >
+                            Investigate a connection from {link.container}
+                          </Link>
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+                {link.peer && (
+                  <p className="mt-2 text-hint text-muted-foreground">
+                    Its other end is <span className="font-mono">{link.peer}</span>
+                    {link.peerNamespace ? ` inside ${link.peerNamespace}` : ""}.
+                  </p>
+                )}
+              </PanelBody>
+            </Panel>
+          )}
 
           <ChartPanel
             plain
@@ -309,6 +392,21 @@ export function DeviceSheet({
             </PanelBody>
           </Panel>
 
+          {link.role !== "loopback" && <DeviceHardware name={link.name} open={open} />}
+
+          {READINESS_KINDS.has(link.kind) && (
+            <DeviceReadiness
+              link={link}
+              open={open}
+              managed={link.managed}
+              remotes={link.remotes}
+              onChanged={onChanged}
+            />
+          )}
+
+          {link.kind === "bridge" && <BridgeSwitch link={link} open={open} onChanged={onChanged} />}
+          {link.kind !== "bridge" && <PortVlans link={link} open={open} onChanged={onChanged} />}
+
           {canEdit && link.kind !== "bridge" && link.role !== "loopback" && (
             <Panel plain>
               <PanelHeader title="Bridge membership" />
@@ -318,17 +416,27 @@ export function DeviceSheet({
                   onSubmit={(event) => {
                     event.preventDefault()
                     const master = bridgeValue === "__none" ? "" : bridgeValue
+                    const effects = shownPreview?.value?.effects ?? []
                     confirm({
                       title: master
                         ? `Join ${link.name} to ${master}`
                         : `Remove ${link.name} from its bridge`,
                       confirmLabel: "Apply",
                       description: (
-                        <p>
-                          This changes which network receives the device&rsquo;s Ethernet frames.
-                          The server refuses a change that would disturb its uplink, addresses or
-                          your connection.
-                        </p>
+                        <div className="flex flex-col gap-2">
+                          <p>
+                            This changes which network receives the device&rsquo;s Ethernet frames.
+                            The server refuses a change that would disturb its uplink, addresses or
+                            your connection.
+                          </p>
+                          {effects.length > 0 && (
+                            <ul className="list-disc pl-5">
+                              {effects.map((e) => (
+                                <li key={e.detail}>{e.detail}</li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
                       ),
                       action: async () => {
                         await post(`/network/links/${name}/master`, { master })
@@ -363,11 +471,35 @@ export function DeviceSheet({
                     type="submit"
                     size="sm"
                     variant="outline"
-                    disabled={busy !== undefined || bridgeValue === (link.master ?? "__none")}
+                    disabled={
+                      busy !== undefined ||
+                      bridgeValue === (link.master ?? "__none") ||
+                      shownPreview?.value?.allowed === false
+                    }
                   >
                     Apply
                   </Button>
                 </form>
+                {shownPreview && bridgeValue !== (link.master ?? "__none") && (
+                  <div className="mt-3 flex flex-col gap-2" aria-label="What the move would do">
+                    {shownPreview.error ? (
+                      <Notice tone="warning" title="The move could not be previewed">
+                        {shownPreview.error}
+                      </Notice>
+                    ) : shownPreview.value?.allowed === false ? (
+                      <Notice tone="warning" title="Refused">
+                        {shownPreview.value.refusal}
+                      </Notice>
+                    ) : null}
+                    {shownPreview.value && shownPreview.value.effects.length > 0 && (
+                      <ul className="flex list-disc flex-col gap-1 pl-5 text-hint text-muted-foreground">
+                        {shownPreview.value.effects.map((e) => (
+                          <li key={e.detail}>{e.detail}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
               </PanelBody>
             </Panel>
           )}
@@ -417,8 +549,7 @@ export function DeviceSheet({
                   <li key={a.cidr} className="flex min-w-0 items-center gap-3 py-2 text-body">
                     <Cidr cidr={a.cidr} className="min-w-0 truncate" />
                     <span className="text-hint text-muted-foreground">
-                      {a.family === "inet" ? "IPv4" : "IPv6"} · {a.scope}
-                      {a.dynamic ? " · from DHCP" : ""}
+                      {a.family === "inet" ? "IPv4" : "IPv6"} · {a.scope} · {addressProvenance(a)}
                       {a.public ? " · public" : ""}
                     </span>
                     <span className="ml-auto flex shrink-0 items-center gap-2">
@@ -455,7 +586,7 @@ export function DeviceSheet({
                   }}
                 >
                   <label className="min-w-0 flex-1 space-y-1.5">
-                    <span className="text-body font-medium">Add an address</span>
+                    <span className="text-body font-medium">Add a static address</span>
                     <Input
                       value={address}
                       placeholder="10.20.0.1/24 or 2001:db8::1/64"
@@ -479,6 +610,17 @@ export function DeviceSheet({
               )}
             </PanelBody>
           </Panel>
+
+          {!link.managed &&
+            link.addresses.some(
+              (a) => a.origin && a.origin !== "static" && a.origin !== "link-local",
+            ) && (
+              <p className="-mt-3 text-hint text-muted-foreground">
+                Addresses added here are static and kept by the dashboard. How {link.name} acquires
+                its own — DHCP, router advertisements or a fixed address — is its network
+                manager&rsquo;s setting{admin ? ", edited in its profile below" : ""}.
+              </p>
+            )}
 
           {admin && !link.managed && (
             <NativeProfileEditor

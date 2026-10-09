@@ -114,6 +114,9 @@ type Service struct {
 	flows               *flowSampler
 	independentRecovery bool
 	recoveryInstalled   bool
+	// incidentMu serialises the Overview's concurrent readers folding their
+	// findings into the incident history.
+	incidentMu sync.Mutex
 }
 
 // Paths are where the module reads and writes on the host. Tests point them

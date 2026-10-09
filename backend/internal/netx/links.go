@@ -73,6 +73,20 @@ type Link struct {
 	Container      string `json:"container,omitempty"`
 	ContainerImage string `json:"containerImage,omitempty"`
 	DockerNetwork  string `json:"dockerNetwork,omitempty"`
+	// DockerJoin is set where the device looks like Docker's but the join to
+	// its container or network could not be made: "unresolved" for a veth
+	// on a Docker bridge whose container was not found, "unknown" for a
+	// Docker-named bridge while Docker's network list could not be read.
+	// DockerJoinReason says why, so a missing name is never read as "no
+	// container".
+	DockerJoin       string `json:"dockerJoin,omitempty"`
+	DockerJoinReason string `json:"dockerJoinReason,omitempty"`
+	// Peer and PeerNamespace are a dashboard-made veth's other end and the
+	// managed namespace it was moved into.
+	Peer          string `json:"peer,omitempty"`
+	PeerNamespace string `json:"peerNamespace,omitempty"`
+	// Remotes are a dashboard-made unicast VXLAN's further flood ends.
+	Remotes []string `json:"remotes,omitempty"`
 	// XDP names the eBPF program attached at the driver, if one is.
 	XDP string `json:"xdp,omitempty"`
 	// Managed marks a device the dashboard created, and so may remove.
@@ -94,6 +108,15 @@ type Address struct {
 	Managed bool `json:"managed,omitempty"`
 	// Guard is why it may not be removed, when it may not.
 	Guard string `json:"guard,omitempty"`
+	// Origin is how the address came to be, as far as the kernel says:
+	// static, dhcp (an IPv4 lease), slaac (from a router advertisement),
+	// temporary (an IPv6 privacy address), dynamic (an IPv6 lifetime of
+	// unknown source: DHCPv6 or an advertisement) or link-local.
+	Origin string `json:"origin,omitempty"`
+	// ValidSeconds and PreferredSeconds are the remaining lifetimes of a
+	// dynamic address; nil means forever.
+	ValidSeconds     *uint64 `json:"validSeconds,omitempty"`
+	PreferredSeconds *uint64 `json:"preferredSeconds,omitempty"`
 }
 
 // Counters are a device's totals since it was created.
@@ -116,7 +139,13 @@ type Inventory struct {
 	Containers []ContainerNet `json:"-"`
 	Networks   []DockerNet    `json:"-"`
 	// An unreadable Docker inventory is not evidence that forwarding is unused.
-	DockerNetworksUnknown bool `json:"-"`
+	DockerNetworksUnknown bool   `json:"-"`
+	DockerNetworksError   string `json:"-"`
+	// ContainersError is why Docker's container list could not be read;
+	// UnjoinedContainers are running containers whose init process could not
+	// be read, so their devices cannot be joined to them.
+	ContainersError    string   `json:"-"`
+	UnjoinedContainers []string `json:"-"`
 }
 
 // ContainerNet is a running container's identity and its init process.
@@ -181,12 +210,28 @@ type ipLink struct {
 type ipAddr struct {
 	IfName   string `json:"ifname"`
 	AddrInfo []struct {
-		Family    string `json:"family"`
-		Local     string `json:"local"`
-		PrefixLen int    `json:"prefixlen"`
-		Scope     string `json:"scope"`
-		Dynamic   bool   `json:"dynamic"`
+		Family     string  `json:"family"`
+		Local      string  `json:"local"`
+		PrefixLen  int     `json:"prefixlen"`
+		Scope      string  `json:"scope"`
+		Dynamic    bool    `json:"dynamic"`
+		Temporary  bool    `json:"temporary"`
+		Mngtmpaddr bool    `json:"mngtmpaddr"`
+		Protocol   string  `json:"protocol"`
+		Valid      *uint64 `json:"valid_life_time"`
+		Preferred  *uint64 `json:"preferred_life_time"`
 	} `json:"addr_info"`
+}
+
+// foreverLifetime is how ip prints an address that does not expire.
+const foreverLifetime = 4294967295
+
+func lifetime(v *uint64) *uint64 {
+	if v == nil || *v >= foreverLifetime {
+		return nil
+	}
+	n := *v
+	return &n
 }
 
 // tunnelData is the info_data fields of the tunnel kinds, read loosely: each
@@ -226,7 +271,8 @@ func (s *Service) ReadLinks(ctx context.Context, inv Inventory, client string) (
 	if err != nil {
 		return nil, err
 	}
-	veths := containerVeths(inv.Containers)
+	veths, unreadable := containerVeths(inv.Containers)
+	inv.UnjoinedContainers = append(append([]string(nil), inv.UnjoinedContainers...), unreadable...)
 	annotate(links, annotation{
 		uplinks: uplinks, path: path, spec: spec, inv: inv, veths: veths,
 		speed: linkSpeed, rates: s.sampler.Rates(),
@@ -264,12 +310,28 @@ func parseLinks(linkOut, addrOut string) ([]Link, error) {
 			if err != nil {
 				continue
 			}
+			origin := "static"
+			switch {
+			case info.Family == "inet6" && info.Scope == "link":
+				origin = "link-local"
+			case info.Temporary:
+				origin = "temporary"
+			case info.Protocol == "kernel_ra" || (info.Family == "inet6" && info.Dynamic && info.Mngtmpaddr):
+				origin = "slaac"
+			case info.Dynamic && info.Family == "inet":
+				origin = "dhcp"
+			case info.Dynamic:
+				origin = "dynamic"
+			}
 			byName[a.IfName] = append(byName[a.IfName], Address{
-				CIDR:    netip.PrefixFrom(addr, info.PrefixLen).String(),
-				Family:  info.Family,
-				Scope:   info.Scope,
-				Dynamic: info.Dynamic,
-				Public:  isPublic(addr),
+				CIDR:             netip.PrefixFrom(addr, info.PrefixLen).String(),
+				Family:           info.Family,
+				Scope:            info.Scope,
+				Dynamic:          info.Dynamic,
+				Public:           isPublic(addr),
+				Origin:           origin,
+				ValidSeconds:     lifetime(info.Valid),
+				PreferredSeconds: lifetime(info.Preferred),
 			})
 		}
 	}
@@ -326,6 +388,13 @@ func parseLinks(linkOut, addrOut string) ([]Link, error) {
 		} else if l.LinkIndex > 0 && link.Kind != "veth" {
 			if name, ok := byIndex[l.LinkIndex]; ok {
 				link.Parent = name
+			}
+		}
+		// A VXLAN names the device it sends from inside its own data.
+		if link.Kind == "vxlan" && link.Parent == "" && len(l.LinkInfo.InfoData) > 0 {
+			var td tunnelData
+			if json.Unmarshal(l.LinkInfo.InfoData, &td) == nil && td.Link != "" {
+				link.Parent = td.Link
 			}
 		}
 		if l.XDP != nil && l.XDP.Prog != nil {
@@ -390,6 +459,14 @@ func annotate(links []Link, a annotation) {
 				l.Container, l.ContainerImage = c.Name, c.Image
 			}
 		}
+		if m, ok := a.spec.link(l.Name); ok {
+			switch m.Kind {
+			case "veth":
+				l.Peer, l.PeerNamespace = m.Peer, m.PeerNamespace
+			case "vxlan":
+				l.Remotes = m.Remotes
+			}
+		}
 		if a.speed != nil && (l.Kind == "physical" || l.Kind == "bond") {
 			l.SpeedMbps = a.speed(l.Name)
 		}
@@ -399,6 +476,7 @@ func annotate(links []Link, a annotation) {
 		_, made := a.spec.link(l.Name)
 		l.Managed = made
 		l.Owner = ownerOf(*l, made, dockerBridge)
+		l.DockerJoin, l.DockerJoinReason = dockerJoin(*l, a.inv, bridges)
 		l.Role = roleOf(*l)
 		l.Guard = linkGuard(*l)
 		for j := range l.Addresses {
@@ -414,6 +492,43 @@ func annotate(links []Link, a annotation) {
 		}
 		return links[i].Name < links[j].Name
 	})
+}
+
+// dockerJoin says whether a Docker device's join to its container or network
+// is incomplete, and why. The api layer reads Docker; a failed read there is
+// carried here so the device says so instead of looking unattached.
+func dockerJoin(l Link, inv Inventory, bridges map[string]DockerNet) (string, string) {
+	if l.Owner != "docker" {
+		return "", ""
+	}
+	if l.Kind == "bridge" {
+		if _, ok := bridges[l.Name]; !ok && inv.DockerNetworksUnknown {
+			return "unknown", "Docker's network list could not be read" + reasonSuffix(inv.DockerNetworksError) + ", so which network this bridge carries is unknown."
+		}
+		return "", ""
+	}
+	if l.Kind != "veth" || l.Container != "" {
+		return "", ""
+	}
+	switch {
+	case inv.ContainersError != "":
+		return "unresolved", "Docker's container list could not be read" + reasonSuffix(inv.ContainersError) + ", so the container behind this device is unknown."
+	case len(inv.UnjoinedContainers) > 0:
+		names := append([]string(nil), inv.UnjoinedContainers...)
+		sort.Strings(names)
+		if len(names) > 3 {
+			names = append(names[:3], fmt.Sprintf("%d more", len(inv.UnjoinedContainers)-3))
+		}
+		return "unresolved", fmt.Sprintf("The devices of %s could not be read, so this device may be one of theirs.", strings.Join(names, ", "))
+	}
+	return "unresolved", "No running container's namespace names this device; it may belong to a container that is starting or stopping."
+}
+
+func reasonSuffix(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return " (" + firstLines(reason, 1) + ")"
 }
 
 // fallbackDevices are the devices a tunnel module makes for itself the moment
@@ -557,9 +672,11 @@ var procRoot = "/proc"
 // containerVeths maps each host-side veth to the container behind it. A
 // container's own devices name, in iflink, the index of their peer in the
 // host's namespace; reading that through /proc/<pid>/root/sys needs no
-// subprocess and no entry into the container's namespace.
-func containerVeths(containers []ContainerNet) map[int]ContainerNet {
+// subprocess and no entry into the container's namespace. It also names the
+// containers whose devices could not be read.
+func containerVeths(containers []ContainerNet) (map[int]ContainerNet, []string) {
 	out := map[int]ContainerNet{}
+	var unreadable []string
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, c := range containers {
@@ -572,6 +689,9 @@ func containerVeths(containers []ContainerNet) map[int]ContainerNet {
 			dir := filepath.Join(procRoot, strconv.Itoa(c.PID), "root", "sys", "class", "net")
 			entries, err := os.ReadDir(dir)
 			if err != nil {
+				mu.Lock()
+				unreadable = append(unreadable, c.Name)
+				mu.Unlock()
 				return
 			}
 			for _, e := range entries {
@@ -593,7 +713,8 @@ func containerVeths(containers []ContainerNet) map[int]ContainerNet {
 		}(c)
 	}
 	wg.Wait()
-	return out
+	sort.Strings(unreadable)
+	return out, unreadable
 }
 
 // linkSpeed reads a NIC's negotiated speed. -1 (no link, or a driver that

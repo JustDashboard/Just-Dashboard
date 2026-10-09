@@ -53,6 +53,14 @@ export function Bandwidth({
           reading="link inventory"
         />
       )}
+      {span === "live" && live.error && live.now > 0 && (
+        <NetworkReadWarning
+          error={live.error}
+          refresh={live.refresh}
+          lastSuccess={live.lastSuccess}
+          reading="live throughput"
+        />
+      )}
       {links.data ? (
         <InterfaceCharts links={links.data} live={live.series} span={span} />
       ) : links.error ? (

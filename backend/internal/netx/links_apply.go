@@ -178,6 +178,12 @@ func linkAddArgs(l LinkSpec) ([]string, error) {
 		if l.STP {
 			args = append(args, "stp_state", "1")
 		}
+		if l.VLANFiltering {
+			args = append(args, "vlan_filtering", "1")
+		}
+		if l.MulticastSnooping != nil {
+			args = append(args, "mcast_snooping", boolDigit(*l.MulticastSnooping))
+		}
 	case "dummy":
 		args = append(args, "type", "dummy")
 	case "vlan":
@@ -308,6 +314,10 @@ type LinkRequest struct {
 	PeerNamespace string `json:"peerNamespace,omitempty"`
 	MTU           int    `json:"mtu,omitempty"`
 	STP           bool   `json:"stp,omitempty"`
+	// VLANFiltering and MulticastSnooping are a bridge's; snooping left
+	// unset keeps the kernel's default.
+	VLANFiltering     bool  `json:"vlanFiltering,omitempty"`
+	MulticastSnooping *bool `json:"multicastSnooping,omitempty"`
 	// Master is a bridge to make the new device a port of.
 	Master    string   `json:"master,omitempty"`
 	Addresses []string `json:"addresses,omitempty"`
@@ -344,7 +354,11 @@ func (req LinkRequest) spec() (LinkSpec, error) {
 	}
 	switch kind {
 	case "bridge":
-		l.STP = req.STP
+		l.STP, l.VLANFiltering = req.STP, req.VLANFiltering
+		if req.MulticastSnooping != nil {
+			on := *req.MulticastSnooping
+			l.MulticastSnooping = &on
+		}
 	case "vlan":
 		if req.VLANID < 1 || req.VLANID > 4094 {
 			return LinkSpec{}, fmt.Errorf("a VLAN id is 1 to 4094")
@@ -476,6 +490,13 @@ func (req LinkRequest) spec() (LinkSpec, error) {
 	}
 	l.Addresses = addrs
 	return l, nil
+}
+
+func boolDigit(on bool) string {
+	if on {
+		return "1"
+	}
+	return "0"
 }
 
 func famName(v6 bool) string {
@@ -935,7 +956,8 @@ func (s *Service) DeleteLink(ctx context.Context, name, client, actor string) er
 			continue
 		}
 		if l.Master == name {
-			l.Master = ""
+			// A port leaves its VLANs with the bridge.
+			l.Master, l.VLANs = "", nil
 		}
 		kept = append(kept, l)
 	}
@@ -1166,7 +1188,9 @@ func (s *Service) SetLinkMaster(ctx context.Context, name, master, client, actor
 	}
 	stp.recovery = []recoveryCommand{{Tool: "ip", Args: previousMaster}}
 	if m, ok := next.link(name); ok {
-		m.Master = master
+		// Memberships belong to the bridge a port was in; a new bridge
+		// starts it at the kernel's default.
+		m.Master, m.VLANs = master, nil
 		if err := s.commit(ctx, next, stp); err != nil {
 			return nil, err
 		}

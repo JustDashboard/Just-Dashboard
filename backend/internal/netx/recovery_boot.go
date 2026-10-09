@@ -99,6 +99,9 @@ func recoveryCreationArgs(args []string) bool {
 }
 
 func recoveryExpectedExistence(tool string, args []string, out string, err error) bool {
+	if tool == "bridge" {
+		return strings.Contains(strings.ToLower(out+err.Error()), "file exists")
+	}
 	if tool != "ip" || !recoveryCreationArgs(args) {
 		return false
 	}

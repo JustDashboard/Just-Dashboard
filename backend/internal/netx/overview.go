@@ -70,13 +70,37 @@ func CurrentForwarding() ForwardingSwitches {
 }
 
 // Finding is one thing on the Overview's attention list: what was measured,
-// how bad it is, and the page that fixes it.
+// how bad it is, the page that fixes it, and the reading it was judged from
+// (Source), so an incident is never closed by a reading that failed.
 type Finding struct {
 	ID     string `json:"id"`
 	Level  string `json:"level"`
 	Title  string `json:"title"`
 	Detail string `json:"detail"`
 	Href   string `json:"href"`
+	Source string `json:"source"`
+}
+
+// Observation is whether one of the readings the Overview is judged from
+// arrived. A failed reading is reported as itself: the findings that depend
+// on it are not judged, rather than judged against an empty answer.
+type Observation struct {
+	Source string `json:"source"`
+	Label  string `json:"label"`
+	// State is ok or failed.
+	State string `json:"state"`
+	Error string `json:"error,omitempty"`
+	Href  string `json:"href"`
+}
+
+// ObservationFailed reports whether the named reading failed.
+func ObservationFailed(observations []Observation, source string) bool {
+	for _, o := range observations {
+		if o.Source == source && o.State == "failed" {
+			return true
+		}
+	}
+	return false
 }
 
 // OverviewInput is everything the attention list is judged from, gathered by
@@ -99,23 +123,26 @@ type OverviewInput struct {
 	// EncryptedDNS is false where every upstream is plain DNS; nil when the
 	// resolver could not be read.
 	EncryptedDNS *bool
+	// Observations are the readings above that did or did not arrive.
+	Observations []Observation
 }
 
 // OverviewFindings judges the network, worst first.
 func OverviewFindings(in OverviewInput) []Finding {
 	var out []Finding
 	add := func(f Finding) { out = append(out, f) }
+	failed := func(source string) bool { return ObservationFailed(in.Observations, source) }
 
-	if in.Spec != nil && in.Persistence.Made > 0 && in.Persistence.Unit == "disabled" {
+	if in.Spec != nil && in.Persistence.Made > 0 && in.Persistence.Unit == "disabled" && !failed("persistence") {
 		add(Finding{
-			ID: "persistence.unit", Level: "warning", Href: "/network",
+			ID: "persistence.unit", Level: "warning", Href: "/network", Source: "persistence",
 			Title:  "What the dashboard made will not come back after a reboot",
 			Detail: fmt.Sprintf("%s holds %d entries, but %s is disabled, so nothing restores them at boot.", in.Persistence.Dir, in.Persistence.Made, UnitName),
 		})
 	}
 	if in.Persistence.Made > 0 && in.Persistence.Unit == "unsupported" {
 		add(Finding{
-			ID: "persistence.systemd", Level: "notice", Href: "/network",
+			ID: "persistence.systemd", Level: "notice", Href: "/network", Source: "persistence",
 			Title:  "Nothing restores the dashboard's network changes at boot",
 			Detail: "This host has no systemd, so the boot files are written but no unit reads them.",
 		})
@@ -148,24 +175,36 @@ func OverviewFindings(in OverviewInput) []Finding {
 		}{
 			{"IPv4", needs4, in.Forwarding.IPv4}, {"IPv6", needs6, in.Forwarding.IPv6},
 		} {
-			if family.needed && !family.enabled {
+			if family.needed && !family.enabled && !failed("forwarding") {
 				add(Finding{
-					ID: "forwarding.off." + strings.ToLower(family.name), Level: "critical", Href: "/network/routing",
+					ID: "forwarding.off." + strings.ToLower(family.name), Level: "critical", Href: "/network/routing", Source: "forwarding",
 					Title:  family.name + " forwarding is off, so its port forwards and NAT carry nothing",
 					Detail: "The gateway translates traffic for other machines, but the kernel is not routing this family's packets that are not its own.",
 				})
 			}
 		}
 	}
-	if !in.FirewallAvailable {
+	for _, o := range in.Observations {
+		if o.State != "failed" {
+			continue
+		}
 		add(Finding{
-			ID: "firewall.none", Level: "warning", Href: "/network/firewall",
+			ID: "observation." + o.Source, Level: "warning", Href: o.Href, Source: o.Source,
+			Title:  o.Label + " could not be read",
+			Detail: firstNonEmpty(o.Error, "The read failed.") + " What depends on it is not judged until it reads again; this is not evidence that nothing is wrong.",
+		})
+	}
+	switch {
+	case failed("firewall"):
+	case !in.FirewallAvailable:
+		add(Finding{
+			ID: "firewall.none", Level: "warning", Href: "/network/firewall", Source: "firewall",
 			Title:  "No supported host firewall manager was detected",
 			Detail: "Neither ufw nor firewalld is available. Custom kernel rules and provider firewalls can still filter traffic; their absence has not been established by this reading.",
 		})
-	} else if !in.FirewallEnabled {
+	case !in.FirewallEnabled:
 		add(Finding{
-			ID: "firewall.off", Level: "warning", Href: "/network/firewall",
+			ID: "firewall.off", Level: "warning", Href: "/network/firewall", Source: "firewall",
 			Title:  "The firewall is installed but not enforcing",
 			Detail: "Its rules exist and are not applied.",
 		})
@@ -173,13 +212,13 @@ func OverviewFindings(in OverviewInput) []Finding {
 	switch {
 	case in.ConntrackPercent >= 95:
 		add(Finding{
-			ID: "conntrack.full", Level: "critical", Href: "/network/protection",
+			ID: "conntrack.full", Level: "critical", Href: "/network/protection", Source: "conntrack",
 			Title:  "The connection-tracking table is nearly full",
 			Detail: fmt.Sprintf("%.0f%% of its entries are in use; once it is full the kernel drops new connections, the dashboard's included.", in.ConntrackPercent),
 		})
 	case in.ConntrackPercent >= 80:
 		add(Finding{
-			ID: "conntrack.high", Level: "warning", Href: "/network/protection",
+			ID: "conntrack.high", Level: "warning", Href: "/network/protection", Source: "conntrack",
 			Title:  "The connection-tracking table is filling up",
 			Detail: fmt.Sprintf("%.0f%% of its entries are in use. A flood of connections, or a maximum set too low for this machine.", in.ConntrackPercent),
 		})
@@ -188,16 +227,16 @@ func OverviewFindings(in OverviewInput) []Finding {
 		if !l.Uplink {
 			continue
 		}
-		if n := in.LinkHistoryErrors[l.Name]; n > 0 {
+		if n := in.LinkHistoryErrors[l.Name]; n > 0 && !failed("history") {
 			add(Finding{
-				ID: "link.errors." + l.Name, Level: "warning", Href: "/network/interfaces",
+				ID: "link.errors." + l.Name, Level: "warning", Href: "/network/interfaces?device=" + l.Name, Source: "history",
 				Title:  fmt.Sprintf("%s dropped or failed %d packets in the last hour", l.Name, n),
 				Detail: "Errors on the uplink are a cable, a driver or the provider; drops are a queue too short for the traffic.",
 			})
 		}
 		if !l.Carrier && l.AdminUp {
 			add(Finding{
-				ID: "link.carrier." + l.Name, Level: "critical", Href: "/network/interfaces",
+				ID: "link.carrier." + l.Name, Level: "critical", Href: "/network/interfaces?device=" + l.Name, Source: "links",
 				Title:  fmt.Sprintf("%s has no carrier", l.Name),
 				Detail: "The device is up but nothing is connected to it.",
 			})
@@ -205,7 +244,7 @@ func OverviewFindings(in OverviewInput) []Finding {
 	}
 	if in.EncryptedDNS != nil && !*in.EncryptedDNS {
 		add(Finding{
-			ID: "dns.plain", Level: "notice", Href: "/network/dns",
+			ID: "dns.plain", Level: "notice", Href: "/network/dns", Source: "dns",
 			Title:  "Name lookups leave this server unencrypted",
 			Detail: "Every upstream resolver is asked in plain DNS, which anyone on the path can read and rewrite. DNS over TLS is a setting away.",
 		})

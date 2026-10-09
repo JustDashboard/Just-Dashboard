@@ -99,6 +99,24 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   no subprocess, with PIDs cached per container start in the api layer) and the sampler's rates. Each
   device carries a kind, a role (uplink, tunnel, bridge, container, vlan, virtual, physical, loopback),
   an owner and, where it may not be changed, a guard sentence.
+  An incomplete Docker join is flagged rather than hidden: `dockerJoin: "unresolved"` on a Docker veth
+  whose container was not found (with `dockerJoinReason` naming a failed container list, containers
+  whose PID or `/proc/<pid>/root/sys/class/net` could not be read, or none of those), and `"unknown"`
+  on a Docker-named bridge while Docker's network list could not be read. Addresses carry the
+  kernel's `origin` (static, dhcp, slaac, temporary, dynamic, link-local) and remaining lifetimes; a
+  managed veth carries its peer and namespace, a managed unicast VXLAN its further flood ends.
+- `GET /links/{name}/detail` reads what the list leaves out: the driver (`ethtool -i`, falling back to
+  the sysfs driver link), the meaningful top-level `ethtool -k` offloads and every
+  `ip -s -s -j link` error counter. Each part has its own `Reading` (ok, unavailable with the package,
+  not_applicable or failed), so a missing ethtool never reads as "no offloads".
+- `GET /links/{name}/readiness` (`readiness.go`) checks what this host alone can establish, sending
+  nothing to the other end: for VXLAN/GRE the underlay device, the local end's ownership, the kernel
+  route to every end (failed when it recurses through the tunnel), MTU headroom for the
+  encapsulation, the VXLAN flood list in the kernel's FDB and received-traffic liveness; for macvlan the
+  parent, the mode's host isolation and siblings, and a warning when the parent is the uplink or a
+  virtual machine's NIC whose provider filters unassigned MACs; for a dummy its address, the routes
+  into it and the services bound to its addresses. Limits (no encryption, unchecked firewall/provider
+  policy, no probe) are returned beside the checks.
 - Create covers bridge, VLAN, VXLAN, GRE/GRETAP/IP6GRE/IP6GRETAP, dummy, macvlan and veth (into a namespace the
   dashboard made). The uplink, the client-path device, loopback, Docker's and Tailscale's devices and
   any device holding an address cannot be set down, deleted or enslaved to a bridge, and neither can
@@ -108,6 +126,23 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   The create form exposes VXLAN unicast or multicast destinations with an explicit sender for
   multicast, and decimal uint32 GRE keys plus TTL/IPv6 hop limits. GRE remains unencrypted and the
   form does not claim verified multicast underlay or remote endpoint reachability.
+- Bridges (`bridges.go`) can be made VLAN-filtering (`vlan_filtering 1`) and with multicast snooping
+  explicitly off. `GET /links/{name}/bridge` reads settings, each port's VLANs beside the managed
+  desired list, and the bounded forwarding database (the bridge's own multicast entries left out).
+  `PUT /links/{name}/vlans` replaces a managed port's (or the managed bridge's own, `self`) VLAN
+  memberships on a managed VLAN-filtering bridge — native VLAN untagged plus tagged VLANs; empty
+  returns to the kernel default VLAN 1. It is refused when the port or bridge carries the client path
+  or the uplink, applied from the observed membership with a full undo, recorded in the spec and
+  restored at boot by failure-tolerant `ExecStart=-bridge vlan …` lines the unit gains only when a
+  spec has memberships. A port leaving its bridge, or a deleted bridge, drops its memberships.
+  `PUT /links/{name}/remotes` replaces a managed unicast VXLAN's further flood ends (same family as its
+  remote, never multicast) as `bridge fdb append 00:00:00:00:00:00 … dst` entries, likewise in the
+  spec and the unit. Both are journaled: `recoveryPlan` adds `bridge` commands that restore the prior
+  memberships and ends. Taking a VLAN or an end away is destructive (`requireDestructive` by content).
+- `GET /links/{name}/master/preview?master=` previews a bridge membership change without changing
+  anything: the same guard verdict `SetLinkMaster` would give and every address, route, managed
+  dependent, VLAN-filtering and STP effect and the runtime-only persistence of a foreign device. The
+  dashboard does not move addresses or routes across a migration; the preview names them.
 - Routing reads every table in both families with `rt_tables` names (the local table is counted, not
   listed), the policy rules with their owners, and the client path. Added rules take priorities in
   10000–19999, checking live foreign priorities as well as the spec in that family; a rule with no
@@ -116,6 +151,13 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   and unmarked discard rules are guarded as potential dashboard-reply selectors.
 - Device/namespace removal checks shaping, NAT/forward ingress/egress, routes/rules, foreign children
   and veth-peer dependencies. A partial namespace failure restores already removed pairs.
+- The namespace list reports a per-namespace `readError` instead of an empty device list.
+  `GET /namespaces/{name}?kind=named|container` (`namespace_detail.go`) reads one namespace's devices,
+  both families' routes (local/broadcast entries left out), the resolv.conf its processes read
+  (`ip netns exec` for a named namespace, `/proc/<pid>/root/etc/resolv.conf` for a container) and
+  its TCP/UDP listeners, each with its own `Reading`. `GET /namespaces/{name}/lookup?target=` asks
+  the namespace's kernel `route get` for a literal address. A container is resolved from the Docker
+  inventory by name; the client never supplies a PID.
 - Forwarding is per family. Turning it off is refused while Docker networks, an enabled forward or NAT
   entry, a WireGuard exit or Tailscale's exit node or subnet routes need it. The API supplies separate
   Docker IPv4/IPv6 bridge counts: IPv6 uses its flag/subnet evidence; IPv4 conservatively counts all
@@ -128,6 +170,37 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
 - IPv4 forwarding resets kernel host settings; managed redirect protections are reasserted after
   changes and rendered after forwarding in the boot sysctl file.
 - BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only.
+
+## Overview
+
+Files: `overview.go`, `identity.go`, `topology_flows*.go`, `incidents.go`; the api's
+`handlers_network_overview.go` gathers the readings concurrently.
+
+- `identity` is each family's way out from `ip route get` of the same anchors the guards use (only the
+  kernel is asked): device, gateway, the NIC source and its scope, and the family's forwarding switch
+  (an unreadable switch says so rather than "off"). `public` keeps the NIC source apart from the
+  provider identity: `nic` (a public source; a provider firewall or 1:1 NAT is not visible), `translated`
+  (a private/shared/unique-local source rewritten upstream to an address this host never observes),
+  `unobserved`, `no_route` or `unknown`.
+- `flows` reads the kernel's connection tracking in-process over ctnetlink (`NETLINK_NETFILTER`, a
+  read-only dump in the backend's host network namespace, bounded to 65,536 entries; no subprocess)
+  and places each entry's initiator and responder on a topology node by Docker subnet, managed or
+  addressed device subnet, tailnet range, host address or the internet. Edges carry flow counts,
+  protocols, translation (masquerade from the reply tuple, port forward from the rewritten
+  destination), the translating device and an effective hop-by-hop path. Bytes appear only when
+  `nf_conntrack_acct` is on. It is a moment's reading of this host, not a capture or switch discovery;
+  `unavailable` and `failed` (e.g. missing `CAP_NET_ADMIN`) are reported as such.
+- `observations` records whether each reading the attention list depends on arrived (`ok`, `failed`,
+  or `unavailable` for a missing tool). A failed reading becomes an `observation.<source>` finding and
+  the findings judged from it are skipped, so a failed firewall, error-history or forwarding read is
+  never reported as an absent firewall, zero errors or forwarding off. `Sampler.RecentErrors` returns
+  its database error for this.
+- Every finding names its `source`. `RecordFindings` folds each Overview read into the additive
+  `network_incidents` table: a new finding opens an incident (correlated with others opened within
+  two minutes), a repeated one extends it, and an open incident resolves only when its own reading
+  succeeded without it; a failed reading marks it `unobservedSince` and keeps it open. Resolved history
+  is kept 30 days, at most 1,000 rows. `Server.Start` also judges the list every five minutes with no
+  browser (`startNetworkIncidents`); between those reads and page reads nothing is observed.
 
 ## Traffic
 
@@ -373,8 +446,8 @@ handler for the PUTs, PATCHes and posts). No route takes a typed phrase.
 
 | Area | Routes |
 | --- | --- |
-| Overview | `GET /`, `GET /capabilities`, `GET /overview`, `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
-| Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`; `GET`/`POST /namespaces`, `DELETE /namespaces/{name}` |
+| Overview | `GET /`, `GET /capabilities`, `GET /overview` (identity, flows, observations, incidents), `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
+| Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`, `PUT /links/{name}/vlans`, `PUT /links/{name}/remotes` (destructive by content when removing); reads `GET /links/{name}/detail`, `/bridge`, `/readiness`, `/master/preview?master=`; `GET`/`POST /namespaces`, `GET /namespaces/{name}?kind=`, `GET /namespaces/{name}/lookup?kind=&target=`, `DELETE /namespaces/{name}` |
 | Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
 | Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
 | Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
@@ -396,6 +469,14 @@ Parsers and renderers are tested against sanitized fixtures copied from the tool
 apply's command order and rollback with the recorder, and every guard as a table. Live tests behind
 `JD_NETNS_LIVE=1` build devices, routes, rules, a gateway table with forwards, limits and blocklists,
 and shaping inside throwaway network namespaces — never on the host's own interfaces.
+`TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel` applies port VLANs and VXLAN flood ends,
+reads the bridge view and readiness from the real kernel and replays the unit's bridge lines into a
+second fresh namespace; `TestLiveBridgeVLANRecoveryAfterProcessDeath` kills the applying process
+after its first `bridge vlan` change and recovers the previous membership from a fresh process with
+only the journal; `TestLiveMacvlanBridgeModeConnectivity` measures sibling reachability and parent
+isolation. `TestLiveConntrackDumpReadsAnOwnedNamespace` must run as root
+(`sudo -E JD_NETNS_LIVE=1 go test ./internal/netx -run TestLiveConntrack`) because the netlink reader
+enters the throwaway namespace in-process.
 
 ### Retained capture routes
 

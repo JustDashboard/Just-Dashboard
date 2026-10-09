@@ -504,7 +504,8 @@ export const overview = {
       title: "ens3 dropped or failed 43 packets in the last hour",
       detail:
         "Errors on the uplink are a cable, a driver or the provider; drops are a queue too short for the traffic.",
-      href: "/network/interfaces",
+      href: "/network/interfaces?device=ens3",
+      source: "history",
     },
     {
       id: "dns.plain",
@@ -513,8 +514,255 @@ export const overview = {
       detail:
         "Every upstream resolver is asked in plain DNS, which anyone on the path can read and rewrite. DNS over TLS is a setting away.",
       href: "/network/dns",
+      source: "dns",
     },
   ],
+  identity: [
+    {
+      family: "inet",
+      forwarding: true,
+      device: "ens3",
+      gateway: "203.0.113.1",
+      source: "203.0.113.20",
+      sourceScope: "public",
+      public: "nic",
+      detail:
+        "Traffic leaves from 203.0.113.20, the NIC's own public address. A provider firewall or 1:1 NAT in front of the NIC is not visible from this host.",
+    },
+    {
+      family: "inet6",
+      forwarding: true,
+      device: "ens3",
+      gateway: "2001:db8:2005:100::",
+      source: "2001:db8:2005:100::13",
+      sourceScope: "public",
+      public: "nic",
+      detail:
+        "Traffic leaves from 2001:db8:2005:100::13, the NIC's own public address. A provider firewall or 1:1 NAT in front of the NIC is not visible from this host.",
+    },
+  ],
+  flows: {
+    state: "ok",
+    readAt: iso(0),
+    total: 412,
+    classified: 57,
+    truncated: false,
+    accounting: false,
+    edges: [
+      {
+        from: "docker:93e5e9c9442b5f1a",
+        to: "internet",
+        flows: 31,
+        protocols: ["tcp", "udp"],
+        translation: "masquerade",
+        via: "ens3",
+        path: ["web", "br-93e5e9c9442b", "this server", "masquerade on ens3", "the internet"],
+      },
+      {
+        from: "internet",
+        to: "docker:93e5e9c9442b5f1a",
+        flows: 18,
+        protocols: ["tcp"],
+        translation: "forward",
+        via: "ens3",
+        path: ["the internet", "this server", "port forward on ens3", "br-93e5e9c9442b", "web"],
+      },
+      {
+        from: "link:tailscale0",
+        to: "host",
+        flows: 8,
+        protocols: ["tcp"],
+        translation: "none",
+        path: ["the tailnet", "tailscale0", "this server"],
+      },
+    ],
+  },
+  observations: [
+    {
+      source: "client",
+      label: "The route back to your browser",
+      state: "ok",
+      href: "/network/routing",
+    },
+    { source: "firewall", label: "The host firewall", state: "ok", href: "/network/firewall" },
+    {
+      source: "history",
+      label: "Recorded interface errors",
+      state: "ok",
+      href: "/network/traffic",
+    },
+  ],
+  incidents: [
+    {
+      id: 7,
+      findingId: "link.errors.ens3",
+      source: "history",
+      level: "warning",
+      title: "ens3 dropped or failed 43 packets in the last hour",
+      detail: "Errors on the uplink are a cable, a driver or the provider.",
+      href: "/network/interfaces?device=ens3",
+      openedAt: iso(42),
+      lastSeenAt: iso(0),
+      related: [6],
+    },
+    {
+      id: 6,
+      findingId: "link.carrier.ens3",
+      source: "links",
+      level: "critical",
+      title: "ens3 has no carrier",
+      detail: "The device is up but nothing is connected to it.",
+      href: "/network/interfaces?device=ens3",
+      openedAt: iso(43),
+      lastSeenAt: iso(40),
+      resolvedAt: iso(39),
+      related: [7],
+    },
+  ],
+  readAt: iso(0),
+}
+
+/** A device's driver, offloads and counters, as `/links/{name}/detail` answers. */
+export function linkDetail(name: string) {
+  const ok = { state: "ok" }
+  const physical = name === "ens3"
+  return {
+    name,
+    checkedAt: iso(0),
+    driver: physical
+      ? { name: "virtio_net", version: "1.0.0", bus: "0000:00:03.0" }
+      : { name: "bridge" },
+    driverRead: ok,
+    offloads: physical
+      ? [
+          { name: "rx-checksumming", enabled: true, fixed: true },
+          { name: "generic-receive-offload", enabled: true, fixed: false },
+          { name: "large-receive-offload", enabled: false, fixed: true },
+        ]
+      : [],
+    offloadsRead: physical
+      ? ok
+      : { state: "not_applicable", reason: "The driver reports no offload features." },
+    errors: {
+      rxErrors: physical ? 43 : 0,
+      rxDropped: 0,
+      rxOverErrors: 0,
+      rxLengthErrors: 0,
+      rxCrcErrors: physical ? 41 : 0,
+      rxFrameErrors: physical ? 2 : 0,
+      rxFifoErrors: 0,
+      rxMissedErrors: 0,
+      txErrors: 0,
+      txDropped: 0,
+      txCarrierErrors: 0,
+      txCollisions: 0,
+      txAbortedErrors: 0,
+      txFifoErrors: 0,
+      txWindowErrors: 0,
+      txHeartbeatErrors: 0,
+      carrierChanges: physical ? 3 : 0,
+    },
+    errorsRead: ok,
+  }
+}
+
+/** The managed bridge read as a switch. */
+export function bridgeView(name: string) {
+  const ok = { state: "ok" }
+  return {
+    name,
+    managed: name === "jd-lab",
+    checkedAt: iso(0),
+    stp: false,
+    vlanFiltering: name === "jd-lab",
+    multicastSnooping: true,
+    defaultPvid: 1,
+    ageingSeconds: 300,
+    vlanProtocol: "802.1Q",
+    settingsRead: ok,
+    ports: [
+      {
+        name,
+        self: true,
+        managed: name === "jd-lab",
+        vlans: [{ vid: 1, pvid: true, untagged: true }],
+        desired: [{ vid: 1, pvid: true, untagged: true }],
+      },
+      {
+        name: "vlan30",
+        self: false,
+        managed: true,
+        vlans: [{ vid: 1, pvid: true, untagged: true }],
+        desired: [{ vid: 1, pvid: true, untagged: true }],
+      },
+    ],
+    vlansRead: ok,
+    fdb: [
+      { mac: "02:42:0a:00:04:02", port: "vlan30", vlan: 1, state: "", static: false },
+      { mac: "02:00:00:aa:bb:08", port: name, vlan: 1, state: "permanent", static: true },
+    ],
+    fdbTotal: 2,
+    fdbRead: ok,
+  }
+}
+
+/** What `/links/{name}/readiness` answers for the kinds that have checks. */
+export function readiness(name: string) {
+  return {
+    name,
+    kind: "unknown",
+    checkedAt: iso(0),
+    checks: [],
+    limits: [`There are no readiness checks for ${name}.`],
+  }
+}
+
+/** A namespace read as its own network. */
+export function namespaceDetail(name: string, kind: string) {
+  const ok = { state: "ok" }
+  const container = kind === "container"
+  return {
+    name,
+    kind,
+    managed: !container,
+    image: container ? "postgres:17-alpine" : undefined,
+    pid: container ? 4412 : undefined,
+    checkedAt: iso(0),
+    devices: [
+      {
+        name: container ? "eth0" : "lab-n",
+        state: "up",
+        mtu: 1500,
+        addresses: [container ? "10.0.0.3/24" : "192.168.50.20/24"],
+      },
+    ],
+    devicesRead: ok,
+    routes: [
+      {
+        family: "inet",
+        destination: "default",
+        gateway: container ? "10.0.0.1" : "192.168.50.1",
+        device: container ? "eth0" : "lab-n",
+        protocol: "static",
+      },
+      {
+        family: "inet",
+        destination: container ? "10.0.0.0/24" : "192.168.50.0/24",
+        device: container ? "eth0" : "lab-n",
+        protocol: "kernel",
+        source: container ? "10.0.0.3" : "192.168.50.20",
+      },
+    ],
+    routesRead: ok,
+    dns: {
+      nameservers: [container ? "127.0.0.11" : "192.168.50.1"],
+      search: [],
+      options: container ? ["ndots:0"] : [],
+    },
+    dnsRead: ok,
+    listeners: container ? [{ protocol: "tcp", address: "0.0.0.0", port: 5432 }] : [],
+    listenersRead: ok,
+  }
 }
 
 /** Fifteen minutes of two-second readings, ending now, shaped by a few slow waves and a burst. */
@@ -1192,6 +1440,41 @@ export async function mockNetwork(
     }
     const overrides = options.overrides ?? {}
     if (path in overrides) return json(route, overrides[path])
+    const linkPart = path.match(
+      /^\/network\/links\/([^/]+)\/(detail|bridge|readiness|master\/preview)$/,
+    )
+    if (linkPart) {
+      const name = decodeURIComponent(linkPart[1])
+      switch (linkPart[2]) {
+        case "detail":
+          return json(route, linkDetail(name))
+        case "bridge":
+          return json(route, bridgeView(name))
+        case "readiness":
+          return json(route, readiness(name))
+        default:
+          return json(route, {
+            device: name,
+            bridge: url.searchParams.get("master") || undefined,
+            allowed: true,
+            persisted: true,
+            steps: [`ip link set ${name} master ${url.searchParams.get("master")}`],
+            effects: [],
+          })
+      }
+    }
+    const namespacePart = path.match(/^\/network\/namespaces\/([^/]+)(\/lookup)?$/)
+    if (namespacePart) {
+      const name = decodeURIComponent(namespacePart[1])
+      if (namespacePart[2])
+        return json(route, {
+          address: url.searchParams.get("target"),
+          device: "lab-n",
+          gateway: "192.168.50.1",
+          source: "192.168.50.20",
+        })
+      return json(route, namespaceDetail(name, url.searchParams.get("kind") ?? "named"))
+    }
     if (path.startsWith("/network/native/profiles/")) {
       return json(route, {
         checkedAt: new Date().toISOString(),

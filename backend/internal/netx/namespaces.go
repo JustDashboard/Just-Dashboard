@@ -26,6 +26,9 @@ type Namespace struct {
 	Image   string            `json:"image,omitempty"`
 	PID     int               `json:"pid,omitempty"`
 	Devices []NamespaceDevice `json:"devices"`
+	// ReadError is why this namespace's devices could not be read; its
+	// Devices are then unknown, not empty.
+	ReadError string `json:"readError,omitempty"`
 }
 
 // NamespaceDevice is a device inside a namespace.
@@ -50,8 +53,8 @@ const containerReads = 4
 
 // Namespaces lists the named namespaces and one per running container, each
 // with its devices. A namespace whose devices cannot be read — a container
-// that exited between the listing and the read — is listed without them
-// rather than failing the page.
+// that exited between the listing and the read — is listed with its
+// ReadError rather than failing the page or looking empty.
 func (s *Service) Namespaces(ctx context.Context, inv Inventory) ([]Namespace, error) {
 	out, err := run(ctx, "ip", "-j", "netns", "list")
 	if err != nil {
@@ -95,11 +98,15 @@ func (s *Service) Namespaces(ctx context.Context, inv Inventory) ([]Namespace, e
 				raw, err = run(ctx, "ip", "-n", n.Name, "-j", "addr", "show")
 			}
 			if err != nil {
+				n.ReadError = firstLines(err.Error(), 2)
 				return
 			}
-			if devices, err := parseNamespaceDevices(raw); err == nil {
-				n.Devices = devices
+			devices, err := parseNamespaceDevices(raw)
+			if err != nil {
+				n.ReadError = err.Error()
+				return
 			}
+			n.Devices = devices
 		}(&all[i])
 	}
 	wg.Wait()

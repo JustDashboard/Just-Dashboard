@@ -32,17 +32,20 @@ export function AddRoute({
   routing,
   links,
   onAdded,
+  initialDevice,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   routing: NetworkRouting
   links: NetworkLink[]
   onAdded: () => void
+  /** A device another page handed the form, already chosen. */
+  initialDevice?: string
 }) {
   const [destination, setDestination] = useState("")
   const [type, setType] = useState("unicast")
   const [gateway, setGateway] = useState("")
-  const [device, setDevice] = useState(NONE)
+  const [device, setDevice] = useState(initialDevice ?? NONE)
   const [table, setTable] = useState("254")
   const [metric, setMetric] = useState("")
   const [source, setSource] = useState("")
