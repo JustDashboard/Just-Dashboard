@@ -67,9 +67,13 @@ const axisRate = (value: number) => `${bytes(value, 0)}/s`
  * protects — with the verdict at the line's end); the topology, which is the
  * page (the internet, the tailnet and every tunnel on the left, this server
  * in the middle, the networks it is the gateway of on the right, each wire
- * moving with its device's bytes); the readings that move, each live and with
- * its last fifteen minutes; that quarter of an hour as a chart; and what
- * needs attention, worst first, each opening the page that fixes it.
+ * moving with its device's bytes), and under it the paths traffic is taking
+ * through it, from connection tracking; the readings that move, each live and
+ * with its last fifteen minutes and the age of its newest reading; that
+ * quarter of an hour as a chart whose selection lists the devices that
+ * carried it; each family's way out, the NIC's source apart from what the
+ * internet sees; and what needs attention, worst first, each opening the page
+ * that fixes it, with its history under it.
  *
  * The overview is read every fifteen seconds and the throughput every two, so
  * the wires and figures move between reads of the rest: the devices are drawn
