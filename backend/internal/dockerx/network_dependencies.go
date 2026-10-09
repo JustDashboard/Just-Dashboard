@@ -77,6 +77,8 @@ type NetworkDependencies struct {
 	// SelfProject is the dashboard's own Compose project, set by the caller,
 	// which is the one that knows where the dashboard keeps its data.
 	SelfProject string
+	// refs maps each inspected reference to the full ID it resolved to.
+	refs map[string]string
 }
 
 // NetworkDependencies reads a network's dependents. extra names containers
@@ -98,7 +100,7 @@ func (c *Client) NetworkDependencies(ctx context.Context, id string, extra ...st
 	if err != nil {
 		return nil, fmt.Errorf("the networks could not be listed: %w", err)
 	}
-	d := &NetworkDependencies{Network: insp, Networks: map[string]Network{}}
+	d := &NetworkDependencies{Network: insp, Networks: map[string]Network{}, refs: map[string]string{}}
 	for _, n := range networks {
 		brief := Network{ID: n.ID, Name: n.Name, Driver: n.Driver, Scope: n.Scope, Internal: n.Internal, Labels: n.Labels, Subnets: []string{}}
 		for _, cfg := range n.IPAM.Config {
@@ -135,14 +137,27 @@ func (c *Client) NetworkDependencies(ctx context.Context, id string, extra ...st
 		}
 		i, ok := index[detail.ID]
 		if !ok {
-			// Created between the listing and the inspect: it still counts.
+			// Created between the listing and the inspect: it still counts,
+			// with the labels its owner checks read from its own inspect.
 			i = len(d.Containers)
 			index[detail.ID] = i
-			d.Containers = append(d.Containers, DependentContainer{Container: Container{ID: detail.ID, Name: strings.TrimPrefix(detail.Name, "/"), Labels: map[string]string{}, Networks: []string{}}})
-			if detail.State != nil {
-				d.Containers[i].State = detail.State.Status
+			c := Container{ID: detail.ID, Name: strings.TrimPrefix(detail.Name, "/"), Labels: map[string]string{}, Networks: []string{}}
+			if detail.Config != nil {
+				c.Image = detail.Config.Image
+				for k, v := range detail.Config.Labels {
+					c.Labels[k] = v
+				}
+				c.ComposeStack, c.ComposeSvc = c.Labels["com.docker.compose.project"], c.Labels["com.docker.compose.service"]
 			}
+			if detail.State != nil {
+				c.State = detail.State.Status
+			}
+			d.Containers = append(d.Containers, DependentContainer{Container: c})
 		}
+		// The reference asked for resolves to this container, whatever
+		// form it took — a name, a short ID — so the previews judge the
+		// container the Engine would act on.
+		d.refs[ref] = detail.ID
 		dc := &d.Containers[i]
 		dc.Inspected = true
 		dc.Endpoints = map[string]Endpoint{}
@@ -165,6 +180,9 @@ func (c *Client) NetworkDependencies(ctx context.Context, id string, extra ...st
 func (d *NetworkDependencies) Container(ref string) *DependentContainer {
 	if ref == "" {
 		return nil
+	}
+	if id, ok := d.refs[ref]; ok {
+		ref = id
 	}
 	var found *DependentContainer
 	for i := range d.Containers {

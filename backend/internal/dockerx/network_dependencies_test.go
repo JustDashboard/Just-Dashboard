@@ -283,3 +283,18 @@ func TestNetworkDependenciesReadsMembersAndFailsClosed(t *testing.T) {
 		t.Fatal("a failed container listing must fail the reading")
 	}
 }
+
+// A reference in any form the Engine resolves — a short ID, a name — is
+// judged as the container it resolved to, so a guard cannot be stepped
+// around by naming the dashboard's container another way.
+func TestPreviewsJudgeTheContainerAReferenceResolvedTo(t *testing.T) {
+	d := lab()
+	d.SelfProject = "shop"
+	d.refs = map[string]string{"bbbb": "bbbb000000000000"}
+	if got := conflictLevels(PreviewDisconnect(d, "bbbb")); got["dashboard_container"] != ConflictBlock {
+		t.Fatalf("a short ID of the dashboard's container is still refused: %+v", got)
+	}
+	if got := conflictLevels(PreviewDisconnect(lab(), "bbbb")); got["not_attached"] != ConflictBlock {
+		t.Fatalf("an unresolved short reference is refused rather than guessed: %+v", got)
+	}
+}

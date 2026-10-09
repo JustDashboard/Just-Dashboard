@@ -553,7 +553,8 @@ func (s *Server) handleNetworkConnect(w http.ResponseWriter, r *http.Request) er
 	if dockerx.Blocking(conflicts) {
 		return conflictRefusal(conflicts)
 	}
-	if err := s.modules.docker.ConnectNetwork(ctx, deps.Network.ID, req.Container, req.Aliases); err != nil {
+	// The change goes to the container the preview judged, by its full ID.
+	if err := s.modules.docker.ConnectNetwork(ctx, deps.Network.ID, deps.Container(req.Container).ID, req.Aliases); err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.network.connect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "aliases": req.Aliases, "acknowledged": conflictCodes(conflicts)})
@@ -586,7 +587,7 @@ func (s *Server) handleNetworkDisconnect(w http.ResponseWriter, r *http.Request)
 	if dockerx.Blocking(conflicts) {
 		return conflictRefusal(conflicts)
 	}
-	if err := s.modules.docker.DisconnectNetwork(ctx, deps.Network.ID, req.Container, req.Force); err != nil {
+	if err := s.modules.docker.DisconnectNetwork(ctx, deps.Network.ID, deps.Container(req.Container).ID, req.Force); err != nil {
 		return s.dockerErr(err)
 	}
 	httpx.SetAudit(r, "docker.network.disconnect", deps.Network.Name, map[string]any{"id": deps.Network.ID, "container": req.Container, "acknowledged": conflictCodes(conflicts)})
