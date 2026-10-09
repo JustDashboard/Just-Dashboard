@@ -38,6 +38,12 @@ It records explicit empty/zero/native-null distinctions, private retained-review
 changed-file gate, selected query/API races and separately attributed current-source three-engine
 owned lifecycle proof. Actual installed Technitium logger rows and broader P17/C074 remain open.
 
+[Measured native custom-domain decision acceptance](dns-domain-decisions-acceptance.md) enables
+protection on actual pinned AdGuard and Pi-hole engines and measures an owned default client's
+UDP/TCP A/AAAA answers before and after reviewed additions, an owned restart and removals. It
+preserves the restart endpoint and Pi-hole `.invalid` failures with their corrections. IPv6 client
+transport, subscriptions, Technitium filtering and broader P17/C074 remain open.
+
 [Kernel observer acceptance](observer-kernel-acceptance.md) records the bounded native observer,
 owned detach/retry, durable batch receipts and actual Docker/process-death fixtures.
 [Observer UI acceptance](observer-ui-acceptance.md) records its separate measurement channels,

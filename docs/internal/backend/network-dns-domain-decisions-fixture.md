@@ -252,6 +252,12 @@ Both originals stay attributed to `17aeaae3`, including the AdGuard pass:
 names now use `.example`; neither engine's earlier result is relabeled as acceptance of that
 source.
 
+Clean `8301171b` then passed both serial actual runs from one frozen helper/race binary: Pi-hole
+with 186 questions in 95.588 seconds and AdGuard with 184 in 79.426 seconds, without skips. Both
+history corroborations, the post-restart matrix and exact cleanup passed. The
+[acceptance record](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-domain-decisions-acceptance.md)
+retains the raw logs, receipts and boundaries.
+
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
 [the AdGuard encryption enum](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/qlog.go#L53),
 [persistent-client JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/home/clientshttp.go#L86),

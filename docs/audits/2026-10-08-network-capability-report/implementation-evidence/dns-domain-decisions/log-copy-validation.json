@@ -1,0 +1,66 @@
+[
+  {
+    "name": "native-pihole",
+    "raw_bytes": 38338,
+    "raw_sha256": "ed63490cd3124e9b357f748c8e3bf5309cd129a96ab1d433123fe644ec3e3dd0",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "7f997c71875c8ea74d2a7cf24e065c3c1b31940d0d4ff759daeb6d5cbbabdd07",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "native-adguard",
+    "raw_bytes": 35780,
+    "raw_sha256": "c2743b44f5dba0ec91b0175ebfd64240168b09cf647cff615c179726a8e12aaf",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "bdda8858b647be9d9cf5aa7cc42b46402282ec0f1fbef05a6395aabfdc7b506e",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "required",
+    "raw_bytes": 298,
+    "raw_sha256": "18d65de932822a0647143e8f23433787bfc6fbf1f17e23170cb44c342cf66de3",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "5f776f536d040fdbf7739bce49cf43e8dccbb6b51940ab7716559a22993ee376",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "focused-race",
+    "raw_bytes": 14880,
+    "raw_sha256": "2d0328c904f29b6fdfb112ea4de1c188b5a0182e0de459034e2c32e686b9051e",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "c994d141b9e8d8928e97bb04ef35784a6d42e2a09fede6b067167c2f79490bbc",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "compile",
+    "raw_bytes": 0,
+    "raw_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "9ceffb7310338057cfe71a4ae1e2c98d2c485d81cdef906532a801f457a38d64",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "superseded-invalid-pihole-failed",
+    "raw_bytes": 2967,
+    "raw_sha256": "12da44ddb0de273c123847b17a4b99dcc89ddf01e6dd9500a4f58b24e9025da9",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "891953a75ef9ce1f514a52bddd73ae9ab1f3d283f46376c63cc2f39be2e14395",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "superseded-invalid-adguard-pass",
+    "raw_bytes": 35782,
+    "raw_sha256": "3f65d25108e13424108481df9f2eee50e87cf65956f3e6e8729c2756f6d18b6a",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "606c121fa4f3246e520a9c59f51fc12d5f687585a51b4dd0789136f24333d84a",
+    "gzip_roundtrip_byte_exact": true
+  },
+  {
+    "name": "restart-diagnostic-adguard-failed",
+    "raw_bytes": 57541,
+    "raw_sha256": "622323e624f0c3b18cfabfce25496a6815c5225a61ca2a6221b3836289390b39",
+    "display_copy_byte_exact": true,
+    "gzip_sha256": "c18b49b00946e59c7ff738e43f341835656a6080596a9956adf577db4be2f68d",
+    "gzip_roundtrip_byte_exact": true
+  }
+]
