@@ -15,6 +15,7 @@
 - [`network-sqm.md`](network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`wireguard-dual-stack.md`](wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
 - [`network-drift.md`](network-drift.md) — saved/render/runtime comparisons and owned repair review.
+- [`network-egress.md`](network-egress.md) — monitored egress groups: member paths, hysteresis, guarded switching, connection pinning, boot restore and the simulation automation waits on.
 - [`docker-files-logs.md`](docker-files-logs.md) — Docker, files, archives, previews, and logs.
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.
 - [`git-backups-users.md`](git-backups-users.md) — Git, backup execution/restore, host users, and SSH keys.

@@ -11,8 +11,8 @@ The [capability-report implementation ledger](../../audits/2026-10-08-network-ca
 tracks the additional work and its acceptance evidence.
 
 The section also offers [connection investigation](network-investigator.md), [saved diagnostic
-runs](network-diagnostics.md), [bounded packet captures](network-captures.md) and
-[owned drift inspection](network-drift.md). The investigator pins a
+runs](network-diagnostics.md), [bounded packet captures](network-captures.md),
+[owned drift inspection](network-drift.md) and [monitored egress groups](network-egress.md). The investigator pins a
 typed host/container tuple and distinguishes observed, modeled, measured and unknown layers. The
 diagnostic service retains bounded quick-tool and typed investigation artifacts with lifecycle state in SQLite; host-network configuration
 remains in the managed spec. Drift compares desired/rendered/runtime identities and measured unit
@@ -170,6 +170,12 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
 - IPv4 forwarding resets kernel host settings; managed redirect protections are reasserted after
   changes and rendered after forwarding in the boot sysctl file.
 - BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only.
+- Tables 7700–7759 and rule priorities 19000–19095 belong to [egress groups](network-egress.md):
+  each group's member tables and mark rules, its group table holding the decided members, and while
+  enabled its operator exclusions, suppress rule and selector. Hand-made routes and rules are refused
+  there. A group's objects are rendered into the same boot batches with the last decided member, and
+  every switch is a journaled `ip route replace` of its group table, guarded and verified like any
+  routing change.
 
 ## Overview
 
@@ -517,8 +523,8 @@ upstream router/provider restriction. All probes remain admin-only and audited.
 
 All under `/api/v1/network` (`handlers_network*.go`). Reads are `read`, except `/vpn/*` and
 `/traffic/processes`, which name who connects and are `system.admin`. Every mutation is `system.admin`;
-removals, setting a device down, turning forwarding off, disabling a forward, NAT entry, limit or
-blocklist, weakening a kernel protection, setting a trusted address to expire, making or removing an
+removals, setting a device down, turning forwarding off, enabling, disabling, removing or switching
+an egress group or turning its automation on, disabling a forward, NAT entry, limit or blocklist, weakening a kernel protection, setting a trusted address to expire, making or removing an
 exception, ending sessions, turning a WireGuard exit off, withdrawing a site's network or changing
 where it is dialled, clearing a peer's usage budget, withdrawing what this server offers the tailnet
 and changing the resolver are inside `s.destructive` (by path, or by content in the handler for the
@@ -530,6 +536,7 @@ PUTs, PATCHes and posts). No route takes a typed phrase.
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`, `PUT /links/{name}/vlans`, `PUT /links/{name}/remotes` (destructive by content when removing); reads `GET /links/{name}/detail`, `/bridge`, `/readiness`, `/master/preview?master=`; `GET`/`POST /namespaces`, `GET /namespaces/{name}?kind=`, `GET /namespaces/{name}/lookup?kind=&target=`, `DELETE /namespaces/{name}` |
 | Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
 | Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
+| Egress groups | `GET /egress`, `GET /egress/{id}/events`, `/simulations`, `GET /egress/simulations/{sim}`; `POST /egress`, `PUT /egress/{id}`, `POST /egress/{id}/simulate`, `/automation/off` (admin); `DELETE /egress/{id}`, `POST /egress/{id}/enable`, `/disable`, `/switch`, `/automation/on` (destructive). See [egress groups](network-egress.md). |
 | Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}`, `POST /gateway/preview`, `POST /gateway/verify` (admin; change nothing on the host) |
 | Protection | `GET /protection`, `GET /protection/pressure` (admin), `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/preview` (admin), `POST /protection/settings`, `DELETE /protection/settings/{key}`, `PUT /protection/trusted` (destructive with an expiry), `DELETE /protection/trusted?address=`, `POST /protection/exceptions`, `DELETE /protection/exceptions/{id}` (both destructive), `POST /protection/sessions/preview` (admin), `POST /protection/sessions/revoke` (destructive) |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
@@ -556,7 +563,8 @@ after its first `bridge vlan` change and recovers the previous membership from a
 only the journal; `TestLiveMacvlanBridgeModeConnectivity` measures sibling reachability and parent
 isolation. `TestLiveConntrackDumpReadsAnOwnedNamespace` must run as root
 (`sudo -E JD_NETNS_LIVE=1 go test ./internal/netx -run TestLiveConntrack`) because the netlink reader
-enters the throwaway namespace in-process.
+enters the throwaway namespace in-process; so do the `TestLiveEgress` tests, whose probes and
+connection tracking do the same ([egress groups](network-egress.md#tests)).
 
 ### Retained capture routes
 
