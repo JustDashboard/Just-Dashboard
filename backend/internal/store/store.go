@@ -1414,6 +1414,10 @@ func Open(dataDir string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply network DNS evidence schema: %w", err)
 	}
+	if err := InitializeNetworkDNSServices(context.Background(), db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply managed DNS service schema: %w", err)
+	}
 	// Run after the schema, never instead of it: a fresh database gets its
 	// tables from the block above and finds nothing to add, while an existing
 	// one gets only the columns it is missing.

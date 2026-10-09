@@ -24,6 +24,7 @@ import (
 func (s *Server) mountNetworkDNSRoutes(r chi.Router) {
 	r.Route("/dns", func(r chi.Router) {
 		s.mountNetworkDNSEvidenceRoutes(r)
+		s.mountNetworkDNSServiceRoutes(r)
 		r.Method(http.MethodGet, "/", s.handle(s.handleDNS))
 		r.Method(http.MethodGet, "/hosts", s.handle(s.handleDNSHosts))
 		// A lookup is `read`, though it is a POST and sends packets. It asks

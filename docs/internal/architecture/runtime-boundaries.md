@@ -7,6 +7,7 @@ upgrader, the three limiters, and in agent mode the `agent.Identity`. `api/modul
 holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEvents`, `pm2`, `systemd`,
 `table`, `cron`, `logs`, `term`, `files`, `git`, `github`, `forge`, `updates`, `selfUpdate`, `proxy`, `dbs`,
 `linuxUsers`, `netsec`, `captures` (`netcapture`), `flowAccounting` (`netflows`), `networkVantages` (`netvantage`),
+`dnsServices` (`dnsservice`, [native DNS connections and owned engines](../backend/network-dns-services.md)),
 `ipam` (`netipam`), `network` (`netx`, [the network module](../backend/network.md)), `jobs`, three backup pieces, and deployment components covering legacy
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. The backup runner delegates native SQLite snapshots to
@@ -61,6 +62,10 @@ and retains failed detach state for retry. Shutdown reports an unsuccessful fina
 restart records interruption and never automatically reloads the observer. Ordinary history opt-out
 requires an explicit observer stop first so it cannot bypass the destructive route and its rate budget. See
 [the observer contract](../backend/network-flow-observer.md).
+Native DNS services reconcile interrupted reviewed changes and owned setup/removal during startup
+with a forty-second deadline. They never replay native mutations or bootstrap, and retain verified
+owned engines. Shutdown closes the module's Docker SDK client without stopping those engines. See
+[native DNS service lifecycle](../backend/network-dns-services.md).
 Before deployment workers start, preview quarantine persists blocks on legacy unsafe environments and
 fences their old work. Its controller stops owned containers, disables restart, withdraws their routes,
 and retries incomplete isolation every 30 seconds without preventing access to the dashboard. It stops
@@ -186,7 +191,9 @@ configurations (`network_vpn_clients`), saved diagnostic runs (`network_diagnost
 packet capture metadata/artifacts (`network_packet_captures`), optional source/check identities
 (`network_probe_vantages`, `network_probe_checks`), shared planning pools/reservations
 (`network_ipam_pools`, `network_ipam_reservations`), private native DNS investigation records
-(`network_dns_evidence`), and socket-hour/coverage records
+(`network_dns_evidence`), private native DNS service connections, reviewed changes, provisions and
+resource owner identity (`network_dns_services`, `network_dns_service_changes`,
+`network_dns_service_provisions`, `network_dns_service_settings`), and socket-hour/coverage records
 (`network_flow_buckets`, `network_flow_cycles`). What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated

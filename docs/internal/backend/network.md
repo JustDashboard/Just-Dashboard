@@ -286,6 +286,11 @@ Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` re
 bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
 writes. This is not a DNS server or an AdGuard/Pi-hole configuration adapter.
 
+The separate [native DNS services module](network-dns-services.md) provides sealed connections to
+AdGuard Home, Pi-hole FTL and Technitium, private configured-policy/query inventory, retained reviewed
+native changes and bounded owned Docker provisions. These default to dashboard read-only and do not
+redirect the host resolver or treat local overrides as authoritative zones.
+
 `POST /dns/lookup` defaults to `mode: "effective"`. When the actual host chain delegates to a supported
 systemd-resolved stub, it uses the [native policy adapter](network-dns-evidence.md), including explicit
 CNAME checks before each target question. Native stub ownership, version and complete split policy
@@ -348,6 +353,7 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |
 | Private DNS evidence | `GET`/`POST /dns/evidence/`, `GET`/`DELETE /dns/evidence/{id}`, `GET /dns/evidence/{id}/export` (admin; deletion destructive) |
+| Native DNS services | `/dns/services/` connections, `/{id}/changes` review and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |
 | Traffic | `GET /traffic/processes`, `GET /traffic/containers`, `GET /ebpf` |
 | Diagnostics | `POST /probe` (26 tools) |
 

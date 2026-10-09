@@ -115,6 +115,11 @@ to the contribution terms above, including the additional licence grant to the p
   This requires root or passwordless sudo and installed resolved/busctl/dbus-daemon/ip. It uses only
   owned network/mount namespaces, private bus/configuration and a controlled signed TLS DNS fixture;
   it never changes the host resolver. See [native DNS investigations](docs/internal/backend/network-dns-evidence.md).
+- Native DNS service changes run the selected private API, sealing, HTTP/TLS and owned-resource races,
+  then each actual pinned engine serially with `JD_DNS_SERVICES_LIVE_ENGINE`. See
+  [native DNS service acceptance](docs/internal/backend/network-dns-services.md#acceptance-status)
+  for the selected test binary, required already-cached images and exact owned cleanup scope.
+  These fixtures publish explicit high loopback ports and never redirect the host resolver.
 - Controlled probe-agent changes also run from `backend/`:
   `JD_NETVANTAGE_LIVE=1 go test -race ./internal/netvantage -run '^TestControlledVantageSeparateNamespace$' -count=1 -v`.
   This lane uses passwordless sudo to create an owned loopback namespace, then runs as the contributor

@@ -134,6 +134,11 @@ func (s *Server) Start(ctx context.Context) error {
 		s.Log.Warn("interrupted DNS investigations could not be reconciled", "err", err)
 	}
 	dnsCancel()
+	dnsServicesCtx, dnsServicesCancel := context.WithTimeout(ctx, 40*time.Second)
+	if err := s.modules.dnsServices.Reconcile(dnsServicesCtx); err != nil {
+		s.Log.Warn("interrupted native DNS changes could not be reconciled", "err", err)
+	}
+	dnsServicesCancel()
 	if err := s.modules.flowAccounting.Start(ctx); err != nil && s.Log != nil {
 		s.Log.Warn("network socket history is unavailable", "err", err)
 	}
@@ -262,6 +267,9 @@ func (s *Server) Shutdown() {
 	s.stopDatabaseMetrics()
 	s.modules.metrics.Stop()
 	s.modules.network.Stop()
+	if err := s.modules.dnsServices.Close(); err != nil && s.Log != nil {
+		s.Log.Warn("native DNS runtime client shutdown failed", "err", err)
+	}
 	s.modules.backupSched.Stop()
 	s.modules.deploySchedule.Stop()
 	s.modules.selfUpdate.Stop()

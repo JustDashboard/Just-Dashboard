@@ -1,0 +1,5 @@
+Against 148e4f38: 32 changed files.
+Go packages: ./internal/api ./internal/store ./internal/dnsservice
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	174.290s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	4.533s
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	10.337s

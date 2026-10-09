@@ -1,0 +1,4 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:122: native pihole provision state=failed phase=cleaned error=owned DNS running container identity could not be established err=<nil>
+--- FAIL: TestDNSServiceNativeOwnedEngine (10.15s)
+FAIL

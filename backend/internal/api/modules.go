@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/forgex"
@@ -89,6 +90,7 @@ type moduleSet struct {
 	// table, shaping, VPN and resolver. netsec keeps reading it for the
 	// posture; this is the half that writes.
 	network         *netx.Service
+	dnsServices     *dnsservice.Service
 	networkVantages *netvantage.Service
 	ipam            *netipam.Service
 	// jobs runs the operations that take longer than a request should:
@@ -219,6 +221,7 @@ func (s *Server) initModules() {
 	s.modules.linuxUsers = linuxusers.New()
 	s.modules.netsec = netsec.New()
 	s.modules.networkVantages = netvantage.New(s.Store, s.Sealer)
+	s.modules.dnsServices = dnsservice.New(dnsservice.Options{DB: s.Store.DB, Seal: s.Sealer.Seal, Open: s.Sealer.Open, Runtime: dnsservice.NewDockerRuntime(s.Cfg.DockerHost)})
 	s.modules.network = netx.New(netx.Options{
 		Paths:               netx.DefaultPaths(),
 		DB:                  s.Store.DB,
