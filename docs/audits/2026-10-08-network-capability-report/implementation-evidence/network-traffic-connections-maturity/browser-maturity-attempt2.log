@@ -1,0 +1,233 @@
+$ node scripts/sync-monaco.mjs && node scripts/sync-excalidraw.mjs && next build
+monaco: /home/ubuntu/Just-Dashboard-net-traffic/frontend/node_modules/monaco-editor/min/vs -> /home/ubuntu/Just-Dashboard-net-traffic/frontend/public/monaco/vs
+▲ Next.js 16.3.5 (Turbopack)
+✓ Running next.config.ts took 47ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 11.3s
+  Running TypeScript ...
+  Finished TypeScript in 12.2s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/73) ...
+  Generating static pages using 7 workers (18/73) 
+  Generating static pages using 7 workers (36/73) 
+  Generating static pages using 7 workers (54/73) 
+✓ Generating static pages using 7 workers (73/73) in 1057ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /account
+├ ƒ /account/keys
+├ ƒ /account/security
+├ ƒ /account/sessions
+├ ƒ /account/users
+├ ○ /apple-icon.png
+├ ƒ /audit
+├ ƒ /backups
+├ ƒ /backups/[job]
+├ ƒ /boards
+├ ƒ /boards/[id]
+├ ƒ /dashboard
+├ ƒ /dashboard/configuration
+├ ƒ /databases
+├ ƒ /databases/[id]
+├ ƒ /databases/[id]/[...missing]
+├ ƒ /databases/[id]/access
+├ ƒ /databases/[id]/advisor
+├ ƒ /databases/[id]/backups
+├ ƒ /databases/[id]/data
+├ ƒ /databases/[id]/diagram
+├ ƒ /databases/[id]/generate
+├ ƒ /databases/[id]/logs
+├ ƒ /databases/[id]/performance
+├ ƒ /databases/[id]/query
+├ ƒ /databases/[id]/schema
+├ ƒ /databases/[id]/search
+├ ƒ /databases/[id]/settings
+├ ƒ /databases/map
+├ ƒ /databases/new
+├ ƒ /deploy
+├ ƒ /deploy/[id]
+├ ƒ /deploy/[id]/console
+├ ƒ /deploy/[id]/deployments
+├ ƒ /deploy/[id]/game-settings
+├ ƒ /deploy/[id]/logs
+├ ƒ /deploy/[id]/players
+├ ƒ /deploy/[id]/runs/[run]
+├ ƒ /deploy/[id]/runtime
+├ ƒ /deploy/[id]/settings
+├ ƒ /deploy/[id]/settings/automation
+├ ƒ /deploy/[id]/settings/build
+├ ƒ /deploy/[id]/settings/danger
+├ ƒ /deploy/[id]/settings/databases
+├ ƒ /deploy/[id]/settings/domains
+├ ƒ /deploy/[id]/settings/general
+├ ƒ /deploy/[id]/settings/runtime
+├ ƒ /deploy/[id]/settings/storage
+├ ƒ /deploy/[id]/settings/variables
+├ ƒ /deploy/credentials
+├ ƒ /deploy/new
+├ ƒ /deploy/notifications
+├ ƒ /docker
+├ ƒ /docker/containers
+├ ƒ /docker/containers/[id]
+├ ƒ /docker/events
+├ ƒ /docker/images
+├ ƒ /docker/networks
+├ ƒ /docker/stacks
+├ ƒ /docker/stacks/[name]
+├ ƒ /docker/volumes
+├ ƒ /files
+├ ƒ /files/editor
+├ ƒ /git
+├ ○ /icon.svg
+├ ƒ /login
+├ ƒ /logs
+├ ƒ /metrics
+├ ƒ /network
+├ ƒ /network/captures
+├ ƒ /network/connections
+├ ƒ /network/dns
+├ ƒ /network/drift
+├ ƒ /network/external
+├ ƒ /network/firewall
+├ ƒ /network/flows
+├ ƒ /network/gateway
+├ ƒ /network/interfaces
+├ ƒ /network/investigate
+├ ƒ /network/ipam
+├ ƒ /network/protection
+├ ƒ /network/routing
+├ ƒ /network/runs
+├ ƒ /network/tools
+├ ƒ /network/traffic
+├ ƒ /network/vpn
+├ ƒ /packages
+├ ƒ /processes
+├ ƒ /processes/pm2
+├ ƒ /processes/scheduled
+├ ƒ /processes/services
+├ ƒ /proxy
+├ ƒ /proxy/certificates
+├ ƒ /proxy/config
+├ ƒ /proxy/ports
+├ ƒ /proxy/sites
+├ ƒ /proxy/sites/[name]
+├ ƒ /proxy/streams
+├ ƒ /proxy/tls
+├ ƒ /proxy/traffic
+├ ƒ /security
+├ ƒ /security/intrusion
+├ ƒ /security/logins
+├ ƒ /security/ssh
+├ ƒ /system-users
+└ ƒ /terminal
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+
+Running 14 tests using 1 worker
+
+  ✓   1 [chromium] › tests/browser/network-traffic-maturity.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip (9.4s)
+  ✓   2 [chromium] › tests/browser/network-traffic-maturity.spec.ts:38:5 › a stopped sampler reads as stale, not as a quiet link (7.3s)
+  ✓   3 [chromium] › tests/browser/network-traffic-maturity.spec.ts:47:5 › a typed range reads that window with its percentiles and the incidents in it (12.8s)
+  ✓   4 [chromium] › tests/browser/network-traffic-maturity.spec.ts:83:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared (13.0s)
+  ✓   5 [chromium] › tests/browser/network-traffic-maturity.spec.ts:119:5 › programs say what a read could not see and list UDP peers without byte counters (9.0s)
+  ✓   6 [chromium] › tests/browser/network-traffic-maturity.spec.ts:138:5 › every container can be listed and one opens into its chart, service and peers (8.6s)
+  ✓   7 [chromium] › tests/browser/network-traffic-maturity.spec.ts:165:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree (11.9s)
+  ✓   8 [chromium] › tests/browser/network-traffic-maturity.spec.ts:184:5 › an upload profile goes with CAKE and the delay CAKE measured is shown (14.6s)
+  ✓   9 [chromium] › tests/browser/network-traffic-maturity.spec.ts:223:5 › congestion control is compared on live sockets, now and before the last switch (7.4s)
+  ✘  10 [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked (10.4s)
+  ✓  11 [chromium] › tests/browser/network-traffic-maturity.spec.ts:259:5 › an install is followed by configured, active and verified phases, not by a claim (8.7s)
+  ✘  12 [chromium] › tests/browser/network-traffic-maturity.spec.ts:324:5 › a peer opens into its tuples, ages, closes and the layers it crosses (2.1s)
+  ✓  13 [chromium] › tests/browser/network-traffic-maturity.spec.ts:362:5 › a block asks why and until when, opens an incident, and is listed with its end (2.5s)
+  ✓  14 [chromium] › tests/browser/network-traffic-maturity.spec.ts:431:5 › a past hour is read from the socket history in the live table's shape (1.7s)
+
+
+  1) [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: locator('[data-slot=stat-tile]').filter({ hasText: 'On cgroups' })
+    Expected substring: "41"
+    Received string:    "On cgroups0service firewalls, device filters and observers"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for locator('[data-slot=stat-tile]').filter({ hasText: 'On cgroups' })
+        7 × locator resolved to <div data-slot="stat-tile" class="flex min-w-0 flex-col justify-start gap-1.5 px-5 py-4">…</div>
+          - unexpected value "On cgroups0service firewalls, device filters and observers"
+
+
+      245 |   await expect(
+      246 |     page.locator("[data-slot=stat-tile]").filter({ hasText: "On cgroups" }),
+    > 247 |   ).toContainText("41")
+          |     ^
+      248 |   const row = page.getByRole("row").filter({ hasText: "jd_flow_egress" })
+      249 |   await expect(row).toContainText("this dashboard’s observer")
+      250 |   await row.getByRole("button", { name: "Open program 9101" }).click()
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:247:5
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-0c050--and-the-observer-is-marked-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests/browser/network-traffic-maturity.spec.ts:324:5 › a peer opens into its tuples, ages, closes and the layers it crosses 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('dialog').getByLabel('Connections with 198.51.100.23')
+    Expected substring: "203.0.113.10:443"
+    Error: strict mode violation: getByRole('dialog').getByLabel('Connections with 198.51.100.23') resolved to 2 elements:
+        1) <table data-slot="table" class="w-full caption-bottom text-xs" aria-label="Connections with 198.51.100.23">…</table> aka getByRole('table', { name: 'Connections with' })
+        2) <ul data-slot="row-list" class="min-w-0 divide-y divide-hairline" aria-label="Closed connections with 198.51.100.23">…</ul> aka getByRole('list', { name: 'Closed connections with' })
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByRole('dialog').getByLabel('Connections with 198.51.100.23')
+
+
+      342 |   const sheet = page.getByRole("dialog")
+      343 |   const tuples = sheet.getByLabel("Connections with 198.51.100.23")
+    > 344 |   await expect(tuples).toContainText("203.0.113.10:443")
+          |                        ^
+      345 |   await expect(tuples).toContainText("51022")
+      346 |   await expect(tuples).toContainText("≥ 1h 30m")
+      347 |   await expect(tuples).toContainText("2.0 GB")
+        at /home/ubuntu/Just-Dashboard-net-traffic/frontend/tests/browser/network-traffic-maturity.spec.ts:344:24
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-traffic-maturity-a-e1cf3-s-and-the-layers-it-crosses-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2 failed
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:237:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked 
+    [chromium] › tests/browser/network-traffic-maturity.spec.ts:324:5 › a peer opens into its tuples, ages, closes and the layers it crosses 
+  12 passed (2.1m)
