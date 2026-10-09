@@ -1,9 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, put } from "@/lib/api"
+import {
+  readNativeProfile,
+  type NativeFamily,
+  type NativeProfile,
+} from "@/lib/network-native-profile"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -21,34 +26,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 
-type NativeRoute = { destination: string; gateway?: string; metric: number; table: number }
-type NativeFamily = {
-  method: string
-  addresses: string[]
-  dns: string[]
-  domains: string[]
-  ignoreAutoDns: boolean
-  ignoreAutoRoutes: boolean
-  routes: NativeRoute[]
-}
-type NativeIntent = { ipv4: NativeFamily; ipv6: NativeFamily }
-type NativeProfile = {
-  checkedAt: string
-  device: string
-  kind: string
-  owner: string
-  renderer?: string
-  version?: string
-  profile?: string
-  generation?: string
-  editable: boolean
-  refusal?: string
-  intent?: NativeIntent
-  contract: { members: string[]; bondMode?: string; vrfTable?: number; master?: string }
-  configured: { status: string; reason?: string }
-  runtime: { status: string; reason?: string }
-  boot: { status: string; reason?: string }
-}
 type DraftFamily = Omit<NativeFamily, "addresses" | "dns" | "domains"> & {
   addresses: string
   dns: string
@@ -81,34 +58,6 @@ const intentFamily = (family: DraftFamily): NativeFamily => ({
   domains: split(family.domains),
 })
 
-function readNativeProfile(value: NativeProfile): NativeProfile {
-  if (!value || typeof value.device !== "string" || typeof value.editable !== "boolean") {
-    throw new Error("The native profile response is incomplete.")
-  }
-  if (
-    !value.configured ||
-    !value.runtime ||
-    !value.boot ||
-    !Array.isArray(value.contract?.members)
-  ) {
-    throw new Error("Native ownership or lifecycle evidence is incomplete.")
-  }
-  if (value.intent) {
-    for (const family of [value.intent.ipv4, value.intent.ipv6]) {
-      if (
-        !family ||
-        !Array.isArray(family.addresses) ||
-        !Array.isArray(family.dns) ||
-        !Array.isArray(family.domains) ||
-        !Array.isArray(family.routes)
-      ) {
-        throw new Error("Native family intent is incomplete.")
-      }
-    }
-  }
-  return value
-}
-
 /** Native ownership is a separate persistent owner, never a second managed profile. */
 export function NativeProfileEditor({
   device,
@@ -129,6 +78,7 @@ export function NativeProfileEditor({
           undefined,
           signal,
         ),
+        device,
       ),
     30_000,
     [device],
@@ -146,7 +96,12 @@ export function NativeProfileEditor({
     draft.renderer === view.renderer &&
     draft.profile === view.profile
   const changed = draft && view && draft.generation !== view.generation
-  const blocked = !writable || !view?.editable || Boolean(profile.error) || changed || !sameOwner
+  const blocked =
+    !open || !writable || !view?.editable || Boolean(profile.error) || changed || !sameOwner
+  const latestReview = useRef<{ draft?: NativeDraft; blocked: boolean }>({ blocked: true })
+  useLayoutEffect(() => {
+    latestReview.current = { draft, blocked }
+  }, [draft, blocked])
 
   const begin = () => {
     if (!view?.intent || !view.generation || profile.error) return
@@ -170,6 +125,12 @@ export function NativeProfileEditor({
         setBusy(true)
         setError(undefined)
         try {
+          // An open confirmation survives polls; its callback must use the current rendered review.
+          if (latestReview.current.blocked || latestReview.current.draft !== draft) {
+            throw new Error(
+              "Native ownership or the latest read changed. Review the retained draft before applying.",
+            )
+          }
           await put(`/network/native/profiles/${encodeURIComponent(device)}`, {
             generation: draft.generation,
             intent: { ipv4: intentFamily(draft.ipv4), ipv6: intentFamily(draft.ipv6) },
@@ -255,6 +216,7 @@ export function NativeProfileEditor({
               value={draft.ipv4}
               renderer={draft.renderer}
               device={device}
+              routeTable={view?.contract.vrfTable ?? 254}
               onChange={(value) => update("ipv4", value)}
             />
             <NativeFamilyFields
@@ -262,6 +224,7 @@ export function NativeProfileEditor({
               value={draft.ipv6}
               renderer={draft.renderer}
               device={device}
+              routeTable={view?.contract.vrfTable ?? 254}
               onChange={(value) => update("ipv6", value)}
             />
             {changed && (
@@ -317,12 +280,14 @@ function NativeFamilyFields({
   value,
   renderer,
   device,
+  routeTable,
   onChange,
 }: {
   family: "ipv4" | "ipv6"
   value: DraftFamily
   renderer?: string
   device: string
+  routeTable: number
   onChange: (value: DraftFamily) => void
 }) {
   const label = family === "ipv4" ? "IPv4" : "IPv6"
@@ -464,7 +429,7 @@ function NativeFamilyFields({
                   destination: family === "ipv4" ? "0.0.0.0/0" : "::/0",
                   gateway: "",
                   metric: renderer === "NetworkManager" ? -1 : 0,
-                  table: 254,
+                  table: routeTable,
                 },
               ],
             })

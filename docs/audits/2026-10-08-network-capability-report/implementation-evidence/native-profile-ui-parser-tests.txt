@@ -1,0 +1,51 @@
+bun test v1.3.11 (af24e281)
+
+src/lib/network-native-profile.test.js:
+(pass) native profile reads retain opaque generation and separate boot evidence [1.00ms]
+(pass) a native owner refusal can be read without an editable intent [1.00ms]
+(pass) unsupported native renderer intent remains readable when editing is refused
+(pass) native reads refuse a null route before the editor can use it
+(pass) native reads refuse a string route before the editor can use it
+(pass) native reads refuse a non-string address before the editor can use it
+(pass) native reads refuse a non-string DNS server before the editor can use it
+(pass) native reads refuse a null domain before the editor can use it
+(pass) native reads refuse a missing address method before the editor can use it [1.00ms]
+(pass) native reads refuse an unsupported method before the editor can use it
+(pass) native reads refuse an empty manual family before the editor can use it
+(pass) native reads refuse a populated disabled family before the editor can use it
+(pass) native reads refuse NetworkManager SLAAC before the editor can use it
+(pass) native reads refuse a non-boolean DNS preference before the editor can use it
+(pass) native reads refuse a missing route preference before the editor can use it
+(pass) native reads refuse a missing editable intent before the editor can use it
+(pass) native reads refuse an empty editable generation before the editor can use it
+(pass) native reads refuse an unknown editable owner before the editor can use it
+(pass) native reads refuse a renderer/owner mismatch before the editor can use it
+(pass) native reads refuse an invalid clock before the editor can use it
+(pass) native reads refuse a non-string owner before the editor can use it
+(pass) native reads refuse a non-string profile before the editor can use it [1.00ms]
+(pass) native reads refuse a non-string lifecycle reason before the editor can use it
+(pass) native reads refuse a missing lifecycle state before the editor can use it
+(pass) native reads refuse an editable unknown boot before the editor can use it
+(pass) native reads refuse a non-string member before the editor can use it
+(pass) native reads refuse an invalid VRF table before the editor can use it
+(pass) native reads refuse a VRF without its table before the editor can use it
+(pass) native reads refuse too many DNS servers before the editor can use it
+(pass) native reads refuse too many routes before the editor can use it
+(pass) native reads refuse route destination=null as a failed read [1.00ms]
+(pass) native reads refuse route gateway=[object Object] as a failed read
+(pass) native reads refuse route metric=0 as a failed read
+(pass) native reads refuse route metric=NaN as a failed read
+(pass) native reads refuse route metric=0.5 as a failed read
+(pass) native reads refuse route metric=1000001 as a failed read
+(pass) native reads refuse route table=254 as a failed read
+(pass) native reads refuse route table=0 as a failed read
+(pass) native reads refuse route table=52 as a failed read
+(pass) native reads refuse route table=253 as a failed read
+(pass) native reads refuse route table=255 as a failed read
+(pass) native reads refuse route table=2147483648 as a failed read
+(pass) an observed native VRF and signed native default metric remain supported
+
+ 43 pass
+ 0 fail
+ 44 expect() calls
+Ran 43 tests across 1 file. [46.00ms]

@@ -22,6 +22,25 @@ backend route checks remain authoritative. VPN peer reads are disabled for a rea
 administrator capability. Interface sheets are keyed by device, and address/MTU drafts clear only
 after a successful write. Their bridge selector reaches the existing guarded membership route, and
 the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
+Administrator sheets for unmanaged devices read the existing
+[native persistent profile](../backend/network-native-managers.md). A response
+must name the requested device before it can create or refresh a draft. The editor keeps configured,
+runtime and boot evidence separate, and exposes only the supported IPv4/IPv6 address, DNS/domain
+and route intent. New routes inherit the observed VRF table, with table 254 for ordinary profiles;
+bond membership and mode remain with the existing owner. Failed reads and rejected writes retain
+the typed fields. A changed generation blocks apply until the operator reviews the latest owner
+and explicitly rebases the generation; rebasing preserves every draft field. An owner/profile change
+cannot be rebased into a different native profile.
+The leaf contract in `lib/network-native-profile.ts` validates every rendered metadata/evidence field,
+family method and preference, bounded string collection and route entry before a poll replaces its
+last successful data. Malformed items become a failed retained read and block apply. An already-open
+confirmation rechecks the latest rendered ownership, generation, read state and draft when clicked;
+its old callback cannot send an obsolete client review. Backend identity fences remain authoritative.
+Native profile writes always request temporary apply and reconnection confirmation, even when the
+ordinary managed-network preference is off. A confirmed or recovered network decision with pending
+or failed native cleanup remains a warning, including outside Network. Further journaled changes
+remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
+until cleanup succeeds. Read accounts do not request administrator-only native profiles.
 The route form exposes an optional preferred source and shows returned sources in the existing
 table. Policy rules include an outgoing-interface selector and validated note. The routing diagram selects
 IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family. Its

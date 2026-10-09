@@ -1,0 +1,59 @@
+
+Running 10 tests using 1 worker
+
+(node:786285) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › tests/browser/network-native-profile.spec.ts:104:5 › native apply carries the exact intent and stays pending when the managed preference is off (4.5s)
+  ✓   2 [chromium] › tests/browser/network-native-profile.spec.ts:146:7 › a 409 native apply retains every field for an explicit retry (3.6s)
+  ✓   3 [chromium] › tests/browser/network-native-profile.spec.ts:146:7 › a 500 native apply retains every field for an explicit retry (4.5s)
+  ✓   4 [chromium] › tests/browser/network-native-profile.spec.ts:180:7 › a later read failure keeps the draft and blocks native apply until a valid refresh (4.1s)
+  ✓   5 [chromium] › tests/browser/network-native-profile.spec.ts:180:7 › a later mismatched device keeps the draft and blocks native apply until a valid refresh (4.0s)
+  ✓   6 [chromium] › tests/browser/network-native-profile.spec.ts:220:5 › a changed native generation blocks apply and rebases only the generation after review (3.6s)
+  ✓   7 [chromium] › tests/browser/network-native-profile.spec.ts:258:5 › an initial profile for a different device is refused before draft creation (1.8s)
+  ✓   8 [chromium] › tests/browser/network-native-profile.spec.ts:268:5 › new native VRF routes inherit the observed table in both families on a phone (2.3s)
+  ✓   9 [chromium] › tests/browser/network-native-profile.spec.ts:287:5 › read accounts open a device without requesting its private native profile (2.0s)
+  ✘  10 [chromium] › tests/browser/network-native-profile.spec.ts:305:5 › confirmed native cleanup remains a warning until an explicit retry succeeds (6.2s)
+
+
+  1) [chromium] › tests/browser/network-native-profile.spec.ts:305:5 › confirmed native cleanup remains a warning until an explicit retry succeeds
+
+    Error: expect(locator).not.toContainText(expected) failed
+
+    Locator: getByRole('complementary', { name: 'Network change confirmation' })
+    Expected substring: not "native cleanup remains incomplete"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "not toContainText" with timeout 5000ms
+      - waiting for getByRole('complementary', { name: 'Network change confirmation' })
+        - locator resolved to <aside class="mx-4 my-3 min-w-0" aria-label="Network change confirmation">…</aside>
+        - unexpected value "Network change confirmedThe applying session received and confirmed a fresh dashboard response. The settings are retained.The network decision is saved, but native cleanup remains incomplete. Further journaled changes are blocked until the owned checkpoint and recovery stages are cleaned.Retry native cleanup"
+
+
+      346 |   expect(retries).toBe(1)
+      347 |   await banner(page).getByRole("button", { name: "Retry native cleanup" }).click()
+    > 348 |   await expect(banner(page)).not.toContainText("native cleanup remains incomplete")
+          |                                  ^
+      349 |   await expect(banner(page).getByRole("button", { name: "Retry native cleanup" })).toHaveCount(0)
+      350 |   expect(retries).toBe(2)
+      351 | })
+        at /home/ubuntu/Just-Dashboard-network-native-profile-ui/frontend/tests/browser/network-native-profile.spec.ts:348:34
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-native-profile-con-bbbc6--an-explicit-retry-succeeds-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-native-profile-con-bbbc6--an-explicit-retry-succeeds-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-native-profile-con-bbbc6--an-explicit-retry-succeeds-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-native-profile-con-bbbc6--an-explicit-retry-succeeds-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  1 failed
+    [chromium] › tests/browser/network-native-profile.spec.ts:305:5 › confirmed native cleanup remains a warning until an explicit retry succeeds
+  9 passed (38.0s)
