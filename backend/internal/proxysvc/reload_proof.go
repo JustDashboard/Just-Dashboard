@@ -187,6 +187,8 @@ func (s *Service) awaitLoad(ctx context.Context, mark loadMark, binds []bind) *L
 				proof.Note = "The nginx master the reload was sent to is gone: " + view.why + "."
 			case startedAnew(before, after):
 				proof.Note = fmt.Sprintf("nginx started a new worker but %s after the reload still runs a worker from before it, which a worker that crashed and was replaced also does.", loadWait)
+			case mark.reload.log == "":
+				proof.Note = fmt.Sprintf("nginx had not taken the reload up %s after it was sent, and its error log, which would say why, could not be read.", loadWait)
 			default:
 				proof.Note = fmt.Sprintf("nginx had not taken the reload up %s after it was sent, and logged nothing about it.", loadWait)
 			}
