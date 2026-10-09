@@ -5,11 +5,12 @@ import Link from "next/link"
 import { post } from "@/lib/api"
 import { timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { Certificate, ProxyValidation, TLSOrigin } from "@/lib/types"
+import type { Certificate, ProxyReloadResult, ProxyValidation, TLSOrigin } from "@/lib/types"
 import { Detail, DetailList } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { reloadToast } from "@/components/proxy/load-proof"
 
 const STATE: Record<TLSOrigin["state"], { verdict: Verdict; label: string }> = {
   current: { verdict: "ok", label: "Serving the current file" },
@@ -108,8 +109,12 @@ export function useNginxReload(onReloaded: () => void) {
         })
         return
       }
-      await post("/proxy/reload", { kind: "nginx" })
-      notify.success("nginx reloaded", { description: "Scanning again." })
+      const res = await post<ProxyReloadResult>("/proxy/reload", { kind: "nginx" })
+      const toast = reloadToast(res.loadProof, {
+        title: "nginx reloaded",
+        description: "Scanning again.",
+      })
+      notify[toast.tone](toast.title, { description: toast.description })
       onReloaded()
     } catch (err) {
       notify.error("Reload refused", err)

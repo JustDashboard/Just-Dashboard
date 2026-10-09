@@ -16,6 +16,7 @@ import { NAV, PERSONAL_NAV, navLocation, type NavEntry, type NavItem } from "@/c
 import { PaletteModal } from "@/components/modal"
 import type { ProxyStatus } from "@/components/proxy/proxy-context"
 import { warningCount } from "@/components/proxy/config-test"
+import { reloadToast } from "@/components/proxy/load-proof"
 import { engineFor, sectionHref } from "@/components/database/engine"
 import {
   KNOWN_DATABASES_KEY,
@@ -781,11 +782,13 @@ async function reloadNginx() {
   try {
     const res = await post<ProxyReloadResult>("/proxy/reload", { kind: "nginx" })
     const warnings = warningCount(res.validation)
-    notify.success(
-      "nginx reloaded",
-      warnings > 0
-        ? { description: `Its config test has ${plural(warnings, "warning")}.` }
-        : undefined,
+    const toast = reloadToast(res.loadProof, {
+      title: "nginx reloaded",
+      description: warnings > 0 ? `Its config test has ${plural(warnings, "warning")}.` : undefined,
+    })
+    notify[toast.tone](
+      toast.title,
+      toast.description ? { description: toast.description } : undefined,
     )
   } catch (err) {
     notify.error("nginx did not reload", err)

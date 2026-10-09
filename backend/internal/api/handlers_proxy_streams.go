@@ -204,6 +204,9 @@ func (s *Server) handleStreamPath(w http.ResponseWriter, r *http.Request) error 
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	path, err := s.modules.proxy.StreamPath(ctx, httpx.URLParam(r, "name"), time.Now())
+	if errors.Is(err, proxysvc.ErrStreamName) {
+		return httpx.BadRequest("%s", err.Error())
+	}
 	if errors.Is(err, proxysvc.ErrStreamNotFound) {
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	}

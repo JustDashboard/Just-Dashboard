@@ -199,3 +199,41 @@ func TestExplainAccessDoesNotGuessAnIf(t *testing.T) {
 		t.Fatalf("= %s %+v", a.Verdict, a.Layers)
 	}
 }
+
+// Under satisfy any only an allow line that matches lets a visitor past the
+// password: an address no line names is declined, not allowed, and nginx
+// still asks it — with no deny all, and with no address lines at all.
+func TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows(t *testing.T) {
+	for name, site := range map[string]string{
+		"no deny all": "server {\n listen 80;\n server_name admin.example.com;\n satisfy any;\n allow 192.0.2.0/24;\n auth_basic \"Admin\";\n location / { proxy_pass http://127.0.0.1:3000; }\n}\n",
+		"no lines":    "server {\n listen 80;\n server_name admin.example.com;\n satisfy any;\n auth_basic \"Admin\";\n location / { proxy_pass http://127.0.0.1:3000; }\n}\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tree := accessTree(t, map[string]string{"admin": site})
+			a, err := ExplainAccess(tree, "http://admin.example.com/", "198.51.100.1")
+			if err != nil || a.Verdict != AccessCredentials {
+				t.Fatalf("an address no line allows = %s (%s), %v", a.Verdict, a.Summary, err)
+			}
+			if name == "no deny all" {
+				if a, _ := ExplainAccess(tree, "http://admin.example.com/", "192.0.2.4"); a.Verdict != AccessAdmitted {
+					t.Fatalf("the allowed address = %s (%s)", a.Verdict, a.Summary)
+				}
+			}
+		})
+	}
+}
+
+// A site whose name holds "req" keeps its exempt list's name: the ident is
+// what comes before the trailing _req or _req_p<n>.
+func TestLimitIdentStripsOnlyTheZonesSuffix(t *testing.T) {
+	for zone, want := range map[string]string{
+		"jd_req_example_com_ab12_req":    "jd_req_example_com_ab12",
+		"jd_req_example_com_ab12_req_p2": "jd_req_example_com_ab12",
+		"jd_shop_req":                    "jd_shop",
+		"custom":                         "custom",
+	} {
+		if got := limitIdent(zone); got != want {
+			t.Errorf("%s = %s, want %s", zone, got, want)
+		}
+	}
+}

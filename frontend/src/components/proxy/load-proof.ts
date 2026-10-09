@@ -37,3 +37,20 @@ export function loadProofText(proof: LoadProof): string {
 export function reloadState(proof: LoadProof | undefined): "is live" | "saved and reloaded" {
   return provenLive(proof) ? "is live" : "saved and reloaded"
 }
+
+/**
+ * The toast for a reload that went out: success only for a load nginx was
+ * seen taking up (or a backend sending no proof), with the proof's sentence;
+ * a warning saying what was not seen otherwise.
+ */
+export function reloadToast(
+  proof: LoadProof | undefined,
+  said: { title: string; description?: string },
+): { tone: "success" | "warning"; title: string; description?: string } {
+  if (provenLive(proof)) return { tone: "success", ...said }
+  return {
+    tone: "warning",
+    title: `${said.title.replace(/ reloaded$/, "")} reload not confirmed`,
+    description: loadProofText(proof!),
+  }
+}

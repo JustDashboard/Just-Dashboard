@@ -122,7 +122,9 @@ func (s *Service) SitePolicy(ctx context.Context, site string) (*ServicePolicy, 
 			case "limit_req":
 				rate.Configured, rate.Setting = true, limitReqSetting(d, zones)
 			case "limit_conn":
-				conn.Configured, conn.Setting = true, strings.Join(d.Args[1:], " ")+" at once per key"
+				if len(d.Args) > 1 {
+					conn.Configured, conn.Setting = true, strings.Join(d.Args[1:], " ")+" at once per key"
+				}
 			case "proxy_cache":
 				if len(d.Args) == 1 && d.Args[0] != "off" {
 					cache.Configured, cache.Setting = true, "zone "+d.Args[0]
@@ -140,6 +142,9 @@ func (s *Service) SitePolicy(ctx context.Context, site string) (*ServicePolicy, 
 					h3.Configured, h3.Setting = true, "http3 on"
 				}
 			case "listen":
+				if len(d.Args) == 0 {
+					continue
+				}
 				for _, a := range d.Args[1:] {
 					switch a {
 					case "http2":
@@ -282,6 +287,11 @@ func (s *Service) VerifySiteControls(ctx context.Context, site string, opts Veri
 	target, err := localTarget(fmt.Sprintf("%s://%s:%d%s", scheme, host, port, opts.Path), vhosts)
 	if err != nil {
 		return nil, err
+	}
+	if target.site != site {
+		// Another enabled site wins the name on the port, and its controls
+		// would be measured under this site's policy.
+		return nil, fmt.Errorf("nginx answers %s on port %d from %s, not %s, so this site's controls cannot be measured there", host, port, target.site, site)
 	}
 	out := &ControlsVerification{Site: site, URL: target.url.String(), CheckedAt: time.Now().UTC(), Policy: policy}
 	m := &measurer{target: target, scheme: scheme, port: port, host: host, out: out}
@@ -536,8 +546,7 @@ func (m *measurer) limit(ctx context.Context, control PolicyControl, s *Service,
 		return ControlCheck{State: ControlNotMeasured, Detail: "The limit's settings could not be read from the site's file."}
 	}
 	e := accessEval{tree: tree, source: netip.MustParseAddr("127.0.0.1")}
-	ident := strings.TrimSuffix(limit.zone, "_req")
-	if exempt, ok := e.geo(ident + "_limit_exempt"); ok && exempt == "1" {
+	if exempt, ok := e.geo(limitIdent(limit.zone) + "_limit_exempt"); ok && exempt == "1" {
 		return ControlCheck{State: ControlNotMeasured, Detail: "127.0.0.1 is on the site's list of addresses no limit counts, so a request from here is never refused."}
 	}
 	perSecond, ok := ratePerSecond(zoneRates(tree)[limit.zone])

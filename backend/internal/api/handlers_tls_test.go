@@ -384,3 +384,27 @@ func TestNetworkProbesAreWatchedEndpoints(t *testing.T) {
 		t.Fatalf("a probe over the TLS watch: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// A probe's result that lands after a TLS watch took the row over is not
+// saved: the row would read as checked and its first handshake would wait a
+// whole interval.
+func TestAProbeResultDoesNotLandOnARowATLSWatchTookOver(t *testing.T) {
+	_, s := newClient(t)
+	res, err := s.Store.DB.Exec(`INSERT INTO watched_endpoints(domain, port, kind, created_at) VALUES('db.example.test', 5432, 'tls', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, _ := res.LastInsertId()
+	err = watchStore{s}.SaveWatchChecks(context.Background(), []proxysvc.WatchCheck{{
+		EndpointID: id, CheckedAt: time.Now(), Probe: &proxysvc.ProbeCheck{OK: true, State: "connected", Ms: 2},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var checked, history int64
+	s.Store.DB.QueryRow(`SELECT checked_at FROM watched_endpoints WHERE id = ?`, id).Scan(&checked)
+	s.Store.DB.QueryRow(`SELECT COUNT(*) FROM watched_checks WHERE endpoint_id = ?`, id).Scan(&history)
+	if checked != 0 || history != 0 {
+		t.Fatalf("checked_at %d, %d history rows", checked, history)
+	}
+}

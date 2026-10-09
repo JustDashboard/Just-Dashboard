@@ -324,6 +324,11 @@ func judgeFailedRun(health *RenewalHealth, run *journalRun, written map[string]t
 	if len(failures) > 0 && len(health.Failures) == 0 {
 		health.State = "recovered"
 	}
+	// What failed validation then is nothing to fix once every certificate
+	// it failed on has renewed or gone.
+	if health.State == "recovered" {
+		health.Problems = nil
+	}
 }
 
 // runFailures reads certbot's lines from one run: each certificate it failed

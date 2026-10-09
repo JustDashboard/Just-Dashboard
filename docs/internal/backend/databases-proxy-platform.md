@@ -2123,7 +2123,9 @@ containers/volumes/networks.
     `result: rolled-back`): left in place, the file would fail every later reload on the host. Any
     other refusal keeps the valid file and is `reloaded: false` with `reloadError` ("nginx did not take
     the reload up: …"). The engine's reload answers a refused load as 502 `load_refused`
-    (`ErrLoadRefused`, audited `result: refused`) and carries `loadProof` otherwise. The site form says
+    (`ErrLoadRefused`, audited `result: refused`) and carries `loadProof` otherwise; every reload
+    toast reads it (`reloadToast`: the command palette, the served-certificate and TLS report reloads,
+    the import outcome), so none says "nginx reloaded" of a load the master was not seen taking up. The site form says
     "is live" only for `loaded` (or a backend that sends no proof), "saved and reloaded" with the note
     otherwise, and "nginx refused the reload" with nginx's words (`load-proof.ts`, `site-save.ts`); the
     engine's Reload toast and the pending strip read the same. `TestLiveReloadIsProvenFromTheMaster`
@@ -2430,7 +2432,8 @@ containers/volumes/networks.
   none of it. `POST /proxy/sites/{name}/controls/verify {path, asset}` (`system.admin`, audited
   `proxy.site.controls.verify` with the request count) measures them against this nginx on loopback,
   naming the site in SNI and Host as the request tester does (`localTarget`: only an enabled nginx site
-  that takes its first exact name on its first TLS port, else its first plain one): HTTP/2 from a
+  that takes its first exact name on its first TLS port, else its first plain one, and refused when
+  another enabled site wins that name on the port, whose controls would be measured instead): HTTP/2 from a
   browser's ALPN offer (`verified`, `not-effective` when the site asks for it and nginx does not
   negotiate it, or `not-configured` noting that another server block on the address turned it on);
   HTTP/3 from a QUIC Version Negotiation answer on the UDP port (`probeQUIC`) and an `h3` in the HTTPS
@@ -2802,7 +2805,8 @@ containers/volumes/networks.
   its error and `ms`. The two tables moved from `proxySchema` into `schema` because they gained columns
   after shipping (`kind`, `probe`, `ms`, brought to older installs by `addedColumns`; every existing row
   reads `tls`). A probe where a TLS watch already exists is 409 `already_watched` (the handshake checks
-  the connection too); a TLS watch where a probe exists takes it over and is checked on the next pass.
+  the connection too); a TLS watch where a probe exists takes it over and is checked on the next pass,
+  and a probe result still in flight then is not saved onto the row (`… AND kind = 'tcp'`).
   The `watch_unreachable` alert judges a probe by whether it connected ("No TCP connection (refused):
   …"); the untrusted and grade rules and the fleet scan leave probes out. The list (`watched-domains.tsx`)
   draws a probe with its connection and connect-time trend and no TLS report; the Network Tools page's
@@ -3186,8 +3190,8 @@ containers/volumes/networks.
   firewall, external checks, the listening ports on 80, the Sites page's URL resolver, the HTTP tool
   on the challenge path, the rate-limit and account panels. `GET /certificates/jobs/{id}/diagnosis`
   (`system.admin`) reads a failed `certbot.*` job's held output (404 for another kind; a job that did
-  not fail has none), and `RenewalHealth.problems` carries the last failed renewal run's, which the
-  `renewal_failed` alert appends as "domain at stage — owner". The Certificates page's issuance
+  not fail has none), and `RenewalHealth.problems` carries the last failed renewal run's — none once
+  the run is `recovered` — which the `renewal_failed` alert appends as "domain at stage — owner". The Certificates page's issuance
   console and a site form's certificate step show **Where it failed** under a failed job
   (`issuance-problems.tsx`), and the renewal notice shows the renewal's. Tests:
   `TestDiagnoseIssuanceReadsEachDomainsStageAndOwner`, `TestDiagnoseIssuanceReadsRunFailures`,
@@ -3716,7 +3720,9 @@ containers/volumes/networks.
   user file, `auth_request` (single sign-on), each innermost and turned off by `off`; then the request
   limit in effect (its zone's rate, or the site's exempt list), and `ssl_verify_client` (`on` requires a
   certificate, `optional` lets the application decide). `satisfy any` is applied as nginx applies it: an
-  address the allow lines refuse can still sign in, and one they admit is not asked. The verdict is
+  address the allow lines refuse can still sign in, one an `allow` line matches is not asked, and one
+  no line names is declined rather than allowed, so it is still asked (an allow list without `deny all`
+  under `satisfy any` lets nobody past the password but the listed addresses). The verdict is
   `refused` (naming the refusing layers), `unknown` (a layer, or a route `certain: false` for anything
   but the judged server-level ifs), `credentials` or `admitted`; `no-route` where nothing answers the
   URL. The Sites page's **Which site answers a URL** takes an optional **From address** and draws each

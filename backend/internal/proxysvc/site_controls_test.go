@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,32 @@ func TestControlHelpers(t *testing.T) {
 	host := VHost{Listen: []string{"80", "127.0.0.1:8443 ssl http2"}, ServerNames: []string{"_", "*.x.test", "app.x.test"}}
 	if scheme, port, name := siteEndpoint(host); scheme != "https" || port != 8443 || name != "app.x.test" {
 		t.Fatalf("endpoint = %s %d %s", scheme, port, name)
+	}
+}
+
+// A hand-written file with an empty limit_conn or listen does not stop the
+// reading, and a site whose name another enabled site wins on the port is
+// not measured under this one's policy.
+func TestSiteControlsSurviveOddFilesAndRefuseAnotherSitesName(t *testing.T) {
+	svc, root := provenSites(t)
+	odd := "server {\n listen;\n limit_conn;\n server_name odd.example.com;\n}\n"
+	for name, content := range map[string]string{"odd": odd, "first": "server { listen 80; server_name shared.example.com; }\n", "second": "server { listen 80; server_name shared.example.com; }\n"} {
+		available := filepath.Join(root, "sites-available", name)
+		if err := os.WriteFile(available, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(available, filepath.Join(root, "sites-enabled", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.SitePolicy(context.Background(), "odd"); err != nil {
+		t.Fatal(err)
+	}
+	vhosts := []VHost{
+		{Name: "first", Kind: KindNginx, Enabled: true, Listen: []string{"80"}, ServerNames: []string{"shared.example.com"}},
+		{Name: "second", Kind: KindNginx, Enabled: true, Listen: []string{"80"}, ServerNames: []string{"shared.example.com"}},
+	}
+	if _, err := svc.VerifySiteControls(context.Background(), "second", VerifyOptions{}, vhosts); err == nil || !strings.Contains(err.Error(), "from first, not second") {
+		t.Fatalf("another site's name = %v", err)
 	}
 }

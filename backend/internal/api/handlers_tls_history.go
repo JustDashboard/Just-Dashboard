@@ -347,14 +347,17 @@ func (ws watchStore) SaveWatchChecks(ctx context.Context, checks []proxysvc.Watc
 			if err != nil {
 				return err
 			}
+			// A probe that a TLS watch took over while it was out is not
+			// saved: the row would read as checked, and its first handshake
+			// would wait a whole interval.
 			if _, err := tx.ExecContext(ctx,
-				`UPDATE watched_endpoints SET checked_at = ?, probe = ? WHERE id = ?`,
+				`UPDATE watched_endpoints SET checked_at = ?, probe = ? WHERE id = ? AND kind = 'tcp'`,
 				c.CheckedAt.Unix(), string(probe), c.EndpointID); err != nil {
 				return err
 			}
 			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO watched_checks(endpoint_id, checked_at, error, ms)
-				 SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM watched_endpoints WHERE id = ?)`,
+				 SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM watched_endpoints WHERE id = ? AND kind = 'tcp')`,
 				c.EndpointID, c.CheckedAt.Unix(), c.Probe.Error, c.Probe.Ms, c.EndpointID); err != nil {
 				return err
 			}

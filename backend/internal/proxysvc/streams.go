@@ -292,6 +292,8 @@ var (
 	ErrStreamExists = errors.New("a stream by that name already exists")
 	// ErrStreamNotFound is a stream to edit or delete that has no file.
 	ErrStreamNotFound = errors.New("no such stream")
+	// ErrStreamName is a name no stream file can have.
+	ErrStreamName = errors.New("invalid stream name")
 	// ErrNoStreamSSL refuses TLS on a stream when nginx was built without
 	// stream_ssl_module. nginx -t catches it only while it reads the stream
 	// directory; saved for later, the file would fail the reload that
@@ -1664,7 +1666,7 @@ func listStream(dir string, e os.DirEntry) StreamEntry {
 func (s *Service) streamFile(name string) (path string, linked bool, err error) {
 	if name == "" || name == "." || name == ".." || strings.HasPrefix(name, ".") ||
 		strings.ContainsAny(name, "/\\\x00") {
-		return "", false, fmt.Errorf("invalid stream name")
+		return "", false, ErrStreamName
 	}
 	path = filepath.Join(s.streamDir(), name+".conf")
 	st, err := os.Lstat(path)

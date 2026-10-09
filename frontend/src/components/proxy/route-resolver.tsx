@@ -134,10 +134,10 @@ function AccessLayers({ access }: { access: AccessExplanation }) {
       </div>
       <p className="text-body">{access.summary}</p>
       <ol className="divide-y divide-hairline">
-        {access.layers.map((layer) => {
+        {access.layers.map((layer, index) => {
           const reading = layerVerdict(layer)
           return (
-            <li key={layer.id} className="min-w-0 space-y-1 py-2.5">
+            <li key={`${layer.id}:${index}`} className="min-w-0 space-y-1 py-2.5">
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span className="text-body font-medium">{layer.title}</span>
                 <Status tone={reading.tone} label={reading.label} />

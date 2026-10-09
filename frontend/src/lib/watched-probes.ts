@@ -50,11 +50,16 @@ const STATE: Record<ProbeCheck["state"], { label: string; tone: DotTone }> = {
 export function probeStatus(probe: ProbeCheck | undefined): { label: string; tone: DotTone } {
   if (!probe) return { label: "not checked yet", tone: "unknown" }
   const state = STATE[probe.state] ?? STATE.error
-  if (probe.ok) return { label: `${state.label} in ${probe.ms ?? 0} ms`, tone: state.tone }
+  if (probe.ok) {
+    // A loopback or LAN connection opens in under a millisecond, which the
+    // server sends as no time at all.
+    const time = probe.ms ? `${probe.ms} ms` : "under 1 ms"
+    return { label: `${state.label} in ${time}`, tone: state.tone }
+  }
   return state
 }
 
 /** The connect times of a probe's recent checks that connected, oldest first. */
 export function connectTimes(checks: WatchedCheck[]): number[] {
-  return checks.filter((check) => !check.error && check.ms !== undefined).map((check) => check.ms!)
+  return checks.filter((check) => !check.error).map((check) => check.ms ?? 0)
 }

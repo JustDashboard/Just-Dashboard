@@ -4,6 +4,7 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 const failedChallenges = `Saving debug log to /var/log/letsencrypt/letsencrypt.log
@@ -123,6 +124,22 @@ func TestFailedRenewalRunCarriesItsProblems(t *testing.T) {
 	health := &RenewalHealth{}
 	judgeFailedRun(health, &journalRun{lines: lines, failed: true}, nil)
 	if health.State != "failed" || len(health.Problems) != 5 || health.Problems[1].Stage != StageDNS {
+		t.Fatalf("health = %+v", health)
+	}
+}
+
+// Once every certificate a failed run failed on has renewed, what it failed
+// on is nothing to fix and is not carried.
+func TestRecoveredRenewalCarriesNoProblems(t *testing.T) {
+	var lines []RenewalLine
+	for _, text := range strings.Split(failedChallenges, "\n") {
+		lines = append(lines, RenewalLine{Text: text})
+	}
+	lines = append(lines, RenewalLine{Text: "Failed to renew certificate app.example.com with error: Some challenges have failed."})
+	run := &journalRun{lines: lines, failed: true}
+	health := &RenewalHealth{}
+	judgeFailedRun(health, run, map[string]time.Time{"app.example.com": time.Now().Add(time.Hour)})
+	if health.State != "recovered" || health.Problems != nil {
 		t.Fatalf("health = %+v", health)
 	}
 }

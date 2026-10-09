@@ -25,5 +25,7 @@ describe("watched network probes", () => {
         { checkedAt: "c", ms: 6 },
       ]),
     ).toEqual([4, 6])
+    expect(connectTimes([{ checkedAt: "a" }])).toEqual([0])
+    expect(probeStatus({ ok: true, state: "connected" }).label).toBe("connects in under 1 ms")
   })
 })

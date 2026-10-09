@@ -49,6 +49,11 @@ type AccessLayer struct {
 	Detail    string `json:"detail"`
 	// Rules are the directives that decide it, the deciding one first.
 	Rules []RouteDirective `json:"rules,omitempty"`
+
+	// allowed is an explicit allow line matching the address: under
+	// satisfy any it alone lets a visitor past the sign-in. An address no
+	// line names is declined, not allowed, and is still asked.
+	allowed bool
 }
 
 // AccessExplanation is the route a URL takes and who may take it from
@@ -369,6 +374,7 @@ func (e accessEval) addressRules(returns bool) AccessLayer {
 		layer.Rules = append(layer.Rules, quoteDirective(r, r.File != e.scopes[len(e.scopes)-1].File))
 		if r.Name == "allow" {
 			layer.Verdict, layer.Detail = LayerAdmits, fmt.Sprintf("%s is allowed by the first line that matches it.", e.source)
+			layer.allowed = true
 		} else {
 			layer.Verdict, layer.Detail = LayerRefuses, fmt.Sprintf("%s is denied by the first line that matches it: nginx answers 403.", e.source)
 		}
@@ -459,11 +465,7 @@ func (e accessEval) rateLimit() *AccessLayer {
 		}
 	}
 	walk(e.tree)
-	ident := strings.TrimSuffix(strings.TrimSuffix(zone, "_req"), "")
-	if i := strings.Index(zone, "_req"); i > 0 {
-		ident = zone[:i]
-	}
-	if exempt, ok := e.geo(ident + "_limit_exempt"); ok && exempt == "1" {
+	if exempt, ok := e.geo(limitIdent(zone) + "_limit_exempt"); ok && exempt == "1" {
 		layer.Detail = e.source.String() + " is on the site's list of addresses no limit counts."
 		return layer
 	}
@@ -472,6 +474,16 @@ func (e accessEval) rateLimit() *AccessLayer {
 		layer.Detail = "Requests are let through up to the zone " + zone + "'s rate per address; more are refused."
 	}
 	return layer
+}
+
+// limitZoneRe is a zone the site form names: the site's ident, then _req
+// for the site-wide limit or _req_p<n> for its n-th path.
+var limitZoneRe = regexp.MustCompile(`_req(_p\d+)?$`)
+
+// limitIdent is the site ident a form-written zone was named from, which its
+// exempt list is named from too.
+func limitIdent(zone string) string {
+	return limitZoneRe.ReplaceAllString(zone, "")
 }
 
 func slicesContainsPrefix(args []string, prefix string) bool {
@@ -522,19 +534,23 @@ func combineLayers(layers []AccessLayer, any bool, certain bool) (string, string
 			}
 		}
 	}
-	signIn := false
+	signIn, allowed := false, false
 	for _, l := range layers {
 		if l.ID == "credentials" && l.Verdict == LayerRequires {
 			signIn = true
 		}
-	}
-	if addressRefused {
-		if any && signIn {
-			// satisfy any: the sign-in is the other way in.
-		} else {
-			refused = append(refused, "Allowed addresses")
+		if l.ID == "addresses" && l.allowed {
+			allowed = true
 		}
-	} else if any && signIn {
+	}
+	switch {
+	case addressRefused && any && signIn:
+		// satisfy any: the sign-in is the other way in.
+	case addressRefused:
+		refused = append(refused, "Allowed addresses")
+	case any && signIn && allowed:
+		// satisfy any lets an explicitly allowed address past the sign-in;
+		// one no line names is declined, and nginx still asks.
 		requires = removeTitle(requires, "Sign-in")
 	}
 	suffix := " Anything in front of this host is not seen here."
