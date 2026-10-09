@@ -316,13 +316,20 @@ test("private DNS verification names accompany upstream changes", async ({ page 
   await mockNetwork(page, mutations, { overrides })
   await mockNetworkWrites(page, mutations)
   await page.goto("/network/dns")
-  await page.getByLabel("Verification name", { exact: true }).fill("nas.home.arpa")
+  await page.getByLabel("Verification names", { exact: true }).fill("nas.home.arpa")
   await page.getByRole("button", { name: /^Quad9/ }).click()
   await page.getByRole("button", { name: "Apply", exact: true }).click()
+  // The plan the dialog shows is asked for the same names the change will be held to.
+  await expect(
+    page.getByRole("dialog").getByRole("list", { name: "Verification plan" }),
+  ).toContainText("nas.home.arpa")
   await page.getByRole("dialog").getByRole("button", { name: "Apply", exact: true }).click()
   await expect
     .poll(() => mutations.find((entry) => entry.path === "/network/dns/")?.body)
-    .toMatchObject({ verificationName: "nas.home.arpa" })
+    .toMatchObject({ verificationNames: ["nas.home.arpa"] })
+  expect(
+    mutations.find((entry) => entry.path === "/network/dns/verification-plan")?.body,
+  ).toMatchObject({ verificationNames: ["nas.home.arpa"] })
 })
 
 test("DNS fallback endpoints and cache policy reach the confirmed resolver apply", async ({
@@ -341,7 +348,9 @@ test("DNS fallback endpoints and cache policy reach the confirmed resolver apply
   await page.getByLabel("Cache mode", { exact: true }).click()
   await page.getByRole("option", { name: "Positive answers only", exact: true }).click()
   await page.getByRole("button", { name: "Apply", exact: true }).click()
-  expect(mutations).toEqual([])
+  await expect(page.getByRole("dialog")).toBeVisible()
+  // Only the verification plan has been asked for; nothing is applied before the confirmation.
+  expect(mutations.map((entry) => entry.path)).toEqual(["/network/dns/verification-plan"])
   await page.getByRole("dialog").getByRole("button", { name: "Apply", exact: true }).click()
   await expect
     .poll(() => mutations.at(-1)?.body)
@@ -350,6 +359,7 @@ test("DNS fallback endpoints and cache policy reach the confirmed resolver apply
       cache: "no-negative",
       dnsOverTLS: "yes",
     })
+  expect(mutations.at(-1)?.path).toBe("/network/dns/")
 })
 
 test("unrelated resolver changes preserve managed fallback and cache choices", async ({ page }) => {

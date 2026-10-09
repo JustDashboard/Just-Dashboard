@@ -2,6 +2,7 @@ package netx
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -64,6 +65,12 @@ type ResolvConf struct {
 	Nameservers []string `json:"nameservers"`
 	Search      []string `json:"search"`
 	Options     []string `json:"options"`
+
+	// header is the comment block before the first directive, which is where
+	// every writer signs the file; unreadable is why the content could not be
+	// read although the path exists. The owner adapter reads both.
+	header     []string
+	unreadable string
 }
 
 // ResolvedScope is what resolvectl says about the global configuration or
@@ -164,25 +171,31 @@ type DNSPort struct {
 // whether it is an ad-blocking resolver. This package does not depend on how
 // containers are discovered.
 type DNSContainer struct {
+	ID    string
 	Name  string
 	Image string
 	State string
 	Ports []DNSPort
 }
 
-// Adblock is an ad-blocking resolver running on this host.
+// Adblock is a filtering DNS server running on this host: AdGuard Home,
+// Pi-hole or Technitium.
 type Adblock struct {
-	// Kind is adguardhome or pihole; Name is how it is called on the page.
+	// Kind is adguardhome, pihole or technitium; Name is how it is called on
+	// the page.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	// RunsAs is container or process.
-	RunsAs    string `json:"runsAs"`
-	Container string `json:"container,omitempty"`
-	Image     string `json:"image,omitempty"`
+	RunsAs      string `json:"runsAs"`
+	Container   string `json:"container,omitempty"`
+	ContainerID string `json:"containerId,omitempty"`
+	Image       string `json:"image,omitempty"`
 	// Answering is whether it holds port 53 on this host.
 	Answering bool `json:"answering"`
-	// WebPort is the port its admin page is published on, zero where none is.
-	WebPort int `json:"webPort,omitempty"`
+	// WebPort is the port its admin page is published on, zero where none is;
+	// WebAddress the host address it is published or listening on.
+	WebPort    int    `json:"webPort,omitempty"`
+	WebAddress string `json:"webAddress,omitempty"`
 }
 
 // ManagedDNS is the drop-in the dashboard writes.
@@ -195,6 +208,11 @@ type ManagedDNS struct {
 	DNSSEC     string   `json:"dnssec"`
 	DNSOverTLS string   `json:"dnsOverTLS"`
 	Cache      string   `json:"cache"`
+	// Cleared names the lists the drop-in empties on purpose — servers,
+	// fallback, domains — which is not the same as leaving them out: an empty
+	// assignment removes what resolved.conf and earlier drop-ins set, and an
+	// empty FallbackDNS= turns off the compiled-in fallback servers.
+	Cleared []string `json:"cleared"`
 }
 
 // DNSPreset is a public resolver the form offers as one choice.
@@ -215,12 +233,15 @@ type DNSPreset struct {
 
 // DNSView is everything the DNS page draws.
 type DNSView struct {
-	ResolvConf ResolvConf    `json:"resolvConf"`
-	Resolved   ResolvedView  `json:"resolved"`
-	Listeners  []DNSListener `json:"listeners"`
-	Adblock    []Adblock     `json:"adblock"`
-	Managed    ManagedDNS    `json:"managed"`
-	Presets    []DNSPreset   `json:"presets"`
+	ResolvConf ResolvConf `json:"resolvConf"`
+	// Owner is who decides /etc/resolv.conf and whether this page's drop-in
+	// reaches what programs ask.
+	Owner     ResolverOwner `json:"owner"`
+	Resolved  ResolvedView  `json:"resolved"`
+	Listeners []DNSListener `json:"listeners"`
+	Adblock   []Adblock     `json:"adblock"`
+	Managed   ManagedDNS    `json:"managed"`
+	Presets   []DNSPreset   `json:"presets"`
 }
 
 // DNSPresets are served from here so the form and the documentation agree on
@@ -275,6 +296,7 @@ func (s *Service) readDNS(ctx context.Context, containers []DNSContainer, stats 
 	}
 	v.Listeners = dnsListeners(all)
 	v.Adblock = detectAdblock(containers, all, v.Listeners)
+	v.Owner = resolverOwner(ctx, v.ResolvConf, v.Resolved, v.Listeners)
 	return v
 }
 
@@ -321,16 +343,17 @@ func (s *Service) readResolved(ctx context.Context, stats bool) ResolvedView {
 	return v
 }
 
-// readResolvConf describes the file programs resolve through.
+// readResolvConf describes the file programs resolve through, as the host
+// has it: the path and its link are read through dnsHostRoot.
 func readResolvConf(path string) ResolvConf {
 	rc := ResolvConf{Path: path, Mode: "missing", Nameservers: []string{}, Search: []string{}, Options: []string{}}
-	st, err := os.Lstat(path)
+	st, err := os.Lstat(hostView(path))
 	if err != nil {
 		return rc
 	}
 	rc.Mode = "static"
 	if st.Mode()&fs.ModeSymlink != 0 {
-		rc.Target, _ = os.Readlink(path)
+		rc.Target, _ = os.Readlink(hostView(path))
 		rc.Mode = "link"
 		// Compared on the tail because the link is relative
 		// (../run/systemd/resolve/stub-resolv.conf) and what it resolves to
@@ -344,14 +367,16 @@ func readResolvConf(path string) ResolvConf {
 			rc.ManagedBy = "resolvconf"
 		case strings.Contains(rc.Target, "NetworkManager"):
 			rc.ManagedBy = "NetworkManager"
+		case strings.Contains(rc.Target, "netconfig"):
+			rc.ManagedBy = "netconfig"
 		}
 	}
-	f, err := os.Open(path)
+	data, err := readHostFile(path)
 	if err != nil {
+		rc.unreadable = err.Error()
 		return rc
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
+	sc := bufio.NewScanner(bytes.NewReader(data))
 	header := true
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -359,8 +384,13 @@ func readResolvConf(path string) ResolvConf {
 			continue
 		}
 		if line[0] == '#' || line[0] == ';' {
-			if header && rc.ManagedBy == "" {
-				rc.ManagedBy = resolvConfWriter(line)
+			if header {
+				if rc.ManagedBy == "" {
+					rc.ManagedBy = resolvConfWriter(line)
+				}
+				if len(rc.header) < 8 {
+					rc.header = append(rc.header, strings.TrimSpace(strings.TrimLeft(line, "#; ")))
+				}
 			}
 			continue
 		}
@@ -392,6 +422,8 @@ func resolvConfWriter(comment string) string {
 		{"dhcpcd", "dhcpcd"},
 		{"dhclient", "dhclient"},
 		{"tailscale", "Tailscale"},
+		{"netconfig", "netconfig"},
+		{"generated by wsl", "WSL"},
 	} {
 		if strings.Contains(c, w.needle) {
 			return w.name
@@ -680,16 +712,18 @@ func adblockKind(image string) string {
 		return "adguardhome"
 	case strings.HasSuffix(img, "pihole/pihole"), strings.HasSuffix(img, "pi-hole/pihole"), img == "pihole", strings.HasSuffix(img, "/pihole"):
 		return "pihole"
+	case strings.HasSuffix(img, "technitium/dns-server"):
+		return "technitium"
 	}
 	return ""
 }
 
-var adblockNames = map[string]string{"adguardhome": "AdGuard Home", "pihole": "Pi-hole"}
+var adblockNames = map[string]string{"adguardhome": "AdGuard Home", "pihole": "Pi-hole", "technitium": "Technitium DNS Server"}
 
 // webPortPreference is which container port of a resolver is its admin page
-// when it publishes several: AdGuard's setup page on 3000, then the web ports
-// Pi-hole and a reverse-proxied AdGuard use.
-var webPortPreference = []uint16{3000, 80, 8080, 443, 8443}
+// when it publishes several: AdGuard's setup page on 3000, Technitium's 5380,
+// then the web ports Pi-hole and a reverse-proxied AdGuard use.
+var webPortPreference = []uint16{3000, 5380, 80, 8080, 443, 8443}
 
 // notWebPorts are the other things a resolver publishes: DNS over TLS, DNS
 // over QUIC and AdGuard's DNS-over-HTTPS listener.
@@ -698,23 +732,38 @@ var notWebPorts = map[uint16]bool{53: true, 784: true, 853: true, 5443: true, 88
 // pickWebPort chooses the admin page among a resolver's TCP ports and returns
 // the port it is reachable on, which for a container is the published one.
 func pickWebPort(ports []DNSPort) int {
+	return int(pickWeb(ports).Public)
+}
+
+// pickWeb is pickWebPort with the address the chosen port is bound to.
+func pickWeb(ports []DNSPort) DNSPort {
 	for _, want := range webPortPreference {
 		for _, p := range ports {
 			if p.Private == want && p.Public != 0 {
-				return int(p.Public)
+				return p
 			}
 		}
 	}
-	best := 0
+	var best DNSPort
 	for _, p := range ports {
 		if p.Public == 0 || notWebPorts[p.Private] {
 			continue
 		}
-		if best == 0 || int(p.Public) < best {
-			best = int(p.Public)
+		if best.Public == 0 || p.Public < best.Public {
+			best = p
 		}
 	}
 	return best
+}
+
+// DetectDNSServices finds the filtering DNS servers on this host without
+// reading the resolver chain, for the native connection handoff.
+func (s *Service) DetectDNSServices(ctx context.Context, containers []DNSContainer) []Adblock {
+	var all []proxysvc.Listener
+	if l, err := listListeners(ctx); err == nil {
+		all = l
+	}
+	return detectAdblock(containers, all, dnsListeners(all))
 }
 
 // detectAdblock finds AdGuard Home and Pi-hole, as containers (by image) and
@@ -734,7 +783,7 @@ func detectAdblock(containers []DNSContainer, all []proxysvc.Listener, dns []DNS
 		if kind == "" || c.State != "running" {
 			continue
 		}
-		a := Adblock{Kind: kind, Name: adblockNames[kind], RunsAs: "container", Container: c.Name, Image: c.Image}
+		a := Adblock{Kind: kind, Name: adblockNames[kind], RunsAs: "container", Container: c.Name, ContainerID: c.ID, Image: c.Image}
 		var web []DNSPort
 		for _, p := range c.Ports {
 			if p.Public == 0 {
@@ -748,7 +797,8 @@ func detectAdblock(containers []DNSContainer, all []proxysvc.Listener, dns []DNS
 		}
 		// A resolver on the host's own network answers without publishing.
 		a.Answering = a.Answering || holds53(func(l DNSListener) bool { return l.Container == c.Name })
-		a.WebPort = pickWebPort(web)
+		chosen := pickWeb(web)
+		a.WebPort, a.WebAddress = int(chosen.Public), chosen.IP
 		out = append(out, a)
 	}
 
@@ -771,10 +821,11 @@ func detectAdblock(containers []DNSContainer, all []proxysvc.Listener, dns []DNS
 		var web []DNSPort
 		for _, o := range all {
 			if o.PID == l.PID && o.PID > 0 && o.Protocol == "tcp" && o.Port != 53 {
-				web = append(web, DNSPort{Private: uint16(o.Port), Public: uint16(o.Port), Type: "tcp"})
+				web = append(web, DNSPort{IP: o.Address, Private: uint16(o.Port), Public: uint16(o.Port), Type: "tcp"})
 			}
 		}
-		a.WebPort = pickWebPort(web)
+		chosen := pickWeb(web)
+		a.WebPort, a.WebAddress = int(chosen.Public), chosen.IP
 		out = append(out, a)
 	}
 	return out
@@ -784,7 +835,7 @@ func detectAdblock(containers []DNSContainer, all []proxysvc.Listener, dns []DNS
 // resolved.conf's: ini sections, space-separated lists, repeated keys adding
 // to the list, and an empty assignment resetting it.
 func readManagedDNS(path string) ManagedDNS {
-	m := ManagedDNS{Path: path, Servers: []string{}, Fallback: []string{}, Domains: []string{}}
+	m := ManagedDNS{Path: path, Servers: []string{}, Fallback: []string{}, Domains: []string{}, Cleared: []string{}}
 	f, err := os.Open(path)
 	if err != nil {
 		return m
@@ -792,6 +843,7 @@ func readManagedDNS(path string) ManagedDNS {
 	defer f.Close()
 	m.Exists = true
 	inResolve := false
+	assigned := map[string]bool{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -809,17 +861,25 @@ func readManagedDNS(path string) ManagedDNS {
 		fields := strings.Fields(value)
 		switch strings.TrimSpace(key) {
 		case "DNS":
-			m.Servers = appendOrReset(m.Servers, fields)
+			m.Servers, assigned["servers"] = appendOrReset(m.Servers, fields), true
 		case "FallbackDNS":
-			m.Fallback = appendOrReset(m.Fallback, fields)
+			m.Fallback, assigned["fallback"] = appendOrReset(m.Fallback, fields), true
 		case "Domains":
-			m.Domains = appendOrReset(m.Domains, fields)
+			m.Domains, assigned["domains"] = appendOrReset(m.Domains, fields), true
 		case "DNSSEC":
 			m.DNSSEC = strings.TrimSpace(value)
 		case "DNSOverTLS":
 			m.DNSOverTLS = strings.TrimSpace(value)
 		case "Cache":
 			m.Cache = strings.TrimSpace(value)
+		}
+	}
+	for _, list := range []struct {
+		name   string
+		values []string
+	}{{"servers", m.Servers}, {"fallback", m.Fallback}, {"domains", m.Domains}} {
+		if assigned[list.name] && len(list.values) == 0 {
+			m.Cleared = append(m.Cleared, list.name)
 		}
 	}
 	return m
@@ -906,9 +966,16 @@ type DNSSettings struct {
 	DNSOverTLS string `json:"dnsOverTLS"`
 	// Cache is yes, no or no-negative.
 	Cache string `json:"cache"`
-	// VerificationName lets an isolated LAN test its own DNS namespace.
-	// It is an apply check, not a persistent resolved setting.
-	VerificationName string `json:"verificationName,omitempty"`
+	// Clear empties lists on purpose instead of inheriting them: servers,
+	// fallback, domains. A cleared list cannot also be given values.
+	Clear []string `json:"clear,omitempty"`
+	// VerificationNames are the names the change is checked with after the
+	// restart, each in the scope resolved routes it to, instead of the default
+	// public names; an isolated LAN or a split-DNS domain names its own.
+	// VerificationName is the older single-name form. They are apply checks,
+	// not persistent resolved settings.
+	VerificationNames []string `json:"verificationNames,omitempty"`
+	VerificationName  string   `json:"verificationName,omitempty"`
 }
 
 // DNSApplied is what a change did.
@@ -922,17 +989,24 @@ type DNSApplied struct {
 	// resolver the change is for.
 	Warning string      `json:"warning,omitempty"`
 	Managed *ManagedDNS `json:"managed"`
+	// Verification is the plan the change was held to and what each check found.
+	Verification *DNSVerification `json:"verification,omitempty"`
 }
 
-// UpstreamError is a change refused because the servers it names did not
-// answer. The previous settings are back in force, and the sentence says so.
-type UpstreamError struct{ Reason string }
+// UpstreamError is a change refused because a required check failed after the
+// restart. The previous settings are back in force, and the sentence says so;
+// Verification is every check's result, the failed one among them.
+type UpstreamError struct {
+	Reason       string
+	Verification *DNSVerification
+}
 
 func (e *UpstreamError) Error() string { return e.Reason }
 
 const (
-	maxDNSServers = 8
-	maxDNSDomains = 16
+	maxDNSServers           = 8
+	maxDNSDomains           = 16
+	maxDNSVerificationNames = 8
 )
 
 // verifyNames are resolved after a change. Two, from unrelated operators, so
@@ -954,10 +1028,13 @@ func (s *Service) SetDNS(ctx context.Context, req DNSSettings, who string) (*DNS
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rc, err := s.requireResolved(ctx)
+	owner, err := s.requireResolved(ctx)
 	if err != nil {
 		return nil, err
 	}
+	// The plan is made from the scopes as they are before the change: the
+	// links keep theirs, and the global scope takes what the request sets.
+	plan := planDNSVerification(req, s.readResolved(ctx, false))
 
 	prev, existed, err := readFileBytes(s.paths.Resolved)
 	if err != nil {
@@ -972,20 +1049,31 @@ func (s *Service) SetDNS(ctx context.Context, req DNSSettings, who string) (*DNS
 		}
 		return nil, fmt.Errorf("systemd-resolved did not restart with the new settings, so the previous ones were put back: %w", err)
 	}
-	via, took, err := verifyResolution(ctx, req.VerificationName)
-	if err != nil {
-		reason := "The new upstreams did not answer: " + err.Error()
+	result, failure := s.runDNSVerification(ctx, req, plan)
+	if failure != "" {
+		reason := failure
 		if restoreErr := s.restoreResolved(ctx, prev, existed); restoreErr != nil {
 			reason += ". Recovery also failed: " + restoreErr.Error()
 		} else {
 			reason += ". The previous settings were put back."
 		}
-		return nil, &UpstreamError{Reason: reason}
+		return nil, &UpstreamError{Reason: reason, Verification: &result}
 	}
 	m := readManagedDNS(s.paths.Resolved)
-	out := &DNSApplied{Verified: true, Via: via, Millis: took, Managed: &m}
-	out.Warning = resolvConfWarning(rc)
+	out := &DNSApplied{Verified: true, Managed: &m, Verification: &result}
+	out.Via, out.Millis = result.firstResolved()
+	out.Warning = resolvConfWarning(owner)
 	return out, nil
+}
+
+// PlanDNS is the verification a change would be held to, without making it.
+func (s *Service) PlanDNS(ctx context.Context, req DNSSettings) (*DNSVerification, error) {
+	req, err := cleanDNSSettings(req)
+	if err != nil {
+		return nil, err
+	}
+	plan := planDNSVerification(req, s.readResolved(ctx, false))
+	return &plan, nil
 }
 
 // ResetDNS removes the drop-in, which returns the host to the servers its
@@ -995,7 +1083,7 @@ func (s *Service) SetDNS(ctx context.Context, req DNSSettings, who string) (*DNS
 func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rc, err := s.requireResolved(ctx)
+	owner, err := s.requireResolved(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -1003,7 +1091,7 @@ func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the resolver drop-in before changing it: %w", err)
 	}
-	out := &DNSApplied{Managed: ptrTo(readManagedDNS(s.paths.Resolved)), Warning: resolvConfWarning(rc)}
+	out := &DNSApplied{Managed: ptrTo(readManagedDNS(s.paths.Resolved)), Warning: resolvConfWarning(owner)}
 	if !existed {
 		return out, nil
 	}
@@ -1017,7 +1105,9 @@ func (s *Service) ResetDNS(ctx context.Context) (*DNSApplied, error) {
 		return nil, fmt.Errorf("systemd-resolved did not restart without the dashboard's settings, so they were put back: %w", err)
 	}
 	out.Managed = ptrTo(readManagedDNS(s.paths.Resolved))
-	if via, took, err := verifyResolution(ctx); err == nil {
+	result, _ := s.runDNSVerification(ctx, DNSSettings{}, planDNSReset())
+	out.Verification = &result
+	if via, took := result.firstResolved(); via != "" {
 		out.Verified, out.Via, out.Millis = true, via, took
 	}
 	return out, nil
@@ -1027,32 +1117,42 @@ func ptrTo[T any](v T) *T { return &v }
 
 // requireResolved refuses a change on a host where systemd-resolved is not the
 // resolver: a drop-in for a service that is not running would be a file that
-// says the change was made and a resolver that never read it.
-func (s *Service) requireResolved(ctx context.Context) (ResolvConf, error) {
+// says the change was made and a resolver that never read it. The owner says
+// who decides the file instead, and where that change is made.
+func (s *Service) requireResolved(ctx context.Context) (ResolverOwner, error) {
 	rc := readResolvConf(resolvConfPath)
-	if resolvedActive(ctx) {
-		return rc, nil
+	active := resolvedActive(ctx)
+	// Listeners only name a loopback resolver other than resolved's stub, so
+	// the socket walk is spent only where the file names one.
+	var listeners []DNSListener
+	if chain, _ := resolverChain(rc, nil); chain == "local-cache" {
+		if all, err := listListeners(ctx); err == nil {
+			listeners = dnsListeners(all)
+		}
 	}
-	by := rc.ManagedBy
-	switch {
-	case by == "" && rc.Mode == "static":
-		by = "a plain file"
-	case by == "" && rc.Mode == "missing":
-		by = "nothing: the file does not exist"
-	case by == "":
-		by = "something other than systemd-resolved"
+	owner := resolverOwner(ctx, rc, ResolvedView{Active: active}, listeners)
+	if active {
+		return owner, nil
 	}
-	return rc, &ReadOnlyError{Reason: "systemd-resolved is not running here; /etc/resolv.conf is managed by " + by +
-		", so the upstreams are changed there rather than on this page"}
+	return owner, &ReadOnlyError{Reason: resolverOwnerReason(owner)}
 }
 
-// resolvConfWarning notes a host where resolved runs but programs do not ask it.
-func resolvConfWarning(rc ResolvConf) string {
-	if rc.Mode == "stub" || rc.Mode == "uplink" {
+// resolvConfWarning notes a host where resolved runs but programs do not ask
+// it, naming who decides what they ask and where that is changed.
+func resolvConfWarning(owner ResolverOwner) string {
+	if owner.DashboardWrites {
 		return ""
 	}
+	ask := "no server at all"
+	if len(owner.Evidence) > 0 {
+		for _, e := range owner.Evidence {
+			if strings.HasSuffix(e.Source, " nameservers") {
+				ask = e.Detail
+			}
+		}
+	}
 	return "systemd-resolved is running, but /etc/resolv.conf does not point at it, so programs on this host keep using " +
-		strings.Join(rc.Nameservers, ", ") + " until it does."
+		ask + " until it does. " + owner.Name + " decides that file: " + owner.Handoff
 }
 
 // restoreResolved puts the previous drop-in back (or removes the one that
@@ -1095,40 +1195,55 @@ func verifyResolution(ctx context.Context, verificationName ...string) (string, 
 	}
 	var last error
 	for _, name := range names {
-		start := time.Now()
-		for _, rtype := range []string{"A", "AAAA"} {
-			queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
-			answers, err := lookupVia(queryCtx, resolvedStub, name, rtype)
-			if err == nil && len(answers) > 0 {
-				cancel()
-				return name, millis(time.Since(start)), nil
-			}
-			// DNSStubListener=no still has resolved's local query API.
-			if err != nil && (errors.Is(err, syscall.ECONNREFUSED) || lookupError(err) == "connection refused") && has("resolvectl") {
-				out, queryErr := run(queryCtx, "resolvectl", "query", "--type="+rtype, "--legend=no", name+".")
-				if queryErr == nil {
-					for _, field := range strings.Fields(out) {
-						if a, parseErr := netip.ParseAddr(field); parseErr == nil && (rtype == "A" && a.Is4() || rtype == "AAAA" && a.Is6()) {
-							cancel()
-							return name, millis(time.Since(start)), nil
-						}
-					}
-				}
-				if queryErr != nil {
-					err = queryErr
-				}
-			}
-			cancel()
-			if err == nil {
-				err = fmt.Errorf("%s has no %s answers", name, rtype)
-			}
-			last = err
-			if ctx.Err() != nil {
-				return "", 0, ctx.Err()
-			}
+		_, _, took, err := verifyName(ctx, name)
+		if err == nil {
+			return name, took, nil
+		}
+		last = err
+		if ctx.Err() != nil {
+			return "", 0, ctx.Err()
 		}
 	}
 	return "", 0, fmt.Errorf("%s could not be resolved through systemd-resolved (%v)", names[0], last)
+}
+
+// verifyName asks resolved for one name, A then AAAA, and returns the first
+// address that answered, its record type and how long the name took.
+func verifyName(ctx context.Context, name string) (string, string, float64, error) {
+	start := time.Now()
+	var last error
+	for _, rtype := range []string{"A", "AAAA"} {
+		queryCtx, cancel := context.WithTimeout(ctx, lookupTimeout)
+		answers, err := lookupVia(queryCtx, resolvedStub, name, rtype)
+		if err == nil && len(answers) > 0 {
+			cancel()
+			return answers[0], rtype, millis(time.Since(start)), nil
+		}
+		// DNSStubListener=no still has resolved's local query API.
+		if err != nil && (errors.Is(err, syscall.ECONNREFUSED) || lookupError(err) == "connection refused") && has("resolvectl") {
+			out, queryErr := run(queryCtx, "resolvectl", "query", "--type="+rtype, "--legend=no", name+".")
+			if queryErr == nil {
+				for _, field := range strings.Fields(out) {
+					if a, parseErr := netip.ParseAddr(field); parseErr == nil && (rtype == "A" && a.Is4() || rtype == "AAAA" && a.Is6()) {
+						cancel()
+						return a.String(), rtype, millis(time.Since(start)), nil
+					}
+				}
+			}
+			if queryErr != nil {
+				err = queryErr
+			}
+		}
+		cancel()
+		if err == nil {
+			err = fmt.Errorf("%s has no %s answers", name, rtype)
+		}
+		last = err
+		if ctx.Err() != nil {
+			return "", "", 0, ctx.Err()
+		}
+	}
+	return "", "", 0, last
 }
 
 func millis(d time.Duration) float64 {
@@ -1138,11 +1253,22 @@ func millis(d time.Duration) float64 {
 // cleanDNSSettings validates a request and returns it in the form it is written.
 func cleanDNSSettings(req DNSSettings) (DNSSettings, error) {
 	var err error
-	req.VerificationName = strings.TrimSuffix(strings.TrimSpace(req.VerificationName), ".")
-	if req.VerificationName != "" {
-		if _, err := cleanLookupName(req.VerificationName, "A"); err != nil {
-			return req, fmt.Errorf("verificationName: %w", err)
+	names := append([]string{req.VerificationName}, req.VerificationNames...)
+	req.VerificationName, req.VerificationNames = "", []string{}
+	seenName := map[string]bool{}
+	for _, raw := range names {
+		name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(raw), "."))
+		if name == "" || seenName[name] {
+			continue
 		}
+		if _, err := cleanLookupName(name, "A"); err != nil {
+			return req, fmt.Errorf("verification name %q: %w", raw, err)
+		}
+		seenName[name] = true
+		req.VerificationNames = append(req.VerificationNames, name)
+	}
+	if len(req.VerificationNames) > maxDNSVerificationNames {
+		return req, fmt.Errorf("at most %d verification names", maxDNSVerificationNames)
 	}
 	if req.Servers, err = cleanDNSServers(req.Servers, "upstream"); err != nil {
 		return req, err
@@ -1168,6 +1294,29 @@ func cleanDNSSettings(req DNSSettings) (DNSSettings, error) {
 	}
 	req.Domains = domains
 
+	clear := []string{}
+	for _, list := range req.Clear {
+		list = strings.ToLower(strings.TrimSpace(list))
+		var values []string
+		switch list {
+		case "servers":
+			values = req.Servers
+		case "fallback":
+			values = req.Fallback
+		case "domains":
+			values = req.Domains
+		default:
+			return req, fmt.Errorf("clear takes servers, fallback or domains, not %q", list)
+		}
+		if len(values) > 0 {
+			return req, fmt.Errorf("%s are both listed and cleared; clear a list only to leave it empty", list)
+		}
+		if !containsString(clear, list) {
+			clear = append(clear, list)
+		}
+	}
+	req.Clear = clear
+
 	if req.DNSSEC, err = oneOf(req.DNSSEC, "DNSSEC", "no", "allow-downgrade", "yes"); err != nil {
 		return req, err
 	}
@@ -1189,7 +1338,7 @@ func cleanDNSSettings(req DNSSettings) (DNSSettings, error) {
 			}
 		}
 	}
-	if len(req.Servers) == 0 && len(req.Fallback) == 0 && len(req.Domains) == 0 &&
+	if len(req.Servers) == 0 && len(req.Fallback) == 0 && len(req.Domains) == 0 && len(req.Clear) == 0 &&
 		req.DNSSEC == "" && req.DNSOverTLS == "" && req.Cache == "" {
 		return req, fmt.Errorf("nothing to set; remove the dashboard's settings instead to go back to the host's own")
 	}
@@ -1270,17 +1419,20 @@ func renderResolved(req DNSSettings, who string) string {
 	b.WriteString(" on " + dnsNow().UTC().Format("2006-01-02 15:04 UTC") + ".\n")
 	b.WriteString("# systemd-resolved reads this after resolved.conf. Change it on the dashboard's\n# Network, DNS page; an edit here is overwritten by the next change there.\n")
 	b.WriteString("[Resolve]\n")
-	list := func(key string, v []string) {
-		if len(v) > 0 {
+	list := func(key, name string, v []string) {
+		if len(v) > 0 || containsString(req.Clear, name) {
 			// List assignments accumulate across earlier files. Clear the old
-			// global list so choosing one upstream does not keep another in use.
+			// global list so choosing one upstream does not keep another in use;
+			// a cleared list stops at the empty assignment.
 			b.WriteString(key + "=\n")
+		}
+		if len(v) > 0 {
 			b.WriteString(key + "=" + strings.Join(v, " ") + "\n")
 		}
 	}
-	list("DNS", req.Servers)
-	list("FallbackDNS", req.Fallback)
-	list("Domains", req.Domains)
+	list("DNS", "servers", req.Servers)
+	list("FallbackDNS", "fallback", req.Fallback)
+	list("Domains", "domains", req.Domains)
 	for _, kv := range [][2]string{{"DNSSEC", req.DNSSEC}, {"DNSOverTLS", req.DNSOverTLS}, {"Cache", req.Cache}} {
 		if kv[1] != "" {
 			b.WriteString(kv[0] + "=" + kv[1] + "\n")

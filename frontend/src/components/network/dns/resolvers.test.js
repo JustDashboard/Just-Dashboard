@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test"
 import {
+  checkTone,
+  clearedLists,
   encryptionOf,
+  issueMatters,
+  issuesByRecord,
+  refusedVerification,
   missingTLSNames,
   parseList,
   presetChosen,
@@ -58,4 +63,43 @@ test("resolved's DNS over TLS words map to what the page says", () => {
   expect(encryptionOf("opportunistic")).toBe("opportunistic")
   expect(encryptionOf("no")).toBe("plain")
   expect(encryptionOf(undefined)).toBe("plain")
+})
+
+test("a check's tone says failed loudly and unknown quietly", () => {
+  expect(checkTone("passed")).toBe("running")
+  expect(checkTone("failed")).toBe("danger")
+  expect(checkTone("warning")).toBe("warning")
+  expect(checkTone("unknown")).toBe("notice")
+  expect(checkTone("planned")).toBe("notice")
+})
+
+test("a list is cleared only while it is empty", () => {
+  expect(
+    clearedLists(
+      { servers: ["1.1.1.1"], fallback: [], domains: [] },
+      { servers: true, fallback: true },
+    ),
+  ).toEqual(["fallback"])
+  expect(clearedLists({ servers: [], fallback: [], domains: [] }, {})).toEqual([])
+})
+
+test("a refused change's verification is read from the error body", () => {
+  const verification = { checks: [{ kind: "readback", state: "failed" }], unverified: [] }
+  expect(refusedVerification({ error: {}, verification })).toBe(verification)
+  expect(refusedVerification({ error: {} })).toBeUndefined()
+  expect(refusedVerification({ verification: { checks: "x" } })).toBeUndefined()
+  expect(refusedVerification(null)).toBeUndefined()
+})
+
+test("host record overlaps group by record, conflicts first", () => {
+  const issues = [
+    { kind: "repeated", name: "a", address: "1", record: 1, detail: "" },
+    { kind: "conflict", name: "a", address: "2", record: 1, detail: "" },
+    { kind: "shadowed", name: "b", address: "3", record: 0, detail: "" },
+  ]
+  const grouped = issuesByRecord(issues)
+  expect(grouped.get(1).map((i) => i.kind)).toEqual(["conflict", "repeated"])
+  expect(grouped.get(0)[0].kind).toBe("shadowed")
+  expect(issueMatters(issues[0])).toBe(false)
+  expect(issueMatters(issues[1])).toBe(true)
 })

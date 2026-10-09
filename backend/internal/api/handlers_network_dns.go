@@ -35,9 +35,22 @@ func (s *Server) mountNetworkDNSRoutes(r chi.Router) {
 		// choosing the way the probes under /network/probe can, and a
 		// resolver is a service that expects to be asked.
 		r.Method(http.MethodPost, "/lookup", s.handle(s.handleDNSLookup))
+		// The certificate check opens TLS sessions only to configured or preset
+		// DNS-over-TLS servers and asks them for the root's NS records; like a
+		// lookup it is `read` and names no address of the caller's.
+		r.Method(http.MethodPost, "/tls-check", s.handle(s.handleDNSTLSCheck))
+		// Which address each managed host name resolves to is `read`: the names
+		// are the hosts file's, which any role reads already.
+		r.Method(http.MethodGet, "/hosts/resolution", s.handle(s.handleDNSHostsResolution))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			r.Method(http.MethodPut, "/hosts", s.handle(s.handleDNSHostsSet))
+			// Planning and previewing change nothing; they belong to the
+			// administrator's editing flow. The DNSSEC chain reads native
+			// per-link policy, which is the policy investigation's capability.
+			r.Method(http.MethodPost, "/hosts/preview", s.handle(s.handleDNSHostsPreview))
+			r.Method(http.MethodPost, "/verification-plan", s.handle(s.handleDNSPlan))
+			r.Method(http.MethodPost, "/dnssec-chain", s.handle(s.handleDNSSECChain))
 			s.destructive(r, func(r chi.Router) {
 				r.Method(http.MethodPost, "/", s.handle(s.handleDNSSet))
 				r.Method(http.MethodDelete, "/", s.handle(s.handleDNSReset))
@@ -59,7 +72,7 @@ func (s *Server) dnsContainers(ctx context.Context) []netx.DNSContainer {
 	}
 	out := make([]netx.DNSContainer, 0, len(containers))
 	for _, c := range containers {
-		dc := netx.DNSContainer{Name: c.Name, Image: c.Image, State: c.State}
+		dc := netx.DNSContainer{ID: c.ID, Name: c.Name, Image: c.Image, State: c.State}
 		for _, p := range c.Ports {
 			dc.Ports = append(dc.Ports, netx.DNSPort{IP: p.IP, Private: p.PrivatePort, Public: p.PublicPort, Type: p.Type})
 		}
@@ -99,12 +112,73 @@ func (s *Server) handleDNSSet(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		var up *netx.UpstreamError
 		if errors.As(err, &up) {
-			httpx.SetAudit(r, "network.dns.set", "", map[string]any{"result": "refused_unreachable", "request": req})
+			httpx.SetAudit(r, "network.dns.set", "", map[string]any{"result": "refused_verification", "request": req})
+			// The refusal carries every check beside the error, so the page can
+			// say which one failed and what the others found.
+			refusal := httpx.Err(http.StatusConflict, "dns_upstream_unreachable", up.Reason)
+			httpx.JSON(w, refusal.Status, map[string]any{"error": refusal, "verification": up.Verification})
+			return nil
 		}
 		return mapDNSError(err)
 	}
 	httpx.SetAudit(r, "network.dns.set", "", req)
 	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+func (s *Server) handleDNSPlan(w http.ResponseWriter, r *http.Request) error {
+	var req netx.DNSSettings
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	defer cancel()
+	plan, err := s.modules.network.PlanDNS(ctx, req)
+	if err != nil {
+		return mapDNSError(err)
+	}
+	httpx.SkipAudit(r)
+	httpx.JSON(w, http.StatusOK, plan)
+	return nil
+}
+
+type dnsTLSCheckRequest struct {
+	Servers []string `json:"servers"`
+}
+
+func (s *Server) handleDNSTLSCheck(w http.ResponseWriter, r *http.Request) error {
+	var req dnsTLSCheckRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	report, err := s.modules.network.CheckDNSTLS(ctx, req.Servers)
+	if err != nil {
+		return mapDNSError(err)
+	}
+	httpx.SkipAudit(r)
+	httpx.JSON(w, http.StatusOK, report)
+	return nil
+}
+
+type dnssecChainRequest struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) handleDNSSECChain(w http.ResponseWriter, r *http.Request) error {
+	var req dnssecChainRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 25*time.Second)
+	defer cancel()
+	chain, err := s.modules.network.InvestigateDNSSEC(ctx, req.Name, nil)
+	if err != nil {
+		return mapDNSError(err)
+	}
+	httpx.SkipAudit(r)
+	httpx.JSON(w, http.StatusOK, chain)
 	return nil
 }
 
@@ -148,6 +222,31 @@ func (s *Server) handleDNSLookup(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+func (s *Server) handleDNSHostsPreview(w http.ResponseWriter, r *http.Request) error {
+	var req dnsHostsRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	preview, err := s.modules.network.PreviewHostRecords(r.Context(), req.Records)
+	if err != nil {
+		return mapDNSError(err)
+	}
+	httpx.SkipAudit(r)
+	httpx.JSON(w, http.StatusOK, preview)
+	return nil
+}
+
+func (s *Server) handleDNSHostsResolution(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 25*time.Second)
+	defer cancel()
+	evidence, err := s.modules.network.HostResolution(ctx)
+	if err != nil {
+		return mapDNSError(err)
+	}
+	httpx.JSON(w, http.StatusOK, evidence)
+	return nil
+}
+
 func (s *Server) handleDNSHosts(w http.ResponseWriter, r *http.Request) error {
 	recs, err := s.modules.network.HostRecords(r.Context())
 	if err != nil {
@@ -184,6 +283,10 @@ func mapDNSError(err error) error {
 	var up *netx.UpstreamError
 	if errors.As(err, &up) {
 		return httpx.Err(http.StatusConflict, "dns_upstream_unreachable", up.Reason)
+	}
+	var refusal *netx.DNSPolicyRefusal
+	if errors.As(err, &refusal) {
+		return httpx.Err(http.StatusConflict, refusal.Code, refusal.Reason)
 	}
 	return mapNetworkError(err)
 }

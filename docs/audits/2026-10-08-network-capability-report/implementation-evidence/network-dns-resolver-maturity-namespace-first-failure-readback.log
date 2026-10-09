@@ -1,0 +1,32 @@
+=== RUN   TestDNSResolverMaturityNativeDisposable
+    dns_verify_live_test.go:58: native resolver maturity fixture: exit status 1
+        === RUN   TestDNSResolverMaturityNativeDisposable
+            dns_verify_live_test.go:521: strict apply refused: systemd-resolved is not running with the settings written: global servers are 203.0.113.53#resolver.fixture.example 127.0.0.2#resolver.fixture.example where 203.0.113.53#resolver.fixture.example was written. A later drop-in or the host's resolved.conf overrides them.. The previous settings were put back. &{Checks:[{Kind:readback Scope:global settings Name: Required:true State:failed Answer: Type: Millis:0 Detail:global servers are 203.0.113.53#resolver.fixture.example 127.0.0.2#resolver.fixture.example where 203.0.113.53#resolver.fixture.example was written. A later drop-in or the host's resolved.conf overrides them.} {Kind:resolution Scope:default route via global upstreams Name:www.example Required:true State:passed Answer:192.0.2.7 Type:A Millis:7.4 Detail:must answer in A or AAAA} {Kind:resolution Scope:~corp.example on dnspriv0 Name:secret.corp.example Required:true State:passed Answer:192.0.2.7 Type:A Millis:7.2 Detail:must answer in A or AAAA} {Kind:transport Scope:upstream connection Name:www.example Required:true State:passed Answer: Type: Millis:0 Detail:systemd-resolved reports the answer came over TLS; opportunistic mode does not authenticate the certificate.} {Kind:dnssec Scope:validation Name:www.example Required:false State:passed Answer: Type: Millis:0 Detail:systemd-resolved authenticated the answer under its own trust anchors.}] Unverified:[links without their own DNSSEC or DNS over TLS setting inherit the global one; only the names above check it]}
+                resolved log tail:
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 +p8EPsCY31hepXxoJCcOC+ZwA0bhTSD7D/Bpj3Kmyio=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 21104
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                dnspriv0: Bus client set DNS server list to: 127.0.0.2#resolver.fixture.example
+                dnspriv0: Bus client set search domain list to: ~corp.example
+                dnspriv0: Bus client set default route setting: no
+                dnspriv0: Bus client set DNSOverTLS setting: yes
+                dnspriv0: Bus client set DNSSEC setting: yes
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 +p8EPsCY31hepXxoJCcOC+ZwA0bhTSD7D/Bpj3Kmyio=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 21104
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+                Positive Trust Anchors:
+                . IN DNSKEY 257 3 ED25519 +p8EPsCY31hepXxoJCcOC+ZwA0bhTSD7D/Bpj3Kmyio=
+                        -- Flags: SEP ZONE_KEY
+                        -- Key tag: 21104
+                Negative trust anchors: home.arpa 10.in-addr.arpa 16.172.in-addr.arpa 17.172.in-addr.arpa 18.172.in-addr.arpa 19.172.in-addr.arpa 20.172.in-addr.arpa 21.172.in-addr.arpa 22.172.in-addr.arpa 23.172.in-addr.arpa 24.172.in-addr.arpa 25.172.in-addr.arpa 26.172.in-addr.arpa 27.172.in-addr.arpa 28.172.in-addr.arpa 29.172.in-addr.arpa 30.172.in-addr.arpa 31.172.in-addr.arpa 170.0.0.192.in-addr.arpa 171.0.0.192.in-addr.arpa 168.192.in-addr.arpa d.f.ip6.arpa ipv4only.arpa resolver.arpa corp home internal intranet lan local private test
+                Using system hostname '[redacted-hostname]'.
+        --- FAIL: TestDNSResolverMaturityNativeDisposable (0.77s)
+        FAIL
+--- FAIL: TestDNSResolverMaturityNativeDisposable (0.81s)
+FAIL

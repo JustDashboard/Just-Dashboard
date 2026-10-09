@@ -213,6 +213,13 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		return filters.Inventory
 	}
 	initialFilters := filterRead(0)
+	// The detected-server handoff opens this reading for a connected engine:
+	// a fresh owned engine serves no DHCP and has an empty, readable table.
+	dhcp, err := s.DHCP(ctx, connection.ID)
+	if err != nil || dhcp.Inventory == nil || dhcp.State != "available" || dhcp.Inventory.Configuration.State != "configured" || dhcp.Inventory.LeaseEvidence.State != "reported" || dhcp.Inventory.Enabled == nil || *dhcp.Inventory.Enabled || len(dhcp.Inventory.Leases) != 0 {
+		t.Fatalf("native %s DHCP inventory: state=%s error=%s err=%v inventory=%+v", engine, dhcp.State, dhcp.Error, err, dhcp.Inventory)
+	}
+	t.Logf("engine=%s nativeDHCPVersion=%s enabled=%t ranges=%d leases=%d configuration=%s leaseEvidence=%s", engine, dhcp.Inventory.NativeVersion, *dhcp.Inventory.Enabled, len(dhcp.Inventory.Ranges), len(dhcp.Inventory.Leases), dhcp.Inventory.Configuration.State, dhcp.Inventory.LeaseEvidence.State)
 	if _, err = s.Preview(ctx, connection.ID, ChangeRequest{Action: "upstreams", Upstreams: []string{"192.0.2.54:5353"}}); !errors.Is(err, ErrReadOnly) {
 		t.Fatalf("native read-only staging allowed: %v", err)
 	}

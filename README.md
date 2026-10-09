@@ -84,9 +84,19 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   reconnection and explicit confirmation within ninety seconds. Gateway admission, blocklist sets
   and shaping expose kernel evidence separately from saved settings. DNS tests use the host's
   configured resolver chain, checking native split policy when supported and reporting unknowns
-  for other paths; direct comparisons require named destinations and a disclosure acknowledgment.
+  for other paths; direct comparisons require named destinations and a disclosure acknowledgment,
+  and can use DNS over TLS and the DNSSEC OK bit. A private name is not sent to a public resolver by
+  the default test, and a configured private resolver whose forwarding is unseen needs an explicit
+  acknowledgment. The DNS page names who writes `/etc/resolv.conf` on the host (systemd-resolved,
+  NetworkManager, resolvconf, netconfig, dhcpcd, Tailscale and others) and where a change is made
+  instead; edits a link's split DNS through its native profile with temporary apply; shows the
+  checks an upstream change is held to before applying it and each result after, rolling back when
+  a required one fails; checks configured DNS-over-TLS certificates; traces a name's DNSSEC chain;
+  previews host-record overlaps and checks local resolution after saving.
   Administrators can connect supported native AdGuard Home, Pi-hole or Technitium engines read-only
   by default, inspect their separate configured/runtime evidence and review supported policy changes.
+  A detected AdGuard Home, Pi-hole or Technitium hands off to its connection, or opens the connection
+  form with its loopback origin, and connections read the engine's DHCP ranges and leases read-only.
   Native filter readings show redacted subscription origins, custom-rule metadata and native group
   memberships. Failed reads retain dated evidence; configured counts do not prove client filtering.
   Reviewed controls include exact A/AAAA local overrides, supported unsigned Technitium primary-zone

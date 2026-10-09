@@ -32,6 +32,22 @@ hiding a control through `useAuth().can()` is affordance only.
 | `/system-users` | Host account inventory under four readings (accounts with the people as faces, administrators, who can sign in, the last sign-in and where from); the accounts as lit cards that open their SSH keys — a person as their initials in their hue, a daemon's account as its product — shelved into people and system accounts, with All, Can sign in, Administrators and Locked chips; create, lock and delete; the keys sheet opening on the account's mark with each key drawn as the service its comment names | system-users page, `components/system-users/marks.tsx` (unit-tested); backend contract in [`../backend/git-backups-users.md`](../backend/git-backups-users.md#host-users-and-ssh-keys); checked by `tests/browser/system-ui.spec.ts` |
 | `/terminal` | Direct PTY sessions held on the host so they outlive the dashboard (opened and closed, nothing else — no folders, renaming or pinning), windows with retained screens and connections while switching, directional nested splits with pointer/keyboard divider resizing and focused input, Codex/Claude run in the focused shell (a sibling window only when that terminal is holding a program), a window strip that scrolls without a scrollbar behind edge fades and chevrons, tabs and rows named after what the shell is doing (without the agent's own title glyph) with a working mark and the running program's own logo (a terminal's where it has none), a Files and Git companion column (full-width tabs; files open with a floating Save that appears only once edited; the Git tab is the repository's changes read file by file, branch switching and checking out an open pull request, with a link to the Git page for everything else), the last-open session and window remembered across navigation, side tools, replay, a dropped socket reconnecting by itself, clipboard upload, renderer, and keyboard customization | terminal page, `components/terminal/`, `components/xterm-pane.tsx`; see [`features-terminal.md`](features-terminal.md#the-terminal-panel) |
 
+The DNS page opens on the resolver chain and `resolver-owner.tsx`: who writes `/etc/resolv.conf`,
+what programs ask, whether the page's resolved drop-in reaches them, the owner's own place to change
+DNS (a link to the Interfaces page for a NetworkManager profile) and the evidence and conflicts behind
+the verdict. `link-scopes.tsx` lists each link's resolved scope and, for an administrator, edits a
+link's split DNS through its native profile as a temporary apply (`split-dns.ts`, unit-tested).
+`upstreams.tsx` offers clearing each list on purpose, up to eight verification names, the server's
+verification plan in the confirmation and every check's result — or the failed check of a change that
+was put back — after it (`verification.tsx`). `tls-check.tsx` checks each configured DoT server's
+certificate, `dnssec-chain.tsx` traces a name's chain of trust for administrators, the host records
+editor previews overlaps before saving and checks local NSS resolution after, the lookup race compares
+over DNS over TLS with the DO bit and asks before sending a private name to unseen forwarding, and the
+ad-blocking rows hand a detected AdGuard Home, Pi-hole or Technitium to its native connection
+(Inspect) or to a seeded connection form (Connect). Connection sheets add `service-dhcp.tsx`, the
+engine's read-only DHCP ranges and leases. Checked by `tests/browser/network-dns.spec.ts` and
+`network-dns-services.spec.ts`.
+
 The DNS page also mounts `components/network/dns/services.tsx` for administrators, including while
 the host resolver reading is unavailable. Native connections default read-only; replacement requires
 the complete native credential and selected custom CA again. Engine sheets keep listeners, runtime,

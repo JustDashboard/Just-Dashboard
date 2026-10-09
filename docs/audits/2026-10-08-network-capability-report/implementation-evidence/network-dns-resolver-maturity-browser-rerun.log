@@ -1,0 +1,54 @@
+
+Running 26 tests using 1 worker
+
+[1/26] [chromium] › tests/browser/network-dns.spec.ts:84:7 › DNS › opens on the resolver chain with the readings and what answers on port 53
+[2/26] [chromium] › tests/browser/network-dns.spec.ts:102:7 › DNS › picking Quad9 with DNS over TLS required posts the servers with their TLS name
+[3/26] [chromium] › tests/browser/network-dns.spec.ts:123:7 › DNS › required TLS is refused before it is asked while a server has no name
+[4/26] [chromium] › tests/browser/network-dns.spec.ts:136:7 › DNS › resetting to the system's goes through a confirmation and a DELETE
+[5/26] [chromium] › tests/browser/network-dns.spec.ts:146:7 › DNS › a host where systemd-resolved is not running reads, and says why
+[6/26] [chromium] › tests/browser/network-dns.spec.ts:160:7 › DNS › with no ad-blocker the page offers the two real ways to get one
+[7/26] [chromium] › tests/browser/network-dns.spec.ts:169:7 › DNS › the lookup race has one row per resolver, the failed one with its reason
+[8/26] [chromium] › tests/browser/network-dns.spec.ts:205:7 › DNS › saving host records sends the whole list, the new row included
+[9/26] [chromium] › tests/browser/network-dns.spec.ts:223:7 › DNS › a half-written host record says which field is missing
+[10/26] [chromium] › tests/browser/network-dns.spec.ts:232:7 › DNS › names the resolver owner, what programs ask and where DNS is changed
+[11/26] [chromium] › tests/browser/network-dns.spec.ts:246:7 › DNS › a NetworkManager-owned file says the drop-in does not reach programs and hands off
+[12/26] [chromium] › tests/browser/network-dns.spec.ts:263:7 › DNS › applying shows the server's verification plan first and each check's result after
+[13/26] [chromium] › tests/browser/network-dns.spec.ts:291:7 › DNS › a change put back by a failed check says which check failed
+[14/26] [chromium] › tests/browser/network-dns.spec.ts:313:7 › DNS › clearing the fallback list sends it as cleared, not as the host's default
+[15/26] [chromium] › tests/browser/network-dns.spec.ts:334:7 › DNS › split DNS for a link goes through its native profile as a temporary apply
+[16/26] [chromium] › tests/browser/network-dns.spec.ts:369:7 › DNS › a link whose native owner is not edited here says why instead of offering a form
+[17/26] [chromium] › tests/browser/network-dns.spec.ts:378:7 › DNS › the certificate check lists each server's trust and what it could not check
+[18/26] [chromium] › tests/browser/network-dns.spec.ts:391:7 › DNS › the DNSSEC chain shows each delegation and the root anchor
+[19/26] [chromium] › tests/browser/network-dns.spec.ts:404:7 › DNS › a host record that a line before the block shadows is previewed before it is saved
+[20/26] [chromium] › tests/browser/network-dns.spec.ts:421:7 › DNS › comparing over DNS over TLS with the DO bit sends both and shows transport and AD
+[21/26] [chromium] › tests/browser/network-dns.spec.ts:447:7 › DNS › a private name with unseen forwarding is sent only after it is acknowledged
+[22/26] [chromium] › tests/browser/network-dns.spec.ts:465:7 › DNS › every button on the page has an accessible name
+[23/26] [chromium] › tests/browser/network-dns.spec.ts:637:11 › screenshots › 390 wide › /network/dns checks at 390
+[24/26] [chromium] › tests/browser/network-dns.spec.ts:669:13 › screenshots › 390 wide › /network/dns at 390
+[25/26] [chromium] › tests/browser/network-dns.spec.ts:637:11 › screenshots › 1440 wide › /network/dns checks at 1440
+[26/26] [chromium] › tests/browser/network-dns.spec.ts:669:13 › screenshots › 1440 wide › /network/dns at 1440
+  26 passed (1.1m)
+��─────────────────────────────────────────
+    test-results/network-dns-DNS-split-DNS--32f31-rofile-as-a-temporary-apply-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-dns-DNS-split-DNS--32f31-rofile-as-a-temporary-apply-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[16/26] [chromium] › tests/browser/network-dns.spec.ts:369:7 › DNS › a link whose native owner is not edited here says why instead of offering a form
+[17/26] [chromium] › tests/browser/network-dns.spec.ts:378:7 › DNS › the certificate check lists each server's trust and what it could not check
+[18/26] [chromium] › tests/browser/network-dns.spec.ts:391:7 › DNS › the DNSSEC chain shows each delegation and the root anchor
+[19/26] [chromium] › tests/browser/network-dns.spec.ts:404:7 › DNS › a host record that a line before the block shadows is previewed before it is saved
+[20/26] [chromium] › tests/browser/network-dns.spec.ts:421:7 › DNS › comparing over DNS over TLS with the DO bit sends both and shows transport and AD
+[21/26] [chromium] › tests/browser/network-dns.spec.ts:447:7 › DNS › a private name with unseen forwarding is sent only after it is acknowledged
+[22/26] [chromium] › tests/browser/network-dns.spec.ts:465:7 › DNS › every button on the page has an accessible name
+[23/26] [chromium] › tests/browser/network-dns.spec.ts:637:11 › screenshots › 390 wide › /network/dns checks at 390
+[24/26] [chromium] › tests/browser/network-dns.spec.ts:669:13 › screenshots › 390 wide › /network/dns at 390
+[25/26] [chromium] › tests/browser/network-dns.spec.ts:637:11 › screenshots › 1440 wide › /network/dns checks at 1440
+[26/26] [chromium] › tests/browser/network-dns.spec.ts:669:13 › screenshots › 1440 wide › /network/dns at 1440
+  1 failed
+    [chromium] › tests/browser/network-dns.spec.ts:334:7 › DNS › split DNS for a link goes through its native profile as a temporary apply 
+  25 passed (1.6m)
+rerun2 exit 0

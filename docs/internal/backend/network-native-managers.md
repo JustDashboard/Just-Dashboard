@@ -98,6 +98,12 @@ or applying a new candidate. IPv6 RA routes remain acquired when automatic DNS i
 The [v8 authored-policy proof](evidence/native-manager-netplan-v8-2026-10-09.md) records the measured
 DHCPv4/SLAAC slice and its remaining platform limits.
 
+The DNS page's per-link split-DNS editor writes through this same `PUT`: the complete current intent
+with only per-family DNS servers, one link-level list of routing (`~`) and search domains on every
+enabled family and the ignore-automatic-DNS choice changed. `TestNativeManagerOwnerLive` applies that
+shape temporarily on the networkd owner, confirms it and waits for runtime agreement, including
+networkd's report of the routing and search domains.
+
 NetworkManager's active [IPv4 domain and search properties](https://github.com/NetworkManager/NetworkManager/blob/1.52.1/introspection/org.freedesktop.NetworkManager.IP4Config.xml)
 and corresponding IPv6 properties are read from the pinned unique owner and exact selected IP-config
 object. Their bounded union covers DHCP domain-name (option 15) and search-list/RA domains without

@@ -467,9 +467,18 @@ func resolvedHost(t *testing.T, stub func(string, uint16) dnsBehavior) (*Service
 	rec := record(t)
 	rec.on("systemctl is-active systemd-resolved", "active\n")
 	rec.on("systemctl restart systemd-resolved", "")
+	// resolvectl status printing nothing leaves the read-back unknown rather
+	// than failed; tests of the read-back answer it themselves first.
+	rec.on("resolvectl status --no-pager", "")
 	pointResolvConf(t, "stub")
 	routeDNS(t, map[string]string{"127.0.0.53": startFakeDNS(t, stub)})
 	lookupTimeout = 400 * time.Millisecond
+	// The transport and DNSSEC checks never ask the machine's own resolver.
+	prevNative := dnsVerifyExecutor
+	dnsVerifyExecutor = func(context.Context, string, ...string) (string, error) {
+		return "", errors.New("no native resolver in this test")
+	}
+	t.Cleanup(func() { dnsVerifyExecutor = prevNative })
 	return testService(t), rec
 }
 
@@ -564,7 +573,7 @@ func TestSetDNSRollsBackWhenTheNewUpstreamsDoNotAnswer(t *testing.T) {
 
 func TestSetDNSRefusesWithoutResolved(t *testing.T) {
 	rec := record(t)
-	rec.on("systemctl is-active systemd-resolved", "inactive\n")
+	rec.on("systemctl is-active systemd-resolved", "inactive\n").on("systemctl is-active NetworkManager", "active\n")
 	pointResolvConf(t, "static")
 	s := testService(t)
 	_, err := s.SetDNS(context.Background(), DNSSettings{Servers: []string{"1.1.1.1"}}, "")
@@ -592,13 +601,14 @@ func TestSetDNSValidatesBeforeTouchingAnything(t *testing.T) {
 }
 
 func TestSetDNSWarnsWhenProgramsDoNotUseResolved(t *testing.T) {
-	s, _ := resolvedHost(t, answerA("192.0.2.1"))
+	s, rec := resolvedHost(t, answerA("192.0.2.1"))
+	rec.on("systemctl is-active NetworkManager", "active\n")
 	pointResolvConf(t, "static")
 	got, err := s.SetDNS(context.Background(), DNSSettings{Servers: []string{"1.1.1.1"}}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got.Warning, "198.51.100.53") {
+	if !strings.Contains(got.Warning, "198.51.100.53") || !strings.Contains(got.Warning, "NetworkManager decides that file") {
 		t.Fatalf("warning = %q", got.Warning)
 	}
 }
@@ -682,7 +692,7 @@ func TestDNSReadsTheWholeChain(t *testing.T) {
 }
 
 func TestDNSOnAHostWithoutResolved(t *testing.T) {
-	record(t, "resolvectl")
+	record(t, "resolvectl").on("systemctl is-active NetworkManager", "inactive\n")
 	pointResolvConf(t, "static")
 	prev := listListeners
 	listListeners = func(context.Context) ([]proxysvc.Listener, error) {

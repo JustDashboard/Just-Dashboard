@@ -1,0 +1,202 @@
+
+Running 89 tests using 1 worker
+
+[1/89] [chromium] › tests/browser/network-dns-services.spec.ts:93:5 › private native services are absent for a reader and make no native GET
+[2/89] [chromium] › tests/browser/network-dns-services.spec.ts:100:5 › connection defaults read-only and sends only the selected native credential
+[3/89] [chromium] › tests/browser/network-dns-services.spec.ts:129:5 › replacement fixes native owner/origin, re-enters sealed trust and retains details after failure
+[4/89] [chromium] › tests/browser/network-dns-services.spec.ts:177:5 › inventory preserves separate native evidence, views, clients, zones, overrides and bounded queries
+[5/89] [chromium] › tests/browser/network-dns-services.spec.ts:214:5 › read-only connections cannot stage native changes
+[6/89] [chromium] › tests/browser/network-dns-services.spec.ts:224:5 › upstream draft becomes a retained review before any native apply
+[7/89] [chromium] › tests/browser/network-dns-services.spec.ts:247:5 › an expired retained review stays readable and cannot apply
+[8/89] [chromium] › tests/browser/network-dns-services.spec.ts:260:5 › a failed native read retains inventory and blocks staging
+[9/89] [chromium] › tests/browser/network-dns-services.spec.ts:275:5 › an open confirmation refuses a changed same-ID reviewed intent
+[10/89] [chromium] › tests/browser/network-dns-services.spec.ts:294:5 › an open confirmation refuses a failed native owner refresh
+[11/89] [chromium] › tests/browser/network-dns-services.spec.ts:316:5 › HTTP 200 needs-review is retained without verified success
+[12/89] [chromium] › tests/browser/network-dns-services.spec.ts:335:5 › a lost apply reply remains single-use after page reload
+[13/89] [chromium] › tests/browser/network-dns-services.spec.ts:359:5 › owned resource preview and removal name the exact bridge/container and both volumes
+[14/89] [chromium] › tests/browser/network-dns-services.spec.ts:397:5 › a local A override has an exact retained intent and human native readback
+[15/89] [chromium] › tests/browser/network-dns-services.spec.ts:430:5 › a Pi-hole AAAA override removal retains its exact address without authoritative TTL
+[16/89] [chromium] › tests/browser/network-dns-services.spec.ts:458:5 › an authoritative AAAA add reads its explicit zone and retains exact TTL and native metadata
+[17/89] [chromium] › tests/browser/network-dns-services.spec.ts:510:5 › using an editable native row preserves exact owner, family, value and TTL for removal
+[18/89] [chromium] › tests/browser/network-dns-services.spec.ts:546:7 › Pi-hole existing-client groups retain exact native IDs and unchanged comment
+[19/89] [chromium] › tests/browser/network-dns-services.spec.ts:546:7 › Pi-hole existing-client groups retain an explicit empty list and unchanged comment
+[20/89] [chromium] › tests/browser/network-dns-services.spec.ts:593:5 › refreshing native clients preserves edited group choices and an empty-group client remains selectable
+[21/89] [chromium] › tests/browser/network-dns-services.spec.ts:617:7 › native null client comment stays explicit before and after group assignment
+[22/89] [chromium] › tests/browser/network-dns-services.spec.ts:617:7 › native empty client comment stays explicit before and after group assignment
+[23/89] [chromium] › tests/browser/network-dns-services.spec.ts:664:5 › record draft validation keeps invalid TTL, family and owner fields without staging
+[24/89] [chromium] › tests/browser/network-dns-services.spec.ts:713:5 › a refused native record preview keeps its complete draft and sends no apply
+[25/89] [chromium] › tests/browser/network-dns-services.spec.ts:736:5 › record errors focus the summary and its link names and focuses the described field
+[26/89] [chromium] › tests/browser/network-dns-services.spec.ts:762:7 › a selected client removed by a fresh native reading cannot stage its retained group draft
+[27/89] [chromium] › tests/browser/network-dns-services.spec.ts:762:7 › a selected group removed by a fresh native reading cannot stage its retained group draft
+[28/89] [chromium] › tests/browser/network-dns-services.spec.ts:812:7 › a internal zone remains visible without editable record rows or review
+[29/89] [chromium] › tests/browser/network-dns-services.spec.ts:812:7 › a signed zone remains visible without editable record rows or review
+[30/89] [chromium] › tests/browser/network-dns-services.spec.ts:812:7 › a secondary zone remains visible without editable record rows or review
+[31/89] [chromium] › tests/browser/network-dns-services.spec.ts:812:7 › a unreported on an unverified version zone remains visible without editable record rows or review
+[32/89] [chromium] › tests/browser/network-dns-services.spec.ts:835:5 › AdGuard override enabled, disabled and unreported state remain distinct
+[33/89] [chromium] › tests/browser/network-dns-services.spec.ts:857:5 › native refusal of a disabled AdGuard override preserves the removal draft
+[34/89] [chromium] › tests/browser/network-dns-services.spec.ts:881:5 › a failed zone-record refresh keeps the exact record draft and blocks staging
+[35/89] [chromium] › tests/browser/network-dns-services.spec.ts:907:7 › an open zone-record confirmation is held after selection-aware drift
+[36/89] [chromium] › tests/browser/network-dns-services.spec.ts:907:7 › an open zone-record confirmation is held after selection-aware unavailable
+[37/89] [chromium] › tests/browser/network-dns-services.spec.ts:907:7 › an open zone-record confirmation is held after selection-aware missing-selection
+[38/89] [chromium] › tests/browser/network-dns-services.spec.ts:907:7 › an open zone-record confirmation is held after selection-aware read-failure
+[39/89] [chromium] › tests/browser/network-dns-services.spec.ts:907:7 › an open zone-record confirmation is held after selection-aware generation
+[40/89] [chromium] › tests/browser/network-dns-services.spec.ts:959:5 › an open client-group confirmation refuses raw comment drift although group IDs match
+[41/89] [chromium] › tests/browser/network-dns-services.spec.ts:990:5 › an open confirmation refuses changed retained record metadata even with reused fingerprints
+[42/89] [chromium] › tests/browser/network-dns-services.spec.ts:1025:5 › an uncertain client-group apply stays single-use after reload with selected review readable
+[43/89] [chromium] › tests/browser/network-dns-services.spec.ts:1060:7 › native records and reviewed readback stay flat and within 390px
+[44/89] [chromium] › tests/browser/network-dns-services.spec.ts:1060:7 › native records and reviewed readback stay flat and within 1280px
+[45/89] [chromium] › tests/browser/network-dns-services.spec.ts:1060:7 › native records and reviewed readback stay flat and within 1720px
+[46/89] [chromium] › tests/browser/network-dns-services.spec.ts:1109:5 › a detected server without a connection opens the connection form with its origin
+[47/89] [chromium] › tests/browser/network-dns-services.spec.ts:1124:5 › a detected server's connection opens its inventory and reads its native DHCP
+[48/89] [chromium] › tests/browser/network-dns.spec.ts:84:7 › DNS › opens on the resolver chain with the readings and what answers on port 53
+  1) [chromium] › tests/browser/network-dns.spec.ts:84:7 › DNS › opens on the resolver chain with the readings and what answers on port 53 
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByText('78', { exact: true }).first()
+    Expected: visible
+    Timeout: 20000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 20000ms
+      - waiting for getByText('78', { exact: true }).first()
+
+
+      89 |     await expect(page.getByText("MagicDNS")).toBeVisible()
+      90 |     await expect(page.getByText("in use").first()).toBeVisible()
+    > 91 |     await expect(page.getByText("78", { exact: true }).first()).toBeVisible()
+         |                                                                 ^
+      92 |     const port53 = page.getByRole("region", { name: "Answering on port 53" })
+      93 |     await expect(port53.getByText("AdGuard Home")).toBeVisible()
+      94 |     await expect(port53.getByText("systemd-resolved").first()).toBeVisible()
+        at /home/ubuntu/Just-Dashboard-net-resolver/frontend/tests/browser/network-dns.spec.ts:91:65
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-dns-DNS-opens-on-t-d4e79-and-what-answers-on-port-53-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-dns-DNS-opens-on-t-d4e79-and-what-answers-on-port-53-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-dns-DNS-opens-on-t-d4e79-and-what-answers-on-port-53-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-dns-DNS-opens-on-t-d4e79-and-what-answers-on-port-53-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[49/89] [chromium] › tests/browser/network-dns.spec.ts:102:7 › DNS › picking Quad9 with DNS over TLS required posts the servers with their TLS name
+[50/89] [chromium] › tests/browser/network-dns.spec.ts:123:7 › DNS › required TLS is refused before it is asked while a server has no name
+[51/89] [chromium] › tests/browser/network-dns.spec.ts:136:7 › DNS › resetting to the system's goes through a confirmation and a DELETE
+[52/89] [chromium] › tests/browser/network-dns.spec.ts:146:7 › DNS › a host where systemd-resolved is not running reads, and says why
+[53/89] [chromium] › tests/browser/network-dns.spec.ts:160:7 › DNS › with no ad-blocker the page offers the two real ways to get one
+[54/89] [chromium] › tests/browser/network-dns.spec.ts:169:7 › DNS › the lookup race has one row per resolver, the failed one with its reason
+[55/89] [chromium] › tests/browser/network-dns.spec.ts:205:7 › DNS › saving host records sends the whole list, the new row included
+[56/89] [chromium] › tests/browser/network-dns.spec.ts:223:7 › DNS › a half-written host record says which field is missing
+[57/89] [chromium] › tests/browser/network-dns.spec.ts:232:7 › DNS › names the resolver owner, what programs ask and where DNS is changed
+[58/89] [chromium] › tests/browser/network-dns.spec.ts:246:7 › DNS › a NetworkManager-owned file says the drop-in does not reach programs and hands off
+[59/89] [chromium] › tests/browser/network-dns.spec.ts:263:7 › DNS › applying shows the server's verification plan first and each check's result after
+[60/89] [chromium] › tests/browser/network-dns.spec.ts:291:7 › DNS › a change put back by a failed check says which check failed
+  2) [chromium] › tests/browser/network-dns.spec.ts:291:7 › DNS › a change put back by a failed check says which check failed 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('button', { name: /^Cloudflare$/ })
+
+
+      300 |       },
+      301 |     })
+    > 302 |     await page.getByRole("button", { name: /^Cloudflare$/ }).click()
+          |                                                              ^
+      303 |     await page.getByRole("button", { name: "Apply", exact: true }).click()
+      304 |     await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click()
+      305 |     await expect(page.getByText("Put back: a required check failed")).toBeVisible()
+        at /home/ubuntu/Just-Dashboard-net-resolver/frontend/tests/browser/network-dns.spec.ts:302:62
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-dns-DNS-a-change-p-7fe46-eck-says-which-check-failed-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-dns-DNS-a-change-p-7fe46-eck-says-which-check-failed-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-dns-DNS-a-change-p-7fe46-eck-says-which-check-failed-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-dns-DNS-a-change-p-7fe46-eck-says-which-check-failed-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[61/89] [chromium] › tests/browser/network-dns.spec.ts:313:7 › DNS › clearing the fallback list sends it as cleared, not as the host's default
+[62/89] [chromium] › tests/browser/network-dns.spec.ts:334:7 › DNS › split DNS for a link goes through its native profile as a temporary apply
+  3) [chromium] › tests/browser/network-dns.spec.ts:334:7 › DNS › split DNS for a link goes through its native profile as a temporary apply 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.fill: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog').getByLabel('DNS servers')
+
+
+      340 |     await page.getByRole("button", { name: "Edit split DNS for ens3" }).click()
+      341 |     const panel = page.getByRole("dialog")
+    > 342 |     await panel.getByLabel("DNS servers").fill("10.0.0.53\nfd00::53")
+          |                                           ^
+      343 |     await panel.getByLabel("Routing domains").fill("corp.example")
+      344 |     await expect(panel.getByRole("list", { name: "What resolved will do" })).toContainText(
+      345 |       "Names under corp.example go only to ens3's servers",
+        at /home/ubuntu/Just-Dashboard-net-resolver/frontend/tests/browser/network-dns.spec.ts:342:43
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/network-dns-DNS-split-DNS--32f31-rofile-as-a-temporary-apply-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/network-dns-DNS-split-DNS--32f31-rofile-as-a-temporary-apply-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/network-dns-DNS-split-DNS--32f31-rofile-as-a-temporary-apply-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/network-dns-DNS-split-DNS--32f31-rofile-as-a-temporary-apply-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[63/89] [chromium] › tests/browser/network-dns.spec.ts:369:7 › DNS › a link whose native owner is not edited here says why instead of offering a form
+[64/89] [chromium] › tests/browser/network-dns.spec.ts:378:7 › DNS › the certificate check lists each server's trust and what it could not check
+[65/89] [chromium] › tests/browser/network-dns.spec.ts:391:7 › DNS › the DNSSEC chain shows each delegation and the root anchor
+[66/89] [chromium] › tests/browser/network-dns.spec.ts:404:7 › DNS › a host record that a line before the block shadows is previewed before it is saved
+[67/89] [chromium] › tests/browser/network-dns.spec.ts:421:7 › DNS › comparing over DNS over TLS with the DO bit sends both and shows transport and AD
+[68/89] [chromium] › tests/browser/network-dns.spec.ts:447:7 › DNS › a private name with unseen forwarding is sent only after it is acknowledged
+[69/89] [chromium] › tests/browser/network-dns.spec.ts:465:7 › DNS › every button on the page has an accessible name
+[70/89] [chromium] › tests/browser/network-dns.spec.ts:476:7 › Traffic › opens on the per-device charts, then who is moving the bytes
+[71/89] [chromium] › tests/browser/network-dns.spec.ts:487:7 › Traffic › pressing a program opens the peers it talks to
+[72/89] [chromium] › tests/browser/network-dns.spec.ts:496:7 › Traffic › the first read of the programs says it is measuring
+[73/89] [chromium] › tests/browser/network-dns.spec.ts:503:7 › Traffic › the containers follow the window the charts are set to
+[74/89] [chromium] › tests/browser/network-dns.spec.ts:515:7 › Traffic › editing a device's limits posts kilobits
+[75/89] [chromium] › tests/browser/network-dns.spec.ts:531:7 › Traffic › under a megabit on the uplink is refused in the form, and by the server when it is asked
+[76/89] [chromium] › tests/browser/network-dns.spec.ts:559:7 › Traffic › clearing a shaped device asks first and sends a DELETE
+[77/89] [chromium] › tests/browser/network-dns.spec.ts:568:7 › Traffic › BBR is a switch that posts its state
+[78/89] [chromium] › tests/browser/network-dns.spec.ts:576:7 › Traffic › a device that cannot be shaped says why instead of offering an Edit
+[79/89] [chromium] › tests/browser/network-dns.spec.ts:584:7 › Traffic › the eBPF programs are listed and the type chips narrow them
+[80/89] [chromium] › tests/browser/network-dns.spec.ts:593:7 › Traffic › without bpftool the eBPF section offers to install it
+[81/89] [chromium] › tests/browser/network-dns.spec.ts:598:7 › Traffic › every button on the page, and in the limits sheet, has an accessible name
+[82/89] [chromium] › tests/browser/network-dns.spec.ts:624:11 › screenshots › 390 wide › /network/traffic peers at 390
+[83/89] [chromium] › tests/browser/network-dns.spec.ts:632:11 › screenshots › 390 wide › /network/traffic charts at 390
+[84/89] [chromium] › tests/browser/network-dns.spec.ts:638:13 › screenshots › 390 wide › /network/dns at 390
+[85/89] [chromium] › tests/browser/network-dns.spec.ts:638:13 › screenshots › 390 wide › /network/traffic at 390
+[86/89] [chromium] › tests/browser/network-dns.spec.ts:624:11 › screenshots › 1440 wide › /network/traffic peers at 1440
+[87/89] [chromium] › tests/browser/network-dns.spec.ts:632:11 › screenshots › 1440 wide › /network/traffic charts at 1440
+[88/89] [chromium] › tests/browser/network-dns.spec.ts:638:13 › screenshots › 1440 wide › /network/dns at 1440
+[89/89] [chromium] › tests/browser/network-dns.spec.ts:638:13 › screenshots › 1440 wide › /network/traffic at 1440
+  3 failed
+    [chromium] › tests/browser/network-dns.spec.ts:84:7 › DNS › opens on the resolver chain with the readings and what answers on port 53 
+    [chromium] › tests/browser/network-dns.spec.ts:291:7 › DNS › a change put back by a failed check says which check failed 
+    [chromium] › tests/browser/network-dns.spec.ts:334:7 › DNS › split DNS for a link goes through its native profile as a temporary apply 
+  8 skipped
+  78 passed (4.8m)

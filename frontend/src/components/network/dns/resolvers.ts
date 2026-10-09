@@ -1,4 +1,12 @@
-import type { DNSPreset, DNSView } from "@/lib/types"
+import type { DotTone } from "@/components/status-dot"
+import type {
+  DNSClearableList,
+  DNSPreset,
+  DNSVerification,
+  DNSVerificationCheck,
+  DNSView,
+  HostRecordIssue,
+} from "@/lib/types"
 
 /**
  * What the DNS page reads out of resolved's own words. Nothing here draws:
@@ -54,7 +62,9 @@ export function sameServer(a: string | undefined, b: string | undefined): boolea
 }
 
 /** The product a listener or ad-blocker kind is drawn as; `undefined` has no mark of its own. */
-export const KIND_PRODUCT: Partial<Record<DNSView["listeners"][number]["kind"], string>> = {
+export const KIND_PRODUCT: Partial<
+  Record<DNSView["listeners"][number]["kind"] | DNSView["adblock"][number]["kind"], string>
+> = {
   adguardhome: "adguard",
   pihole: "pihole",
   unbound: "unbound",
@@ -71,4 +81,70 @@ export const KIND_NAME: Record<DNSView["listeners"][number]["kind"], string> = {
   pihole: "Pi-hole",
   "docker-proxy": "Docker's published port",
   other: "Another resolver",
+}
+
+/** A check's state, drawn as the dot it is: failed is the only danger. */
+export function checkTone(state: DNSVerificationCheck["state"]): DotTone {
+  switch (state) {
+    case "passed":
+      return "running"
+    case "failed":
+      return "danger"
+    case "warning":
+      return "warning"
+    default:
+      return "notice"
+  }
+}
+
+export const CHECK_KIND_NAME: Record<DNSVerificationCheck["kind"], string> = {
+  readback: "Read back",
+  resolution: "Resolves",
+  transport: "Transport",
+  dnssec: "DNSSEC",
+}
+
+/** The lists a draft clears: a list can be cleared only while nothing is typed in it. */
+export function clearedLists(
+  lists: Record<DNSClearableList, string[]>,
+  clear: Partial<Record<DNSClearableList, boolean>>,
+): DNSClearableList[] {
+  return (["servers", "fallback", "domains"] as const).filter(
+    (list) => clear[list] && lists[list].length === 0,
+  )
+}
+
+/** The verification a refused change carries beside its error, when it does. */
+export function refusedVerification(body: unknown): DNSVerification | undefined {
+  if (typeof body !== "object" || body === null) return undefined
+  const value = (body as { verification?: unknown }).verification
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !Array.isArray((value as DNSVerification).checks) ||
+    !Array.isArray((value as DNSVerification).unverified)
+  )
+    return undefined
+  return value as DNSVerification
+}
+
+/** A preview's overlaps by the record they belong to, worst first within each. */
+export function issuesByRecord(issues: HostRecordIssue[]): Map<number, HostRecordIssue[]> {
+  const rank: Record<HostRecordIssue["kind"], number> = {
+    conflict: 0,
+    shadowed: 1,
+    duplicate: 2,
+    overrides: 3,
+    repeated: 4,
+  }
+  const out = new Map<number, HostRecordIssue[]>()
+  for (const issue of [...issues].sort((a, b) => rank[a.kind] - rank[b.kind])) {
+    out.set(issue.record, [...(out.get(issue.record) ?? []), issue])
+  }
+  return out
+}
+
+/** Whether an overlap changes which address a program gets, rather than repeating one. */
+export function issueMatters(issue: HostRecordIssue): boolean {
+  return issue.kind === "conflict" || issue.kind === "shadowed"
 }

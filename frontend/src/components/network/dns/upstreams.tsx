@@ -3,7 +3,7 @@
 import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { del, post, ApiError } from "@/lib/api"
-import type { DNSApplied, DNSView } from "@/lib/types"
+import type { DNSApplied, DNSClearableList, DNSVerification, DNSView } from "@/lib/types"
 import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { Field, FieldRow } from "@/components/form"
 import { Notice } from "@/components/state"
@@ -18,9 +18,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Globe } from "@/components/icons"
-import { missingTLSNames, parseList, presetChosen } from "@/components/network/dns/resolvers"
+import {
+  clearedLists,
+  missingTLSNames,
+  parseList,
+  presetChosen,
+  refusedVerification,
+} from "@/components/network/dns/resolvers"
+import { VerificationChecks } from "@/components/network/dns/verification"
 import { dnsServersProblem } from "@/components/network/draft-input"
 
 type Draft = {
@@ -30,6 +38,15 @@ type Draft = {
   dnssec: string
   dot: string
   cache: string
+  /** The lists written as empty on purpose rather than left to the host. */
+  clear: Partial<Record<DNSClearableList, boolean>>
+}
+
+/** What clearing each list does, said where the box is ticked. */
+const CLEAR: Record<DNSClearableList, string> = {
+  servers: "Clear the global servers; each link's own servers still answer",
+  fallback: "No fallback servers: turns off resolved's built-in fallback",
+  domains: "Clear the global search and routing domains",
 }
 
 /** DNS over TLS, as the three answers it has. `no` is resolved's word for off. */
@@ -88,6 +105,7 @@ function baseline(view: DNSView): Draft {
         dnssec: resolved.global.dnssec,
         dot: resolved.global.dnsOverTLS,
       }
+  const cleared = managed.exists ? (managed.cleared ?? []) : []
   return {
     servers: source.servers.join("\n"),
     domains: source.domains.join(" "),
@@ -95,6 +113,7 @@ function baseline(view: DNSView): Draft {
     dot: source.dot || "no",
     fallback: managed.exists ? managed.fallback.join("\n") : "",
     cache: managed.exists ? managed.cache : "",
+    clear: Object.fromEntries(cleared.map((list) => [list, true])),
   }
 }
 
@@ -125,18 +144,33 @@ export function UpstreamEditor({
   const base = baseline(view)
   const [edits, setEdits] = useState<Partial<Draft>>({})
   const [applied, setApplied] = useState<DNSApplied>()
+  const [rolledBack, setRolledBack] = useState<{ reason: string; verification: DNSVerification }>()
   const [refused, setRefused] = useState<string>()
-  const [verificationName, setVerificationName] = useState("")
+  const [planError, setPlanError] = useState<string>()
+  const [planning, setPlanning] = useState(false)
+  const [verificationNames, setVerificationNames] = useState("")
   const { confirm, dialog } = useConfirm()
   const draft: Draft = { ...base, ...edits }
   const edit = (patch: Partial<Draft>) => {
     setEdits((previous) => ({ ...previous, ...patch }))
     setApplied(undefined)
+    setRolledBack(undefined)
+    setPlanError(undefined)
   }
 
   const servers = parseList(draft.servers)
   const fallback = parseList(draft.fallback)
   const domains = parseList(draft.domains)
+  const clear = clearedLists({ servers, fallback, domains }, draft.clear)
+  const baseClear = clearedLists(
+    {
+      servers: parseList(base.servers),
+      fallback: parseList(base.fallback),
+      domains: parseList(base.domains),
+    },
+    base.clear,
+  )
+  const names = parseList(verificationNames)
   const unnamed = draft.dot === "yes" ? missingTLSNames(servers) : []
   const unnamedFallback = draft.dot === "yes" ? missingTLSNames(fallback) : []
   const serversError =
@@ -157,7 +191,8 @@ export function UpstreamEditor({
     domains.join(" ") !== parseList(base.domains).join(" ") ||
     draft.dnssec !== base.dnssec ||
     draft.dot !== base.dot ||
-    draft.cache !== base.cache
+    draft.cache !== base.cache ||
+    clear.join(" ") !== baseClear.join(" ")
   const blocked = !can("system.admin")
     ? "Changing the host resolver requires an administrator."
     : (readOnly ?? refused)
@@ -165,6 +200,7 @@ export function UpstreamEditor({
 
   const finish = (result: DNSApplied) => {
     setApplied(result)
+    setRolledBack(undefined)
     setEdits({})
     onChanged()
   }
@@ -172,7 +208,32 @@ export function UpstreamEditor({
     if (err instanceof ApiError && err.code === "network_read_only") setRefused(err.message)
   }
 
-  const apply = () =>
+  const body = {
+    servers,
+    fallback,
+    domains,
+    dnssec: draft.dnssec,
+    dnsOverTLS: draft.dot,
+    cache: draft.cache,
+    ...(clear.length > 0 ? { clear } : {}),
+    ...(names.length > 0 ? { verificationNames: names } : {}),
+  }
+
+  // The plan comes from the server before the dialog opens, so what the
+  // dialog promises to check is exactly what the change will be held to.
+  const apply = async () => {
+    setPlanning(true)
+    setPlanError(undefined)
+    let plan: DNSVerification
+    try {
+      plan = await post<DNSVerification>("/network/dns/verification-plan", body)
+    } catch (err) {
+      refuse(err)
+      setPlanError(err instanceof Error ? err.message : String(err))
+      return
+    } finally {
+      setPlanning(false)
+    }
     confirm({
       title: "Change the upstream resolvers",
       confirmLabel: "Apply",
@@ -183,39 +244,46 @@ export function UpstreamEditor({
             certificate renewals and this dashboard included. A wrong one breaks all of them at
             once.
           </p>
-          <p>
-            The dashboard checks that a name still resolves afterwards, and puts the previous
-            settings back if it does not.
-          </p>
           <p className="font-mono text-xs break-all text-muted-foreground">
-            {servers.length > 0 ? servers.join("  ") : "the servers the network hands out"}
+            {servers.length > 0
+              ? servers.join("  ")
+              : clear.includes("servers")
+                ? "no global servers: each link's own"
+                : "the servers the network hands out"}
           </p>
           <p className="text-body">
-            Fallback: {fallback.length > 0 ? fallback.join("  ") : "the host's defaults"}. Cache:{" "}
-            {CACHE.find((option) => option.value === (draft.cache || "default"))?.label}.
+            Fallback:{" "}
+            {fallback.length > 0
+              ? fallback.join("  ")
+              : clear.includes("fallback")
+                ? "none"
+                : "the host's defaults"}
+            . Cache: {CACHE.find((option) => option.value === (draft.cache || "default"))?.label}.
           </p>
+          <p>
+            After the restart each check below runs; a required one that fails puts the previous
+            settings back.
+          </p>
+          <VerificationChecks verification={plan} label="Verification plan" />
         </>
       ),
       action: async () => {
         try {
-          finish(
-            await post<DNSApplied>("/network/dns/", {
-              servers,
-              fallback,
-              domains,
-              dnssec: draft.dnssec,
-              dnsOverTLS: draft.dot,
-              cache: draft.cache,
-              ...(verificationName.trim() ? { verificationName: verificationName.trim() } : {}),
-            }),
-          )
+          finish(await post<DNSApplied>("/network/dns/", body))
         } catch (err) {
           refuse(err)
-          throw err
+          const verification =
+            err instanceof ApiError && err.code === "dns_upstream_unreachable"
+              ? refusedVerification(err.body)
+              : undefined
+          if (!verification || !(err instanceof ApiError)) throw err
+          setApplied(undefined)
+          setRolledBack({ reason: err.message, verification })
         }
         return "reported"
       },
     })
+  }
 
   const reset = () =>
     confirm({
@@ -248,7 +316,7 @@ export function UpstreamEditor({
       className="flex min-w-0 flex-col gap-6"
       onSubmit={(event) => {
         event.preventDefault()
-        if (dirty && !invalid && !blocked) apply()
+        if (dirty && !invalid && !blocked && !planning) void apply()
       }}
     >
       {blocked && (
@@ -284,16 +352,22 @@ export function UpstreamEditor({
       <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="flex min-w-0 flex-col gap-5">
           <Field
-            label="Verification name"
-            htmlFor="dns-verification-name"
-            hint="Optional: a name your private network resolves, such as nas.home.arpa. Leave empty to check public names after applying."
+            label="Verification names"
+            htmlFor="dns-verification-names"
+            hint="Optional, up to eight: a name in each scope this change touches, such as nas.home.arpa or git.corp.example. Each must answer after applying. Leave empty to check public names."
           >
-            <Input
-              id="dns-verification-name"
-              value={verificationName}
-              onChange={(event) => setVerificationName(event.target.value)}
+            <Textarea
+              id="dns-verification-names"
+              value={verificationNames}
+              rows={2}
+              spellCheck={false}
+              autoComplete="off"
+              onChange={(event) => {
+                setVerificationNames(event.target.value)
+                setPlanError(undefined)
+              }}
               disabled={Boolean(blocked)}
-              placeholder="nas.home.arpa"
+              placeholder={"nas.home.arpa\ngit.corp.example"}
               className="font-mono"
             />
           </Field>
@@ -316,6 +390,13 @@ export function UpstreamEditor({
               placeholder={"1.1.1.1#cloudflare-dns.com\n1.0.0.1#cloudflare-dns.com"}
             />
           </Field>
+          <ClearList
+            list="servers"
+            empty={servers.length === 0}
+            checked={Boolean(draft.clear.servers)}
+            disabled={Boolean(blocked)}
+            onChange={(checked) => edit({ clear: { ...draft.clear, servers: checked } })}
+          />
           <Field
             label="Fallback servers"
             htmlFor="dns-fallback"
@@ -335,6 +416,13 @@ export function UpstreamEditor({
               placeholder="192.168.1.53#resolver.home.arpa"
             />
           </Field>
+          <ClearList
+            list="fallback"
+            empty={fallback.length === 0}
+            checked={Boolean(draft.clear.fallback)}
+            disabled={Boolean(blocked)}
+            onChange={(checked) => edit({ clear: { ...draft.clear, fallback: checked } })}
+          />
           <Field
             label="Cache mode"
             htmlFor="dns-cache"
@@ -393,6 +481,13 @@ export function UpstreamEditor({
               />
             </Field>
           </FieldRow>
+          <ClearList
+            list="domains"
+            empty={domains.length === 0}
+            checked={Boolean(draft.clear.domains)}
+            disabled={Boolean(blocked)}
+            onChange={(checked) => edit({ clear: { ...draft.clear, domains: checked } })}
+          />
         </div>
 
         <fieldset className="min-w-0">
@@ -416,7 +511,7 @@ export function UpstreamEditor({
 
       <div className="flex min-w-0 flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="submit" disabled={!dirty || invalid || Boolean(blocked)}>
+          <Button type="submit" disabled={!dirty || invalid || Boolean(blocked)} pending={planning}>
             Apply
           </Button>
           {view.managed.exists && (
@@ -430,17 +525,64 @@ export function UpstreamEditor({
             </Button>
           )}
         </div>
+        {planError && (
+          <p role="alert" className="text-body text-destructive">
+            {planError}
+          </p>
+        )}
         {applied && <AppliedResult applied={applied} />}
+        {rolledBack && (
+          <div className="flex min-w-0 animate-rise flex-col gap-3" role="alert">
+            <Notice title="Put back: a required check failed" tone="danger">
+              {rolledBack.reason}
+            </Notice>
+            <VerificationChecks
+              verification={rolledBack.verification}
+              label="Verification results"
+            />
+          </div>
+        )}
       </div>
       {dialog}
     </form>
   )
 }
 
-/** What the server found after the change: the name that resolved and how long it took, and any warning. */
+/**
+ * Emptying a list on purpose, offered only while the list is empty: an empty
+ * field otherwise leaves the host's own list in force.
+ */
+function ClearList({
+  list,
+  empty,
+  checked,
+  disabled,
+  onChange,
+}: {
+  list: DNSClearableList
+  empty: boolean
+  checked: boolean
+  disabled: boolean
+  onChange: (checked: boolean) => void
+}) {
+  if (!empty) return null
+  return (
+    <label className="flex min-h-11 items-center gap-3 text-body">
+      <Checkbox
+        aria-label={CLEAR[list]}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(value) => onChange(value === true)}
+      />
+      {CLEAR[list]}
+    </label>
+  )
+}
+
+/** What the server found after the change: every check's result, and any warning. */
 function AppliedResult({ applied }: { applied: DNSApplied }) {
   return (
-    <div className="flex min-w-0 animate-rise flex-col gap-2" role="status">
+    <div className="flex min-w-0 animate-rise flex-col gap-3" role="status">
       {applied.verified ? (
         <Status
           tone="running"
@@ -458,6 +600,9 @@ function AppliedResult({ applied }: { applied: DNSApplied }) {
           className="text-body"
           label="Applied; no name was resolved to check it"
         />
+      )}
+      {applied.verification && (
+        <VerificationChecks verification={applied.verification} label="Verification results" />
       )}
       {applied.warning && (
         <Notice title="Applied, with a warning" tone="warning">

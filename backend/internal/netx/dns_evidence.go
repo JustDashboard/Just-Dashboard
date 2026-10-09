@@ -157,42 +157,13 @@ func (s *Service) InvestigateDNS(ctx context.Context, req DNSInvestigationReques
 	if req.Type == "AAAA" {
 		r.AnswerFamily = "inet6"
 	}
-	owner, err := dnsBusOwner(ctx, execute)
-	if err != nil {
-		r.Error = "Native resolved ownership is unavailable; no query or alternate resolver was used."
-		return r, nil
+	owner, version, failure := dnsNativeIdentify(ctx, execute)
+	r.OwnerIdentity, r.OwnerVersion = owner, version
+	if version != "" || failure == "" || strings.HasPrefix(failure, "Native resolver version") {
+		r.Owner = "systemd-resolved"
 	}
-	r.OwnerIdentity = owner
-	credentials, err := dnsBusProperties(ctx, execute, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionCredentials", "s", owner)
-	if err != nil {
-		r.Error = "Cannot identify the resolver process; no query was sent."
-		return r, nil
-	}
-	pid, err := dnsVariantInt(credentials["ProcessID"])
-	if err != nil || pid <= 0 {
-		r.Error = "Cannot identify the resolver process; no query was sent."
-		return r, nil
-	}
-	exe, err := execute(ctx, "readlink", "/proc/"+strconv.Itoa(pid)+"/exe")
-	exe = strings.TrimSpace(exe)
-	if err != nil || !filepath.IsAbs(exe) || filepath.Base(exe) != "systemd-resolved" {
-		r.Error = "The bus owner is not a supported systemd-resolved process; no query was sent."
-		return r, nil
-	}
-	r.Owner = "systemd-resolved"
-	version, err := execute(ctx, exe, "--version")
-	if err != nil {
-		r.Error = "Native resolver version is unreadable; no query was sent."
-		return r, nil
-	}
-	r.OwnerVersion = strings.Split(strings.TrimSpace(version), "\n")[0]
-	fields := strings.Fields(r.OwnerVersion)
-	major := 0
-	if len(fields) > 1 {
-		major, _ = strconv.Atoi(fields[1])
-	}
-	if major < 256 {
-		r.Error = "This adapter requires systemd-resolved 256 or newer for fresh network-origin evidence; no query was sent."
+	if failure != "" {
+		r.Error = failure
 		return r, nil
 	}
 	qname := req.Name
@@ -201,6 +172,43 @@ func (s *Service) InvestigateDNS(ctx context.Context, req DNSInvestigationReques
 		qname = reverseDNSName(ip)
 	}
 	return r, dnsWalkNative(ctx, execute, owner, qname, req, r)
+}
+
+// dnsNativeIdentify pins the system-bus owner of resolve1, checks that its
+// process is systemd-resolved 256 or newer, and returns its unique bus name and
+// version line, or the sentence explaining why no question may be sent.
+func dnsNativeIdentify(ctx context.Context, execute TrafficExecutor) (string, string, string) {
+	owner, err := dnsBusOwner(ctx, execute)
+	if err != nil {
+		return "", "", "Native resolved ownership is unavailable; no query or alternate resolver was used."
+	}
+	credentials, err := dnsBusProperties(ctx, execute, "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "GetConnectionCredentials", "s", owner)
+	if err != nil {
+		return owner, "", "Cannot identify the resolver process; no query was sent."
+	}
+	pid, err := dnsVariantInt(credentials["ProcessID"])
+	if err != nil || pid <= 0 {
+		return owner, "", "Cannot identify the resolver process; no query was sent."
+	}
+	exe, err := execute(ctx, "readlink", "/proc/"+strconv.Itoa(pid)+"/exe")
+	exe = strings.TrimSpace(exe)
+	if err != nil || !filepath.IsAbs(exe) || filepath.Base(exe) != "systemd-resolved" {
+		return owner, "", "The bus owner is not a supported systemd-resolved process; no query was sent."
+	}
+	out, err := execute(ctx, exe, "--version")
+	if err != nil {
+		return owner, "", "Native resolver version is unreadable; no query was sent."
+	}
+	version := strings.Split(strings.TrimSpace(out), "\n")[0]
+	fields := strings.Fields(version)
+	major := 0
+	if len(fields) > 1 {
+		major, _ = strconv.Atoi(fields[1])
+	}
+	if major < 256 {
+		return owner, version, "This adapter requires systemd-resolved 256 or newer for fresh network-origin evidence; no query was sent."
+	}
+	return owner, version, ""
 }
 
 func dnsUnknown(summary string) DNSEvidenceReading {
@@ -232,6 +240,10 @@ func dnsInterpretNative(r *DNSInvestigation, flags uint64) {
 	}
 	r.Transport = DNSEvidenceReading{"encrypted", "native_reply", "The native resolver reports confidential transport for this fresh network DNS answer. This is not a packet trace or proof about upstream forwarding."}
 	strict := r.PolicyStable && len(r.AnswerInterfaces) > 0
+	// A global-scope reply carries the index of the interface it arrived on,
+	// not scope zero. When the global scope is the only candidate, the question
+	// went to its servers alone, so its policy covers that reply.
+	globalOnly := len(r.Policy) == 1 && r.Policy[0].Index == 0
 	for _, index := range r.AnswerInterfaces {
 		found := false
 		for _, p := range r.Policy {
@@ -239,6 +251,10 @@ func dnsInterpretNative(r *DNSInvestigation, flags uint64) {
 				found = true
 				strict = strict && p.DNSOverTLS == "yes"
 			}
+		}
+		if !found && globalOnly {
+			found = true
+			strict = strict && r.Policy[0].DNSOverTLS == "yes"
 		}
 		strict = strict && found
 	}

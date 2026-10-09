@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { dnsDraftLines, dnsStageProblem } from "./service-form"
 import { DNSServicePolicyForm, type DNSPolicyAction } from "./service-policy-form"
+import { DNSServiceDHCP } from "./service-dhcp"
 import { DNSServiceFilters } from "./service-filters"
 
 function InventorySection({
@@ -551,6 +552,11 @@ function Inventory({
       )}
       <DNSServiceFilters
         key={JSON.stringify(view.connection)}
+        connection={view.connection}
+        ownerStale={stale}
+      />
+      <DNSServiceDHCP
+        key={`dhcp:${JSON.stringify(view.connection)}`}
         connection={view.connection}
         ownerStale={stale}
       />

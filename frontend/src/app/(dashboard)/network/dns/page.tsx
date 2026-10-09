@@ -12,13 +12,22 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { ErrorState, LoadingPanel } from "@/components/state"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Adblock } from "@/components/network/dns/adblock"
+import { DNSSECChainCheck } from "@/components/network/dns/dnssec-chain"
 import { HostRecordsEditor } from "@/components/network/dns/host-records"
+import { LinkScopes } from "@/components/network/dns/link-scopes"
 import { LookupRace } from "@/components/network/dns/lookup-race"
 import { DNSPolicyEvidence } from "@/components/network/dns/policy-evidence"
-import { DNSServiceManager } from "@/components/network/dns/services"
+import { ResolverOwnerPanel } from "@/components/network/dns/resolver-owner"
+import {
+  DNSServiceManager,
+  type DNSServiceAsk,
+  type DNSServiceRequest,
+} from "@/components/network/dns/services"
 import { ResolverChain, viaStub } from "@/components/network/dns/resolver-chain"
 import { encryptionOf, splitServer } from "@/components/network/dns/resolvers"
+import { TLSCheck } from "@/components/network/dns/tls-check"
 import { UpstreamEditor } from "@/components/network/dns/upstreams"
+import { useAuth } from "@/hooks/use-auth"
 
 /**
  * Who answers this server's lookups, and how.
@@ -29,11 +38,18 @@ import { UpstreamEditor } from "@/components/network/dns/upstreams"
  * because "why did that name resolve there" is the question a DNS page is
  * opened with. Under it the four readings the resolver keeps (the cache, the
  * transactions, what DNSSEC found, and whether the upstreams are held to
- * TLS), then the upstreams as the thing you change: public resolvers as
- * cards, the three answers DNS over TLS has, DNSSEC and the domains, with
- * Apply asking first because a wrong upstream stops every lookup on the host.
- * Then the ad-blocker the page found or the two ways to get one, the host's
- * own records, and the race that asks one name of every resolver at once.
+ * TLS), then who owns /etc/resolv.conf — on a host where NetworkManager or
+ * resolvconf writes it, nothing on this page reaches programs, and the page
+ * says where the change is made instead. Then each link's scope, whose split
+ * DNS is its network manager's to change, and the upstreams as the thing you
+ * change: public resolvers as cards, the three answers DNS over TLS has,
+ * DNSSEC and the domains, with Apply showing the checks the change will be
+ * held to first, because a wrong upstream stops every lookup on the host and
+ * one name resolving does not prove every scope still does. Then the
+ * certificates the DoT servers present, the ad-blocker the page found (handed
+ * to its native connection) or the two ways to get one, the host's own
+ * records, the race that asks one name of chosen resolvers, and the chain of
+ * trust a name rests on.
  *
  * The chain is read every ten seconds. A wire into the stub carries while the
  * resolver's transaction count rose over the last interval; the wire to the
@@ -46,6 +62,12 @@ export default function NetworkDNSPage() {
     (signal) => get("/network/dns/hosts", undefined, signal),
     30_000,
   )
+  const { can } = useAuth()
+  // A detected DNS server's Connect or Inspect opens the native engines'
+  // panel; the nonce makes the same press open it again.
+  const [serviceRequest, setServiceRequest] = useState<DNSServiceRequest>()
+  const requestService = (request: DNSServiceAsk) =>
+    setServiceRequest({ ...request, nonce: (serviceRequest?.nonce ?? 0) + 1 })
 
   // Whether the transaction count rose since the last read. Derived while
   // rendering from the count seen last time, so there is no effect and no ref
@@ -64,7 +86,7 @@ export default function NetworkDNSPage() {
       <Page className="animate-rise">
         <PageContext eyebrow="Network" title="DNS" />
         {dns.error ? <ErrorState error={dns.error} onRetry={dns.refresh} /> : <LoadingPanel />}
-        <DNSServiceManager key="native-dns-services" />
+        <DNSServiceManager key="native-dns-services" request={serviceRequest} />
       </Page>
     )
   }
@@ -74,7 +96,7 @@ export default function NetworkDNSPage() {
   const readOnly = !resolved.active
     ? resolved.installed
       ? "systemd-resolved is installed but not running, so a drop-in written here would be read by nothing."
-      : `systemd-resolved is not running here; ${resolvConf.path} is managed by ${resolvConf.managedBy ?? (resolvConf.mode === "static" ? "a plain file" : "something else")}, so the upstreams are changed there rather than on this page.`
+      : `systemd-resolved is not running here; ${view.owner?.name ?? resolvConf.managedBy ?? "something else"} decides ${resolvConf.path}, so the upstreams are changed there rather than on this page. ${view.owner?.handoff ?? ""}`.trim()
     : undefined
 
   return (
@@ -100,6 +122,21 @@ export default function NetworkDNSPage() {
 
       <Readings view={view} />
 
+      {view.owner && <ResolverOwnerPanel owner={view.owner} />}
+
+      <div id="dns-links" className="scroll-mt-6">
+        <Section
+          title="Per-link DNS"
+          actions={
+            <span className="numeric text-hint text-muted-foreground">
+              {plural(resolved.links.length, "link")} of {resolved.linksTotal} with DNS settings
+            </span>
+          }
+        >
+          <LinkScopes view={view} onChanged={dns.refresh} />
+        </Section>
+      </div>
+
       <div id="dns-upstreams" className="scroll-mt-6">
         <Section
           title="Upstreams"
@@ -119,15 +156,22 @@ export default function NetworkDNSPage() {
         </Section>
       </div>
 
+      <Section title="Upstream certificates">
+        <TLSCheck />
+      </Section>
+
       <Section title="Ad-blocking">
         <Panel plain>
           <PanelBody className="py-0 group-data-[plain]/panel:py-0">
-            <Adblock adblock={view.adblock} />
+            <Adblock
+              adblock={view.adblock}
+              onRequest={can("system.admin") ? requestService : undefined}
+            />
           </PanelBody>
         </Panel>
       </Section>
 
-      <DNSServiceManager key="native-dns-services" />
+      <DNSServiceManager key="native-dns-services" request={serviceRequest} />
 
       {hosts.data ? (
         <HostRecordsEditor records={hosts.data} onSaved={hosts.refresh} />
@@ -147,6 +191,11 @@ export default function NetworkDNSPage() {
       <Section title="Policy investigation">
         <DNSPolicyEvidence />
       </Section>
+      {can("system.admin") && (
+        <Section title="DNSSEC chain">
+          <DNSSECChainCheck />
+        </Section>
+      )}
     </Page>
   )
 }
