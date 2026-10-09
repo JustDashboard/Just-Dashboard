@@ -55,6 +55,28 @@ export type DNSNativeGroup = {
 }
 export type DNSRecordChange = { name: string; type: "A" | "AAAA"; value: string; ttl?: number }
 export type DNSClientGroupChange = { address: string; groups: number[] }
+export type DNSDomainFilterChange = {
+  domain: string
+  disposition: "allow" | "deny"
+  match: "suffix" | "exact"
+  groups?: number[]
+}
+export type DNSSelectedFilter = {
+  domain: string
+  disposition: "allow" | "deny"
+  match: "suffix" | "exact"
+  present: boolean
+  enabled?: boolean
+  groups?: number[]
+  comment: string | null
+  commentReported: boolean
+  ruleFingerprint?: string
+  otherPolicyFingerprint: string
+  evidence: DNSNativeReading
+  owners: number
+  exact: number
+  inventoryCount: number
+}
 export type DNSSelectedClient = {
   address: string
   groups: number[]
@@ -133,6 +155,7 @@ export type DNSServiceSnapshot = {
   records?: DNSRecordInventory
   selectionFingerprint?: string
   selectedClient?: DNSSelectedClient
+  selectedFilter?: DNSSelectedFilter
 }
 export type DNSServiceView = {
   connection: DNSConnection
@@ -152,6 +175,7 @@ export type DNSChangeRequest =
       record: DNSRecordChange & { ttl: number }
     }
   | { action: "client_groups"; client: DNSClientGroupChange }
+  | { action: "filter_add" | "filter_remove"; filter: DNSDomainFilterChange }
 export type DNSServiceChange = {
   id: string
   connectionId: string
@@ -224,7 +248,7 @@ const keys = (value: Record<string, unknown>, allowed: string[]) =>
 const groups = (value: unknown, max: number): value is number[] =>
   Array.isArray(value) &&
   value.length <= max &&
-  value.every((id) => integer(id)) &&
+  Array.from(value).every((id) => integer(id)) &&
   new Set(value).size === value.length
 const optionalDate = (value: unknown) => value === undefined || date(value)
 const stringMap = (value: unknown, arrays: boolean) =>
@@ -374,17 +398,107 @@ export function readDNSSnapshot(value: unknown): DNSServiceSnapshot {
   const records = value.records === undefined ? undefined : readDNSRecords(value.records)
   const selectedClient =
     value.selectedClient === undefined ? undefined : readDNSSelectedClient(value.selectedClient)
+  const selectedFilter =
+    value.selectedFilter === undefined
+      ? undefined
+      : readDNSSelectedFilter(value.selectedFilter, value.engine)
   if (
-    ((records || selectedClient) && !digest(value.selectionFingerprint)) ||
-    (records && selectedClient) ||
+    ((records || selectedClient || selectedFilter) && !digest(value.selectionFingerprint)) ||
+    [records, selectedClient, selectedFilter].filter(Boolean).length > 1 ||
     (records &&
       (value.engine !== "technitium" ||
         records.nativeVersion !== value.version ||
         records.fingerprint !== value.selectionFingerprint)) ||
-    (selectedClient && value.engine !== "pihole")
+    (selectedClient && value.engine !== "pihole") ||
+    (selectedFilter &&
+      !(value.engine === "adguard"
+        ? /^v?0\.107\./.test(value.version)
+        : value.engine === "pihole" && /^v?6\./.test(value.version)))
   )
     throw new Error("Native DNS selected inventory is inconsistent.")
-  return { ...value, records, selectedClient } as DNSServiceSnapshot
+  return { ...value, records, selectedClient, selectedFilter } as DNSServiceSnapshot
+}
+
+export function readDNSSelectedFilter(
+  value: unknown,
+  expectedEngine?: DNSEngine,
+): DNSSelectedFilter {
+  if (
+    !object(value) ||
+    !keys(value, [
+      "domain",
+      "disposition",
+      "match",
+      "present",
+      "enabled",
+      "groups",
+      "comment",
+      "commentReported",
+      "ruleFingerprint",
+      "otherPolicyFingerprint",
+      "evidence",
+      "owners",
+      "exact",
+      "inventoryCount",
+    ]) ||
+    !text(value.domain) ||
+    !dnsDomainName(value.domain) ||
+    (value.disposition !== "allow" && value.disposition !== "deny") ||
+    (value.match !== "suffix" && value.match !== "exact") ||
+    (expectedEngine && expectedEngine !== (value.match === "suffix" ? "adguard" : "pihole")) ||
+    typeof value.present !== "boolean" ||
+    !integer(value.inventoryCount, 0, 256) ||
+    !integer(value.owners, 0, value.inventoryCount as number) ||
+    !integer(value.exact, 0, value.owners as number) ||
+    value.present !== (value.exact === 1) ||
+    (value.exact > 0 ? !digest(value.ruleFingerprint) : value.ruleFingerprint !== undefined) ||
+    !digest(value.otherPolicyFingerprint) ||
+    !object(value.evidence) ||
+    !keys(value.evidence, ["state", "basis", "summary"]) ||
+    value.evidence.state !== "configured" ||
+    value.evidence.basis !== "native_configuration" ||
+    !text(value.evidence.summary) ||
+    !value.evidence.summary ||
+    value.evidence.summary.length > 512 ||
+    !(value.comment === null || (text(value.comment) && value.comment.length <= 512)) ||
+    typeof value.commentReported !== "boolean"
+  )
+    throw new Error("Native DNS selected domain-filter policy is incomplete or inconsistent.")
+  const piRow = value.match === "exact" && value.exact > 0
+  if (
+    piRow
+      ? typeof value.enabled !== "boolean" || !groups(value.groups, 64) || !value.commentReported
+      : value.enabled !== undefined ||
+        value.groups !== undefined ||
+        value.comment !== null ||
+        value.commentReported
+  )
+    throw new Error(
+      "Native DNS selected domain-filter metadata does not match its engine or presence.",
+    )
+  return {
+    domain: value.domain,
+    disposition: value.disposition,
+    match: value.match,
+    present: value.present,
+    ...(piRow
+      ? { enabled: value.enabled as boolean, groups: [...(value.groups as number[])] }
+      : {}),
+    comment: value.comment,
+    commentReported: value.commentReported,
+    ...(value.ruleFingerprint === undefined
+      ? {}
+      : { ruleFingerprint: value.ruleFingerprint as string }),
+    otherPolicyFingerprint: value.otherPolicyFingerprint,
+    evidence: {
+      state: value.evidence.state,
+      basis: value.evidence.basis,
+      summary: value.evidence.summary,
+    },
+    owners: value.owners,
+    exact: value.exact,
+    inventoryCount: value.inventoryCount,
+  }
 }
 
 function readDNSSelectedClient(value: unknown): DNSSelectedClient {
@@ -614,6 +728,36 @@ export function readDNSChangeRequest(value: unknown, expectedEngine?: DNSEngine)
           action: value.action,
           client: { address: value.client.address, groups: [...value.client.groups] },
         }
+      break
+    case "filter_add":
+    case "filter_remove": {
+      const filter = value.filter
+      if (
+        keys(value, ["action", "filter"]) &&
+        object(filter) &&
+        keys(filter, ["domain", "disposition", "match", "groups"]) &&
+        text(filter.domain) &&
+        dnsDomainName(filter.domain) &&
+        (filter.disposition === "allow" || filter.disposition === "deny") &&
+        ((filter.match === "suffix" &&
+          (!expectedEngine || expectedEngine === "adguard") &&
+          filter.groups === undefined) ||
+          (filter.match === "exact" &&
+            (!expectedEngine || expectedEngine === "pihole") &&
+            (value.action === "filter_add"
+              ? groups(filter.groups, 64)
+              : filter.groups === undefined)))
+      )
+        return {
+          action: value.action,
+          filter: {
+            domain: filter.domain,
+            disposition: filter.disposition,
+            match: filter.match,
+            ...(filter.groups === undefined ? {} : { groups: [...(filter.groups as number[])] }),
+          },
+        }
+    }
   }
   throw new Error("Native DNS review intent is incomplete or unsupported.")
 }
@@ -770,20 +914,46 @@ export function dnsChangeOwnerProblem(change: DNSServiceChange, view?: DNSServic
     return "The native policy or connection changed. Read it and create a new review."
   if (
     dnsSelectedScopeProblem(change.request, view.snapshot) ||
-    dnsSelectedScopeProblem(change.request, change.before)
+    dnsSelectedScopeProblem(change.request, change.before) ||
+    dnsDomainFilterBaselineProblem(change.request, change.before)
   )
     return "Refresh the exact reviewed native selection before applying. Ordinary inventory cannot replace it."
+  if (
+    (change.request.action === "filter_add" || change.request.action === "filter_remove") &&
+    (view.snapshot.selectionFingerprint !== change.before.selectionFingerprint ||
+      JSON.stringify(view.snapshot.selectedFilter) !== JSON.stringify(change.before.selectedFilter))
+  )
+    return "The selected native filter policy changed. Read it and create a new review."
   return undefined
 }
 
 function dnsSelectedScopeProblem(request: DNSChangeRequest, snapshot?: DNSServiceSnapshot) {
   if (
-    !["override_add", "override_remove", "record_add", "record_remove", "client_groups"].includes(
-      request.action,
-    )
+    ![
+      "override_add",
+      "override_remove",
+      "record_add",
+      "record_remove",
+      "client_groups",
+      "filter_add",
+      "filter_remove",
+    ].includes(request.action)
   )
     return false
   if (!snapshot || !digest(snapshot.selectionFingerprint)) return true
+  if (request.action === "filter_add" || request.action === "filter_remove") {
+    const filter = snapshot.selectedFilter
+    return (
+      snapshot.engine !== (request.filter.match === "suffix" ? "adguard" : "pihole") ||
+      !filter ||
+      filter.domain !== request.filter.domain ||
+      filter.disposition !== request.filter.disposition ||
+      filter.match !== request.filter.match ||
+      filter.evidence.state !== "configured" ||
+      Boolean(snapshot.records || snapshot.selectedClient)
+    )
+  }
+  if (snapshot.selectedFilter) return true
   if (request.action === "record_add" || request.action === "record_remove")
     return (
       snapshot.engine !== "technitium" ||
@@ -800,6 +970,23 @@ function dnsSelectedScopeProblem(request: DNSChangeRequest, snapshot?: DNSServic
       Boolean(snapshot.records)
     )
   return snapshot.engine === "technitium" || Boolean(snapshot.records || snapshot.selectedClient)
+}
+
+function dnsDomainFilterBaselineProblem(request: DNSChangeRequest, snapshot?: DNSServiceSnapshot) {
+  if (request.action !== "filter_add" && request.action !== "filter_remove") return false
+  const filter = snapshot?.selectedFilter
+  if (!filter) return true
+  if (request.action === "filter_add")
+    return (
+      filter.present || filter.owners !== 0 || filter.exact !== 0 || filter.inventoryCount >= 256
+    )
+  return (
+    !filter.present ||
+    filter.owners !== 1 ||
+    filter.exact !== 1 ||
+    !digest(filter.ruleFingerprint) ||
+    (snapshot?.engine === "pihole" && filter.enabled !== true)
+  )
 }
 
 export function readDNSCurrentChange(value: unknown, change: DNSServiceChange): DNSServiceView {
@@ -856,7 +1043,9 @@ export function dnsSameReviewedIntent(
       before.before?.selectionFingerprint === current.before?.selectionFingerprint &&
       JSON.stringify(before.before?.records) === JSON.stringify(current.before?.records) &&
       JSON.stringify(before.before?.selectedClient) ===
-        JSON.stringify(current.before?.selectedClient)
+        JSON.stringify(current.before?.selectedClient) &&
+      JSON.stringify(before.before?.selectedFilter) ===
+        JSON.stringify(current.before?.selectedFilter)
     )
   return false
 }
@@ -883,7 +1072,8 @@ export function dnsReviewProblem(
       connection.generation !== change.generation ||
       !change.before ||
       change.before.engine !== connection.engine ||
-      dnsSelectedScopeProblem(change.request, change.before)
+      dnsSelectedScopeProblem(change.request, change.before) ||
+      dnsDomainFilterBaselineProblem(change.request, change.before)
     ) {
       return "The connection or reviewed baseline changed. Refresh the native reading and review the draft again."
     }
@@ -913,5 +1103,8 @@ export function dnsChangeName(request: DNSChangeRequest): string {
       return `Remove ${request.record.type} record ${request.record.name}`
     case "client_groups":
       return `Change native client groups for ${request.client.address}`
+    case "filter_add":
+    case "filter_remove":
+      return `${request.action === "filter_add" ? "Add" : "Remove"} ${request.filter.disposition} ${request.filter.match === "suffix" ? "domain-suffix" : "exact-domain"} filter ${request.filter.domain}`
   }
 }

@@ -186,3 +186,54 @@ export function prepareDNSClientGroups(
     request: { action: "client_groups", client: { address, groups: [...(groups as number[])] } },
   }
 }
+
+export type DNSDomainFilterAction = "filter_add" | "filter_remove"
+export type DNSDomainFilterErrors = {
+  domain?: string
+  disposition?: string
+  groups?: string
+  action?: string
+}
+
+export function prepareDNSDomainFilterChange(
+  engine: DNSEngine,
+  action: DNSDomainFilterAction,
+  draft: { domain: string; disposition: string; groups?: unknown },
+): { request?: DNSChangeRequest; errors: DNSDomainFilterErrors } {
+  const errors: DNSDomainFilterErrors = {}
+  const domain = draft.domain.trim()
+  if (
+    (action !== "filter_add" && action !== "filter_remove") ||
+    (engine !== "adguard" && engine !== "pihole")
+  )
+    errors.action = "Choose a supported AdGuard suffix or Pi-hole exact domain action."
+  if (!dnsDomainName(domain))
+    errors.domain = "Use a complete lower-case DNS name without a wildcard or native rule syntax."
+  if (draft.disposition !== "allow" && draft.disposition !== "deny")
+    errors.disposition = "Choose allow or deny."
+  const piAdd = engine === "pihole" && action === "filter_add"
+  if (piAdd) {
+    if (
+      !Array.isArray(draft.groups) ||
+      draft.groups.length > 64 ||
+      Array.from(draft.groups).some((id) => !Number.isInteger(id) || id < 0 || id > 2147483647) ||
+      new Set(draft.groups).size !== draft.groups.length
+    )
+      errors.groups = "Choose 0–64 unique existing native group IDs; an empty list is explicit."
+  } else if (draft.groups !== undefined) {
+    errors.groups = "Only a Pi-hole addition takes replacement group memberships."
+  }
+  if (Object.keys(errors).length) return { errors }
+  return {
+    errors,
+    request: {
+      action,
+      filter: {
+        domain,
+        disposition: draft.disposition as "allow" | "deny",
+        match: engine === "adguard" ? "suffix" : "exact",
+        ...(piAdd ? { groups: [...(draft.groups as number[])] } : {}),
+      },
+    },
+  }
+}

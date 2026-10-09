@@ -7,6 +7,7 @@ import {
   dnsRecordZoneEditable,
   dnsUnicastAddress,
   prepareDNSClientGroups,
+  prepareDNSDomainFilterChange,
   prepareDNSRecordChange,
 } from "./network-dns-service-policy"
 
@@ -189,4 +190,89 @@ test("existing client group form requires an explicit bounded numeric list inclu
   ])
     expect(prepareDNSClientGroups("pihole", "198.51.100.9", value).request).toBeUndefined()
   expect(prepareDNSClientGroups("adguard", "198.51.100.9", []).request).toBeUndefined()
+})
+
+test("domain filter drafts derive suffix and exact semantics from the native engine", () => {
+  const draft = { domain: " selected.example ", disposition: "deny" }
+  const original = structuredClone(draft)
+  expect(prepareDNSDomainFilterChange("adguard", "filter_add", draft)).toEqual({
+    errors: {},
+    request: {
+      action: "filter_add",
+      filter: { domain: "selected.example", disposition: "deny", match: "suffix" },
+    },
+  })
+  expect(prepareDNSDomainFilterChange("pihole", "filter_remove", draft).request).toEqual({
+    action: "filter_remove",
+    filter: { domain: "selected.example", disposition: "deny", match: "exact" },
+  })
+  expect(draft).toEqual(original)
+  expect(prepareDNSDomainFilterChange("technitium", "filter_add", draft).errors.action).toBeTruthy()
+  expect(prepareDNSDomainFilterChange("adguard", "native_dsl", draft).errors.action).toBeTruthy()
+})
+
+test("Pi-hole additions preserve explicit empty and zero memberships without sharing drafts", () => {
+  for (const groups of [[], [0], [0, 7], [2147483647]]) {
+    const draft = { domain: "selected.example", disposition: "allow", groups }
+    const result = prepareDNSDomainFilterChange("pihole", "filter_add", draft)
+    expect(result.errors).toEqual({})
+    expect(result.request.filter).toEqual({
+      domain: draft.domain,
+      disposition: "allow",
+      match: "exact",
+      groups,
+    })
+    expect(result.request.filter.groups).not.toBe(groups)
+  }
+})
+
+test("domain drafts keep invalid input while rejecting native syntax and malformed memberships", () => {
+  const draft = { domain: "selected.example", disposition: "deny", groups: [] }
+  for (const domain of [
+    "||selected.example^",
+    "@@||selected.example^",
+    "*.selected.example",
+    "SELECTED.example",
+    "selected.example.",
+    "single",
+    `${"a".repeat(64)}.example`,
+    "a".repeat(254),
+  ]) {
+    const rejected = { ...draft, domain }
+    expect(
+      prepareDNSDomainFilterChange("pihole", "filter_add", rejected).errors.domain,
+    ).toBeTruthy()
+    expect(rejected.domain).toBe(domain)
+  }
+  for (const groups of [
+    undefined,
+    null,
+    [null],
+    ["0"],
+    [false],
+    [-1],
+    [0.5],
+    [NaN],
+    [Infinity],
+    [2147483648],
+    [0, 0],
+    Array(1),
+    Array.from({ length: 65 }, (_, id) => id),
+  ])
+    expect(
+      prepareDNSDomainFilterChange("pihole", "filter_add", { ...draft, groups }).request,
+    ).toBeUndefined()
+  expect(
+    prepareDNSDomainFilterChange("pihole", "filter_add", { ...draft, disposition: "regex" }).errors
+      .disposition,
+  ).toBeTruthy()
+  for (const [engine, action] of [
+    ["adguard", "filter_add"],
+    ["adguard", "filter_remove"],
+    ["pihole", "filter_remove"],
+  ])
+    for (const groups of [[], [0], null])
+      expect(
+        prepareDNSDomainFilterChange(engine, action, { ...draft, groups }).errors.groups,
+      ).toBeTruthy()
 })

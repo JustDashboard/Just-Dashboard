@@ -15,6 +15,7 @@ import {
   readDNSList,
   readDNSProvision,
   readDNSRecords,
+  readDNSSelectedFilter,
   readDNSSnapshot,
   readDNSView,
 } from "./network-dns-services"
@@ -636,4 +637,355 @@ test("selected metadata remains immutable across confirmation even when a top-le
       { ...connection(), engine: "pihole" },
     ),
   ).toContain("attempted apply")
+})
+
+const domainFilterChange = (engine = "adguard", action = "filter_add") => {
+  const row = change()
+  const removing = action === "filter_remove"
+  row.before.engine = engine
+  row.before.version = engine === "adguard" ? "v0.107.71" : "v6.7.1"
+  row.before.selectionFingerprint = hash()
+  row.request = {
+    action,
+    filter: {
+      domain: "selected.example",
+      disposition: "deny",
+      match: engine === "adguard" ? "suffix" : "exact",
+      ...(engine === "pihole" && !removing ? { groups: [] } : {}),
+    },
+  }
+  row.before.selectedFilter = {
+    domain: row.request.filter.domain,
+    disposition: row.request.filter.disposition,
+    match: row.request.filter.match,
+    present: removing,
+    comment: null,
+    commentReported: engine === "pihole" && removing,
+    ...(removing ? { ruleFingerprint: hash("b") } : {}),
+    ...(engine === "pihole" && removing ? { enabled: true, groups: [0] } : {}),
+    otherPolicyFingerprint: hash("c"),
+    evidence: {
+      state: "configured",
+      basis: "native_configuration",
+      summary: "Native configuration; client filtering decisions remain unmeasured.",
+    },
+    owners: removing ? 1 : 0,
+    exact: removing ? 1 : 0,
+    inventoryCount: removing ? 3 : 2,
+  }
+  return row
+}
+
+test("domain reviews preserve engine-specific match and explicit membership instead of native DSL", () => {
+  for (const engine of ["adguard", "pihole"])
+    for (const action of ["filter_add", "filter_remove"]) {
+      const value = domainFilterChange(engine, action)
+      const read = readDNSChange(value)
+      expect(read.request).toEqual(value.request)
+      expect(read.before.selectedFilter).toEqual(value.before.selectedFilter)
+      expect(dnsChangeName(read.request)).toBe(
+        `${action === "filter_add" ? "Add" : "Remove"} deny ${engine === "adguard" ? "domain-suffix" : "exact-domain"} filter selected.example`,
+      )
+      for (const unwanted of ["record", "client", "protection", "zone", "nativeBody", "token"])
+        expect(() => readDNSChangeRequest({ ...value.request, [unwanted]: {} })).toThrow()
+      const metadata = { ...value, before: undefined }
+      expect(readDNSChange(metadata).request).toEqual(value.request)
+    }
+  const value = domainFilterChange("pihole")
+  value.request.filter.groups = [0]
+  const read = readDNSChange(value)
+  expect(read.request.filter.groups).toEqual([0])
+  expect(read.request.filter.groups).not.toBe(value.request.filter.groups)
+})
+
+test("native domain readback supports the opposite presence after each consumed add or removal", () => {
+  for (const engine of ["adguard", "pihole"])
+    for (const action of ["filter_add", "filter_remove"]) {
+      const row = domainFilterChange(engine, action)
+      row.after = domainFilterChange(
+        engine,
+        action === "filter_add" ? "filter_remove" : "filter_add",
+      ).before
+      row.after.selectionFingerprint = hash("d")
+      if (engine === "pihole" && action === "filter_add") row.after.selectedFilter.groups = []
+      row.state = "verified"
+      row.endedAt = "2026-10-09T12:01:00Z"
+      const read = readDNSChange(row)
+      expect(read.after.selectedFilter.present).toBe(action === "filter_add")
+      expect(read.after.selectionFingerprint).toBe(hash("d"))
+      expect(read.after.selectedFilter.otherPolicyFingerprint).toBe(
+        read.before.selectedFilter.otherPolicyFingerprint,
+      )
+      expect(
+        dnsReviewProblem(read, "change", new Set(), Date.parse(at), { ...connection(), engine }),
+      ).toContain("consumed")
+    }
+})
+
+test("closed domain intents reject wrong engines, missing selections and malformed group elements", () => {
+  for (const engine of ["adguard", "pihole"])
+    for (const action of ["filter_add", "filter_remove"]) {
+      const request = domainFilterChange(engine, action).request
+      for (const delta of [
+        { domain: "*.selected.example" },
+        { domain: "SELECTED.example" },
+        { domain: "selected.example." },
+        { domain: "||selected.example^" },
+        { domain: "single" },
+        { domain: `${"a".repeat(64)}.example` },
+        { disposition: "block" },
+        { match: "regex" },
+        { comment: "not a writable field" },
+        { enabled: true },
+        { nativeBody: {} },
+      ])
+        expect(() =>
+          readDNSChangeRequest({ ...request, filter: { ...request.filter, ...delta } }),
+        ).toThrow()
+      expect(() => readDNSChangeRequest(request, "technitium")).toThrow()
+      expect(() =>
+        readDNSChangeRequest(request, engine === "adguard" ? "pihole" : "adguard"),
+      ).toThrow()
+      expect(() => readDNSChangeRequest({ action, filter: null })).toThrow()
+      expect(() => readDNSChangeRequest({ action })).toThrow()
+      if (engine !== "pihole" || action !== "filter_add")
+        for (const groups of [[], [0], null])
+          expect(() =>
+            readDNSChangeRequest({ ...request, filter: { ...request.filter, groups } }),
+          ).toThrow()
+    }
+  const request = domainFilterChange("pihole").request
+  for (const groups of [
+    undefined,
+    null,
+    [null],
+    ["0"],
+    [false],
+    [0, 0],
+    [-1],
+    [0.5],
+    [2147483648],
+    Array(1),
+    Array.from({ length: 65 }, (_, id) => id),
+  ])
+    expect(() =>
+      readDNSChangeRequest({ ...request, filter: { ...request.filter, groups } }),
+    ).toThrow()
+})
+
+test("selected filter counts, digests and configured provenance must agree before rendering", () => {
+  for (const engine of ["adguard", "pihole"])
+    for (const action of ["filter_add", "filter_remove"]) {
+      const row = domainFilterChange(engine, action).before.selectedFilter
+      for (const mutate of [
+        (v) => (v.domain = "*.selected.example"),
+        (v) => (v.disposition = "regex"),
+        (v) => (v.match = "native"),
+        (v) => (v.inventoryCount = 257),
+        (v) => (v.inventoryCount = -1),
+        (v) => (v.inventoryCount = null),
+        (v) => (v.owners = v.inventoryCount + 1),
+        (v) => (v.exact = v.owners + 1),
+        (v) => (v.exact = "1"),
+        (v) => (v.present = !v.present),
+        (v) => (v.otherPolicyFingerprint = "unreported"),
+        (v) => (v.evidence.state = "unknown"),
+        (v) => (v.evidence.basis = "runtime"),
+        (v) => (v.evidence.summary = ""),
+        (v) => (v.evidence.nativeBody = "secret"),
+        (v) => (v.comment = undefined),
+        (v) => (v.commentReported = undefined),
+        (v) => (v.nativeBody = {}),
+        (v) => (v.ruleFingerprint = v.exact ? undefined : hash("d")),
+      ]) {
+        const changed = structuredClone(row)
+        mutate(changed)
+        expect(() => readDNSSelectedFilter(changed, engine)).toThrow()
+      }
+    }
+  const ambiguous = domainFilterChange("adguard", "filter_remove").before.selectedFilter
+  ambiguous.owners = ambiguous.exact = 2
+  ambiguous.present = false
+  expect(readDNSSelectedFilter(ambiguous).owners).toBe(2)
+  const opposite = domainFilterChange().before.selectedFilter
+  opposite.owners = 1
+  expect(readDNSSelectedFilter(opposite).present).toBe(false)
+})
+
+test("Pi-hole reported false, empty membership and null versus empty comment remain distinct", () => {
+  const selected = domainFilterChange("pihole", "filter_remove").before.selectedFilter
+  for (const comment of [null, "", "native comment"]) {
+    const value = { ...selected, enabled: false, groups: [], comment }
+    const read = readDNSSelectedFilter(value, "pihole")
+    expect(read.enabled).toBe(false)
+    expect(read.groups).toEqual([])
+    expect(read.groups).not.toBe(value.groups)
+    expect(read.comment).toBe(comment)
+    expect(read.commentReported).toBe(true)
+  }
+  for (const delta of [
+    { enabled: undefined },
+    { enabled: null },
+    { groups: undefined },
+    { groups: [null] },
+    { groups: [0, 0] },
+    { groups: [-1] },
+    { groups: Array.from({ length: 65 }, (_, id) => id) },
+    { comment: "x".repeat(513) },
+    { commentReported: false },
+  ])
+    expect(() => readDNSSelectedFilter({ ...selected, ...delta }, "pihole")).toThrow()
+  for (const row of [
+    domainFilterChange("adguard", "filter_remove").before.selectedFilter,
+    domainFilterChange("pihole").before.selectedFilter,
+  ])
+    for (const delta of [
+      { enabled: false },
+      { groups: [] },
+      { comment: "" },
+      { commentReported: true },
+    ])
+      expect(() => readDNSSelectedFilter({ ...row, ...delta })).toThrow()
+})
+
+test("selected domain snapshots and retained reviews cannot borrow another selection or native version", () => {
+  for (const engine of ["adguard", "pihole"]) {
+    const review = domainFilterChange(engine)
+    for (const mutate of [
+      (v) => delete v.selectionFingerprint,
+      (v) => (v.selectionFingerprint = "not-raw"),
+      (v) => (v.engine = "technitium"),
+      (v) => (v.version = "future-version"),
+      (v) => (v.records = records()),
+      (v) => (v.selectedClient = policyChange("client_groups").before.selectedClient),
+    ]) {
+      const snapshot = structuredClone(review.before)
+      mutate(snapshot)
+      expect(() => readDNSSnapshot(snapshot)).toThrow()
+    }
+    for (const delta of [
+      { domain: "foreign.example" },
+      { disposition: "allow" },
+      { match: engine === "adguard" ? "exact" : "suffix" },
+    ]) {
+      const row = structuredClone(review)
+      Object.assign(row.before.selectedFilter, delta)
+      expect(() => readDNSChange(row)).toThrow()
+    }
+  }
+  const legacy = policyChange("override_add")
+  legacy.before.selectedFilter = domainFilterChange().before.selectedFilter
+  expect(() => readDNSChange(legacy)).toThrow("selection")
+})
+
+test("domain current reads retain changed evidence but hold apply for raw or selected metadata drift", () => {
+  for (const engine of ["adguard", "pihole"])
+    for (const action of ["filter_add", "filter_remove"]) {
+      const review = readDNSChange(domainFilterChange(engine, action))
+      const owner = { ...connection(), engine }
+      const view = {
+        connection: owner,
+        state: "available",
+        snapshot: structuredClone(review.before),
+      }
+      expect(readDNSCurrentChange(view, review).state).toBe("available")
+      expect(dnsChangeOwnerProblem(review, view)).toBeUndefined()
+      const ordinary = { ...view, snapshot: snapshot() }
+      ordinary.snapshot.engine = engine
+      ordinary.snapshot.version = review.before.version
+      expect(() => readDNSCurrentChange(ordinary, review)).toThrow("exact reviewed")
+      expect(dnsChangeOwnerProblem(review, ordinary)).toBeTruthy()
+      for (const mutate of [
+        (v) => (v.selectionFingerprint = hash("d")),
+        (v) => (v.selectedFilter.otherPolicyFingerprint = hash("d")),
+        (v) => v.selectedFilter.inventoryCount++,
+      ]) {
+        const fresh = structuredClone(view)
+        mutate(fresh.snapshot)
+        expect(readDNSCurrentChange(fresh, review).state).toBe("available")
+        expect(dnsChangeOwnerProblem(review, fresh)).toContain("changed")
+      }
+      const different = structuredClone(view)
+      different.snapshot.selectedFilter.domain = "other.example"
+      expect(() => readDNSCurrentChange(different, review)).toThrow("exact reviewed")
+      expect(() =>
+        readDNSCurrentChange({ ...view, connection: { ...owner, generation: 4 } }, review),
+      ).toThrow()
+      const unavailable = { connection: owner, state: "unavailable", error: "native timeout" }
+      expect(readDNSCurrentChange(unavailable, review).state).toBe("unavailable")
+      expect(dnsChangeOwnerProblem(review, unavailable)).toContain("could not be read")
+    }
+})
+
+test("domain apply requires an editable retained baseline while uncertainty and expiry stay single-use", () => {
+  for (const engine of ["adguard", "pihole"])
+    for (const action of ["filter_add", "filter_remove"]) {
+      const review = readDNSChange(domainFilterChange(engine, action))
+      const owner = { ...connection(), engine }
+      expect(dnsReviewProblem(review, "change", new Set(), Date.parse(at), owner)).toBeUndefined()
+      const changed = structuredClone(review)
+      if (action === "filter_add") changed.before.selectedFilter.owners = 1
+      else changed.before.selectedFilter.owners = 2
+      expect(dnsReviewProblem(changed, "change", new Set(), Date.parse(at), owner)).toContain(
+        "baseline",
+      )
+      expect(
+        dnsReviewProblem(review, "change", new Set(), Date.parse(review.expiresAt), owner),
+      ).toContain("expired")
+      expect(
+        dnsReviewProblem(
+          { ...review, state: "needs_review" },
+          "change",
+          new Set(),
+          Date.parse(at),
+          owner,
+        ),
+      ).toContain("consumed")
+      expect(
+        dnsReviewProblem(
+          review,
+          "change",
+          new Set([dnsAttemptKey("change", review.id)]),
+          Date.parse(at),
+          owner,
+        ),
+      ).toContain("attempted")
+    }
+  const full = readDNSChange(domainFilterChange())
+  full.before.selectedFilter.inventoryCount = 256
+  expect(dnsReviewProblem(full, "change", new Set(), Date.parse(at), connection())).toContain(
+    "baseline",
+  )
+  const disabled = readDNSChange(domainFilterChange("pihole", "filter_remove"))
+  disabled.before.selectedFilter.enabled = false
+  expect(
+    dnsReviewProblem(disabled, "change", new Set(), Date.parse(at), {
+      ...connection(),
+      engine: "pihole",
+    }),
+  ).toContain("baseline")
+})
+
+test("held domain intent includes selected raw metadata even when another digest is reused", () => {
+  const review = readDNSChange(domainFilterChange("pihole", "filter_remove"))
+  expect(dnsSameReviewedIntent(review, { ...review, state: "verified" })).toBe(true)
+  for (const mutate of [
+    (v) => (v.request.filter.domain = "other.example"),
+    (v) => (v.request.filter.disposition = "allow"),
+    (v) => (v.request.filter.match = "suffix"),
+    (v) => (v.before.selectedFilter.comment = ""),
+    (v) => (v.before.selectedFilter.groups = []),
+    (v) => (v.before.selectedFilter.enabled = false),
+    (v) => (v.before.selectedFilter.ruleFingerprint = hash("d")),
+    (v) => (v.before.selectedFilter.otherPolicyFingerprint = hash("d")),
+    (v) => (v.before.selectionFingerprint = hash("d")),
+  ]) {
+    const next = structuredClone(review)
+    mutate(next)
+    expect(dnsSameReviewedIntent(review, next)).toBe(false)
+  }
+  const add = readDNSChange(domainFilterChange("pihole"))
+  const next = structuredClone(add)
+  next.request.filter.groups = [0]
+  expect(dnsSameReviewedIntent(add, next)).toBe(false)
 })
