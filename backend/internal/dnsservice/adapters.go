@@ -326,9 +326,9 @@ func (c *nativeClient) inspectPiHole(ctx context.Context, s *Snapshot) error {
 	}
 	var clients struct {
 		Clients []struct {
-			Client  string `json:"client"`
-			Comment string `json:"comment"`
-			Groups  []int  `json:"groups"`
+			Client  string          `json:"client"`
+			Comment string          `json:"comment"`
+			Groups  json.RawMessage `json:"groups"`
 		} `json:"clients"`
 	}
 	if err = c.request(ctx, http.MethodGet, "/api/clients", nil, &clients); err != nil || clients.Clients == nil {
@@ -340,15 +340,24 @@ func (c *nativeClient) inspectPiHole(ctx context.Context, s *Snapshot) error {
 		if len(clients.Clients) > 128 {
 			return errors.New("native Pi-hole client inventory exceeds its bound")
 		}
+		complete := true
+		policies := []ClientPolicy{}
 		for _, client := range clients.Clients {
-			if len(client.Groups) > 64 {
-				return errors.New("native Pi-hole client groups exceed their bound")
+			groups, valid := filterRawGroups(client.Groups)
+			if !valid || client.Client == "" {
+				complete = false
+				break
 			}
-			s.Clients = append(s.Clients, ClientPolicy{ID: c.text(client.Client), Name: c.text(client.Comment), Addresses: []string{c.text(client.Client)}, Groups: client.Groups})
+			policies = append(policies, ClientPolicy{ID: c.text(client.Client), Name: c.text(client.Comment), Addresses: []string{c.text(client.Client)}, Groups: groups})
 		}
-		s.ClientEvidence = Reading{"configured", "native_configuration", "Native persistent clients and their group assignments; group filtering rules are not inferred."}
-		if err = c.retainPolicy(clients); err != nil {
-			return err
+		if !complete {
+			s.ClientEvidence.Summary = "Native Pi-hole client membership is unreadable; no complete client inventory is reported."
+		} else {
+			s.Clients = policies
+			s.ClientEvidence = Reading{"configured", "native_configuration", "Native persistent clients and their group assignments; group filtering rules are not inferred."}
+			if err = c.retainPolicy(clients); err != nil {
+				return err
+			}
 		}
 	}
 	if err = c.inspectPiHoleGroups(ctx, s); err != nil {

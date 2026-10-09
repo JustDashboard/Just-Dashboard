@@ -150,6 +150,11 @@ unicast IP of that family. Mapped IPv6, unspecified, multicast and scoped addres
 The optional `client` request is `{address, groups}`. All action-specific fields are mutually
 exclusive with other policy fields; arbitrary record types, native request bodies and unknown JSON
 fields are refused.
+Client membership requires an explicit array of actual integer IDs. Empty `[]` and numeric `0`
+remain valid; collection/element null, wrong numeric types, duplicate or out-of-bound IDs are
+refused before selection. Native client/group reads apply the same presence-aware contract:
+unreadable memberships or null/duplicate/invalid group identities and enable fields stay unknown,
+with no partial configured inventory or replacement baseline.
 
 | Action | Engine and reviewed scope |
 | --- | --- |

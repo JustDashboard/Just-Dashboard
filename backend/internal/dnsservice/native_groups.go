@@ -152,13 +152,17 @@ func (c *nativeClient) inspectPiHoleGroups(ctx context.Context, s *Snapshot) err
 	if len(response.Groups) > 128 {
 		return errors.New("native FTL filter groups exceed their bound")
 	}
+	groups := []NativeGroup{}
+	ids := map[int]bool{}
 	for _, group := range response.Groups {
-		if group.ID == nil || group.Enabled == nil {
+		if group.ID == nil || *group.ID < 0 || *group.ID > 2147483647 || ids[*group.ID] || group.Enabled == nil {
 			s.AppClientEvidence = Reading{"unknown", "unavailable", "Native FTL group identity or enable state is unreadable."}
 			return nil
 		}
-		s.FilterGroups = append(s.FilterGroups, NativeGroup{ID: group.ID, Name: c.text(group.Name), Enabled: group.Enabled, ClientScopes: []string{}, ListenerScopes: []string{}, Domains: []string{}})
+		ids[*group.ID] = true
+		groups = append(groups, NativeGroup{ID: group.ID, Name: c.text(group.Name), Enabled: group.Enabled, ClientScopes: []string{}, ListenerScopes: []string{}, Domains: []string{}})
 	}
+	s.FilterGroups = groups
 	s.AppClientEvidence = Reading{"configured", "native_configuration", "Native FTL filter-group IDs and enable states are listed independently of the global blocking switch and client assignments. Actual filtering decisions remain native."}
 	return c.retainPolicy(response)
 }

@@ -1,11 +1,13 @@
 package dnsservice
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -25,6 +27,27 @@ type RecordChange struct {
 type ClientGroupChange struct {
 	Address string `json:"address"`
 	Groups  []int  `json:"groups"`
+}
+
+func (c *ClientGroupChange) UnmarshalJSON(body []byte) error {
+	var raw struct {
+		Address string          `json:"address"`
+		Groups  json.RawMessage `json:"groups"`
+	}
+	d := json.NewDecoder(bytes.NewReader(body))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&raw); err != nil {
+		return err
+	}
+	if d.Decode(new(any)) != io.EOF {
+		return errors.New("client group intent must be one JSON object")
+	}
+	groups, ok := filterRawGroups(raw.Groups)
+	if !ok {
+		return errors.New("client groups require explicit bounded integer IDs")
+	}
+	*c = ClientGroupChange{Address: raw.Address, Groups: groups}
+	return nil
 }
 
 type ClientGroupPolicy struct {
@@ -256,9 +279,11 @@ func selectedClient(req ClientGroupChange, inv clientInventory) (piClient, error
 	for _, raw := range inv.Clients {
 		b, _ := json.Marshal(raw)
 		var client piClient
-		if json.Unmarshal(b, &client) != nil || client.Client == "" || client.Groups == nil || raw["comment"] == nil {
+		groups, validGroups := filterRawGroups(raw["groups"])
+		if json.Unmarshal(b, &client) != nil || client.Client == "" || !validGroups || raw["comment"] == nil {
 			return selected, errors.New("native client policy is incomplete")
 		}
+		client.Groups = groups
 		if client.Client == req.Address {
 			if !knownPolicyFields(raw, "client comment groups id date_added date_modified name") {
 				return selected, errors.New("native client has unsupported replacement fields; no incomplete replacement is sent")
@@ -272,12 +297,12 @@ func selectedClient(req ClientGroupChange, inv clientInventory) (piClient, error
 	}
 	known := map[int]bool{}
 	for _, raw := range inv.Groups {
-		var id int
-		var enabled bool
-		if json.Unmarshal(raw["id"], &id) != nil || json.Unmarshal(raw["enabled"], &enabled) != nil || known[id] {
+		var id *int
+		var enabled *bool
+		if json.Unmarshal(raw["id"], &id) != nil || id == nil || *id < 0 || *id > 2147483647 || json.Unmarshal(raw["enabled"], &enabled) != nil || enabled == nil || known[*id] {
 			return selected, errors.New("native group identity or enable policy is unreadable")
 		}
-		known[id] = true
+		known[*id] = true
 	}
 	for _, id := range req.Groups {
 		if !known[id] {
