@@ -191,25 +191,37 @@ func (c *nativeClient) adGuardFilters(ctx context.Context, i *FilterInventory) e
 	}
 	i.Filtering = enabled
 	i.Sources = c.adGuardFilterSources(raw, status.Version)
-	var values []string
-	if json.Unmarshal(raw["user_rules"], &values) != nil {
-		return nil
-	}
-	if strings.TrimPrefix(status.Version, "v") == "0.107.71" && string(raw["user_rules"]) == "null" {
-		values = []string{}
-	}
-	if values == nil || len(values) > maxFilterEntries {
+	values, ok := adGuardRuleStrings(raw["user_rules"], status.Version)
+	if !ok {
 		return nil
 	}
 	entries := []FilterEntry{}
 	for _, rule := range values {
-		if len(rule) > 4096 {
-			return nil
-		}
 		entries = append(entries, FilterEntry{Kind: "native_rule", Fingerprint: policyHash(rule)})
 	}
 	i.Rules.Evidence, i.Rules.Entries, i.Rules.Fingerprint = Reading{"configured", "native_configuration", "Native custom-rule metadata; rule text and compilation are not exposed or evaluated."}, entries, policyHash(raw["user_rules"])
 	return nil
+}
+
+// A null collection is a pinned empty-slice representation. A null element is
+// malformed rule content, and must never become an invented empty string.
+func adGuardRuleStrings(raw json.RawMessage, version string) ([]string, bool) {
+	if strings.TrimPrefix(version, "v") == "0.107.71" && strings.TrimSpace(string(raw)) == "null" {
+		return []string{}, true
+	}
+	var entries []json.RawMessage
+	if json.Unmarshal(raw, &entries) != nil || entries == nil || len(entries) > maxFilterEntries {
+		return nil, false
+	}
+	values := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		var value *string
+		if json.Unmarshal(entry, &value) != nil || value == nil || len(*value) > 4096 {
+			return nil, false
+		}
+		values = append(values, *value)
+	}
+	return values, true
 }
 
 func (c *nativeClient) adGuardFilterSources(raw map[string]json.RawMessage, version string) FilterSection {

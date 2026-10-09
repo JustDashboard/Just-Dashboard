@@ -89,6 +89,9 @@ slices and a nil custom-rule slice. Only that exact version's present `filters`,
 `whitelist_filters` and `user_rules` null fields establish zero entries; missing fields and other
 versions' null remain unknown. The original native failure is retained separately from this narrow
 [response-writer compatibility](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/http.go).
+Every custom-rule array element must be an actual JSON string. An explicit empty string is a
+reported native entry; an element-level null keeps the rule section unknown and is never converted
+to empty text. This differs from the pinned writer's collection-level null representation.
 
 Each source/custom-rule collection is bounded to 256 entries. Technitium supports 255 native
 entries; this adapter bounds each identity to 255 bytes and preserves its update interval range

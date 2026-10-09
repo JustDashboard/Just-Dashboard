@@ -207,6 +207,37 @@ func TestDNSFilterAdGuardNullRequiresExactPinnedWriterAndPresentFields(t *testin
 	}
 }
 
+func TestDNSFilterAdGuardRuleElementsRequireActualStrings(t *testing.T) {
+	for _, version := range []string{"v0.107.71", "v0.107.72"} {
+		t.Run(version, func(t *testing.T) {
+			status := filterAdGuardStatus()
+			status["version"] = version
+			policy := filterAdGuardPolicy()
+			policy["user_rules"] = []string{}
+			req, mutations := filterFixture(t, AdGuard, map[string]any{"/control/status": status, "/control/filtering/status": policy})
+			empty, err := inspectNativeFilters(t.Context(), req)
+			if err != nil || empty.Rules.Evidence.State != "configured" || len(empty.Rules.Entries) != 0 || empty.Fingerprint == "" {
+				t.Fatalf("explicit empty rule array was not retained: %+v %v", empty, err)
+			}
+			policy["user_rules"] = []string{""}
+			blank, err := inspectNativeFilters(t.Context(), req)
+			if err != nil || blank.Rules.Evidence.State != "configured" || len(blank.Rules.Entries) != 1 || blank.Rules.Entries[0].Fingerprint != policyHash("") || blank.Rules.Fingerprint == empty.Rules.Fingerprint || blank.Fingerprint == empty.Fingerprint {
+				t.Fatalf("reported empty-string entry collapsed into an empty collection: %+v %v", blank, err)
+			}
+			for _, malformed := range []any{nil, true, 1, map[string]any{}, []any{}} {
+				policy["user_rules"] = []any{"# preserved native comment", malformed, "||native-rule.example^"}
+				got, err := inspectNativeFilters(t.Context(), req)
+				if err != nil || got.Rules.Evidence.State != "unknown" || len(got.Rules.Entries) != 0 || got.Rules.Fingerprint != "" || got.Fingerprint != "" || got.Sources.Evidence.State != "configured" || got.Sources.Fingerprint != empty.Sources.Fingerprint || len(got.Sources.Entries) != 1 {
+					t.Fatalf("malformed rule entry became text or erased independent sources: %+v %v", got, err)
+				}
+			}
+			if mutations.Load() != 0 {
+				t.Fatal("read-only malformed rule inspection mutated native policy")
+			}
+		})
+	}
+}
+
 func TestDNSFilterTechnitiumPinnedNullAndUnsupportedScopes(t *testing.T) {
 	for _, version := range []string{"15.6.0", "15.7.0"} {
 		p := map[string]any{"version": version, "enableBlocking": true, "blockListUrls": nil, "blockListUpdateIntervalHours": 24, "proxy": map[string]string{"password": "proxy-secret"}, "tsigKeys": []any{map[string]string{"sharedSecret": "tsig-secret"}}}
