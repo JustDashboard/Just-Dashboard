@@ -2812,7 +2812,8 @@ containers/volumes/networks.
   its error and `ms`. The two tables moved from `proxySchema` into `schema` because they gained columns
   after shipping (`kind`, `probe`, `ms`, brought to older installs by `addedColumns`; every existing row
   reads `tls`). A probe where a TLS watch already exists is 409 `already_watched` (the handshake checks
-  the connection too); a TLS watch where a probe exists takes it over and is checked on the next pass,
+  the connection too); a TLS watch where a probe exists takes it over, drops the probe's connect times
+  from its history in the same transaction, and is checked on the next pass,
   and a probe result still in flight then is not saved onto the row (`… AND kind = 'tcp'`).
   The `watch_unreachable` alert judges a probe by whether it connected ("No TCP connection (refused):
   …"); the untrusted and grade rules and the fleet scan leave probes out. The list (`watched-domains.tsx`)

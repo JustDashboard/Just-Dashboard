@@ -380,6 +380,11 @@ func TestNetworkProbesAreWatchedEndpoints(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &upgraded); err != nil || upgraded.ID != probe.ID || upgraded.Kind != "tls" {
 		t.Fatalf("tls over the probe: %d %s", w.Code, w.Body.String())
 	}
+	// The probe's connect times are not the TLS watch's handshakes.
+	w = admin.do(http.MethodGet, "/api/v1/certificates/watched/"+strconv.FormatInt(probe.ID, 10)+"/history", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &history); err != nil || len(history) != 0 {
+		t.Fatalf("history after the takeover: %s", w.Body.String())
+	}
 	if w := admin.do(http.MethodPost, "/api/v1/certificates/watched", `{"domain":"127.0.0.1","port":`+port+`,"kind":"tcp"}`, nil); w.Code != http.StatusConflict {
 		t.Fatalf("a probe over the TLS watch: %d %s", w.Code, w.Body.String())
 	}

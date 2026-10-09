@@ -143,9 +143,21 @@ func (s *Server) handleWatchDomain(w http.ResponseWriter, r *http.Request) error
 			"This endpoint is already watched for TLS, whose handshake checks the connection too.")
 	case d.Kind == proxysvc.WatchTCP && kind == proxysvc.WatchTLS:
 		// A probe is the lesser question; watching its certificate takes it
-		// over, checked on the next pass.
-		if _, err := s.Store.DB.ExecContext(r.Context(),
+		// over, checked on the next pass. Its connect times go with it, or
+		// the endpoint's history would read them as handshakes.
+		tx, err := s.Store.DB.BeginTx(r.Context(), nil)
+		if err != nil {
+			return httpx.Internal(err)
+		}
+		defer tx.Rollback()
+		if _, err := tx.ExecContext(r.Context(),
 			`UPDATE watched_endpoints SET kind = 'tls', probe = '', checked_at = 0 WHERE id = ?`, d.ID); err != nil {
+			return httpx.Internal(err)
+		}
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM watched_checks WHERE endpoint_id = ?`, d.ID); err != nil {
+			return httpx.Internal(err)
+		}
+		if err := tx.Commit(); err != nil {
 			return httpx.Internal(err)
 		}
 		d.Kind, added = proxysvc.WatchTLS, 1
