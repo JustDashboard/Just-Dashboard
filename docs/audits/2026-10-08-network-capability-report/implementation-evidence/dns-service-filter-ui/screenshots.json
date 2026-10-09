@@ -1,0 +1,86 @@
+[
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguar-3f604--filter-reading-fits-1720px-chromium/native-filters-adguard-1720.png",
+    "name": "native-filters-adguard-1720.png",
+    "sha256": "1a1ccb34c2e206ee652d67d6ddab729412b9fa46df21b78b23a1b45b1e5b05a5",
+    "bytes": 124839,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguar-df428--filter-reading-fits-1280px-chromium/native-filters-adguard-1280.png",
+    "name": "native-filters-adguard-1280.png",
+    "sha256": "1a9af985f6734febc6e88f3aa82d5fe532f88145313fcf9cddaa7a1b2e0d11cb",
+    "bytes": 88878,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguard-native-filter-reading-fits-390px-chromium/native-filter-rules-adguard-390.png",
+    "name": "native-filter-rules-adguard-390.png",
+    "sha256": "85e33cd953beb2b5215c31cacd5ce7500afa6695d0e4b13afae9baef0c028f53",
+    "bytes": 41326,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-adguard-native-filter-reading-fits-390px-chromium/native-filters-adguard-390.png",
+    "name": "native-filters-adguard-390.png",
+    "sha256": "11c2089649700b94d94799878f5ab6301e4d80dde2a371c38ff15aaf2c32cb24",
+    "bytes": 50699,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-1280px-chromium/native-filters-pihole-1280.png",
+    "name": "native-filters-pihole-1280.png",
+    "sha256": "9e1c430700494015ada055430f9853fdb980906ec67dda04ed782023eabe5b78",
+    "bytes": 88576,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-1720px-chromium/native-filters-pihole-1720.png",
+    "name": "native-filters-pihole-1720.png",
+    "sha256": "6af8207cf1ddf6a5000f7f628c26f475aa3d436bd1021ce798c958358123837b",
+    "bytes": 123950,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-390px-chromium/native-filter-rules-pihole-390.png",
+    "name": "native-filter-rules-pihole-390.png",
+    "sha256": "786a63f61823cc50c7f0f353d30ed0399e46d970911eb649b7bceadd61ddbf51",
+    "bytes": 43001,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-pihole-native-filter-reading-fits-390px-chromium/native-filters-pihole-390.png",
+    "name": "native-filters-pihole-390.png",
+    "sha256": "8bc88ad38005609dd7a128bb18b9fff19e49d100aa4aface66baf24fa98e1efc",
+    "bytes": 52938,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-2dacd--filter-reading-fits-1280px-chromium/native-filters-technitium-1280.png",
+    "name": "native-filters-technitium-1280.png",
+    "sha256": "ce34c3a430e9f18d6552b44ec55226858f2a91e58c4857b75358bae185e33cec",
+    "bytes": 89608,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-a11dc-e-filter-reading-fits-390px-chromium/native-filter-rules-technitium-390.png",
+    "name": "native-filter-rules-technitium-390.png",
+    "sha256": "0aa3f3f82635e1f6f5c7e86662b20e05a06f7bb33203168f8b6791636a5043a4",
+    "bytes": 41118,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-a11dc-e-filter-reading-fits-390px-chromium/native-filters-technitium-390.png",
+    "name": "native-filters-technitium-390.png",
+    "sha256": "1406d3dc28bdc72312b13de0a13e63e9125f1883f6123724e09288ae4e82039c",
+    "bytes": 51302,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  },
+  {
+    "original": "/home/ubuntu/Just-Dashboard-network-dns-filter-inventory-ui/frontend/test-results/network-dns-filters-techni-d7a68--filter-reading-fits-1720px-chromium/native-filters-technitium-1720.png",
+    "name": "native-filters-technitium-1720.png",
+    "sha256": "52aa371bbead308531e0afb702584ec58a247a48d77e022d882f8ab0e48e889e",
+    "bytes": 125087,
+    "scope": "corrected wait and actual sheet viewport bounds; mocked native metadata"
+  }
+]

@@ -87,6 +87,8 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   for other paths; direct comparisons require named destinations and a disclosure acknowledgment.
   Administrators can connect supported native AdGuard Home, Pi-hole or Technitium engines read-only
   by default, inspect their separate configured/runtime evidence and review supported policy changes.
+  Native filter readings show redacted subscription origins, custom-rule metadata and native group
+  memberships. Failed reads retain dated evidence; configured counts do not prove client filtering.
   Reviewed controls include exact A/AAAA local overrides, supported unsigned Technitium primary-zone
   records with explicit TTL, and existing Pi-hole client group assignments, including no memberships.
   Unsupported records remain visible; fresh selected native policy is checked before apply.

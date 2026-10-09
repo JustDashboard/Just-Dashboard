@@ -59,6 +59,9 @@ redacted subscription origins, IDs, counts/update metadata, custom-rule fingerpr
 native group memberships. Configured inventory, native status, unavailable/manual/app scope and
 unmeasured client decisions stay separate. Failed reads retain dated same-owner data; changed
 connection identity clears it. Unknown sections carry no zero-policy count or healthy verdict.
+The [filter UI acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui-acceptance.md)
+keeps its production build, strict decoder, browser captures and actual native metadata proofs
+separately attributed.
 Its [source-matched build, 13 interaction cases and phone/desktop inspection](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-services-ui-acceptance.md)
 pass, as do the [combined reachable checks](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
 Broader P17 acceptance remains open.

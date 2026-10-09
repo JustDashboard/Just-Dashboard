@@ -130,6 +130,11 @@ original AdGuard failure separately attributed. It verifies empty subscriptions 
 local-rule metadata persistence; it does not establish loaded subscription content or effective
 client filtering.
 
+The [assembled filter UI acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui-acceptance.md)
+separately records its source-matched production build, strict decoder checks, reachable browser
+cases and settled phone/desktop captures. Browser fixture metadata does not establish native
+subscription loading or a client filtering decision.
+
 ## Reviewed records and client groups
 
 The optional `record` request is `{name, type, value, ttl?}`. `name` is a complete lower-case DNS

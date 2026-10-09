@@ -4,7 +4,8 @@ The bounded read-only filter inventory passes focused service/private API checks
 AdGuard Home, Pi-hole and Technitium owned-engine acceptance. This proves native configured
 metadata and local-rule persistence, not subscription loading, compiled rules or effective client
 filtering. Filter edits, manual/app rule contents and broader P17 acceptance remain open. The
-matching frontend is a separate integration task and is not validated by these backend records.
+matching frontend has [separate assembled acceptance](../../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-filter-ui-acceptance.md);
+these backend records do not validate its browser behavior.
 
 ## Frozen sources and records
 
