@@ -496,7 +496,21 @@ function ReviewedSnapshot({ title, value }: { title: string; value: DNSServiceSn
             />
             <ReviewDetail
               label="Native selected filter"
-              value={value.selectedFilter.present ? "Present" : "Absent"}
+              value={
+                value.selectedFilter.exact > 1
+                  ? "Ambiguous · multiple exact matches"
+                  : value.selectedFilter.present
+                    ? "Present"
+                    : value.selectedFilter.owners > 0
+                      ? "No exact match · another native target policy exists"
+                      : "Absent"
+              }
+            />
+            <ReviewDetail label="Native target owners" value={value.selectedFilter.owners} />
+            <ReviewDetail label="Exact native matches" value={value.selectedFilter.exact} />
+            <ReviewDetail
+              label="Native filter inventory"
+              value={value.selectedFilter.inventoryCount}
             />
             {value.selectedFilter.enabled !== undefined && (
               <ReviewDetail

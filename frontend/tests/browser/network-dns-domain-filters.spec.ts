@@ -82,7 +82,7 @@ for (const disposition of ["deny", "allow"] as const) {
       "Unreported",
     ])
     expect(applies(control)).toHaveLength(1)
-    await expect(applyReview(page)).toBeDisabled()
+    await expect(applyReview(page)).toHaveCount(0)
   })
 }
 
@@ -165,6 +165,9 @@ test("unknown native groups hold a Pi-hole filter draft after refresh", async ({
   const control = await mockDNSServicePage(page, { engine: "pihole" })
   configuredGroups(control)
   await draft(page)
+  await sheet(page)
+    .getByRole("checkbox", { name: /Default filtering group · ID 0/ })
+    .check()
   control.view.snapshot!.appClientEvidence.state = "unknown"
   control.view.snapshot!.filterGroups = []
   await sheet(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
@@ -173,7 +176,56 @@ test("unknown native groups hold a Pi-hole filter draft after refresh", async ({
     "filter.example.test",
   )
   await expect(sheet(page).getByText(/Refresh the native group inventory/)).toBeVisible()
+  await expect(
+    sheet(page).getByText("Selected native group IDs: 0", { exact: false }),
+  ).toBeVisible()
+  await expect(
+    sheet(page).getByRole("button", { name: /Remove unavailable group ID/ }),
+  ).toHaveCount(0)
   expect(control.mutations).toEqual([])
+})
+
+test("a disappeared selected group remains correctable without losing the filter draft", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page, { engine: "pihole" })
+  configuredGroups(control)
+  await draft(page)
+  await sheet(page).getByLabel("Filter disposition", { exact: true }).click()
+  await page.getByRole("option", { name: "Allow", exact: true }).click()
+  await sheet(page)
+    .getByRole("checkbox", { name: /Default filtering group · ID 0/ })
+    .check()
+  control.view.snapshot!.filterGroups = control.view.snapshot!.filterGroups.filter(
+    (group) => group.id !== 0,
+  )
+  await sheet(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
+  const remove = sheet(page).getByRole("button", {
+    name: "Remove unavailable group ID 0",
+    exact: true,
+  })
+  await expect(remove).toBeVisible()
+  await createReview(page).click()
+  await expect(
+    sheet(page).getByRole("alert").filter({ hasText: "Check the native change fields" }),
+  ).toBeFocused()
+  expect(control.mutations).toEqual([])
+  await expect(sheet(page).getByLabel("Filter domain", { exact: true })).toHaveValue(
+    "filter.example.test",
+  )
+  await expect(sheet(page).getByLabel("Filter disposition", { exact: true })).toHaveText("Allow")
+  await remove.click()
+  await expect(remove).toHaveCount(0)
+  await expect(
+    sheet(page).getByRole("group", { name: "Filter group memberships", exact: true }),
+  ).toBeFocused()
+  await createReview(page).click()
+  expect(control.mutations).toHaveLength(1)
+  expect(control.mutations[0].body).toEqual({
+    action: "filter_add",
+    filter: { domain: "filter.example.test", disposition: "allow", match: "exact", groups: [] },
+  })
+  expect(applies(control)).toEqual([])
 })
 
 test("read-only domain controls cannot create a review", async ({ page }) => {
@@ -238,6 +290,52 @@ for (const failure of [
     ).toBeVisible()
     expect(applies(control)).toEqual([])
     expect(control.reads).toContain("/network/dns/services/changes/change-fixture/current")
+  })
+}
+
+for (const ambiguity of ["duplicate", "other-target"] as const) {
+  test(`uncertain native readback labels ${ambiguity} policy without claiming absence`, async ({
+    page,
+  }) => {
+    const control = await mockDNSServicePage(page, { engine: "pihole" })
+    const change = dnsPolicyChange(
+      {
+        action: "filter_remove",
+        filter: { domain: "filter.example.test", disposition: "deny", match: "exact" },
+      },
+      control.view.connection,
+      control.view.snapshot,
+    )
+    change.state = "needs_review"
+    change.after = structuredClone(change.before!)
+    const selected = change.after.selectedFilter!
+    selected.present = false
+    if (ambiguity === "duplicate") selected.exact = selected.owners = 2
+    else {
+      selected.exact = 0
+      delete selected.enabled
+      delete selected.groups
+      delete selected.ruleFingerprint
+      selected.comment = null
+      selected.commentReported = false
+    }
+    control.changes = [change]
+    await openInventory(page)
+    await sheet(page)
+      .getByRole("button", { name: "Read DNS change change-fixture", exact: true })
+      .click()
+    await expect(detail(sheet(page), "Native selected filter")).toHaveText([
+      "Present",
+      ambiguity === "duplicate"
+        ? "Ambiguous · multiple exact matches"
+        : "No exact match · another native target policy exists",
+    ])
+    await expect(detail(sheet(page), "Exact native matches")).toHaveText([
+      "1",
+      ambiguity === "duplicate" ? "2" : "0",
+    ])
+    await expect(applyReview(page)).toHaveCount(0)
+    expect(applies(control)).toEqual([])
   })
 }
 

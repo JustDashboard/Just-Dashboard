@@ -58,7 +58,10 @@ Custom-domain controls in the same policy form add `filter_add` and `filter_remo
 Pi-hole. The engine fixes the match: AdGuard covers the domain and its subdomains, while Pi-hole
 matches the exact domain. Pi-hole additions use explicit existing native memberships, including
 `[]` and ID zero; removals omit replacement groups. Unknown native group inventory holds additions.
-Retained reviews show selected presence, native enabled/groups/comment metadata and configured
+A selected group absent from a configured refresh stays in the draft until explicitly removed;
+the removal returns focus to the membership fieldset and preserves the domain and disposition.
+Retained reviews distinguish absent, ambiguous and other-target policy with owner/exact counts,
+and show native enabled/groups/comment metadata and configured
 evidence before/readback. Full selected fingerprints and metadata participate in current-read and
 open-confirmation checks; configured rules do not establish precedence or measured client filtering.
 Technitium custom-domain controls remain unsupported. Matching browser/native assembled acceptance

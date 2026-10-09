@@ -110,6 +110,10 @@ function DomainFilterForm({
     memberships && view.snapshot?.appClientEvidence.state !== "configured"
       ? "Refresh the native group inventory before reviewing a domain filter."
       : undefined
+  const unavailableGroups =
+    memberships && !groupProblem
+      ? groups.filter((id) => !nativeGroups.some((group) => group.id === id))
+      : []
   const held = problem ?? groupProblem
   const fields = {
     domain: { label: "Filter domain", id: `${id}-domain` },
@@ -129,8 +133,9 @@ function DomainFilterForm({
           disposition,
           ...(memberships ? { groups } : {}),
         })
-        if (memberships && groups.some((id) => !nativeGroups.some((group) => group.id === id)))
-          result.errors.groups = "Choose groups still present in the current native reading."
+        if (unavailableGroups.length)
+          result.errors.groups =
+            "Remove selected IDs absent from the current native group inventory."
         setErrors(result.errors)
         if (result.request && !Object.values(result.errors).some(Boolean))
           void onStage(result.request)
@@ -188,6 +193,7 @@ function DomainFilterForm({
           id={`${id}-groups`}
           tabIndex={-1}
           className="min-w-0 space-y-2 focus-ring"
+          aria-invalid={Boolean(errors.groups)}
           aria-describedby={errors.groups ? `${id}-groups-error` : undefined}
         >
           <legend className="text-body font-medium">Filter group memberships</legend>
@@ -222,6 +228,25 @@ function DomainFilterForm({
                 </span>
               </span>
             </label>
+          ))}
+          {unavailableGroups.map((groupId) => (
+            <div key={groupId} className="min-w-0 space-y-2 rounded-md border p-3">
+              <p className="text-body break-words">
+                Selected group ID {groupId} is absent from the current native inventory.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={Boolean(held) || busy}
+                onClick={() => {
+                  setGroups((prior) => prior.filter((value) => value !== groupId))
+                  setErrors((prior) => ({ ...prior, groups: undefined }))
+                  document.getElementById(`${id}-groups`)?.focus()
+                }}
+              >
+                Remove unavailable group ID {groupId}
+              </Button>
+            </div>
           ))}
           <p className="text-hint text-muted-foreground">
             {groups.length

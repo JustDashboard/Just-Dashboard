@@ -116,8 +116,10 @@ owner read suspends its filter poll. These reads do not stage or apply a filter 
 Reviewed custom-domain forms use the closed `network-dns-service-policy` validator and retained
 service DTO reader. Engine-specific suffix/exact matching is explicit; raw rule syntax is not a
 draft field. Pi-hole add drafts preserve empty memberships and native zero, require configured
-native groups and refuse disappeared group IDs after refresh. Refused reviews retain draft values.
-Selected-filter evidence distinguishes absence, native false/empty/null and unreported fields.
+native groups and refuse disappeared group IDs after refresh. A configured missing ID has an
+explicit removal control; unknown inventory retains selections and holds review. Refused reviews
+retain draft values. Selected-filter evidence distinguishes absence, ambiguous or other-target
+policy, native false/empty/null and unreported fields; owner and exact-match counts remain visible.
 Ordinary inventory cannot replace `/changes/{id}/current`; changed selected metadata or fingerprints
 hold apply even if a top-level digest is reused. Open confirmations also compare the complete
 immutable selected-filter baseline. Native readback shows configured policy rather than measured
