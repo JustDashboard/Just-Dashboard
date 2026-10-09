@@ -110,6 +110,7 @@ type Service struct {
 
 	sampler             *Sampler
 	vpn                 *VPNStore
+	wg                  *wgRecord
 	flows               *flowSampler
 	independentRecovery bool
 	recoveryInstalled   bool
@@ -183,12 +184,14 @@ func New(opts Options) *Service {
 	gatewayListDir = filepath.Join(opts.Paths.Dir, "lists")
 	s.sampler = newSampler(opts.DB, opts.Log, opts.SampleEvery, opts.Retention)
 	s.vpn = newVPNStore(opts.DB, opts.Seal, opts.Open)
+	s.wg = newWGRecord(opts.DB, opts.Log, opts.Retention)
 	s.flows = newFlowSampler()
 	return s
 }
 
-// Start begins sampling interface counters. It returns once the first read
-// has been taken, so the first page load already has a rate to show.
+// Start begins sampling interface counters and WireGuard's peers. It returns
+// once the first interface read has been taken, so the first page load
+// already has a rate to show.
 func (s *Service) Start(ctx context.Context) {
 	if s.independentRecovery {
 		recovery, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
@@ -198,11 +201,13 @@ func (s *Service) Start(ctx context.Context) {
 		cancel()
 	}
 	s.sampler.Start(ctx)
+	s.wg.start(ctx)
 }
 
-// Stop ends the sampler.
+// Stop ends the samplers.
 func (s *Service) Stop() {
 	s.sampler.Stop()
+	s.wg.stopLoop()
 }
 
 // Sampler is the interface counter recorder, for the traffic routes.

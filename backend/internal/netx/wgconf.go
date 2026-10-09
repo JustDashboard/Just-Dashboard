@@ -223,6 +223,17 @@ func (s *wgSection) set(key, value string) {
 	s.add(key, value)
 }
 
+// remove drops every line of a key.
+func (s *wgSection) remove(key string) {
+	kept := s.body[:0]
+	for _, l := range s.body {
+		if l.key != key {
+			kept = append(kept, l)
+		}
+	}
+	s.body = kept
+}
+
 // add appends a setting after the section's last setting, ahead of any
 // comments that trail it, so a note written at the bottom of a block stays at
 // the bottom.

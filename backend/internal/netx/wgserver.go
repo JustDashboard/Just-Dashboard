@@ -43,6 +43,9 @@ type WGServerRequest struct {
 	ExitNode bool           `json:"exitNode"`
 	MTU      int            `json:"mtu"`
 	IPv6     *WGIPv6Request `json:"ipv6,omitempty"`
+	// Avoid are networks an automatic allocation must not pick: the shared
+	// IPAM plan's held reservations, which only the API layer can read.
+	Avoid []netip.Prefix `json:"-"`
 }
 
 // WGServerResult is a created interface and what the caller should know
@@ -50,6 +53,9 @@ type WGServerRequest struct {
 type WGServerResult struct {
 	Interface WGInterface `json:"interface"`
 	Warnings  []string    `json:"warnings"`
+	// EndpointEvidence is what this host can tell about the address clients
+	// were given, read once the tunnel exists.
+	EndpointEvidence *WGEndpointEvidence `json:"endpointEvidence,omitempty"`
 }
 
 // wgHostPrefix is a network the host already has, and where it comes from, so a
@@ -492,7 +498,11 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 		}
 	}
 
-	subnet, err := s.wgSubnetFor(req.Subnet, host, wgSubnetsInConfs(confs))
+	taken := wgSubnetsInConfs(confs)
+	for _, p := range req.Avoid {
+		taken = append(taken, wgHostPrefix{prefix: p.Masked(), what: "held in the shared IPAM plan"})
+	}
+	subnet, err := s.wgSubnetFor(req.Subnet, host, taken)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +531,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, req WGServerRequest, acto
 				}
 			}
 		}
-		subnet6, err = wgIPv6Subnet(req.IPv6.Subnet, host, wgSubnetsInConfs(confs))
+		subnet6, err = wgIPv6Subnet(req.IPv6.Subnet, host, taken)
 		if err != nil {
 			return nil, err
 		}
@@ -613,42 +623,35 @@ SaveConfig = false
 	}
 
 	unit := "wg-quick@" + name
-	undo := func() {
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		// Best effort by design: this runs because something already failed,
-		// and the unit may never have been enabled or started.
-		_, _ = run(cleanup, "systemctl", "disable", "--now", unit)
-		_ = os.Remove(path)
+	// fail puts the host back and records what that recovery achieved, so a
+	// creation that went wrong is in the tunnel's history with its outcome.
+	fail := func(cause error) (*WGServerResult, error) {
+		s.undoCreate(ctx, name, path, cause, actor)
+		return nil, cause
 	}
 	if _, err := run(ctx, "systemctl", "enable", "--now", unit); err != nil {
-		undo()
-		return nil, fmt.Errorf("starting %s: %w", unit, err)
+		return fail(fmt.Errorf("starting %s: %w", unit, err))
 	}
 
 	if req.ExitNode {
 		networks := []wgExitNetwork{{subnet: subnet, uplink: host.uplink}}
 		if req.IPv6 != nil {
 			if err := wgRefusePeerDrift(ctx, name, parseWGConf(text)); err != nil {
-				undo()
-				return nil, err
+				return fail(err)
 			}
 			fresh, err := wgReadHostState(ctx)
 			if err != nil {
-				undo()
-				return nil, err
+				return fail(err)
 			}
 			v4, err := wgExitUplink(ctx, fresh, name, subnet)
 			if err != nil {
-				undo()
-				return nil, err
+				return fail(err)
 			}
 			networks = []wgExitNetwork{{subnet: subnet, uplink: v4}}
 			if req.IPv6.ExitNode {
 				v6, err := wgExitUplink(ctx, fresh, name, subnet6)
 				if err != nil {
-					undo()
-					return nil, err
+					return fail(err)
 				}
 				networks = append(networks, wgExitNetwork{subnet: subnet6, uplink: v6})
 			}
@@ -660,8 +663,7 @@ SaveConfig = false
 				// device/file would turn a boot-unit warning into a broken exit.
 				warnings = append(warnings, err.Error())
 			} else {
-				undo()
-				return nil, fmt.Errorf("making %s an exit node: %w", name, err)
+				return fail(fmt.Errorf("making %s an exit node: %w", name, err))
 			}
 		}
 	}
@@ -679,7 +681,50 @@ SaveConfig = false
 	if res.Interface.Name == "" {
 		return nil, fmt.Errorf("%s was started but could not be read back", name)
 	}
+	evidence := wgEndpointEvidenceFor(ctx, endpoint, host)
+	res.EndpointEvidence = &evidence
+	if evidence.Warning != "" {
+		res.Warnings = append(res.Warnings, evidence.Warning)
+	}
+	detail := fmt.Sprintf("udp %d, %s", port, subnet)
+	if subnet6.IsValid() {
+		detail += ", " + subnet6.String()
+	}
+	if req.ExitNode {
+		detail += ", exit node"
+	}
+	detail += "; endpoint " + endpoint + " (" + evidence.Verdict + ")"
+	outcome := wgOutcomeOK
+	if len(warnings) > 0 {
+		outcome = wgOutcomeDegraded
+		detail += "; " + strings.Join(warnings, "; ")
+	}
+	s.wg.note(ctx, WGEvent{Iface: name, Kind: "created", Outcome: outcome, Actor: actor, Detail: detail})
 	return res, nil
+}
+
+// undoCreate takes back a creation that failed after its file was written,
+// with an independent context, then reads what is left: a file still there or
+// a unit still running is a degraded recovery, and both are recorded.
+func (s *Service) undoCreate(ctx context.Context, name, path string, cause error, actor string) {
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	unit := "wg-quick@" + name
+	// The unit may never have been enabled or started, so this failing is
+	// not itself a sign of anything; what is left afterwards is checked below.
+	_, _ = run(cleanup, "systemctl", "disable", "--now", unit)
+	var left []string
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		left = append(left, "its file could not be removed: "+err.Error())
+	}
+	if state, _ := run(cleanup, "systemctl", "is-active", unit); strings.TrimSpace(state) == "active" {
+		left = append(left, unit+" is still running")
+	}
+	e := WGEvent{Iface: name, Kind: "create_failed", Outcome: wgOutcomeFailed, Actor: actor, Detail: cause.Error() + "; rolled back"}
+	if len(left) > 0 {
+		e.Outcome, e.Detail = wgOutcomeDegraded, cause.Error()+"; rollback incomplete: "+strings.Join(left, "; ")
+	}
+	s.wg.note(cleanup, e)
 }
 
 // wgSubnetFor is the requested network or a free default, checked against the
@@ -748,7 +793,7 @@ func wgRefuseClientPath(ctx context.Context, client, iface, verb string) error {
 
 // SetWireGuardUp starts or stops a tunnel's unit. Stopping leaves it enabled:
 // "down" is for now, and the tunnel is back at the next boot.
-func (s *Service) SetWireGuardUp(ctx context.Context, iface string, up bool, client string) error {
+func (s *Service) SetWireGuardUp(ctx context.Context, iface string, up bool, client, actor string) error {
 	if err := validWGName(iface); err != nil {
 		return err
 	}
@@ -769,9 +814,15 @@ func (s *Service) SetWireGuardUp(ctx context.Context, iface string, up bool, cli
 			return err
 		}
 	}
+	kind := "down"
+	if up {
+		kind = "up"
+	}
 	if _, err := run(ctx, "systemctl", action, "wg-quick@"+iface); err != nil {
+		s.wg.note(ctx, WGEvent{Iface: iface, Kind: kind, Outcome: wgOutcomeFailed, Actor: actor, Detail: err.Error()})
 		return fmt.Errorf("%s %s: %w", action, iface, err)
 	}
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: kind, Actor: actor})
 	return nil
 }
 
@@ -787,6 +838,27 @@ func (s *Service) SetWireGuardExit(ctx context.Context, iface string, on bool, a
 func (s *Service) SetWireGuardExitFamilies(ctx context.Context, iface string, on bool, ipv6 *bool, actor string) (*WGServerResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	res, err := s.setWireGuardExitFamilies(ctx, iface, on, ipv6, actor)
+	detail := "off"
+	if on {
+		detail = "IPv4 on, IPv6 choice kept"
+		if ipv6 != nil && *ipv6 {
+			detail = "IPv4 and IPv6 on"
+		} else if ipv6 != nil {
+			detail = "IPv4 on, IPv6 off"
+		}
+	}
+	if err != nil {
+		if !errors.Is(err, ErrNotManaged) && !errors.Is(err, ErrNotFound) {
+			s.wg.note(ctx, WGEvent{Iface: iface, Kind: "exit", Outcome: wgOutcomeFailed, Actor: actor, Detail: detail + ": " + err.Error()})
+		}
+		return nil, err
+	}
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: "exit", Actor: actor, Detail: detail})
+	return res, nil
+}
+
+func (s *Service) setWireGuardExitFamilies(ctx context.Context, iface string, on bool, ipv6 *bool, actor string) (*WGServerResult, error) {
 	conf, err := s.managedWG(iface)
 	if err != nil {
 		return nil, err
@@ -958,7 +1030,7 @@ func (s *Service) setWGExitNetworks(ctx context.Context, iface string, networks 
 
 // RemoveWireGuard stops and removes a tunnel the dashboard made. Its file is
 // moved aside, not deleted: the server's private key exists only there.
-func (s *Service) RemoveWireGuard(ctx context.Context, iface, client string) error {
+func (s *Service) RemoveWireGuard(ctx context.Context, iface, client, actor string) error {
 	if err := validWGName(iface); err != nil {
 		return err
 	}
@@ -973,8 +1045,22 @@ func (s *Service) RemoveWireGuard(ctx context.Context, iface, client string) err
 	if err := wgRefuseClientPath(ctx, client, iface, "removed"); err != nil {
 		return err
 	}
+	var exits []string
+	if sp, err := s.loadSpec(); err == nil {
+		if wgExitEnabled(sp, iface, false) {
+			exits = append(exits, "IPv4")
+		}
+		if wgExitEnabled(sp, iface, true) {
+			exits = append(exits, "IPv6")
+		}
+	}
+	degraded := func(err error) error {
+		s.wg.note(ctx, WGEvent{Iface: iface, Kind: "removed", Outcome: wgOutcomeDegraded, Actor: actor, Detail: err.Error()})
+		return err
+	}
 	unit := "wg-quick@" + iface
 	if _, err := run(ctx, "systemctl", "disable", "--now", unit); err != nil {
+		s.wg.note(ctx, WGEvent{Iface: iface, Kind: "removed", Outcome: wgOutcomeFailed, Actor: actor, Detail: err.Error()})
 		return fmt.Errorf("stopping %s: %w", unit, err)
 	}
 	path, err := s.wgConfPath(iface)
@@ -983,22 +1069,34 @@ func (s *Service) RemoveWireGuard(ctx context.Context, iface, client string) err
 	}
 	dir := filepath.Join(s.paths.WireGuard, wgRemovedDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("%s was stopped, but its file could not be moved aside: %w", iface, err)
+		return degraded(fmt.Errorf("%s was stopped, but its file could not be moved aside: %w", iface, err))
 	}
-	dest := filepath.Join(dir, fmt.Sprintf("%s.conf.%d", iface, wgNow().Unix()))
+	file := fmt.Sprintf("%s.conf.%d", iface, wgNow().Unix())
+	dest := filepath.Join(dir, file)
 	if err := os.Rename(path, dest); err != nil {
-		return fmt.Errorf("%s was stopped, but its file could not be moved aside: %w", iface, err)
+		return degraded(fmt.Errorf("%s was stopped, but its file could not be moved aside: %w", iface, err))
 	}
 	if err := os.Chmod(dest, 0o600); err != nil {
-		return fmt.Errorf("securing %s: %w", dest, err)
+		return degraded(fmt.Errorf("securing %s: %w", dest, err))
 	}
 	if err := s.vpn.DeleteInterface(ctx, iface); err != nil {
-		return err
+		return degraded(err)
 	}
 	if err := s.setWGExit(ctx, iface, "", "", false, ""); err != nil {
-		return fmt.Errorf("%s was removed, but its NAT entry could not be: %w", iface, err)
+		return degraded(fmt.Errorf("%s was removed, but its NAT entry could not be: %w", iface, err))
 	}
+	detail := "archived as " + file
+	if len(exits) > 0 {
+		detail += "; its " + strings.Join(exits, " and ") + " exit was withdrawn"
+	}
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: "removed", Actor: actor, Detail: detail})
 	return nil
+}
+
+// NoteWireGuard records an outcome the API layer owns, such as the firewall
+// rule a creation opened, in a tunnel's lifecycle history.
+func (s *Service) NoteWireGuard(ctx context.Context, iface, kind, outcome, detail, actor string) {
+	s.wg.note(ctx, WGEvent{Iface: iface, Kind: kind, Outcome: outcome, Actor: actor, Detail: detail})
 }
 
 // wgIPForwarding reads a family's forwarding switch.

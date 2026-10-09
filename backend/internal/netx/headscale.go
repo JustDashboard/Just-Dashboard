@@ -39,6 +39,15 @@ type HeadscaleNode struct {
 	LastSeen   int64    `json:"lastSeen"`
 	User       string   `json:"user"`
 	ForcedTags []string `json:"forcedTags"`
+	ValidTags  []string `json:"validTags"`
+	// Expiry is when the node's key expires, unix seconds; zero for none.
+	Expiry int64 `json:"expiry"`
+	// AvailableRoutes are the subnets (and exit pair) the node advertises;
+	// ApprovedRoutes those the control server routes to it. RoutesKnown is
+	// false when this Headscale reported neither, so empty lists say nothing.
+	AvailableRoutes []string `json:"availableRoutes"`
+	ApprovedRoutes  []string `json:"approvedRoutes"`
+	RoutesKnown     bool     `json:"routesKnown"`
 }
 
 // HeadscaleUser is an owner of devices.
@@ -91,22 +100,52 @@ func (f *headscaleFlexTime) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-type headscaleNodeJSON struct {
-	ID          headscaleFlexString `json:"id"`
-	Name        string              `json:"name"`
-	GivenName   string              `json:"givenName"`
-	IPAddresses []string            `json:"ipAddresses"`
-	Online      bool                `json:"online"`
-	LastSeen    headscaleFlexTime   `json:"lastSeen"`
-	User        struct {
-		Name string `json:"name"`
-	} `json:"user"`
-	ForcedTags []string `json:"forcedTags"`
+// headscaleObject is one JSON object whose keys are matched without regard
+// to case or underscores. The CLI prints its protobuf messages through Go's
+// encoding/json, so the field names are the generated snake_case ones
+// (given_name, ip_addresses); other builds and wrappers print camelCase.
+// Both name the same field.
+type headscaleObject map[string]json.RawMessage
+
+func headscaleKey(s string) string { return strings.ToLower(strings.ReplaceAll(s, "_", "")) }
+
+// get decodes the field called name into v, reporting whether it was there.
+func (o headscaleObject) get(name string, v any) bool {
+	want := headscaleKey(name)
+	for k, raw := range o {
+		if headscaleKey(k) == want {
+			return json.Unmarshal(raw, v) == nil
+		}
+	}
+	return false
 }
 
-type headscaleUserJSON struct {
-	ID   headscaleFlexString `json:"id"`
-	Name string              `json:"name"`
+func headscaleNodeOf(o headscaleObject) HeadscaleNode {
+	var (
+		id               headscaleFlexString
+		lastSeen, expiry headscaleFlexTime
+		user             headscaleObject
+	)
+	n := HeadscaleNode{}
+	o.get("id", &id)
+	o.get("name", &n.Name)
+	o.get("given_name", &n.GivenName)
+	o.get("ip_addresses", &n.IPAddresses)
+	o.get("online", &n.Online)
+	o.get("last_seen", &lastSeen)
+	o.get("expiry", &expiry)
+	o.get("forced_tags", &n.ForcedTags)
+	o.get("valid_tags", &n.ValidTags)
+	if o.get("user", &user) {
+		user.get("name", &n.User)
+	}
+	available := o.get("available_routes", &n.AvailableRoutes)
+	approved := o.get("approved_routes", &n.ApprovedRoutes)
+	n.RoutesKnown = available || approved
+	n.ID, n.LastSeen, n.Expiry = string(id), int64(lastSeen), int64(expiry)
+	n.IPAddresses, n.ForcedTags, n.ValidTags = vpnNonNil(n.IPAddresses), vpnNonNil(n.ForcedTags), vpnNonNil(n.ValidTags)
+	n.AvailableRoutes, n.ApprovedRoutes = vpnNonNil(n.AvailableRoutes), vpnNonNil(n.ApprovedRoutes)
+	return n
 }
 
 // Headscale reads a Headscale binary on this host. Without one, it is a view
@@ -153,17 +192,14 @@ func fillHeadscale(ctx context.Context, v *HeadscaleView, name string, lead []st
 	if err != nil {
 		problems = append(problems, "nodes: "+err.Error())
 	} else {
-		var nodes []headscaleNodeJSON
+		var nodes []headscaleObject
 		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &nodes); err != nil {
 			problems = append(problems, "nodes: headscale printed something unreadable")
 		}
 		for _, n := range nodes {
-			v.Nodes = append(v.Nodes, HeadscaleNode{
-				ID: string(n.ID), Name: n.Name, GivenName: n.GivenName,
-				IPAddresses: vpnNonNil(n.IPAddresses), Online: n.Online, LastSeen: int64(n.LastSeen),
-				User: n.User.Name, ForcedTags: vpnNonNil(n.ForcedTags),
-			})
+			v.Nodes = append(v.Nodes, headscaleNodeOf(n))
 		}
+		headscaleLegacyRoutes(ctx, v, name, argv)
 	}
 	sort.Slice(v.Nodes, func(i, j int) bool {
 		a, b := v.Nodes[i], v.Nodes[j]
@@ -177,14 +213,18 @@ func fillHeadscale(ctx context.Context, v *HeadscaleView, name string, lead []st
 	if err != nil {
 		problems = append(problems, "users: "+err.Error())
 	} else {
-		var users []headscaleUserJSON
+		var users []headscaleObject
 		if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &users); err != nil {
 			problems = append(problems, "users: headscale printed something unreadable")
 		}
 		for _, u := range users {
-			hu := HeadscaleUser{ID: string(u.ID), Name: u.Name}
+			var id headscaleFlexString
+			hu := HeadscaleUser{}
+			u.get("id", &id)
+			u.get("name", &hu.Name)
+			hu.ID = string(id)
 			for _, n := range v.Nodes {
-				if n.User == u.Name {
+				if n.User == hu.Name {
 					hu.Nodes++
 				}
 			}
@@ -193,5 +233,57 @@ func fillHeadscale(ctx context.Context, v *HeadscaleView, name string, lead []st
 	}
 	if len(problems) > 0 {
 		v.Error = strings.Join(problems, "; ")
+	}
+}
+
+// headscaleLegacyRoutes reads routes from `routes list`, the command
+// Headscale had before 0.26 moved a node's routes onto the node itself. It
+// runs only when no node reported routes of its own; a Headscale that has no
+// such command answers with an error, which leaves the routes unknown rather
+// than reported as none.
+func headscaleLegacyRoutes(ctx context.Context, v *HeadscaleView, name string, argv func(...string) []string) {
+	for _, n := range v.Nodes {
+		if n.RoutesKnown {
+			return
+		}
+	}
+	if len(v.Nodes) == 0 {
+		return
+	}
+	out, err := run(ctx, name, argv("routes", "list", "-o", "json")...)
+	if err != nil {
+		return
+	}
+	var routes []headscaleObject
+	if json.Unmarshal([]byte(strings.TrimSpace(out)), &routes) != nil {
+		return
+	}
+	byID := map[string]int{}
+	for i, n := range v.Nodes {
+		byID[n.ID] = i
+	}
+	for i := range v.Nodes {
+		v.Nodes[i].RoutesKnown = true
+	}
+	for _, r := range routes {
+		var node headscaleObject
+		var nodeID headscaleFlexString
+		var prefix string
+		var advertised, enabled bool
+		if !r.get("prefix", &prefix) || !r.get("node", &node) || !node.get("id", &nodeID) {
+			continue
+		}
+		r.get("advertised", &advertised)
+		r.get("enabled", &enabled)
+		i, ok := byID[string(nodeID)]
+		if !ok {
+			continue
+		}
+		if advertised {
+			v.Nodes[i].AvailableRoutes = append(v.Nodes[i].AvailableRoutes, prefix)
+		}
+		if enabled {
+			v.Nodes[i].ApprovedRoutes = append(v.Nodes[i].ApprovedRoutes, prefix)
+		}
 	}
 }

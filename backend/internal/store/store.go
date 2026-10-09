@@ -21,7 +21,7 @@ type Store struct {
 // whether a pre-rename data directory should be adopted.
 const DatabaseFile = "vpsd.db"
 
-const schema = networkProbeSchema + networkIPAMSchema + `
+const schema = networkProbeSchema + networkIPAMSchema + networkWireGuardSchema + `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
@@ -1330,6 +1330,11 @@ var addedColumns = []struct{ table, column, spec string }{
 	// Inode exhaustion fills a filesystem that reports free space, and is
 	// invisible in a used-bytes percentage.
 	{"metric_mount_samples", "inodes_percent", "REAL NOT NULL DEFAULT 0"},
+
+	// A device's own routes (its AllowedIPs) live only in its sealed client
+	// configuration; this unsealed copy lets an edit start from them. Empty for
+	// a peer made before it existed, which reads as unknown, never as none.
+	{"network_vpn_clients", "client_routes", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

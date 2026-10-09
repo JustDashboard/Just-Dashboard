@@ -48,6 +48,8 @@ type TailscaleView struct {
 	PrefsReadable  bool     `json:"prefsReadable"`
 	ControlServer  string   `json:"controlServer"`
 	ControlURL     string   `json:"controlUrl"`
+	// Approval is how far the tailnet grants what this server advertises.
+	Approval TSApproval `json:"approval"`
 	// ClientOnTailnet is the dashboard's reader arriving through the tailnet,
 	// which is what makes everything here something that must not be broken.
 	ClientOnTailnet bool         `json:"clientOnTailnet"`
@@ -76,7 +78,33 @@ type TSSelf struct {
 	// PrimaryRoutes are the subnets the tailnet routes to this server.
 	PrimaryRoutes []string `json:"primaryRoutes"`
 	Relay         string   `json:"relay"`
+	// KeyExpiry is when this node's key expires, unix seconds; zero when the
+	// status gives none (expiry disabled for the machine). An expired key takes
+	// the server off the tailnet, and with it a dashboard reached that way.
+	KeyExpiry int64 `json:"keyExpiry,omitempty"`
 }
+
+// TSApproval is the tailnet's answer to what this server advertises, read
+// from its own status: advertising is asking, and only an administrator, an
+// auto-approver or the control server's policy grants it. The policy itself
+// is not readable from a node, so this says what is served, not why.
+type TSApproval struct {
+	// ExitNode is serving (the tailnet offers this server as an exit) or
+	// not_serving (advertised, not granted); empty when not advertised.
+	ExitNode string            `json:"exitNode,omitempty"`
+	Routes   []TSRouteApproval `json:"routes"`
+}
+
+// TSRouteApproval is one advertised subnet: serving (this server is its
+// primary router) or not_serving (awaiting approval, or another router of the
+// same subnet is primary for it).
+type TSRouteApproval struct {
+	Route string `json:"route"`
+	State string `json:"state"`
+}
+
+// tsKeyExpiryWarning is how far ahead an expiring node key is called out.
+const tsKeyExpiryWarning = 14 * 24 * time.Hour
 
 // TSPeer is another device on the tailnet.
 type TSPeer struct {
@@ -121,25 +149,26 @@ type TSPrefs struct {
 }
 
 type tsNodeJSON struct {
-	ID             string    `json:"ID"`
-	HostName       string    `json:"HostName"`
-	DNSName        string    `json:"DNSName"`
-	OS             string    `json:"OS"`
-	UserID         int64     `json:"UserID"`
-	TailscaleIPs   []string  `json:"TailscaleIPs"`
-	CurAddr        string    `json:"CurAddr"`
-	Relay          string    `json:"Relay"`
-	RxBytes        uint64    `json:"RxBytes"`
-	TxBytes        uint64    `json:"TxBytes"`
-	LastSeen       time.Time `json:"LastSeen"`
-	LastHandshake  time.Time `json:"LastHandshake"`
-	Online         bool      `json:"Online"`
-	Active         bool      `json:"Active"`
-	ExitNode       bool      `json:"ExitNode"`
-	ExitNodeOption bool      `json:"ExitNodeOption"`
-	Expired        bool      `json:"Expired"`
-	PrimaryRoutes  []string  `json:"PrimaryRoutes"`
-	Tags           []string  `json:"Tags"`
+	ID             string     `json:"ID"`
+	HostName       string     `json:"HostName"`
+	DNSName        string     `json:"DNSName"`
+	OS             string     `json:"OS"`
+	UserID         int64      `json:"UserID"`
+	TailscaleIPs   []string   `json:"TailscaleIPs"`
+	CurAddr        string     `json:"CurAddr"`
+	Relay          string     `json:"Relay"`
+	RxBytes        uint64     `json:"RxBytes"`
+	TxBytes        uint64     `json:"TxBytes"`
+	LastSeen       time.Time  `json:"LastSeen"`
+	LastHandshake  time.Time  `json:"LastHandshake"`
+	Online         bool       `json:"Online"`
+	Active         bool       `json:"Active"`
+	ExitNode       bool       `json:"ExitNode"`
+	ExitNodeOption bool       `json:"ExitNodeOption"`
+	Expired        bool       `json:"Expired"`
+	PrimaryRoutes  []string   `json:"PrimaryRoutes"`
+	Tags           []string   `json:"Tags"`
+	KeyExpiry      *time.Time `json:"KeyExpiry"`
 }
 
 type tsStatusJSON struct {
@@ -174,7 +203,7 @@ type tsPrefsJSON struct {
 func (s *Service) Tailscale(ctx context.Context, client string) (*TailscaleView, error) {
 	v := &TailscaleView{
 		Health: []string{}, Peers: []TSPeer{}, Warnings: []string{},
-		Prefs: TSPrefs{AdvertiseRoutes: []string{}},
+		Prefs: TSPrefs{AdvertiseRoutes: []string{}}, Approval: TSApproval{Routes: []TSRouteApproval{}},
 	}
 	if !has("tailscale") {
 		return v, nil
@@ -194,6 +223,16 @@ func (s *Service) Tailscale(ctx context.Context, client string) (*TailscaleView,
 		v.Warnings = append(v.Warnings, "The preferences could not be read: "+err.Error())
 	} else {
 		v.PrefsReadable = true
+		v.Approval = tsApprovalOf(v)
+	}
+	if v.Self != nil && v.Self.KeyExpiry > 0 {
+		expiry := time.Unix(v.Self.KeyExpiry, 0)
+		switch until := expiry.Sub(wgNow()); {
+		case until <= 0:
+			v.Warnings = append(v.Warnings, "This server's Tailscale key expired on "+expiry.UTC().Format("2 January 2006")+"; it is off the tailnet until it is reauthenticated.")
+		case until <= tsKeyExpiryWarning:
+			v.Warnings = append(v.Warnings, "This server's Tailscale key expires on "+expiry.UTC().Format("2 January 2006")+". When it does the server leaves the tailnet, and a dashboard reached through it goes with it: disable key expiry for this machine on the control server, or reauthenticate it from a shell before then.")
+		}
 	}
 	v.Forwarding = TSForwarding{IPv4: wgIPForwarding("ipv4"), IPv6: wgIPForwarding("ipv6")}
 	v.ClientOnTailnet = tsClientOnTailnet(client, v)
@@ -226,6 +265,9 @@ func parseTailscaleStatus(out string, v *TailscaleView) (*TailscaleView, error) 
 			TailscaleIPs: vpnNonNil(st.Self.TailscaleIPs), Online: st.Self.Online,
 			ExitNodeOption: st.Self.ExitNodeOption, PrimaryRoutes: vpnNonNil(st.Self.PrimaryRoutes),
 			Relay: st.Self.Relay,
+		}
+		if st.Self.KeyExpiry != nil {
+			v.Self.KeyExpiry = vpnUnixOrZero(*st.Self.KeyExpiry)
 		}
 	}
 	for _, n := range st.Peer {
@@ -296,6 +338,36 @@ func tsApplyPrefs(out string, v *TailscaleView) error {
 	v.ControlURL = p.ControlURL
 	v.ControlServer = tsControlServerOf(p.ControlURL)
 	return nil
+}
+
+// tsApprovalOf compares what the preferences advertise with what the
+// tailnet routes to this node.
+func tsApprovalOf(v *TailscaleView) TSApproval {
+	a := TSApproval{Routes: []TSRouteApproval{}}
+	primary := map[netip.Prefix]bool{}
+	exitOption := false
+	if v.Self != nil {
+		exitOption = v.Self.ExitNodeOption
+		for _, raw := range v.Self.PrimaryRoutes {
+			if p, err := netip.ParsePrefix(raw); err == nil {
+				primary[p.Masked()] = true
+			}
+		}
+	}
+	if v.Prefs.AdvertisingExitNode {
+		a.ExitNode = "not_serving"
+		if exitOption {
+			a.ExitNode = "serving"
+		}
+	}
+	for _, raw := range v.Prefs.AdvertiseRoutes {
+		state := "not_serving"
+		if p, err := netip.ParsePrefix(raw); err == nil && primary[p.Masked()] {
+			state = "serving"
+		}
+		a.Routes = append(a.Routes, TSRouteApproval{Route: raw, State: state})
+	}
+	return a
 }
 
 // tsSplitAdvertised separates the exit-node pair (0.0.0.0/0 and ::/0, how

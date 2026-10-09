@@ -32,6 +32,11 @@ type WGExitState struct {
 	Runtime    string     `json:"runtime"`
 	Reason     string     `json:"reason,omitempty"`
 	Capability Capability `json:"capability"`
+	// Translated is the owned masquerade rule's packet counter: a NAT chain
+	// sees only a connection's first packet, so it counts the connections
+	// clients sent out through this exit since the rules were last loaded.
+	// It is measured use of the exit, not proof of reachability beyond it.
+	Translated *uint64 `json:"translated,omitempty"`
 }
 
 type WGFamilies struct {
@@ -195,6 +200,38 @@ func wgCheckExitRules(out string, n NATSpec) error {
 		return fmt.Errorf("owned %s exit lacks matching source/interface masquerade or connection-mark rules", n.Source)
 	}
 	return nil
+}
+
+// wgExitCounter reads the packet counter of an exit's owned masquerade rule.
+func wgExitCounter(out string, n NATSpec) (uint64, bool) {
+	var listing struct {
+		Nftables []struct {
+			Rule *struct {
+				Table   string                       `json:"table"`
+				Chain   string                       `json:"chain"`
+				Comment string                       `json:"comment"`
+				Expr    []map[string]json.RawMessage `json:"expr"`
+			} `json:"rule"`
+		} `json:"nftables"`
+	}
+	if json.Unmarshal([]byte(out), &listing) != nil {
+		return 0, false
+	}
+	for _, object := range listing.Nftables {
+		r := object.Rule
+		if r == nil || r.Table != gatewayTable || r.Chain != "nat_post" || r.Comment != "nat:"+strconv.Itoa(n.ID) {
+			continue
+		}
+		for _, e := range r.Expr {
+			var c struct {
+				Packets *uint64 `json:"packets"`
+			}
+			if raw, ok := e["counter"]; ok && json.Unmarshal(raw, &c) == nil && c.Packets != nil {
+				return *c.Packets, true
+			}
+		}
+	}
+	return 0, false
 }
 
 func wgExpression(expr []map[string]json.RawMessage, kind string) bool {
@@ -533,8 +570,16 @@ func (s *Service) wgFamilyEvidence(ctx context.Context, ifc *WGInterface, conf *
 			case !state.Exit.Capability.Writable:
 				state.Exit.Runtime, state.Exit.Reason = "degraded", state.Exit.Capability.Reason
 			default:
-				if err := wgExitRules(ctx, n); err != nil {
+				out, err := run(ctx, "nft", "-j", "list", "table", "inet", gatewayTable)
+				if err != nil {
+					err = fmt.Errorf("reading owned exit rules: %w", err)
+				} else {
+					err = wgCheckExitRules(out, n)
+				}
+				if err != nil {
 					state.Exit.Runtime, state.Exit.Reason = "unknown", err.Error()
+				} else if count, ok := wgExitCounter(out, n); ok {
+					state.Exit.Translated = &count
 				}
 				for _, chain := range admission.Chains {
 					if chain.Family == family && chain.Needed && chain.Status != "present" {

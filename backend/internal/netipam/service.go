@@ -363,6 +363,31 @@ func (s *Service) CheckUnselectedReservations(ctx context.Context, prefixes []st
 	return nil
 }
 
+// HeldPrefixes are every reservation not yet released, for a native owner's
+// automatic allocation to avoid: it has no requested prefix to check, so it
+// steers around held planning space instead of borrowing it.
+func (s *Service) HeldPrefixes(ctx context.Context) ([]netip.Prefix, error) {
+	if e := s.Ready(); e != nil {
+		return nil, e
+	}
+	reservations, e := listReservations(ctx, s.db)
+	if e != nil {
+		return nil, e
+	}
+	out := []netip.Prefix{}
+	for _, r := range reservations {
+		if r.State == "released" {
+			continue
+		}
+		p, e := Canonical(r.Prefix)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
 // BeginHandoff claims only the planning rows. Native validation, ownership,
 // authorization and audited mutation remain in the caller's existing owner.
 func (s *Service) BeginHandoff(ctx context.Context, ids []string, owner, resource string, prefixes []string) (Handoff, error) {

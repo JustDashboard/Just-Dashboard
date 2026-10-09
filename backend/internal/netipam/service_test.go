@@ -231,11 +231,18 @@ func TestIPAMUnselectedNativePrefixCannotBorrowHeldPlan(t *testing.T) {
 	if e := s.CheckUnselectedReservations(context.Background(), []string{"10.245.0.0/24"}); e != nil {
 		t.Fatal(e)
 	}
+	held, e := s.HeldPrefixes(context.Background())
+	if e != nil || len(held) != 1 || held[0].String() != r.Prefix {
+		t.Fatal("automatic allocation cannot see the held plan", held, e)
+	}
 	if e := s.CheckUnselectedReservations(context.Background(), nil); e != nil {
 		t.Fatal("legacy automatic native allocation changed", e)
 	}
 	if e := s.Release(context.Background(), r.ID); e != nil {
 		t.Fatal(e)
+	}
+	if held, e := s.HeldPrefixes(context.Background()); e != nil || len(held) != 0 {
+		t.Fatal("a released plan still steers automatic allocation", held, e)
 	}
 	if e := s.CheckUnselectedReservations(context.Background(), []string{r.Prefix}); e != nil {
 		t.Fatal("released plan remained active", e)

@@ -29,19 +29,29 @@ func (s *Server) mountNetworkVPNRoutes(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodGet, "/", s.handle(s.handleVPN))
 		r.Method(http.MethodPost, "/tailscale", s.handle(s.handleTailscaleSet))
+		// Archived tunnels live outside /wireguard so an interface may be
+		// called anything wg-quick allows, "archive" included.
+		r.Method(http.MethodGet, "/archive", s.handle(s.handleWireGuardArchive))
+		r.Method(http.MethodPost, "/archive/{file}/restore", s.handle(s.handleWireGuardRestore))
 
 		r.Route("/wireguard", func(r chi.Router) {
 			r.Method(http.MethodPost, "/", s.handle(s.handleWireGuardCreate))
 			r.Route("/{iface}", func(r chi.Router) {
+				r.Method(http.MethodGet, "/history", s.handle(s.handleWireGuardHistory))
+				r.Method(http.MethodGet, "/endpoint", s.handle(s.handleWireGuardEndpoint))
 				r.Method(http.MethodPost, "/up", s.handle(s.handleWireGuardUp))
 				r.Method(http.MethodPost, "/exit", s.handle(s.handleWireGuardExit))
 				r.Method(http.MethodPost, "/peers", s.handle(s.handleWireGuardPeerAdd))
+				r.Method(http.MethodPatch, "/peers/{id}", s.handle(s.handleWireGuardPeerEdit))
 				r.Method(http.MethodGet, "/peers/{id}/config", s.handle(s.handleWireGuardPeerConfig))
+				r.Method(http.MethodPut, "/peers/{id}/quota", s.handle(s.handleWireGuardPeerQuota))
+				r.Method(http.MethodPost, "/peers/{id}/verify", s.handle(s.handleWireGuardSiteVerify))
 				s.destructive(r, func(r chi.Router) {
 					r.Method(http.MethodPost, "/down", s.handle(s.handleWireGuardDown))
 					r.Method(http.MethodDelete, "/", s.handle(s.handleWireGuardRemove))
 					r.Method(http.MethodDelete, "/peers/{id}", s.handle(s.handleWireGuardPeerRemove))
 					r.Method(http.MethodDelete, "/peers/{id}/config", s.handle(s.handleWireGuardPeerForget))
+					r.Method(http.MethodDelete, "/peers/{id}/quota", s.handle(s.handleWireGuardPeerQuotaClear))
 				})
 			})
 		})
@@ -121,9 +131,10 @@ type wgFirewall struct {
 }
 
 type wgCreateResponse struct {
-	Interface netx.WGInterface `json:"interface"`
-	Warnings  []string         `json:"warnings"`
-	Firewall  wgFirewall       `json:"firewall"`
+	Interface        netx.WGInterface         `json:"interface"`
+	Warnings         []string                 `json:"warnings"`
+	Firewall         wgFirewall               `json:"firewall"`
+	EndpointEvidence *netx.WGEndpointEvidence `json:"endpointEvidence,omitempty"`
 }
 
 func (s *Server) handleWireGuardCreate(w http.ResponseWriter, r *http.Request) error {
@@ -162,6 +173,14 @@ func (s *Server) handleWireGuardCreate(w http.ResponseWriter, r *http.Request) e
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
+	ipamWarning := ""
+	if len(body.IPAMReservationIDs) == 0 && (req.Subnet == "" || (req.IPv6 != nil && req.IPv6.Subnet == "")) {
+		if held, err := s.modules.ipam.HeldPrefixes(ctx); err != nil {
+			ipamWarning = "The shared IPAM plan could not be read, so the automatic network was chosen without its held reservations: " + err.Error()
+		} else {
+			req.Avoid = held
+		}
+	}
 	httpx.SetAudit(r, "network.vpn.wireguard.create", req.Name, map[string]any{"ipamReservations": body.IPAMReservationIDs})
 	res, err := s.modules.network.CreateWireGuard(ctx, req, actor(r))
 	warning := s.finishIPAMOwnerHandoff(handoff, func() string {
@@ -176,17 +195,33 @@ func (s *Server) handleWireGuardCreate(w http.ResponseWriter, r *http.Request) e
 	if warning != "" {
 		res.Warnings = append(res.Warnings, warning)
 	}
+	if ipamWarning != "" {
+		res.Warnings = append(res.Warnings, ipamWarning)
+	}
 	httpx.SetAudit(r, "network.vpn.wireguard.create", res.Interface.Name, map[string]any{
 		"port": res.Interface.ListenPort, "subnet": res.Interface.Subnet, "exitNode": res.Interface.ExitNode,
 		"ipv6":             req.IPv6 != nil,
-		"ipamReservations": body.IPAMReservationIDs, "ipamWarning": warning,
+		"ipamReservations": body.IPAMReservationIDs, "ipamWarning": warning, "ipamAvoided": len(req.Avoid),
 	})
+	firewall := s.openWireGuardPort(ctx, res.Interface, s.networkClient(r))
+	s.noteFirewallOpening(ctx, res.Interface.Name, firewall, actor(r))
 	httpx.JSON(w, http.StatusOK, wgCreateResponse{
-		Interface: res.Interface,
-		Warnings:  res.Warnings,
-		Firewall:  s.openWireGuardPort(ctx, res.Interface, s.networkClient(r)),
+		Interface:        res.Interface,
+		Warnings:         res.Warnings,
+		Firewall:         firewall,
+		EndpointEvidence: res.EndpointEvidence,
 	})
 	return nil
+}
+
+// noteFirewallOpening puts what became of a tunnel's firewall opening in its
+// lifecycle history beside the creation or restore that asked for it.
+func (s *Server) noteFirewallOpening(ctx context.Context, iface string, fw wgFirewall, by string) {
+	if fw.Opened {
+		s.modules.network.NoteWireGuard(ctx, iface, "firewall_opened", "ok", "the firewall admits its UDP port", by)
+		return
+	}
+	s.modules.network.NoteWireGuard(ctx, iface, "firewall_unchanged", "ok", fw.Reason, by)
 }
 
 // openWireGuardPort allows the tunnel's UDP port through the firewall when the
@@ -231,7 +266,7 @@ func (s *Server) handleWireGuardUp(w http.ResponseWriter, r *http.Request) error
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.up", iface, nil)
-	if err := s.modules.network.SetWireGuardUp(ctx, iface, true, s.networkClient(r)); err != nil {
+	if err := s.modules.network.SetWireGuardUp(ctx, iface, true, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	return s.writeWireGuardInterface(ctx, w, iface)
@@ -242,7 +277,7 @@ func (s *Server) handleWireGuardDown(w http.ResponseWriter, r *http.Request) err
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.wireguard.down", iface, nil)
-	if err := s.modules.network.SetWireGuardUp(ctx, iface, false, s.networkClient(r)); err != nil {
+	if err := s.modules.network.SetWireGuardUp(ctx, iface, false, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	return s.writeWireGuardInterface(ctx, w, iface)
@@ -308,10 +343,16 @@ func (s *Server) handleWireGuardRemove(w http.ResponseWriter, r *http.Request) e
 			}
 		}
 	}
-	if err := s.modules.network.RemoveWireGuard(ctx, iface, s.networkClient(r)); err != nil {
+	if err := s.modules.network.RemoveWireGuard(ctx, iface, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
-	httpx.JSON(w, http.StatusOK, wgRemoveResponse{Firewall: s.closeWireGuardPort(ctx, iface, port)})
+	firewall := s.closeWireGuardPort(ctx, iface, port)
+	if firewall.Removed {
+		s.modules.network.NoteWireGuard(ctx, iface, "firewall_closed", "ok", "the opening its creation made was removed", actor(r))
+	} else {
+		s.modules.network.NoteWireGuard(ctx, iface, "firewall_unchanged", "ok", firewall.Reason, actor(r))
+	}
+	httpx.JSON(w, http.StatusOK, wgRemoveResponse{Firewall: firewall})
 	return nil
 }
 
@@ -421,7 +462,16 @@ func (s *Server) handleWireGuardPeerConfig(w http.ResponseWriter, r *http.Reques
 	}
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
-	cfg, err := s.modules.network.WireGuardPeerConfig(ctx, iface, id)
+	variant := r.URL.Query().Get("variant")
+	var cfg *netx.WGPeerConfig
+	switch variant {
+	case "":
+		cfg, err = s.modules.network.WireGuardPeerConfig(ctx, iface, id)
+	case "linux-killswitch":
+		cfg, err = s.modules.network.WireGuardPeerKillSwitch(ctx, iface, id)
+	default:
+		return httpx.BadRequest("the variant is linux-killswitch, or none for the configuration itself")
+	}
 	if errors.Is(err, netx.ErrForgotten) {
 		return httpx.Err(http.StatusNotFound, "forgotten", "This configuration was forgotten, so it cannot be shown again. Remove the peer and add it again to make a new one.")
 	}
@@ -429,7 +479,7 @@ func (s *Server) handleWireGuardPeerConfig(w http.ResponseWriter, r *http.Reques
 		return mapNetworkError(err)
 	}
 	// Showing a private key is a reading worth a record, though it is a GET.
-	s.recordAudit(r, "network.vpn.peer.config.view", cfg.Name, map[string]any{"iface": iface, "id": id})
+	s.recordAudit(r, "network.vpn.peer.config.view", cfg.Name, map[string]any{"iface": iface, "id": id, "variant": variant})
 	w.Header().Set("Cache-Control", "no-store")
 	httpx.JSON(w, http.StatusOK, cfg)
 	return nil
@@ -444,7 +494,7 @@ func (s *Server) handleWireGuardPeerForget(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.peer.config.forget", iface+"/"+strconv.Itoa(id), nil)
-	if err := s.modules.network.ForgetWireGuardPeerConfig(ctx, iface, id); err != nil {
+	if err := s.modules.network.ForgetWireGuardPeerConfig(ctx, iface, id, actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)
@@ -460,7 +510,7 @@ func (s *Server) handleWireGuardPeerRemove(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := timeoutCtx(r, 30*time.Second)
 	defer cancel()
 	httpx.SetAudit(r, "network.vpn.peer.remove", iface+"/"+strconv.Itoa(id), nil)
-	if err := s.modules.network.RemoveWireGuardPeer(ctx, iface, id, s.networkClient(r)); err != nil {
+	if err := s.modules.network.RemoveWireGuardPeer(ctx, iface, id, s.networkClient(r), actor(r)); err != nil {
 		return mapNetworkError(err)
 	}
 	httpx.NoContent(w)

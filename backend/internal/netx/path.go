@@ -34,10 +34,15 @@ type Path struct {
 }
 
 // anchorPath is the kernel's answer for one fixed address, as plainly and as
-// tailscaled's marked packets would ask it.
+// tailscaled's marked packets would ask it, or for one WireGuard peer's
+// endpoint as that interface's own socket asks it.
 type anchorPath struct {
 	label string
+	args  []string
 	path  Path
+	// tunnels are the WireGuard devices of a transport anchor: its route may
+	// move between native devices, but never into one of them.
+	tunnels map[string]bool
 }
 
 // routeGet is one entry of `ip -j route get`.
@@ -154,25 +159,71 @@ var anchorPaths = func(ctx context.Context) []anchorPath {
 		if err != nil {
 			continue
 		}
-		out = append(out, anchorPath{label: a.label, path: p})
+		out = append(out, anchorPath{label: a.label, args: a.args, path: p})
 	}
-	return out
+	return append(out, wgTransportAnchors(ctx)...)
+}
+
+// wgTransportAnchors are the endpoints WireGuard peers are dialled at or were
+// last seen from, read from the kernel rather than the files: a host name is
+// already resolved there and a roaming phone is where it is now. A change
+// that would route one of them into a tunnel cuts that peer off, the operator
+// included when they arrive over WireGuard, so every guarded change compares
+// them as it compares the internet anchors. A transport already captured is
+// not anchored: moving it back out is the repair.
+func wgTransportAnchors(ctx context.Context) []anchorPath {
+	if !has("wg") {
+		return nil
+	}
+	out, err := run(ctx, "wg", "show", "all", "dump")
+	if err != nil {
+		return nil
+	}
+	live, err := wgCheckedDump(out)
+	if err != nil {
+		return nil
+	}
+	tunnels := map[string]bool{}
+	for name := range live {
+		tunnels[name] = true
+	}
+	var anchors []anchorPath
+	for _, t := range wgTransportTargets(live) {
+		args := wgTransportArgs(t)
+		raw, err := run(ctx, "ip", args...)
+		if err != nil {
+			continue
+		}
+		p, err := parseRouteGet(raw, Path{Address: t.addr.String()})
+		if err != nil || tunnels[p.Device] {
+			continue
+		}
+		anchors = append(anchors, anchorPath{
+			label: fmt.Sprintf("the WireGuard transport of %s to %s", t.ref.iface, t.addr), args: args, path: p, tunnels: tunnels,
+		})
+	}
+	return anchors
 }
 
 // verifyAnchors refuses a change that moved how this server reaches the
-// internet, or left it with no way at all.
+// internet, or left it with no way at all, and one that routed a WireGuard
+// transport into a tunnel or nowhere. Each anchor is asked again exactly as it
+// was asked before, so a peer that roams meanwhile is not mistaken for a loss.
 func verifyAnchors(ctx context.Context, before []anchorPath) error {
-	if len(before) == 0 {
-		return nil
-	}
-	now := map[string]Path{}
-	for _, a := range anchorPaths(ctx) {
-		now[a.label] = a.path
-	}
 	for _, a := range before {
-		after, ok := now[a.label]
-		if !ok {
+		var after Path
+		raw, err := run(ctx, "ip", a.args...)
+		if err == nil {
+			after, err = parseRouteGet(raw, Path{Address: a.path.Address})
+		}
+		if err != nil || after.Device == "" {
 			return guarded("this would leave this server with no route to %s, which your connection and every outbound one ride on, so it was put back", a.label)
+		}
+		if a.tunnels != nil {
+			if a.tunnels[after.Device] {
+				return guarded("this would route %s into %s, so the tunnel would carry its own transport and its peer would be cut off; it was put back", a.label, after.Device)
+			}
+			continue
 		}
 		if !samePath(a.path, after) {
 			return guarded("this would move how this server reaches %s (%s instead of %s), which your connection and every outbound one ride on, so it was put back",
