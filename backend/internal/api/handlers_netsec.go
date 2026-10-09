@@ -2,8 +2,10 @@ package api
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -304,8 +306,12 @@ func (s *Server) handleFail2banBan(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	jail := chi.URLParam(r, "jail")
-	if err := s.boundaryGate(r, "fail2ban.ban", netsec.BoundaryProposal{Kind: "ban", Target: req.IP}, req.AcknowledgeBoundary); err != nil {
-		return err
+	// An address that is not one is refused by Ban below; only a real one
+	// has a boundary to judge.
+	if net.ParseIP(strings.TrimSpace(req.IP)) != nil {
+		if err := s.boundaryGate(r, "fail2ban.ban", netsec.BoundaryProposal{Kind: "ban", Target: req.IP}, req.AcknowledgeBoundary); err != nil {
+			return err
+		}
 	}
 	// The caller's own address goes down with the request for the reason it
 	// does on the firewall route: a ban is a drop rule, and banning yourself

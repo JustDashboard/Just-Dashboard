@@ -357,6 +357,19 @@ func (s *Service) AddDecision(ctx context.Context, value, duration, reason, call
 	return run(ctx, "cscli", "decisions", "add", flag, target, "--duration", duration, "--reason", reason, "--type", "ban")
 }
 
+// ValidateDecision runs AddDecision's checks on the request alone, so a
+// caller can refuse an invalid decision before judging what a valid one does.
+func ValidateDecision(value, duration, reason string) error {
+	if _, _, _, err := parseDecisionTarget(strings.TrimSpace(value)); err != nil {
+		return err
+	}
+	if d, err := time.ParseDuration(strings.TrimSpace(duration)); err != nil || d < minDecisionDuration || d > maxDecisionDuration {
+		return fmt.Errorf("a duration is a length of time such as 4h, 24h or 168h, from 1m to 8760h")
+	}
+	_, err := cleanDecisionReason(reason)
+	return err
+}
+
 // parseDecisionTarget reads an address or a range and says which cscli flag
 // takes it and whether an address falls inside it.
 func parseDecisionTarget(value string) (flag, target string, covers func(netip.Addr) bool, err error) {

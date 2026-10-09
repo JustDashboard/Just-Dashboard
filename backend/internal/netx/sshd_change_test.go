@@ -243,10 +243,16 @@ func TestSSHJournalRefusesForeignFilesAndCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, tamper := range map[string]func(*changeJournal){
-		"file":    func(j *changeJournal) { j.Files = append(j.Files, recoverySnapshot{Path: victim, Data: []byte("x"), Exists: true}) },
-		"command": func(j *changeJournal) { j.Commands = append(j.Commands, recoveryCommand{Tool: "sshd", Args: []string{"exec", "/bin/sh"}}) },
-		"tool":    func(j *changeJournal) { j.Commands = []recoveryCommand{{Tool: "ip", Args: []string{"link", "del", "eth0"}}} },
-		"owner":   func(j *changeJournal) { j.Subsystem = "nginx" },
+		"file": func(j *changeJournal) {
+			j.Files = append(j.Files, recoverySnapshot{Path: victim, Data: []byte("x"), Exists: true})
+		},
+		"command": func(j *changeJournal) {
+			j.Commands = append(j.Commands, recoveryCommand{Tool: "sshd", Args: []string{"exec", "/bin/sh"}})
+		},
+		"tool": func(j *changeJournal) {
+			j.Commands = []recoveryCommand{{Tool: "ip", Args: []string{"link", "del", "eth0"}}}
+		},
+		"owner": func(j *changeJournal) { j.Subsystem = "nginx" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := pendingSSHHost(t)

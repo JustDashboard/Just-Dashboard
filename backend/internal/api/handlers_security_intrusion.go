@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/go-chi/chi/v5"
 )
@@ -45,6 +47,13 @@ func (s *Server) mountSecurityIntrusionRoutes(r chi.Router) {
 	r.Route("/security/suricata", func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 		r.Method(http.MethodGet, "/", s.handle(s.handleSuricata))
+		// The setup after installing, each a job worth watching: fetching
+		// rules, moving the capture onto another interface (tested with
+		// `suricata -T`, put back if Suricata does not come back), and
+		// starting the service. The inline queue rules are read, never set.
+		r.Method(http.MethodPost, "/rules/update", s.handle(s.handleSuricataRulesUpdate))
+		r.Method(http.MethodPost, "/interface", s.handle(s.handleSuricataInterface))
+		r.Method(http.MethodPost, "/start", s.handle(s.handleSuricataStart))
 	})
 }
 
@@ -107,6 +116,9 @@ func (s *Server) handleCrowdSecAdd(w http.ResponseWriter, r *http.Request) error
 	var req crowdSecDecisionRequest
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
+	}
+	if err := netsec.ValidateDecision(req.Value, req.Duration, req.Reason); err != nil {
+		return httpx.BadRequest("%v", err)
 	}
 	if err := s.boundaryGate(r, "crowdsec.decision.add", netsec.BoundaryProposal{Kind: "ban", Target: req.Value}, req.AcknowledgeBoundary); err != nil {
 		return err
@@ -171,5 +183,47 @@ func (s *Server) handleSuricata(w http.ResponseWriter, r *http.Request) error {
 		return httpx.Internal(err)
 	}
 	httpx.JSON(w, http.StatusOK, view)
+	return nil
+}
+
+func (s *Server) handleSuricataRulesUpdate(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "suricata.rules.update", "", nil)
+	s.startJob(w, r, jobs.Spec{Kind: "suricata.rules", Title: "Updating Suricata's rules", Timeout: 12 * time.Minute},
+		func(ctx context.Context, out jobs.Emitter) error {
+			return s.modules.netsec.UpdateSuricataRules(ctx, out)
+		})
+	return nil
+}
+
+type suricataInterfaceRequest struct {
+	Interface string `json:"interface"`
+}
+
+func (s *Server) handleSuricataInterface(w http.ResponseWriter, r *http.Request) error {
+	var req suricataInterfaceRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	plan, err := s.modules.netsec.PlanSuricataInterface(ctx, req.Interface)
+	if err != nil {
+		return httpx.BadRequest("%v", err)
+	}
+	httpx.SetAudit(r, "suricata.interface", plan.Interface, map[string]any{"previous": plan.Previous})
+	s.startJob(w, r, jobs.Spec{Kind: "suricata.interface", Title: "Moving Suricata's capture to " + plan.Interface,
+		Target: plan.Interface, Timeout: 6 * time.Minute},
+		func(ctx context.Context, out jobs.Emitter) error {
+			return s.modules.netsec.ApplySuricataInterface(ctx, plan, out)
+		})
+	return nil
+}
+
+func (s *Server) handleSuricataStart(w http.ResponseWriter, r *http.Request) error {
+	httpx.SetAudit(r, "suricata.start", "", nil)
+	s.startJob(w, r, jobs.Spec{Kind: "suricata.start", Title: "Starting Suricata", Timeout: 3 * time.Minute},
+		func(ctx context.Context, out jobs.Emitter) error {
+			return s.modules.netsec.StartSuricata(ctx, out)
+		})
 	return nil
 }

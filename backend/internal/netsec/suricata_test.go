@@ -14,22 +14,27 @@ import (
 // recorded systemctl and suricata behind run. dir holds eve.json, the rules
 // file and the defaults file; none of the real ones is read.
 type suricataHost struct {
-	t       *testing.T
-	dir     string
-	execs   string
-	active  string
-	version string
+	t        *testing.T
+	dir      string
+	execs    string
+	active   string
+	version  string
+	iptables string
+	nft      string
 }
 
 func newSuricataHost(t *testing.T) *suricataHost {
 	t.Helper()
-	h := &suricataHost{t: t, dir: t.TempDir(), active: "active\n", version: "This is Suricata version 7.0.8 RELEASE\n"}
+	h := &suricataHost{t: t, dir: t.TempDir(), active: "active\n", version: "This is Suricata version 7.0.8 RELEASE\n", nft: `{"nftables": []}`}
 	h.execs = testdata(t, "suricata-execstart-ids.txt")
 	prevRun, prevHas := run, hasTool
 	prevEve, prevDefault, prevRules := suricataEvePath, suricataDefaultFile, suricataRulesFile
+	prevYAML, prevSources := suricataYAML, suricataSources
 	suricataEvePath = filepath.Join(h.dir, "eve.json")
 	suricataDefaultFile = filepath.Join(h.dir, "default-suricata")
 	suricataRulesFile = filepath.Join(h.dir, "suricata.rules")
+	suricataYAML = filepath.Join(h.dir, "suricata.yaml")
+	suricataSources = filepath.Join(h.dir, "sources")
 	run = func(_ context.Context, name string, args ...string) (string, error) {
 		switch call := name + " " + strings.Join(args, " "); call {
 		case "systemctl is-active suricata":
@@ -38,6 +43,12 @@ func newSuricataHost(t *testing.T) *suricataHost {
 			return h.version, nil
 		case "systemctl show -p ExecStart suricata":
 			return h.execs, nil
+		case "iptables-save ":
+			return h.iptables, nil
+		case "ip6tables-save ":
+			return "", nil
+		case "nft -j list ruleset":
+			return h.nft, nil
 		default:
 			t.Errorf("unexpected command: %s", call)
 			return "", fmt.Errorf("unexpected command: %s", call)
@@ -47,6 +58,7 @@ func newSuricataHost(t *testing.T) *suricataHost {
 	t.Cleanup(func() {
 		run, hasTool = prevRun, prevHas
 		suricataEvePath, suricataDefaultFile, suricataRulesFile = prevEve, prevDefault, prevRules
+		suricataYAML, suricataSources = prevYAML, prevSources
 	})
 	return h
 }
@@ -215,8 +227,12 @@ func TestSuricataMode(t *testing.T) {
 		wantMode     string
 		wantContains string
 	}{
-		{"defaults say nfqueue", "suricata-default-nfqueue.txt", "suricata-execstart-ids.txt", "ips", "LISTENMODE"},
-		{"defaults say af-packet", "suricata-default-afpacket.txt", "suricata-execstart-ips.txt", "ids", "LISTENMODE"},
+		// Debian's own files: LISTENMODE=nfqueue beside a unit that runs
+		// --af-packet and never reads it. What runs is IDS.
+		{"debian's defaults beside its af-packet unit", "suricata-default-debian.txt", "suricata-execstart-ids.txt", "ids", "command line"},
+		{"a queue on the command line beats the defaults", "suricata-default-afpacket.txt", "suricata-execstart-ips.txt", "ips", "command line"},
+		{"no command line, defaults say nfqueue", "suricata-default-nfqueue.txt", "", "ips", "LISTENMODE"},
+		{"a unit expanding the defaults", "suricata-default-nfqueue.txt", "suricata-execstart-variables.txt", "ips", "LISTENMODE"},
 		{"no defaults file, -q on the command line", "", "suricata-execstart-ips.txt", "ips", "command line"},
 		{"no defaults file, af-packet on the command line", "", "suricata-execstart-ids.txt", "ids", "command line"},
 		{"nothing says", "", "", "ids", "default"},
