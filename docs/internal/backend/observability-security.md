@@ -277,7 +277,8 @@ position sell a score out of a hundred, which is a number to optimise rather tha
   findings as "Not seen by these checks", and a clean list beside them reads "No findings in the layers
   these checks can see". The ports sheet says the same of an exposed socket's provider, and the
   container reachability verdicts end with it: "reachable from outside" is unproven until an external
-  check measures it.
+  check measures it. `JD_POSTURE_LIVE=1` (`TestLivePostureUnknownsOnThisHost`, run as root from a
+  compiled test binary) grades the actual host read-only and lists its unknowns.
 
 `netsec.Disconnect` ends an interactive login: the PID is matched against the live session list first,
 or the route is a "kill any process on this host" primitive wearing a sensible name. SIGHUP, not

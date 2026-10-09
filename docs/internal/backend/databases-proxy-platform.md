@@ -1938,7 +1938,10 @@ containers/volumes/networks.
   naming the port (admitting it from where the rule says, or refusing it — whatever binds there meets
   that policy at once; read through `netsec.InboundRuleFor`, so an interface-limited or profile rule is
   not taken for one covering every address), and an enabled gateway forward translating it away. A
-  loopback search skips the firewall and gateway, which decide only what other hosts reach. `reservations` names each
+  loopback search skips the firewall and gateway, which decide only what other hosts reach.
+  `JD_PORT_POLICY_LIVE=1` (`TestLiveFreePortPolicyOnThisHost`, run as root from a compiled test binary)
+  reads every source on the actual host for a wildcard search and lists what each would pass over,
+  binding nothing. `reservations` names each
   passed-over port (at most 32) and why; `sources` lists every owner consulted with `checked`,
   `unavailable` (with the reason) or `not_supplied` — provider reservations, for which no adapter
   exists, always say so rather than being left out.

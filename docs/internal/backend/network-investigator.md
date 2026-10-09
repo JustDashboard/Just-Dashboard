@@ -101,3 +101,11 @@ by whether the measured address is on this host. The comparison line keeps those
 The container page's reachability rows and the ports sheet of a Docker-published socket open it.
 `published_test.go`, `docker_chains_test.go` and `docker_published_path_test.go` cover the layers and
 the capability; the browser cases are in `docker-ui.spec.ts` and `proxy-ports-reachability.spec.ts`.
+The opt-in read-only host check compiles as the contributor and runs as root, so iptables can be
+listed as the backend lists them; it sends nothing and changes nothing:
+
+```sh
+cd backend
+go test -c ./internal/api -o /tmp/jd-api.test
+sudo -n env JD_PUBLISHED_PATH_LIVE=1 /tmp/jd-api.test -test.run '^TestLivePublishedPathOnThisHost$' -test.v
+```
