@@ -369,7 +369,8 @@ ufw's grammar has shapes that are accepted and mean something else, checked agai
 - `AddRule` has `insert` because ufw stops at the first match — a deny added after a broad allow does
   nothing at all, which looks exactly like a deny that works. **A source-only deny or reject with no
   position goes in front on its own** (`blocksASource`, `frontPosition`): that is what "block this
-  address" from the Connections, Intrusion and Logins pages writes, and appended after `allow 22` it
+  address" from the Connections, Intrusion and Logins pages writes (the Connections page's as a
+  recorded block, below), and appended after `allow 22` it
   never saw the SSH traffic it was written to refuse. The positions are ufw's, checked with
   `--dry-run` against a real dual-stack host: an IPv4 block at 1, an IPv6 block at one past the last
   IPv4 rule (ufw numbers the v6 rules after the v4 ones and refuses an insert outside the family's own
