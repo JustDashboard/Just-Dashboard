@@ -12,20 +12,24 @@ import (
 )
 
 type policyFixture struct {
-	t        *testing.T
-	engine   Engine
-	version  string
-	mu       sync.Mutex
-	hosts    []string
-	cname    []string
-	rewrites []map[string]any
-	clients  []map[string]any
-	groups   []map[string]any
-	records  []map[string]any
-	zone     map[string]any
-	writes   int
-	corrupt  bool
-	fail     bool
+	t           *testing.T
+	engine      Engine
+	version     string
+	mu          sync.Mutex
+	hosts       []string
+	cname       []string
+	rewrites    []map[string]any
+	clients     []map[string]any
+	groups      []map[string]any
+	records     []map[string]any
+	zone        map[string]any
+	writes      int
+	reads       int
+	corrupt     bool
+	fail        bool
+	unavailable bool
+	pause       <-chan struct{}
+	readHook    func(string)
 }
 
 func newPolicyFixture(t *testing.T, engine Engine) (*Service, Connection, *policyFixture) {
@@ -53,6 +57,17 @@ func (f *policyFixture) serve(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	var result any
 	path := r.URL.Path
+	f.reads++
+	if f.readHook != nil {
+		f.readHook(path)
+	}
+	if f.pause != nil {
+		select {
+		case <-f.pause:
+		case <-r.Context().Done():
+			return
+		}
+	}
 	if f.engine == Technitium {
 		if r.Method != "POST" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer native-policy-token" {
 			f.t.Error("Technitium request escaped pinned bearer POST")
@@ -62,7 +77,7 @@ func (f *policyFixture) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Error("token escaped header")
 		}
 	}
-	if f.fail && f.writes > 0 {
+	if f.unavailable || f.fail && f.writes > 0 {
 		http.Error(w, "native-policy-password", 503)
 		return
 	}

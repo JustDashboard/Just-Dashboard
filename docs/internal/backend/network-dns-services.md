@@ -30,6 +30,7 @@ removed before snapshots become reviewed or retained change state.
 | `GET /{id}/zones/{zone}/records` | Technitium-only fresh `RecordInventory` for an explicit lower-case zone, including native version, owner/type/DNSSEC, nullable internal classification, at most 256 records, metadata fingerprints and per-record editability. Read-only connections may inspect it. |
 | `GET /{id}/changes`, `POST /{id}/changes` | Latest 64 metadata-only `Change[]`; `ChangeRequest` creates a five-minute retained reviewed `Change`. |
 | `GET /changes/{id}`, `POST /changes/{id}/apply` | Full retained `Change`; single-use native apply/readback returns the terminal `Change`. |
+| `GET /changes/{id}/current` | Fresh `View` of the exact retained request and connection generation, including selected raw record/client/override fingerprints. Changed ownership/generation or malformed intent is refused. This read never claims, mutates or replays the review. |
 | `GET /provisions`, `POST /provisions` | Latest 64 `Provision[]`; `ProvisionRequest` creates a five-minute sealed resource review without creation. |
 | `GET /provisions/{id}`, `POST /provisions/{id}/apply`, `DELETE /provisions/{id}` | Retained `Provision`; single-use owned creation/bootstrap; separately reviewed exact owned removal including both volumes. |
 
@@ -81,6 +82,13 @@ explicit null. Full native selection metadata enters `selectionFingerprint` and 
 fingerprint before retention, then is re-read before apply and immediately before sending the
 mutation. Changed zone/RR metadata, client comments or group configuration refuse the consumed review.
 Sequential APIs still provide no compare-and-swap across that last read and the native write.
+`GET /changes/{id}/current` supplies the same selection-aware fresh baseline as preview/apply;
+ordinary connection inventory has no selected fingerprint and cannot replace it for these reviews.
+The current read validates the closed retained request and original baseline again, and rechecks
+connection identity after native reads. Native unavailability is an unavailable `View`; malformed
+scope is a bad request and changed generation/ownership is a conflict. Valid expired or consumed
+reviews remain inspectable without becoming applicable again. The single-use apply claim and expiry
+checks remain authoritative.
 AdGuard `LocalOverride.enabled` retains the optional native boolean; missing stays unreported.
 Its pinned add/delete body explicitly selects an enabled entry. Enable-state drift refuses a retained
 review, and unreadable or unknown rewrite policy fields prevent an incomplete mutation.

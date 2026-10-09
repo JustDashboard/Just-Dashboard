@@ -27,6 +27,7 @@ func (s *Server) mountNetworkDNSServiceRoutes(r chi.Router) {
 		r.Method(http.MethodPost, "/{id}/changes", s.handle(s.handleDNSServicePreview))
 		r.Method(http.MethodGet, "/{id}/changes", s.handle(s.handleDNSServiceChanges))
 		r.Method(http.MethodGet, "/changes/{change}", s.handle(s.handleDNSServiceChange))
+		r.Method(http.MethodGet, "/changes/{change}/current", s.handle(s.handleDNSServiceCurrentChange))
 		r.Method(http.MethodGet, "/provisions", s.handle(s.handleDNSProvisions))
 		r.Method(http.MethodPost, "/provisions", s.handle(s.handleDNSProvisionPreview))
 		r.Method(http.MethodGet, "/provisions/{provision}", s.handle(s.handleDNSProvision))
@@ -151,6 +152,15 @@ func (s *Server) handleDNSServiceRecords(w http.ResponseWriter, r *http.Request)
 		return mapDNSServiceError(err)
 	}
 	httpx.JSON(w, http.StatusOK, records)
+	return nil
+}
+
+func (s *Server) handleDNSServiceCurrentChange(w http.ResponseWriter, r *http.Request) error {
+	view, err := s.modules.dnsServices.CurrentChange(r.Context(), chi.URLParam(r, "change"))
+	if err != nil {
+		return mapDNSServiceError(err)
+	}
+	httpx.JSON(w, http.StatusOK, view)
 	return nil
 }
 func (s *Server) handleDNSServiceUpdate(w http.ResponseWriter, r *http.Request) error {

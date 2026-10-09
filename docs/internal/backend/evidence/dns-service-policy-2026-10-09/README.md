@@ -88,3 +88,12 @@ all binaries remain under the workspace artifact directory; copied binary manife
 archival filenames after preservation. Bounded redacted native daemon logs also remain there.
 Sequential native APIs still provide no CAS between the final read and mutation; uncertain effects
 remain single-use `needs_review`, with no automatic retry or foreign-policy restore.
+
+The later exact-selection current-read endpoint is covered separately by
+`current-selection-race.log` (DNS 16.551 seconds, private API 4.479 seconds) and
+`test-changed-current.log` (selected build/vet, API 0.499 seconds, DNS 9.886 seconds). It adds
+`GET /changes/{id}/current` with the same closed selection inspector already used by preview/apply,
+without changing native mutation or owned lifecycle paths. Tests prove all selected metadata drift,
+connection replacement before/during reads, malformed retained fields, bounded failure/cancellation,
+private capability/no-store behavior and expired/consumed inspection without replay. The three
+native engine proofs above predate this read-only seam; no new engine-acceptance claim is made.

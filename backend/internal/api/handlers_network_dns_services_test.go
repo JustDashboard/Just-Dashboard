@@ -22,7 +22,7 @@ func TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit(t *testing.T) {
 	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "native-dns-reader", auth.RoleReadOnly)}
 	base := "/api/v1/network/dns/services/"
 	id := strings.Repeat("a", 32)
-	for _, route := range []struct{ method, path, body string }{{"GET", base, ""}, {"POST", base, `{}`}, {"GET", base + id, ""}, {"PUT", base + id, `{}`}, {"DELETE", base + id, ""}, {"POST", base + id + "/changes", `{}`}, {"GET", base + "changes/" + id, ""}, {"POST", base + "changes/" + id + "/apply", `{}`}, {"GET", base + "provisions", ""}, {"POST", base + "provisions", `{}`}, {"GET", base + "provisions/" + id, ""}, {"POST", base + "provisions/" + id + "/apply", `{}`}, {"DELETE", base + "provisions/" + id, ""}} {
+	for _, route := range []struct{ method, path, body string }{{"GET", base, ""}, {"POST", base, `{}`}, {"GET", base + id, ""}, {"PUT", base + id, `{}`}, {"DELETE", base + id, ""}, {"POST", base + id + "/changes", `{}`}, {"GET", base + "changes/" + id, ""}, {"GET", base + "changes/" + id + "/current", ""}, {"POST", base + "changes/" + id + "/apply", `{}`}, {"GET", base + "provisions", ""}, {"POST", base + "provisions", `{}`}, {"GET", base + "provisions/" + id, ""}, {"POST", base + "provisions/" + id + "/apply", `{}`}, {"DELETE", base + "provisions/" + id, ""}} {
 		if w := viewer.do(route.method, route.path, route.body, nil); w.Code != http.StatusForbidden {
 			t.Fatalf("private native route %s %s returned %d", route.method, route.path, w.Code)
 		}
@@ -236,6 +236,15 @@ func TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken(t *testing.T) {
 	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Before == nil || plan.Before.Records == nil || plan.Before.SelectionFingerprint == "" || mutations.Load() != 0 {
 		t.Fatal("review did not retain complete zone/RR selection", w.Code, w.Body.String())
 	}
+	currentPath := base + "changes/" + plan.ID + "/current"
+	var current dnsservice.View
+	w = tokenClient.do("GET", currentPath, "", headers)
+	if w.Code != 200 || w.Header().Get("Cache-Control") != "private, no-store" || json.Unmarshal(w.Body.Bytes(), &current) != nil || current.State != "available" || current.Snapshot == nil || current.Snapshot.Records == nil || current.Snapshot.PolicyFingerprint != plan.Before.PolicyFingerprint || current.Snapshot.SelectionFingerprint != plan.Before.SelectionFingerprint || mutations.Load() != 0 || strings.Contains(w.Body.String(), "native-record-token") {
+		t.Fatal("private selection-aware current reading", w.Code, w.Body.String())
+	}
+	if w = viewer.do("GET", currentPath, "", nil); w.Code != 403 {
+		t.Fatal("retained current selection allowed readonly account", w.Code)
+	}
 	w = tokenClient.do("POST", base+"changes/"+plan.ID+"/apply", `{}`, headers)
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.State != "verified" || mutations.Load() != 1 || plan.After.Records == nil || len(plan.After.Records.Records) != 1 {
 		t.Fatal("destructive reviewed native record readback", w.Code, w.Body.String())
@@ -243,8 +252,18 @@ func TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken(t *testing.T) {
 	if w = tokenClient.do("POST", base+"changes/"+plan.ID+"/apply", `{}`, headers); w.Code != 409 || mutations.Load() != 1 {
 		t.Fatal("native record applied twice", w.Code)
 	}
+	w = tokenClient.do("GET", currentPath, "", headers)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &current) != nil || current.Snapshot == nil || len(current.Snapshot.Records.Records) != 1 || current.Snapshot.SelectionFingerprint == plan.Before.SelectionFingerprint || mutations.Load() != 1 {
+		t.Fatal("consumed current reading lost native drift or replayed an effect", w.Code, w.Body.String())
+	}
 	var detail string
 	if err = s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action='network.dns.service.apply' AND target=? AND status=200 ORDER BY id DESC LIMIT 1`, plan.ID).Scan(&detail); err != nil || strings.Contains(detail, "native-record-token") || !strings.Contains(detail, "record_add") {
 		t.Fatal("native record mutation audit", detail, err)
+	}
+	if _, err = s.Store.DB.Exec(`UPDATE network_dns_services SET generation=generation+1 WHERE id=?`, view.Connection.ID); err != nil {
+		t.Fatal(err)
+	}
+	if w = tokenClient.do("GET", currentPath, "", headers); w.Code != 409 || mutations.Load() != 1 {
+		t.Fatal("retained current read adopted changed connection generation", w.Code, w.Body.String())
 	}
 }

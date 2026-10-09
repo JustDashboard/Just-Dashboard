@@ -353,7 +353,7 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config`, `DELETE /vpn/wireguard/{iface}/peers/{id}`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |
 | Private DNS evidence | `GET`/`POST /dns/evidence/`, `GET`/`DELETE /dns/evidence/{id}`, `GET /dns/evidence/{id}/export` (admin; deletion destructive) |
-| Native DNS services | `/dns/services/` connections, `/{id}/zones/{zone}/records` authority inventory, `/{id}/changes` review and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |
+| Native DNS services | `/dns/services/` connections, `/{id}/zones/{zone}/records` authority inventory, `/{id}/changes` review, `/changes/{id}/current` exact current selection and `/changes/{id}/apply`; `/provisions` review and `/provisions/{id}/apply`/removal (admin, private; apply/removal destructive) |
 | Traffic | `GET /traffic/processes`, `GET /traffic/containers`, `GET /ebpf` |
 | Diagnostics | `POST /probe` (26 tools) |
 
