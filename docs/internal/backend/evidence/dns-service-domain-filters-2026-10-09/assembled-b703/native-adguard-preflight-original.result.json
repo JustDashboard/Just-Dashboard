@@ -1,0 +1,15 @@
+{
+  "phase": "wrapper_preflight_only",
+  "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "exit_code": 1,
+  "tool_session_id": 18606,
+  "native_spawned": false,
+  "reason": "PermissionError13 reading /proc/883/exe before inventory/task creation/native spawn",
+  "transcript_origin": "Verbatim concatenation of exec session initial stdout and completion traceback, retained after terminal response",
+  "transcript_sha256": "2a46e0f80d9317beb6ff2782a623e6aa7a5feca77ab3d05584da2fe6b9ffa0a2",
+  "original_runner_sha256": "206507c738b4582ccdc813fa6a9672fc1861b1e71c00928019830fd441ce8421",
+  "original_compiler_receipt_sha256": "25afaf64cd2b5b29a6699631355a58f91f8d91346343d750a3e2057abb651fef",
+  "task_tmp_entries": [],
+  "native_log_created": false,
+  "native_source_manifest_created": false
+}

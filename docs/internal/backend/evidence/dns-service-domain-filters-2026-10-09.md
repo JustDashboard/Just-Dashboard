@@ -100,3 +100,64 @@ native metadata stay private. Read-only defaults, literal-origin/TLS/auth sealin
 private/no-store routes, generation rechecks and destructive audit remain enforced. This exposes
 no arbitrary native DSL/regex, subscription controls, Technitium manual/app effects or provisioning
 replay. An uncertain effect remains `needs_review`, without retry or foreign-policy restoration.
+
+## Separately assembled backend proof at b7038998
+
+The following proof uses clean assembled source
+`b7038998c668fc915404b51a0b2236e68fe148fa`, not the isolated `f3fe06aa` source above. Its backend
+diff from that earlier proof is confined to `filters.go` and `filters_test.go`; the owned native
+fixture is unchanged. The [assembled records](dns-service-domain-filters-2026-10-09/assembled-b703/)
+retain the complete compiler/source receipts, both wrappers, the separate wrapper preflight failure,
+both actual native logs/results and deterministic gzip copies of every original log.
+The [verification manifest](dns-service-domain-filters-2026-10-09/assembled-b703/verification.json)
+matches all 1,863 backend Go files and both modules against the named Git source, both native
+manifests and the current backend files. It also records original/compressed/display-log hashes.
+Terminal and trailing-whitespace normalization changed none of these four logs; all checked-in
+display logs remain byte-identical to their workspace originals.
+
+The [compiler receipt](dns-service-domain-filters-2026-10-09/assembled-b703/domain-native-compile.json)
+records Go 1.26.8, race instrumentation, CGO enabled and Linux/amd64, with `GOMAXPROCS=2`,
+`GOFLAGS=-p=2`, explicit `GOTOOLCHAIN=go1.26.8` and private 0700 workspace TMPDIR
+`/home/ubuntu/jd-dff-t`. Compilation exits zero in 4.985s. Both engines use binary SHA256
+`1874158aaf8b7a852573d214325f1c568919ae386c04e74fc745a73d9669a178`.
+
+The [original wrapper](dns-service-domain-filters-2026-10-09/assembled-b703/domain-native-runner-final.py)
+stops before a native spawn because the task account cannot dereference the production manager's
+`/proc/883/exe`. The retained [transcript](dns-service-domain-filters-2026-10-09/assembled-b703/native-adguard-preflight-original.log)
+and [result](dns-service-domain-filters-2026-10-09/assembled-b703/native-adguard-preflight-original.result.json)
+explicitly identify copied tool-session output, wrapper exit one and no native test, task directory
+or engine resource creation. This is a wrapper preflight failure, not an engine-test failure.
+Original wrapper/compiler metadata remains unchanged. A separately reviewed
+[corrected wrapper](dns-service-domain-filters-2026-10-09/assembled-b703/domain-native-runner-corrected.py)
+uses readable, fixed PID 883/start time 452, `systemd-network` comm/name and all four UID/GID
+fields equal to 998. Unreadable or mismatched identity refuses the run. Its
+[linked receipt](dns-service-domain-filters-2026-10-09/assembled-b703/domain-native-runner-corrected.receipt.json)
+binds the original compiler and the same binary without claiming another compilation.
+
+| Actual engine | Wrapper / test child | Final native records |
+| --- | --- | --- |
+| AdGuard Home `v0.107.71` | 70.471s / 69.44s | [log](dns-service-domain-filters-2026-10-09/assembled-b703/native-adguard-final.log), [source](dns-service-domain-filters-2026-10-09/assembled-b703/native-adguard-final.source-binary.json), [result](dns-service-domain-filters-2026-10-09/assembled-b703/native-adguard-final.result.json) |
+| Pi-hole FTL `v6.7.1` | 91.545s / 90.49s | [log](dns-service-domain-filters-2026-10-09/assembled-b703/native-pihole-final.log), [source](dns-service-domain-filters-2026-10-09/assembled-b703/native-pihole-final.source-binary.json), [result](dns-service-domain-filters-2026-10-09/assembled-b703/native-pihole-final.result.json) |
+
+Each serial run exits zero without skips under the same `240s` wrapper, five-second kill grace
+and `235s` Go-test limit shown above. The fixture retains its own 180-second native context.
+AdGuard verifies allow/deny suffix configuration; Pi-hole verifies exact allow `[0]` and deny `[]`
+memberships. Both verify add/removal, duplicate and consumed refusal, selected-current freshness,
+unselected metadata preservation and restart persistence, then restore the original seeded
+rule inventory fingerprint. There are 16 AdGuard and 20 Pi-hole selected-current reads across the
+fixture, including eight custom-domain reads per engine. Existing override, client-membership,
+UDP/TCP local-answer and interrupted-provision cleanup checks keep their original scope.
+
+Before each actual run, the wrapper checks clean source, all Go/module hashes, compiler receipt,
+binary and wrapper identities. Every terminal record reports zero owned test processes, Docker
+containers/networks/volumes and task TMP entries, with the task directory removed and the backend
+source unchanged. The Docker CLI endpoint was independently checked to match the fixture's local
+Unix socket before release. Host resolver digest remains
+`9b5b6ef96476a3c090e8e5d1b98ae55802c227581143800dcde7c075f0ff5a02`; networkd PID/start/credentials
+remain fixed, and host NetworkManager paths remain absent. The native lane was released only after
+both terminal cleanup checks. Cached images require no pulls or host resolver/manager changes.
+
+This assembled backend proof does not replace the isolated records or establish subscription
+downloads, loaded rule content, effective client filtering, precedence, Technitium domain controls,
+timers or reboot recovery. Protection stays disabled in the fixture. The matching production
+build/browser/capture acceptance is a separate record; broader P17 acceptance remains open.
