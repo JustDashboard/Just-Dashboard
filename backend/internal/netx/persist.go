@@ -124,6 +124,9 @@ type step struct {
 	undo              func(ctx context.Context)
 	verify            func(ctx context.Context) error
 	verifyPersistence func(ctx context.Context) error
+	// evidence records what the change was checked against once verify
+	// passed, for the operator to read before confirming.
+	evidence func(ctx context.Context) *ChangeValidation
 	// recovery carries observed state that cannot be reconstructed from the
 	// previous managed spec, such as an interface's original default MTU.
 	recovery []recoveryCommand
@@ -236,6 +239,9 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 		if err := st.verify(recoveryCtx); err != nil {
 			return finishRecovery(err, nil, true)
 		}
+	}
+	if st.evidence != nil {
+		journal.Validation = st.evidence(recoveryCtx)
 	}
 	unitChanged := changed(s.paths.Unit, files[s.paths.Unit])
 	var written []string

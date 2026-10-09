@@ -440,7 +440,9 @@ type wgLiveIface struct {
 	name       string
 	publicKey  string
 	listenPort int
-	peers      []wgLivePeer
+	// fwmark marks the tunnel's own encrypted packets, "off" or a value.
+	fwmark string
+	peers  []wgLivePeer
 }
 
 type wgLivePeer struct {
@@ -469,7 +471,7 @@ func parseWGDump(out string) map[string]*wgLiveIface {
 		switch len(f) {
 		case 5:
 			port, _ := strconv.Atoi(f[3])
-			res[f[0]] = &wgLiveIface{name: f[0], publicKey: wgNoneIsEmpty(f[2]), listenPort: port}
+			res[f[0]] = &wgLiveIface{name: f[0], publicKey: wgNoneIsEmpty(f[2]), listenPort: port, fwmark: f[4]}
 		case 9:
 			ifc := res[f[0]]
 			if ifc == nil {

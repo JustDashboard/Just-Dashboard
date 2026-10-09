@@ -179,6 +179,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)
+	// Route changes are only seen if something reads the tables while they
+	// happen, whether or not anybody has the Routing page open.
+	s.modules.network.StartRouteHistory(ctx)
 	s.startDatabaseMetrics(ctx)
 	// Two things, both of which have to happen at boot rather than on request.
 	// An upgrade that was in flight when this process started is settled here,

@@ -98,6 +98,9 @@ type ChangeStatus struct {
 	ExpiresAt      time.Time `json:"expiresAt,omitzero"`
 	AppliedAt      time.Time `json:"appliedAt,omitzero"`
 	VerifiedAt     time.Time `json:"verifiedAt,omitzero"`
+	// Validation is what a routing change was checked against after it
+	// applied; other changes leave it empty.
+	Validation *ChangeValidation `json:"validation,omitempty"`
 }
 
 type recoverySnapshot struct {

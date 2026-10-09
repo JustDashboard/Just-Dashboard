@@ -105,8 +105,19 @@ type RouteSpec struct {
 	Table   int    `json:"table"`
 	Metric  int    `json:"metric,omitempty"`
 	Source  string `json:"source,omitempty"`
-	Comment string `json:"comment,omitempty"`
+	// Nexthops are an equal-cost multipath route's legs; such a route has
+	// no single Gateway or Device.
+	Nexthops []NexthopSpec `json:"nexthops,omitempty"`
+	Comment  string        `json:"comment,omitempty"`
 	Made
+}
+
+// NexthopSpec is one leg of a managed multipath route. Weight is the
+// kernel's relative share, 1 to 256, and zero is written as the default 1.
+type NexthopSpec struct {
+	Gateway string `json:"gateway,omitempty"`
+	Device  string `json:"device,omitempty"`
+	Weight  int    `json:"weight,omitempty"`
 }
 
 // RuleSpec is a policy rule the dashboard added. Its priority is always in
@@ -120,9 +131,18 @@ type RuleSpec struct {
 	IIF      string `json:"iif,omitempty"`
 	OIF      string `json:"oif,omitempty"`
 	FWMark   string `json:"fwmark,omitempty"`
-	// Action is lookup (Table), blackhole, unreachable or prohibit.
+	// UIDRange selects locally generated traffic by socket owner, "1000-1999".
+	UIDRange string `json:"uidRange,omitempty"`
+	// TOS selects a DS field value, written as ip prints it ("0x10").
+	TOS string `json:"tos,omitempty"`
+	// L3MDev looks traffic up in the table of the VRF device it uses
+	// instead of a numbered table.
+	L3MDev bool `json:"l3mdev,omitempty"`
+	// Action is lookup (Table, or the VRF's with L3MDev), goto (Goto),
+	// blackhole, unreachable or prohibit.
 	Action  string `json:"action"`
 	Table   int    `json:"table,omitempty"`
+	Goto    int    `json:"goto,omitempty"`
 	Comment string `json:"comment,omitempty"`
 	Made
 }

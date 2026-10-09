@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,6 +35,20 @@ type RoutingView struct {
 	HiddenLocal int `json:"hiddenLocal"`
 	// RulePriorities is the range rules made here are numbered in.
 	RulePriorities PriorityRange `json:"rulePriorities"`
+	// ClientDecision names the table and rule behind ClientPath: the table
+	// as the kernel reports it, the rule as the model evaluates it.
+	ClientDecision *ClientDecision `json:"clientDecision,omitempty"`
+	// VRFs are the VRF devices and the tables they look up.
+	VRFs []VRFDevice `json:"vrfs"`
+	// local is the local table, which decisions consult and the page does
+	// not draw.
+	local []RouteEntry
+}
+
+// VRFDevice is an l3mdev master and its table.
+type VRFDevice struct {
+	Name  string `json:"name"`
+	Table int    `json:"table"`
 }
 
 // PriorityRange is a closed range of rule priorities.
@@ -92,10 +107,26 @@ type RuleEntry struct {
 	IIF      string `json:"iif,omitempty"`
 	OIF      string `json:"oif,omitempty"`
 	FWMark   string `json:"fwmark,omitempty"`
-	// Action is lookup, blackhole, unreachable, prohibit or goto.
+	UIDRange string `json:"uidRange,omitempty"`
+	TOS      string `json:"tos,omitempty"`
+	IPProto  string `json:"ipProto,omitempty"`
+	SPort    string `json:"sport,omitempty"`
+	DPort    string `json:"dport,omitempty"`
+	// Not inverts every selector of the rule.
+	Not bool `json:"not,omitempty"`
+	// L3MDev looks a packet up in the table of the VRF device it uses.
+	L3MDev bool `json:"l3mdev,omitempty"`
+	// SuppressPrefixLength discards a lookup's answer whose prefix is this
+	// long or shorter, so the next rule decides instead.
+	SuppressPrefixLength *int `json:"suppressPrefixLength,omitempty"`
+	// Action is lookup, blackhole, unreachable, prohibit, goto or nop.
 	Action    string `json:"action"`
 	Table     int    `json:"table,omitempty"`
 	TableName string `json:"tableName,omitempty"`
+	Goto      int    `json:"goto,omitempty"`
+	// Unresolved is a goto whose target priority holds no rule; the kernel
+	// then passes over it.
+	Unresolved bool `json:"unresolved,omitempty"`
 	// Owner is system, tailscale or just-dashboard.
 	Owner   string `json:"owner"`
 	Managed bool   `json:"managed"`
@@ -123,17 +154,40 @@ type ipRoute struct {
 
 // ipRule is one entry of `ip -j rule show`.
 type ipRule struct {
-	Priority int     `json:"priority"`
-	Src      string  `json:"src"`
-	SrcLen   *int    `json:"srclen"`
-	Dst      string  `json:"dst"`
-	DstLen   *int    `json:"dstlen"`
-	IIF      string  `json:"iif"`
-	OIF      string  `json:"oif"`
-	FWMark   string  `json:"fwmark"`
-	FWMask   string  `json:"fwmask"`
-	Table    ipTable `json:"table"`
-	Action   string  `json:"action"`
+	Priority          int     `json:"priority"`
+	Src               string  `json:"src"`
+	SrcLen            *int    `json:"srclen"`
+	Dst               string  `json:"dst"`
+	DstLen            *int    `json:"dstlen"`
+	IIF               string  `json:"iif"`
+	OIF               string  `json:"oif"`
+	FWMark            string  `json:"fwmark"`
+	FWMask            string  `json:"fwmask"`
+	Table             ipTable `json:"table"`
+	Action            string  `json:"action"`
+	UIDStart          *uint32 `json:"uid_start"`
+	UIDEnd            *uint32 `json:"uid_end"`
+	TOS               string  `json:"tos"`
+	IPProto           string  `json:"ipproto"`
+	SPort             *int    `json:"sport"`
+	SPortStart        *int    `json:"sport_start"`
+	SPortEnd          *int    `json:"sport_end"`
+	DPort             *int    `json:"dport"`
+	DPortStart        *int    `json:"dport_start"`
+	DPortEnd          *int    `json:"dport_end"`
+	Goto              *int    `json:"goto"`
+	SuppressPrefixLen *int    `json:"suppress_prefixlen"`
+	Not               present `json:"not"`
+	Unresolved        present `json:"unresolved"`
+	L3MDev            present `json:"l3mdev"`
+}
+
+// present is a flag ip prints as a key with a null value ("not": null).
+type present bool
+
+func (p *present) UnmarshalJSON([]byte) error {
+	*p = true
+	return nil
 }
 
 // iproute2 versions may encode a table's number as a string or a JSON number,
@@ -248,6 +302,20 @@ func parseIPRules(out string) ([]ipRule, error) {
 // Routing reads every table and rule. client is the address the request came
 // from, whose path the page names.
 func (s *Service) Routing(ctx context.Context, client string) (*RoutingView, error) {
+	view, err := s.readRouting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	path, _ := clientPath(ctx, client)
+	view.ClientPath = path
+	vrfs, read := readVRFs(ctx)
+	view.VRFs = vrfs
+	view.ClientDecision = clientDecision(ctx, view, path, !read || len(vrfs) > 0)
+	return view, nil
+}
+
+// readRouting is the inventory alone, which previews model changes against.
+func (s *Service) readRouting(ctx context.Context) (*RoutingView, error) {
 	v4, err := run(ctx, "ip", "-j", "route", "show", "table", "all")
 	if err != nil {
 		return nil, err
@@ -270,7 +338,6 @@ func (s *Service) Routing(ctx context.Context, client string) (*RoutingView, err
 	if err != nil {
 		sp = emptySpec()
 	}
-	path, _ := clientPath(ctx, client)
 	byID, byName := rtTables()
 	routes4, err := parseIPRoutes(v4)
 	if err != nil {
@@ -288,13 +355,11 @@ func (s *Service) Routing(ctx context.Context, client string) (*RoutingView, err
 	if err != nil {
 		return nil, err
 	}
-	view := buildRouting(routing{
+	return buildRouting(routing{
 		routes: map[string][]ipRoute{"inet": routes4, "inet6": routes6},
 		rules:  map[string][]ipRule{"inet": rules4, "inet6": rules6},
 		spec:   sp, byID: byID, byName: byName,
-	})
-	view.ClientPath = path
-	return view, nil
+	}), nil
 }
 
 // routing is everything buildRouting joins, gathered so it stays pure.
@@ -308,7 +373,7 @@ type routing struct {
 
 func buildRouting(in routing) *RoutingView {
 	view := &RoutingView{
-		Tables: []RoutingTable{}, Rules: []RuleEntry{},
+		Tables: []RoutingTable{}, Rules: []RuleEntry{}, VRFs: []VRFDevice{},
 		RulePriorities: PriorityRange{Min: rulePriorityMin, Max: rulePriorityMax},
 	}
 	byTable := map[int]*RoutingTable{}
@@ -327,11 +392,12 @@ func buildRouting(in routing) *RoutingView {
 	for _, family := range []string{"inet", "inet6"} {
 		for _, r := range in.routes[family] {
 			id, name := tableOf(r.Table, in.byID, in.byName)
+			e := routeEntry(r, family, id, in.spec)
 			if id == tableLocal {
 				view.HiddenLocal++
+				view.local = append(view.local, e)
 				continue
 			}
-			e := routeEntry(r, family, id, in.spec)
 			t := table(id, name)
 			t.Routes = append(t.Routes, e)
 		}
@@ -447,9 +513,44 @@ func managedRoute(sp *Spec, e RouteEntry, table int) (RouteSpec, bool) {
 		if m.Metric == 0 && e.Metric != 0 && !(m.Family == "inet6" && e.Metric == 1024) {
 			continue
 		}
+		if !sameNexthops(m.Nexthops, e.Nexthops) {
+			continue
+		}
 		return m, true
 	}
 	return RouteSpec{}, false
+}
+
+// sameNexthops compares a managed route's legs with the kernel's, in any
+// order: a leg without a device matches the device the kernel resolved, and
+// an unwritten weight is the kernel's 1.
+func sameNexthops(want []NexthopSpec, got []RouteNexthop) bool {
+	if len(want) != len(got) {
+		return false
+	}
+	used := make([]bool, len(got))
+	for _, w := range want {
+		weight := w.Weight
+		if weight == 0 {
+			weight = 1
+		}
+		found := false
+		for i, g := range got {
+			gw := g.Weight
+			if gw == 0 {
+				gw = 1
+			}
+			if used[i] || canonicalAddr(w.Gateway) != canonicalAddr(g.Gateway) || weight != gw || (w.Device != "" && w.Device != g.Device) {
+				continue
+			}
+			used[i], found = true, true
+			break
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func canonicalDest(s string) string {
@@ -504,6 +605,15 @@ func ruleEntry(r ipRule, family string, byID map[int]string, byName map[string]i
 			e.FWMark += "/" + r.FWMask
 		}
 	}
+	if r.UIDStart != nil && r.UIDEnd != nil {
+		e.UIDRange = fmt.Sprintf("%d-%d", *r.UIDStart, *r.UIDEnd)
+	}
+	e.TOS, e.IPProto, e.Not, e.L3MDev = r.TOS, r.IPProto, bool(r.Not), bool(r.L3MDev)
+	e.SPort, e.DPort = portSelector(r.SPort, r.SPortStart, r.SPortEnd), portSelector(r.DPort, r.DPortStart, r.DPortEnd)
+	e.SuppressPrefixLength = r.SuppressPrefixLen
+	if r.Goto != nil {
+		e.Action, e.Goto, e.Unresolved = "goto", *r.Goto, bool(r.Unresolved)
+	}
 	if e.Action == "" {
 		e.Action = "lookup"
 	}
@@ -529,6 +639,19 @@ func ruleEntry(r ipRule, family string, byID map[int]string, byName map[string]i
 	return e
 }
 
+// portSelector reads ip's single port or its start/end pair.
+func portSelector(single, start, end *int) string {
+	switch {
+	case single != nil:
+		return strconv.Itoa(*single)
+	case start != nil && end != nil && *start == *end:
+		return strconv.Itoa(*start)
+	case start != nil && end != nil:
+		return fmt.Sprintf("%d-%d", *start, *end)
+	}
+	return ""
+}
+
 // ruleSelector reads ip's split of a rule address and its prefix length. "all"
 // is no selector.
 func ruleSelector(addr string, bits *int) string {
@@ -542,8 +665,20 @@ func ruleSelector(addr string, bits *int) string {
 }
 
 func managedRule(sp *Spec, e RuleEntry) (RuleSpec, bool) {
+	// A selector the dashboard never writes makes the kernel's rule something
+	// else, however much of the rest agrees.
+	if e.Not || e.IPProto != "" || e.SPort != "" || e.DPort != "" || e.SuppressPrefixLength != nil {
+		return RuleSpec{}, false
+	}
 	for _, m := range sp.Rules {
-		if m.Family != e.Family || m.Priority != e.Priority || m.Action != e.Action || m.Table != e.Table {
+		if m.Family != e.Family || m.Priority != e.Priority || m.Action != e.Action || m.Table != e.Table ||
+			m.Goto != e.Goto || m.L3MDev != e.L3MDev {
+			continue
+		}
+		if uid, err := canonicalUIDRange(m.UIDRange); err != nil || uid != e.UIDRange {
+			continue
+		}
+		if !sameDSField(m.TOS, e.TOS) {
 			continue
 		}
 		if canonicalSelector(m.From) != canonicalSelector(e.From) || canonicalSelector(m.To) != canonicalSelector(e.To) ||
@@ -631,6 +766,9 @@ func routeArgs(r RouteSpec) ([]string, error) {
 		dest = p.Masked().String()
 	}
 	args = append(args, dest)
+	if len(r.Nexthops) > 0 {
+		return multipathArgs(r, args)
+	}
 	if r.Gateway != "" {
 		gw, err := ParseAddr(r.Gateway)
 		if err != nil {
@@ -665,6 +803,69 @@ func routeArgs(r RouteSpec) ([]string, error) {
 	}
 	return args, nil
 }
+
+// multipathArgs finishes a multipath route. ip reads every attribute of the
+// route before its first nexthop, so table, metric and source come first.
+func multipathArgs(r RouteSpec, args []string) ([]string, error) {
+	if r.Type != "unicast" || r.Gateway != "" || r.Device != "" {
+		return nil, fmt.Errorf("only a unicast route without a single gateway or device has nexthops")
+	}
+	if len(r.Nexthops) < 2 || len(r.Nexthops) > maxNexthops {
+		return nil, fmt.Errorf("a multipath route has 2 to %d nexthops", maxNexthops)
+	}
+	if r.Table != 0 && r.Table != tableMain {
+		if r.Table < 1 || r.Table > 4294967294 {
+			return nil, fmt.Errorf("a table is 1 to 4294967294")
+		}
+		args = append(args, "table", strconv.Itoa(r.Table))
+	}
+	if r.Metric != 0 {
+		if r.Metric < 0 || r.Metric > 4294967295 {
+			return nil, fmt.Errorf("a metric is 0 to 4294967295")
+		}
+		args = append(args, "metric", strconv.Itoa(r.Metric))
+	}
+	if r.Source != "" {
+		src, err := ParseAddr(r.Source)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "src", src.String())
+	}
+	for _, n := range r.Nexthops {
+		args = append(args, "nexthop")
+		if n.Gateway != "" {
+			gw, err := ParseAddr(n.Gateway)
+			if err != nil {
+				return nil, err
+			}
+			if (r.Family == "inet") != gw.Is4() {
+				return nil, fmt.Errorf("the nexthop %s is not an %s address", gw, r.Family)
+			}
+			args = append(args, "via", gw.String())
+		}
+		if n.Device != "" {
+			if err := ValidIfName(n.Device); err != nil {
+				return nil, err
+			}
+			args = append(args, "dev", n.Device)
+		}
+		if n.Gateway == "" && n.Device == "" {
+			return nil, fmt.Errorf("every nexthop needs a gateway, a device, or both")
+		}
+		if n.Weight != 0 {
+			if n.Weight < 1 || n.Weight > 256 {
+				return nil, fmt.Errorf("a nexthop weight is 1 to 256")
+			}
+			args = append(args, "weight", strconv.Itoa(n.Weight))
+		}
+	}
+	return args, nil
+}
+
+// maxNexthops bounds a managed multipath route; the kernel takes more, but
+// a form and a boot line stay readable.
+const maxNexthops = 16
 
 // familyArgs is the `-6` an ip route command needs where the batch line
 // could infer the family from the address and a command line cannot.
@@ -713,10 +914,20 @@ type RouteRequest struct {
 	Gateway string `json:"gateway,omitempty"`
 	Device  string `json:"device,omitempty"`
 	// Table is main (254, and the default) or a number the dashboard may use.
-	Table   int    `json:"table,omitempty"`
-	Metric  int    `json:"metric,omitempty"`
-	Source  string `json:"source,omitempty"`
-	Comment string `json:"comment,omitempty"`
+	Table  int    `json:"table,omitempty"`
+	Metric int    `json:"metric,omitempty"`
+	Source string `json:"source,omitempty"`
+	// Nexthops make an equal-cost multipath route; Gateway and Device are
+	// then left empty.
+	Nexthops []NexthopRequest `json:"nexthops,omitempty"`
+	Comment  string           `json:"comment,omitempty"`
+}
+
+// NexthopRequest is one leg of a multipath route.
+type NexthopRequest struct {
+	Gateway string `json:"gateway,omitempty"`
+	Device  string `json:"device,omitempty"`
+	Weight  int    `json:"weight,omitempty"`
 }
 
 // spec validates a request and returns the entry it would record.
@@ -780,7 +991,11 @@ func (req RouteRequest) spec() (RouteSpec, error) {
 		}
 		r.Device = dev
 	}
-	if r.Type == "unicast" {
+	if len(req.Nexthops) > 0 {
+		if err := r.setNexthops(req.Nexthops, dest); err != nil {
+			return RouteSpec{}, err
+		}
+	} else if r.Type == "unicast" {
 		if r.Gateway == "" && r.Device == "" {
 			return RouteSpec{}, fmt.Errorf("a route needs a gateway, a device, or both")
 		}
@@ -803,6 +1018,63 @@ func (req RouteRequest) spec() (RouteSpec, error) {
 		}
 	}
 	return r, nil
+}
+
+// setNexthops validates the legs of a multipath route. A default
+// destination takes its family from the first leg's gateway, like a single
+// route's gateway decides it.
+func (r *RouteSpec) setNexthops(legs []NexthopRequest, dest string) error {
+	if r.Type != "unicast" {
+		return fmt.Errorf("a %s route has no nexthops", r.Type)
+	}
+	if r.Gateway != "" || r.Device != "" {
+		return fmt.Errorf("a multipath route names its gateways and devices in its nexthops")
+	}
+	if len(legs) < 2 || len(legs) > maxNexthops {
+		return fmt.Errorf("a multipath route has 2 to %d nexthops", maxNexthops)
+	}
+	seen := map[string]bool{}
+	for i, leg := range legs {
+		n := NexthopSpec{Weight: leg.Weight}
+		if gw := strings.TrimSpace(leg.Gateway); gw != "" {
+			addr, err := ParseAddr(gw)
+			if err != nil {
+				return err
+			}
+			if addr.IsUnspecified() || addr.IsMulticast() || addr.IsLoopback() {
+				return fmt.Errorf("%s cannot be a gateway", addr)
+			}
+			if i == 0 && strings.EqualFold(strings.TrimSpace(dest), "default") && r.Source == "" {
+				r.Family = familyOf(addr)
+			}
+			if familyOf(addr) != r.Family {
+				return fmt.Errorf("the nexthop %s is not an %s address", addr, r.Family)
+			}
+			n.Gateway = addr.String()
+		}
+		if dev := strings.TrimSpace(leg.Device); dev != "" {
+			if err := ValidIfName(dev); err != nil {
+				return err
+			}
+			n.Device = dev
+		}
+		if n.Gateway == "" && n.Device == "" {
+			return fmt.Errorf("every nexthop needs a gateway, a device, or both")
+		}
+		if n.Weight < 0 || n.Weight > 256 {
+			return fmt.Errorf("a nexthop weight is 1 to 256")
+		}
+		if n.Weight == 1 {
+			n.Weight = 0
+		}
+		key := n.Gateway + "|" + n.Device
+		if seen[key] {
+			return fmt.Errorf("the nexthop %s appears twice", strings.Trim(n.Gateway+" "+n.Device, " "))
+		}
+		seen[key] = true
+		r.Nexthops = append(r.Nexthops, n)
+	}
+	return nil
 }
 
 // checkTable refuses the tables that are not the dashboard's to write in.
@@ -879,6 +1151,20 @@ func verifyRouting(before Path) func(ctx context.Context) error {
 	}
 }
 
+// routeDevices are the devices a route names, its own or its legs'.
+func routeDevices(r RouteSpec) []string {
+	var out []string
+	if r.Device != "" {
+		out = append(out, r.Device)
+	}
+	for _, n := range r.Nexthops {
+		if n.Device != "" && !slices.Contains(out, n.Device) {
+			out = append(out, n.Device)
+		}
+	}
+	return out
+}
+
 // AddRoute adds a route, checks the browser's path survived it, and records it.
 func (s *Service) AddRoute(ctx context.Context, req RouteRequest, client, actor string) (*RouteSpec, error) {
 	r, err := req.spec()
@@ -896,8 +1182,8 @@ func (s *Service) AddRoute(ctx context.Context, req RouteRequest, client, actor 
 	if err != nil {
 		return nil, err
 	}
-	if r.Device != "" {
-		if _, err := st.need(r.Device); err != nil {
+	for _, dev := range routeDevices(r) {
+		if _, err := st.need(dev); err != nil {
 			return nil, err
 		}
 	}
@@ -926,10 +1212,12 @@ func (s *Service) AddRoute(ctx context.Context, req RouteRequest, client, actor 
 	r.ID = next.takeID()
 	r.Made = stamp(actor)
 	next.Routes = append(next.Routes, r)
+	flows := flowAnchors(ctx)
 	err = s.commit(ctx, next, step{
-		apply:  func(ctx context.Context) error { _, err := run(ctx, "ip", add...); return err },
-		undo:   func(ctx context.Context) { s.best(ctx, "ip", del...) },
-		verify: verifyRouting(st.path),
+		apply:    func(ctx context.Context) error { _, err := run(ctx, "ip", add...); return err },
+		undo:     func(ctx context.Context) { s.best(ctx, "ip", del...) },
+		verify:   verifyRouting(st.path),
+		evidence: routingEvidence(st.path, flows),
 	})
 	if err != nil {
 		return nil, err
@@ -972,6 +1260,7 @@ func (s *Service) DeleteRoute(ctx context.Context, id int, client, actor string)
 	if err != nil {
 		return err
 	}
+	flows := flowAnchors(ctx)
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
 			if _, err := run(ctx, "ip", del...); err != nil && !isGone(err) {
@@ -979,8 +1268,9 @@ func (s *Service) DeleteRoute(ctx context.Context, id int, client, actor string)
 			}
 			return nil
 		},
-		undo:   func(ctx context.Context) { s.best(ctx, "ip", add...) },
-		verify: verifyRouting(path),
+		undo:     func(ctx context.Context) { s.best(ctx, "ip", add...) },
+		verify:   verifyRouting(path),
+		evidence: routingEvidence(path, flows),
 	})
 }
 
@@ -997,9 +1287,20 @@ type RuleRequest struct {
 	IIF      string `json:"iif,omitempty"`
 	OIF      string `json:"oif,omitempty"`
 	FWMark   string `json:"fwmark,omitempty"`
-	// Action is lookup (the default), blackhole, unreachable or prohibit.
-	Action  string `json:"action,omitempty"`
-	Table   int    `json:"table,omitempty"`
+	// UIDRange selects locally generated traffic by its socket's owner: a
+	// UID or a range such as 1000-1999.
+	UIDRange string `json:"uidRange,omitempty"`
+	// TOS selects a DS field value, such as 0x10 or EF.
+	TOS string `json:"tos,omitempty"`
+	// L3MDev looks the traffic up in its VRF device's table; it names no
+	// table of its own.
+	L3MDev bool `json:"l3mdev,omitempty"`
+	// Action is lookup (the default), goto, blackhole, unreachable or
+	// prohibit.
+	Action string `json:"action,omitempty"`
+	Table  int    `json:"table,omitempty"`
+	// Goto is the priority a goto rule continues at: a later rule made here.
+	Goto    int    `json:"goto,omitempty"`
 	Comment string `json:"comment,omitempty"`
 }
 
@@ -1019,10 +1320,10 @@ func (req RuleRequest) spec() (RuleSpec, error) {
 	}
 	switch a := strings.ToLower(strings.TrimSpace(req.Action)); a {
 	case "", "lookup":
-	case "blackhole", "unreachable", "prohibit":
+	case "goto", "blackhole", "unreachable", "prohibit":
 		r.Action = a
 	default:
-		return RuleSpec{}, fmt.Errorf("a rule's action is lookup, blackhole, unreachable or prohibit")
+		return RuleSpec{}, fmt.Errorf("a rule's action is lookup, goto, blackhole, unreachable or prohibit")
 	}
 	var families []netip.Addr
 	selector := func(raw string) (string, error) {
@@ -1071,10 +1372,29 @@ func (req RuleRequest) spec() (RuleSpec, error) {
 	if r.FWMark, err = canonicalFWMark(req.FWMark); err != nil {
 		return RuleSpec{}, err
 	}
-	if r.From == "" && r.To == "" && r.IIF == "" && r.OIF == "" && r.FWMark == "" {
-		return RuleSpec{}, guarded("A rule with no selector matches every packet, so sending it to another table reroutes the whole server, this connection included. Select by source, destination, interface or mark.")
+	if r.UIDRange, err = canonicalUIDRange(req.UIDRange); err != nil {
+		return RuleSpec{}, err
 	}
-	if r.Action == "lookup" {
+	if tos := strings.TrimSpace(req.TOS); tos != "" {
+		if r.TOS, err = canonicalTOS(tos, r.Family); err != nil {
+			return RuleSpec{}, err
+		}
+	}
+	r.L3MDev = req.L3MDev
+	// A VRF lookup selects only traffic using a VRF device, which is a
+	// selection of its own; the other additions narrow like any selector.
+	if r.From == "" && r.To == "" && r.IIF == "" && r.OIF == "" && r.FWMark == "" && r.UIDRange == "" && r.TOS == "" && !r.L3MDev {
+		return RuleSpec{}, guarded("A rule with no selector matches every packet, so sending it to another table reroutes the whole server, this connection included. Select by source, destination, interface, mark, UID, TOS or VRF.")
+	}
+	switch {
+	case r.L3MDev:
+		if r.Action != "lookup" {
+			return RuleSpec{}, fmt.Errorf("a VRF rule looks traffic up in its device's table; it has no other action")
+		}
+		if req.Table != 0 {
+			return RuleSpec{}, fmt.Errorf("a VRF rule takes its table from the VRF device and names none")
+		}
+	case r.Action == "lookup":
 		if req.Table == 0 {
 			return RuleSpec{}, fmt.Errorf("a lookup rule needs a table")
 		}
@@ -1082,8 +1402,16 @@ func (req RuleRequest) spec() (RuleSpec, error) {
 			return RuleSpec{}, err
 		}
 		r.Table = req.Table
-	} else if req.Table != 0 {
+	case req.Table != 0:
 		return RuleSpec{}, fmt.Errorf("a %s rule names no table", r.Action)
+	}
+	if r.Action == "goto" {
+		if req.Goto < rulePriorityMin || req.Goto > rulePriorityMax {
+			return RuleSpec{}, guarded("A goto made here continues at a priority from %d to %d, so it can never jump past the kernel's, Tailscale's or the distribution's rules.", rulePriorityMin, rulePriorityMax)
+		}
+		r.Goto = req.Goto
+	} else if req.Goto != 0 {
+		return RuleSpec{}, fmt.Errorf("only a goto rule names a priority to continue at")
 	}
 	if req.Priority != 0 && (req.Priority < rulePriorityMin || req.Priority > rulePriorityMax) {
 		return RuleSpec{}, fmt.Errorf("a rule made here has a priority from %d to %d; the kernel's, Tailscale's and the distribution's rules are outside it", rulePriorityMin, rulePriorityMax)
@@ -1149,18 +1477,130 @@ func ruleArgs(r RuleSpec) ([]string, error) {
 		}
 		args = append(args, "fwmark", mark)
 	}
+	if r.UIDRange != "" {
+		uid, err := canonicalUIDRange(r.UIDRange)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "uidrange", uid)
+	}
+	if r.TOS != "" {
+		tos, err := canonicalTOS(r.TOS, r.Family)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "tos", tos)
+	}
+	if r.L3MDev {
+		if r.Action != "lookup" || r.Table != 0 {
+			return nil, fmt.Errorf("a VRF rule looks up its device's table and names none")
+		}
+		return append(args, "l3mdev"), nil
+	}
 	switch r.Action {
 	case "lookup":
 		if r.Table < 1 || r.Table > 4294967294 {
 			return nil, fmt.Errorf("a table is 1 to 4294967294")
 		}
 		args = append(args, "lookup", strconv.Itoa(r.Table))
+	case "goto":
+		// The kernel refuses a backward goto; the dashboard's range keeps
+		// every jump among its own rules.
+		if r.Goto <= r.Priority || r.Goto > rulePriorityMax {
+			return nil, fmt.Errorf("a goto continues at a later priority within the dashboard's range")
+		}
+		args = append(args, "goto", strconv.Itoa(r.Goto))
 	case "blackhole", "unreachable", "prohibit":
 		args = append(args, r.Action)
 	default:
 		return nil, fmt.Errorf("%q is not a rule action", r.Action)
 	}
 	return args, nil
+}
+
+// canonicalUIDRange reads a UID or a range and writes ip's start-end form.
+func canonicalUIDRange(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	lo, hi, ranged := strings.Cut(s, "-")
+	start, err := strconv.ParseUint(strings.TrimSpace(lo), 10, 32)
+	end := start
+	if err == nil && ranged {
+		end, err = strconv.ParseUint(strings.TrimSpace(hi), 10, 32)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%q is not a UID or a UID range such as 1000-1999", s)
+	}
+	// 4294967295 is the kernel's invalid UID and cannot own a socket.
+	if start > end || end > 4294967294 {
+		return "", fmt.Errorf("a UID range runs upward from 0 to at most 4294967294")
+	}
+	return fmt.Sprintf("%d-%d", start, end), nil
+}
+
+// canonicalTOS reads a DS field value, by number or by its rt_dsfield name,
+// and writes it in hex. The kernel refuses either ECN bit, and an IPv4
+// rule compares only the TOS bits 0x1c.
+func canonicalTOS(s, family string) (string, error) {
+	v, ok := dsfieldValue(s)
+	if !ok {
+		return "", fmt.Errorf("%q is not a TOS value such as 0x10 or EF", s)
+	}
+	if v&0x03 != 0 {
+		return "", fmt.Errorf("a TOS selector's two ECN bits must be 0")
+	}
+	if family != "inet6" && v&^0x1c != 0 {
+		return "", fmt.Errorf("an IPv4 rule selects TOS 0x04 to 0x1c in steps of 4; a DSCP class such as EF is an IPv6 selector")
+	}
+	return fmt.Sprintf("0x%02x", v), nil
+}
+
+// standardDSField is iproute2's shipped rt_dsfield: the RFC 2474/2597/2598
+// names ip prints. The backend's own image may lack the file, and the
+// host's /usr/share is not mounted, so the standard names are known here.
+var standardDSField = map[string]uint8{
+	"default": 0x00, "af11": 0x28, "af12": 0x30, "af13": 0x38, "af21": 0x48, "af22": 0x50, "af23": 0x58,
+	"af31": 0x68, "af32": 0x70, "af33": 0x78, "af41": 0x88, "af42": 0x90, "af43": 0x98,
+	"cs1": 0x20, "cs2": 0x40, "cs3": 0x60, "cs4": 0x80, "cs5": 0xa0, "cs6": 0xc0, "cs7": 0xe0, "ef": 0xb8,
+}
+
+// dsfieldValue reads a number or a name from the rt_dsfield files ip prints
+// names from, so a rule read back as "EF" compares with one written 0xb8.
+func dsfieldValue(s string) (uint8, bool) {
+	s = strings.TrimSpace(s)
+	if v, err := strconv.ParseUint(s, 0, 8); err == nil {
+		return uint8(v), true
+	}
+	for _, dir := range rtTableDirs {
+		b, err := os.ReadFile(filepath.Join(dir, "rt_dsfield"))
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if i := strings.IndexByte(line, '#'); i >= 0 {
+				line = line[:i]
+			}
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && strings.EqualFold(fields[1], s) {
+				if v, err := strconv.ParseUint(fields[0], 0, 8); err == nil {
+					return uint8(v), true
+				}
+			}
+		}
+	}
+	v, ok := standardDSField[strings.ToLower(s)]
+	return v, ok
+}
+
+func sameDSField(a, b string) bool {
+	if a == "" || b == "" {
+		return a == b
+	}
+	x, okA := dsfieldValue(a)
+	y, okB := dsfieldValue(b)
+	return okA && okB && x == y
 }
 
 // shadowsReplies reports whether a rule that discards what it selects would
@@ -1213,7 +1653,138 @@ func shadowsReplies(r RuleSpec, path Path) bool {
 			return false
 		}
 	}
+	// Only sockets actually answering the client prove a UID range misses
+	// them; without that evidence the rule may select the replies. A TOS
+	// selector is never such evidence, since an application chooses its
+	// own DS field (OpenSSH marks interactive sessions).
+	if r.UIDRange != "" && len(path.replyUIDs) > 0 {
+		lo, hi, _ := strings.Cut(r.UIDRange, "-")
+		start, err1 := strconv.ParseUint(lo, 10, 32)
+		end, err2 := strconv.ParseUint(hi, 10, 32)
+		if err1 == nil && err2 == nil && !slices.ContainsFunc(path.replyUIDs, func(uid uint32) bool {
+			return uint64(uid) >= start && uint64(uid) <= end
+		}) {
+			return false
+		}
+	}
 	return true
+}
+
+// replySocketUIDs reads the owners of the established sockets talking to the
+// client, which are the sockets its replies leave from. ss prints a uid only
+// when it is not root's.
+func replySocketUIDs(ctx context.Context, client string) []uint32 {
+	addr, err := netip.ParseAddr(client)
+	if err != nil {
+		return nil
+	}
+	out, err := run(ctx, "ss", "-Htne", "state", "established", "dst", addr.String())
+	if err != nil {
+		return nil
+	}
+	return parseSocketUIDs(out)
+}
+
+func parseSocketUIDs(out string) []uint32 {
+	var uids []uint32
+	for _, line := range strings.Split(out, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		uid := uint32(0)
+		for _, field := range strings.Fields(line) {
+			if v, ok := strings.CutPrefix(field, "uid:"); ok {
+				if n, err := strconv.ParseUint(v, 10, 32); err == nil {
+					uid = uint32(n)
+				}
+			}
+		}
+		if !slices.Contains(uids, uid) {
+			uids = append(uids, uid)
+		}
+	}
+	return uids
+}
+
+// checkGoto keeps a jump among the dashboard's own rules: the kernel refuses a
+// backward goto and passes over an unresolved one, and a jump over a rule
+// someone else installed would silently disable it for the traffic selected.
+func checkGoto(r RuleSpec, managed []RuleSpec, live []ipRule) error {
+	if r.Goto <= r.Priority {
+		return fmt.Errorf("a goto continues at a later priority than its own (%d); choose a priority before %d", r.Priority, r.Goto)
+	}
+	target := slices.ContainsFunc(managed, func(m RuleSpec) bool { return m.Family == r.Family && m.Priority == r.Goto })
+	if !target {
+		return fmt.Errorf("a goto made here continues at a rule made here; no %s rule has priority %d", r.Family, r.Goto)
+	}
+	for _, l := range live {
+		if l.Priority <= r.Priority || l.Priority >= r.Goto {
+			continue
+		}
+		if !slices.ContainsFunc(managed, func(m RuleSpec) bool { return m.Family == r.Family && m.Priority == l.Priority }) {
+			return guarded("A rule this dashboard did not make sits at priority %d, between %d and %d; a jump over it would disable it for the traffic selected.", l.Priority, r.Priority, r.Goto)
+		}
+	}
+	return nil
+}
+
+// placeRule gives a rule its priority and runs every guard an add runs
+// before it is applied: a free priority in the dashboard's range checked
+// against live foreign rules too, a goto kept among the dashboard's own
+// rules, and no discard of the dashboard's replies. The preview runs it so a
+// refusal reads the same before and at apply.
+func placeRule(ctx context.Context, managed []RuleSpec, r RuleSpec, client string) (RuleSpec, Path, error) {
+	used := map[int]bool{}
+	for _, have := range managed {
+		if have.Family == r.Family {
+			used[have.Priority] = true
+		}
+	}
+	// Explicit priorities must avoid foreign rules too. Two rules at one
+	// priority otherwise leave their order dependent on who installed first.
+	query := append([]string{"-j"}, familyArgs(r.Family)...)
+	out, err := run(ctx, "ip", append(query, "rule", "show")...)
+	if err != nil {
+		return r, Path{}, err
+	}
+	live, err := parseIPRules(out)
+	if err != nil {
+		return r, Path{}, err
+	}
+	for _, l := range live {
+		used[l.Priority] = true
+	}
+	if r.Priority != 0 {
+		if used[r.Priority] {
+			return r, Path{}, fmt.Errorf("priority %d: %w", r.Priority, ErrExists)
+		}
+	} else {
+		for p := rulePriorityMin; p <= rulePriorityMax; p++ {
+			if !used[p] {
+				r.Priority = p
+				break
+			}
+		}
+		if r.Priority == 0 {
+			return r, Path{}, fmt.Errorf("all %d priorities set aside for rules made here are in use", rulePriorityMax-rulePriorityMin+1)
+		}
+	}
+	if r.Action == "goto" {
+		if err := checkGoto(r, managed, live); err != nil {
+			return r, Path{}, err
+		}
+	}
+	path, err := clientPath(ctx, client)
+	if err != nil {
+		return r, Path{}, err
+	}
+	if r.UIDRange != "" && r.Action != "lookup" && r.Action != "goto" {
+		path.replyUIDs = replySocketUIDs(ctx, path.Address)
+	}
+	if shadowsReplies(r, path) {
+		return r, path, guarded("This rule would discard the replies to your connection to the dashboard (%s), so it was not applied.", path.Address)
+	}
+	return r, path, nil
 }
 
 // AddRule adds a policy rule and records it.
@@ -1229,47 +1800,9 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 		return nil, err
 	}
 	next := sp.clone()
-	used := map[int]bool{}
-	for _, have := range next.Rules {
-		if have.Family == r.Family {
-			used[have.Priority] = true
-		}
-	}
-	// Explicit priorities must avoid foreign rules too. Two rules at one
-	// priority otherwise leave their order dependent on who installed first.
-	query := append([]string{"-j"}, familyArgs(r.Family)...)
-	out, err := run(ctx, "ip", append(query, "rule", "show")...)
+	r, path, err := placeRule(ctx, next.Rules, r, client)
 	if err != nil {
 		return nil, err
-	}
-	live, err := parseIPRules(out)
-	if err != nil {
-		return nil, err
-	}
-	for _, l := range live {
-		used[l.Priority] = true
-	}
-	if r.Priority != 0 {
-		if used[r.Priority] {
-			return nil, fmt.Errorf("priority %d: %w", r.Priority, ErrExists)
-		}
-	} else {
-		for p := rulePriorityMin; p <= rulePriorityMax; p++ {
-			if !used[p] {
-				r.Priority = p
-				break
-			}
-		}
-		if r.Priority == 0 {
-			return nil, fmt.Errorf("all %d priorities set aside for rules made here are in use", rulePriorityMax-rulePriorityMin+1)
-		}
-	}
-	path, err := clientPath(ctx, client)
-	if err != nil {
-		return nil, err
-	}
-	if shadowsReplies(r, path) {
-		return nil, guarded("This rule would discard the replies to your connection to the dashboard (%s), so it was not applied.", path.Address)
 	}
 	args, err := ruleArgs(r)
 	if err != nil {
@@ -1278,6 +1811,7 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 	r.ID = next.takeID()
 	r.Made = stamp(actor)
 	next.Rules = append(next.Rules, r)
+	flows := flowAnchors(ctx)
 	err = s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
 			_, err := run(ctx, "ip", append(append(familyArgs(r.Family), "rule", "add"), args...)...)
@@ -1286,7 +1820,8 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 		undo: func(ctx context.Context) {
 			s.best(ctx, "ip", append(append(familyArgs(r.Family), "rule", "del"), args...)...)
 		},
-		verify: verifyRouting(path),
+		verify:   verifyRouting(path),
+		evidence: routingEvidence(path, flows),
 	})
 	if err != nil {
 		return nil, err
@@ -1316,6 +1851,11 @@ func (s *Service) DeleteRule(ctx context.Context, id int, client, actor string) 
 	if !found {
 		return fmt.Errorf("rule %d: %w", id, ErrNotFound)
 	}
+	for _, r := range kept {
+		if r.Action == "goto" && r.Family == gone.Family && r.Goto == gone.Priority {
+			return guarded("Rule %d jumps to this rule's priority %d; without it the jump would silently pass over every rule between them. Remove rule %d first.", r.Priority, gone.Priority, r.Priority)
+		}
+	}
 	next.Rules = kept
 	path, err := clientPath(ctx, client)
 	if err != nil {
@@ -1325,6 +1865,7 @@ func (s *Service) DeleteRule(ctx context.Context, id int, client, actor string) 
 	if err != nil {
 		return err
 	}
+	flows := flowAnchors(ctx)
 	return s.commit(ctx, next, step{
 		apply: func(ctx context.Context) error {
 			if _, err := run(ctx, "ip", append(append(familyArgs(gone.Family), "rule", "del"), args...)...); err != nil && !isGone(err) {
@@ -1335,6 +1876,7 @@ func (s *Service) DeleteRule(ctx context.Context, id int, client, actor string) 
 		undo: func(ctx context.Context) {
 			s.best(ctx, "ip", append(append(familyArgs(gone.Family), "rule", "add"), args...)...)
 		},
-		verify: verifyRouting(path),
+		verify:   verifyRouting(path),
+		evidence: routingEvidence(path, flows),
 	})
 }

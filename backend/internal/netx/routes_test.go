@@ -297,7 +297,9 @@ func TestRoutingReadsBothFamiliesAndTheClientPath(t *testing.T) {
 		on("ip -j -6 route show table all", fixture(t, "routing-route6.json")).
 		on("ip -j rule show", fixture(t, "routing-rule4.json")).
 		on("ip -j -6 rule show", fixture(t, "routing-rule6.json")).
-		on("ip -j route get", fixture(t, "routing-route-get.json"))
+		on("ip -j route get", fixture(t, "routing-route-get.json")).
+		on("ip -j -d link show type vrf", "[{},{}]").
+		on("ss -Htne state established dst", "")
 	s := testService(t)
 	rtSaveSpec(t, s, rtRoutingSpec())
 	view, err := s.Routing(context.Background(), rtClient)
@@ -322,7 +324,9 @@ func TestRoutingSurvivesAHostWithoutIPv6(t *testing.T) {
 		fail("ip -j -6 route show table all", "RTNETLINK answers: Address family not supported by protocol").
 		on("ip -j rule show", fixture(t, "routing-rule4.json")).
 		fail("ip -j -6 rule show", "RTNETLINK answers: Address family not supported by protocol").
-		on("ip -j route get", fixture(t, "routing-route-get.json"))
+		on("ip -j route get", fixture(t, "routing-route-get.json")).
+		on("ip -j -d link show type vrf", "[]").
+		on("ss -Htne state established dst", "")
 	s := testService(t)
 	if _, err := s.Routing(context.Background(), rtClient); err != nil {
 		t.Fatal(err)
@@ -688,7 +692,8 @@ func TestRoutingRuleRequestValidation(t *testing.T) {
 		{name: "from all, spelled out", req: RuleRequest{From: "all", To: "0.0.0.0/0", Table: 100}, want: ""},
 		{name: "lookup without a table", req: RuleRequest{From: "10.9.0.0/24"}, want: "needs a table"},
 		{name: "a blackhole naming a table", req: RuleRequest{From: "10.9.0.0/24", Action: "blackhole", Table: 100}, want: "names no table"},
-		{name: "unknown action", req: RuleRequest{From: "10.9.0.0/24", Action: "goto", Table: 100}, want: "action"},
+		{name: "unknown action", req: RuleRequest{From: "10.9.0.0/24", Action: "nat", Table: 100}, want: "action"},
+		{name: "a goto naming a table", req: RuleRequest{From: "10.9.0.0/24", Action: "goto", Goto: 12000, Table: 100}, want: "names no table"},
 		{name: "table 52", req: RuleRequest{From: "10.9.0.0/24", Table: 52}, want: "Tailscale"},
 		{name: "table 255", req: RuleRequest{From: "10.9.0.0/24", Table: 255}, want: "local"},
 		{name: "priority below the range", req: RuleRequest{From: "10.9.0.0/24", Table: 100, Priority: 5270}, want: "priority from 10000 to 19999"},

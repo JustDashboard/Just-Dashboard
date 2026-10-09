@@ -113,6 +113,11 @@ type Service struct {
 	flows               *flowSampler
 	independentRecovery bool
 	recoveryInstalled   bool
+	// history is the route observer's last reading (route_history.go).
+	history routeObserver
+	// forwardingSample is the last forwarded-datagram reading per family,
+	// which the next read turns into a rate (forwarding.go).
+	forwardingSample forwardingSamples
 }
 
 // Paths are where the module reads and writes on the host. Tests point them
