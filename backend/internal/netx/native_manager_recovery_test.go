@@ -199,6 +199,10 @@ func TestNativeConfirmationKeepsRollbackUntilDurableDecision(t *testing.T) {
 	if string(got) != string(f.u.Files[0].Before.Data) {
 		t.Fatal("fresh independent recovery did not restore prior native profile")
 	}
+	restored, err := nativeReadProfile(f.u.Files[0].Before.Path)
+	if err != nil || restored.Identity != f.u.Files[0].Before.Identity {
+		t.Fatalf("recovery failed to return its retained authored inode: %+v %v", restored, err)
+	}
 }
 
 func TestNativeConfirmedCleanupRetriesWithoutRollback(t *testing.T) {

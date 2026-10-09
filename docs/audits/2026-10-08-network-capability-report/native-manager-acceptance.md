@@ -34,7 +34,7 @@ applying-backend death recovery. Its Ubuntu NetworkManager 1.52.0 build applied 
 crashed during native checkpoint rollback in libnetplan YAML serialization. Inspection of the
 Ubuntu source patch confirmed that this persistent writer migrates keyfile origins to Netplan YAML.
 The adapter now refuses that running-image feature before admitting edits; covering authored
-Netplan/NetworkManager profiles without origin migration remains open. The failure is retained and
+Netplan/NetworkManager profiles without origin migration required a separate strategy. The failure is retained and
 is not counted as a successful restore.
 
 Final core run 10 passed against the conservative field/ownership guards: the isolated child took
@@ -44,6 +44,16 @@ profile, journal, checkpoint or authored-origin mutation; this is refusal accept
 editing. All owned private children were absent afterwards, only the original production networkd
 remained, and the host `/var/lib/NetworkManager` was still absent. Raw output is retained as
 `native-owner-run-10.log` in the task's external acceptance artifacts.
+
+Run 11 passed the separate actual Ubuntu 1.52.0/Netplan 1.1.2 generated-origin strategy in
+28.75 seconds in the private namespace, 52.10 seconds including its helper build. The independent
+journal creates no native checkpoint and therefore has no opaque timeout-zero creation-reply gap.
+It restored actual loaded/applied/kernel dual-family intent after rollback and applying-process
+death, retained pending recovery after a failed confirmed save, and preserved the candidate after
+process death following a durable confirmed decision and after a lost terminal cleanup outcome.
+The final verifier was then strengthened to compare exact authored/generated paths, bytes and
+recorded inodes as well as UUID and native intent. That stronger final source still requires its
+own native rerun; run 11 is not claimed as that rerun. Raw output is `native-owner-run-11.log`.
 
 Root-owned fault/race fixtures pass for failed durable confirmation, failure after checkpoint
 destruction, retry without rollback after confirmation, foreign stage preservation, next ordinary

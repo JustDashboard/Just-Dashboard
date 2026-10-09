@@ -143,7 +143,7 @@ func nativeNetplanOrigin(p *nativeProfile, selected string) error {
 		if nativeYAMLScalar(nativeYAMLGet(network, "version")) != "2" {
 			return errors.New("netplan source version is outside the supported contract")
 		}
-		for _, section := range []string{"ethernets", "bonds", "vrfs", "bridges", "vlans"} {
+		for _, section := range []string{"ethernets", "dummy-devices", "bonds", "vrfs", "bridges", "vlans"} {
 			profile := nativeYAMLGet(nativeYAMLGet(network, section), id)
 			if profile == nil {
 				continue
@@ -210,6 +210,47 @@ func nativeNetplanNode(data []byte, p *nativeProfile) (*yaml.Node, *yaml.Node, e
 		return nil, nil, errors.New("selected netplan source definition is absent")
 	}
 	return node, profile, nil
+}
+
+func nativeNetplanNMIdentity(p *nativeProfile) error {
+	_, profile, err := nativeNetplanNode(p.File.Data, p)
+	if err != nil || p.View.Owner != "netplan" || p.View.Renderer != "NetworkManager" || !nativeUUID.MatchString(p.UUID) || !nativeGeneratedPath("NetworkManager", p.NetplanID, p.Generated.Path) {
+		return errors.New("the exact authored Netplan/native connection identity could not be verified")
+	}
+	metadata := nativeYAMLGet(profile, "networkmanager")
+	if metadata == nil {
+		return nil
+	}
+	if metadata.Kind != yaml.MappingNode {
+		return errors.New("unsupported native connection metadata in Netplan")
+	}
+	generated, err := parseNativeINI(p.Generated.Data)
+	if err != nil {
+		return err
+	}
+	for i := 0; i < len(metadata.Content); i += 2 {
+		key, value := metadata.Content[i].Value, metadata.Content[i+1]
+		if value.Kind != yaml.ScalarNode || value.Tag != "!!str" || len(value.Value) > 256 {
+			return errors.New("unsupported native connection metadata in Netplan")
+		}
+		switch key {
+		case "uuid":
+			if value.Value != p.UUID {
+				return errors.New("the authored Netplan UUID differs from the loaded native connection")
+			}
+		case "name":
+			if value.Value == "" || strings.ContainsAny(value.Value, "\x00\r\n") {
+				return errors.New("unsupported native connection name in Netplan")
+			}
+			name, err := generated.one("connection", "id")
+			if err != nil || name != value.Value {
+				return errors.New("the authored Netplan name differs from the selected native connection")
+			}
+		default:
+			return errors.New("advanced native Netplan metadata requires its native owner")
+		}
+	}
+	return nil
 }
 
 func parseNativeNetplan(data []byte, p *nativeProfile) (NativeIntent, error) {

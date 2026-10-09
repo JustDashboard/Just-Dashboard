@@ -39,9 +39,12 @@ loads and activates it. networkd stages the selected `.network` file and reconfi
 Netplan preserves its exact YAML origin, generates in a private root, then replaces only the selected
 source and generated renderer artifact. It does not run a global `netplan apply`.
 The running NetworkManager image is also inspected for the Ubuntu Netplan writer integration.
-That build migrates persistent origins while restoring a checkpoint, so edits remain refused until
-an exact-origin adapter can cover the authored YAML and generated profile without migration. A pass
-on an unpatched keyfile build does not cover the common Ubuntu Netplan/NetworkManager combination.
+That build migrates persistent origins while restoring a native checkpoint. Existing keyfile origins
+on that build remain refused. A selected authored Netplan origin instead uses the independent
+exact-origin journal: it restores the exact YAML and selected generated keyfile and reactivates the
+same UUID through the pinned native owner, without calling the vendor checkpoint rollback writer.
+Closed NetworkManager name/UUID metadata is supported; arbitrary passthrough remains refused.
+A pass on an unpatched keyfile build does not cover this separate Ubuntu strategy.
 
 The observed device index, MAC, kind, master, members, bond mode and VRF table are part of the transaction
 contract. Observing those relationships does not prove that reactivating the saved profile will
@@ -54,15 +57,24 @@ Native writes always require a positive authenticated pending owner and independ
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise the native recovery protocol before admission.
+The standalone recovery executable must advertise `jd-native-manager-v2` before admission. The new
+closed strategy vocabulary cannot be admitted by a previously installed v1 helper. Recovery retains
+the earlier v1 journal's checkpoint strategy and refuses a migrating writer rather than converting
+that existing journal to a different recovery method.
 Selected files are exchanged atomically with their staged candidates, retaining the displaced inode
 in private staging. A concurrent native writer is verified after the exchange and preserved; it is
 never overwritten by a candidate rename. Files and containing directories are synced before progress
 is recorded. Terminal deletion first claims a stage through a no-replace rename to its deterministic
 cleanup name, then verifies that captured inode and its bytes. A crash during that claim is retryable.
 
-NetworkManager adds a checkpoint for the exact selected device, with a native timeout in addition to
-the independent ninety-second journal watchdog. Confirming first verifies current native intent and
+Verified non-migrating NetworkManager keyfile profiles add a checkpoint for the exact selected
+device, with a native timeout in addition to the independent ninety-second journal watchdog.
+Netplan/NetworkManager exact-origin recovery creates no native checkpoint: a lost reply to a
+timeout-zero checkpoint would leave an opaque permanent object whose ownership cannot safely be
+guessed from inventory. The independent watchdog must already be armed before any profile effect.
+Exact-origin admission and recovery refuse foreign native checkpoints, a changed writer/strategy,
+or any selected origin, UUID, byte or inode change outside the recorded transaction.
+Confirming first verifies current native intent and
 the returned dashboard challenge. It durably records the checkpoint timeout hold while independent
 pending recovery still owns the change, then records `confirmed`. Only after that decision reaches
 stable storage may the helper release the checkpoint or remove rollback stages.
@@ -103,7 +115,9 @@ private tmpfs mounts, sysfs reflects its network namespace, and its private syst
 fixture processes. NetworkManager receives explicit private state/intern/pid paths. It tests
 the actual transport GUID and mismatched/prior-bus authentication refusal across an actual restart,
 owner activation, static dual-family addressing/DNS/explicit-route evidence, independent executable
-rollback, reconnection confirmation and applying-backend process death. Timer admission is stubbed
+rollback, reconnection confirmation and applying-backend process death. The separate generated-origin
+Ubuntu case also injects failed durable confirmation storage, process death after durable confirmation
+and a lost terminal cleanup outcome, then invokes the actual fresh recovery executable. Timer admission is stubbed
 in this owner-data fixture; real systemd timer dispatch has separate acceptance. DHCP/SLAAC acquisition,
 cold runtime reconstruction and structural bond/VRF native acceptance remain required separately.
 
@@ -111,3 +125,6 @@ Run a bounded owner fixture from `backend/internal/netx` after compiling the rac
 binary. `JD_NETNS_LIVE=1` opts in, and `JD_NATIVE_MANAGER_NM_ROOT` identifies the independently verified
 NetworkManager/nmcli userland used for this local fixture. No package installation or production owner
 restart is part of the fixture. Use a workspace-local `TMPDIR` for its helper build.
+`JD_NATIVE_MANAGER_CASE=netplan-NetworkManager` selects authored Netplan with that renderer.
+`JD_NATIVE_MANAGER_NM_ORIGIN=refuse-migration` explicitly requests refusal acceptance for an Ubuntu
+keyfile origin; this is not counted as supported editing.

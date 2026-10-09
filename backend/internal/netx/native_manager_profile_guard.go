@@ -81,13 +81,20 @@ func nativeNetplanFieldsGuard(p *nativeProfile) error {
 	if err != nil {
 		return err
 	}
-	if p.NetplanSection != "ethernets" {
+	if p.NetplanSection != "ethernets" && !(p.NetplanSection == "dummy-devices" && p.View.Kind == "dummy" && p.View.Renderer == "NetworkManager") {
 		return errors.New("this Netplan structural profile requires verified native topology before activation")
 	}
 	for i := 0; i < len(profile.Content); i += 2 {
-		if !slices.Contains([]string{"renderer", "match", "set-name", "optional", "link-local", "dhcp4", "dhcp6", "accept-ra", "addresses", "nameservers", "routes", "dhcp4-overrides", "dhcp6-overrides"}, profile.Content[i].Value) {
+		if !slices.Contains([]string{"renderer", "match", "set-name", "optional", "link-local", "dhcp4", "dhcp6", "accept-ra", "addresses", "nameservers", "routes", "dhcp4-overrides", "dhcp6-overrides", "networkmanager"}, profile.Content[i].Value) {
 			return errors.New("this saved Netplan profile has properties whose active effects are not yet verified")
 		}
+	}
+	if p.View.Renderer == "NetworkManager" {
+		if err := nativeNetplanNMIdentity(p); err != nil {
+			return err
+		}
+	} else if nativeYAMLGet(profile, "networkmanager") != nil {
+		return errors.New("NetworkManager metadata disagrees with the Netplan renderer")
 	}
 	if err := nativeProfileFieldsGuard(p, p.Generated.Data, p.View.Renderer); err != nil {
 		return err

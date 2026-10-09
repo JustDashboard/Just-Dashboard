@@ -62,6 +62,10 @@ func prepareNativeFiles(p *nativeProfile, intent NativeIntent) (*nativeUndo, err
 		return nil, err
 	}
 	u := &nativeUndo{Version: 1, Transaction: hex.EncodeToString(nonce[:]), Owner: p.View.Owner, Renderer: p.View.Renderer, OwnerVersion: p.View.Version, OwnerBus: p.OwnerBus, BusID: p.BusID, TransportGUID: p.TransportGUID, BootID: p.BootID, Device: p.View.Device, IfIndex: p.Device.IfIndex, Kind: p.View.Kind, MAC: p.Device.Address, Contract: p.View.Contract, UUID: p.UUID, DeviceObject: p.DeviceObject, ConnectionObject: p.ConnectionObject, NetplanID: p.NetplanID, NetplanSection: p.NetplanSection, BeforeIntent: *p.View.Intent, CandidateIntent: intent, CheckpointState: "none"}
+	u.RecoveryStrategy, u.NMWriter = p.RecoveryStrategy, p.NMWriter
+	if p.RecoveryStrategy != "" {
+		u.Version = 2
+	}
 	return u, nil
 }
 
@@ -130,7 +134,7 @@ func (s *Service) prepareNativeChange(ctx context.Context, u *nativeUndo) (*chan
 }
 
 func nativeCheckpointCreate(ctx context.Context, j *changeJournal, u *nativeUndo) error {
-	if u.Renderer != "NetworkManager" {
+	if !nativeUsesCheckpoint(u) {
 		return nil
 	}
 	ctx = nativePinnedBus(ctx, u.TransportGUID)

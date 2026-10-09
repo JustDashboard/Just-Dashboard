@@ -26,6 +26,8 @@ type nativeProfile struct {
 	BusID            string
 	TransportGUID    string
 	BootID           string
+	RecoveryStrategy string
+	NMWriter         string
 	NetplanID        string
 	NetplanSection   string
 	Generated        nativeProfileFile
@@ -249,7 +251,7 @@ func (s *Service) readNativeProfile(ctx context.Context, device string) (*native
 	if err := ValidIfName(device); err != nil {
 		return nil, err
 	}
-	p := &nativeProfile{View: NativeProfileView{CheckedAt: time.Now().UTC(), Device: device, Owner: "unknown", Coverage: []string{}, Contract: NativeContract{Members: []string{}}, Configured: NativeEvidence{Status: "unknown"}, Runtime: NativeEvidence{Status: "unknown"}, Boot: NativeEvidence{Status: "unknown"}}}
+	p := &nativeProfile{RecoveryStrategy: nativeExactOriginStrategy, View: NativeProfileView{CheckedAt: time.Now().UTC(), Device: device, Owner: "unknown", Coverage: []string{}, Contract: NativeContract{Members: []string{}}, Configured: NativeEvidence{Status: "unknown"}, Runtime: NativeEvidence{Status: "unknown"}, Boot: NativeEvidence{Status: "unknown"}}}
 	refuse := func(reason string) (*nativeProfile, error) { p.View.Refusal = reason; return p, nil }
 	links, err := nativeLinks(ctx)
 	if err != nil {
@@ -436,11 +438,12 @@ func (s *Service) readNativeProfile(ctx context.Context, device string) (*native
 		p.View.Refusal = fieldErr.Error()
 	}
 	if p.View.Renderer == "NetworkManager" {
-		if err := nativeNMOriginGuard(ctx, p.OwnerBus); err != nil {
+		if err := nativeNMOriginStrategy(ctx, p); err != nil {
 			p.View.Editable = false
 			p.View.Refusal = err.Error()
 		}
 	}
+	p.View.Generation = nativeGeneration(p)
 	return p, nil
 }
 
@@ -448,10 +451,11 @@ func nativeGeneration(p *nativeProfile) string {
 	meta, _ := json.Marshal(struct {
 		Owner, Renderer, Version, Path, UUID, MAC, Kind, OwnerBus, BusID, BootID, TransportGUID string
 		DeviceObject, ConnectionObject                                                          string
+		RecoveryStrategy, NMWriter                                                              string
 		IfIndex                                                                                 int
 		Identity                                                                                nativeFileIdentity
 		Contract                                                                                NativeContract
-	}{Owner: p.View.Owner, Renderer: p.View.Renderer, Version: p.View.Version, Path: p.File.Path, UUID: p.UUID, MAC: p.Device.Address, Kind: p.View.Kind, OwnerBus: p.OwnerBus, BusID: p.BusID, BootID: p.BootID, TransportGUID: p.TransportGUID, DeviceObject: p.DeviceObject, ConnectionObject: p.ConnectionObject, IfIndex: p.Device.IfIndex, Identity: p.File.Identity, Contract: p.View.Contract})
+	}{Owner: p.View.Owner, Renderer: p.View.Renderer, Version: p.View.Version, Path: p.File.Path, UUID: p.UUID, MAC: p.Device.Address, Kind: p.View.Kind, OwnerBus: p.OwnerBus, BusID: p.BusID, BootID: p.BootID, TransportGUID: p.TransportGUID, DeviceObject: p.DeviceObject, ConnectionObject: p.ConnectionObject, RecoveryStrategy: p.RecoveryStrategy, NMWriter: p.NMWriter, IfIndex: p.Device.IfIndex, Identity: p.File.Identity, Contract: p.View.Contract})
 	meta = append(meta, p.File.Data...)
 	if p.View.Owner == "netplan" {
 		generated, _ := json.Marshal(p.Generated)

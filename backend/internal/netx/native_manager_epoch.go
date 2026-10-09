@@ -80,6 +80,9 @@ func nativeRebindAfterBoot(ctx context.Context, j *changeJournal, u *nativeUndo)
 	if err != nil || p == nil || p.OwnerBus == "" || p.BusID == "" || p.View.Owner != u.Owner || p.View.Renderer != u.Renderer || p.View.Version != u.OwnerVersion || p.Device.Address != u.MAC || p.View.Kind != u.Kind || !nativeContractsEqual(p.View.Contract, u.Contract) || p.File.Path != u.Files[0].Before.Path || p.View.Intent == nil || (u.Renderer == "NetworkManager" && p.UUID != u.UUID) {
 		return errors.New("native boot recovery cannot verify the exact persistent owner/device contract")
 	}
+	if u.RecoveryStrategy != "" && (p.RecoveryStrategy != u.RecoveryStrategy || p.NMWriter != u.NMWriter) {
+		return errors.New("native boot recovery found a different recovery strategy or persistent writer")
+	}
 	selected := []nativeProfileFile{p.File}
 	if u.Owner == "netplan" {
 		if p.NetplanID != u.NetplanID || p.NetplanSection != u.NetplanSection || p.Generated.Path != u.Files[1].Before.Path {
@@ -103,6 +106,8 @@ func nativeRebindAfterBoot(ctx context.Context, j *changeJournal, u *nativeUndo)
 		// an exact selected artifact may have a new root-owned inode.
 		if bytes.Equal(current.Data, f.Candidate.Data) {
 			f.Candidate.Identity = current.Identity
+		} else {
+			f.Before.Identity = current.Identity
 		}
 		rollback, err := nativeReadProfile(f.RollbackPath)
 		if errors.Is(err, os.ErrNotExist) {

@@ -3,6 +3,7 @@ package netx
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -123,6 +125,49 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 			t.Fatalf("fresh worker native profile: %+v %v", profile, err)
 		}
 		writer := writeChangeJournal
+		if mode != "apply" {
+			j, err := readChange(s.paths.Dir)
+			if err != nil || j.Phase != "awaiting_confirmation" {
+				t.Fatalf("confirmation-death worker lacks a pending change: %+v %v", j, err)
+			}
+			proof, err := s.VerifyReconnection(context.Background(), j.ID, 7, "native-death-session", "127.0.0.1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeChangeJournal = func(path string, data []byte, permissions os.FileMode) error {
+				if !strings.Contains(string(data), `"phase": "confirmed"`) {
+					return writer(path, data, permissions)
+				}
+				if mode == "confirm-save-failure" {
+					return errors.New("native fixture durable confirmation failed")
+				}
+				if mode == "confirm-death" {
+					if err := writer(path, data, permissions); err != nil {
+						return err
+					}
+					os.Exit(92)
+				}
+				if mode == "cleanup-death" {
+					var current changeJournal
+					if err := json.Unmarshal(data, &current); err != nil {
+						return err
+					}
+					u, err := nativeJournalUndo(&current)
+					if err != nil {
+						return err
+					}
+					if u.CheckpointState == "released" || slices.ContainsFunc(u.Files, func(f nativeUndoFile) bool { return f.Cleanup == "complete" }) {
+						os.Exit(94)
+					}
+				}
+				return writer(path, data, permissions)
+			}
+			_, err = s.ConfirmChange(context.Background(), j.ID, 7, "native-death-session", proof.Challenge, "127.0.0.1")
+			if mode == "confirm-save-failure" && err != nil {
+				os.Exit(93)
+			}
+			t.Fatalf("native confirmation worker did not reach requested death window %s: %v", mode, err)
+		}
 		writeChangeJournal = func(path string, data []byte, mode os.FileMode) error {
 			if err := writer(path, data, mode); err != nil {
 				return err
@@ -262,11 +307,16 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 	if _, err := nativeFixtureExecute(ctx, nil, "ip", "link", "set", "lo", "up"); err != nil {
 		t.Fatal(err)
 	}
-	for _, owner := range []string{"networkd", "NetworkManager", "netplan"} {
+	for _, owner := range []string{"networkd", "NetworkManager", "netplan", "netplan-NetworkManager"} {
 		if selected := os.Getenv("JD_NATIVE_MANAGER_CASE"); selected != "" && selected != owner {
 			continue
 		}
 		t.Run(owner, func(t *testing.T) {
+			useNM := owner == "NetworkManager" || owner == "netplan-NetworkManager"
+			expectedOwner := owner
+			if owner == "netplan-NetworkManager" {
+				expectedOwner = "netplan"
+			}
 			must := func(tool string, args ...string) string {
 				t.Helper()
 				out, err := nativeFixtureExecute(ctx, nil, tool, args...)
@@ -288,23 +338,31 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 				t.Fatal(err)
 			}
 			manager := "io.systemd.Network"
-			if owner == "NetworkManager" {
+			if useNM {
 				manager = nmService
 			}
 			nativeFixtureWrite(t, "/run/udev/data/n"+strings.TrimSpace(string(indexBytes)), "I:1\nE:INTERFACE=d0\nE:ID_NET_MANAGED_BY="+manager+"\n", 0o644)
 			before := nativeFixtureIntent("198.18.8.2", "2001:db8:18::2")
 			unit := "systemd-networkd.service"
 			var stopOwner func()
-			if owner == "NetworkManager" {
+			if useNM {
 				unit = "NetworkManager.service"
 				nativeFixtureWrite(t, "/etc/NetworkManager/NetworkManager.conf", "[main]\nplugins=keyfile\ndns=none\nrc-manager=unmanaged\n[device-fixture]\nmatch-device=interface-name:d0\nmanaged=true\n[connectivity]\nenabled=false\n", 0o600)
-				profile := must("nmcli", "--offline", "connection", "add", "type", "dummy", "ifname", "d0", "con-name", "d0", "ipv4.method", "manual", "ipv4.addresses", before.IPv4.Addresses[0], "ipv4.dns", "127.0.0.1", "ipv4.dns-search", "corp.test", "ipv6.method", "manual", "ipv6.addresses", before.IPv6.Addresses[0], "ipv6.dns", "::1", "ipv6.dns-search", "corp.test")
-				nativeFixtureWrite(t, "/etc/NetworkManager/system-connections/d0.nmconnection", profile, 0o600)
+				profilePath, activation := "/etc/NetworkManager/system-connections/d0.nmconnection", "d0"
+				if owner == "netplan-NetworkManager" {
+					activation = "27c153d6-ade1-4dde-988b-7acb135a8495"
+					nativeFixtureWrite(t, "/etc/netplan/20-fixture.yaml", "network:\n  version: 2\n  renderer: NetworkManager\n  dummy-devices:\n    d0:\n      dhcp4: false\n      dhcp6: false\n      accept-ra: false\n      addresses: [198.18.8.2/24, '2001:db8:18::2/64']\n      nameservers:\n        addresses: [127.0.0.1, '::1']\n        search: [corp.test]\n      networkmanager:\n        uuid: '"+activation+"'\n        name: d0\n", 0o600)
+					must("netplan", "generate")
+					profilePath = "/run/NetworkManager/system-connections/netplan-d0.nmconnection"
+				} else {
+					profile := must("nmcli", "--offline", "connection", "add", "type", "dummy", "ifname", "d0", "con-name", "d0", "ipv4.method", "manual", "ipv4.addresses", before.IPv4.Addresses[0], "ipv4.dns", "127.0.0.1", "ipv4.dns-search", "corp.test", "ipv6.method", "manual", "ipv6.addresses", before.IPv6.Addresses[0], "ipv6.dns", "::1", "ipv6.dns-search", "corp.test")
+					nativeFixtureWrite(t, profilePath, profile, 0o600)
+				}
 				stopOwner = nativeFixtureDaemon(t, filepath.Join(nmRoot, "usr/sbin/NetworkManager"), "--debug", "--log-level=INFO", "--plugins=keyfile", "--config=/etc/NetworkManager/NetworkManager.conf", "--system-config-dir=/run/jd-native-nm/conf.d", "--intern-config=/run/jd-native-nm/intern.conf", "--state-file=/run/jd-native-nm/state", "--pid-file=/run/jd-native-nm/pid")
 				nmDeadline := time.Now().Add(10 * time.Second)
 				for time.Now().Before(nmDeadline) {
-					if _, err := nativeFixtureExecute(ctx, nil, "nmcli", "connection", "load", "/etc/NetworkManager/system-connections/d0.nmconnection"); err == nil {
-						must("nmcli", "connection", "up", "d0")
+					if _, err := nativeFixtureExecute(ctx, nil, "nmcli", "connection", "load", profilePath); err == nil {
+						must("nmcli", "connection", "up", activation)
 						break
 					}
 					time.Sleep(100 * time.Millisecond)
@@ -329,7 +387,7 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 			var p *NativeProfileView
 			for time.Now().Before(deadline) {
 				p, _ = s.NativeProfile(ctx, "d0")
-				if p != nil && p.Editable && p.Owner == owner {
+				if p != nil && p.Editable && p.Owner == expectedOwner {
 					break
 				}
 				if owner == "NetworkManager" && os.Getenv("JD_NATIVE_MANAGER_NM_ORIGIN") == "refuse-migration" && p != nil && strings.Contains(p.Refusal, "migrates saved profiles through Netplan") {
@@ -369,7 +427,7 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 				t.Log("Actual Ubuntu Netplan-writer image refused before profile mutation, journal creation, checkpoint creation or origin migration; this is refusal acceptance, not supported editing")
 				return
 			}
-			if p == nil || !p.Editable || p.Owner != owner {
+			if p == nil || !p.Editable || p.Owner != expectedOwner {
 				t.Logf("native owner capabilities: %+v %+v %+v", nativeCapability(ctx, "NetworkManager"), nativeCapability(ctx, "networkd"), nativeCapability(ctx, "netplan"))
 				for _, command := range [][]string{{"busctl", "--system", "list"}, {"networkctl", "--no-pager", "--json=short", "status", "d0"}, {"ip", "-j", "addr", "show", "dev", "d0"}} {
 					out, err := nativeFixtureExecute(ctx, nil, command[0], command[1:]...)
@@ -414,7 +472,25 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 			if err != nil || j.Phase != "awaiting_confirmation" {
 				t.Fatalf("native pending journal: %+v %v", j, err)
 			}
+			undo, err := nativeJournalUndo(j)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if owner == "netplan-NetworkManager" && (undo.RecoveryStrategy != nativeExactOriginStrategy || undo.NMWriter != "netplan" || undo.Checkpoint != "" || undo.CheckpointState != "none" || undo.UUID != "27c153d6-ade1-4dde-988b-7acb135a8495" || len(undo.Files) != 2 || undo.Files[0].Before.Path != "/etc/netplan/20-fixture.yaml" || undo.Files[1].Before.Path != "/run/NetworkManager/system-connections/netplan-d0.nmconnection") {
+				t.Fatalf("actual Ubuntu generated-origin transaction lost its closed origin/UUID strategy: %+v", undo)
+			}
 			must(filepath.Join(s.paths.Dir, recoveryBinary), "--network-recover", s.paths.Dir, j.ID)
+			if owner == "netplan-NetworkManager" {
+				for _, f := range undo.Files {
+					if err := nativeCurrentFile(f.Before, f.Before.Identity); err != nil {
+						t.Fatalf("fresh helper did not restore exact authored/generated bytes and original inode: %v", err)
+					}
+				}
+				entries, err := os.ReadDir("/etc/netplan")
+				if err != nil || len(entries) != 1 || entries[0].Name() != "20-fixture.yaml" {
+					t.Fatalf("exact-origin recovery migrated authored source inventory: %v %v", entries, err)
+				}
+			}
 			p, err = s.NativeProfile(ctx, "d0")
 			if err != nil || p.Intent == nil || !nativeIntentEqual(*p.Intent, before) {
 				t.Fatalf("fresh executable did not restore real owner intent: %+v %v", p, err)
@@ -443,6 +519,43 @@ func TestNativeManagerOwnerLive(t *testing.T) {
 			p, err = s.NativeProfile(ctx, "d0")
 			if err != nil || p.Intent == nil || !nativeIntentEqual(*p.Intent, candidate) {
 				t.Fatalf("backend-death native recovery did not restore confirmed intent: %+v %v", p, err)
+			}
+			if useNM {
+				for index, mode := range []string{"confirm-save-failure", "confirm-death", "cleanup-death"} {
+					prior := *p.Intent
+					next := nativeFixtureIntent(fmt.Sprintf("198.18.8.%d", 5+index), fmt.Sprintf("2001:db8:18::%d", 5+index))
+					if _, err := s.EditNativeProfile(WithPendingConfirmation(ctx, 7), "d0", NativeEditRequest{Generation: p.Generation, Intent: next}, "127.0.0.1"); err != nil {
+						t.Fatal(err)
+					}
+					worker := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestNativeManagerOwnerLive$", "-test.count=1")
+					worker.Env = append(os.Environ(), "JD_NATIVE_MANAGER_WORKER="+mode)
+					out, err := worker.CombinedOutput()
+					expectedExit := map[string]int{"confirm-save-failure": 93, "confirm-death": 92, "cleanup-death": 94}[mode]
+					if !errors.As(err, &exited) || exited.ExitCode() != expectedExit {
+						t.Fatalf("actual native %s did not reach its death window: %v %s", mode, err, out)
+					}
+					j, err := readChange(s.paths.Dir)
+					if err != nil || j.Cleanup == "complete" {
+						t.Fatalf("native death window lost pending cleanup: %+v %v", j, err)
+					}
+					want, phase := next, "confirmed"
+					if mode == "confirm-save-failure" {
+						want, phase = prior, "awaiting_confirmation"
+					}
+					if j.Phase != phase {
+						t.Fatalf("native %s left the wrong durable decision: %+v", mode, j.ChangeStatus)
+					}
+					must(filepath.Join(s.paths.Dir, recoveryBinary), "--network-recover", s.paths.Dir, j.ID)
+					p, err = s.NativeProfile(ctx, "d0")
+					if err != nil || !p.Editable || p.Intent == nil || !nativeIntentEqual(*p.Intent, want) {
+						t.Fatalf("native %s fresh helper did not preserve its durable decision: %+v %v", mode, p, err)
+					}
+					finished, err := readChange(s.paths.Dir)
+					if err != nil || finished.Cleanup != "complete" {
+						t.Fatalf("native %s cleanup did not retry completely: %+v %v", mode, finished, err)
+					}
+				}
+				t.Log("Native confirmation save failure, process death after durable confirmation, and lost terminal cleanup outcome recovered through fresh helpers")
 			}
 			t.Logf("%s actual IPv4/IPv6 addresses, DNS, metric/table routes, rollback, confirmation and backend-death helper recovery passed", owner)
 			stopOwner()

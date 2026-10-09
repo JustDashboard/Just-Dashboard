@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v1"
+const nativeRecoveryToken = "jd-native-manager-v2"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {
@@ -41,6 +41,8 @@ type nativeUndo struct {
 	BusID            string           `json:"busId"`
 	TransportGUID    string           `json:"transportGuid"`
 	BootID           string           `json:"bootId"`
+	RecoveryStrategy string           `json:"recoveryStrategy,omitempty"`
+	NMWriter         string           `json:"nmWriter,omitempty"`
 	Device           string           `json:"device"`
 	IfIndex          int              `json:"ifIndex"`
 	Kind             string           `json:"kind"`
@@ -83,7 +85,7 @@ func decodeNativeUndo(c recoveryCommand) (*nativeUndo, error) {
 	if d.Decode(&u) != nil || d.Decode(new(any)) != io.EOF {
 		return nil, errors.New("refused unreadable native recovery evidence")
 	}
-	if u.Version != 1 || !nativeTransaction.MatchString(u.Transaction) || !nativeBusOwner.MatchString(u.OwnerBus) || !nativeTransaction.MatchString(u.BusID) || !nativeTransaction.MatchString(u.TransportGUID) || u.TransportGUID == strings.Repeat("0", 32) || !nativeUUID.MatchString(u.BootID) || u.IfIndex < 1 || u.IfIndex > 2147483647 || ValidIfName(u.Device) != nil || !slices.Contains([]string{"physical", "dummy", "vlan", "bridge", "bond", "vrf"}, u.Kind) || !slices.Contains([]string{"NetworkManager", "networkd", "netplan"}, u.Owner) || !slices.Contains([]string{"NetworkManager", "networkd"}, u.Renderer) || !nativeVersionSupported(u.Owner, u.OwnerVersion) || len(u.MAC) != 17 || len(u.Files) < 1 || len(u.Files) > 2 {
+	if !slices.Contains([]int{1, 2}, u.Version) || !nativeTransaction.MatchString(u.Transaction) || !nativeBusOwner.MatchString(u.OwnerBus) || !nativeTransaction.MatchString(u.BusID) || !nativeTransaction.MatchString(u.TransportGUID) || u.TransportGUID == strings.Repeat("0", 32) || !nativeUUID.MatchString(u.BootID) || u.IfIndex < 1 || u.IfIndex > 2147483647 || ValidIfName(u.Device) != nil || !slices.Contains([]string{"physical", "dummy", "vlan", "bridge", "bond", "vrf"}, u.Kind) || !slices.Contains([]string{"NetworkManager", "networkd", "netplan"}, u.Owner) || !slices.Contains([]string{"NetworkManager", "networkd"}, u.Renderer) || !nativeVersionSupported(u.Owner, u.OwnerVersion) || len(u.MAC) != 17 || len(u.Files) < 1 || len(u.Files) > 2 {
 		return nil, errors.New("refused unexpected native owner identities")
 	}
 	mac, macErr := net.ParseMAC(u.MAC)
@@ -100,6 +102,12 @@ func decodeNativeUndo(c recoveryCommand) (*nativeUndo, error) {
 	}
 	if u.Owner != "netplan" && u.Owner != u.Renderer {
 		return nil, errors.New("refused mismatched native owner/renderer")
+	}
+	if err := nativeRecoveryStrategyScope(&u); err != nil {
+		return nil, err
+	}
+	if u.Version == 1 && (u.RecoveryStrategy != "" || u.NMWriter != "") || u.Version == 2 && u.RecoveryStrategy == "" {
+		return nil, errors.New("refused mismatched native helper recovery vocabulary")
 	}
 	if u.Renderer == "NetworkManager" && (!nativeUUID.MatchString(u.UUID) || !nativeObjectID.MatchString(u.DeviceObject) || !strings.Contains(u.DeviceObject, "/Devices/") || !nativeObjectID.MatchString(u.ConnectionObject) || !strings.Contains(u.ConnectionObject, "/Settings/")) {
 		return nil, errors.New("refused unexpected native connection identity")
@@ -219,6 +227,9 @@ func nativeActivate(ctx context.Context, u *nativeUndo) error {
 	if err := nativeVerifyEpoch(ctx, u); err != nil {
 		return err
 	}
+	if err := nativeVerifyRecoveryStrategy(ctx, u); err != nil {
+		return err
+	}
 	if u.Renderer == "NetworkManager" {
 		path := u.Files[0].Before.Path
 		if len(u.Files) == 2 {
@@ -266,6 +277,32 @@ func nativeVerifyUndo(ctx context.Context, j *changeJournal, u *nativeUndo, cand
 	if p.View.Intent == nil || !nativeIntentEqual(*p.View.Intent, want) {
 		return errors.New("native owner's current supported intent differs from the transaction")
 	}
+	selected := []nativeProfileFile{p.File}
+	if u.Owner == "netplan" {
+		if p.NetplanID != u.NetplanID || p.NetplanSection != u.NetplanSection {
+			return errors.New("native owner's authored origin differs from the recorded transaction")
+		}
+		selected = append(selected, p.Generated)
+	}
+	if len(selected) != len(u.Files) {
+		return errors.New("native owner's selected file scope differs from the transaction")
+	}
+	for i, actual := range selected {
+		f := u.Files[i]
+		expected := f.Before
+		if candidate {
+			expected = f.Candidate
+		}
+		if actual.Path != expected.Path || !bytes.Equal(actual.Data, expected.Data) {
+			return errors.New("native activation changed the exact recorded origin or bytes")
+		}
+		if candidate && actual.Identity != f.Candidate.Identity || !candidate && !nativeUsesCheckpoint(u) && actual.Identity != f.Before.Identity && actual.Identity != f.RollbackID {
+			return errors.New("native activation replaced an exact-origin inode outside its recorded scope")
+		}
+	}
+	if u.RecoveryStrategy != "" && (p.RecoveryStrategy != u.RecoveryStrategy || p.NMWriter != u.NMWriter) {
+		return errors.New("native recovery strategy or writer changed; its original evidence was preserved")
+	}
 	return nil
 }
 
@@ -280,7 +317,10 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 		return err
 	}
 	ctx = nativePinnedBus(ctx, u.TransportGUID)
-	if u.Renderer == "NetworkManager" {
+	if err := nativeVerifyRecoveryStrategy(ctx, u); err != nil {
+		return err
+	}
+	if nativeUsesCheckpoint(u) {
 		if u.CheckpointState == "creating" {
 			checkpoints, err := nativeBusProperty[[]string](ctx, u.OwnerBus, nmObject, nmService, "Checkpoints", "ao")
 			if err != nil || len(checkpoints) != 0 {
@@ -327,7 +367,12 @@ func recoverNativeChange(ctx context.Context, j *changeJournal, c recoveryComman
 		}
 		rollback := f.Before
 		rollback.Path, rollback.Identity = f.RollbackPath, f.RollbackID
-		if err := nativeCurrentFile(rollback, f.RollbackID); err != nil {
+		if displaced, err := nativeReadProfile(f.CandidatePath); err == nil && displaced.Identity == f.Before.Identity && bytes.Equal(displaced.Data, f.Before.Data) {
+			// An exchange retained the authored inode. Prefer returning it to
+			// its selected name over the durable copy used after reconstruction.
+			rollback.Path, rollback.Identity = f.CandidatePath, f.Before.Identity
+		}
+		if err := nativeCurrentFile(rollback, rollback.Identity); err != nil {
 			return err
 		}
 		if err := nativeReplaceProfile(rollback, f.Candidate); err != nil {
