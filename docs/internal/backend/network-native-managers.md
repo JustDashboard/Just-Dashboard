@@ -205,15 +205,16 @@ The [v8 authored Netplan proof](evidence/native-manager-netplan-v8-2026-10-09.md
 standalone policy above. Default Netplan DHCP MTU, DHCPv6 acquisition, wider platform owners and host
 reboot remain open; source ancestry is not interchangeable.
 
-Current v8 recovery has a separately observed equal-byte ownership defect. When a staged candidate
+The earlier v8 checkpoint has a separately observed equal-byte ownership defect. When a staged candidate
 has the same bytes as the saved prior profile but a different captured inode, byte-first
 classification can mistake the candidate for the prior file. Exact-origin recovery then refuses
 the known candidate and retains a degraded journal; checkpoint recovery can instead treat it as an
 unrecorded restored inode and skip restoration of the retained authored inode. Foreign-file guards
-remain enforced. The correction and unchanged-intent native acceptance are still pending; the
-nonidentical-profile proofs above do not cover this case. Direct networkd also currently adds a
-synthetic trailing blank line on each INI parse/render, so repeated unchanged renders are not byte
-stable. Its parser correction and source-matched native rerun remain required.
+remain enforced. Helper v10 corrects the inode classification, and the INI parser now treats exactly
+one terminal LF as a line terminator, preserving intentional blank lines. Focused regression and
+race checks pass; final assembled-source unchanged-intent native acceptance remains pending in the
+[profile inode record](evidence/native-manager-profile-inodes-v10-2026-10-09.md). Earlier
+nonidentical-profile proofs retain their v8 attribution and do not cover this case.
 
 `native_manager_recovery_test.go` uses bounded root-owned file fixtures and injected storage failures
 to check durable confirmation before cleanup, cleanup retry after checkpoint release, foreign-stage
