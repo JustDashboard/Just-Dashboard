@@ -14,7 +14,11 @@ const detail = (root: Locator, label: string) =>
 const createReview = (page: Page) =>
   sheet(page).getByRole("button", { name: "Create retained review", exact: true })
 const applyReview = (page: Page) =>
-  sheet(page).getByRole("button", { name: "Apply reviewed native change", exact: true })
+  sheet(page).getByRole("button", {
+    name: "Apply reviewed native change",
+    exact: true,
+    includeHidden: true,
+  })
 const applies = (control: DNSServicePageControl) =>
   control.mutations.filter((item) => item.path.endsWith("/apply"))
 
