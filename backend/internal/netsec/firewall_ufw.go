@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // errRuleExists is ufw declining to add a rule it already has.
@@ -29,7 +27,7 @@ var errRuleExists = errors.New("ufw already has that exact rule")
 type ufwBackend struct{}
 
 func (ufwBackend) Kind() Backend { return BackendUFW }
-func (ufwBackend) Detect() bool  { return hostexec.AvailableOnHost("ufw") }
+func (ufwBackend) Detect() bool  { return availableOnHost("ufw") }
 
 func (ufwBackend) Capabilities() FirewallCapabilities {
 	return FirewallCapabilities{
@@ -158,6 +156,16 @@ func parseUFWRule(num int, body string) Rule {
 		r.Action = "UNKNOWN"
 		r.To = strings.TrimSpace(body)
 	}
+	// An interface-scoped rule prints "on eth0" in the destination column for
+	// inbound rules and in the source column for outbound ones, before or
+	// after the "(v6)" marker.
+	var iface string
+	if r.To, iface = cutInterface(r.To); iface != "" {
+		r.Interface = iface
+	}
+	if r.From, iface = cutInterface(r.From); iface != "" && r.Interface == "" {
+		r.Interface = iface
+	}
 	// ufw appends "(v6)" to the destination of the IPv6 half of a rule. Left
 	// in the To field it makes the same rule look like two different ones.
 	if trimmed, ok := strings.CutSuffix(r.To, " (v6)"); ok {
@@ -184,6 +192,18 @@ func parseUFWRule(num int, body string) Rule {
 		r.Port = lastField(r.To)
 	}
 	return r
+}
+
+// cutInterface removes ufw's "on <device>" from a column.
+func cutInterface(s string) (string, string) {
+	fields := strings.Fields(s)
+	for i := 0; i+1 < len(fields); i++ {
+		if fields[i] == "on" {
+			iface := fields[i+1]
+			return strings.Join(append(fields[:i:i], fields[i+2:]...), " "), iface
+		}
+	}
+	return s, ""
 }
 
 // lastField is the port half of ufw's destination column, which carries an

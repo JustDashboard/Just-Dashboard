@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // Raw iptables is the fallback, and it is deliberately read-only.
@@ -22,7 +20,7 @@ import (
 type iptablesBackend struct{}
 
 func (iptablesBackend) Kind() Backend { return BackendIPTables }
-func (iptablesBackend) Detect() bool  { return hostexec.AvailableOnHost("iptables") }
+func (iptablesBackend) Detect() bool  { return availableOnHost("iptables") }
 
 func (iptablesBackend) Capabilities() FirewallCapabilities {
 	return FirewallCapabilities{

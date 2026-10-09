@@ -40,6 +40,9 @@ type Spec struct {
 	Trusted []string `json:"trusted"`
 	// Sysctls are the kernel settings set here, by key.
 	Sysctls map[string]string `json:"sysctls"`
+	// Firewall is the owned nftables table, present once it has been used
+	// (firewall_owned.go).
+	Firewall *FirewallSpec `json:"firewall,omitempty"`
 }
 
 const specVersion = 1

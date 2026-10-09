@@ -1460,7 +1460,8 @@ func firewallViewFor(status *netsec.FirewallStatus, port dockerx.PortExposure) F
 	}
 	needle := strconv.Itoa(port.HostPort)
 	for _, rule := range status.Rules {
-		if !portRuleMatches(rule.Port, needle) {
+		// A rule scoped to one device does not answer for the port at large.
+		if rule.Interface != "" || !portRuleMatches(rule.Port, needle) {
 			continue
 		}
 		if rule.Protocol != "" && port.Protocol != "" &&

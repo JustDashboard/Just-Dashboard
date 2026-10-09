@@ -696,7 +696,8 @@ func ruleTarget(r Rule, backend Backend) (destination, ports string, ok bool) {
 		return "", "", isAnywhere(r.To)
 	}
 	to := strings.TrimSpace(r.To)
-	if strings.Contains(to, " on ") {
+	// A rule scoped to one device does not open the port everywhere.
+	if r.Interface != "" || strings.Contains(to, " on ") {
 		return "", "", false
 	}
 	if r.Port != "" {

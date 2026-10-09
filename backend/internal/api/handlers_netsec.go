@@ -3,7 +3,6 @@ package api
 import (
 	"errors"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -23,23 +22,36 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/apps", s.handle(s.handleFirewallApps))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
-			r.Method(http.MethodPost, "/rules", s.handle(s.handleFirewallAddRule))
-			// Editing is a replace, and it is not in the destructive group:
-			// the new rule goes in before the old one comes out, so the worst
-			// failure leaves the firewall exactly as strict as it was.
-			r.Method(http.MethodPut, "/rules/{number}", s.handle(s.handleFirewallReplaceRule))
-			// Logging is the one firewall setting that cannot cost anybody
-			// their access, so it is the one that stays out of the
-			// destructive group.
-			r.Method(http.MethodPost, "/logging", s.handle(s.handleFirewallLogging))
-			s.destructive(r, func(r chi.Router) {
-				// Turning the firewall off, deleting the rule that admits
-				// you, flipping the inbound default or wiping every rule is
-				// how an operator locks themselves out of the box.
-				r.Method(http.MethodPost, "/enabled", s.handle(s.handleFirewallToggle))
-				r.Method(http.MethodPost, "/policy", s.handle(s.handleFirewallPolicy))
-				r.Method(http.MethodPost, "/reset", s.handle(s.handleFirewallReset))
-				r.Method(http.MethodDelete, "/rules/{number}", s.handle(s.handleFirewallDeleteRule))
+			// The rule history names who changed what, as the audit log does.
+			r.Method(http.MethodGet, "/history", s.handle(s.handleFirewallHistory))
+			r.Group(func(r chi.Router) {
+				// Covered changes may be applied temporarily and confirmed by
+				// a fresh dashboard response, as network changes are.
+				r.Use(s.pendingNetworkApply)
+				// Reviews change nothing.
+				r.Method(http.MethodPost, "/preflight", s.handle(s.handleFirewallPreflight))
+				r.Method(http.MethodPost, "/plans/preview", s.handle(s.handleFirewallPlanPreview))
+				r.Method(http.MethodPost, "/rules", s.handle(s.handleFirewallAddRule))
+				// Editing is a replace, and it is not in the destructive
+				// group: the new rule goes in before the old one comes out,
+				// so the worst failure leaves the firewall exactly as strict
+				// as it was.
+				r.Method(http.MethodPut, "/rules/{number}", s.handle(s.handleFirewallReplaceRule))
+				// Logging is the one firewall setting that cannot cost
+				// anybody their access, so it is the one that stays out of
+				// the destructive group.
+				r.Method(http.MethodPost, "/logging", s.handle(s.handleFirewallLogging))
+				s.destructive(r, func(r chi.Router) {
+					// Turning the firewall off, deleting the rule that admits
+					// you, flipping the inbound default or wiping every rule
+					// is how an operator locks themselves out of the box. A
+					// plan can remove rules too.
+					r.Method(http.MethodPost, "/enabled", s.handle(s.handleFirewallToggle))
+					r.Method(http.MethodPost, "/policy", s.handle(s.handleFirewallPolicy))
+					r.Method(http.MethodPost, "/reset", s.handle(s.handleFirewallReset))
+					r.Method(http.MethodPost, "/plans", s.handle(s.handleFirewallPlanApply))
+					r.Method(http.MethodDelete, "/rules/{number}", s.handle(s.handleFirewallDeleteRule))
+				})
 			})
 		})
 	})
@@ -162,106 +174,6 @@ func loginLimit(r *http.Request) int {
 		limit = 500
 	}
 	return limit
-}
-
-func (s *Server) handleFirewallStatus(w http.ResponseWriter, r *http.Request) error {
-	st, err := s.modules.netsec.Status(r.Context())
-	if err != nil {
-		return httpx.Internal(err)
-	}
-	httpx.JSON(w, http.StatusOK, st)
-	return nil
-}
-
-func (s *Server) handleFirewallAddRule(w http.ResponseWriter, r *http.Request) error {
-	var req netsec.RuleRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	// The caller's own address is handed to the firewall layer so it can
-	// refuse a rule that would sever this very connection.
-	out, err := s.modules.netsec.AddRule(r.Context(), req, s.networkClient(r))
-	if err != nil {
-		if errors.Is(err, netsec.ErrLockout) {
-			httpx.SetAudit(r, "firewall.rule.add", req.Port, map[string]any{"result": "refused_lockout"})
-			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
-		}
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.rule.add", req.Port, req)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-// mapFirewallError distinguishes "this host's firewall cannot do that" from
-// "you asked for something invalid". They deserve different words, and only
-// the first is worth a code the UI keys off.
-func mapFirewallError(err error) error {
-	if errors.Is(err, netsec.ErrReadOnly) {
-		return httpx.Err(http.StatusNotImplemented, "firewall_read_only", err.Error())
-	}
-	if errors.Is(err, netsec.ErrNoFirewall) {
-		return httpx.Err(http.StatusServiceUnavailable, "no_firewall", err.Error())
-	}
-	return httpx.BadRequest("%v", err)
-}
-
-func (s *Server) handleFirewallReplaceRule(w http.ResponseWriter, r *http.Request) error {
-	number, err := strconv.Atoi(chi.URLParam(r, "number"))
-	if err != nil {
-		return httpx.BadRequest("invalid rule number")
-	}
-	var req netsec.RuleRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	out, err := s.modules.netsec.ReplaceRule(r.Context(), number, req, s.networkClient(r))
-	if err != nil {
-		if errors.Is(err, netsec.ErrLockout) {
-			httpx.SetAudit(r, "firewall.rule.replace", strconv.Itoa(number),
-				map[string]any{"result": "refused_lockout"})
-			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
-		}
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.rule.replace", strconv.Itoa(number), req)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-func (s *Server) handleFirewallDeleteRule(w http.ResponseWriter, r *http.Request) error {
-	number, err := strconv.Atoi(chi.URLParam(r, "number"))
-	if err != nil {
-		return httpx.BadRequest("invalid rule number")
-	}
-	// No typed phrase: a rule is one line of configuration, visible on the row
-	// being deleted and re-addable from the form beside it. Turning the
-	// firewall off entirely is the route below, and that also uses ordinary confirmation.
-	out, err := s.modules.netsec.DeleteRule(r.Context(), number)
-	if err != nil {
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.rule.delete", strconv.Itoa(number), nil)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-type firewallToggleRequest struct {
-	Enabled bool `json:"enabled"`
-}
-
-func (s *Server) handleFirewallToggle(w http.ResponseWriter, r *http.Request) error {
-	var req firewallToggleRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	out, err := s.modules.netsec.SetEnabled(r.Context(), req.Enabled)
-	if err != nil {
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.toggle", "", map[string]any{"enabled": req.Enabled})
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
 }
 
 func (s *Server) handleFail2banStatus(w http.ResponseWriter, r *http.Request) error {

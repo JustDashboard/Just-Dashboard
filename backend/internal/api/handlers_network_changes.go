@@ -17,10 +17,16 @@ import (
 const networkApplyHeader = "X-JD-Network-Apply"
 
 // Only operations with serialized netx undo coverage may opt into pending apply.
-// Firewall, DNS, namespaces and VPN have separate owners and are not enrolled.
+// Host firewall changes are enrolled through their own file snapshot and
+// fixed recovery commands; DNS, namespaces and VPN have separate owners and
+// are not.
 func supportsPendingNetworkApply(path string) bool {
 	path = strings.TrimSuffix(path, "/")
-	if path == "/network/drift/repairs" {
+	switch path {
+	case "/network/drift/repairs", "/firewall/rules", "/firewall/enabled", "/firewall/policy", "/firewall/reset", "/firewall/plans":
+		return true
+	}
+	if strings.HasPrefix(path, "/firewall/rules/") {
 		return true
 	}
 	for _, prefix := range []string{"/network/links", "/network/native/profiles", "/network/routing/routes", "/network/routing/rules", "/network/forwarding", "/network/shaping", "/network/gateway/forwards", "/network/gateway/nat", "/network/protection/limits", "/network/protection/blocklists", "/network/protection/settings", "/network/protection/trusted"} {
@@ -60,7 +66,7 @@ func (s *Server) pendingNetworkApply(next http.Handler) http.Handler {
 			return
 		}
 		if mode != "pending" || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete) || !supportsPendingNetworkApply(strings.TrimPrefix(r.URL.Path, "/api/v1")) {
-			httpx.WriteError(w, r, httpx.BadRequest("Pending apply is supported only for native profile edits, selected drift repairs, and managed link, routing, shaping, gateway and kernel-setting mutations."))
+			httpx.WriteError(w, r, httpx.BadRequest("Pending apply is supported only for native profile edits, selected drift repairs, host firewall changes, and managed link, routing, shaping, gateway and kernel-setting mutations."))
 			return
 		}
 		p := httpx.MustPrincipal(r)

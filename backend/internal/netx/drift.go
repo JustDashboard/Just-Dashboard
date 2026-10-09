@@ -290,7 +290,12 @@ func (s *Service) drift(ctx context.Context, locked bool) DriftReport {
 			filepath.Join(s.paths.Dir, shapingFile): []byte(renderShaping(sp)),
 			filepath.Join(s.paths.Dir, gatewayFile): []byte(gateway),
 			s.paths.Sysctl:                          []byte(renderSysctl(sp)),
-			s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery, hasSQM(sp))),
+			s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery, hasSQM(sp), hasOwnedFirewall(sp))),
+		}
+		if hasOwnedFirewall(sp) {
+			if firewall, err := renderFirewall(sp, s.trustedFor(sp)); err == nil {
+				files[filepath.Join(s.paths.Dir, firewallFile)] = []byte(firewall)
+			}
 		}
 		if s.independentRecovery {
 			files[filepath.Join(filepath.Dir(s.paths.Unit), "just-dashboard-network-recovery.service")] = []byte(renderRecoveryUnit(s.paths))

@@ -12,6 +12,7 @@ package netsec
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -19,6 +20,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -87,6 +89,23 @@ type FirewallStatus struct {
 	Rules        []Rule               `json:"rules"`
 	Raw          string               `json:"raw,omitempty"`
 	Error        string               `json:"error,omitempty"`
+	// Detection is every firewall this host could be run by and whether it
+	// is, which is how Backend was chosen.
+	Detection []BackendDetection `json:"detection"`
+	// Zones are firewalld's active zones with what is bound to them.
+	Zones []FirewallZone `json:"zones,omitempty"`
+	// Effective is the policy per family and per interface as enforced.
+	Effective EffectivePolicy `json:"effective"`
+	// Findings are rules the evaluation order makes unreachable or redundant.
+	Findings []RuleFinding `json:"findings"`
+	// Analysis says whether Findings could be computed for this backend.
+	Analysis string `json:"analysis,omitempty"`
+	// Foreign names the other nftables tables beside the owned one, which
+	// keep enforcing whatever this page says.
+	Foreign []string `json:"foreign,omitempty"`
+	// Access is how the operator's own ways in and Caddy's public ingress
+	// fare under the current rules, filled in by the API for the page.
+	Access []AccessCheck `json:"access,omitempty"`
 }
 
 // DefaultPolicy is the three default verdicts. Routed is "disabled" on a host
@@ -118,6 +137,17 @@ type Rule struct {
 	// and should not be. Attached to the rule rather than computed in the UI
 	// so that "which of my rules are the dangerous ones" has one answer.
 	Danger string `json:"danger,omitempty"`
+	// ID is the rule's stable identity: a digest of what it says, not of
+	// where it sits, so a renumbered list still names the same rule and a
+	// stale identity refuses an edit instead of changing a neighbour.
+	ID string `json:"id"`
+	// Interface is the device a rule is scoped to ("on eth0").
+	Interface string `json:"interface,omitempty"`
+	// Zone is the firewalld zone holding the rule.
+	Zone string `json:"zone,omitempty"`
+	// BothFamilies is a rule that applies to IPv4 and IPv6 at once, which
+	// ufw prints twice and firewalld and nftables print once.
+	BothFamilies bool `json:"-"`
 	// Handle is how the owning backend identifies this rule when removing it.
 	// ufw deletes by number; firewalld has no numbers at all and needs the
 	// exact thing back. Never shown, never accepted from a client — the
@@ -145,41 +175,63 @@ type fwBackend interface {
 	Capabilities() FirewallCapabilities
 }
 
-type Service struct{}
+type Service struct {
+	// owned is the dashboard's own nftables table, offered where no ufw or
+	// firewalld runs (firewall_nft.go).
+	owned OwnedFirewall
+	// history keeps the dashboard's own rule changes (firewall_history.go).
+	history *sql.DB
+
+	profilesMu sync.Mutex
+	profiles   map[string][]string
+	profilesAt time.Time
+}
 
 func New() *Service { return &Service{} }
 
-// backends are tried in order. ufw first because a host with both installed is
-// almost always a Debian machine where ufw is the one in charge; iptables last
-// because it is present everywhere and would otherwise mask the others.
+// backends are the tool firewalls in preference order. ufw first because a
+// host with both installed is almost always a Debian machine where ufw is the
+// one in charge; iptables last because it is present everywhere and would
+// otherwise mask the others. Which one runs the host is decided by activity
+// as well as presence (firewall_detect.go).
 func backends() []fwBackend {
 	return []fwBackend{ufwBackend{}, firewalldBackend{}, iptablesBackend{}}
 }
 
-func (s *Service) backend() fwBackend {
-	for _, b := range backends() {
-		if b.Detect() {
-			return b
-		}
-	}
-	return nil
+// backend is the firewall in charge of this host now.
+func (s *Service) backend(ctx context.Context) fwBackend {
+	b, _ := s.selectBackend(ctx)
+	return b
 }
 
 func (s *Service) Backend() Backend {
-	if b := s.backend(); b != nil {
+	if b := s.backend(context.Background()); b != nil {
 		return b.Kind()
 	}
 	return ""
 }
 
 func (s *Service) Status(ctx context.Context) (*FirewallStatus, error) {
-	b := s.backend()
+	b, detection := s.selectBackend(ctx)
 	if b == nil {
-		return &FirewallStatus{Rules: []Rule{}, Error: ErrNoFirewall.Error()}, nil
+		return &FirewallStatus{Rules: []Rule{}, Detection: detection, Findings: []RuleFinding{}, Error: ErrNoFirewall.Error()}, nil
 	}
+	st, err := s.statusOf(ctx, b)
+	if err != nil {
+		return &FirewallStatus{Backend: b.Kind(), Rules: []Rule{}, Detection: detection, Findings: []RuleFinding{}, Error: err.Error()}, nil
+	}
+	st.Detection = detection
+	st.Capabilities = capabilitiesFor(b, detection)
+	return st, nil
+}
+
+// statusOf reads one backend and completes what every reader relies on:
+// positional numbers, annotations, stable identities, findings and the
+// effective policy.
+func (s *Service) statusOf(ctx context.Context, b fwBackend) (*FirewallStatus, error) {
 	st, err := b.Status(ctx)
 	if err != nil {
-		return &FirewallStatus{Backend: b.Kind(), Rules: []Rule{}, Error: err.Error()}, nil
+		return nil, err
 	}
 	st.Capabilities = b.Capabilities()
 	// Numbers are positional and assigned here rather than by each backend, so
@@ -191,6 +243,19 @@ func (s *Service) Status(ctx context.Context) (*FirewallStatus, error) {
 			st.Rules[i].Number = i + 1
 		}
 		annotateRule(&st.Rules[i])
+	}
+	assignRuleIDs(b.Kind(), st.Rules)
+	for i := range st.Zones {
+		if st.Zones[i].Default {
+			st.Zones[i].Rules = st.Rules
+			continue
+		}
+		assignRuleIDs(b.Kind(), st.Zones[i].Rules)
+	}
+	st.Findings, st.Analysis = analyzeRules(b.Kind(), st.Rules)
+	st.Effective = effectivePolicy(ctx, b, st)
+	if st.Detection == nil {
+		st.Detection = []BackendDetection{}
 	}
 	return st, nil
 }
@@ -305,18 +370,18 @@ var (
 // a separate argument, so nothing the operator types can become part of a
 // different command.
 func (s *Service) AddRule(ctx context.Context, req RuleRequest, callerIP string) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
-	}
-	if !b.Capabilities().Editable {
-		return "", fmt.Errorf("%w: %s", ErrReadOnly, b.Capabilities().ReadOnlyReason)
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.Editable })
+	if err != nil {
+		return "", err
 	}
 	clean, err := normaliseRule(req)
 	if err != nil {
 		return "", err
 	}
 	if err := guardLockout(clean.Action, clean.Direction, clean.From, callerIP); err != nil {
+		return "", err
+	}
+	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateAdd(st, clean) }); err != nil {
 		return "", err
 	}
 	return b.AddRule(ctx, clean)
@@ -468,9 +533,14 @@ func guardLockout(action, direction, from, callerIP string) error {
 // add would leave a hole in the firewall, which is the one outcome an edit
 // must never produce.
 func (s *Service) ReplaceRule(ctx context.Context, number int, req RuleRequest, callerIP string) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.Editable })
+	if err != nil {
+		return "", err
+	}
+	if clean, err := normaliseRule(req); err == nil {
+		if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateReplace(st, number, clean) }); err != nil {
+			return "", err
+		}
 	}
 	return replaceRule(ctx, b, number, req, callerIP)
 }
@@ -513,15 +583,25 @@ func replaceRule(ctx context.Context, b fwBackend, number int, req RuleRequest, 
 	if old.Direction != "" && !strings.EqualFold(old.Direction, "in") && !strings.EqualFold(old.Direction, "out") {
 		return "", fmt.Errorf("rule %d is a %s rule, which this form cannot express — edit it with ufw directly", number, old.Direction)
 	}
+	// The form has no device field either; saving it would widen the rule
+	// from one interface to all of them.
+	if old.Interface != "" {
+		return "", fmt.Errorf("rule %d applies only on %s, which this form cannot express — edit it with %s directly", number, old.Interface, b.Kind())
+	}
 	// firewalld has no ordering and no numbers of its own, so the handle it
 	// was given is what removes it. ufw is ordered, so the replacement is
 	// inserted where the original sits and the original is found again by what
 	// it says — never by arithmetic on the number, which is wrong the moment
 	// ufw declines to insert anything.
 	oldHandle := old.Handle
-	if b.Kind() == BackendUFW {
+	switch b.Kind() {
+	case BackendUFW:
 		clean.Position = number
 		oldHandle = ""
+	case BackendNFTOwned:
+		// Ordered too, but its handle is a stable id, so the original is
+		// removed by that rather than found again.
+		clean.Position = number
 	}
 
 	added, err := b.AddRule(ctx, clean)
@@ -587,7 +667,7 @@ func sameRule(a, b Rule) bool {
 		strings.EqualFold(a.Direction, b.Direction) &&
 		a.To == b.To && a.From == b.From &&
 		a.Port == b.Port && a.Protocol == b.Protocol &&
-		a.Comment == b.Comment
+		a.Comment == b.Comment && a.Interface == b.Interface
 }
 
 // ruleLocator is a backend that can find a rule again after the list beneath it
@@ -605,26 +685,26 @@ type handleRemover interface {
 }
 
 func (s *Service) DeleteRule(ctx context.Context, number int) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
-	}
-	if !b.Capabilities().Editable {
-		return "", fmt.Errorf("%w: %s", ErrReadOnly, b.Capabilities().ReadOnlyReason)
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.Editable })
+	if err != nil {
+		return "", err
 	}
 	if number <= 0 {
 		return "", fmt.Errorf("rule number must be positive")
+	}
+	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateDelete(st, number) }); err != nil {
+		return "", err
 	}
 	return b.DeleteRule(ctx, number)
 }
 
 func (s *Service) SetEnabled(ctx context.Context, enabled bool) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.Toggle })
+	if err != nil {
+		return "", err
 	}
-	if !b.Capabilities().Toggle {
-		return "", fmt.Errorf("%w: %s", ErrReadOnly, b.Capabilities().ReadOnlyReason)
+	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { st.Enabled = enabled; return nil }); err != nil {
+		return "", err
 	}
 	return b.SetEnabled(ctx, enabled)
 }
@@ -633,17 +713,14 @@ func (s *Service) SetEnabled(ctx context.Context, enabled bool) (string, error) 
 //
 // This is the single most consequential control on the page: switching the
 // inbound default to deny on a host whose rule list admits nobody takes the
-// machine off the network, this dashboard included, in one command. The guard
-// below refuses exactly that case, and leaves the ambiguous ones to the typed
-// confirmation — a rule list that admits *something* cannot be judged from
-// here without knowing which port the operator's browser arrived on.
+// machine off the network, this dashboard included, in one command. The
+// access guard refuses a default that would refuse the operator's own
+// connection, SSH or Caddy's public ingress where they are admitted now; the
+// no-allow-rule guard below remains for callers without that context.
 func (s *Service) SetDefaultPolicy(ctx context.Context, direction, policy string) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
-	}
-	if !b.Capabilities().DefaultPolicy {
-		return "", fmt.Errorf("%w: %s", ErrReadOnly, b.Capabilities().ReadOnlyReason)
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.DefaultPolicy })
+	if err != nil {
+		return "", err
 	}
 	direction = strings.ToLower(strings.TrimSpace(direction))
 	policy = strings.ToLower(strings.TrimSpace(policy))
@@ -658,11 +735,14 @@ func (s *Service) SetDefaultPolicy(ctx context.Context, direction, policy string
 		return "", fmt.Errorf("policy must be allow, deny or reject")
 	}
 	if direction == "incoming" && policy != "allow" {
-		st, err := s.Status(ctx)
+		st, err := s.statusOf(ctx, b)
 		if err == nil && st.Enabled && !admitsAnything(st.Rules) {
 			return "", fmt.Errorf("%w: no inbound allow rule exists, so a default of %s would refuse every connection to this host",
 				ErrLockout, policy)
 		}
+	}
+	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulatePolicy(st, direction, policy) }); err != nil {
+		return "", err
 	}
 	return b.SetDefaultPolicy(ctx, direction, policy)
 }
@@ -687,12 +767,9 @@ func admitsAnything(rules []Rule) bool {
 // what was refused, and "off" is a choice somebody should have made on purpose
 // rather than inherited.
 func (s *Service) SetLogging(ctx context.Context, level string) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
-	}
-	if !b.Capabilities().Logging {
-		return "", fmt.Errorf("%w: %s", ErrReadOnly, b.Capabilities().ReadOnlyReason)
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.Logging })
+	if err != nil {
+		return "", err
 	}
 	level = strings.ToLower(strings.TrimSpace(level))
 	switch level {
@@ -704,13 +781,18 @@ func (s *Service) SetLogging(ctx context.Context, level string) (string, error) 
 }
 
 // Reset removes every rule and returns the firewall to its installed state.
+// firewalld's equivalent reloads the default zone's shipped settings and is
+// judged against the access guard like any other change (firewall_reset.go).
 func (s *Service) Reset(ctx context.Context) (string, error) {
-	b := s.backend()
-	if b == nil {
-		return "", ErrNoFirewall
+	b, err := s.writable(ctx, func(c FirewallCapabilities) bool { return c.Reset })
+	if err != nil {
+		if errors.Is(err, ErrReadOnly) {
+			return "", fmt.Errorf("%w: this firewall has no reset that is safe to offer", ErrReadOnly)
+		}
+		return "", err
 	}
-	if !b.Capabilities().Reset {
-		return "", fmt.Errorf("%w: this firewall has no reset that is safe to offer", ErrReadOnly)
+	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateReset(ctx, st) }); err != nil {
+		return "", err
 	}
 	return b.Reset(ctx)
 }
@@ -722,7 +804,7 @@ func (s *Service) Reset(ctx context.Context) (string, error) {
 // speak: a rule added as "Nginx Full" keeps meaning what it says if the
 // package later adds a port, and reads better in the rule list than 80,443.
 func (s *Service) AppProfiles(ctx context.Context) ([]AppProfile, error) {
-	b := s.backend()
+	b := s.backend(ctx)
 	if b == nil {
 		return []AppProfile{}, nil
 	}

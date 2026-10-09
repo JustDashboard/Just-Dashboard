@@ -52,7 +52,14 @@ func (s *Service) renderAllWithGateway(sp *Spec, candidate *string) (rendered, e
 		filepath.Join(s.paths.Dir, shapingFile): []byte(renderShaping(sp)),
 		filepath.Join(s.paths.Dir, gatewayFile): []byte(gateway),
 		s.paths.Sysctl:                          []byte(renderSysctl(sp)),
-		s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery, hasSQM(sp))),
+		s.paths.Unit:                            []byte(renderUnit(s.paths, needsAdmission(sp), s.independentRecovery, hasSQM(sp), hasOwnedFirewall(sp))),
+	}
+	if hasOwnedFirewall(sp) {
+		firewall, err := renderFirewall(sp, s.trustedFor(sp))
+		if err != nil {
+			return nil, err
+		}
+		out[filepath.Join(s.paths.Dir, firewallFile)] = []byte(firewall)
 	}
 	return out, nil
 }
@@ -93,6 +100,11 @@ Type=oneshot
 	fmt.Fprintf(&b, "ExecStart=-ip -6 -force -batch %s\n", filepath.Join(dir, rules6File))
 	fmt.Fprintf(&b, "ExecStart=-tc -force -batch %s\n", filepath.Join(dir, shapingFile))
 	fmt.Fprintf(&b, "ExecStart=-nft -f %s\n", filepath.Join(dir, gatewayFile))
+	if len(recovery) > 2 && recovery[2] {
+		// The owned firewall table is restored but never removed by a stop:
+		// a restart with networkd must not leave the host unfiltered.
+		fmt.Fprintf(&b, "ExecStart=-nft -f %s\n", filepath.Join(dir, firewallFile))
+	}
 	for _, cmd := range admissionCommands(admission) {
 		fmt.Fprintf(&b, "ExecStart=-%s\n", strings.Join(cmd, " "))
 	}
@@ -157,6 +169,12 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 	gatewayPath := filepath.Join(s.paths.Dir, gatewayFile)
 	if gatewayHolds(sp) && changed(gatewayPath, files[gatewayPath]) {
 		if err := checkRuleset(ctx, s.paths.Dir, files[gatewayPath]); err != nil {
+			return err
+		}
+	}
+	firewallPath := filepath.Join(s.paths.Dir, firewallFile)
+	if ownedFirewallOn(sp) && changed(firewallPath, files[firewallPath]) {
+		if err := checkRuleset(ctx, s.paths.Dir, files[firewallPath]); err != nil {
 			return err
 		}
 	}

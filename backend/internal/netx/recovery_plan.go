@@ -181,6 +181,15 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 			add("tc", args, len(args) > 1 && args[1] == "del", false)
 		}
 	}
+	// The owned firewall's file is restored first; loading it puts the old
+	// table back, or the table goes where the old spec had none switched on.
+	if (hasOwnedFirewall(old) || hasOwnedFirewall(next)) && (!reflect.DeepEqual(old.Firewall, next.Firewall) || !reflect.DeepEqual(old.Trusted, next.Trusted)) {
+		if ownedFirewallOn(old) {
+			add("nft", []string{"-f", filepath.Join(s.paths.Dir, firewallFile)}, false, false)
+		} else {
+			add("nft", []string{"delete", "table", "inet", firewallTable}, true, false)
+		}
+	}
 	if !reflect.DeepEqual(old.Forwards, next.Forwards) || !reflect.DeepEqual(old.NAT, next.NAT) || !reflect.DeepEqual(old.Limits, next.Limits) || !reflect.DeepEqual(old.Blocklists, next.Blocklists) || !reflect.DeepEqual(old.Trusted, next.Trusted) {
 		if gatewayEmpty(old) {
 			add("nft", []string{"delete", "table", "inet", gatewayTable}, true, false)

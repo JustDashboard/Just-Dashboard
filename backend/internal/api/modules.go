@@ -233,6 +233,11 @@ func (s *Server) initModules() {
 		Retention:           s.Cfg.MetricsRetention,
 		IndependentRecovery: true,
 	})
+	// The firewall keeps its rule history beside the audit log, and offers
+	// the network module's owned nftables table where no ufw or firewalld
+	// runs.
+	s.modules.netsec.UseHistory(s.Store.DB)
+	s.modules.netsec.UseOwnedFirewall(ownedFirewall{net: s.modules.network})
 	s.modules.ipam = netipam.New(s.Store, s.ipamInventory)
 	s.modules.jobs = jobs.New(s.Log)
 	s.modules.diagnostics = netdiag.New(netdiag.NewStore(s.Store.DB), s.modules.jobs, s.executeNetworkProbe, netdiag.WithInvestigator(s.executeNetworkInvestigation))
