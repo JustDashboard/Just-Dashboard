@@ -142,8 +142,10 @@ inode and must return the retained authored inode during rollback. Equal-byte fo
 changed restore stages remain refusals before owner effects, including persistent new-boot rebinding.
 Helper v10 supplies this correction while preserving the shipped undo versions 1/2/3 and their
 owner/domain-policy interpretation. An older helper cannot satisfy the new admission capability.
-Existing v8 source-specific native evidence remains attributed to v8; actual v10 owner/no-op
-acceptance is a separate required check. Private structural v9 journals are outside this adapter.
+Existing v8 source-specific native evidence remains attributed to v8; the
+[v10 unchanged-intent record](evidence/native-manager-profile-inodes-v10-2026-10-09.md) separately
+passes all four established owner paths against the assembled source. Private structural v9
+journals are outside this adapter.
 Pending recovery verifies every selected candidate's recorded inode and bytes, both captured restore
 stages and the absence of unexpected cleanup claims before asking a native checkpoint writer to act.
 It repeats those checks at the checkpoint effect boundary and after that writer returns, before
@@ -211,10 +213,12 @@ classification can mistake the candidate for the prior file. Exact-origin recove
 the known candidate and retains a degraded journal; checkpoint recovery can instead treat it as an
 unrecorded restored inode and skip restoration of the retained authored inode. Foreign-file guards
 remain enforced. Helper v10 corrects the inode classification, and the INI parser now treats exactly
-one terminal LF as a line terminator, preserving intentional blank lines. Focused regression and
-race checks pass; final assembled-source unchanged-intent native acceptance remains pending in the
-[profile inode record](evidence/native-manager-profile-inodes-v10-2026-10-09.md). Earlier
-nonidentical-profile proofs retain their v8 attribution and do not cover this case.
+one terminal LF as a line terminator, preserving intentional blank lines. Focused regression,
+race checks and final assembled-source unchanged-intent native acceptance pass for all four
+established owner paths in the [profile inode record](evidence/native-manager-profile-inodes-v10-2026-10-09.md).
+That proof measures exact original inode restoration and confirmed candidate retention; it does
+not supply timer, reboot or public structural acceptance. Earlier nonidentical-profile proofs
+retain their v8 attribution and do not cover this case.
 
 `native_manager_recovery_test.go` uses bounded root-owned file fixtures and injected storage failures
 to check durable confirmation before cleanup, cleanup retry after checkpoint release, foreign-stage
