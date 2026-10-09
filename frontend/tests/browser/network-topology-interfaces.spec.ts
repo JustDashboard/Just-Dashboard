@@ -56,9 +56,9 @@ test("the identity says both forwarding families and keeps a translated source f
     "IPv4 routing · IPv6 not routing",
   )
   await expect(
-    page.locator("[data-slot=host-identity]").getByText(
-      "translated upstream; public address not observed",
-    ),
+    page
+      .locator("[data-slot=host-identity]")
+      .getByText("translated upstream; public address not observed"),
   ).toBeVisible()
   const ways = page.getByRole("table").filter({ hasText: "The internet sees" })
   const v4 = ways.locator("tr[data-family=inet]")
@@ -135,7 +135,12 @@ test("throughput says how old its newest reading is and turns stale when the rin
     overrides: {
       "/network/traffic/live": {
         now: stale,
-        series: { ens3: [{ t: stale - 2, rx: 10, tx: 20 }, { t: stale, rx: 10, tx: 20 }] },
+        series: {
+          ens3: [
+            { t: stale - 2, rx: 10, tx: 20 },
+            { t: stale, rx: 10, tx: 20 },
+          ],
+        },
       },
     },
   })
@@ -151,13 +156,23 @@ test("a failed live poll keeps the ring with a dated retry", async ({ page }) =>
     reads++
     if (reads === 1) {
       const t = now()
-      return json(route, { now: t, series: { ens3: [{ t: t - 2, rx: 100, tx: 50 }, { t, rx: 120, tx: 60 }] } })
+      return json(route, {
+        now: t,
+        series: {
+          ens3: [
+            { t: t - 2, rx: 100, tx: 50 },
+            { t, rx: 120, tx: 60 },
+          ],
+        },
+      })
     }
     return json(route, { error: { code: "busy", message: "The sampler did not answer" } }, 503)
   })
   await page.goto("/network")
   await loaded(page)
-  const warning = page.getByRole("alert").filter({ hasText: "Showing the last known live throughput" })
+  const warning = page
+    .getByRole("alert")
+    .filter({ hasText: "Showing the last known live throughput" })
   await expect(warning).toBeVisible()
   await expect(warning.getByText("The sampler did not answer")).toBeVisible()
   await expect(warning.locator("time")).toHaveAttribute("datetime", /T/)
@@ -274,7 +289,11 @@ test("interfaces flag Docker devices that could not be joined instead of hiding 
   await loaded(page)
   await expect(page.getByText("1 Docker device not joined to a container or network")).toBeVisible()
   await expect(page.getByText(/Cannot connect to the Docker daemon/).first()).toBeVisible()
-  await page.getByRole("radio", { name: /Everything/ }).or(page.getByRole("button", { name: /Everything/ })).first().click()
+  await page
+    .getByRole("radio", { name: /Everything/ })
+    .or(page.getByRole("button", { name: /Everything/ }))
+    .first()
+    .click()
   await expect(page.getByText("container not joined · on docker0")).toBeVisible()
 })
 
@@ -299,7 +318,9 @@ test("a device sheet reads its driver, offloads, error counters and address orig
   const hardware = sheet.locator("[data-slot=panel]").filter({ hasText: "Driver and errors" })
   await expect(hardware.getByText("virtio_net 1.0.0")).toBeVisible()
   await expect(hardware.getByText("0000:00:03.0")).toBeVisible()
-  await expect(hardware.getByRole("list", { name: "Offloads" })).toContainText("rx-checksumming · fixed")
+  await expect(hardware.getByRole("list", { name: "Offloads" })).toContainText(
+    "rx-checksumming · fixed",
+  )
   await expect(hardware.getByText("CRC errors (received)")).toBeVisible()
   await expect(hardware.getByText("41")).toBeVisible()
   await expect(sheet.getByText(/from DHCP, valid 23 h 3 min/)).toBeVisible()
@@ -384,7 +405,9 @@ test("a veth hands off to the namespace it leads into and a container's to the i
   const sheet = await openDevice(page, "lab-h")
   await expect(sheet.getByText("Its other end is lab-n inside lab.")).toBeVisible()
   await sheet.getByRole("button", { name: "Open namespace lab" }).click()
-  await expect(page.getByRole("dialog").getByRole("table", { name: "Namespace routes" })).toBeVisible()
+  await expect(
+    page.getByRole("dialog").getByRole("table", { name: "Namespace routes" }),
+  ).toBeVisible()
   await expect(page.getByRole("dialog").getByRole("button", { name: "Open lab-h" })).toBeVisible()
 
   const container = await openDevice(page, "veth6e4f828")
@@ -412,7 +435,9 @@ test("a managed bridge reads as a switch and a port's VLAN policy is applied and
   await policy.getByLabel("Native VLAN").fill("10")
   await policy.getByLabel("Tagged VLANs").fill("20, 30-31")
   await policy.getByRole("button", { name: "Apply VLANs" }).click()
-  const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog").filter({ hasText: "Take VLAN 1 off vlan30" }))
+  const confirm = page
+    .getByRole("alertdialog")
+    .or(page.getByRole("dialog").filter({ hasText: "Take VLAN 1 off vlan30" }))
   await expect(page.getByText("Take VLAN 1 off vlan30")).toBeVisible()
   await confirm.getByRole("button", { name: "Apply", exact: true }).click()
   await expect.poll(() => mutations.length).toBe(1)
@@ -420,12 +445,7 @@ test("a managed bridge reads as a switch and a port's VLAN policy is applied and
     method: "PUT",
     path: "/network/links/vlan30/vlans",
     body: {
-      vlans: [
-        { vid: 10, pvid: true, untagged: true },
-        { vid: 20 },
-        { vid: 30 },
-        { vid: 31 },
-      ],
+      vlans: [{ vid: 10, pvid: true, untagged: true }, { vid: 20 }, { vid: 30 }, { vid: 31 }],
     },
   })
 })
@@ -459,7 +479,10 @@ test("a refused bridge move is previewed with what it would leave behind and can
   await expect(preview.getByText(/carries this server's default route/)).toBeVisible()
   await expect(preview.getByText(/stops receiving the frames jd-lab switches/)).toBeVisible()
   await expect(
-    sheet.locator("[data-slot=panel]").filter({ hasText: "Bridge membership" }).getByRole("button", { name: "Apply" }),
+    sheet
+      .locator("[data-slot=panel]")
+      .filter({ hasText: "Bridge membership" })
+      .getByRole("button", { name: "Apply" }),
   ).toBeDisabled()
 })
 
@@ -491,16 +514,24 @@ test("a VXLAN's readiness names its checks and limits and edits its flood ends",
         kind: "vxlan",
         checkedAt: iso(0),
         checks: [
-          { id: "underlay", label: "Underlay device", state: "ok", detail: "vx42 sends from ens3, which is up with a carrier." },
+          {
+            id: "underlay",
+            label: "Underlay device",
+            state: "ok",
+            detail: "vx42 sends from ens3, which is up with a carrier.",
+          },
           {
             id: "route:198.51.100.8",
             label: "Route to 198.51.100.8",
             state: "failed",
-            detail: "The route to 198.51.100.8 leaves through vx42 itself, so the tunnel would carry its own packets.",
+            detail:
+              "The route to 198.51.100.8 leaves through vx42 itself, so the tunnel would carry its own packets.",
           },
           { id: "mtu", label: "MTU headroom", state: "warning", detail: "set it to 1450 or less" },
         ],
-        limits: ["VXLAN is neither encrypted nor authenticated: anything that can reach UDP 4789 here can inject frames into the segment."],
+        limits: [
+          "VXLAN is neither encrypted nor authenticated: anything that can reach UDP 4789 here can inject frames into the segment.",
+        ],
       },
     },
   })
@@ -569,7 +600,12 @@ test("a dummy's sheet hands a route into it to the routing page", async ({ page 
         kind: "dummy",
         checkedAt: iso(0),
         checks: [
-          { id: "routes", label: "Routes into it", state: "info", detail: "No route sends traffic into svc0." },
+          {
+            id: "routes",
+            label: "Routes into it",
+            state: "info",
+            detail: "No route sends traffic into svc0.",
+          },
         ],
         limits: [],
       },
@@ -581,3 +617,90 @@ test("a dummy's sheet hands a route into it to the routing page", async ({ page 
   const form = page.getByRole("dialog")
   await expect(form.getByRole("combobox").filter({ hasText: "svc0" })).toBeVisible()
 })
+
+for (const tunnel of [
+  {
+    name: "gre1",
+    kind: "gre",
+    checks: [
+      {
+        id: "local",
+        label: "Local end",
+        state: "failed",
+        detail:
+          "192.0.2.99 is not an address of this host; packets leave from it anyway and the replies have nowhere to arrive.",
+      },
+      {
+        id: "liveness",
+        label: "Traffic received",
+        state: "warning",
+        detail: "12 packets have arrived since it was made, none within the last fifteen minutes.",
+      },
+    ],
+    limits: [
+      "GRE is not encrypted: carry it over WireGuard or IPsec where the path is not trusted.",
+    ],
+    title: "Underlay and liveness",
+    expect: /replies have nowhere to arrive/,
+    limit: /GRE is not encrypted/,
+  },
+  {
+    name: "mv0",
+    kind: "macvlan",
+    checks: [
+      {
+        id: "isolation",
+        label: "Host isolation",
+        state: "info",
+        detail:
+          "This host cannot reach mv0's addresses through ens3, nor mv0 the host's: frames between a macvlan and its parent are never delivered.",
+      },
+      {
+        id: "mac",
+        label: "Provider MAC filtering",
+        state: "warning",
+        detail:
+          "ens3 uses virtio_net, a virtual machine's NIC. Cloud providers drop frames from MAC addresses they did not assign.",
+      },
+    ],
+    limits: [
+      "Connectivity to the outside network is not probed; these checks read this host only.",
+    ],
+    title: "Isolation and reach",
+    expect: /Cloud providers drop frames/,
+    limit: /not probed/,
+  },
+]) {
+  test(`a ${tunnel.kind} sheet shows what this host can establish about it`, async ({ page }) => {
+    const device = {
+      ...links.find((l) => l.name === "vlan30"),
+      name: tunnel.name,
+      index: 50,
+      kind: tunnel.kind,
+      role: tunnel.kind === "gre" ? "tunnel" : "vlan",
+      master: undefined,
+      vlanId: undefined,
+      parent: tunnel.kind === "macvlan" ? "ens3" : undefined,
+    }
+    await mockNetwork(page, [], {
+      overrides: {
+        "/network/links": [...links, device],
+        [`/network/links/${tunnel.name}/readiness`]: {
+          name: tunnel.name,
+          kind: tunnel.kind,
+          checkedAt: iso(0),
+          checks: tunnel.checks,
+          limits: tunnel.limits,
+        },
+      },
+    })
+    const sheet = await openDevice(page, tunnel.name)
+    const panel = sheet.locator("[data-slot=panel]").filter({ hasText: tunnel.title })
+    await expect(panel.getByRole("list", { name: "Readiness checks" })).toContainText(
+      tunnel.checks[0].label,
+    )
+    await expect(panel.getByText(tunnel.expect)).toBeVisible()
+    await expect(panel.getByText(tunnel.limit)).toBeVisible()
+    await expect(panel.getByLabel("Further ends")).toHaveCount(0)
+  })
+}

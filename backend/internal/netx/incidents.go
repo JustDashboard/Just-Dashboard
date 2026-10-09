@@ -8,9 +8,9 @@ import (
 )
 
 // Incident is one attention finding over time, as the Overview's readings saw
-// it. History exists only for the moments the Overview was read: between two
-// reads nothing was observed, and a finding that came and went unread is not
-// in it.
+// it. History exists only for the moments the Overview was read — by a page,
+// or by the server's own five-minute schedule: between two reads nothing was
+// observed, and a finding that came and went unread is not in it.
 type Incident struct {
 	ID         int64      `json:"id"`
 	FindingID  string     `json:"findingId"`

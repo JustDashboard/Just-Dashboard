@@ -199,7 +199,8 @@ Files: `overview.go`, `identity.go`, `topology_flows*.go`, `incidents.go`; the a
   `network_incidents` table: a new finding opens an incident (correlated with others opened within
   two minutes), a repeated one extends it, and an open incident resolves only when its own reading
   succeeded without it; a failed reading marks it `unobservedSince` and keeps it open. Resolved history
-  is kept 30 days, at most 1,000 rows. History covers only the moments the Overview was read.
+  is kept 30 days, at most 1,000 rows. `Server.Start` also judges the list every five minutes with no
+  browser (`startNetworkIncidents`); between those reads and page reads nothing is observed.
 
 ## Traffic
 

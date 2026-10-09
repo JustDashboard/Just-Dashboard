@@ -118,13 +118,49 @@ type overviewMade struct {
 	Namespaces int `json:"namespaces"`
 }
 
-// handleNetworkOverview gathers every part concurrently — each is a
-// subprocess, a socket or a file on a host that may be busy — and judges the
-// attention list from what came back.
+// handleNetworkOverview is the Overview page's read, judged for the browser
+// asking: its own path is part of the picture.
 func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) error {
 	ctx, cancel := timeoutCtx(r, 20*time.Second)
 	defer cancel()
-	client := s.networkClient(r)
+	out, err := s.readNetworkOverview(ctx, s.networkClient(r))
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+// networkIncidentEvery is how often the attention list is judged while
+// nobody reads the Overview, so an incident at three in the morning is in
+// the history at nine. Each judgement is one Overview read of the host.
+const networkIncidentEvery = 5 * time.Minute
+
+// startNetworkIncidents keeps the incident history observed between page
+// reads. A failed read is logged and leaves the history as it was.
+func (s *Server) startNetworkIncidents(ctx context.Context) {
+	go func() {
+		ticker := time.NewTicker(networkIncidentEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				read, cancel := context.WithTimeout(ctx, 30*time.Second)
+				if _, err := s.readNetworkOverview(read, ""); err != nil {
+					s.Log.Warn("network incident history could not be observed", "err", err)
+				}
+				cancel()
+			}
+		}
+	}()
+}
+
+// readNetworkOverview gathers every part concurrently — each is a
+// subprocess, a socket or a file on a host that may be busy — judges the
+// attention list from what came back and folds it into the incident history.
+func (s *Server) readNetworkOverview(ctx context.Context, client string) (networkOverview, error) {
 	out := networkOverview{
 		Links: []netx.Link{}, DockerNetworks: []overviewDockerNet{},
 		PublicAddresses: []string{}, Defaults: []netx.DefaultRoute{},
@@ -219,7 +255,7 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	})
 	wg.Wait()
 	if linksErr != nil {
-		return mapNetworkError(linksErr)
+		return out, linksErr
 	}
 	out.ReadAt = time.Now().UTC()
 	if s.modules.docker != nil {
@@ -304,8 +340,7 @@ func (s *Server) handleNetworkOverview(w http.ResponseWriter, r *http.Request) e
 	} else {
 		out.Incidents = incidents
 	}
-	httpx.JSON(w, http.StatusOK, out)
-	return nil
+	return out, nil
 }
 
 // dockerTopology puts each running container on the networks its veths lead

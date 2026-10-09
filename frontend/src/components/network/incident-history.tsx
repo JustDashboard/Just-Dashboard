@@ -12,8 +12,9 @@ import { incidentSpan } from "@/components/network/topology-reading"
  * later reading no longer found it, and when its own reading failed — an
  * unobserved finding stays open rather than being called fixed. Findings that
  * began within two minutes of each other are named beside each other, which
- * is usually one event seen from several readings. History covers only the
- * moments the Overview was read.
+ * is usually one event seen from several readings. History covers the
+ * moments the Overview was read: by a page, or every five minutes by the
+ * server itself.
  */
 export function IncidentHistory({
   incidents,
@@ -38,7 +39,8 @@ export function IncidentHistory({
       )}
       {incidents.length === 0 ? (
         <p className="text-body text-muted-foreground">
-          No finding has been recorded while this page was read.
+          No finding has been recorded. The server judges the list every five minutes and on every
+          read of this page.
         </p>
       ) : (
         <ol className="flex flex-col divide-y divide-hairline" aria-label="Incident history">

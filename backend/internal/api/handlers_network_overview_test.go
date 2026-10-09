@@ -85,3 +85,27 @@ func TestNetworkOverviewReportsEachReadingItsIdentityFlowsAndHistory(t *testing.
 		}
 	}
 }
+
+// TestNetworkOverviewScheduledReadRecordsWithoutABrowser is the read the
+// incident schedule makes: no client address, and the same history.
+func TestNetworkOverviewScheduledReadRecordsWithoutABrowser(t *testing.T) {
+	s := testServer(t)
+	out, err := s.readNetworkOverview(t.Context(), "")
+	if err != nil {
+		t.Skipf("this host cannot read its devices: %v", err)
+	}
+	if out.Client.Address != "" || out.ReadAt.IsZero() {
+		t.Fatalf("a scheduled read has no browser: %+v", out.Client)
+	}
+	recorded := map[string]bool{}
+	for _, inc := range out.Incidents {
+		if inc.ResolvedAt == nil {
+			recorded[inc.FindingID] = true
+		}
+	}
+	for _, f := range out.Findings {
+		if !recorded[f.ID] {
+			t.Fatalf("finding %s was not recorded by the scheduled read", f.ID)
+		}
+	}
+}
