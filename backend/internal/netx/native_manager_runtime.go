@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -15,21 +16,29 @@ type nativeVariant struct {
 	Data json.RawMessage `json:"data"`
 }
 
+var nativeIPConfigID = regexp.MustCompile(`^/org/freedesktop/NetworkManager/IP[46]Config/[0-9]+$`)
+
 func nativeNMDNS(ctx context.Context, p *nativeProfile, family int) ([]string, []string, error) {
+	if p == nil || !nativeBusOwner.MatchString(p.OwnerBus) || !nativeObjectID.MatchString(p.DeviceObject) || !strings.Contains(p.DeviceObject, "/Devices/") || family < 0 || family > 1 {
+		return nil, nil, errors.New("unreadable native DNS owner scope")
+	}
 	property, iface := "Ip4Config", nmService+".IP4Config"
 	if family == 1 {
 		property, iface = "Ip6Config", nmService+".IP6Config"
 	}
-	object, err := nativeBusProperty[string](ctx, nmService, p.DeviceObject, nmService+".Device", property, "o")
+	object, err := nativeBusProperty[string](ctx, p.OwnerBus, p.DeviceObject, nmService+".Device", property, "o")
 	if err != nil {
 		return nil, nil, err
 	}
 	if object == "/" {
 		return []string{}, []string{}, nil
 	}
+	if !nativeIPConfigID.MatchString(object) || !strings.Contains(object, "/IP"+strconv.Itoa(4+2*family)+"Config/") {
+		return nil, nil, errors.New("native DNS config object differs from its family scope")
+	}
 	var dns []string
 	if family == 0 {
-		servers, err := nativeBusProperty[[]map[string]nativeVariant](ctx, nmService, object, iface, "NameserverData", "aa{sv}")
+		servers, err := nativeBusProperty[[]map[string]nativeVariant](ctx, p.OwnerBus, object, iface, "NameserverData", "aa{sv}")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -41,7 +50,7 @@ func nativeNMDNS(ctx context.Context, p *nativeProfile, family int) ([]string, [
 			dns = append(dns, addr)
 		}
 	} else {
-		servers, err := nativeBusProperty[[][]byte](ctx, nmService, object, iface, "Nameservers", "aay")
+		servers, err := nativeBusProperty[[][]byte](ctx, p.OwnerBus, object, iface, "Nameservers", "aay")
 		if err != nil {
 			return nil, nil, err
 		}
@@ -54,9 +63,23 @@ func nativeNMDNS(ctx context.Context, p *nativeProfile, family int) ([]string, [
 			dns = append(dns, netip.AddrFrom16(bytes).String())
 		}
 	}
-	domains, err := nativeBusProperty[[]string](ctx, nmService, object, iface, "Searches", "as")
-	if err != nil {
-		return nil, nil, err
+	domains := []string{}
+	for _, property := range []string{"Domains", "Searches"} {
+		values, err := nativeBusProperty[[]string](ctx, p.OwnerBus, object, iface, property, "as")
+		if err != nil || len(values) > 128 {
+			return nil, nil, errors.New("unreadable or unbounded native active domain evidence")
+		}
+		for _, value := range values {
+			if value != "~." && !nativeDomain(strings.TrimPrefix(value, "~")) {
+				return nil, nil, errors.New("unreadable native active domain")
+			}
+			if !slices.Contains(domains, value) {
+				domains = append(domains, value)
+			}
+		}
+	}
+	if len(domains) > 128 {
+		return nil, nil, errors.New("native active domain evidence exceeds its combined bound")
 	}
 	return dns, domains, nil
 }
@@ -244,6 +267,9 @@ func readNativeRuntime(ctx context.Context, p *nativeProfile, in NativeIntent) N
 			if !slices.Contains(domains, required) {
 				return drift("A configured native search/route domain is absent from its active owner.")
 			}
+		}
+		if p.View.Renderer == "NetworkManager" && (f.IgnoreAutoDNS || f.Method == "manual" || f.Method == "disabled") && len(domains) != len(f.Domains) {
+			return drift("The native owner has extra domains outside its configured automatic DNS policy.")
 		}
 	}
 	return NativeEvidence{Status: "matching", Reason: "Kernel addresses/routes and the native owner's DNS/domains match supported intent; DHCP/RA acquisition was observed where required. Owner-default metrics remain owner-selected. No resolver/provider connectivity was probed."}

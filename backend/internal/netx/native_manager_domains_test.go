@@ -127,21 +127,25 @@ func TestNativeNetworkdDomainPolicyFencesRecoveryAndActiveOverrides(t *testing.T
 }
 
 func TestNativeDomainRecoveryRefusesOldHelperBeforeJournalOrWatchdog(t *testing.T) {
-	h := pendingHost(t)
-	prior := nativeExecute
-	t.Cleanup(func() { nativeExecute = prior })
-	nativeExecute = func(_ context.Context, _ []byte, _ string, args ...string) (string, error) {
-		if len(args) != 1 || args[0] != "--network-native-check" {
-			t.Fatal("unexpected effect before native helper capability check", args)
-		}
-		return "jd-native-manager-v3\n", nil
-	}
-	_, err := h.prepareNativeChange(WithPendingConfirmation(context.Background(), 7), &nativeUndo{Transaction: strings.Repeat("1", 32)})
-	var refusal *ReadOnlyError
-	if !errors.As(err, &refusal) || h.rec.ran("systemd-run") {
-		t.Fatal("old native helper admitted a journal or watchdog", err, h.rec.commands())
-	}
-	if _, err := readChange(h.paths.Dir); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("old native helper left a new transaction journal", err)
+	for _, token := range []string{"jd-native-manager-v3", "jd-native-manager-v4"} {
+		t.Run(token, func(t *testing.T) {
+			h := pendingHost(t)
+			prior := nativeExecute
+			t.Cleanup(func() { nativeExecute = prior })
+			nativeExecute = func(_ context.Context, _ []byte, _ string, args ...string) (string, error) {
+				if len(args) != 1 || args[0] != "--network-native-check" {
+					t.Fatal("unexpected effect before native helper capability check", args)
+				}
+				return token + "\n", nil
+			}
+			_, err := h.prepareNativeChange(WithPendingConfirmation(context.Background(), 7), &nativeUndo{Transaction: strings.Repeat("1", 32)})
+			var refusal *ReadOnlyError
+			if !errors.As(err, &refusal) || h.rec.ran("systemd-run") {
+				t.Fatal("old native helper admitted a journal or watchdog", err, h.rec.commands())
+			}
+			if _, err := readChange(h.paths.Dir); !errors.Is(err, os.ErrNotExist) {
+				t.Fatal("old native helper left a new transaction journal", err)
+			}
+		})
 	}
 }

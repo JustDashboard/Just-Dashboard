@@ -17,7 +17,7 @@ import (
 	"syscall"
 )
 
-const nativeRecoveryToken = "jd-native-manager-v4"
+const nativeRecoveryToken = "jd-native-manager-v5"
 const maxNativeUndoBytes = 2 << 20
 
 type nativeUndoFile struct {

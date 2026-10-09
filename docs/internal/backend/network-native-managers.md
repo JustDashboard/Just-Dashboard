@@ -80,6 +80,13 @@ and [per-domain source/provider evidence](https://github.com/systemd/systemd/blo
 Raw policy remains fenced by the exact prior/candidate snapshots and ownership generation. Staging
 and recovery decoding refuse a change to that retained policy; the public intent is unchanged.
 
+NetworkManager's active [IPv4 domain and search properties](https://github.com/NetworkManager/NetworkManager/blob/1.52.1/introspection/org.freedesktop.NetworkManager.IP4Config.xml)
+and corresponding IPv6 properties are read from the pinned unique owner and exact selected IP-config
+object. Their bounded union covers DHCP domain-name (option 15) and search-list/RA domains without
+duplicating one suffix. Invalid properties, object-family mismatches and malformed domains refuse
+agreement. Extra active domains also refuse agreement for manual/disabled families or when automatic
+DNS is disabled, matching the existing NetworkManager DNS policy.
+
 ## Temporary apply and durable cleanup
 
 Native writes always require a positive authenticated pending owner and independently armed recovery.
@@ -87,8 +94,9 @@ Immediate requests are refused before taking a recovery lock or retrying prior t
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise `jd-native-manager-v4` before admission, including
-the automatic-domain preservation and provenance checks. An older helper is refused before journaling
+The standalone recovery executable must advertise `jd-native-manager-v5` before admission, including
+networkd automatic-domain preservation/provenance and both NetworkManager active domain properties.
+An older helper is refused before journaling
 or arming a new native change. The private undo payload remains at v3 with its peer vocabulary;
 the domain policy is already captured in existing file snapshots, so no additional raw policy is serialized.
 Recovery preserves earlier v1/v2/v3 journal scope and strategies; a legacy checkpoint journal refuses a migrating writer
