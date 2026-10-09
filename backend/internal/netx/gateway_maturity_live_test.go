@@ -400,3 +400,37 @@ func writeTemp(t *testing.T, dir, name, body string) string {
 	}
 	return path
 }
+
+func TestLiveModesGoldenLoadsAndDriftReadsItAsOwned(t *testing.T) {
+	gwLiveRequired(t)
+	ns := gwLiveNS(t, "mgolden")
+	file, err := filepath.Abs("testdata/gateway-modes.nft")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gwMustInNS(t, ns, "nft", "-c", "-f", file)
+	gwMustInNS(t, ns, "nft", "-f", file)
+	gwMustInNS(t, ns, "nft", "-f", file)
+	prevRun := run
+	run = gwLiveRun(ns)
+	t.Cleanup(func() { run = prevRun })
+	sp, _, _ := gwModesSpec()
+	rendered, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := testService(t)
+	o := svc.driftGateway(context.Background(), sp, string(rendered), nil)[0]
+	if o.Status == "drift" || o.Status == "missing" || o.Status == "unreadable" {
+		t.Fatalf("the loaded modes table reads as %s: %s", o.Status, o.Reason)
+	}
+	live, err := parseLiveCounters(gwMustInNS(t, ns, "nft", "-t", "-j", "list", "table", "inet", gatewayTable))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, comment := range []string{"nat-in:1", "nat-in:2", "nat-in:3", "nat:4", "limit-global:5", "exception:8", "exception:9", "exception:10", "blocklist:6"} {
+		if live.Rules[comment] == 0 {
+			t.Errorf("no rule %q came back from the kernel", comment)
+		}
+	}
+}

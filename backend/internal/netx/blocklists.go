@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -684,6 +685,11 @@ func (s *Service) UpdateBlocklist(ctx context.Context, id int, req BlocklistRequ
 	if existing == nil {
 		return BlocklistView{}, fmt.Errorf("blocklist %d: %w", id, ErrNotFound)
 	}
+	// The pinned key stays when an edit names the same signature without
+	// repeating it; a different signature address needs its key.
+	if sig := strings.TrimSpace(req.SignatureURL); sig != "" && sig == existing.SignatureURL && strings.TrimSpace(req.PublicKey) == "" {
+		req.PublicKey = existing.PublicKey
+	}
 	upd, err := buildBlocklist(req, existing.Kind, client)
 	if err != nil {
 		return BlocklistView{}, err
@@ -763,6 +769,14 @@ func (s *Service) DeleteBlocklist(ctx context.Context, id int, client string) er
 		for i, bl := range next.Blocklists {
 			if bl.ID == id {
 				next.Blocklists = append(next.Blocklists[:i], next.Blocklists[i+1:]...)
+				// Its own exceptions have nothing left to except from.
+				kept := next.Exceptions[:0]
+				for _, e := range next.Exceptions {
+					if e.Scope != "blocklist:"+strconv.Itoa(id) {
+						kept = append(kept, e)
+					}
+				}
+				next.Exceptions = kept
 				s.trustClient(next, client)
 				return false, nil
 			}

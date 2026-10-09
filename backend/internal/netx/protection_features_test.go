@@ -579,3 +579,53 @@ func TestPerInterfaceEffectiveValuesFollowTheKernelsCombination(t *testing.T) {
 		}
 	}
 }
+
+func TestEditingASignedFeedKeepsItsPinnedKeyAndToggleKeepsTheSignature(t *testing.T) {
+	h := newGwHost(t)
+	feed := newSignedFeed(t)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	feed.body = "203.0.113.0/24\n"
+	feed.sig = base64.StdEncoding.EncodeToString(ed25519.Sign(priv, []byte(feed.body)))
+	v, err := h.AddBlocklist(context.Background(), BlocklistRequest{Name: "signed", Kind: "feed", URL: feed.URL + "/list", SignatureURL: feed.URL + "/list.sig", PublicKey: base64.StdEncoding.EncodeToString(pub)}, gwClient, "ops")
+	if err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	if _, err := h.UpdateBlocklist(context.Background(), v.ID, BlocklistRequest{Name: "renamed", URL: feed.URL + "/list", SignatureURL: feed.URL + "/list.sig", Enabled: &off}, gwClient, "ops"); err != nil {
+		t.Fatal(err)
+	}
+	bl := h.spec(t).Blocklists[0]
+	if bl.Name != "renamed" || bl.SignatureURL == "" || bl.PublicKey != base64.StdEncoding.EncodeToString(pub) || bl.Enabled {
+		t.Fatalf("after edit = %+v", bl)
+	}
+	if hits := feed.hits["/list"]; hits != 1 {
+		t.Fatalf("an edit that changes neither the address nor the signature refetched: %d", hits)
+	}
+}
+
+func TestDeletingAListTakesItsOwnExceptionsWithIt(t *testing.T) {
+	h := newGwHost(t)
+	gwClock(t, time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC))
+	sp := emptySpec()
+	sp.NextID = 9
+	sp.Blocklists = []BlocklistSpec{
+		{ID: 1, Name: "a", Kind: "manual", Entries: []string{"198.51.100.0/24"}, Enabled: true, Count: 1},
+		{ID: 2, Name: "b", Kind: "manual", Entries: []string{"192.0.2.0/24"}, Enabled: true, Count: 1},
+	}
+	sp.Exceptions = []ExceptionSpec{
+		{ID: 3, Address: "198.51.100.7/32", Scope: "blocklist:1", Reason: "x"},
+		{ID: 4, Address: "192.0.2.7/32", Scope: "blocklist:2", Reason: "y"},
+		{ID: 5, Address: "203.0.113.7/32", Scope: "all", Reason: "z"},
+	}
+	h.seed(t, sp)
+	if err := h.DeleteBlocklist(context.Background(), 1, gwClient); err != nil {
+		t.Fatal(err)
+	}
+	got := h.spec(t).Exceptions
+	if len(got) != 2 || got[0].ID != 4 || got[1].ID != 5 {
+		t.Fatalf("exceptions = %+v", got)
+	}
+}
