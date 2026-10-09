@@ -102,6 +102,12 @@ verification plans, hosts previews, encrypted comparisons, native DNS handoffs a
 refusal, with real resolved namespace runs, live engine DHCP reads, retained failures and the
 passing gate. Other distributions, live NetworkManager split DNS and DHCP leases remain open.
 
+[Docker networking, ports and exposure acceptance](network-docker-ports-maturity-acceptance.md)
+(C115–C119, C127–C129) records network ownership, driver catalogue, dependency previews, the
+published-port inbound investigator, external proof per binding, claim-aware free-port search and
+posture unknowns, with native runs on owned objects, the first failed attempts and the passing
+gate. Real off-host port measurement remains open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from
