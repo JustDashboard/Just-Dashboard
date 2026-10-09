@@ -132,7 +132,8 @@ The final core/API change passed `scripts/test-changed.sh 148e4f38`: Go build, v
 API (174.290 seconds), store (4.533 seconds) and DNS service (10.337 seconds) tests. Separate final
 HTTP, private API, retained-history and FTL restart races passed (DNS services 13.678 seconds,
 API 4.640 seconds). Their raw logs are retained in the same evidence directory. No frontend source
-changed in this core handoff; the retained UI and its fresh integrated acceptance remain pending.
+changed in that core handoff; the subsequently assembled UI and reachable gate passed as recorded
+above. Broader P17 controls remain open.
 These checks used `GOMAXPROCS=2`, `GOFLAGS='-p=2'` and a short, nonhidden workspace `TMPDIR` because
 the system temporary filesystem was constrained. Earlier full API attempts are preserved separately
 as `test-changed-core-final.log` and `test-changed-core-short-tmpdir.log` in the workspace artifacts:

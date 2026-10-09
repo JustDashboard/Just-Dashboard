@@ -52,7 +52,8 @@ host `/run/NetworkManager` and `/var/lib/NetworkManager` remain absent. The shar
 was released only after these checks.
 
 This is direct-owner production assembly proof. Actual Ubuntu generated-origin compatibility
-has a separate exact-source proof. The stricter experimental generated-profile closure refusal
+has a [separate exact-source proof](../../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
+The stricter experimental generated-profile closure refusal
 is a separate investigation. Cold boot, actual independent systemd timer dispatch, unsupported
 creation/adoption and the unfinished existing bond/VRF transactions are not established here.
 

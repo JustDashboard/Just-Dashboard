@@ -171,7 +171,10 @@ the evidence for native-owner review.
 The [assembled editor/DNS checkpoint](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md)
 records the matching production build, selected package tests and retained UI controls. The
 [automatic owner record](evidence/native-manager-automatic-2026-10-09.md) separately attributes
-actual DHCPv4/SLAAC and final-helper rollback/deadline proof to frozen source. Netplan automatic
+actual DHCPv4/SLAAC and final-helper rollback/deadline proof to frozen source. The
+[exact production assembly proof](evidence/native-manager-v6-assembly-2026-10-09.md) passes those
+direct NetworkManager/networkd fixtures against the assembled owner-reader and v6 recovery files.
+Netplan automatic
 admission, wider platform owners and host reboot remain open; source ancestry is not interchangeable.
 
 `native_manager_recovery_test.go` uses bounded root-owned file fixtures and injected storage failures

@@ -28,8 +28,18 @@ The [automatic owner record](../../../internal/backend/evidence/native-manager-a
 attributes real DHCPv4/SLAAC, automatic DNS/domain/routes, manual transitions, process death,
 fresh-helper rollback, durable confirmation and cleanup retry to frozen native helpers. The actual
 NetworkManager v6 foreign-file case verifies exact checkpoint release and unchanged foreign
-profile/stage bytes/inodes past its three-second deadline. Its isolated ancestry and the assembled
-owner-reader comparison remain explicit; additional assembled-source native checks are separate.
+profile/stage bytes/inodes past its three-second deadline. Its isolated ancestry remains explicit.
+
+The [exact assembled-source direct-owner proof](../../../internal/backend/evidence/native-manager-v6-assembly-2026-10-09.md)
+also passed without skips: Debian NetworkManager in 30.69 seconds including wrapper / 23.18 seconds
+in the child, and networkd in 17.08 / 10.45 seconds. The frozen branch contains exact `3e0c2016`
+production files plus only the automatic fixture. Both cases independently built the same v6 helper,
+SHA256 `8a6b5ad325bccacad61952506c6de28cc9e1309d592c3d566cd3d1aa6f6cf02e`.
+They measured DHCPv4/SLAAC, acquired DNS/domain/routes, automatic/manual changes, suppression,
+process death, fresh-helper rollback, durable confirmation and cleanup retry. The NetworkManager
+case also preserved foreign file/stage bytes and inodes beyond the released three-second native
+checkpoint deadline. Exact owned process and temporary-file cleanup passed; host networkd and
+NetworkManager state remained unchanged. The guide links the unchanged raw logs and source manifest.
 
 The [actual Ubuntu generated-origin fixture](native-v6-root-ubuntu-exact-origin-final.log) passed
 on exact clean `3e0c2016` with the v6 helper: 53.53 seconds including wrapper, 20.00 seconds in the
@@ -62,6 +72,6 @@ and 128 pending. P11 still requires existing-controller structural editing, Netp
 admission, wider owner/platform and reboot proof. P17 still requires broader query/zone/view/client
 policy controls. The historical report scores are unchanged.
 
-The final pre-push documentation review compares the complete diff with internal guides,
-`AGENTS.md`, `README.md` and `CONTRIBUTING.md`; final results and any additional native admission
-refusal must be recorded before publishing this checkpoint.
+The [final pre-push documentation review](native-dns-pre-push-review.json) compares the complete diff
+with internal guides, `AGENTS.md`, `README.md` and `CONTRIBUTING.md`. Existing-controller structural
+admission, default Netplan automatic admission and cold host-runtime acceptance remain open.
