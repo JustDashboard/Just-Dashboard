@@ -182,6 +182,9 @@ func nativeWaitVerified(ctx context.Context, j *changeJournal, u *nativeUndo, ca
 }
 
 func (s *Service) EditNativeProfile(ctx context.Context, device string, req NativeEditRequest, client string) (*NativeProfileView, error) {
+	if req.Structure != nil {
+		return nil, &ReadOnlyError{Reason: "Existing native bond/VRF structural edits require verified member profiles and independent recovery; no profile was changed."}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := lockChange(s.paths.Dir)

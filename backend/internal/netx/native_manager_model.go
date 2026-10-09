@@ -36,8 +36,9 @@ type NativeRoute struct {
 }
 
 type NativeEditRequest struct {
-	Generation string       `json:"generation"`
-	Intent     NativeIntent `json:"intent"`
+	Generation string                  `json:"generation"`
+	Intent     NativeIntent            `json:"intent"`
+	Structure  *NativeStructureRequest `json:"structure,omitempty"`
 }
 
 type NativeEvidence struct {
