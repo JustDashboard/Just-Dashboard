@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"reflect"
 	"strings"
 	"time"
@@ -380,7 +381,10 @@ func readChange(row scanner) (Change, error) {
 	if err != nil {
 		return c, err
 	}
-	if json.Unmarshal([]byte(request), &c.Request) != nil || json.Unmarshal([]byte(before), &c.Before) != nil || (after != "" && json.Unmarshal([]byte(after), &c.After) != nil) {
+	decoder := json.NewDecoder(strings.NewReader(request))
+	decoder.DisallowUnknownFields()
+	var extra any
+	if decoder.Decode(&c.Request) != nil || decoder.Decode(&extra) != io.EOF || json.Unmarshal([]byte(before), &c.Before) != nil || (after != "" && json.Unmarshal([]byte(after), &c.After) != nil) {
 		return c, errors.New("retained native DNS change is unreadable")
 	}
 	c.CreatedAt, c.ExpiresAt = time.UnixMilli(created).UTC(), time.UnixMilli(expires).UTC()
@@ -429,6 +433,9 @@ func (s *Service) Apply(ctx context.Context, id string) (Change, error) {
 	defer cancel()
 	_, native, err := s.connection(ctx, plan.ConnectionID)
 	var current *Snapshot
+	if err == nil {
+		err = validateChange(plan.Request, native.Engine)
+	}
 	if err == nil {
 		current, err = inspectNativeSelection(ctx, native, &plan.Request)
 		if err == nil && (plan.Before == nil || current.PolicyFingerprint != plan.Before.PolicyFingerprint) {

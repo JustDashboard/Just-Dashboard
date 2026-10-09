@@ -31,7 +31,7 @@ removed before snapshots become reviewed or retained change state.
 | `GET /{id}/zones/{zone}/records` | Technitium-only fresh `RecordInventory` for an explicit lower-case zone, including native version, owner/type/DNSSEC, nullable internal classification, at most 256 records, metadata fingerprints and per-record editability. Read-only connections may inspect it. |
 | `GET /{id}/changes`, `POST /{id}/changes` | Latest 64 metadata-only `Change[]`; `ChangeRequest` creates a five-minute retained reviewed `Change`. |
 | `GET /changes/{id}`, `POST /changes/{id}/apply` | Full retained `Change`; single-use native apply/readback returns the terminal `Change`. |
-| `GET /changes/{id}/current` | Fresh `View` of the exact retained request and connection generation, including selected raw record/client/override fingerprints. Changed ownership/generation or malformed intent is refused. This read never claims, mutates or replays the review. |
+| `GET /changes/{id}/current` | Fresh `View` of the exact retained request and connection generation, including selected raw record/client/override/custom-domain-filter fingerprints. Changed ownership/generation or malformed intent is refused. This read never claims, mutates or replays the review. |
 | `GET /provisions`, `POST /provisions` | Latest 64 `Provision[]`; `ProvisionRequest` creates a five-minute sealed resource review without creation. |
 | `GET /provisions/{id}`, `POST /provisions/{id}/apply`, `DELETE /provisions/{id}` | Retained `Provision`; single-use owned creation/bootstrap; separately reviewed exact owned removal including both volumes. |
 
@@ -45,7 +45,7 @@ selected in the provision review, or a separately created native token can be su
 `ChangeRequest` is closed to `protection` (explicit boolean), `upstreams` (1–16 literal classic DNS
 address/port endpoints), AdGuard `access` (nonempty canonical allowed prefixes, optional denied
 prefixes), Technitium `zone_create` (a validated lower-case primary-zone DNS name), and the bounded
-record/client actions below. Arbitrary
+record/client/custom-domain-filter actions below. Arbitrary
 native paths, payloads, app installation and command source are not accepted. Read-only connections
 refuse staging. Consumed/expired/generation-conflicting claims return conflict; a claimed operation
 can return HTTP 200 with `refused` or `needs_review`, so the UI must inspect terminal state/error.
@@ -129,7 +129,8 @@ The pinned metadata contracts are [AdGuard 0.107.71](https://github.com/AdguardT
 and [domain rules](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml),
 plus Technitium's [15.6.0 settings writer](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/WebServiceSettingsApi.cs)
 and [block-list manager](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/Dns/ZoneManagers/BlockListZoneManager.cs).
-Filter mutation, full rule contents, manual/app filtering and wider P17 acceptance remain open.
+Arbitrary rule editing, full rule contents, subscription/manual/app filtering and wider P17 acceptance
+remain open. The reviewed custom-domain controls below are a separate bounded mutation contract.
 The [source-matched filter acceptance](evidence/dns-service-filters-2026-10-09.md) retains scoped
 checks, all three actual engine passes, exact source/binary/raw hashes and owned cleanup, with the
 original AdGuard failure separately attributed. It verifies empty subscriptions and AdGuard/Pi-hole
@@ -140,6 +141,53 @@ The [assembled filter UI acceptance](../../audits/2026-10-08-network-capability-
 separately records its source-matched production build, strict decoder checks, reachable browser
 cases and settled phone/desktop captures. Browser fixture metadata does not establish native
 subscription loading or a client filtering decision.
+
+## Reviewed custom-domain filters
+
+`filter_add` and `filter_remove` take only a nested `filter` object with `domain`, `disposition`
+(`allow` or `deny`) and an explicit engine-specific `match`. The domain must be a complete lower-case
+DNS name without a trailing dot, wildcard, regular expression or native rule syntax. AdGuard uses
+`match: "suffix"`: the adapter generates `||domain^` or `@@||domain^` and preserves every unselected
+native rule, comment and blank-string entry in order. Pi-hole uses `match: "exact"` and its native
+exact-domain allow/deny endpoints. These semantics are different; neither configured rule establishes
+a measured client decision or precedence over other native policy.
+
+Pi-hole additions require explicit `groups`, including `[]`, with at most 64 unique existing native
+nonnegative 32-bit IDs. Disabled native groups are still existing membership targets. Removal takes
+no replacement group field and requires one enabled, exact native rule with supported metadata.
+AdGuard takes no groups. Missing/null IDs or enable fields and null/noninteger group-array entries
+are refused. Native comments remain unchanged for every unselected Pi-hole row; new rows explicitly
+use a null comment. Unsupported engines, duplicate/opposite-domain owners, modified AdGuard targets,
+disabled selected Pi-hole rules and unknown selected-row fields require the native console.
+
+The retained `Snapshot.selectedFilter` reports the selected domain, disposition, match, presence,
+optional native enabled/groups, nullable comment and `commentReported`, owner/exact counts, native
+inventory count, configured evidence and selected/unselected fingerprints. AdGuard has no native
+per-rule enable, group or comment field; these remain unreported. Pi-hole comments are bounded and
+credential-redacted for review. Original rule text, source URLs, other comments and raw native
+configuration stay private and enter only comparison fingerprints. The full selection baseline
+includes AdGuard source/settings/rule metadata or Pi-hole domain rows, sources and native groups,
+as well as the ordinary connection policy. It is bounded to 256 rules/sources, 128 native groups,
+4096 bytes per rule/domain/source identity and the existing 512 KiB native response limit.
+
+Preview and `/changes/{id}/current` use the same closed, selection-aware native inspection. Apply
+validates the retained intent, connection generation and five-minute baseline, reads the complete
+selection again immediately before the one effect, and reads it after the response. Raw drift or
+unreadable pre-effect metadata refuses the consumed review without sending a mutation. Post-effect
+readback must match the selected intent and all unselected policy fingerprints. A failed/lost native
+response or changed foreign policy leaves `needs_review`; no mutation is replayed and no foreign
+policy is restored. Sequential native API reads are not an atomic revision or a native CAS.
+
+The AdGuard replacement endpoint updates only the freshly compared custom-rule array and schedules
+native rule recompilation; it does not fetch subscription URLs. Pi-hole adds/deletes one exact-domain
+row, retaining every unselected row/group/source field. No subscription, regex/DSL, Technitium
+manual/app policy or provisioning replay is exposed. Existing `system.admin`, private/no-store,
+sealed literal-origin authentication, audit and destructive-apply boundaries apply unchanged.
+The contracts are the pinned [AdGuard set-rules API](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/openapi/openapi.yaml),
+its [replacement handler](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/http.go),
+[AdGuard DNS filter syntax](https://adguard-dns.io/kb/general/dns-filtering-syntax/) and
+[FTL 6.7.1 exact-domain API](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml).
+Matching mounted controls and complete P17 acceptance remain open pending frontend integration.
 
 ## Reviewed records and client groups
 
@@ -337,6 +385,12 @@ credentials/config after container restart, owned removal and cold interrupted p
 Filter inventory changes also check known empty native subscriptions, AdGuard/Pi-hole local custom
 rule metadata and stable section fingerprints after restart. Subscription URLs are never added or
 fetched for this proof; unsupported Technitium manual/app rules remain explicit.
+Custom-domain changes additionally review allow and deny rules with engine-specific match semantics,
+exact-selection current reads, duplicate/replay refusal, explicit Pi-hole group membership including
+`[]`, restart persistence and removals that restore the original unselected rule fingerprints.
+AdGuard comments and blank entries and Pi-hole unselected comments/groups remain preserved. This is
+native configuration/readback proof; effective client filtering and native policy precedence remain
+unmeasured.
 It removes its exact owned resources and leaves the host resolver unchanged. A missing selected
 image is a failed acceptance, not a successful skip. `JD_DNS_SERVICES_NATIVE_LOG_DIR` optionally
 retains bounded owner-specific fixture logs with bootstrap credentials redacted.

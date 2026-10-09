@@ -136,6 +136,9 @@ to the contribution terms above, including the additional licence grant to the p
   corrected source/binary/raw records separately.
   Filter UI changes run `network-dns-filters.spec.ts` against the matching production build; width
   assertions must check the settled sheet against the viewport before capturing it.
+  Reviewed custom-domain filters also prove native allow/deny configuration with AdGuard suffix
+  versus Pi-hole exact semantics, selected-current reads, explicit group membership, duplicate/replay
+  refusal, restart persistence and unselected rule/comment/group/source preservation after removal.
   Record/client UI changes also run the selected DNS service browser spec against a fresh production
   build. Its mocks must supply `/changes/{id}/current` for the exact retained selection; ordinary
   connection inventory cannot stand in for selected record/client freshness. Browser mocks and

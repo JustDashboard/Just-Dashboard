@@ -247,9 +247,11 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer nativeClient.logout()
+	seedRuleCount := 1
 	switch engine {
 	case AdGuard:
-		err = nativeClient.request(ctx, http.MethodPost, "/control/filtering/set_rules", map[string]any{"rules": []string{"||filter-fixture.invalid^"}}, nil)
+		seedRuleCount = 3
+		err = nativeClient.request(ctx, http.MethodPost, "/control/filtering/set_rules", map[string]any{"rules": []string{"# owned unselected fixture comment", "", "||filter-fixture.invalid^"}}, nil)
 	case PiHole:
 		err = nativeClient.request(ctx, http.MethodPost, "/api/clients", map[string]any{"client": "198.51.100.77", "comment": "owned fixture client comment", "groups": []int{0}}, nil)
 		if err == nil {
@@ -269,7 +271,7 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal("owned native rule seed", err)
 	}
-	seededFilters := filterRead(1)
+	seededFilters := filterRead(seedRuleCount)
 	if engine != Technitium && initialFilters.Rules.Fingerprint == seededFilters.Rules.Fingerprint {
 		t.Fatal("native seeded rule metadata did not change its raw fingerprint")
 	}
@@ -281,6 +283,20 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	}
 	if engine == PiHole {
 		policyRequests = append(policyRequests, ChangeRequest{Action: "client_groups", Client: &ClientGroupChange{Address: "198.51.100.77", Groups: []int{}}})
+	}
+	if engine != Technitium {
+		for _, disposition := range []string{"allow", "deny"} {
+			filter := &DomainFilterChange{Domain: "review-" + disposition + ".invalid", Disposition: disposition, Match: "suffix"}
+			if engine == PiHole {
+				filter.Match = "exact"
+				groups := []int{}
+				if disposition == "allow" {
+					groups = []int{0}
+				}
+				filter.Groups = &groups
+			}
+			policyRequests = append(policyRequests, ChangeRequest{Action: "filter_add", Filter: filter})
+		}
 	}
 	assertCurrentPolicy := func(change Change, expected *Snapshot) {
 		t.Helper()
@@ -311,6 +327,20 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		if _, e = s.Apply(ctx, change.ID); !errors.Is(e, ErrConflict) {
 			t.Fatal("native reviewed policy replay", e)
 		}
+		if request.Filter != nil {
+			if _, e = s.Preview(ctx, connection.ID, request); e == nil {
+				t.Fatal("native duplicate custom-domain rule was staged")
+			}
+			t.Logf("native custom-domain configuration verified engine=%s match=%s disposition=%s groups=%v decisions=unmeasured", engine, request.Filter.Match, request.Filter.Disposition, change.After.SelectedFilter.Groups)
+		}
+	}
+	configuredRuleCount := seedRuleCount
+	if engine != Technitium {
+		configuredRuleCount += 2
+	}
+	configuredFilters := filterRead(configuredRuleCount)
+	if seededFilters.Sources.Fingerprint != configuredFilters.Sources.Fingerprint {
+		t.Fatal("native subscription metadata changed during custom-domain edits")
 	}
 	for _, protocol := range []string{"udp", "tcp"} {
 		nativeDNSAnswer(t, protocol, dnsPort, name, engine == Technitium)
@@ -348,8 +378,8 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	persistedFilters := filterRead(1)
-	if seededFilters.Sources.Fingerprint != persistedFilters.Sources.Fingerprint || seededFilters.Rules.Fingerprint != persistedFilters.Rules.Fingerprint {
+	persistedFilters := filterRead(configuredRuleCount)
+	if configuredFilters.Sources.Fingerprint != persistedFilters.Sources.Fingerprint || configuredFilters.Rules.Fingerprint != persistedFilters.Rules.Fingerprint {
 		t.Fatal("native filter metadata did not persist after restart")
 	}
 	nativeDNSAnswer(t, "udp", dnsPort, name, engine == Technitium)
@@ -361,6 +391,8 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		}
 		if request.Action == "client_groups" {
 			request.Client.Groups = []int{0}
+		} else if request.Filter != nil {
+			request.Action, request.Filter.Groups = "filter_remove", nil
 		} else if request.Action == "record_add" {
 			request.Action = "record_remove"
 		} else {
@@ -376,6 +408,10 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 			t.Fatal("native reviewed removal readback", change.State, change.Error, e)
 		}
 		assertCurrentPolicy(change, change.After)
+	}
+	finalFilters := filterRead(seedRuleCount)
+	if seededFilters.Sources.Fingerprint != finalFilters.Sources.Fingerprint || seededFilters.Rules.Fingerprint != finalFilters.Rules.Fingerprint {
+		t.Fatal("native unselected custom rules or subscriptions changed after reviewed removals")
 	}
 	removed, err := s.RemoveProvision(ctx, plan.ID)
 	if err != nil || removed.State != "removed" {

@@ -82,6 +82,9 @@ type RecordInventory struct {
 }
 
 func policyAction(action string) bool {
+	if domainFilterAction(action) {
+		return true
+	}
 	switch action {
 	case "override_add", "override_remove", "record_add", "record_remove", "client_groups":
 		return true
@@ -90,7 +93,7 @@ func policyAction(action string) bool {
 }
 
 func validatePolicyChange(req ChangeRequest, engine Engine) error {
-	if !policyAction(req.Action) || req.Protection != nil || req.Upstreams != nil || req.AllowedClients != nil || req.DeniedClients != nil {
+	if !policyAction(req.Action) || req.Filter != nil || req.Protection != nil || req.Upstreams != nil || req.AllowedClients != nil || req.DeniedClients != nil {
 		return errors.New("native record and client changes cannot carry other policy fields")
 	}
 	if req.Action == "client_groups" {
@@ -411,6 +414,9 @@ func editableZone(inv *RecordInventory) bool {
 }
 
 func (c *nativeClient) inspectPolicySelection(ctx context.Context, s *Snapshot, req ChangeRequest) error {
+	if domainFilterAction(req.Action) {
+		return c.inspectDomainFilterSelection(ctx, s, req)
+	}
 	switch req.Action {
 	case "override_add", "override_remove":
 		inv, err := c.readOverrides(ctx)
@@ -452,6 +458,9 @@ func (c *nativeClient) inspectPolicySelection(ctx context.Context, s *Snapshot, 
 }
 
 func validatePolicyBaseline(req ChangeRequest, s *Snapshot) error {
+	if domainFilterAction(req.Action) {
+		return validateDomainFilterBaseline(req, s)
+	}
 	if !policyAction(req.Action) {
 		return nil
 	}
@@ -552,6 +561,9 @@ func validatePolicyBaseline(req ChangeRequest, s *Snapshot) error {
 }
 
 func applyPolicyNative(ctx context.Context, c *nativeClient, req ChangeRequest, before *Snapshot) error {
+	if domainFilterAction(req.Action) {
+		return applyDomainFilterNative(ctx, c, req, before)
+	}
 	selection := &Snapshot{}
 	if err := c.inspectPolicySelection(ctx, selection, req); err != nil {
 		return err
@@ -619,6 +631,9 @@ func applyPolicyNative(ctx context.Context, c *nativeClient, req ChangeRequest, 
 }
 
 func policyMatches(req ChangeRequest, after *Snapshot) bool {
+	if domainFilterAction(req.Action) {
+		return domainFilterMatches(req, after)
+	}
 	switch req.Action {
 	case "override_add", "override_remove":
 		inv := overrideInventory{}
@@ -676,6 +691,9 @@ func policyMatches(req ChangeRequest, after *Snapshot) bool {
 }
 
 func policyPreserved(req ChangeRequest, before, after *Snapshot) bool {
+	if domainFilterAction(req.Action) {
+		return before != nil && after != nil && before.SelectedFilter != nil && after.SelectedFilter != nil && before.SelectedFilter.OtherPolicyFingerprint == after.SelectedFilter.OtherPolicyFingerprint
+	}
 	if !policyAction(req.Action) {
 		return true
 	}

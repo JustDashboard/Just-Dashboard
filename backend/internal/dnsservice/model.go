@@ -157,6 +157,7 @@ type Snapshot struct {
 	Records              *RecordInventory    `json:"records,omitempty"`
 	SelectionFingerprint string              `json:"selectionFingerprint,omitempty"`
 	SelectedClient       *ClientGroupPolicy  `json:"selectedClient,omitempty"`
+	SelectedFilter       *DomainFilterPolicy `json:"selectedFilter,omitempty"`
 }
 
 type View struct {
@@ -167,14 +168,15 @@ type View struct {
 }
 
 type ChangeRequest struct {
-	Action         string             `json:"action"`
-	Protection     *bool              `json:"protection,omitempty"`
-	Upstreams      []string           `json:"upstreams,omitempty"`
-	AllowedClients []string           `json:"allowedClients,omitempty"`
-	DeniedClients  []string           `json:"deniedClients,omitempty"`
-	Zone           string             `json:"zone,omitempty"`
-	Record         *RecordChange      `json:"record,omitempty"`
-	Client         *ClientGroupChange `json:"client,omitempty"`
+	Action         string              `json:"action"`
+	Protection     *bool               `json:"protection,omitempty"`
+	Upstreams      []string            `json:"upstreams,omitempty"`
+	AllowedClients []string            `json:"allowedClients,omitempty"`
+	DeniedClients  []string            `json:"deniedClients,omitempty"`
+	Zone           string              `json:"zone,omitempty"`
+	Record         *RecordChange       `json:"record,omitempty"`
+	Client         *ClientGroupChange  `json:"client,omitempty"`
+	Filter         *DomainFilterChange `json:"filter,omitempty"`
 }
 
 type Change struct {
@@ -258,6 +260,9 @@ func validateCredential(engine Engine, c Credential) error {
 }
 
 func validateChange(req ChangeRequest, engine Engine) error {
+	if req.Filter != nil || domainFilterAction(req.Action) {
+		return validateDomainFilterChange(req, engine)
+	}
 	if req.Record != nil || req.Client != nil {
 		return validatePolicyChange(req, engine)
 	}
