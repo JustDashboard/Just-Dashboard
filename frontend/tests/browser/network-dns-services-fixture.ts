@@ -356,6 +356,25 @@ export function dnsProvision(): DNSServiceProvision {
   }
 }
 
+export type DNSServicePageControl = {
+  mutations: Mutation[]
+  reads: string[]
+  connections: DNSConnection[]
+  view: DNSServiceView
+  records: DNSRecordInventory
+  changes: DNSServiceChange[]
+  provisions: DNSServiceProvision[]
+  inspectFailure: boolean
+  currentFailure: boolean
+  currentView?: DNSServiceView
+  currentMissingSelection: boolean
+  recordsFailure: boolean
+  stageFailure: boolean
+  unexpectedReads: string[]
+  connectFailure: boolean
+  apply: "verified" | "needs_review" | "lost"
+}
+
 export async function mockDNSServicePage(
   page: Page,
   options: {
@@ -364,31 +383,31 @@ export async function mockDNSServicePage(
     management?: boolean
     engine?: DNSConnection["engine"]
   } = {},
-) {
+): Promise<DNSServicePageControl> {
   const mutations: Mutation[] = []
   const reads: string[] = []
   const connection = dnsConnection(options.management ?? true, options.engine ?? "adguard")
-  const control = {
+  const control: DNSServicePageControl = {
     mutations,
     reads,
-    connections: options.empty ? ([] as DNSConnection[]) : [connection],
+    connections: options.empty ? [] : [connection],
     view: {
       connection,
       state: "available",
       snapshot: dnsSnapshot(connection.engine),
-    } as DNSServiceView,
+    },
     records: dnsRecords(),
-    changes: [] as DNSServiceChange[],
-    provisions: [] as DNSServiceProvision[],
+    changes: [],
+    provisions: [],
     inspectFailure: false,
     currentFailure: false,
-    currentView: undefined as DNSServiceView | undefined,
+    currentView: undefined,
     currentMissingSelection: false,
     recordsFailure: false,
     stageFailure: false,
-    unexpectedReads: [] as string[],
+    unexpectedReads: [],
     connectFailure: false,
-    apply: "verified" as "verified" | "needs_review" | "lost",
+    apply: "verified",
   }
   await mockNetwork(page, mutations, {
     session: options.reader

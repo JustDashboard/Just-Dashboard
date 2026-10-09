@@ -5,10 +5,11 @@ import {
   dnsProvision,
   dnsRecords,
   mockDNSServicePage,
+  type DNSServicePageControl,
 } from "./network-dns-services-fixture"
 
 const sheet = (page: Page) => page.locator("[data-slot=sheet-content]")
-const posts = (control: Awaited<ReturnType<typeof mockDNSServicePage>>) =>
+const posts = (control: DNSServicePageControl) =>
   control.mutations.filter((mutation) => mutation.path.endsWith("/apply"))
 const section = (page: Page, name: string) =>
   sheet(page)
@@ -623,9 +624,9 @@ test("record draft validation keeps invalid TTL, family and owner fields without
   await ttl.fill("0")
   await createReview(page).click()
   await expect(
-    sheet(page)
-      .getByRole("alert")
-      .getByText(/exact TTL from 1 to 86400/i),
+    sheet(page).getByRole("link", {
+      name: /^TTL \(seconds\): Enter the exact TTL from 1 to 86400/i,
+    }),
   ).toBeVisible()
   await expect(ttl).toHaveValue("0")
   expect(control.mutations).toEqual([])
@@ -633,9 +634,9 @@ test("record draft validation keeps invalid TTL, family and owner fields without
   await sheet(page).getByLabel("DNS record name", { exact: true }).fill("outside.example.test")
   await createReview(page).click()
   await expect(
-    sheet(page)
-      .getByRole("alert")
-      .getByText(/containing Technitium primary zone/i),
+    sheet(page).getByRole("link", {
+      name: /^Authoritative zone: Select an explicit containing Technitium primary zone/i,
+    }),
   ).toBeVisible()
   await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
     "outside.example.test",
@@ -647,9 +648,9 @@ test("record draft validation keeps invalid TTL, family and owner fields without
   await sheet(page).getByLabel("Record value", { exact: true }).fill("198.51.100.9")
   await createReview(page).click()
   await expect(
-    sheet(page)
-      .getByRole("alert")
-      .getByText(/canonical unicast IP of the selected record family/i),
+    sheet(page).getByRole("link", {
+      name: /^Record value: Use a canonical unicast IP of the selected record family/i,
+    }),
   ).toBeVisible()
   await expect(sheet(page).getByLabel("Record value", { exact: true })).toHaveValue("198.51.100.9")
   await expect(ttl).toHaveValue("600")
@@ -678,6 +679,76 @@ test("a refused native record preview keeps its complete draft and sends no appl
   expect(control.mutations).toHaveLength(1)
   expect(posts(control)).toEqual([])
 })
+
+test("record errors focus the summary and its link names and focuses the described field", async ({
+  page,
+}) => {
+  const control = await mockDNSServicePage(page)
+  await recordDraft(page, "Review add local override", "retained.example.test", "not-an-ip")
+  await createReview(page).click()
+  const link = sheet(page).getByRole("link", { name: /^Record value: Use a canonical unicast IP/ })
+  const summary = sheet(page)
+    .locator('[role="alert"][tabindex="-1"]')
+    .filter({ has: page.getByRole("link", { name: /^Record value: Use a canonical unicast IP/ }) })
+  await expect(summary).toBeFocused()
+  const value = sheet(page).getByLabel("Record value", { exact: true })
+  await expect(value).toHaveAttribute("aria-invalid", "true")
+  await expect(value).toHaveAccessibleDescription(
+    /canonical unicast IP of the selected record family/,
+  )
+  await link.click()
+  await expect(value).toBeFocused()
+  await expect(value).toHaveValue("not-an-ip")
+  await expect(sheet(page).getByLabel("DNS record name", { exact: true })).toHaveValue(
+    "retained.example.test",
+  )
+  expect(control.mutations).toEqual([])
+})
+
+for (const removed of ["client", "group"] as const) {
+  test(`a selected ${removed} removed by a fresh native reading cannot stage its retained group draft`, async ({
+    page,
+  }) => {
+    const control = await mockDNSServicePage(page, { engine: "pihole" })
+    await selectedClient(page)
+    if (removed === "client")
+      control.view.snapshot!.clients = control.view.snapshot!.clients.filter(
+        (client) => !client.addresses.includes("192.0.2.10"),
+      )
+    else
+      control.view.snapshot!.filterGroups = control.view.snapshot!.filterGroups.filter(
+        (group) => group.id !== 7,
+      )
+    await sheet(page).getByRole("button", { name: "Refresh native reading", exact: true }).click()
+    if (removed === "client")
+      await expect(
+        sheet(page).getByLabel("Native client settings", { exact: true }),
+      ).not.toContainText("Office client")
+    else
+      await expect(
+        sheet(page).getByRole("checkbox", { name: /^No filtering group · ID 7(?:\s|$)/ }),
+      ).toHaveCount(0)
+    await createReview(page).click()
+    const field =
+      removed === "client"
+        ? sheet(page).getByLabel("Existing Pi-hole client", { exact: true })
+        : sheet(page).getByRole("group", { name: "Native groups", exact: true })
+    const message =
+      removed === "client"
+        ? /Select a client still present in the current native reading/
+        : /Choose groups still present in the current native reading/
+    const link = sheet(page).getByRole("link", { name: message })
+    const summary = sheet(page)
+      .locator('[role="alert"][tabindex="-1"]')
+      .filter({ has: page.getByRole("link", { name: message }) })
+    await expect(summary).toBeFocused()
+    await expect(field).toHaveAccessibleDescription(message)
+    await link.click()
+    await expect(field).toBeFocused()
+    await expect(sheet(page).getByText(/Selected group IDs: 7\./)).toBeVisible()
+    expect(control.mutations).toEqual([])
+  })
+}
 
 for (const [name, patch] of [
   ["internal", { internal: true }],
