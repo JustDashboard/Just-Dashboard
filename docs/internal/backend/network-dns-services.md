@@ -101,6 +101,17 @@ configured membership nor reported counts prove loaded/compiled rule content or 
 filtering decision. All reads remain `system.admin`, private/no-store; administrator API tokens have
 the same existing capability contract as sessions.
 
+The engine detail sheet mounts this inventory before its reviewed change controls, including on
+dashboard read-only connections. The separate `Read native filters` command and thirty-second
+foreground poll retain their own observation time. Network errors and native unavailable responses
+keep the last same-owner entries with a retry warning; changed connection identity or generation
+clears them. A fresh partial response replaces unreadable sections with explicit unknown evidence
+without drawing a zero count or implying empty policy. The bounded frontend decoder refuses unknown
+DTO fields, malformed origins, mixed engines and contradictory configured/fingerprint evidence;
+optional false flags, zero counts and empty group memberships remain visible. Fingerprints identify
+redacted rows; native status codes and update times carry their native basis without acquiring a
+healthy or effective-filtering verdict.
+
 The pinned metadata contracts are [AdGuard 0.107.71](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/openapi/openapi.yaml),
 [FTL 6.7.1 lists](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/lists.yaml)
 and [domain rules](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml),

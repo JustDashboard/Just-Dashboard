@@ -10,6 +10,7 @@ import type {
   DNSServiceView,
 } from "../../src/lib/network-dns-services"
 import { admin, mockNetwork, type Mutation } from "./network-fixture"
+import type { DNSFilterView } from "../../src/lib/network-dns-filters"
 import { overrides } from "./network-dns-fixture"
 
 const base = "/network/dns/services"
@@ -148,6 +149,81 @@ export function dnsConnection(
     ownership: "connected",
     createdAt: time(),
     updatedAt: time(),
+  }
+}
+
+export function dnsFilters(connection = dnsConnection()): DNSFilterView {
+  const unknown = reading("unknown", "Loaded filter contents and client decisions are unmeasured.")
+  const configured = reading(
+    "configured",
+    "Native configured metadata; subscriptions are not fetched.",
+  )
+  const identity = reading(
+    "redacted",
+    "IDs and fingerprints distinguish intentionally redacted native entries.",
+  )
+  const engine = connection.engine
+  const source = {
+    kind: "block_subscription",
+    origin: "https://filters.example.test",
+    fingerprint: "a".repeat(64),
+    ...(engine === "technitium" ? {} : { id: 0, enabled: false, ruleCount: 0 }),
+    ...(engine === "pihole" ? { groups: [], status: 0, updatedAt: "0" } : {}),
+  }
+  return {
+    connection,
+    state: "available",
+    inventory: {
+      engine,
+      nativeVersion:
+        engine === "technitium" ? "15.6" : engine === "pihole" ? "v6.7.1" : "v0.107.71",
+      observedAt: "2026-10-09T04:00:00Z",
+      transport: configured,
+      runtime: unknown,
+      protection: false,
+      ...(engine === "adguard" ? { filtering: false } : {}),
+      sources: {
+        evidence: configured,
+        identity,
+        entries: [
+          source,
+          {
+            ...source,
+            ...(engine === "technitium" ? {} : { id: 7, enabled: true, ruleCount: 12 }),
+            ...(engine === "pihole" ? { groups: [0, 7], status: 1 } : {}),
+            fingerprint: "b".repeat(64),
+          },
+        ],
+        fingerprint: "c".repeat(64),
+      },
+      rules: {
+        evidence:
+          engine === "technitium"
+            ? reading(
+                "unsupported",
+                "Manual Allowed/Blocked tree contents are outside this inventory.",
+              )
+            : configured,
+        identity,
+        entries:
+          engine === "technitium"
+            ? []
+            : [
+                {
+                  kind: engine === "pihole" ? "deny_regex" : "native_rule",
+                  fingerprint: "d".repeat(64),
+                  ...(engine === "pihole" ? { id: 4, enabled: false, groups: [] } : {}),
+                },
+              ],
+        ...(engine === "technitium" ? {} : { fingerprint: "e".repeat(64) }),
+      },
+      appRules: reading("unsupported", "Installed app rule content is outside this inventory."),
+      fingerprint: "f".repeat(64),
+      limitations: [
+        "Origins omit credentials, paths, queries and fragments; rules and comments are fingerprint-only.",
+        "Native metadata does not establish loaded filtering or client packet decisions.",
+      ],
+    },
   }
 }
 
@@ -371,6 +447,8 @@ export type DNSServicePageControl = {
   currentView?: DNSServiceView
   currentMissingSelection: boolean
   recordsFailure: boolean
+  filtersFailure: boolean
+  filterPayload?: unknown
   stageFailure: boolean
   unexpectedReads: string[]
   connectFailure: boolean
@@ -407,6 +485,7 @@ export async function mockDNSServicePage(
     currentView: undefined,
     currentMissingSelection: false,
     recordsFailure: false,
+    filtersFailure: false,
     stageFailure: false,
     unexpectedReads: [],
     connectFailure: false,
@@ -432,6 +511,19 @@ export async function mockDNSServicePage(
         return reply(
           control.changes.map((change) => ({ ...change, before: undefined, after: undefined })),
         )
+      if (path === `${base}/${control.view.connection.id}/filters`) {
+        if (control.filtersFailure)
+          return reply(
+            {
+              error: {
+                code: "native_unavailable",
+                message: "Fixture filter inventory unavailable.",
+              },
+            },
+            503,
+          )
+        return reply(control.filterPayload ?? dnsFilters(control.view.connection))
+      }
       const current = control.changes.find((item) => path === `${base}/changes/${item.id}/current`)
       if (current) {
         if (control.currentFailure)

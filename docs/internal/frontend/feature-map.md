@@ -54,6 +54,11 @@ holding stale or changed confirmations and showing human record/client details b
 The [record/client acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-policy-ui-acceptance.md)
 keeps its final source, selected browser checks and actual native engine/current-read proofs separate
 from the earlier handoff below. Explicit null and empty client comments have distinct labels.
+`service-filters.tsx` adds a separate native filter reading on read-only or managed connections:
+redacted subscription origins, IDs, counts/update metadata, custom-rule fingerprints and explicit
+native group memberships. Configured inventory, native status, unavailable/manual/app scope and
+unmeasured client decisions stay separate. Failed reads retain dated same-owner data; changed
+connection identity clears it. Unknown sections carry no zero-policy count or healthy verdict.
 Its [source-matched build, 13 interaction cases and phone/desktop inspection](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-services-ui-acceptance.md)
 pass, as do the [combined reachable checks](../../audits/2026-10-08-network-capability-report/implementation-evidence/native-dns-integrated-acceptance.md).
 Broader P17 acceptance remains open.

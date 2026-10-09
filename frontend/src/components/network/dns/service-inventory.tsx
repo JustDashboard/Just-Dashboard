@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { dnsDraftLines, dnsStageProblem } from "./service-form"
 import { DNSServicePolicyForm, type DNSPolicyAction } from "./service-policy-form"
+import { DNSServiceFilters } from "./service-filters"
 
 function InventorySection({
   title,
@@ -530,6 +531,11 @@ function Inventory({
           </InventorySection>
         </>
       )}
+      <DNSServiceFilters
+        key={JSON.stringify(view.connection)}
+        connection={view.connection}
+        ownerStale={stale}
+      />
       <InventorySection title="Review a native change">
         <ChoiceGrid columns={2} aria-label="Native DNS change kinds">
           {choices.map((choice) => (

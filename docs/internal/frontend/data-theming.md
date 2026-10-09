@@ -105,6 +105,12 @@ polling `/changes/{id}/current`; ordinary connection inventory cannot supply sel
 freshness. The current read retains raw record/client fingerprints, while open confirmations also
 compare the complete immutable request and selected metadata. Explicit null and empty client
 comments have distinct labels and remain unchanged in native readback.
+Filter metadata uses the separate bounded `lib/network-dns-filters.ts` decoder and `/filters` read.
+It checks complete connection identity and generation, redacted HTTP(S) origins, closed per-engine
+entry kinds and configured/fingerprint consistency. Native unavailable or transport failures retain
+the previous same-owner data and observation time; a fresh partial reading shows unknown sections
+without treating them as empty. Connection replacement clears all retained filter rows, and a stale
+owner read suspends its filter poll. These reads do not stage or apply a filter change.
 WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
 and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
 containment; successful setup says configured when native runtime is not up.
