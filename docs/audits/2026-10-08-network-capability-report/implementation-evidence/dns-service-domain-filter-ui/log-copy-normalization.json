@@ -80,6 +80,14 @@
       "original_sha256": "fd847c0340821957afd5f07ab524cf56fb50094499777d010dbb50207b176240",
       "text_sha256": "fd847c0340821957afd5f07ab524cf56fb50094499777d010dbb50207b176240",
       "gzip_sha256": "10d84f9dcb49019c7e1d48489590345fdb7e9126c880833745f509e9f627d6fc"
+    },
+    {
+      "original": "/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-docs-final.log",
+      "text": "docs-final.log",
+      "gzip": "docs-final.log.raw.gz",
+      "original_sha256": "e091cae577eeb5018c9b40eb189dd30c752b860531f0e88091730dbea61e5804",
+      "text_sha256": "e091cae577eeb5018c9b40eb189dd30c752b860531f0e88091730dbea61e5804",
+      "gzip_sha256": "355860e46e7de3e336ea31024a140d7b8fb14e073c668591cb862799c1564d04"
     }
   ]
 }

@@ -175,5 +175,18 @@
       },
       "total": 26
     }
+  },
+  "prepush_review": "prepush-review.json",
+  "docs_gate": {
+    "reviewed_head": "5ad74d42e3c9f25f6d8e1afe133acd40958432ab",
+    "argv": [
+      "scripts/test-changed.sh",
+      "988207ea4d8559a11ac25a51a14179c703e1b9e4"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.053,
+    "raw_sha256": "e091cae577eeb5018c9b40eb189dd30c752b860531f0e88091730dbea61e5804",
+    "selection": "documentation only; no product source changes since the completed build/required/race gates",
+    "frozen_product_source": "988207ea4d8559a11ac25a51a14179c703e1b9e4"
   }
 }
