@@ -456,6 +456,12 @@ async function mockSecurity(
         return json(route, options.firewall ?? firewall)
       case "/firewall/apps":
         return json(route, [{ name: "OpenSSH", ports: ["22/tcp"] }])
+      case "/firewall/history":
+        return json(route, { events: [], limits: [] })
+      case "/firewall/access":
+        return json(route, { backend: "ufw", checks: [] })
+      case "/firewall/preflight":
+        return json(route, { backend: "ufw", findings: [], checks: [] })
       case "/fail2ban/":
         return json(route, jails)
       case "/fail2ban/offenders":

@@ -619,6 +619,12 @@ export async function mockIntrusion(
         return json(route, posture)
       case "/firewall/":
         return json(route, firewall)
+      case "/firewall/history":
+        return json(route, { events: [], limits: [] })
+      case "/firewall/access":
+        return json(route, { backend: "ufw", checks: [] })
+      case "/firewall/preflight":
+        return json(route, { backend: "ufw", findings: [], checks: [] })
       case "/fail2ban/":
         return json(route, jails)
       case "/fail2ban/offenders":

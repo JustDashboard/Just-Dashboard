@@ -20,7 +20,7 @@ func TestFirewallMaturityRoutesKeepTheirCapabilities(t *testing.T) {
 		c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "fw-"+string(role), role)}
 		for _, m := range []struct{ method, path, body string }{
 			{http.MethodGet, "/api/v1/firewall/history", ""},
-			{http.MethodPost, "/api/v1/firewall/preflight", `{"op":"enable"}`},
+			{http.MethodGet, "/api/v1/firewall/preflight?op=enable", ""},
 			{http.MethodPost, "/api/v1/firewall/plans/preview", `{"operations":[]}`},
 			{http.MethodPost, "/api/v1/firewall/plans", `{"operations":[]}`},
 			{http.MethodDelete, "/api/v1/firewall/rules/1?id=fw-000000000000", ""},
@@ -29,6 +29,15 @@ func TestFirewallMaturityRoutesKeepTheirCapabilities(t *testing.T) {
 				t.Errorf("%s may call %s %s: %d %s", role, m.method, m.path, w.Code, strings.TrimSpace(w.Body.String()))
 			}
 		}
+	}
+}
+
+func TestFirewallAccessIsReadableByAnyReader(t *testing.T) {
+	s := testServer(t)
+	c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "fw-reader", auth.RoleReadOnly)}
+	w := c.do(http.MethodGet, "/api/v1/firewall/access", "", nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"checks"`) {
+		t.Fatalf("access = %d %s", w.Code, w.Body.String())
 	}
 }
 
@@ -42,6 +51,9 @@ func TestFirewallHistoryRefusesAMalformedIdentityBeforeReading(t *testing.T) {
 	}
 	if w := c.do(http.MethodPost, "/api/v1/firewall/plans/preview", `{"operations":[],"mystery":1}`, nil); w.Code != http.StatusBadRequest {
 		t.Fatalf("an unknown field = %d", w.Code)
+	}
+	if w := c.do(http.MethodGet, "/api/v1/firewall/preflight?op=add", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("an add reviewed outside a plan = %d", w.Code)
 	}
 }
 

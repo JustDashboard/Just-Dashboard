@@ -464,7 +464,7 @@ export function FirewallPanel({
 
       <AreaFindings posture={posture} area="firewall" onFix={onFix} />
 
-      <FirewallAccessPanel status={status} />
+      <FirewallAccessPanel />
 
       {writable && (
         <FirewallPlanTray

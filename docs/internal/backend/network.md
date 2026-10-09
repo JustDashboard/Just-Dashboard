@@ -29,7 +29,9 @@ automatically reconciles a native owner. File recovery binds exact staged/origin
   into `links.batch` (`ip -force -batch`), `rules6.batch` (`ip -6 -force -batch`),
   `shaping.batch` (`tc -force -batch`), `gateway.nft`
   (`nft -f`, declare–delete–define so loading is an atomic replace) and
-  `/etc/sysctl.d/90-just-dashboard.conf`. `just-dashboard-network.service`, a oneshot unit ordered after
+  `/etc/sysctl.d/90-just-dashboard.conf`, and, once the owned firewall table has been used,
+  `firewall.nft` (see [the firewall](observability-security.md#which-firewall-which-rules-and-who-can-still-get-in)).
+  `just-dashboard-network.service`, a oneshot unit ordered after
   the network managers, Docker, ufw and firewalld, runs them at boot, so what was made survives a
   reboot whether or not the dashboard is running, and a reinstalled dashboard finds what the last one
   made. The spec is a file beside its renders rather than rows in SQLite because it describes the host.
@@ -37,11 +39,17 @@ automatically reconciles a native owner. File recovery binds exact staged/origin
   request came from (`path.go`, `ip -j route get`): the device the reply leaves through, its gateway
   and its source. A route or rule is applied, the path is resolved again (`verifyPath`, and
   `verifyRouting`, which also asks `route get CLIENT from SOURCE` so a rule selecting on the server's own
-  address is caught), and the change is taken back if the answer moved. Three anchors are read with
+  address is caught), and the change is taken back if the answer moved. Anchors are read with
   it and compared the same way — the route to 1.1.1.1, the same with Tailscale's packet mark 0x80000,
-  and to 2606:4700:4700::1111 (only asked of the kernel, never contacted) — because the operator's
+  and to 2606:4700:4700::1111 (only asked of the kernel, never contacted), plus up to sixteen tunnel
+  endpoints read when the change starts: each WireGuard peer's endpoint with its interface's fwmark and
+  each Tailscale peer's direct address with tailscaled's mark — because the operator's
   way in rides on this server's own way out: tailscaled's packets, a WireGuard endpoint, the SSH
-  session behind a tunnel. A request on loopback is followed to the SSH session carrying it
+  session behind a tunnel. The check asks exactly the questions it read before the change, so an
+  endpoint that roams meanwhile cannot become a missing anchor. A routing change also re-asks the
+  route to up to 32 established connections' peers and records those it moved in the journal's
+  `validation` evidence beside the guards it passed; moved connections are evidence for the operator
+  to judge before confirming, not a refusal, since a route is often added to move them. A request on loopback is followed to the SSH session carrying it
   (`OperatorAddress`, `operator.go`: an sshd process holding a loopback-to-loopback connection and
   one from elsewhere on a listening port), so an `ssh -L` browser is guarded as the address it
   really comes from. Guards answer `409 would_lock_you_out` with the sentence saying why.
@@ -114,6 +122,33 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   selector, a second default route
   in main, and tables 52, 253 (for routes) and 255 are refused. A zero packet-mark mask is refused,
   and unmarked discard rules are guarded as potential dashboard-reply selectors.
+- Rules also select by socket owner (`uidrange`), TOS (IPv4 0x04–0x1c, IPv6 any DS field without ECN
+  bits; `rt_dsfield` names and the shipped standard names compare as their values) and VRF (`l3mdev`,
+  which names no table), and may `goto` a later priority. A goto must land on a rule made here in the
+  same family, may not jump over a rule made elsewhere, and a rule a goto lands on cannot be removed
+  first. A UID-selecting discard is checked against the owners of the sockets actually answering the
+  client (`ss -tne`); without that evidence it is guarded as possibly selecting the replies. Inverted,
+  protocol/port and `suppress_prefixlength` selectors are read and modelled but not written.
+- Routes may be equal-cost multipath (2–16 legs of gateway, device and weight 1–256); ip reads every
+  attribute before the first `nexthop`, so table, metric and source are written first. A managed route
+  is edited through a reviewed plan (`POST /routing/routes/{id}/plan`, then `PUT`): `ip route replace`
+  while family, table, destination and metric — the kernel's identity — are unchanged, otherwise the
+  new route is added before the old one is removed; the plan is recomputed under the lock at apply.
+- `route_model.go` evaluates the rules as `fib_rules_lookup` does (selectors, goto, throw and
+  suppressed answers, longest match then lowest metric), forking on a selector it cannot decide for the
+  packet and naming an answer only when both branches agree. It backs `POST /routing/routes/preview`
+  and the edit plan's impact (addresses this host depends on: the client, anchors, tunnel endpoints,
+  forward targets, NAT sources, allowlisted networks, Docker networks and established peers, modelled as
+  packets this host sends with the source the first lookup chooses), and `POST /routing/rules/preview`,
+  which also places the rule among the others, finds rules that shadow it or that it shadows, and
+  answers a named packet with the kernel's present `ip route get` beside the model's prediction. The
+  routing read's `clientDecision` is the kernel's table for `route get CLIENT from SOURCE` with the
+  evaluated rule only where model and kernel agree on table and device.
+- `StartRouteHistory` reads the same inventory every thirty seconds and records added, removed and
+  changed routes and rules (local table excluded) in `network_route_events`, each bounded by the two
+  readings it fell between; a restarted process diffs against the stored snapshot and marks those
+  changes as found across a restart. Thirty days or 2000 events are kept; `GET /routing/history`
+  filters by family, object and a covering target.
 - Device/namespace removal checks shaping, NAT/forward ingress/egress, routes/rules, foreign children
   and veth-peer dependencies. A partial namespace failure restores already removed pairs.
 - Forwarding is per family. Turning it off is refused while Docker networks, an enabled forward or NAT
@@ -121,13 +156,22 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   Docker IPv4/IPv6 bridge counts: IPv6 uses its flag/subnet evidence; IPv4 conservatively counts all
   bridges because the Docker inventory lacks reliable IPv4-disable/custom-IPAM evidence. A failed
   Docker network listing blocks shutdown for both families until dependencies can be read.
-  `TailscaleNeedsForwarding` also answers "needed" when Tailscale cannot be read.
+  `TailscaleNeedsForwarding` also answers "needed" when Tailscale cannot be read. Each family carries
+  `dockerBasis`, saying how the Docker count was reached, and measured `health`: the kernel's forwarded
+  datagram counter (`Ip ForwDatagrams`, `Ip6OutForwDatagrams`), its rate between reads at least a
+  second apart, and devices whose own `forwarding` switch is off while the family's is on (`partial`).
+  A rate shows forwarding happens; it does not show a particular flow passed.
   Turning IPv6 forwarding on is refused while the IPv6 default route was
   learned from a router advertisement on a device whose `accept_ra` is not 2: with forwarding on, the
   kernel ignores those advertisements and the route would expire.
 - IPv4 forwarding resets kernel host settings; managed redirect protections are reasserted after
   changes and rendered after forwarding in the boot sysctl file.
-- BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only.
+- BGP is read from FRR (`vtysh -c "show bgp summary json"`) where it runs; read-only. Each neighbour
+  carries the route-map, prefix-list and filter-list names `show bgp neighbors json` reports, OSPFv2 and
+  v3 adjacencies are read from `show ip ospf neighbor json` and `show ipv6 ospf6 neighbor json` (both
+  releases' field names), and `GET /bgp/routes?family=&prefix=` lists a family's paths only while its
+  neighbours sent at most 5000 prefixes, or one parsed prefix's paths in either FRR shape. Policy,
+  areas and failover remain FRR's configuration.
 
 ## Traffic
 
@@ -346,7 +390,7 @@ handler for the PUTs and posts). No route takes a typed phrase.
 | Overview | `GET /`, `GET /capabilities`, `GET /overview`, `GET /links`, `GET /traffic/live`, `GET /traffic/history` |
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`; `GET`/`POST /namespaces`, `DELETE /namespaces/{name}` |
 | Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
-| Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
+| Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `GET /routing/history?family=&object=&target=`, `POST /routing/routes/preview`, `POST /routing/routes/{id}/plan`, `POST /routing/rules/preview` (admin, change nothing), `POST /routing/routes`, `PUT /routing/routes/{id}` (destructive), `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp`, `GET /bgp/routes?family=&prefix=` |
 | Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
 | Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |

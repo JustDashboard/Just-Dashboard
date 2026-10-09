@@ -154,13 +154,28 @@ func outcomeOf(err error) string {
 }
 
 func (s *Server) handleFirewallStatus(w http.ResponseWriter, r *http.Request) error {
+	st, err := s.modules.netsec.Status(r.Context())
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	httpx.JSON(w, http.StatusOK, st)
+	return nil
+}
+
+// handleFirewallAccess is how the requester's own ways in and Caddy's public
+// ingress fare under the current rules. Separate from the status, which
+// several pages poll, because it asks the kernel and sshd for this request.
+func (s *Server) handleFirewallAccess(w http.ResponseWriter, r *http.Request) error {
 	ctx := s.firewallContext(r)
 	st, err := s.modules.netsec.Status(ctx)
 	if err != nil {
 		return httpx.Internal(err)
 	}
-	st.Access = s.modules.netsec.EvaluateAccess(ctx, st)
-	httpx.JSON(w, http.StatusOK, st)
+	checks := s.modules.netsec.EvaluateAccess(ctx, st)
+	if checks == nil {
+		checks = []netsec.AccessCheck{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"backend": st.Backend, "checks": checks})
 	return nil
 }
 
@@ -177,10 +192,16 @@ func (s *Server) handleFirewallHistory(w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
+// handleFirewallPreflight reviews one change named by the query: enable,
+// disable, reset, policy (direction, policy) or delete (ruleId). A rule to add
+// or several changes are reviewed as a plan.
 func (s *Server) handleFirewallPreflight(w http.ResponseWriter, r *http.Request) error {
-	var change netsec.ProposedChange
-	if err := httpx.DecodeJSON(r, &change); err != nil {
-		return err
+	q := r.URL.Query()
+	change := netsec.ProposedChange{Op: q.Get("op"), Direction: q.Get("direction"), Policy: q.Get("policy"), RuleID: q.Get("ruleId")}
+	switch change.Op {
+	case "enable", "disable", "reset", "policy", "delete":
+	default:
+		return httpx.BadRequest("op is enable, disable, reset, policy or delete; review a rule to add as a plan")
 	}
 	preflight, err := s.modules.netsec.Preflight(s.firewallContext(r), change)
 	if err != nil {

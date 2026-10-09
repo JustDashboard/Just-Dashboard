@@ -1,8 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { post } from "@/lib/api"
+import { get } from "@/lib/api"
+import { usePoll } from "@/hooks/use-poll"
 import type {
+  FirewallAccess,
   FirewallAccessCheck,
   FirewallAccessComparison,
   FirewallPreflight,
@@ -43,8 +45,12 @@ function where(check: FirewallAccessCheck) {
  * connection to the dashboard and to SSH, and Caddy's public ingress — each
  * with the verdict the current rules give it and the rule that decides.
  */
-export function FirewallAccessPanel({ status }: { status: FirewallStatus }) {
-  const checks = status.access ?? []
+export function FirewallAccessPanel() {
+  const access = usePoll<FirewallAccess>(
+    (signal) => get("/firewall/access", undefined, signal),
+    30_000,
+  )
+  const checks = access.data?.checks ?? []
   if (checks.length === 0) return null
   return (
     <Panel>
@@ -103,14 +109,14 @@ export function FirewallPreflightCheck({
   change,
   onResult,
 }: {
-  change: Record<string, unknown>
+  change: Record<string, string>
   onResult?: (preflight: FirewallPreflight | undefined) => void
 }) {
   const key = JSON.stringify(change)
   const [state, setState] = useState<{ key: string; result?: FirewallPreflight; error?: string }>()
   useEffect(() => {
     let live = true
-    post<FirewallPreflight>("/firewall/preflight", JSON.parse(key))
+    get<FirewallPreflight>("/firewall/preflight", JSON.parse(key))
       .then((preflight) => {
         if (!live) return
         setState({ key, result: preflight })

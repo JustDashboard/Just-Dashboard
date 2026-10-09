@@ -2518,8 +2518,10 @@ export type FirewallStatus = {
   analysis?: string
   /** Other nftables tables beside the dashboard's own, which keep enforcing. */
   foreign?: string[]
-  access?: FirewallAccessCheck[]
 }
+
+/** The requester's own ways in and Caddy's public ingress under the current rules. */
+export type FirewallAccess = { backend: FirewallBackend; checks: FirewallAccessCheck[] }
 
 export type FirewallAccessComparison = FirewallAccessCheck & {
   before: FirewallAccessCheck["verdict"]

@@ -106,9 +106,6 @@ type FirewallStatus struct {
 	// Foreign names the other nftables tables beside the owned one, which
 	// keep enforcing whatever this page says.
 	Foreign []string `json:"foreign,omitempty"`
-	// Access is how the operator's own ways in and Caddy's public ingress
-	// fare under the current rules, filled in by the API for the page.
-	Access []AccessCheck `json:"access,omitempty"`
 }
 
 // DefaultPolicy is the three default verdicts. Routed is "disabled" on a host

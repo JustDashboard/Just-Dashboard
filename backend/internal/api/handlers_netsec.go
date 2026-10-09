@@ -20,6 +20,7 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 	r.Route("/firewall", func(r chi.Router) {
 		r.Method(http.MethodGet, "/", s.handle(s.handleFirewallStatus))
 		r.Method(http.MethodGet, "/apps", s.handle(s.handleFirewallApps))
+		r.Method(http.MethodGet, "/access", s.handle(s.handleFirewallAccess))
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapSystemAdmin))
 			// The rule history names who changed what, as the audit log does.
@@ -28,8 +29,8 @@ func (s *Server) mountNetSecRoutes(r chi.Router) {
 				// Covered changes may be applied temporarily and confirmed by
 				// a fresh dashboard response, as network changes are.
 				r.Use(s.pendingNetworkApply)
-				// Reviews change nothing.
-				r.Method(http.MethodPost, "/preflight", s.handle(s.handleFirewallPreflight))
+				// Reviews change nothing; the single-change review is a read.
+				r.Method(http.MethodGet, "/preflight", s.handle(s.handleFirewallPreflight))
 				r.Method(http.MethodPost, "/plans/preview", s.handle(s.handleFirewallPlanPreview))
 				r.Method(http.MethodPost, "/rules", s.handle(s.handleFirewallAddRule))
 				// Editing is a replace, and it is not in the destructive
