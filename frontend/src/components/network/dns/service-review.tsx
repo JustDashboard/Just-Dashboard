@@ -450,8 +450,8 @@ function ReviewedSnapshot({ title, value }: { title: string; value: DNSServiceSn
               label="Client comment"
               value={
                 value.selectedClient.comment === null
-                  ? "Unreported"
-                  : value.selectedClient.comment || "None"
+                  ? "None (native null)"
+                  : value.selectedClient.comment || "Empty native comment"
               }
             />
           </>
