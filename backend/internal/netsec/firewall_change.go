@@ -13,6 +13,41 @@ import (
 // holds: someone else changed the list since it was read.
 var ErrRuleChanged = errors.New("the rule has changed since the list was read")
 
+// ErrUnreadable is a change refused because the firewall could not be read:
+// nothing then shows what the change would do to the operator's access.
+var ErrUnreadable = errors.New("the firewall could not be read, so the change cannot be checked against your access")
+
+// ErrBackendChanged is a change prepared for one firewall finding another in
+// charge when it runs.
+var ErrBackendChanged = errors.New("the firewall in charge changed while the change was being made")
+
+// ErrChecked ends the first pass of a scoped change where the host would be
+// changed: everything before it, validation and the access guard, passed.
+var ErrChecked = errors.New("the change was checked and not applied")
+
+// A host firewall change made under the network journal runs twice under
+// its lock: once only as far as its validation and access guard, so a
+// refusal never opens a journal or touches the host, then for real. Both
+// passes name the firewall the journal was prepared for, so one that changed
+// hands in between is refused rather than written through another path.
+type scopeKey struct{}
+
+type changeScope struct {
+	backend   Backend
+	checkOnly bool
+}
+
+// Scoped binds a change to the firewall its journal was prepared for and,
+// with checkOnly, stops it before the host is touched with ErrChecked.
+func Scoped(ctx context.Context, backend Backend, checkOnly bool) context.Context {
+	return context.WithValue(ctx, scopeKey{}, changeScope{backend: backend, checkOnly: checkOnly})
+}
+
+func checking(ctx context.Context) bool {
+	scope, ok := ctx.Value(scopeKey{}).(changeScope)
+	return ok && scope.checkOnly
+}
+
 // AccessRefusal is a change that would refuse a required way in that the
 // firewall admits now. It is a lockout, carried with its evidence.
 type AccessRefusal struct {
@@ -22,6 +57,10 @@ type AccessRefusal struct {
 
 func (e *AccessRefusal) Error() string {
 	c := e.Check
+	if c.Verdict == "unknown" {
+		return fmt.Sprintf("%s: %s (%d/%s, %s from %s) is %s now, and afterwards it could not be shown to be: %s Make the rule specific enough to judge, or add a rule admitting it first.",
+			ErrLockout.Error(), c.Name, c.Port, c.Protocol, c.Family, c.Source, e.Before.Verdict, c.Reason)
+	}
 	return fmt.Sprintf("%s: %s (%d/%s, %s from %s) is %s now and would be refused: %s Add a rule admitting it first.",
 		ErrLockout.Error(), c.Name, c.Port, c.Protocol, c.Family, c.Source, e.Before.Verdict, c.Reason)
 }
@@ -49,16 +88,19 @@ func cloneStatus(st *FirewallStatus) *FirewallStatus {
 
 // guardChange compares the required access checks before and after a
 // simulated change. Without an access context there is nothing to compare
-// against; an unreadable status leaves the decision to the timed recovery
-// that covers interactive changes.
+// against. An unreadable status refuses the change: what it would do to the
+// operator's access is then unknown.
 func (s *Service) guardChange(ctx context.Context, b fwBackend, mutate func(*FirewallStatus) error) error {
 	a, ok := accessFrom(ctx)
 	if !ok {
 		return nil
 	}
 	before, err := s.statusOf(ctx, b)
-	if err != nil || before.Error != "" {
-		return nil
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrUnreadable, err)
+	}
+	if before.Error != "" {
+		return fmt.Errorf("%w: %s", ErrUnreadable, before.Error)
 	}
 	after := cloneStatus(before)
 	if err := mutate(after); err != nil {
@@ -71,8 +113,11 @@ func compareAccess(before, after *FirewallStatus, a AccessContext) error {
 	checks := accessChecks(a)
 	was := evaluateAccess(before, checks, a.Profiles)
 	now := evaluateAccess(after, checks, a.Profiles)
+	// A way in admitted now must still be shown admitted: one the result can
+	// no longer be judged on is refused as surely as one it refuses, since
+	// nothing then says SSH or the dashboard survives.
 	for i := range checks {
-		if checks[i].Required && admits(was[i].Verdict) && now[i].Verdict == "refused" {
+		if checks[i].Required && admits(was[i].Verdict) && (now[i].Verdict == "refused" || now[i].Verdict == "unknown") {
 			return &AccessRefusal{Check: now[i], Before: was[i]}
 		}
 	}
@@ -473,11 +518,13 @@ func ruleRequestFor(r Rule) RuleRequest {
 }
 
 // RecoveryState is what the host firewall's independent recovery restores.
+// Unit is whether firewalld starts at boot: enabled, disabled, or empty when
+// systemd answered anything else, which the recovery then leaves alone.
 type RecoveryState struct {
-	Backend     Backend
-	Enabled     bool
-	UnitEnabled bool
-	Zone        string
+	Backend Backend
+	Enabled bool
+	Unit    string
+	Zone    string
 }
 
 // RecoveryState reads the firewall in charge, for a journal taken before a
@@ -492,10 +539,22 @@ func (s *Service) RecoveryState(ctx context.Context) (RecoveryState, *FirewallSt
 	}
 	rs := RecoveryState{Backend: st.Backend, Enabled: st.Enabled, Zone: st.Zone}
 	if st.Backend == BackendFirewalld {
-		out, _ := run(ctx, "systemctl", "is-enabled", "firewalld")
-		rs.UnitEnabled = strings.TrimSpace(out) == "enabled"
+		rs.Unit = unitState(run(ctx, "systemctl", "is-enabled", "firewalld"))
 	}
 	return rs, st, nil
+}
+
+// unitState reads `systemctl is-enabled`, whose exit status is non-zero for
+// a disabled unit, by its first line. Only a plain enabled or disabled is a
+// state the recovery restores; alias, static, masked, a runtime-only
+// enablement or no answer leave the unit as it is.
+func unitState(out string, _ error) string {
+	first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	switch first = strings.TrimSpace(first); first {
+	case "enabled", "disabled":
+		return first
+	}
+	return ""
 }
 
 // VerifyAccessAfter is the staged verification after a change: the firewall

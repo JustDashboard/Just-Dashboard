@@ -248,6 +248,9 @@ func TestRuleExtensionRequestsAreValidatedForTheirFamily(t *testing.T) {
 		{RuleRequest{L3MDev: true, Table: 100}, "takes its table from the VRF"},
 		{RuleRequest{L3MDev: true, Action: "blackhole"}, "no other action"},
 		{RuleRequest{Action: "goto", Goto: 12000}, "no selector"},
+		{RuleRequest{TOS: "0", Table: 100}, "any TOS"},
+		{RuleRequest{Family: "inet6", TOS: "default", Table: 100}, "any TOS"},
+		{RuleRequest{UIDRange: "0-4294967294", Table: 100}, "every UID"},
 	}
 	for _, c := range bad {
 		if _, err := c.req.spec(); err == nil || !strings.Contains(err.Error(), c.want) {
@@ -359,6 +362,10 @@ func TestShadowsRepliesReadsTheAnsweringSocketsOwners(t *testing.T) {
 	path.replyUIDs = []uint32{0, 1500}
 	if !shadowsReplies(rule, path) {
 		t.Fatal("one answering socket inside the range is enough")
+	}
+	// A goto discards nothing; what its path does is verified after it runs.
+	if shadowsReplies(RuleSpec{Family: "inet", Priority: 10000, TOS: "0x10", Action: "goto", Goto: 10050}, Path{Address: "100.110.34.9", Source: "100.110.34.31"}) {
+		t.Fatal("a goto was judged a discard")
 	}
 	if got := parseSocketUIDs("0 0 100.110.34.31:443 100.110.34.9:5123 ino:1 sk:2 <->\n0 0 100.110.34.31:22 100.110.34.9:6000 uid:1500 ino:3 <->\n"); len(got) != 2 || got[0] != 0 || got[1] != 1500 {
 		t.Fatalf("uids = %v", got)
@@ -510,7 +517,8 @@ func TestRoutePlansReplaceInPlaceOrAddBeforeRemoving(t *testing.T) {
 }
 
 func TestEditRouteReplacesAndTakesItBackWhenTheReplyMoves(t *testing.T) {
-	rec := rtHost(t).on("ip route replace", "")
+	rec := rtHost(t).on("ip route replace", "").
+		on("ip -j route show table 100 exact 10.88.0.0/24", `[{"dst":"10.88.0.0/24","gateway":"192.168.50.2","dev":"jd-lan","metric":50,"flags":[]}]`)
 	s := testService(t)
 	rtSaveSpec(t, s, rtEditSpec())
 	r, err := s.EditRoute(context.Background(), 3, RouteRequest{Destination: "10.88.0.0/24", Gateway: "192.168.50.3", Device: "jd-lan", Table: 100, Metric: 50, Comment: "second hop"}, rtClient, "ion")
@@ -540,6 +548,20 @@ func TestEditRouteReplacesAndTakesItBackWhenTheReplyMoves(t *testing.T) {
 	}
 	if sp := rtLoad(t, s); sp.Routes[0].Destination != "10.88.0.0/24" {
 		t.Fatalf("a refused edit left the spec changed: %+v", sp.Routes)
+	}
+}
+
+func TestEditRouteDoesNotReplaceARouteThatDriftedToAnotherOwner(t *testing.T) {
+	rec := rtHost(t).
+		on("ip -j route show table 100 exact 10.88.0.0/24", `[{"dst":"10.88.0.0/24","gateway":"192.168.50.9","dev":"jd-lan","metric":50,"protocol":"static","flags":[]},{"dst":"10.88.0.0/24","dev":"jd-lan","metric":700,"flags":[]}]`)
+	s := testService(t)
+	rtSaveSpec(t, s, rtEditSpec())
+	_, err := s.EditRoute(context.Background(), 3, RouteRequest{Destination: "10.88.0.0/24", Gateway: "192.168.50.3", Device: "jd-lan", Table: 100, Metric: 50}, rtClient, "ion")
+	if g := rtGuarded(t, err); !strings.Contains(g.Reason, "via 192.168.50.9") {
+		t.Fatalf("reason = %q", g.Reason)
+	}
+	if rtMutations(rec) != nil {
+		t.Fatalf("mutations = %v", rtMutations(rec))
 	}
 }
 

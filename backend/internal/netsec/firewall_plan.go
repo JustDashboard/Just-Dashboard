@@ -93,8 +93,14 @@ func (s *Service) preparePlan(ctx context.Context, b fwBackend, plan FirewallPla
 				return nil, nil, nil, fmt.Errorf("change %d names a rule another change already does", i+1)
 			}
 			named[op.RuleID] = true
-			if op.Op == "replace" && (old.Interface != "" || strings.EqualFold(old.Direction, "FWD")) {
-				return nil, nil, nil, fmt.Errorf("change %d: rule %d cannot be expressed by this form; edit it with %s directly", i+1, old.Number, b.Kind())
+			// The form cannot write a rule on one device or a forwarding rule,
+			// so neither can be the replacement, nor be put back as it was if
+			// a later step of the plan fails.
+			if old.Interface != "" || strings.EqualFold(old.Direction, "FWD") {
+				if op.Op == "replace" {
+					return nil, nil, nil, fmt.Errorf("change %d: rule %d cannot be expressed by this form; edit it with %s directly", i+1, old.Number, b.Kind())
+				}
+				return nil, nil, nil, fmt.Errorf("change %d: rule %d could not be written back as it was if the plan failed; remove it on its own", i+1, old.Number)
 			}
 			p.old = old
 		}
@@ -193,6 +199,9 @@ func (s *Service) ApplyPlan(ctx context.Context, plan FirewallPlan, callerIP str
 	}
 	for _, p := range steps {
 		review.Steps = append(review.Steps, describeStep(p))
+	}
+	if checking(ctx) {
+		return review, ErrChecked
 	}
 	var undo []func() error
 	for i, p := range steps {

@@ -390,6 +390,32 @@ func (s *Service) editPlan(ctx context.Context, sp *Spec, id int, req RouteReque
 	return plan, nil
 }
 
+// liveRouteIsManaged refuses an in-place replace when the route the kernel
+// holds at that identity is no longer the one made here: `ip route replace`
+// would overwrite whatever drift put there. A route that is gone is written
+// again, as the spec has it.
+func liveRouteIsManaged(ctx context.Context, old RouteSpec) error {
+	args := append([]string{"-j"}, familyArgs(old.Family)...)
+	out, err := run(ctx, "ip", append(args, "route", "show", "table", strconv.Itoa(old.Table), "exact", old.Destination)...)
+	if err != nil {
+		return err
+	}
+	routes, err := parseIPRoutes(out)
+	if err != nil {
+		return err
+	}
+	for _, r := range routes {
+		e := routeEntry(r, old.Family, old.Table, emptySpec())
+		if routeIdentity(RouteSpec{Family: e.Family, Table: old.Table, Destination: e.Destination, Metric: e.Metric}) != routeIdentity(old) {
+			continue
+		}
+		if _, mine := managedRoute(&Spec{Routes: []RouteSpec{old}}, e, old.Table); !mine {
+			return guarded("The kernel's route to %s in table %d is no longer the one made here (it reads %s), so it was not replaced. Check drift on the Routing page first.", old.Destination, old.Table, routeSummary(e))
+		}
+	}
+	return nil
+}
+
 // onlyThisDefault refuses a second default route in main unless the only one
 // there now is the managed route being edited.
 func onlyThisDefault(ctx context.Context, family string, old RouteSpec) error {
@@ -481,7 +507,13 @@ func (s *Service) EditRoute(ctx context.Context, id int, req RouteRequest, clien
 	if plan.Replace {
 		replace, _ := routeCommand("replace", plan.After)
 		back, _ := routeCommand("replace", plan.Before)
-		apply = func(ctx context.Context) error { _, err := run(ctx, "ip", replace...); return err }
+		apply = func(ctx context.Context) error {
+			if err := liveRouteIsManaged(ctx, plan.Before); err != nil {
+				return err
+			}
+			_, err := run(ctx, "ip", replace...)
+			return err
+		}
 		undo = func(ctx context.Context) { s.best(ctx, "ip", back...) }
 	} else {
 		apply = func(ctx context.Context) error {

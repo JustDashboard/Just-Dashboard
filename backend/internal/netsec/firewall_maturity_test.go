@@ -677,3 +677,115 @@ ufw allow from 2001:db8::/32 to any port 53
 		t.Fatalf("an IPv6 source rule = %+v", v6)
 	}
 }
+
+func TestAChangeThatLeavesAWayInUnjudgeableIsRefused(t *testing.T) {
+	h := newFakeHost(t, "ufw")
+	h.ufwActive, h.listing = true, "[ 1] 22,8443/tcp               ALLOW IN    Anywhere\n[ 2] 22,8443/tcp (v6)          ALLOW IN    Anywhere (v6)\n"
+	s := New()
+	ctx := WithAccess(context.Background(), operatorAccess())
+	// A deny to one of the host's addresses may be the one SSH arrives on.
+	_, err := s.AddRule(ctx, RuleRequest{Action: "deny", Port: "22", Protocol: "tcp", From: "198.51.100.0/24", To: "203.0.113.5", Position: 1}, "")
+	var refusal *AccessRefusal
+	if !errors.As(err, &refusal) || refusal.Check.Verdict != "unknown" || refusal.Check.Port != 22 || !strings.Contains(err.Error(), "could not be shown") {
+		t.Fatalf("a deny that may or may not select SSH: %v", err)
+	}
+	if len(h.mutations()) != 0 {
+		t.Fatalf("a refused add ran %v", h.mutations())
+	}
+	// An allow that may or may not apply, in front of one that admits
+	// anyway, leaves every way in decided.
+	if _, err := s.AddRule(ctx, RuleRequest{Action: "allow", Port: "22", Protocol: "tcp", To: "203.0.113.5", Position: 1}, "198.51.100.9"); err != nil {
+		t.Fatalf("an allow either way: %v", err)
+	}
+	h.listing = "[ 1] 203.0.113.5 22/tcp         ALLOW IN    Anywhere\n" + strings.ReplaceAll(strings.ReplaceAll(h.listing, "[ 1]", "[ 2]"), "[ 2] 22,8443/tcp (v6)", "[ 3] 22,8443/tcp (v6)")
+	st, _ := s.Status(ctx)
+	for _, c := range s.EvaluateAccess(ctx, st) {
+		if c.Port == 22 && c.Family == "ipv4" && (c.Verdict != "admitted" || !strings.Contains(c.Reason, "same either way")) {
+			t.Fatalf("SSH behind an undecidable allow = %+v", c)
+		}
+	}
+}
+
+func TestAnUnreadableFirewallRefusesAGuardedChange(t *testing.T) {
+	h := newFakeHost(t, "ufw")
+	h.ufwActive, h.listing = true, ufwAdmitsSSHAndWeb
+	h.fail["ufw status numbered"] = errors.New("ufw: lock held")
+	s := New()
+	_, err := s.SetDefaultPolicy(WithAccess(context.Background(), operatorAccess()), "incoming", "deny")
+	if !errors.Is(err, ErrUnreadable) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(h.mutations()) != 0 {
+		t.Fatalf("an unguarded change ran %v", h.mutations())
+	}
+}
+
+func TestAScopedChangeStopsBeforeTheHostAndKeepsItsFirewall(t *testing.T) {
+	h := newFakeHost(t, "ufw", "firewall-cmd")
+	h.ufwActive, h.listing = true, ufwAdmitsSSHAndWeb+"[ 5] 9000/tcp                   ALLOW IN    Anywhere\n"
+	s := New()
+	ctx := WithAccess(context.Background(), operatorAccess())
+	checked := Scoped(ctx, BackendUFW, true)
+	for name, call := range map[string]func() error{
+		"add": func() error {
+			_, err := s.AddRule(checked, RuleRequest{Action: "allow", Port: "8443", Protocol: "tcp"}, "")
+			return err
+		},
+		"delete": func() error { _, err := s.DeleteRule(checked, 5); return err },
+		"policy": func() error { _, err := s.SetDefaultPolicy(checked, "outgoing", "deny"); return err },
+		"replace": func() error {
+			_, err := s.ReplaceRule(checked, 2, RuleRequest{Action: "allow", Port: "80,443", Protocol: "tcp", Comment: "web"}, "")
+			return err
+		},
+		"plan": func() error {
+			_, err := s.ApplyPlan(checked, FirewallPlan{Operations: []PlanOperation{{Op: "add", Rule: &RuleRequest{Action: "allow", Port: "9000", Protocol: "tcp"}}}}, "")
+			return err
+		},
+	} {
+		if err := call(); !errors.Is(err, ErrChecked) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// A refusal is answered by the first pass, as it would be by the second.
+	if _, err := s.DeleteRule(checked, 1); !errors.Is(err, ErrLockout) {
+		t.Fatalf("removing SSH's rule in the first pass: %v", err)
+	}
+	if len(h.mutations()) != 0 {
+		t.Fatalf("the first pass touched the host: %v", h.mutations())
+	}
+	// firewalld taking over between the journal and the change is refused
+	// before either is written to.
+	h.firewalld, h.ufwActive = "running", false
+	if _, err := s.AddRule(Scoped(ctx, BackendUFW, false), RuleRequest{Action: "allow", Port: "8443", Protocol: "tcp"}, ""); !errors.Is(err, ErrBackendChanged) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(h.mutations()) != 0 {
+		t.Fatalf("a change for another firewall ran %v", h.mutations())
+	}
+}
+
+func TestOnlyAPlainUnitStateIsRestored(t *testing.T) {
+	for out, want := range map[string]string{
+		"enabled\n": "enabled", "disabled\n": "disabled", "enabled-runtime\n": "", "alias\n": "", "masked\n": "",
+		"": "", "Failed to get unit file state for firewalld.service: No such file or directory\n": "",
+	} {
+		if got := unitState(out, nil); got != want {
+			t.Errorf("%q = %q, want %q", out, got, want)
+		}
+	}
+}
+
+func TestAPlanCannotRemoveARuleItCouldNotPutBack(t *testing.T) {
+	h := newFakeHost(t, "ufw")
+	h.ufwActive = true
+	h.listing = "[ 1] 22,8443/tcp               ALLOW IN    Anywhere\n[ 2] 9000/tcp on eth1          ALLOW IN    Anywhere\n"
+	s := New()
+	st, _ := s.Status(context.Background())
+	_, err := s.ApplyPlan(context.Background(), FirewallPlan{Operations: []PlanOperation{{Op: "delete", RuleID: st.Rules[1].ID}}}, "")
+	if err == nil || !strings.Contains(err.Error(), "remove it on its own") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(h.mutations()) != 0 {
+		t.Fatalf("mutations = %v", h.mutations())
+	}
+}

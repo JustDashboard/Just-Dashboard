@@ -127,13 +127,17 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   which names no table), and may `goto` a later priority. A goto must land on a rule made here in the
   same family, may not jump over a rule made elsewhere, and a rule a goto lands on cannot be removed
   first. A UID-selecting discard is checked against the owners of the sockets actually answering the
-  client (`ss -tne`); without that evidence it is guarded as possibly selecting the replies. Inverted,
-  protocol/port and `suppress_prefixlength` selectors are read and modelled but not written.
+  client (`ss -tne`); without that evidence it is guarded as possibly selecting the replies. A goto is
+  not a discard and is verified after it applies. TOS 0 and the all-UID range select nothing in
+  particular and are refused, so they cannot pass the no-selector guard. Inverted, protocol/port and
+  `suppress_prefixlength` selectors are read and modelled but not written.
 - Routes may be equal-cost multipath (2–16 legs of gateway, device and weight 1–256); ip reads every
   attribute before the first `nexthop`, so table, metric and source are written first. A managed route
   is edited through a reviewed plan (`POST /routing/routes/{id}/plan`, then `PUT`): `ip route replace`
   while family, table, destination and metric — the kernel's identity — are unchanged, otherwise the
-  new route is added before the old one is removed; the plan is recomputed under the lock at apply.
+  new route is added before the old one is removed; the plan is recomputed under the lock at apply. An
+  in-place replace first reads the kernel's route at that identity and is guarded when it is no longer
+  the managed one, rather than overwriting what drift put there.
 - `route_model.go` evaluates the rules as `fib_rules_lookup` does (selectors, goto, throw and
   suppressed answers, longest match then lowest metric), forking on a selector it cannot decide for the
   packet and naming an answer only when both branches agree. It backs `POST /routing/routes/preview`
@@ -148,7 +152,10 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   changed routes and rules (local table excluded) in `network_route_events`, each bounded by the two
   readings it fell between; a restarted process diffs against the stored snapshot and marks those
   changes as found across a restart. Thirty days or 2000 events are kept; `GET /routing/history`
-  filters by family, object and a covering target.
+  filters by family, object and a covering target. Routes a routing daemon installs (BGP, OSPF, IS-IS,
+  RIP, Babel, BIRD, zebra by name or FRR's protocol number) follow its sessions and are left out; a
+  reading with more than 100 changes is recorded as one event; and past 20000 routes the observer stops
+  with the reason in `lastError` rather than rereading a routing table every thirty seconds.
 - Device/namespace removal checks shaping, NAT/forward ingress/egress, routes/rules, foreign children
   and veth-peer dependencies. A partial namespace failure restores already removed pairs.
 - Forwarding is per family. Turning it off is refused while Docker networks, an enabled forward or NAT
@@ -159,7 +166,8 @@ Files: `links*.go`, `namespaces.go`, `routes.go`, `forwarding.go`, `bgp.go`.
   `TailscaleNeedsForwarding` also answers "needed" when Tailscale cannot be read. Each family carries
   `dockerBasis`, saying how the Docker count was reached, and measured `health`: the kernel's forwarded
   datagram counter (`Ip ForwDatagrams`, `Ip6OutForwDatagrams`), its rate between reads at least a
-  second apart, and devices whose own `forwarding` switch is off while the family's is on (`partial`).
+  second apart, and IPv4 devices whose own `forwarding` switch is off while the family's is on
+  (`partial`). An IPv6 device's switch only chooses host or router behaviour, so IPv6 is never partial.
   A rate shows forwarding happens; it does not show a particular flow passed.
   Turning IPv6 forwarding on is refused while the IPv6 default route was
   learned from a router advertisement on a device whose `accept_ra` is not 2: with forwarding on, the

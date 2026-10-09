@@ -211,7 +211,7 @@ func TestProtectFirewallChangeRestoresTheToolsFilesWhenVerificationFails(t *test
 	rec := record(t).on("ufw --force disable", "Firewall stopped").on("systemctl daemon-reload", "")
 	s := testService(t)
 	userRules := filepath.Join(root, "/etc/ufw/user.rules")
-	err := s.ProtectFirewallChange(context.Background(), FirewallState{Backend: "ufw", Enabled: false},
+	err := s.ProtectFirewallChange(context.Background(), FirewallState{Backend: "ufw", Enabled: false}, noCheck,
 		func(context.Context) error { return os.WriteFile(userRules, []byte("candidate\n"), 0o640) },
 		func(context.Context) error { return errors.New("SSH from your address would be refused") })
 	if err == nil || !strings.Contains(err.Error(), "SSH from your address") {
@@ -234,7 +234,7 @@ func TestProtectFirewallChangeSavesAndLeavesTheFilesItChanged(t *testing.T) {
 	record(t)
 	s := testService(t)
 	userRules := filepath.Join(root, "/etc/ufw/user.rules")
-	if err := s.ProtectFirewallChange(context.Background(), FirewallState{Backend: "ufw", Enabled: true},
+	if err := s.ProtectFirewallChange(context.Background(), FirewallState{Backend: "ufw", Enabled: true}, noCheck,
 		func(context.Context) error { return os.WriteFile(userRules, []byte("candidate\n"), 0o640) }, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -251,6 +251,30 @@ func TestProtectFirewallChangeSavesAndLeavesTheFilesItChanged(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(userRules); string(b) != "candidate\n" {
 		t.Fatal("a saved change was undone")
+	}
+}
+
+func noCheck(context.Context) error { return nil }
+
+func TestARefusedFirewallChangeOpensNoJournalAndRunsNoRecovery(t *testing.T) {
+	root := ufwFixture(t)
+	rec := record(t)
+	s := testService(t)
+	applied := false
+	err := s.ProtectFirewallChange(context.Background(), FirewallState{Backend: "ufw", Enabled: true},
+		func(context.Context) error { return errors.New("port must be a number") },
+		func(context.Context) error { applied = true; return nil }, nil)
+	if err == nil || !strings.Contains(err.Error(), "port must be a number") || applied {
+		t.Fatalf("err = %v, applied = %v", err, applied)
+	}
+	if len(rec.commands()) != 0 {
+		t.Fatalf("a refused change ran %v", rec.commands())
+	}
+	if _, err := readChange(s.paths.Dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a journal was opened for a refused change: %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "/etc/ufw/user.rules")); string(b) != "original user.rules\n" {
+		t.Fatalf("user.rules = %q", b)
 	}
 }
 
@@ -312,13 +336,23 @@ func TestIndependentRecoveryRestoresAPendingFirewallChange(t *testing.T) {
 }
 
 func TestFirewalldRecoveryRestoresUnitServiceAndZone(t *testing.T) {
-	got := firewallRecoveryCommands(FirewallState{Backend: "firewalld", Enabled: true, UnitEnabled: true, Zone: "public"})
-	var lines []string
-	for _, c := range got {
-		lines = append(lines, c.Tool+" "+strings.Join(c.Args, " "))
+	lines := func(state FirewallState) string {
+		var out []string
+		for _, c := range firewallRecoveryCommands(state) {
+			out = append(out, c.Tool+" "+strings.Join(c.Args, " "))
+		}
+		return strings.Join(out, "|")
 	}
-	if strings.Join(lines, "|") != "systemctl enable firewalld|systemctl start firewalld|firewall-cmd --reload" {
-		t.Fatalf("commands = %v", lines)
+	if got := lines(FirewallState{Backend: "firewalld", Enabled: true, Unit: "enabled", Zone: "public"}); got != "systemctl enable firewalld|systemctl start firewalld|firewall-cmd --reload" {
+		t.Fatalf("commands = %v", got)
+	}
+	if got := lines(FirewallState{Backend: "firewalld", Enabled: false, Unit: "disabled", Zone: "public"}); got != "systemctl disable firewalld|systemctl stop firewalld" {
+		t.Fatalf("commands = %v", got)
+	}
+	// A unit state systemd did not answer plainly is left as it is: an
+	// unreadable answer must not become a firewall that no longer boots.
+	if got := lines(FirewallState{Backend: "firewalld", Enabled: true, Zone: "public"}); got != "systemctl start firewalld|firewall-cmd --reload" {
+		t.Fatalf("commands = %v", got)
 	}
 	paths, err := firewallFiles(FirewallState{Backend: "firewalld", Zone: "public"})
 	if err != nil || len(paths) != 2 || !strings.HasSuffix(paths[1], "/etc/firewalld/zones/public.xml") {
@@ -329,5 +363,32 @@ func TestFirewalldRecoveryRestoresUnitServiceAndZone(t *testing.T) {
 	}
 	if _, err := firewallFiles(FirewallState{Backend: "iptables"}); err == nil {
 		t.Fatal("a tool without recovery")
+	}
+}
+
+func TestRevokingATrustedAddressReloadsTheOwnedTable(t *testing.T) {
+	enabled := strings.Replace(strings.Replace(ownedListing, "%s", "drop", 1), "%s", "", 1)
+	rec := rtHost(t).on("nft -j list table inet jd_firewall", enabled).on("nft", "")
+	s := testService(t)
+	sp := emptySpec()
+	sp.Firewall = &FirewallSpec{Enabled: true, Incoming: "drop"}
+	sp.Trusted = []string{"203.0.113.0/24"}
+	rtSaveSpec(t, s, sp)
+	before, err := renderFirewall(sp, s.trustedFor(sp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firewallPath := filepath.Join(s.paths.Dir, firewallFile)
+	if err := os.WriteFile(firewallPath, []byte(before), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveTrusted(context.Background(), "203.0.113.0/24", "198.51.100.9"); err != nil {
+		t.Fatal(err)
+	}
+	if !rec.ran("nft -f " + filepath.Join(s.paths.Dir, firewallApplyFile)) {
+		t.Fatalf("the revoked address stays admitted until the table is loaded: %v", rec.commands())
+	}
+	if b, _ := os.ReadFile(firewallPath); strings.Contains(string(b), "203.0.113.0/24") || !strings.Contains(before, "203.0.113.0/24") {
+		t.Fatalf("firewall.nft still admits the revoked range:\n%s", b)
 	}
 }

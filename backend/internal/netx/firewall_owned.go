@@ -389,7 +389,8 @@ func (s *Service) ChangeOwnedFirewall(ctx context.Context, change OwnedFirewallC
 		previous = ""
 	}
 	return s.commit(ctx, next, step{
-		apply: func(ctx context.Context) error { return s.loadFirewall(ctx, candidate) },
+		loadsFirewall: true,
+		apply:         func(ctx context.Context) error { return s.loadFirewall(ctx, candidate) },
 		undo: func(ctx context.Context) {
 			if previous == "" || !ownedFirewallOn(sp) {
 				if _, err := run(ctx, "nft", "delete", "table", "inet", firewallTable); err != nil && !isGone(err) {
@@ -401,6 +402,47 @@ func (s *Service) ChangeOwnedFirewall(ctx context.Context, change OwnedFirewallC
 		},
 		verify: func(ctx context.Context) error { return verifyOwnedFirewall(ctx, next) },
 	})
+}
+
+// withFirewallLoad makes a change that alters the owned table's render
+// without being an owned-table change, such as a trusted address the
+// protections admit, load the table beside its own runtime change. Until it
+// does, a revoked address stays admitted ahead of every rule. Both are taken
+// back together: the table from the render loaded before, which the boot
+// unit was loading too.
+func (s *Service) withFirewallLoad(st step, sp *Spec, candidate string, loaded savedNetworkFile) step {
+	apply, undo, verify := st.apply, st.undo, st.verify
+	st.apply = func(ctx context.Context) error {
+		if apply != nil {
+			if err := apply(ctx); err != nil {
+				return err
+			}
+		}
+		if err := s.loadFirewall(ctx, candidate); err != nil {
+			rollback(ctx, undo)
+			return err
+		}
+		return nil
+	}
+	st.undo = func(ctx context.Context) {
+		if loaded.exists {
+			recordRecoveryError(ctx, s.loadFirewall(ctx, string(loaded.data)))
+		} else if _, err := run(ctx, "nft", "delete", "table", "inet", firewallTable); err != nil && !isGone(err) {
+			recordRecoveryError(ctx, err)
+		}
+		if undo != nil {
+			undo(ctx)
+		}
+	}
+	st.verify = func(ctx context.Context) error {
+		if verify != nil {
+			if err := verify(ctx); err != nil {
+				return err
+			}
+		}
+		return verifyOwnedFirewall(ctx, sp)
+	}
+	return st
 }
 
 func (s *Service) loadFirewall(ctx context.Context, ruleset string) error {

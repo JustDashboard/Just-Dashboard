@@ -1539,6 +1539,9 @@ func canonicalUIDRange(s string) (string, error) {
 	if start > end || end > 4294967294 {
 		return "", fmt.Errorf("a UID range runs upward from 0 to at most 4294967294")
 	}
+	if start == 0 && end == 4294967294 {
+		return "", fmt.Errorf("a UID range of every UID selects nothing in particular; leave it empty")
+	}
 	return fmt.Sprintf("%d-%d", start, end), nil
 }
 
@@ -1552,6 +1555,9 @@ func canonicalTOS(s, family string) (string, error) {
 	}
 	if v&0x03 != 0 {
 		return "", fmt.Errorf("a TOS selector's two ECN bits must be 0")
+	}
+	if v == 0 {
+		return "", fmt.Errorf("TOS 0 is the kernel's \"any TOS\" and selects nothing in particular; leave it empty")
 	}
 	if family != "inet6" && v&^0x1c != 0 {
 		return "", fmt.Errorf("an IPv4 rule selects TOS 0x04 to 0x1c in steps of 4; a DSCP class such as EF is an IPv6 selector")
@@ -1612,7 +1618,9 @@ func sameDSField(a, b string) bool {
 // route get` fail and the rollback would arrive only after the connection had
 // already dropped.
 func shadowsReplies(r RuleSpec, path Path) bool {
-	if r.Action == "lookup" || path.Address == "" || path.Local {
+	// A goto discards nothing: it continues at a later rule made here, and
+	// what that path does to the replies is verified after it applies.
+	if r.Action == "lookup" || r.Action == "goto" || path.Address == "" || path.Local {
 		return false
 	}
 	client, err := netip.ParseAddr(path.Address)

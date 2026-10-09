@@ -229,7 +229,7 @@ func TestLiveUFWChangesAreRestoredByTheJournal(t *testing.T) {
 	handBack(t, ns)
 
 	// A failed verification after enabling puts ufw back off at once.
-	err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw"}, ufw("--force", "enable"),
+	err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw"}, noCheck, ufw("--force", "enable"),
 		func(context.Context) error { return errors.New("SSH from your address would be refused") })
 	if err == nil || !strings.Contains(err.Error(), "would be refused") {
 		t.Fatalf("err = %v", err)
@@ -244,11 +244,11 @@ func TestLiveUFWChangesAreRestoredByTheJournal(t *testing.T) {
 
 	// An admitted port, then enabling with a deny default: the port stays
 	// reachable and others are dropped.
-	if err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw"}, ufw("allow", "8080/tcp"), nil); err != nil {
+	if err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw"}, noCheck, ufw("allow", "8080/tcp"), nil); err != nil {
 		t.Fatal(err)
 	}
 	handBack(t, ns)
-	if err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw"}, ufw("--force", "enable"), nil); err != nil {
+	if err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw"}, noCheck, ufw("--force", "enable"), nil); err != nil {
 		t.Fatal(err)
 	}
 	handBack(t, ns)
@@ -262,7 +262,7 @@ func TestLiveUFWChangesAreRestoredByTheJournal(t *testing.T) {
 
 	// Removing the rule as a temporary apply nobody confirms: the host
 	// helper restores ufw's files and reloads them.
-	if err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw", Enabled: true}, ufw("--force", "delete", "allow", "8080/tcp"), nil); err != nil {
+	if err := s.ProtectFirewallChange(ctx, FirewallState{Backend: "ufw", Enabled: true}, noCheck, ufw("--force", "delete", "allow", "8080/tcp"), nil); err != nil {
 		t.Fatal(err)
 	}
 	handBack(t, ns)

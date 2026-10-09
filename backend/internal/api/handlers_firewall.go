@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -67,20 +68,34 @@ func (s *Server) firewallContext(r *http.Request) context.Context {
 // protectFirewall runs a ufw or firewalld change inside the network journal,
 // with the post-change access verification as its verify step, so a failure
 // restores the tool's files at once and an unconfirmed temporary apply is
-// restored by the host. The owned nftables table journals itself.
+// restored by the host. The change runs first only as far as its validation
+// and access guard, so a refusal opens no journal and sets off no recovery,
+// and both passes are bound to the firewall the journal was prepared for.
+// The owned nftables table journals itself.
 func (s *Server) protectFirewall(ctx context.Context, apply func(context.Context) (string, error)) (string, error) {
 	if s.modules.network == nil {
 		return apply(ctx)
 	}
 	state, before, err := s.modules.netsec.RecoveryState(ctx)
-	if err != nil || (state.Backend != netsec.BackendUFW && state.Backend != netsec.BackendFirewalld) {
+	if state.Backend != netsec.BackendUFW && state.Backend != netsec.BackendFirewalld {
 		return apply(ctx)
+	}
+	if err != nil {
+		// Neither the access guard nor the recovery can be prepared from a
+		// firewall that cannot be read, and a pending apply would otherwise
+		// go ahead with no watchdog behind it.
+		return "", fmt.Errorf("%w: %v", netsec.ErrUnreadable, err)
 	}
 	var out string
 	err = s.modules.network.ProtectFirewallChange(ctx, netx.FirewallState{
-		Backend: string(state.Backend), Enabled: state.Enabled, UnitEnabled: state.UnitEnabled, Zone: state.Zone,
+		Backend: string(state.Backend), Enabled: state.Enabled, Unit: state.Unit, Zone: state.Zone,
 	}, func(ctx context.Context) error {
-		o, err := apply(ctx)
+		if _, err := apply(netsec.Scoped(ctx, state.Backend, true)); !errors.Is(err, netsec.ErrChecked) {
+			return err
+		}
+		return nil
+	}, func(ctx context.Context) error {
+		o, err := apply(netsec.Scoped(ctx, state.Backend, false))
 		out = o
 		return err
 	}, func(ctx context.Context) error { return s.modules.netsec.VerifyAccessAfter(ctx, before) })
@@ -102,6 +117,10 @@ func mapFirewallError(err error) error {
 		return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
 	case errors.Is(err, netsec.ErrRuleChanged):
 		return httpx.Err(http.StatusConflict, "rule_changed", "The rule has changed since the list was read; reload the rules and try again.")
+	case errors.Is(err, netsec.ErrBackendChanged):
+		return httpx.Err(http.StatusConflict, "firewall_changed", err.Error())
+	case errors.Is(err, netsec.ErrUnreadable):
+		return httpx.Err(http.StatusServiceUnavailable, "firewall_unreadable", err.Error())
 	case errors.Is(err, netsec.ErrReadOnly):
 		return httpx.Err(http.StatusNotImplemented, "firewall_read_only", err.Error())
 	case errors.Is(err, netsec.ErrNoFirewall):
@@ -278,27 +297,29 @@ func (s *Server) handleFirewallAddRule(w http.ResponseWriter, r *http.Request) e
 	return nil
 }
 
-// ruleTarget resolves the rule an edit or removal names: by its identity
-// when the client sends one, which survives renumbering; by number only for
-// callers that predate identities.
-func (s *Server) ruleTarget(r *http.Request) (int, netsec.Rule, error) {
+// ruleTarget reads the rule an edit or removal names: its listed number,
+// and its identity when the client sends one, which survives renumbering.
+func ruleTarget(r *http.Request) (int, string, error) {
 	number, err := strconv.Atoi(chi.URLParam(r, "number"))
 	if err != nil || number <= 0 {
-		return 0, netsec.Rule{}, httpx.BadRequest("invalid rule number")
+		return 0, "", httpx.BadRequest("invalid rule number")
 	}
-	id := r.URL.Query().Get("id")
+	return number, r.URL.Query().Get("id"), nil
+}
+
+// resolveRule finds the named rule as the firewall lists it now: by its
+// identity, or by number for callers that predate identities. It runs inside
+// the protected change, under the journal's lock, so a list renumbered since
+// the client read it answers rule_changed rather than changing a neighbour.
+func (s *Server) resolveRule(ctx context.Context, number int, id string) (netsec.Rule, error) {
 	if id == "" {
-		return number, netsec.Rule{Number: number}, nil
+		return netsec.Rule{Number: number}, nil
 	}
-	rule, err := s.modules.netsec.RuleByID(r.Context(), id)
-	if err != nil {
-		return 0, netsec.Rule{}, mapFirewallError(err)
-	}
-	return rule.Number, rule, nil
+	return s.modules.netsec.RuleByID(ctx, id)
 }
 
 func (s *Server) handleFirewallReplaceRule(w http.ResponseWriter, r *http.Request) error {
-	number, old, err := s.ruleTarget(r)
+	number, id, err := ruleTarget(r)
 	if err != nil {
 		return err
 	}
@@ -307,9 +328,18 @@ func (s *Server) handleFirewallReplaceRule(w http.ResponseWriter, r *http.Reques
 		return err
 	}
 	ctx := s.firewallContext(r)
+	old := netsec.Rule{Number: number, ID: id}
 	out, err := s.protectFirewall(ctx, func(ctx context.Context) (string, error) {
+		rule, err := s.resolveRule(ctx, number, id)
+		if err != nil {
+			return "", err
+		}
+		old, number = rule, rule.Number
 		return s.modules.netsec.ReplaceRule(ctx, number, req, s.networkClient(r))
 	})
+	if errors.Is(err, netsec.ErrRuleChanged) {
+		return mapFirewallError(err)
+	}
 	event := netsec.RuleEvent{Operation: "replace", PreviousRuleID: old.ID, Rule: eventJSON(req), Previous: eventJSON(old), Outcome: outcomeOf(err)}
 	if err != nil {
 		event.RuleID, event.Detail = old.ID, err.Error()
@@ -329,16 +359,25 @@ func (s *Server) handleFirewallReplaceRule(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleFirewallDeleteRule(w http.ResponseWriter, r *http.Request) error {
-	number, old, err := s.ruleTarget(r)
+	number, id, err := ruleTarget(r)
 	if err != nil {
 		return err
 	}
 	// No typed phrase: a rule is one line of configuration, visible on the row
 	// being deleted and re-addable from the form beside it. Turning the
 	// firewall off entirely is the route below, and that also uses ordinary confirmation.
+	old := netsec.Rule{Number: number, ID: id}
 	out, err := s.protectFirewall(s.firewallContext(r), func(ctx context.Context) (string, error) {
+		rule, err := s.resolveRule(ctx, number, id)
+		if err != nil {
+			return "", err
+		}
+		old, number = rule, rule.Number
 		return s.modules.netsec.DeleteRule(ctx, number)
 	})
+	if errors.Is(err, netsec.ErrRuleChanged) {
+		return mapFirewallError(err)
+	}
 	event := netsec.RuleEvent{Operation: "delete", RuleID: old.ID, Previous: eventJSON(old), Outcome: outcomeOf(err)}
 	if err != nil {
 		event.Detail = err.Error()

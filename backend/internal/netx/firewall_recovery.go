@@ -21,13 +21,14 @@ import (
 // the named files and a handful of fixed commands, never argv from a request.
 
 // FirewallState is the host firewall before a change: which tool, whether
-// it enforced, whether its unit starts at boot, and firewalld's default zone,
-// whose permanent file a rule change edits.
+// it enforced, whether its unit starts at boot (enabled, disabled, or empty
+// when that could not be read, which the recovery then leaves alone), and
+// firewalld's default zone, whose permanent file a rule change edits.
 type FirewallState struct {
-	Backend     string
-	Enabled     bool
-	UnitEnabled bool
-	Zone        string
+	Backend string
+	Enabled bool
+	Unit    string
+	Zone    string
 }
 
 // ufwRecoveryFiles are every file ufw's rules, defaults and switch live in;
@@ -73,11 +74,13 @@ func firewallRecoveryCommands(state FirewallState) []recoveryCommand {
 		}
 		return []recoveryCommand{{Tool: "ufw", Args: []string{"--force", "disable"}}}
 	case "firewalld":
-		unit := "disable"
-		if state.UnitEnabled {
-			unit = "enable"
+		var out []recoveryCommand
+		switch state.Unit {
+		case "enabled":
+			out = append(out, recoveryCommand{Tool: "systemctl", Args: []string{"enable", "firewalld"}})
+		case "disabled":
+			out = append(out, recoveryCommand{Tool: "systemctl", Args: []string{"disable", "firewalld"}})
 		}
-		out := []recoveryCommand{{Tool: "systemctl", Args: []string{unit, "firewalld"}}}
 		if state.Enabled {
 			return append(out, recoveryCommand{Tool: "systemctl", Args: []string{"start", "firewalld"}}, recoveryCommand{Tool: "firewall-cmd", Args: []string{"--reload"}})
 		}
@@ -130,9 +133,12 @@ type firewallJournalKey struct{}
 
 // ProtectFirewallChange runs a host firewall change inside the network
 // journal. The spec is untouched; the firewall's own files and state are the
-// snapshot. verify runs after apply, before the change is saved or left
-// awaiting confirmation, and a failure of either restores the snapshot.
-func (s *Service) ProtectFirewallChange(ctx context.Context, state FirewallState, apply, verify func(context.Context) error) error {
+// snapshot. check runs first under the same lock and refuses without opening
+// a journal, so an invalid or guarded request never sets off a recovery that
+// would rewrite and reload a firewall nothing changed. verify runs after
+// apply, before the change is saved or left awaiting confirmation, and a
+// failure of either restores the snapshot.
+func (s *Service) ProtectFirewallChange(ctx context.Context, state FirewallState, check, apply, verify func(context.Context) error) error {
 	paths, err := firewallFiles(state)
 	if err != nil {
 		return err
@@ -144,6 +150,9 @@ func (s *Service) ProtectFirewallChange(ctx context.Context, state FirewallState
 		return err
 	}
 	defer unlockChange(lock)
+	if err := check(ctx); err != nil {
+		return err
+	}
 	sp, err := s.loadSpec()
 	if err != nil {
 		return err

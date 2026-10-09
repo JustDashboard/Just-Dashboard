@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -81,6 +82,8 @@ func TestFirewallErrorsKeepTheirMeaning(t *testing.T) {
 		{&netx.ConfirmationError{Reason: "Pending apply requires an independent host recovery watchdog"}, 409, "network_confirmation"},
 		{&netx.ReadOnlyError{Reason: "An earlier network change needs confirmation or recovery"}, 409, "network_read_only"},
 		{netsec.ErrReadOnly, 501, "firewall_read_only"},
+		{fmt.Errorf("%w: ufw: lock held", netsec.ErrUnreadable), 503, "firewall_unreadable"},
+		{fmt.Errorf("%w: it was ufw and is now firewalld", netsec.ErrBackendChanged), 409, "firewall_changed"},
 		{netsec.ErrNoFirewall, 503, "no_firewall"},
 		{errors.New("port must be a number"), 400, "bad_request"},
 	}

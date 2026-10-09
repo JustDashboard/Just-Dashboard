@@ -145,6 +145,8 @@ type step struct {
 	// Fetched cache replacements are staged until the journal is durable.
 	recoveryFiles []recoverySnapshot
 	gatewayRules  *string
+	// loadsFirewall is a step that loads the owned firewall table itself.
+	loadsFirewall bool
 }
 
 // commit makes a change the proxy editor's way: render the new spec and check
@@ -176,6 +178,13 @@ func (s *Service) commit(ctx context.Context, sp *Spec, st step) error {
 	if ownedFirewallOn(sp) && changed(firewallPath, files[firewallPath]) {
 		if err := checkRuleset(ctx, s.paths.Dir, files[firewallPath]); err != nil {
 			return err
+		}
+		if !st.loadsFirewall {
+			loaded, err := saveNetworkFile(firewallPath)
+			if err != nil {
+				return fmt.Errorf("reading %s before changing the network: %w", firewallPath, err)
+			}
+			st = s.withFirewallLoad(st, sp, string(files[firewallPath]), loaded)
 		}
 	}
 	b, err := json.MarshalIndent(sp, "", "  ")

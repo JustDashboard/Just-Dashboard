@@ -3,11 +3,12 @@
 `Service.commit` protects managed links, addresses, routes, rules, namespaces, forwarding, gateway,
 protection, shaping and owned firewall-table changes with `/etc/just-dashboard/network/change.json`.
 Native-owned link state, MTU and bridge membership changes use the same journal but remain
-runtime-only. ufw and firewalld changes are enrolled through `ProtectFirewallChange`: the journal
-names the tool (`firewall`), snapshots only that tool's own files and records a closed set of
-commands that put its switch back (`ufw --force enable|disable`, `ufw reload`, `systemctl
-start|stop|enable|disable firewalld`, `firewall-cmd --reload`); a journal naming any other file or
-command is refused before recovery starts. DNS and WireGuard configuration and Tailscale preferences
+runtime-only. ufw and firewalld changes are enrolled through `ProtectFirewallChange`: a check pass
+runs first under the lock, so a refused request opens no journal; then the journal names the tool
+(`firewall`), snapshots only that tool's own files and records a closed set of commands that put its
+switch back (`ufw --force enable|disable`, `ufw reload`, `systemctl start|stop|enable|disable
+firewalld`, `firewall-cmd --reload`; the unit command only when its prior state read as plainly
+enabled or disabled); a journal naming any other file or command is refused before recovery starts. DNS and WireGuard configuration and Tailscale preferences
 have separate owners and are not covered by this journal. Their existing synchronous rollback does not
 imply independent recovery.
 

@@ -3,6 +3,7 @@ package netx
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -354,6 +355,13 @@ func TestForwardingHealthMeasuresTheKernelsCountersAndDevices(t *testing.T) {
 	if h := s.Forwarding(context.Background(), needs).IPv4.Health; h.Status != "partial" || len(h.Disabled) != 1 || h.Disabled[0] != "docker0" {
 		t.Fatalf("a device that does not forward = %+v", h)
 	}
+	// An IPv6 device's forwarding switch chooses host or router behaviour;
+	// only all/forwarding decides, so a device set to 0 is not "partial".
+	write(filepath.Join(procSysRoot, "net/ipv6/conf/all/forwarding"), "1\n")
+	write(filepath.Join(procSysRoot, "net/ipv6/conf/eth0/forwarding"), "0\n")
+	if h := s.Forwarding(context.Background(), needs).IPv6.Health; h.Status == "partial" || len(h.Disabled) != 0 {
+		t.Fatalf("ipv6 with a host-mode device = %+v", h)
+	}
 	os.Remove(filepath.Join(procNetRoot, "snmp"))
 	if h := s.Forwarding(context.Background(), needs).IPv4.Health; h.Status != "unknown" || h.Forwarded != nil {
 		t.Fatalf("an unreadable counter = %+v", h)
@@ -428,5 +436,58 @@ func TestBGPRoutesListASmallTableAndOnlyAPrefixOfALargeOne(t *testing.T) {
 	v, err = s.BGPRoutes(context.Background(), "ipv4Unicast", "")
 	if err != nil || !v.Truncated || len(v.Routes) != 0 || !strings.Contains(v.Error, "Name a prefix") {
 		t.Fatalf("a full table is not listed whole: %+v %v", v, err)
+	}
+}
+
+func TestRouteHistoryLeavesDaemonRoutesOutAndBoundsAReading(t *testing.T) {
+	view := &RoutingView{Tables: []RoutingTable{{ID: 254, Name: "main", Routes: []RouteEntry{
+		{Family: "inet", Destination: "10.9.0.0/24", Type: "unicast", Device: "eth1", Protocol: "static"},
+		{Family: "inet", Destination: "198.18.0.0/15", Type: "unicast", Gateway: "10.9.0.1", Device: "eth1", Protocol: "bgp"},
+		{Family: "inet", Destination: "198.20.0.0/16", Type: "unicast", Gateway: "10.9.0.1", Device: "eth1", Protocol: "188"},
+	}}}}
+	if items := snapshotRouting(view); len(items) != 1 {
+		t.Fatalf("a daemon's routes are the BGP page's, not the history's: %+v", items)
+	}
+
+	rec := rtReadHost(t, fixture(t, "routing-route-get.json"))
+	s, _ := historyService(t)
+	s.observeRoutes(context.Background())
+	var many strings.Builder
+	many.WriteString("[")
+	for i := 0; i < routeHistoryMaxPerReading+1; i++ {
+		if i > 0 {
+			many.WriteString(",")
+		}
+		fmt.Fprintf(&many, `{"dst":"10.200.%d.0/24","dev":"eth0","protocol":"static","scope":"link","flags":[]}`, i)
+	}
+	many.WriteString("]")
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "ip -j route show table all", out: many.String()}}, rec.replies...)
+	rec.mu.Unlock()
+	s.observeRoutes(context.Background())
+	h, err := s.RouteHistory(context.Background(), RouteHistoryQuery{})
+	if err != nil || len(h.Events) != 1 || h.Events[0].Object != "reading" || !strings.Contains(h.Events[0].After, "too many to record") {
+		t.Fatalf("history = %+v %v", h, err)
+	}
+
+	// A full routing table stops the observer instead of being reread.
+	var full strings.Builder
+	full.WriteString("[")
+	for i := 0; i <= routeHistoryMaxRoutes; i++ {
+		if i > 0 {
+			full.WriteString(",")
+		}
+		fmt.Fprintf(&full, `{"dst":"10.%d.%d.0/24","gateway":"10.9.0.1","dev":"eth0","protocol":"bgp","flags":[]}`, i/256, i%256)
+	}
+	full.WriteString("]")
+	rec.mu.Lock()
+	rec.replies = append([]reply{{prefix: "ip -j route show table all", out: full.String()}}, rec.replies...)
+	rec.mu.Unlock()
+	if s.observeRoutes(context.Background()) {
+		t.Fatal("the observer keeps rereading a full table")
+	}
+	h, _ = s.RouteHistory(context.Background(), RouteHistoryQuery{})
+	if h.Running || !strings.Contains(h.LastError, "routing table rather than a configuration") {
+		t.Fatalf("history = %+v", h)
 	}
 }

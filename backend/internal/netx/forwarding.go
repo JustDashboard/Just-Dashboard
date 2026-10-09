@@ -137,14 +137,13 @@ func forwardedDatagrams(canon string) (uint64, error) {
 	return 0, fmt.Errorf("snmp has no Ip ForwDatagrams")
 }
 
-// devicesNotForwarding lists the devices whose own forwarding switch is off
-// while the family's is on; traffic arriving on them is not forwarded.
-func devicesNotForwarding(canon string) ([]string, error) {
-	family := "ipv4"
-	if canon == "ipv6" {
-		family = "ipv6"
-	}
-	dir := filepath.Join(procSysRoot, "net", family, "conf")
+// devicesNotForwarding lists the IPv4 devices whose own forwarding switch
+// is off while the family's is on; traffic arriving on them is not
+// forwarded. IPv6 has no such switch: a device's forwarding setting chooses
+// host or router behaviour (router advertisements), and only all/forwarding
+// decides whether the kernel forwards.
+func devicesNotForwarding() ([]string, error) {
+	dir := filepath.Join(procSysRoot, "net", "ipv4", "conf")
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -198,12 +197,15 @@ func (f *forwardingSamples) measure(canon string, enabled bool, now time.Time) F
 		h.Status, h.Reason = "off", "The family's forwarding switch is off; the counter shows what was forwarded before."
 		return h
 	}
-	disabled, err := devicesNotForwarding(canon)
-	if err != nil {
-		h.Reason = "Per-device forwarding could not be read: " + err.Error()
-		return h
+	if canon == "ipv4" {
+		disabled, err := devicesNotForwarding()
+		if err != nil {
+			h.Reason = "Per-device forwarding could not be read: " + err.Error()
+			return h
+		}
+		h.Disabled = disabled
 	}
-	h.Disabled = disabled
+	disabled := h.Disabled
 	switch {
 	case len(disabled) > 0:
 		h.Status = "partial"

@@ -389,6 +389,9 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, callerIP string)
 	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateAdd(st, clean) }); err != nil {
 		return "", err
 	}
+	if checking(ctx) {
+		return "", ErrChecked
+	}
 	return b.AddRule(ctx, clean)
 }
 
@@ -608,6 +611,9 @@ func replaceRule(ctx context.Context, b fwBackend, number int, req RuleRequest, 
 		// removed by that rather than found again.
 		clean.Position = number
 	}
+	if checking(ctx) {
+		return "", ErrChecked
+	}
 
 	added, err := b.AddRule(ctx, clean)
 	if err != nil {
@@ -700,6 +706,9 @@ func (s *Service) DeleteRule(ctx context.Context, number int) (string, error) {
 	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateDelete(st, number) }); err != nil {
 		return "", err
 	}
+	if checking(ctx) {
+		return "", ErrChecked
+	}
 	return b.DeleteRule(ctx, number)
 }
 
@@ -710,6 +719,9 @@ func (s *Service) SetEnabled(ctx context.Context, enabled bool) (string, error) 
 	}
 	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { st.Enabled = enabled; return nil }); err != nil {
 		return "", err
+	}
+	if checking(ctx) {
+		return "", ErrChecked
 	}
 	return b.SetEnabled(ctx, enabled)
 }
@@ -749,6 +761,9 @@ func (s *Service) SetDefaultPolicy(ctx context.Context, direction, policy string
 	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulatePolicy(st, direction, policy) }); err != nil {
 		return "", err
 	}
+	if checking(ctx) {
+		return "", ErrChecked
+	}
 	return b.SetDefaultPolicy(ctx, direction, policy)
 }
 
@@ -782,6 +797,9 @@ func (s *Service) SetLogging(ctx context.Context, level string) (string, error) 
 	default:
 		return "", fmt.Errorf("logging level must be off, on, low, medium, high or full")
 	}
+	if checking(ctx) {
+		return "", ErrChecked
+	}
 	return b.SetLogging(ctx, level)
 }
 
@@ -798,6 +816,9 @@ func (s *Service) Reset(ctx context.Context) (string, error) {
 	}
 	if err := s.guardChange(ctx, b, func(st *FirewallStatus) error { return simulateReset(ctx, st) }); err != nil {
 		return "", err
+	}
+	if checking(ctx) {
+		return "", ErrChecked
 	}
 	return b.Reset(ctx)
 }

@@ -2,6 +2,7 @@ package netsec
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
@@ -135,6 +136,9 @@ func (s *Service) writable(ctx context.Context, need func(FirewallCapabilities) 
 	b, detection := s.selectBackend(ctx)
 	if b == nil {
 		return nil, ErrNoFirewall
+	}
+	if scope, ok := ctx.Value(scopeKey{}).(changeScope); ok && b.Kind() != scope.backend {
+		return nil, fmt.Errorf("%w: it was %s and is now %s; nothing was changed", ErrBackendChanged, scope.backend, b.Kind())
 	}
 	caps := capabilitiesFor(b, detection)
 	if !need(caps) {

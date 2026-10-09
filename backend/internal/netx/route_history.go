@@ -23,7 +23,23 @@ const (
 	routeHistoryEvery     = 30 * time.Second
 	routeHistoryKeep      = 30 * 24 * time.Hour
 	routeHistoryMaxEvents = 2000
+	// A reading with more changes than this records them as one event, so
+	// a renumbering or a flap cannot push every earlier change out.
+	routeHistoryMaxPerReading = 100
+	// Past this many routes the host carries a routing table rather than a
+	// configuration, and rereading it every interval is a cost the observer
+	// does not impose: it stops and says why.
+	routeHistoryMaxRoutes = 20000
 )
+
+// daemonProtocols are the routes a routing daemon installs (iproute2's names
+// and FRR's numbers): they follow its sessions, a full BGP table is a
+// million of them, and the BGP page reads them from the daemon instead.
+var daemonProtocols = map[string]bool{
+	"bgp": true, "isis": true, "ospf": true, "rip": true, "ripng": true, "eigrp": true, "babel": true,
+	"bird": true, "zebra": true, "openr": true, "11": true, "12": true, "42": true, "99": true,
+	"186": true, "187": true, "188": true, "189": true, "190": true, "191": true, "192": true, "193": true, "197": true,
+}
 
 // RouteEvent is one change between two readings.
 type RouteEvent struct {
@@ -96,6 +112,9 @@ func snapshotRouting(view *RoutingView) map[string]historyItem {
 	items := map[string]historyItem{}
 	for _, t := range view.Tables {
 		for _, r := range t.Routes {
+			if daemonProtocols[r.Protocol] {
+				continue
+			}
 			key := fmt.Sprintf("route|%s|%d|%s|%d", r.Family, t.ID, r.Destination, r.Metric)
 			items[key] = historyItem{
 				Object: "route", Family: r.Family, Table: t.ID, TableName: t.Name, Destination: r.Destination,
@@ -234,7 +253,9 @@ func (s *Service) StartRouteHistory(ctx context.Context) {
 		return
 	}
 	go func() {
-		s.observeRoutes(ctx)
+		if !s.observeRoutes(ctx) {
+			return
+		}
 		ticker := time.NewTicker(routeHistoryEvery)
 		defer ticker.Stop()
 		for {
@@ -245,15 +266,18 @@ func (s *Service) StartRouteHistory(ctx context.Context) {
 				s.history.mu.Unlock()
 				return
 			case <-ticker.C:
-				s.observeRoutes(ctx)
+				if !s.observeRoutes(ctx) {
+					return
+				}
 			}
 		}
 	}()
 }
 
-// observeRoutes takes one reading and records its changes. The first reading
-// of a process compares with the snapshot its predecessor kept.
-func (s *Service) observeRoutes(ctx context.Context) {
+// observeRoutes takes one reading and records its changes, and says whether
+// to keep observing. The first reading of a process compares with the
+// snapshot its predecessor kept.
+func (s *Service) observeRoutes(ctx context.Context) bool {
 	readCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	view, err := s.readRouting(readCtx)
@@ -262,17 +286,27 @@ func (s *Service) observeRoutes(ctx context.Context) {
 	defer s.history.mu.Unlock()
 	if err != nil {
 		s.history.lastErr = err.Error()
-		return
+		return true
+	}
+	routes := 0
+	for _, t := range view.Tables {
+		routes += len(t.Routes)
+	}
+	if routes > routeHistoryMaxRoutes {
+		s.history.running, s.history.items = false, nil
+		s.history.lastErr = fmt.Sprintf("This host carries %d routes, a routing table rather than a configuration; the observer stopped instead of rereading it every %d seconds.", routes, int(routeHistoryEvery/time.Second))
+		return false
 	}
 	items := snapshotRouting(view)
 	if err := s.recordRouteReading(ctx, items, now); err != nil {
 		s.history.lastErr = err.Error()
-		return
+		return true
 	}
 	if s.history.since.IsZero() {
 		s.history.since = now
 	}
 	s.history.running, s.history.last, s.history.lastErr, s.history.items = true, now, "", items
+	return true
 }
 
 // recordRouteReading diffs a reading against the previous one (in memory, or
@@ -300,7 +334,12 @@ func (s *Service) recordRouteReading(ctx context.Context, items map[string]histo
 		}
 	}
 	if before != nil {
-		for _, e := range diffRouting(before, items, previous, now, acrossRestart) {
+		events := diffRouting(before, items, previous, now, acrossRestart)
+		if len(events) > routeHistoryMaxPerReading {
+			events = []RouteEvent{{ObservedAt: now, PreviousAt: previous, AcrossRestart: acrossRestart, Object: "reading", Change: "changed",
+				Owner: "system", After: fmt.Sprintf("%d routes and rules changed at once; too many to record one by one.", len(events))}}
+		}
+		for _, e := range events {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO network_route_events(observed_at,previous_at,across_restart,object,change,family,table_id,table_name,destination,owner,managed,before_summary,after_summary) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 				e.ObservedAt.UnixMilli(), e.PreviousAt.UnixMilli(), e.AcrossRestart, e.Object, e.Change, e.Family, e.Table, e.TableName, e.Destination, e.Owner, e.Managed, e.Before, e.After); err != nil {
 				return err
@@ -325,6 +364,8 @@ var routeHistoryLimits = []string{
 	"Readings are taken every 30 seconds; a route that appeared and disappeared between two readings is not recorded.",
 	"A change is dated by the reading that found it: it happened after the previous reading and no later than this one.",
 	"The local table, which follows this host's own addresses, is not recorded here.",
+	"Routes a routing daemon installs (BGP, OSPF, IS-IS, RIP, Babel) follow its sessions and are not recorded; the BGP page reads them.",
+	"A reading that finds more than 100 changes records them as one event.",
 }
 
 // RouteHistory returns the newest events that match the query.

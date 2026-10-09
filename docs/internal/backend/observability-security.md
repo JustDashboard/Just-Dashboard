@@ -463,14 +463,27 @@ Cross-cutting:
   table, the landing zone (source binding, then interface, then default) with denials before
   allowances and the zone target for firewalld. A required way in that is admitted, limited or
   unfiltered now and refused afterwards is `AccessRefusal` (`409 would_lock_you_out`, with the check
-  and the deciding rule). A rule the evaluator cannot read before the decision makes the verdict
-  `unknown`, never admitted; unknowns are shown, not refused, and the timed recovery covers them.
+  and the deciding rule). A rule the evaluator cannot read (a destination address, an unresolved
+  profile, a device when the arrival device is unknown) is followed both ways, up to four deep: when
+  both reach the same decision that is the verdict, so an allow that may or may not apply in front of
+  one that admits anyway changes nothing. Otherwise the verdict is `unknown`, never admitted, and a
+  required way in that is admitted now and `unknown` afterwards is refused like one that is refused.
+  A status that cannot be read refuses a guarded change (`ErrUnreadable`, `503 firewall_unreadable`).
+  A browser that reached the dashboard through an SSH tunnel is judged by the SSH session's address
+  (`netx.OperatorAddress`), so its SSH check is kept.
   `GET /firewall/preflight?op=` returns the same comparison for the confirm dialogs, and the page shows
   the current verdicts as "Preserved access" (`GET /firewall/access`).
 - **Staged verification and timed recovery.** ufw and firewalld changes run inside the network
-  journal (`netx.ProtectFirewallChange`): the tool's own files (`/etc/ufw/*.rules`, `ufw.conf`,
-  `/etc/default/ufw`; firewalld's `firewalld.conf` and the zone file) and whether it ran are snapshotted
-  first. After the change the firewall is read back and the access comparison repeated
+  journal (`netx.ProtectFirewallChange`). Under its lock the change runs first with
+  `netsec.Scoped(…, checkOnly)`, which stops every mutation at `ErrChecked` after its validation and
+  access guard: a refused or invalid request opens no journal and sets off no recovery that would
+  rewrite and reload an unchanged firewall. Both passes are bound to the firewall the journal was
+  prepared for; one that changed hands in between is `409 firewall_changed`, never written through
+  another path. A rule named by identity is resolved inside the protected change. The tool's own files
+  (`/etc/ufw/*.rules`, `ufw.conf`, `/etc/default/ufw`; firewalld's `firewalld.conf` and the zone file)
+  and whether it ran are snapshotted first; firewalld's boot unit is restored only from a plain
+  `enabled` or `disabled` (`systemctl is-enabled`), any other answer leaving it alone. A firewall whose
+  state cannot be read is not changed at all, since neither the guard nor the recovery can be prepared. After the change the firewall is read back and the access comparison repeated
   (`VerifyAccessAfter`); a failure restores the snapshot at once. With `X-JD-Network-Apply: pending` the
   change waits for the same reconnection confirmation as a network change and the independent host
   helper restores it at the deadline. Recovery is a closed vocabulary: those files and `ufw --force
@@ -481,6 +494,8 @@ Cross-cutting:
   replacements and removals named by identity, validated and guarded together, run adds first and
   removals last, each re-resolved by identity just before it runs. A failure takes back the steps
   already made in reverse and the review says which steps applied, failed, were skipped or compensated.
+  A device-scoped or forwarding rule cannot be removed in a plan: the form could not write it back as it
+  was if a later step failed.
 - **History** (`firewall_history.go`, `firewall_rule_events`): every dashboard rule change, refusal
   and failure is filed under the rule's identity, a replacement linking new to previous so a rule's
   history follows its edits; `GET /firewall/history?rule=` (administrators, as the audit log). Edits made
@@ -495,7 +510,10 @@ Cross-cutting:
   `firewall.nft`, checked with `nft -c`, loaded, read back and restored by the boot unit (never removed
   by its stop). Before its rules it admits established and related traffic, loopback, ICMP and ICMPv6,
   DHCP client replies, the gateway's translated connections by mark and the trusted operator sets.
-  Changes go through the ordinary commit, journal and pending confirmation. No other table is read as
+  Changes go through the ordinary commit, journal and pending confirmation. Any other change that alters
+  its render, such as a trusted address added or revoked on the Protection page, loads the table beside
+  its own runtime change (`withFirewallLoad`) and takes both back together; otherwise a revoked address
+  would stay admitted ahead of every rule until the next boot. No other table is read as
   its own or changed; their names are listed, since an accept here cannot override a drop there.
 
 Routes under `/firewall`: `GET /`, `/apps` and `/access` (the requester's checks, kept off the status

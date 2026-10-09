@@ -390,35 +390,61 @@ func evaluateAccess(st *FirewallStatus, checks []AccessCheck, profiles map[strin
 	return out
 }
 
+// maxAccessForks bounds how many unreadable rules the ordered evaluation
+// follows both ways before it settles for unknown.
+const maxAccessForks = 4
+
 func evaluateOrderedAccess(st *FirewallStatus, c *AccessCheck, profiles map[string][]string) {
-	for _, r := range st.Rules {
-		match, why := ruleSelects(r, *c, profiles)
+	*c = orderedVerdict(st, st.Rules, *c, profiles, 0)
+}
+
+// orderedVerdict is first match over the rules. A rule the evaluator cannot
+// read is followed both ways, selecting the connection and not, and when
+// both reach the same decision that is the verdict: an allow that may or may
+// not apply in front of a rule that admits anyway changes nothing.
+func orderedVerdict(st *FirewallStatus, rules []Rule, c AccessCheck, profiles map[string][]string, forks int) AccessCheck {
+	for i, r := range rules {
+		match, why := ruleSelects(r, c, profiles)
 		if match == selectNo {
 			continue
 		}
 		if match == selectUnknown {
+			if forks < maxAccessForks {
+				taken := ruleVerdict(r, c)
+				passed := orderedVerdict(st, rules[i+1:], c, profiles, forks+1)
+				if (admits(taken.Verdict) && admits(passed.Verdict)) || (taken.Verdict == "refused" && passed.Verdict == "refused") {
+					passed.Reason = fmt.Sprintf("Rule %d may or may not apply, and the verdict is the same either way: %s", r.Number, passed.Reason)
+					return passed
+				}
+			}
 			c.Verdict, c.Rule, c.RuleID = "unknown", r.Number, r.ID
 			c.Reason = fmt.Sprintf("Rule %d is read first and %s.", r.Number, why)
-			return
+			return c
 		}
-		c.Rule, c.RuleID = r.Number, r.ID
-		switch verdictOf(r.Action) {
-		case "allow":
-			c.Verdict, c.Reason = "admitted", fmt.Sprintf("Rule %d admits it.", r.Number)
-			if strings.EqualFold(r.Action, "LIMIT") {
-				c.Verdict, c.Reason = "limited", fmt.Sprintf("Rule %d admits it at a limited rate.", r.Number)
-			}
-		case "deny":
-			c.Verdict, c.Reason = "refused", fmt.Sprintf("Rule %d refuses it.", r.Number)
-		default:
-			c.Verdict, c.Reason = "unknown", fmt.Sprintf("Rule %d has an action this page cannot read.", r.Number)
-		}
-		return
+		return ruleVerdict(r, c)
 	}
-	defaultVerdict(c, st.Policy.Incoming)
+	defaultVerdict(&c, st.Policy.Incoming)
 	if c.Family == "ipv6" && st.Effective.ipv6Unfiltered {
 		c.Verdict, c.Reason = "unfiltered", "ufw is configured not to filter IPv6 (IPV6=no)."
 	}
+	return c
+}
+
+// ruleVerdict is a rule's decision for a connection it selects.
+func ruleVerdict(r Rule, c AccessCheck) AccessCheck {
+	c.Rule, c.RuleID = r.Number, r.ID
+	switch verdictOf(r.Action) {
+	case "allow":
+		c.Verdict, c.Reason = "admitted", fmt.Sprintf("Rule %d admits it.", r.Number)
+		if strings.EqualFold(r.Action, "LIMIT") {
+			c.Verdict, c.Reason = "limited", fmt.Sprintf("Rule %d admits it at a limited rate.", r.Number)
+		}
+	case "deny":
+		c.Verdict, c.Reason = "refused", fmt.Sprintf("Rule %d refuses it.", r.Number)
+	default:
+		c.Verdict, c.Reason = "unknown", fmt.Sprintf("Rule %d has an action this page cannot read.", r.Number)
+	}
+	return c
 }
 
 func defaultVerdict(c *AccessCheck, policy string) {
