@@ -1,7 +1,14 @@
 package netx
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -139,4 +146,107 @@ func TestLiveMacvlanBridgeModeConnectivity(t *testing.T) {
 	if _, err := ns.run(context.Background(), nil, "ping", "-c", "1", "-W", "1", "10.151.0.1"); err == nil {
 		t.Fatal("the parent's own stack must not reach a macvlan on it")
 	}
+}
+
+// TestLiveBridgeVLANRecoveryAfterProcessDeath kills the process applying a
+// port's VLAN policy after its first kernel change, then recovers from a
+// fresh process with only the journal: the standalone recovery restores the
+// previous spec and puts the kernel default membership back with real
+// `bridge` argv inside the throwaway namespace.
+func TestLiveBridgeVLANRecoveryAfterProcessDeath(t *testing.T) {
+	liveRequired(t)
+	ns := newLiveNS(t)
+	ns.must(t, "ip", "link", "add", "jdsw", "type", "bridge", "vlan_filtering", "1")
+	ns.must(t, "ip", "link", "add", "jdp0", "type", "veth", "peer", "name", "jdp1")
+	ns.must(t, "ip", "link", "set", "jdp0", "master", "jdsw")
+	ns.must(t, "ip", "link", "set", "jdsw", "up")
+	ns.must(t, "ip", "link", "set", "jdp0", "up")
+	dir := t.TempDir()
+	s := New(Options{Paths: bridgeFixturePaths(dir)})
+	sp := emptySpec()
+	sp.Links = []LinkSpec{
+		{Name: "jdsw", Kind: "bridge", VLANFiltering: true, Up: true},
+		{Name: "jdp0", Kind: "veth", Peer: "jdp1", Master: "jdsw", Up: true},
+	}
+	rtSaveSpec(t, s, sp)
+	before, err := os.ReadFile(s.specPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoke := func(mode string) *exec.Cmd {
+		return ns.command(context.Background(), "env", "JD_BRIDGE_RECOVERY_DIR="+dir, "JD_BRIDGE_RECOVERY_MODE="+mode, os.Args[0], "-test.run=^TestBridgeRecoveryProcessFixture$")
+	}
+	out, err := invoke("apply").CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 83 {
+		t.Fatalf("applying process: %v %s", err, out)
+	}
+	held, _ := parseBridgeVLANs(ns.must(t, "bridge", "-j", "vlan", "show", "dev", "jdp0"))
+	reached := false
+	for _, v := range held["jdp0"] {
+		reached = reached || v == (PortVLAN{VID: 10, PVID: true, Untagged: true})
+	}
+	if !reached {
+		t.Fatalf("the candidate membership never reached the kernel: %+v", held["jdp0"])
+	}
+	if out, err := invoke("recover").CombinedOutput(); err != nil {
+		t.Fatalf("standalone recovery: %v %s", err, out)
+	}
+	held, _ = parseBridgeVLANs(ns.must(t, "bridge", "-j", "vlan", "show", "dev", "jdp0"))
+	if len(held["jdp0"]) != 1 || held["jdp0"][0] != (PortVLAN{VID: 1, PVID: true, Untagged: true}) {
+		t.Fatalf("recovery left %+v", held["jdp0"])
+	}
+	if after := ns.must(t, "cat", s.specPath()); after != string(before) {
+		t.Fatal("the previous spec was not restored")
+	}
+	var journal changeJournal
+	if err := json.Unmarshal([]byte(ns.must(t, "cat", filepath.Join(s.paths.Dir, recoveryFile))), &journal); err != nil || journal.Phase != "recovered" {
+		t.Fatalf("journal = %+v, %v", journal, err)
+	}
+}
+
+func bridgeFixturePaths(dir string) Paths {
+	return Paths{Dir: filepath.Join(dir, "network"), Sysctl: filepath.Join(dir, "sysctl.d", "90-just-dashboard.conf"), Unit: filepath.Join(dir, "systemd", UnitName)}
+}
+
+// TestBridgeRecoveryProcessFixture is the child the live test runs inside its
+// namespace. Its commands run directly, never through the host wrapper, so
+// nothing can reach the host's own network.
+func TestBridgeRecoveryProcessFixture(t *testing.T) {
+	dir := os.Getenv("JD_BRIDGE_RECOVERY_DIR")
+	if dir == "" {
+		return
+	}
+	paths := bridgeFixturePaths(dir)
+	has = func(string) bool { return false }
+	direct := func(ctx context.Context, stdin []byte, name string, args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, name, args...)
+		if stdin != nil {
+			cmd.Stdin = bytes.NewReader(stdin)
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return string(out), fmt.Errorf("%s: %s", name, strings.TrimSpace(string(out)))
+		}
+		return string(out), nil
+	}
+	if os.Getenv("JD_BRIDGE_RECOVERY_MODE") == "recover" {
+		if err := RecoverNetworkStandalone(context.Background(), paths.Dir, "pending"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	run = func(ctx context.Context, name string, args ...string) (string, error) {
+		out, err := direct(ctx, nil, name, args...)
+		if err == nil && name == "bridge" && len(args) > 1 && args[0] == "vlan" && args[1] == "add" {
+			os.Exit(83)
+		}
+		return out, err
+	}
+	runStdin = direct
+	s := New(Options{Paths: paths})
+	if _, err := s.SetPortVLANs(context.Background(), "jdp0", []PortVLAN{{VID: 10, PVID: true, Untagged: true}, {VID: 20}}, "", "fixture"); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("fixture did not reach its interruption")
 }

@@ -441,8 +441,10 @@ apply's command order and rollback with the recorder, and every guard as a table
 and shaping inside throwaway network namespaces — never on the host's own interfaces.
 `TestLiveBridgeVLANsFloodEndsAndReadinessAgainstARealKernel` applies port VLANs and VXLAN flood ends,
 reads the bridge view and readiness from the real kernel and replays the unit's bridge lines into a
-second fresh namespace; `TestLiveMacvlanBridgeModeConnectivity` measures sibling reachability and
-parent isolation. `TestLiveConntrackDumpReadsAnOwnedNamespace` must run as root
+second fresh namespace; `TestLiveBridgeVLANRecoveryAfterProcessDeath` kills the applying process
+after its first `bridge vlan` change and recovers the previous membership from a fresh process with
+only the journal; `TestLiveMacvlanBridgeModeConnectivity` measures sibling reachability and parent
+isolation. `TestLiveConntrackDumpReadsAnOwnedNamespace` must run as root
 (`sudo -E JD_NETNS_LIVE=1 go test ./internal/netx -run TestLiveConntrack`) because the netlink reader
 enters the throwaway namespace in-process.
 
