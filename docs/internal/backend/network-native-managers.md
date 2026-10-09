@@ -5,6 +5,7 @@ owner. It never adds a dashboard spec entry or installs a second persistent mana
 current surface edits IPv4/IPv6 addressing methods, per-family static addresses, DNS servers and
 domains, and explicit unicast routes in an existing selected persistent profile. The full P11 scope
 also includes structural bond and supported VRF editing; that work and its acceptance remain open.
+Its prepared owner/member scope is described in [native structure preparation](network-native-structure.md).
 Existing virtual/controller/member profiles remain refused until saved, loaded, applied and kernel
 topology are verified together; their observed relationships are still reported.
 
@@ -74,6 +75,8 @@ timeout-zero checkpoint would leave an opaque permanent object whose ownership c
 guessed from inventory. The independent watchdog must already be armed before any profile effect.
 Exact-origin admission and recovery refuse foreign native checkpoints, a changed writer/strategy,
 or any selected origin, UUID, byte or inode change outside the recorded transaction.
+When the displaced authored inode is still retained in staging, rollback exchanges that exact inode
+back into its selected name; reconstructed runtime artifacts retain their separately recorded boot proof.
 Confirming first verifies current native intent and
 the returned dashboard challenge. It durably records the checkpoint timeout hold while independent
 pending recovery still owns the change, then records `confirmed`. Only after that decision reaches

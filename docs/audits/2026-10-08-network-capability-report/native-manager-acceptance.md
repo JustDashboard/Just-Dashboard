@@ -55,6 +55,19 @@ The final verifier was then strengthened to compare exact authored/generated pat
 recorded inodes as well as UUID and native intent. That stronger final source still requires its
 own native rerun; run 11 is not claimed as that rerun. Raw output is `native-owner-run-11.log`.
 
+Strict final core run 12 passed against `20248233` with the prepared structural request still refused.
+It took 23.39 seconds in its namespace, 44.25 seconds including the actual helper build. Explicit
+assertions checked the fixed UUID, exact YAML/generated-file scope, original retained inodes and
+prior bytes after fresh helper rollback, plus the unchanged one-file authored YAML inventory.
+Loaded/applied/kernel intent and all confirmation/death/cleanup fault windows also passed. Owned
+children were absent afterwards, production networkd PID 883 was unchanged, and the host
+`/var/lib/NetworkManager` remained absent. The preserved `native-owner-run-12.log` SHA256 is
+`545535ecabb74cc243ab780c048cd0adb0dfb5530d13c62c3e15d720f27534b6`.
+
+The required changed gate for the backend checkpoint, against its prior separately committed
+frontend draft `3018e120`, passed build/vet and the selected API/netx tests (9.811/1.411 seconds).
+The complete P11 frontend/backend selection is still reserved for the final integrated tree.
+
 Root-owned fault/race fixtures pass for failed durable confirmation, failure after checkpoint
 destruction, retry without rollback after confirmation, foreign stage preservation, next ordinary
 and native journal refusal, boot-epoch revalidation, profile-exchange races and cleanup-claim races.
