@@ -1,0 +1,53 @@
+# host state before the live runs
+dc09e0508fd828168722cadda92479f7  -
+e182b377dcfc40afe79e78c115c658af  /etc/ufw/user.rules
+e0826c9c898baddae3ad465e4dd161dc  /etc/ufw/user6.rules
+369a693fc6cb1b3277c750b8137b6f9b  /etc/ufw/ufw.conf
+a921dd9d167380b04de4bc911915ea44  /etc/default/ufw
+d41d8cd98f00b204e9800998ecf8427e  -
+26
+d0e3b1cee4c9c7827577904946c8712a  -
+1646c3d2cb97413dd99d94ef2eaddea5  -
+5223d581ede9e7d4ed677e6b83116d71  -
+e97ca97f7d8ed032d80ab21c594cb467  -
+# host state after the live runs
+dc09e0508fd828168722cadda92479f7  -
+e182b377dcfc40afe79e78c115c658af  /etc/ufw/user.rules
+e0826c9c898baddae3ad465e4dd161dc  /etc/ufw/user6.rules
+369a693fc6cb1b3277c750b8137b6f9b  /etc/ufw/ufw.conf
+a921dd9d167380b04de4bc911915ea44  /etc/default/ufw
+d41d8cd98f00b204e9800998ecf8427e  -
+26
+d0e3b1cee4c9c7827577904946c8712a  -
+1646c3d2cb97413dd99d94ef2eaddea5  -
+5223d581ede9e7d4ed677e6b83116d71  -
+50d63ac3f40ac90be0439f2afb21f10a  -
+# lines: ufw status md5; md5 of user.rules, user6.rules, ufw.conf, default/ufw; netns list md5; link count; nft tables md5; ip rule md5; ip -6 rule md5; route table md5 (excluding expires)
+# route table churn with no test running (10s apart):
+11c11
+< 10.0.3.0/24 dev br-7921f65e807c proto kernel scope link src 10.0.3.1 
+---
+> 10.0.3.0/24 dev br-d97f8c1a9c99 proto kernel scope link src 10.0.3.1 
+22,23c22,23
+< local 10.0.3.1 dev br-7921f65e807c table local proto kernel scope host src 10.0.3.1 
+< broadcast 10.0.3.255 dev br-7921f65e807c table local proto kernel scope link src 10.0.3.1 
+---
+> local 10.0.3.1 dev br-d97f8c1a9c99 table local proto kernel scope host src 10.0.3.1 
+> broadcast 10.0.3.255 dev br-d97f8c1a9c99 table local proto kernel scope link src 10.0.3.1 
+56,57c56
+< fe80::/64 dev br-7921f65e807c proto kernel metric 256 pref medium
+< fe80::/64 dev veth672b942 proto kernel metric 256 pref medium
+---
+> fe80::/64 dev br-d97f8c1a9c99 proto kernel metric 256 pref medium
+80,81d78
+< anycast fe80:: dev br-7921f65e807c table local proto kernel metric 0 pref medium
+< anycast fe80:: dev veth672b942 table local proto kernel metric 0 pref medium
+88d84
+< local fe80::58c7:d0ff:fee4:cc81 dev veth672b942 table local proto kernel metric 0 pref medium
+93d88
+< local fe80::84d9:f1ff:fe14:7feb dev br-7921f65e807c table local proto kernel metric 0 pref medium
+120,121c115
+< multicast ff00::/8 dev br-7921f65e807c table local proto kernel metric 256 pref medium
+< multicast ff00::/8 dev veth672b942 table local proto kernel metric 256 pref medium
+---
+> multicast ff00::/8 dev br-d97f8c1a9c99 table local proto kernel metric 256 pref medium

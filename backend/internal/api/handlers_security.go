@@ -200,57 +200,6 @@ func (s *Server) handleFirewallApps(w http.ResponseWriter, r *http.Request) erro
 	return nil
 }
 
-type firewallPolicyRequest struct {
-	Direction string `json:"direction"`
-	Policy    string `json:"policy"`
-}
-
-func (s *Server) handleFirewallPolicy(w http.ResponseWriter, r *http.Request) error {
-	var req firewallPolicyRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	out, err := s.modules.netsec.SetDefaultPolicy(r.Context(), req.Direction, req.Policy)
-	if err != nil {
-		if errors.Is(err, netsec.ErrLockout) {
-			httpx.SetAudit(r, "firewall.policy", req.Direction, map[string]any{"result": "refused_lockout"})
-			return httpx.Err(http.StatusConflict, "would_lock_you_out", err.Error())
-		}
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.policy", req.Direction, map[string]any{"policy": req.Policy})
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-type firewallLoggingRequest struct {
-	Level string `json:"level"`
-}
-
-func (s *Server) handleFirewallLogging(w http.ResponseWriter, r *http.Request) error {
-	var req firewallLoggingRequest
-	if err := httpx.DecodeJSON(r, &req); err != nil {
-		return err
-	}
-	out, err := s.modules.netsec.SetLogging(r.Context(), req.Level)
-	if err != nil {
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.logging", req.Level, nil)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
-func (s *Server) handleFirewallReset(w http.ResponseWriter, r *http.Request) error {
-	out, err := s.modules.netsec.Reset(r.Context())
-	if err != nil {
-		return mapFirewallError(err)
-	}
-	httpx.SetAudit(r, "firewall.reset", "", nil)
-	httpx.JSON(w, http.StatusOK, map[string]string{"output": out})
-	return nil
-}
-
 func (s *Server) handleSSHConfig(w http.ResponseWriter, r *http.Request) error {
 	httpx.JSON(w, http.StatusOK, s.modules.netsec.SSHDStatus(r.Context()))
 	return nil

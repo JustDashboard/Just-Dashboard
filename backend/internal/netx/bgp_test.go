@@ -94,14 +94,22 @@ func TestBGPNotInstalledIsInformationNotAnError(t *testing.T) {
 func TestBGPReadsTheSummaryAndWhetherFRRRuns(t *testing.T) {
 	rec := record(t).
 		on("systemctl is-active frr", "active\n").
-		on(`vtysh -c show bgp summary json`, fixture(t, "routing-bgp-summary.json"))
+		on(`vtysh -c show bgp summary json`, fixture(t, "routing-bgp-summary.json")).
+		on(`vtysh -c show bgp neighbors json`, "{}").
+		fail(`vtysh -c show ip ospf`, "ospfd is not running").
+		fail(`vtysh -c show ipv6 ospf6`, "ospf6d is not running")
 	s := testService(t)
 	v, err := s.BGP(context.Background())
 	if err != nil || !v.Installed || !v.Running || len(v.Families) != 2 || v.Error != "" {
 		t.Fatalf("view = %+v, %v", v, err)
 	}
-	if got := rtMutations(rec); len(got) != 0 && !(len(got) == 1 && strings.HasPrefix(got[0], "vtysh")) {
-		t.Fatalf("a read changed something: %v", got)
+	for _, c := range rtMutations(rec) {
+		if !strings.HasPrefix(c, "vtysh -c show ") {
+			t.Fatalf("a read changed something: %v", rtMutations(rec))
+		}
+	}
+	if v.OSPF == nil || len(v.OSPF) != 0 {
+		t.Fatalf("daemons that are not running have no neighbours: %+v", v.OSPF)
 	}
 }
 

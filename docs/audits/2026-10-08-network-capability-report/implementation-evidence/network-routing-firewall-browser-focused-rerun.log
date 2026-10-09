@@ -1,0 +1,146 @@
+
+Running 141 tests using 1 worker
+
+[1/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:25:5 › the reply decision names the kernel's table and the evaluated rule, and says when it cannot
+[2/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:73:5 › a target narrows every table to its covering routes and the history to its changes
+[3/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:122:5 › a multipath route sends each leg, and a discard route is added only after its preview
+[4/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:187:5 › a managed route is edited by applying exactly the plan that was reviewed
+[5/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:249:5 › a policy rule takes UID, TOS and goto selectors and previews its effect before it is added
+[6/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:347:5 › forwarding shows its measured health and how Docker was counted
+[7/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:389:5 › BGP shows each neighbour's filters, OSPF adjacencies and a bounded route browser
+[8/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:469:5 › a pending routing change shows what it was checked against and the connections it moved
+[9/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:641:5 › the firewall page says which firewall is in charge, its zones, policy by family and preserved access
+[10/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:668:5 › enabling shows the preflight's refusal before anything is sent, and sends nothing on cancel
+[11/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:724:5 › rules carry their identity, findings and history, and removal names the identity
+[12/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:788:5 › several rule changes are staged, reviewed and applied as one plan
+[13/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:844:5 › an inactive ufw's configured rules and the owned nftables table say what is enforced
+[14/141] [chromium] › tests/browser/network-routing-firewall.spec.ts:919:5 › with temporary apply on, a firewall change asks the host to recover it unless confirmed
+[15/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network at 390
+[16/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/interfaces at 390
+[17/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/routing at 390
+[18/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/vpn at 390
+[19/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/firewall at 390
+[20/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/connections at 390
+[21/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 390 wide › /network/tools at 390
+[22/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network at 1440
+[23/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/interfaces at 1440
+[24/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/routing at 1440
+[25/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/vpn at 1440
+[26/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/firewall at 1440
+[27/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/connections at 1440
+[28/141] [chromium] › tests/browser/network-ui.spec.ts:34:13 › screenshots › 1440 wide › /network/tools at 1440
+[29/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network keeps the design system's structural rules
+[30/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/interfaces keeps the design system's structural rules
+[31/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/routing keeps the design system's structural rules
+[32/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/vpn keeps the design system's structural rules
+[33/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/firewall keeps the design system's structural rules
+[34/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/connections keeps the design system's structural rules
+[35/141] [chromium] › tests/browser/network-ui.spec.ts:105:7 › /network/tools keeps the design system's structural rules
+[36/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network never scrolls sideways
+[37/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/interfaces never scrolls sideways
+[38/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/routing never scrolls sideways
+[39/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/vpn never scrolls sideways
+[40/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/firewall never scrolls sideways
+[41/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/connections never scrolls sideways
+[42/141] [chromium] › tests/browser/network-ui.spec.ts:118:9 › on a phone › /network/tools never scrolls sideways
+[43/141] [chromium] › tests/browser/network-ui.spec.ts:130:5 › the old Security addresses lead to the Network pages, keeping their questions
+[44/141] [chromium] › tests/browser/network-ui.spec.ts:142:5 › the overview draws the topology, the readings and the attention list
+[45/141] [chromium] › tests/browser/network-ui.spec.ts:158:5 › a device opens its sheet, and only what may change offers to
+[46/141] [chromium] › tests/browser/network-ui.spec.ts:170:5 › a new VLAN sends exactly what the create route takes
+[47/141] [chromium] › tests/browser/network-ui.spec.ts:197:5 › the routing page lights the rule that answers this browser
+[48/141] [chromium] › tests/browser/network-ui.spec.ts:206:5 › a peer opens its sheet and shows its QR code again
+[49/141] [chromium] › tests/browser/network-ui.spec.ts:222:5 › every control in the forms has a name
+[50/141] [chromium] › tests/browser/security-ui.spec.ts:530:5 › the overview reads as readings, findings and how the panel is reached
+[51/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /security keeps non-table Panels plain
+[52/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /security has an accessible name
+[53/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /network/firewall keeps non-table Panels plain
+[54/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /network/firewall has an accessible name
+[55/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /security/ssh keeps non-table Panels plain
+[56/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /security/ssh has an accessible name
+[57/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /security/intrusion keeps non-table Panels plain
+[58/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /security/intrusion has an accessible name
+[59/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /network/connections keeps non-table Panels plain
+[60/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /network/connections has an accessible name
+[61/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /security/logins keeps non-table Panels plain
+[62/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /security/logins has an accessible name
+[63/141] [chromium] › tests/browser/security-ui.spec.ts:610:7 › /network/tools keeps non-table Panels plain
+[64/141] [chromium] › tests/browser/security-ui.spec.ts:619:7 › every icon-only control on /network/tools has an accessible name
+[65/141] [chromium] › tests/browser/security-ui.spec.ts:640:5 › the firewall page opens on its defaults and offers the controls that set them
+[66/141] [chromium] › tests/browser/security-ui.spec.ts:670:5 › ssh changes are staged as a page state and applied together
+[67/141] [chromium] › tests/browser/security-ui.spec.ts:702:5 › a jail's sheet bans an address by hand and the tuning offers the caller's own
+[68/141] [chromium] › tests/browser/security-ui.spec.ts:732:5 › an offender is blocked with a plain deny and looked up on the tools page
+[69/141] [chromium] › tests/browser/security-ui.spec.ts:760:5 › connections offers a block only for an address that is not private
+[70/141] [chromium] › tests/browser/security-ui.spec.ts:777:5 › the logins page folds the failed record into attackers
+[71/141] [chromium] › tests/browser/security-ui.spec.ts:800:5 › the ssh page reads its auth log through the lens, the day's counts in its one grid
+[72/141] [chromium] › tests/browser/security-ui.spec.ts:867:5 › an attacker in the auth log is blocked from its line; a tailnet address is not
+[73/141] [chromium] › tests/browser/security-ui.spec.ts:901:5 › without the admin capability the ssh page says so and reads no auth data
+[74/141] [chromium] › tests/browser/security-ui.spec.ts:915:5 › a host with no auth.log reads sshd and sudo through the journal
+[75/141] [chromium] › tests/browser/security-ui.spec.ts:929:5 › an auth.log outside the log roots is said to be, not said to be missing
+[76/141] [chromium] › tests/browser/security-ui.spec.ts:945:5 › the firewall page reads what its rules did, with the day's counts in its grid
+[77/141] [chromium] › tests/browser/security-ui.spec.ts:991:5 › with no ufw.log the firewall's drops are read from kern.log, then the kernel ring
+[78/141] [chromium] › tests/browser/security-ui.spec.ts:1018:5 › a host with neither file reads the firewall's drops from the kernel ring
+[79/141] [chromium] › tests/browser/security-ui.spec.ts:1036:5 › with logging off the firewall log points at the control that turns it on
+[80/141] [chromium] › tests/browser/security-ui.spec.ts:1052:5 › intrusion's activity is fail2ban's own log, strikes and repeat offenders included
+[81/141] [chromium] › tests/browser/security-ui.spec.ts:1088:5 › with no fail2ban.log the activity is read from its unit's journal
+[82/141] [chromium] › tests/browser/security-ui.spec.ts:1112:9 › with no hover available › row controls on /network/connections are reachable without a pointer
+[83/141] [chromium] › tests/browser/security-ui.spec.ts:1112:9 › with no hover available › row controls on /security/logins are reachable without a pointer
+[84/141] [chromium] › tests/browser/security-ui.spec.ts:1112:9 › with no hover available › row controls on /security/intrusion are reachable without a pointer
+[85/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /security at 390
+[86/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /network/firewall at 390
+[87/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /security/ssh at 390
+[88/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /security/intrusion at 390
+[89/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /network/connections at 390
+[90/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /security/logins at 390
+[91/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 390 wide › /network/tools at 390
+[92/141] [chromium] › tests/browser/security-ui.spec.ts:1174:11 › screenshots › 390 wide › rule and jail dialogs at 390
+[93/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /security at 1280
+[94/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /network/firewall at 1280
+[95/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /security/ssh at 1280
+[96/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /security/intrusion at 1280
+[97/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /network/connections at 1280
+[98/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /security/logins at 1280
+[99/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1280 wide › /network/tools at 1280
+[100/141] [chromium] › tests/browser/security-ui.spec.ts:1174:11 › screenshots › 1280 wide › rule and jail dialogs at 1280
+[101/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /security at 1720
+[102/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /network/firewall at 1720
+[103/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /security/ssh at 1720
+[104/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /security/intrusion at 1720
+[105/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /network/connections at 1720
+[106/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /security/logins at 1720
+[107/141] [chromium] › tests/browser/security-ui.spec.ts:1149:13 › screenshots › 1720 wide › /network/tools at 1720
+[108/141] [chromium] › tests/browser/security-ui.spec.ts:1174:11 › screenshots › 1720 wide › rule and jail dialogs at 1720
+[109/141] [chromium] › tests/browser/security-ui.spec.ts:1197:5 › jail policy inputs keep edits and send all three values together
+[110/141] [chromium] › tests/browser/security-ui.spec.ts:1215:5 › reverting an SSH setting removes the pending change
+[111/141] [chromium] › tests/browser/security-ui.spec.ts:1225:5 › a source-only firewall deny stays editable and preserves its source
+[112/141] [chromium] › tests/browser/security-ui.spec.ts:1244:5 › the rule builder shows the service warning and requires a deliberate source choice
+[113/141] [chromium] › tests/browser/security-ui.spec.ts:1266:5 › limited readers see no SSH, diagnostic, firewall or failed-login mutations
+[114/141] [chromium] › tests/browser/security-ui.spec.ts:1303:7 › firewall keeps its unavailable state distinct from a healthy reading
+[115/141] [chromium] › tests/browser/security-ui.spec.ts:1303:7 › ssh keeps its unavailable state distinct from a healthy reading
+[116/141] [chromium] › tests/browser/security-ui.spec.ts:1303:7 › intrusion keeps its unavailable state distinct from a healthy reading
+[117/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security keeps its content in the viewport at 390
+[118/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/firewall keeps its content in the viewport at 390
+[119/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/ssh keeps its content in the viewport at 390
+[120/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/intrusion keeps its content in the viewport at 390
+[121/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/connections keeps its content in the viewport at 390
+[122/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/logins keeps its content in the viewport at 390
+[123/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/tools keeps its content in the viewport at 390
+[124/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security keeps its content in the viewport at 1280
+[125/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/firewall keeps its content in the viewport at 1280
+[126/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/ssh keeps its content in the viewport at 1280
+[127/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/intrusion keeps its content in the viewport at 1280
+[128/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/connections keeps its content in the viewport at 1280
+[129/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/logins keeps its content in the viewport at 1280
+[130/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/tools keeps its content in the viewport at 1280
+[131/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security keeps its content in the viewport at 1720
+[132/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/firewall keeps its content in the viewport at 1720
+[133/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/ssh keeps its content in the viewport at 1720
+[134/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/intrusion keeps its content in the viewport at 1720
+[135/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/connections keeps its content in the viewport at 1720
+[136/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /security/logins keeps its content in the viewport at 1720
+[137/141] [chromium] › tests/browser/security-ui.spec.ts:1313:9 › /network/tools keeps its content in the viewport at 1720
+[138/141] [chromium] › tests/browser/security-ui.spec.ts:1337:5 › diagnostics retain drafts and finish requests while another tool is selected
+[139/141] [chromium] › tests/browser/security-ui.spec.ts:1379:5 › a new diagnostic deep link overrides only that tool's saved input and never runs itself
+[140/141] [chromium] › tests/browser/security-ui.spec.ts:1414:5 › firewall and SSH changes use ordinary confirmation
+[141/141] [chromium] › tests/browser/security-ui.spec.ts:1438:5 › workspace: security filters are shareable and Back restores the previous question
+  38 skipped
+  103 passed (2.6m)

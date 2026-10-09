@@ -98,6 +98,9 @@ type ChangeStatus struct {
 	ExpiresAt      time.Time `json:"expiresAt,omitzero"`
 	AppliedAt      time.Time `json:"appliedAt,omitzero"`
 	VerifiedAt     time.Time `json:"verifiedAt,omitzero"`
+	// Validation is what a routing change was checked against after it
+	// applied; other changes leave it empty.
+	Validation *ChangeValidation `json:"validation,omitempty"`
 }
 
 type recoverySnapshot struct {
@@ -122,14 +125,17 @@ type recoveryCommand struct {
 
 type changeJournal struct {
 	ChangeStatus
-	Paths                 Paths              `json:"paths"`
-	Files                 []recoverySnapshot `json:"files"`
-	Commands              []recoveryCommand  `json:"commands"`
-	BootDependencies      []recoveryCommand  `json:"bootDependencies,omitempty"`
-	SelectedDriftRepair   bool               `json:"selectedDriftRepair,omitempty"`
-	VerificationDigest    string             `json:"verificationDigest,omitempty"`
-	VerificationSession   string             `json:"verificationSession,omitempty"`
-	VerificationTransport string             `json:"verificationTransport,omitempty"`
+	Paths               Paths              `json:"paths"`
+	Files               []recoverySnapshot `json:"files"`
+	Commands            []recoveryCommand  `json:"commands"`
+	BootDependencies    []recoveryCommand  `json:"bootDependencies,omitempty"`
+	SelectedDriftRepair bool               `json:"selectedDriftRepair,omitempty"`
+	// Firewall names the host firewall (ufw or firewalld) whose own files
+	// and fixed commands this journal may restore (firewall_recovery.go).
+	Firewall              string `json:"firewall,omitempty"`
+	VerificationDigest    string `json:"verificationDigest,omitempty"`
+	VerificationSession   string `json:"verificationSession,omitempty"`
+	VerificationTransport string `json:"verificationTransport,omitempty"`
 }
 
 // lockChange also serializes the independent host process against an apply.
@@ -247,7 +253,8 @@ func (s *Service) prepareChange(ctx context.Context, sp *Spec, paths []string, p
 		return nil, err
 	}
 	sum := sha256.Sum256(spec)
-	j := &changeJournal{Paths: s.paths, Commands: commands, BootDependencies: dependencies, SelectedDriftRepair: selectedDrift, ChangeStatus: ChangeStatus{
+	firewall, _ := ctx.Value(firewallJournalKey{}).(string)
+	j := &changeJournal{Paths: s.paths, Commands: commands, BootDependencies: dependencies, SelectedDriftRepair: selectedDrift, Firewall: firewall, ChangeStatus: ChangeStatus{
 		ID: hex.EncodeToString(id[:]), Phase: "prepared", Generation: hex.EncodeToString(sum[:]),
 		Watchdog: "unsupported", Runtime: "not_applied", Persistence: "not_written", Boot: "not_verified",
 	}}
@@ -387,7 +394,8 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 	allowed := map[string]bool{
 		filepath.Join(j.Paths.Dir, linksFile): true, filepath.Join(j.Paths.Dir, rules6File): true,
 		filepath.Join(j.Paths.Dir, shapingFile): true, filepath.Join(j.Paths.Dir, gatewayFile): true,
-		filepath.Join(j.Paths.Dir, "spec.json"): true, j.Paths.Sysctl: true, j.Paths.Unit: true,
+		filepath.Join(j.Paths.Dir, firewallFile): true,
+		filepath.Join(j.Paths.Dir, "spec.json"):  true, j.Paths.Sysctl: true, j.Paths.Unit: true,
 	}
 	if j.SelectedDriftRepair {
 		delete(allowed, filepath.Join(j.Paths.Dir, "spec.json"))
@@ -396,6 +404,9 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 		}
 	}
 	for _, f := range j.Files {
+		if j.Firewall != "" && validFirewallFile(j, f.Path) {
+			continue
+		}
 		if (!allowed[f.Path] && (j.SelectedDriftRepair || !recoveryBlocklistPath(j.Paths.Dir, f.Path))) || f.Path == "" {
 			return fmt.Errorf("a recovery snapshot names an unexpected file")
 		}
@@ -411,6 +422,9 @@ func recoverChangeWithDependencies(ctx context.Context, j *changeJournal, boot b
 	for _, c := range j.Commands {
 		if j.SelectedDriftRepair && !validSelectedAdmissionUndo(c) {
 			return fmt.Errorf("selected repair recovery must contain only canonical owned admission undo")
+		}
+		if j.Firewall != "" && validFirewallRecovery(j, c) {
+			continue
 		}
 		switch c.Tool {
 		case "sqm":

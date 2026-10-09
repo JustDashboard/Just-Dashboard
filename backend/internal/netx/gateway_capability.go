@@ -177,6 +177,14 @@ func (s *Service) GatewayCapability(ctx context.Context) Capability {
 			c.Layers = append(c.Layers, layer)
 			continue
 		}
+		// The owned firewall admits translated connections by their mark
+		// before any of its own rules or its policy.
+		if ch.Family == "inet" && ch.Table == firewallTable {
+			layer.Status = "owned"
+			layer.Reason = "The dashboard's firewall table admits translated connections by their connection mark before its own rules."
+			c.Layers = append(c.Layers, layer)
+			continue
+		}
 		// Admission is inserted only into the filter table. A security or
 		// mangle chain called FORWARD remains an independent policy layer.
 		if (ch.Family == "ip" || ch.Family == "ip6") && ch.Table == "filter" && (ch.Name == "FORWARD" || ch.Name == "INPUT") {

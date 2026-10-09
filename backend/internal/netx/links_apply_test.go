@@ -41,7 +41,7 @@ func rtMutations(rec *recorder) []string {
 	var out []string
 	for _, c := range rec.commands() {
 		switch {
-		case strings.HasPrefix(c, "ip -j"), strings.HasPrefix(c, "nft -c"), strings.HasPrefix(c, "systemctl"):
+		case strings.HasPrefix(c, "ip -j"), strings.HasPrefix(c, "nft -c"), strings.HasPrefix(c, "systemctl"), strings.HasPrefix(c, "ss -H"):
 		default:
 			out = append(out, c)
 		}

@@ -9,8 +9,9 @@ policy owners. It does not prove source-to-destination connectivity. `capability
 
 `capability.layers` records each relevant nftables base chain: family, table, chain, hook, default
 policy, status and an explanation. Status is `owned`, `admitted`, `checked`, `blocked` or `unknown`.
-The dashboard's own table and iptables-compatible **filter** `INPUT`/`FORWARD` chains are owned
-admission paths. A `FORWARD` chain in an independent security or mangle table is not inferred to be
+The dashboard's own table, its owned firewall table `inet jd_firewall` (which admits translated
+connections by their mark before any of its rules) and iptables-compatible **filter**
+`INPUT`/`FORWARD` chains are owned admission paths. A `FORWARD` chain in an independent security or mangle table is not inferred to be
 owned merely from its name. Foreign input, forward, prerouting and postrouting filters are checked.
 
 Supported rule forms are unconditional verdicts and the documented masked connection-mark accept.

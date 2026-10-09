@@ -1,0 +1,5 @@
+=== RUN   TestLiveUFWParsesGuardsAndPlansAgainstTheRealTool
+--- PASS: TestLiveUFWParsesGuardsAndPlansAgainstTheRealTool (5.74s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	5.751s
+JD_NETNS_LIVE=1 timeout 300 go test ./internal/netsec/ -run 'TestLiveUFW'  -v  4.29s user 2.01s system 94% cpu 6.667 total

@@ -6,7 +6,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { setNetworkPendingApply } from "@/lib/network-pending"
-import type { NetworkConfirmationView } from "@/lib/types"
+import type { NetworkChangeStatus, NetworkConfirmationView } from "@/lib/types"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
@@ -149,6 +149,7 @@ export function NetworkChangeConfirmation() {
               ? "Verify a new dashboard response, then explicitly confirm to keep these settings."
               : "The administrator who applied this change must reconnect and confirm it."}
           </p>
+          {change?.validation && <ChangeChecks validation={change.validation} />}
           {state.error && (
             <p className="mt-1">
               Reconnection failed. The last known status is shown; confirmation is unavailable.
@@ -267,5 +268,46 @@ export function NetworkChangeConfirmation() {
       )}
       {dialog}
     </aside>
+  )
+}
+
+/**
+ * What a routing change was checked against after it applied. The reply
+ * paths and anchors were guards, so reaching this state means none moved;
+ * established connections are evidence, listed when the change moved them,
+ * for the operator to judge before confirming.
+ */
+function ChangeChecks({
+  validation,
+}: {
+  validation: NonNullable<NetworkChangeStatus["validation"]>
+}) {
+  const guarded = [
+    validation.client && "your replies",
+    validation.sourceSelected && "your replies from the address they are sent from",
+    ...validation.anchors,
+  ].filter(Boolean) as string[]
+  return (
+    <div className="mt-2 space-y-1" data-testid="network-change-checks">
+      <p>
+        Unchanged after the apply: {guarded.length ? guarded.join("; ") : "nothing was guarded"}.
+      </p>
+      <p>
+        {validation.flows === 0
+          ? "No established connection was open to re-check."
+          : validation.moved.length === 0
+            ? `None of the ${validation.flows} established connections re-checked moved.`
+            : `${validation.moved.length} of ${validation.flows} established connections now leave differently:`}
+      </p>
+      {validation.moved.length > 0 && (
+        <ul className="list-inside list-disc">
+          {validation.moved.map((flow) => (
+            <li key={flow.address} className="break-words">
+              <span className="font-mono">{flow.address}</span>: {flow.before} → {flow.after}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

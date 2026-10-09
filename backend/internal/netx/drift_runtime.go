@@ -363,8 +363,10 @@ func driftRoute(want RouteSpec, entries []json.RawMessage, err error) DriftObser
 			continue
 		}
 		o.Observed = map[string]string{"gateway": e.Gateway, "device": e.Device, "source": e.Source, "type": e.Type}
-		if _, ok := managedRoute(&Spec{Routes: []RouteSpec{want}}, e, table); ok && canonicalAddr(e.Gateway) == canonicalAddr(want.Gateway) && canonicalAddr(e.Source) == canonicalAddr(want.Source) && len(e.Nexthops) == 0 {
-			if unsupportedJSONFields(raw, []string{"type", "dst", "gateway", "dev", "table", "protocol", "scope", "metric", "prefsrc", "flags", "pref"}) {
+		// managedRoute compares a multipath route's legs; a single-path
+		// route must not have gained any.
+		if _, ok := managedRoute(&Spec{Routes: []RouteSpec{want}}, e, table); ok && canonicalAddr(e.Gateway) == canonicalAddr(want.Gateway) && canonicalAddr(e.Source) == canonicalAddr(want.Source) && (len(want.Nexthops) > 0 || len(e.Nexthops) == 0) {
+			if unsupportedJSONFields(raw, []string{"type", "dst", "gateway", "dev", "table", "protocol", "scope", "metric", "prefsrc", "flags", "pref", "nexthops"}) {
 				o.Reason = "The route has selectors or attributes this inspector cannot compare."
 			} else {
 				o.Status = "matching"
@@ -408,7 +410,7 @@ func driftRule(want RuleSpec, entries []json.RawMessage, err error) DriftObserva
 			return o
 		}
 		e := ruleEntry(r, want.Family, byID, byName, &Spec{Rules: []RuleSpec{want}})
-		if unsupportedJSONFields(raw, []string{"priority", "src", "srclen", "dst", "dstlen", "iif", "oif", "fwmark", "fwmask", "table", "action", "protocol"}) {
+		if unsupportedJSONFields(raw, []string{"priority", "src", "srclen", "dst", "dstlen", "iif", "oif", "fwmark", "fwmask", "table", "action", "protocol", "uid_start", "uid_end", "tos", "goto", "l3mdev"}) {
 			o.Status, o.Reason = "unknown", "The policy rule has selectors this inspector cannot compare."
 		} else if e.Managed {
 			o.Status = "matching"

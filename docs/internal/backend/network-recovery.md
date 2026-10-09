@@ -1,14 +1,19 @@
 # Recovering network changes
 
 `Service.commit` protects managed links, addresses, routes, rules, namespaces, forwarding, gateway,
-protection and shaping changes with `/etc/just-dashboard/network/change.json`. Managed bridge-port VLAN
-memberships and VXLAN flood ends are part of the spec; their undo is typed `bridge vlan`/`bridge fdb`
-commands derived from the previous spec, and the boot unit restores them with conditional
-failure-tolerant `bridge` lines. Native-owned link
-state, MTU and bridge membership changes use the same journal but remain runtime-only. DNS and
-WireGuard configuration, Tailscale preferences and netsec firewall changes have separate owners and
-are not covered by this journal. Their existing synchronous rollback does not imply independent
-recovery.
+protection, shaping and owned firewall-table changes with `/etc/just-dashboard/network/change.json`.
+Managed bridge-port VLAN memberships and VXLAN flood ends are part of the spec; their undo is typed
+`bridge vlan`/`bridge fdb` commands derived from the previous spec, and the boot unit restores them
+with conditional failure-tolerant `bridge` lines. Native-owned link state, MTU and bridge membership
+changes use the same journal but remain runtime-only. ufw and firewalld changes are enrolled through
+`ProtectFirewallChange`: a check pass runs first under the lock, so a refused request opens no
+journal; then the journal names the tool (`firewall`), snapshots only that tool's own files and
+records a closed set of commands that put its switch back (`ufw --force enable|disable`, `ufw
+reload`, `systemctl start|stop|enable|disable firewalld`, `firewall-cmd --reload`; the unit command
+only when its prior state read as plainly enabled or disabled); a journal naming any other file or
+command is refused before recovery starts. DNS and WireGuard configuration and Tailscale preferences
+have separate owners and are not covered by this journal. Their existing synchronous rollback does not
+imply independent recovery.
 
 [Selected persistent native profiles](network-native-managers.md) also use this journal with a
 closed native owner/checkpoint recovery payload. Their addressing, DNS/domain and explicit-route
@@ -36,8 +41,11 @@ The serialized snapshot has a 32 MiB limit and refuses an oversized change befor
   unresolved journal prevents another journaled apply.
 - `boot_degraded` means the immediate-mode candidate was applied and saved but enabling its normal
   boot unit failed. This is not a successful boot test.
-- `runtime`, `persistence`, `boot` and `watchdog` remain separate. For native-owned runtime edits,
-  persistence and boot are `not_applicable`.
+- `runtime`, `persistence`, `boot` and `watchdog` remain separate. For native-owned runtime edits and
+  host firewall changes, persistence and boot are `not_applicable`.
+- `validation` (routing changes) lists what the change was checked against once applied — the
+  client reply, the source-selected reply and every anchor and tunnel endpoint label — with the
+  established connections it re-asked and those that now leave differently.
 - Native profile changes expose `cleanup: pending | failed | complete` separately. A confirmed or
   recovered decision is saved before checkpoint release or rollback-stage deletion. Failed cleanup
   remains visible, preserves foreign stages and blocks replacement by the next journaled change.
@@ -80,8 +88,9 @@ remain visible throughout the dashboard. The response body stays compatible and 
 API/no-header callers keep immediate saved behavior. Selected drift repairs and explicit download
 SQM always require pending mode; their UI sends it even when the global preference is off, and
 the backend refuses an immediate request before effects. Native-owned link runtime edits are covered;
-DNS, namespaces, firewall, WireGuard/Tailscale and direct gateway admission-rule repair do not accept
-pending opt-in. Selected drift admission repair uses its separately enrolled transaction.
+Host firewall rule, switch, default, reset and plan changes accept it through their own journal.
+DNS, namespaces, firewall logging, WireGuard/Tailscale and direct gateway admission-rule repair do not
+accept pending opt-in. Selected drift admission repair uses its separately enrolled transaction.
 
 An opted apply refuses before kernel mutation unless the independent helper and watchdog arm.
 Its ninety-second deadline is recorded before apply, and a late apply rolls back. A pending journal

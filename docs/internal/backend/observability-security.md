@@ -338,7 +338,8 @@ The page is `/network/firewall` since 0.7.1, in the Network section beside the g
 admits its own connections past these rules by a connection mark, so it needs no rule here
 ([forward admission](network.md#gateway-and-protection)).
 
-`netsec/firewall.go` dispatches to ufw, firewalld or iptables (`firewall_{ufw,firewalld,iptables}.go`).
+`netsec/firewall.go` dispatches to ufw, firewalld, the network module's owned nftables table or
+iptables (`firewall_{ufw,firewalld,nft,iptables}.go`).
 **Validation and both lockout guards live in the dispatcher**, so a fourth backend cannot be added
 without them — that placement is the reason the refactor was worth doing. The shared `run` is a
 **variable** so recorded transcripts can stand behind it; the fixtures in the three test files are copied
@@ -408,9 +409,8 @@ Cross-cutting:
   replacement goes in **first**; deleting first and failing to add leaves a hole in the firewall, the one
   outcome an edit must never produce. The rule is read before anything is added and found again by what
   it says rather than where it sat. Ordering lives in `replaceRule`, separate from backend detection.
-- `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody; ambiguous cases go to ordinary
-  confirmation, since a rule list admitting *something* cannot be judged without knowing which port the
-  browser arrived on.
+- `SetDefaultPolicy` refuses an inbound deny on a host admitting nobody. With the request's access
+  context (below) it also refuses a default that would refuse a required way in.
 - `ServiceCatalogue` (`GET /security/services`) is the rule form's teaching layer, served from the server
   so the form's warning and the audit's finding are the same claim. `annotateRule` attaches it centrally
   so firewalld's rules read like ufw's — and `parseUFWRule` must find the port, since `ufw allow 6379`
@@ -430,6 +430,97 @@ Cross-cutting:
 - `FailedLoginVolume` counts inside a **window** and reports `Capped`. The posture verdict used `len()`
   of a 500-record btmp listing, which made the 2000-attempt threshold unreachable and the 200-attempt
   notice permanent on every host with a public SSH port.
+
+### Which firewall, which rules, and who can still get in
+
+- **Selection is by activity, not presence** (`firewall_detect.go`). Each candidate reports
+  `active`, `inactive`, `unknown` or `not_checked`: `ufw status`, `firewall-cmd --state` (read even
+  from its non-zero exit), the owned table's own state and `iptables -S` holding rules or a non-accept
+  policy. The first active front end is in charge; otherwise the first installed one that can be
+  switched on; then the owned table; then raw iptables for reading. Both front ends are always asked,
+  and two active at once is a conflict: `capabilitiesFor` withdraws every write with the reason. Past
+  an active front end the rest are not probed. `availableOnHost` is a variable for tests.
+- **An inactive ufw lists nothing** — `ufw status numbered` prints only its status line — though it
+  holds rules it loads the moment it is enabled. `show added` is read instead (`parseUFWAdded`, the
+  command grammar ufw echoes), `rulesFrom: "configured"` says so, and the rules stay **unnumbered**:
+  ufw numbers its IPv6 twins only once it loads them, and a number-based delete then (checked against a
+  real ufw in a sandbox) leaves the twin behind. Its defaults come from `/etc/default/ufw` the same way.
+  `(out)` closes an outbound source column, an IPv6 source carries no `(v6)` marker, and `on <device>`
+  sits in either column, before or after `(v6)`; all three are parsed. An interface-scoped rule cannot
+  be edited from the form (it would widen to every device) and is refused like a route rule.
+- **Every rule has a stable identity** (`assignRuleIDs`, `fw-` and twelve hex digits): a digest of
+  what a ufw rule says, or of firewalld's handle and zone. Edit and removal routes take `?id=`; a stale
+  identity is `409 rule_changed` instead of whichever rule took the number. **Ordering findings**
+  (`analyzeRules`) mark a ufw or owned-table rule shadowed or redundant when an earlier rule selects
+  everything it does (family, direction, interface, protocol, source and destination containment,
+  port ranges); firewalld evaluates denials before allowances whatever the listing shows, so it gets a
+  note instead of invented findings.
+- **The access guard** (`firewall_analysis.go`, `firewall_change.go`). The API puts an
+  `AccessContext` on the request: the operator's address and arrival device, the port the dashboard was
+  reached on, sshd's ports, the uplink, and Caddy's public ingress on 80 and 443 in both families.
+  Every rule add, replace and delete, enable/disable, default and reset is first simulated on a copy of
+  the status and each required check evaluated before and after — first match for ufw and the owned
+  table, the landing zone (source binding, then interface, then default) with denials before
+  allowances and the zone target for firewalld. A required way in that is admitted, limited or
+  unfiltered now and refused afterwards is `AccessRefusal` (`409 would_lock_you_out`, with the check
+  and the deciding rule). A rule the evaluator cannot read (a destination address, an unresolved
+  profile, a device when the arrival device is unknown) is followed both ways, up to four deep: when
+  both reach the same decision that is the verdict, so an allow that may or may not apply in front of
+  one that admits anyway changes nothing. Otherwise the verdict is `unknown`, never admitted, and a
+  required way in that is admitted now and `unknown` afterwards is refused like one that is refused.
+  A status that cannot be read refuses a guarded change (`ErrUnreadable`, `503 firewall_unreadable`).
+  A browser that reached the dashboard through an SSH tunnel is judged by the SSH session's address
+  (`netx.OperatorAddress`), so its SSH check is kept.
+  `GET /firewall/preflight?op=` returns the same comparison for the confirm dialogs, and the page shows
+  the current verdicts as "Preserved access" (`GET /firewall/access`).
+- **Staged verification and timed recovery.** ufw and firewalld changes run inside the network
+  journal (`netx.ProtectFirewallChange`). Under its lock the change runs first with
+  `netsec.Scoped(…, checkOnly)`, which stops every mutation at `ErrChecked` after its validation and
+  access guard: a refused or invalid request opens no journal and sets off no recovery that would
+  rewrite and reload an unchanged firewall. Both passes are bound to the firewall the journal was
+  prepared for; one that changed hands in between is `409 firewall_changed`, never written through
+  another path. A rule named by identity is resolved inside the protected change. The tool's own files
+  (`/etc/ufw/*.rules`, `ufw.conf`, `/etc/default/ufw`; firewalld's `firewalld.conf` and the zone file)
+  and whether it ran are snapshotted first; firewalld's boot unit is restored only from a plain
+  `enabled` or `disabled` (`systemctl is-enabled`), any other answer leaving it alone. A firewall whose
+  state cannot be read is not changed at all, since neither the guard nor the recovery can be prepared. After the change the firewall is read back and the access comparison repeated
+  (`VerifyAccessAfter`); a failure restores the snapshot at once. With `X-JD-Network-Apply: pending` the
+  change waits for the same reconnection confirmation as a network change and the independent host
+  helper restores it at the deadline. Recovery is a closed vocabulary: those files and `ufw --force
+  enable|disable`, `ufw reload`, `systemctl start|stop|enable|disable firewalld`, `firewall-cmd
+  --reload`. ufw's enable starts a stopped firewall but does nothing to a running one, so an enabled
+  state is restored by enable then reload — found by the real-ufw sandbox test.
+- **Plans** (`firewall_plan.go`, `POST /firewall/plans/preview` and `/plans`): up to twenty adds,
+  replacements and removals named by identity, validated and guarded together, run adds first and
+  removals last, each re-resolved by identity just before it runs. A failure takes back the steps
+  already made in reverse and the review says which steps applied, failed, were skipped or compensated.
+  A device-scoped or forwarding rule cannot be removed in a plan: the form could not write it back as it
+  was if a later step failed.
+- **History** (`firewall_history.go`, `firewall_rule_events`): every dashboard rule change, refusal
+  and failure is filed under the rule's identity, a replacement linking new to previous so a rule's
+  history follows its edits; `GET /firewall/history?rule=` (administrators, as the audit log). Edits made
+  with the tools directly leave no event, and the response says so.
+- **firewalld zones and reset.** Status lists the active zones with their interfaces, sources, target
+  and rules (read-only beyond the default zone), and the effective policy per family and interface.
+  Reset reloads the default zone's shipped definition (`--load-zone-defaults`), only for a zone
+  firewalld ships under `/usr/lib/firewalld/zones` (read through `/host`); the result is simulated
+  from that file and judged by the access guard first.
+- **The owned nftables table** (`BackendNFTOwned`, `netx/firewall_owned.go`): where no ufw or firewalld
+  runs, table `inet jd_firewall` filters input for both families from the network spec, rendered to
+  `firewall.nft`, checked with `nft -c`, loaded, read back and restored by the boot unit (never removed
+  by its stop). Before its rules it admits established and related traffic, loopback, ICMP and ICMPv6,
+  DHCP client replies, the gateway's translated connections by mark and the trusted operator sets.
+  Changes go through the ordinary commit, journal and pending confirmation. Any other change that alters
+  its render, such as a trusted address added or revoked on the Protection page, loads the table beside
+  its own runtime change (`withFirewallLoad`) and takes both back together; otherwise a revoked address
+  would stay admitted ahead of every rule until the next boot. No other table is read as
+  its own or changed; their names are listed, since an accept here cannot override a drop there.
+
+Routes under `/firewall`: `GET /`, `/apps` and `/access` (the requester's checks, kept off the status
+several pages poll) for any reader;
+for administrators `GET /history` and `GET /preflight`, `POST /plans/preview`, `POST /rules`,
+`PUT /rules/{n}?id=`, `POST /logging`, and inside `s.destructive` `POST /enabled`, `/policy`, `/reset`,
+`/plans` and `DELETE /rules/{n}?id=`. Every change is audited; the covered ones accept pending apply.
 
 ## Packages: six managers, one interface
 

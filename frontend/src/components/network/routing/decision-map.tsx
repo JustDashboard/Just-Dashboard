@@ -2,18 +2,13 @@
 
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import { Route as RouteGlyph, StopCircle } from "@/components/icons"
-import type { NetworkRouting, NetworkRule } from "@/lib/types"
+import type { NetworkRouting } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
 import { WireMark, WireNode } from "@/components/deploy/wire"
 import { ChipStrip, FilterChip } from "@/components/tabs"
-import {
-  addressFamily,
-  decisionRules,
-  decisionTables,
-  inferredAnswer,
-  type RouteFamily,
-} from "./decision-reading"
+import { addressFamily, decisionRules, decisionTables, type RouteFamily } from "./decision-reading"
+import { replyHighlight, ruleSelectors, ruleThen } from "./route-reading"
 import { RouteLookup } from "./route-lookup"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 
@@ -22,9 +17,12 @@ import { AnimatedBeam } from "@/components/ui/animated-beam"
  * on the left in the order they are asked — priority first — and the tables
  * they send a packet to on the right, each with how many routes it holds.
  *
- * An inferred rule and table for this browser's replies carry a moving wire.
- * The separate target lookup asks the kernel; the diagram does not implement
- * every policy selector. A rule that discards (blackhole, prohibit,
+ * The rule and table behind this browser's replies carry a moving wire. The
+ * table is the one the kernel reports answering; the rule is the one the
+ * server's model evaluated to that table, named only when model and kernel
+ * agree. Without that answer the older inference from routes is drawn and
+ * labelled as such. The separate target lookup asks the kernel about any
+ * literal address. A rule that discards (blackhole, prohibit,
  * unreachable) ends in a mark of its own rather than a table. A rule the
  * dashboard made has its priority in the brand's blue, the colour of where
  * the reader is (§3); Tailscale's take its logo.
@@ -35,7 +33,17 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
   const [family, setFamily] = useState<RouteFamily>(() => addressFamily(routing.clientPath.address))
   const rules = useMemo(() => decisionRules(routing, family), [routing, family])
   const tables = useMemo(() => decisionTables(routing, rules, family), [routing, rules, family])
-  const answering = inferredAnswer(routing, family)
+  const highlight = replyHighlight(routing, family)
+  const answering = highlight
+    ? {
+        rule: rules.find((r) => r.priority === highlight.rulePriority),
+        table: highlight.table,
+      }
+    : undefined
+  const ruleLabel =
+    highlight?.basis === "kernel" ? "your replies (evaluated)" : "your replies (inferred)"
+  const tableLabel =
+    highlight?.basis === "inferred" ? "answers you (inferred)" : "answers you (kernel)"
 
   const ids = [
     ...rules.map((r) => `r:${r.priority}:${r.id}`),
@@ -79,8 +87,11 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
           </FilterChip>
         </ChipStrip>
         <p className="text-hint text-muted-foreground">
-          Highlights infer which rule may answer your replies; they do not evaluate every policy
-          selector.
+          {highlight?.basis === "kernel"
+            ? "The lit table is the one the kernel reports answering your replies; the lit rule is the one the evaluated rules reach it by."
+            : highlight?.basis === "table"
+              ? `The lit table is the kernel's answer for your replies; the rule is not named: ${highlight.reason ?? "the model could not decide it"}${highlight.candidates.length ? ` Rules looking up that table: ${highlight.candidates.join(", ")}.` : ""}`
+              : "Highlights infer which rule may answer your replies; they do not evaluate every policy selector."}
         </p>
         <p className="text-hint text-muted-foreground">
           Browser path ({addressFamily(routing.clientPath.address) === "inet6" ? "IPv6" : "IPv4"}):{" "}
@@ -127,7 +138,7 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
                 : refs.get("drop")
           if (!from || !to) return null
           const lit = focus === null || focus === `r:${rule.priority}:${rule.id}`
-          const carries = answering?.rule === rule
+          const carries = answering?.rule !== undefined && answering.rule === rule
           return (
             <AnimatedBeam
               key={`${rule.priority}:${rule.id}`}
@@ -156,7 +167,7 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
               )}
               {rules.map((rule) => {
                 const id = `r:${rule.priority}:${rule.id}`
-                const carries = answering?.rule === rule
+                const carries = answering?.rule !== undefined && answering.rule === rule
                 return (
                   <li
                     key={id}
@@ -188,17 +199,15 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
                       eyebrow={
                         <span className={cn(carries && "text-brand")}>
                           {rule.priority}
-                          {carries ? " · your replies (inferred)" : ""}
+                          {carries ? ` · ${ruleLabel}` : ""}
                         </span>
                       }
-                      title={<span className="font-mono text-xs">{selector(rule)}</span>}
-                      hint={
-                        rule.action === "lookup"
-                          ? `then ${rule.tableName ?? rule.table}`
-                          : rule.action === "goto"
-                            ? "jump further down"
-                            : rule.action
+                      title={
+                        <span className="font-mono text-xs">
+                          {ruleSelectors(rule).join(" ") || "everything"}
+                        </span>
                       }
+                      hint={`then ${ruleThen(rule)}`}
                     />
                   </li>
                 )
@@ -225,7 +234,7 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
                       eyebrow={
                         <span className={cn(answers && "text-brand")}>
                           table {table.id}
-                          {answers ? " · answers you (inferred)" : ""}
+                          {answers ? ` · ${tableLabel}` : ""}
                         </span>
                       }
                       title={table.name}
@@ -261,17 +270,6 @@ export function DecisionMap({ routing }: { routing: NetworkRouting }) {
 /** A priority short enough for a mark: 32766 is "32k". */
 function short(priority: number) {
   return priority >= 10000 ? `${Math.round(priority / 1000)}k` : String(priority)
-}
-
-/** What a rule matches, as `ip rule` would say it. */
-function selector(rule: NetworkRule) {
-  const parts: string[] = []
-  if (rule.from) parts.push(`from ${rule.from}`)
-  if (rule.to) parts.push(`to ${rule.to}`)
-  if (rule.iif) parts.push(`iif ${rule.iif}`)
-  if (rule.oif) parts.push(`oif ${rule.oif}`)
-  if (rule.fwmark) parts.push(`fwmark ${rule.fwmark}`)
-  return parts.length ? parts.join(" ") : "everything"
 }
 
 function defaultOf(routes: NetworkRouting["tables"][number]["routes"], family: RouteFamily) {

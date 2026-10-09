@@ -122,7 +122,53 @@ function Family({
       {locked && state.neededBy.length === 0 && (
         <p className="text-hint text-muted-foreground">{state.guard}</p>
       )}
+      {state.dockerBasis && <p className="text-hint text-muted-foreground">{state.dockerBasis}</p>}
+      {state.health && <Health health={state.health} />}
       {dialog}
+    </div>
+  )
+}
+
+const HEALTH_WORD: Record<NonNullable<ForwardingFamily["health"]>["status"], string> = {
+  forwarding: "Forwarding traffic",
+  idle: "Idle",
+  measuring: "Measuring",
+  partial: "Some devices do not forward",
+  off: "Off",
+  unknown: "Not measured",
+}
+
+/**
+ * Forwarding as the kernel counts it, beside the switch: datagrams forwarded
+ * per second between the last two readings, and the devices whose own switch
+ * stops traffic arriving on them. A rate says forwarding happens; it does
+ * not say a particular flow was meant to pass or arrived.
+ */
+function Health({ health }: { health: NonNullable<ForwardingFamily["health"]> }) {
+  const rate =
+    health.ratePerSecond !== undefined
+      ? `${health.ratePerSecond < 10 ? health.ratePerSecond.toFixed(1) : Math.round(health.ratePerSecond)} datagrams/s over ${Math.round(health.windowSeconds ?? 0)}s`
+      : undefined
+  return (
+    <div className="space-y-1 text-hint" data-testid="forwarding-health">
+      <Status
+        tone={
+          health.status === "forwarding"
+            ? "running"
+            : health.status === "partial"
+              ? "warning"
+              : health.status === "unknown"
+                ? "unknown"
+                : "stopped"
+        }
+        label={rate ? `${HEALTH_WORD[health.status]} · ${rate}` : HEALTH_WORD[health.status]}
+      />
+      {health.reason && <p className="text-muted-foreground">{health.reason}</p>}
+      {health.forwarded !== undefined && (
+        <p className="numeric text-muted-foreground">
+          {health.forwarded.toLocaleString()} forwarded since the kernel started counting
+        </p>
+      )}
     </div>
   )
 }

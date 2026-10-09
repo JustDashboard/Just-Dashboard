@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-
-	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // firewalld runs Fedora, RHEL and everything descended from it — Rocky, Alma,
@@ -30,16 +28,17 @@ import (
 type firewalldBackend struct{}
 
 func (firewalldBackend) Kind() Backend { return BackendFirewalld }
-func (firewalldBackend) Detect() bool  { return hostexec.AvailableOnHost("firewall-cmd") }
+func (firewalldBackend) Detect() bool  { return availableOnHost("firewall-cmd") }
 
 func (firewalldBackend) Capabilities() FirewallCapabilities {
 	return FirewallCapabilities{
 		Editable: true, Toggle: true, DefaultPolicy: true,
 		Logging: true, Profiles: true,
-		// firewalld has no reset. Removing everything a zone holds one call
-		// at a time is not the same operation and would leave a half-reset
-		// firewall behind if any of them failed.
-		Reset: false,
+		// firewalld has no ufw-style reset. Removing everything a zone holds
+		// one call at a time would leave a half-reset firewall behind if any
+		// failed; reloading the default zone's shipped definition is one
+		// permanent change and one reload (firewall_reset.go).
+		Reset: true,
 	}
 }
 
@@ -83,14 +82,95 @@ func (b firewalldBackend) Status(ctx context.Context) (*FirewallStatus, error) {
 	}
 	st.Raw = out
 	target, rules := parseFirewalldZone(out)
+	for i := range rules {
+		rules[i].Zone = zone
+	}
 	st.Rules = rules
 	st.Policy = firewalldPolicy(target)
 	st.Default = fmt.Sprintf("%s (zone %s)", target, zone)
+	st.Zones = b.activeZones(ctx, zone, target, rules)
 
 	if logged, err := run(ctx, "firewall-cmd", "--get-log-denied"); err == nil {
 		st.Logging = strings.TrimSpace(logged)
 	}
 	return st, nil
+}
+
+// FirewallZone is one active firewalld zone: what is bound to it, its
+// target and what it admits. Only the default zone's rules are editable from
+// here; the others are read so the policy each interface meets is visible.
+type FirewallZone struct {
+	Name       string   `json:"name"`
+	Default    bool     `json:"default"`
+	Target     string   `json:"target"`
+	Interfaces []string `json:"interfaces"`
+	Sources    []string `json:"sources"`
+	Rules      []Rule   `json:"rules"`
+}
+
+// activeZones reads `--get-active-zones` and each zone's own listing. The
+// default zone is always present, bound or not, since unbound interfaces
+// land in it.
+func (b firewalldBackend) activeZones(ctx context.Context, defaultZone, defaultTarget string, defaultRules []Rule) []FirewallZone {
+	zones := []FirewallZone{{Name: defaultZone, Default: true, Target: defaultTarget, Interfaces: []string{}, Sources: []string{}, Rules: defaultRules}}
+	out, err := run(ctx, "firewall-cmd", "--get-active-zones")
+	if err != nil {
+		return zones
+	}
+	for _, z := range parseActiveZones(out) {
+		if z.Name == defaultZone {
+			zones[0].Interfaces, zones[0].Sources = z.Interfaces, z.Sources
+			continue
+		}
+		if listing, err := run(ctx, "firewall-cmd", "--zone="+z.Name, "--list-all"); err == nil {
+			target, rules := parseFirewalldZone(listing)
+			for i := range rules {
+				rules[i].Zone = z.Name
+			}
+			z.Target, z.Rules = target, rules
+		}
+		zones = append(zones, z)
+	}
+	return zones
+}
+
+// parseActiveZones reads the zone names and their indented bindings:
+//
+//	public
+//	  interfaces: eth0
+//	trusted
+//	  sources: 10.0.0.0/8
+func parseActiveZones(out string) []FirewallZone {
+	var zones []FirewallZone
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			name := strings.Fields(trimmed)[0]
+			if !zoneNameRe.MatchString(name) {
+				continue
+			}
+			zones = append(zones, FirewallZone{Name: name, Interfaces: []string{}, Sources: []string{}, Rules: []Rule{}})
+			continue
+		}
+		if len(zones) == 0 {
+			continue
+		}
+		key, value, ok := strings.Cut(trimmed, ":")
+		if !ok {
+			continue
+		}
+		z := &zones[len(zones)-1]
+		switch strings.TrimSpace(key) {
+		case "interfaces":
+			z.Interfaces = append(z.Interfaces, strings.Fields(value)...)
+		case "sources":
+			z.Sources = append(z.Sources, strings.Fields(value)...)
+		}
+	}
+	return zones
 }
 
 // firewalldPolicy translates a zone target into the three directions.
@@ -153,14 +233,14 @@ func parseFirewalldZone(out string) (target string, rules []Rule) {
 				rules = append(rules, Rule{
 					Action: "ALLOW", Direction: "IN", From: "Anywhere",
 					To: svc, Service: svc, Handle: "service:" + svc,
-					Raw: "service " + svc,
+					Raw: "service " + svc, BothFamilies: true,
 				})
 			}
 		case "ports":
 			for _, port := range strings.Fields(value) {
 				r := Rule{
 					Action: "ALLOW", Direction: "IN", From: "Anywhere",
-					To: port, Handle: "port:" + port, Raw: "port " + port,
+					To: port, Handle: "port:" + port, Raw: "port " + port, BothFamilies: true,
 				}
 				r.Port, r.Protocol, _ = strings.Cut(port, "/")
 				rules = append(rules, r)
@@ -200,8 +280,11 @@ func parseRichRule(raw string) (Rule, bool) {
 			attrs[m[1]] = m[2]
 		}
 	}
-	if attrs["family"] == "ipv6" {
+	switch attrs["family"] {
+	case "ipv6":
 		r.IPv6 = true
+	case "":
+		r.BothFamilies = true
 	}
 	r.From = "Anywhere"
 	if addr := attrs["address"]; addr != "" {
@@ -467,10 +550,6 @@ func (firewalldBackend) SetLogging(ctx context.Context, level string) (string, e
 		value = "unicast"
 	}
 	return run(ctx, "firewall-cmd", "--set-log-denied="+value)
-}
-
-func (firewalldBackend) Reset(ctx context.Context) (string, error) {
-	return "", fmt.Errorf("%w: firewalld has no reset command", ErrReadOnly)
 }
 
 // Profiles are firewalld's predefined services. It ships a few hundred, and

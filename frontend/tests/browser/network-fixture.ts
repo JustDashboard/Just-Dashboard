@@ -1380,6 +1380,65 @@ export const routing = {
 
 export const bgp = { installed: false, running: false, families: [] }
 
+export const routeHistory = {
+  intervalSeconds: 30,
+  running: true,
+  since: iso(120),
+  lastReading: iso(0),
+  events: [
+    {
+      id: 2,
+      observedAt: iso(14),
+      previousAt: iso(14.5),
+      object: "route",
+      change: "added",
+      family: "inet",
+      table: 100,
+      tableName: "office",
+      destination: "default",
+      owner: "just-dashboard",
+      managed: true,
+      after: "default via 10.8.0.10 dev wg0 proto static",
+    },
+    {
+      id: 1,
+      observedAt: iso(60),
+      previousAt: iso(60.5),
+      acrossRestart: true,
+      object: "route",
+      change: "removed",
+      family: "inet",
+      table: 254,
+      tableName: "main",
+      destination: "10.0.9.0/24",
+      owner: "docker",
+      managed: false,
+      before: "10.0.9.0/24 dev br-old proto kernel",
+    },
+  ],
+  limits: [
+    "Readings are taken every 30 seconds; a route that appeared and disappeared between two readings is not recorded.",
+  ],
+}
+
+export const firewallHistory = {
+  events: [
+    {
+      id: 1,
+      at: iso(30),
+      actor: "operator",
+      backend: "ufw",
+      operation: "add",
+      ruleId: "fw-0000000000a3",
+      rule: { action: "allow", port: "51820", protocol: "udp" },
+      outcome: "applied",
+    },
+  ],
+  limits: [
+    "Only changes made from this dashboard are recorded; edits made with ufw or firewall-cmd directly leave no entry.",
+  ],
+}
+
 export const namespaces = [
   {
     name: "lab",
@@ -1500,6 +1559,14 @@ export async function mockNetwork(
         return json(route, firewall)
       case "/firewall/apps":
         return json(route, [{ name: "OpenSSH", ports: ["22/tcp"] }])
+      case "/firewall/history":
+        return json(route, firewallHistory)
+      case "/firewall/access":
+        return json(route, { backend: firewall.backend, checks: [] })
+      case "/firewall/preflight":
+        return json(route, { backend: firewall.backend, findings: [], checks: [] })
+      case "/network/routing/history":
+        return json(route, routeHistory)
       case "/security/services":
         return json(route, [])
       case "/network/overview":

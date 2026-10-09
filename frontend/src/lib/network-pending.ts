@@ -3,6 +3,19 @@ export function supportsPendingNetworkMutation(path: string, method: string): bo
   if (!["POST", "PUT", "DELETE"].includes(method.toUpperCase())) return false
   const clean = path.split("?")[0].replace(/\/$/, "")
   if (clean === "/network/drift/repairs") return method.toUpperCase() === "POST"
+  // Host firewall changes are journaled through their own file snapshot and
+  // fixed recovery commands; reviews and logging are not changes to recover.
+  if (
+    [
+      "/firewall/rules",
+      "/firewall/enabled",
+      "/firewall/policy",
+      "/firewall/reset",
+      "/firewall/plans",
+    ].includes(clean) ||
+    clean.startsWith("/firewall/rules/")
+  )
+    return true
   return [
     "/network/links",
     "/network/native/profiles",
