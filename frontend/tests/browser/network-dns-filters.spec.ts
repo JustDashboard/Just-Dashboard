@@ -182,6 +182,16 @@ for (const width of [390, 1280, 1720]) {
       const control = await mockDNSServicePage(page, { engine, management: false })
       await open(page)
       await filters(page).evaluate((node) => node.scrollIntoView({ block: "start" }))
+      await expect
+        .poll(async () => {
+          const bounds = await sheet(page).boundingBox()
+          return bounds !== null && bounds.x >= 0 && bounds.x + bounds.width <= width + 1
+        })
+        .toBe(true)
+      const bounds = await sheet(page).boundingBox()
+      expect(bounds).not.toBeNull()
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1)
       const overflow = await sheet(page).evaluate((node) => node.scrollWidth - node.clientWidth)
       expect(overflow).toBeLessThanOrEqual(1)
       await page.screenshot({ path: testInfo.outputPath(`native-filters-${engine}-${width}.png`) })

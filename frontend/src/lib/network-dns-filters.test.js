@@ -87,6 +87,15 @@ describe("native DNS filter inventory provenance", () => {
     ])
   })
 
+  test("Technitium subscriptions retain the native 255-entry limit", () => {
+    const value = view("technitium")
+    const source = value.inventory.sources.entries[0]
+    value.inventory.sources.entries = Array.from({ length: 255 }, () => ({ ...source }))
+    expect(read(value).inventory.sources.entries).toHaveLength(255)
+    value.inventory.sources.entries.push({ ...source })
+    expect(() => read(value)).toThrow()
+  })
+
   test("native unknown and unsupported sections cannot claim empty configured policy", () => {
     const value = view("technitium")
     value.inventory.sources = section([], "unknown")

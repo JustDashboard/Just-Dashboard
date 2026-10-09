@@ -175,7 +175,7 @@ function section(value: unknown, engine: DNSEngine, name: "sources" | "rules"): 
     !object(value) ||
     !keys(value, ["evidence", "identity", "entries", "fingerprint"]) ||
     !Array.isArray(value.entries) ||
-    value.entries.length > 256
+    value.entries.length > (engine === "technitium" ? 255 : 256)
   )
     return fail()
   const evidence = reading(value.evidence)
