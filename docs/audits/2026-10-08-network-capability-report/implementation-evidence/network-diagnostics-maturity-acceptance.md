@@ -21,8 +21,8 @@ without running the tool again. One frontend renderer
 inspector. The [diagnostics document](../../../internal/backend/network-diagnostics.md#structured-evidence)
 describes each tool's readings, bounds and routes.
 
-Browser acceptance is `frontend/tests/browser/network-tools.spec.ts`: twelve workflow cases plus one
-visible-evidence case per tool driven by
+Browser acceptance is `frontend/tests/browser/network-tools.spec.ts`: ten workflow cases, page
+containment at 375 and 1280 pixels, and one visible-evidence case for each of nineteen tools driven by
 [`fixtures/network-tool-results.ts`](../../../../frontend/tests/browser/fixtures/network-tool-results.ts),
 which mirrors the backend shapes the Go tests produce.
 
@@ -73,4 +73,26 @@ The idle backend CPU includes the test's own 20 ms heap sampler. Raw log:
 
 ## Final checks
 
-FINAL_CHECKS
+All on source `c5085d31` with `TMPDIR`/`GOTMPDIR` on disk, `GOMAXPROCS=2 GOFLAGS=-p=2` and one
+browser worker against a production build of this tree served on port 43211. Browser and
+`test-changed` runs held `/home/ubuntu/.jd-heavy.lock` for the build, server and run.
+
+| Check | Duration | Result |
+| --- | --- | --- |
+| `scripts/test-changed.sh 4338e6cc` (73 changed files) | 825 s, after a 24 s build | exit 0: Prettier clean, ESLint and `tsc --noEmit` clean, `bun test src` 3,275 pass / 0 fail, `go build ./...` and `go vet` on changed packages clean, Go tests for `api`, `netcapture`, `netdiag`, `netpath`, `netsec`, `netx` ok, 386 browser cases passed and 60 skipped |
+| `go test -race -count=1 ./internal/netdiag ./internal/netpath` | 86 s | ok |
+| `go test -race` focused selections in `netsec`, `api` (new and existing diagnostic routes) and `netx` (`TestHostSupport`) | 6 s / 10 s / 1 s | ok |
+| `JD_NETCAPTURE_LIVE=1 go test ./internal/netcapture -run TestLiveCaptureCostAtFullBounds` | 10.5 s | ok (table above) |
+
+The 60 skipped browser cases are the optional screenshot captures in `network-dns`,
+`network-gateway`, `network-ui`, `security-intrusion` and `security-ui`, which run only with
+`JD_NETWORK_SHOTS` set; none belongs to this change. `network-tools.spec.ts` ran all 31 of its cases.
+
+The first full run (on `6e088b40` plus the new per-tool cases) failed 11 browser cases: ten in
+`network-runs.spec.ts`, whose fixture answered the new `/history` read with a run object and broke
+the inspector, and the `mtu` evidence case, whose text matched a hidden card first. The history read
+is now validated (an incomplete body becomes a failed read with retry), the fixture answers
+`/history`, and the evidence cases ignore hidden cards. A read-only review of the same diff then
+found trust-binding, replacement, NODATA, site-audit, wake and bounding issues; they are fixed in
+`c5085d31` with regression tests before the passing run above. Raw logs: `test-changed-1.log`,
+`test-changed-2.log`, `spec-run-1.log` and `capture-cost.log` in the artifacts directory.
