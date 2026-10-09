@@ -46,6 +46,9 @@ type Spec struct {
 	Exceptions []ExceptionSpec `json:"exceptions,omitempty"`
 	// Sysctls are the kernel settings set here, by key.
 	Sysctls map[string]string `json:"sysctls"`
+	// EgressGroups are monitored egress groups (egress.go): their member
+	// tables, rules and the decided member restored at boot.
+	EgressGroups []EgressGroupSpec `json:"egressGroups,omitempty"`
 }
 
 // TrustedNote is the record behind one kept trusted address.

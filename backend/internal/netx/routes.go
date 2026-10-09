@@ -814,6 +814,8 @@ func checkTable(id int) error {
 		return guarded("Table 52 is Tailscale's; routes put there are removed the next time tailscaled changes its own.")
 	case id == tableDefault:
 		return guarded("Table 253 is the kernel's default table, consulted last; use main or a table of your own.")
+	case egressReservedTable(id):
+		return guarded("Tables %d–%d belong to egress groups, whose decisions rewrite them; use a table of your own.", egressTableBase, egressTableBase+egressSlots*egressTableSpan-1)
 	case id < 1 || id > 4294967294:
 		return fmt.Errorf("a table is main or a number from 1 to 4294967294")
 	}
@@ -1088,6 +1090,9 @@ func (req RuleRequest) spec() (RuleSpec, error) {
 	if req.Priority != 0 && (req.Priority < rulePriorityMin || req.Priority > rulePriorityMax) {
 		return RuleSpec{}, fmt.Errorf("a rule made here has a priority from %d to %d; the kernel's, Tailscale's and the distribution's rules are outside it", rulePriorityMin, rulePriorityMax)
 	}
+	if egressReservedPriority(req.Priority) {
+		return RuleSpec{}, guarded("Priorities %d–%d belong to egress groups; choose another.", egressPriorityBase, egressPriorityBase+egressSlots*egressPrioritySpan-1)
+	}
 	r.Priority = req.Priority
 	if c := strings.TrimSpace(req.Comment); c != "" {
 		if r.Comment, err = CleanLabel(c, 80); err != nil {
@@ -1105,6 +1110,8 @@ func checkRuleTable(id int) error {
 		return guarded("Table 255 is the kernel's local table; the first rule already consults it.")
 	case id == tableTailscale:
 		return guarded("Table 52 is Tailscale's; a rule sending traffic there competes with the ones tailscaled keeps.")
+	case egressReservedTable(id):
+		return guarded("Tables %d–%d belong to egress groups; select a group's traffic with its own policy.", egressTableBase, egressTableBase+egressSlots*egressTableSpan-1)
 	case id < 1 || id > 4294967294:
 		return fmt.Errorf("a table is 1 to 4294967294")
 	}
@@ -1255,7 +1262,7 @@ func (s *Service) AddRule(ctx context.Context, req RuleRequest, client, actor st
 		}
 	} else {
 		for p := rulePriorityMin; p <= rulePriorityMax; p++ {
-			if !used[p] {
+			if !used[p] && !egressReservedPriority(p) {
 				r.Priority = p
 				break
 			}

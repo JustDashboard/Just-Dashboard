@@ -204,7 +204,33 @@ func (s *Service) recoveryPlan(ctx context.Context, old, next *Spec) ([]recovery
 			commands = append(commands, admission...)
 		}
 	}
+	commands = append(commands, s.egressRecoveryPlan(old, next)...)
 	return commands, nil
+}
+
+// egressRecoveryPlan takes every changed egress group back to its previous
+// state, then reloads the previous connection pinning from the restored file
+// (or removes the table when the previous state had none).
+func (s *Service) egressRecoveryPlan(old, next *Spec) []recoveryCommand {
+	var commands []recoveryCommand
+	key := func(g EgressGroupSpec) string { return strconv.Itoa(g.ID) }
+	for _, g := range differing(next.EgressGroups, old.EgressGroups, key) {
+		prior, _ := old.egressGroup(g.ID)
+		commands = append(commands, egressCommands(&g, prior)...)
+	}
+	for _, g := range differing(old.EgressGroups, next.EgressGroups, key) {
+		if current, _ := next.egressGroup(g.ID); current == nil {
+			commands = append(commands, egressCommands(nil, &g)...)
+		}
+	}
+	if renderEgressNFT(old) != renderEgressNFT(next) {
+		if len(egressStickyGroups(old)) == 0 {
+			commands = append(commands, recoveryCommand{Tool: "nft", Args: []string{"delete", "table", "inet", egressNFTable}, AllowGone: true})
+		} else {
+			commands = append(commands, recoveryCommand{Tool: "nft", Args: []string{"-f", filepath.Join(s.paths.Dir, egressFile)}})
+		}
+	}
+	return commands
 }
 
 // Only chains actually present in the affected families participate in

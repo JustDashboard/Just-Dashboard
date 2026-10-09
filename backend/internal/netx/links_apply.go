@@ -21,6 +21,12 @@ func renderLinks(sp *Spec) string {
 		b.WriteString(line)
 		b.WriteByte('\n')
 	}
+	// Egress groups last: their member routes need the devices above, and
+	// the boot file restores each group with the member last decided.
+	for _, line := range egressBatchLines(sp, "inet") {
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
 	return b.String()
 }
 
@@ -36,6 +42,9 @@ func renderIPv6Rules(sp *Spec) string {
 		if args, err := ruleArgs(r); err == nil {
 			b.WriteString("rule add " + strings.Join(args, " ") + "\n")
 		}
+	}
+	for _, line := range egressBatchLines(sp, "inet6") {
+		b.WriteString(line + "\n")
 	}
 	return b.String()
 }
