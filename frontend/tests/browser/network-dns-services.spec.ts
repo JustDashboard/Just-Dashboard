@@ -169,6 +169,9 @@ test("upstream draft becomes a retained review before any native apply", async (
     .fill("192.0.2.54:53\n[2001:db8::54]:53")
   await sheet(page).getByRole("button", { name: "Create retained review", exact: true }).click()
   await expect(
+    sheet(page).getByRole("heading", { name: "Reviewed native change", exact: true }),
+  ).toBeInViewport()
+  await expect(
     sheet(page).getByRole("button", { name: "Apply reviewed native change", exact: true }),
   ).toBeEnabled()
   expect(control.mutations).toHaveLength(1)
