@@ -177,6 +177,12 @@ func TestDNSFilterPiHoleGroupEmptyAndIndependentRuleKinds(t *testing.T) {
 	if err != nil || i.Sources.Evidence.State != "unknown" || i.Rules.Evidence.State != "configured" || i.Fingerprint != "" {
 		t.Fatal("malformed FTL source hid independent rule evidence", err)
 	}
+	list["groups"] = []int{}
+	list["address"] = ""
+	i, err = inspectNativeFilters(t.Context(), req)
+	if err != nil || i.Sources.Evidence.State != "unknown" || len(i.Sources.Entries) != 0 || i.Sources.Fingerprint != "" || i.Rules.Evidence.State != "configured" || i.Fingerprint != "" {
+		t.Fatal("an empty native source destination became configured or erased independent rules", err)
+	}
 }
 
 func TestDNSFilterPiHoleGroupElementsRequireActualIntegers(t *testing.T) {

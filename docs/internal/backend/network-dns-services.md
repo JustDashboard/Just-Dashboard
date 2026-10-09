@@ -81,7 +81,8 @@ and exact/regex allow/deny domain-rule metadata, preserving native enable flags 
 arrays, including `[]`. Each group element must be an actual bounded integer; null membership
 elements keep their section unknown and never become group ID zero. Explicit numeric zero and an
 empty array remain distinct. Native counts, update times and numeric list statuses are retained
-only when reported; absent values remain unreported. Technitium reads built-in block/allow subscriptions and
+only when reported; absent values remain unreported. Technitium reads built-in block/allow subscriptions
+and
 comment entries from settings. Only its pinned 15.6/15.6.0 response writer's explicit `blockListUrls:
 null` establishes no configured subscription entries; a missing field or another version's null
 stays unknown. Its manual Allowed/Blocked zone trees and installed app rule contents remain
@@ -95,9 +96,10 @@ Every custom-rule array element must be an actual JSON string. An explicit empty
 reported native entry; an element-level null keeps the rule section unknown and is never converted
 to empty text. This differs from the pinned writer's collection-level null representation.
 
-Each source/custom-rule collection is bounded to 256 entries. Technitium supports 255 native
-entries; this adapter bounds each identity to 255 bytes and preserves its update interval range
-of 0–168 hours. Other native
+AdGuard and Pi-hole source/custom-rule collections are bounded to 256 entries. Technitium supports
+255 native entries; its adapter bounds each identity to 255 bytes and preserves its update interval
+range of 0–168 hours. Native subscription destinations must be nonempty strings even when their
+display identity is redacted. Other native
 source/rule identities are at most 4096 bytes, groups at most 64 unique nonnegative 32-bit IDs,
 responses at most 512 KiB and the returned inventory at most 192 KiB. Reads share a 20-second
 deadline and the existing pinned literal origin, verified TLS, scoped authentication and no-redirect

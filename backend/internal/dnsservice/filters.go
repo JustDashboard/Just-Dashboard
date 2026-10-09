@@ -362,7 +362,7 @@ func (c *nativeClient) piHoleFilters(ctx context.Context, i *FilterInventory) er
 			seen[*f.ID] = true
 			e := FilterEntry{ID: f.ID, Enabled: f.Enabled, Groups: &groups, Fingerprint: policyHash(entry)}
 			if index == 0 {
-				if (f.Type != "block" && f.Type != "allow") || f.Address == nil || len(*f.Address) > 4096 || (f.Count != nil && !filterNumber(f.Count)) || (f.Updated != nil && !filterNumber(f.Updated)) || (f.Status != nil && !filterNumber(f.Status)) {
+				if (f.Type != "block" && f.Type != "allow") || f.Address == nil || len(*f.Address) == 0 || len(*f.Address) > 4096 || (f.Count != nil && !filterNumber(f.Count)) || (f.Updated != nil && !filterNumber(f.Updated)) || (f.Status != nil && !filterNumber(f.Status)) {
 					valid = false
 					break
 				}
