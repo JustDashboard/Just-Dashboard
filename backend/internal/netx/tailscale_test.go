@@ -558,7 +558,10 @@ func TestVPNJSONKeysAreTheContract(t *testing.T) {
 			for i := 0; i < rt.NumField(); i++ {
 				f := rt.Field(i)
 				tag, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-				if tag == "" || tag == "-" {
+				if !f.IsExported() || tag == "-" {
+					continue
+				}
+				if tag == "" {
 					t.Errorf("%s.%s has no json tag", rt.Name(), f.Name)
 					continue
 				}

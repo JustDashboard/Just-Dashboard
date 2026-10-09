@@ -1468,6 +1468,17 @@ func TestVPNSummaryCountsAndNamesNobody(t *testing.T) {
 	rec := record(t)
 	rec.on("wg show all dump", fixture(t, "wg-dump.txt")).
 		on("systemctl", "enabled\n").
+		on("ip -j -d link show", "[]").
+		on("ip -j addr", "[]").
+		on("ip -j route show table all", "[]").
+		on("ip -j -6 route show table all", "[]").
+		on("ip -j route show default", "[]").
+		on("ip -j -6 route show default", "[]").
+		on("ip -j route get 1.1.1.1 from", "[]").
+		on("nft -t -j list ruleset", `{"nftables":[]}`).
+		fail("firewall-cmd --state", "not running").
+		fail("iptables -S DOCKER-USER", "no chain").
+		on("ufw status", "Status: inactive\n").
 		on("tailscale status --json", fixture(t, "tailscale-status.json")).
 		on("tailscale debug prefs", fixture(t, "tailscale-prefs-exit.json"))
 

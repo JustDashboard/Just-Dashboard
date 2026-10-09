@@ -1,0 +1,6 @@
+--- FAIL: TestVPNSummaryCountsAndNamesNobody (0.03s)
+    helpers_test.go:84: unexpected command: ip -j route get 1.1.1.1 from 10.8.0.2 iif wg0
+    helpers_test.go:84: unexpected command: ip -j route get 1.1.1.1 from 10.9.9.2 iif wg1
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/netx	0.161s
+FAIL
