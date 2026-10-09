@@ -321,6 +321,19 @@ test("a failed later Docker candidate poll keeps the selected container and alia
       reads === 2 ? 500 : 200,
     )
   })
+  // Attaching is previewed before it is offered; this case is about the
+  // candidates, so the preview finds nothing in the way.
+  await page.route("**/api/v1/docker/networks/lab/connect?**", (route) =>
+    json(route, {
+      network: "lab",
+      networkId: "lab",
+      container: new URL(route.request().url()).searchParams.get("container"),
+      owner: { kind: "manual" },
+      conflicts: [],
+      blocked: false,
+      checkedAt: new Date().toISOString(),
+    }),
+  )
   await page.clock.install()
   await page.goto("/docker/networks")
   await page.getByRole("button", { name: "lab", exact: true }).click()

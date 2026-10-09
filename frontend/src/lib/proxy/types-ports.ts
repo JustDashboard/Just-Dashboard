@@ -187,6 +187,63 @@ export type PortsFree = {
   skipped: HostPortBinding[]
   /** False where Docker did not answer, so containers' ports were not avoided. */
   containersChecked: boolean
+  /**
+   * The other ports passed over: a deployment's lease, the preview range, the
+   * ephemeral range, a port a firewall rule or gateway forward already decides.
+   */
+  reservations?: PortReservation[]
+  /** Every owner consulted and whether it could be — provider reservations included. */
+  sources?: PortSource[]
+}
+
+export type PortReservation = { port: number; source: string; detail: string }
+
+export type PortSource = {
+  key: string
+  label: string
+  state: "checked" | "unavailable" | "not_supplied"
+  detail?: string
+}
+
+/** GET /ports/external: what enrolled external sources measured of each port. */
+export type PortsExternal = {
+  evidence: PortExternalEvidence[]
+  scopes: PortExternalScope[]
+  checkedAt: string
+  /** The external-check owner being unavailable, not "no source enrolled". */
+  error?: string
+}
+
+export type PortExternalEvidence = {
+  checkId: string
+  vantageId: string
+  source: string
+  location?: string
+  placement: "external_host" | "controlled_fixture" | string
+  port: number
+  family: "inet" | "inet6"
+  tls: boolean
+  address?: string
+  /** The measured address is on this host; otherwise a provider translation stood between. */
+  local: boolean
+  status: "queued" | "running" | "completed" | "failed" | "cancelled" | "expired"
+  state: string
+  basis: "measured" | "observed" | "unknown"
+  detail?: string
+  at: string
+}
+
+export type PortExternalScope = {
+  vantageId: string
+  source: string
+  location?: string
+  placement: string
+  scopeId: string
+  target: string
+  addresses: string[]
+  ports: number[]
+  families: ("inet" | "inet6")[]
+  lastSeen?: string
 }
 
 /**

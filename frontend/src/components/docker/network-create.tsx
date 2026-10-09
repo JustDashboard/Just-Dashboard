@@ -2,7 +2,9 @@
 
 import { useCallback, useMemo, useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import { post } from "@/lib/api"
+import { usePoll } from "@/hooks/use-poll"
+import { get, post } from "@/lib/api"
+import { driverReading, isDriverCatalogue } from "@/lib/docker-networks"
 import { notify } from "@/lib/toast"
 import { Modal } from "@/components/modal"
 import { Group } from "@/components/panel"
@@ -51,6 +53,19 @@ export function NewNetworkDialog({
         ids.includes(initialReservationId) ? ids : [...ids, initialReservationId],
       )
   }, [initialReservationId])
+  // What this Engine can create a network with, read when an administrator
+  // opens the advanced settings: a plugin can be disabled or removed at any
+  // time, so the list is never cached past the dialog.
+  const drivers = usePoll<unknown>(
+    (signal) => get("/docker/networks/drivers", undefined, signal),
+    0,
+    [open, advanced],
+    { enabled: open && advanced && admin },
+  )
+  const catalogue = isDriverCatalogue(drivers.data) ? drivers.data : undefined
+  const driver = driverReading(catalogue, draft.driver, draft.options)
+  const driverRefused =
+    admin && driver.name !== "bridge" && (!driver.known || !driver.driver?.creatable)
   const [ipamUnavailable, setIPAMUnavailable] = useState(Boolean(initialReservationId))
   const [ipamRefreshKey, setIPAMRefreshKey] = useState(0)
   const reading = useMemo(() => {
@@ -109,6 +124,7 @@ export function NewNetworkDialog({
       inventoryError ||
       activeSeed ||
       ipamUnavailable ||
+      driverRefused ||
       !can("service.control")
     )
       return
@@ -141,6 +157,7 @@ export function NewNetworkDialog({
       </Label>
       <Input
         id={`network-${key}`}
+        list={key === "driver" && catalogue ? "network-driver-choices" : undefined}
         value={String(draft[key])}
         spellCheck={false}
         className="font-mono text-xs"
@@ -186,6 +203,7 @@ export function NewNetworkDialog({
               Boolean(inventoryError) ||
               Boolean(activeSeed) ||
               ipamUnavailable ||
+              driverRefused ||
               !can("service.control")
             }
             pending={busy}
@@ -231,11 +249,21 @@ export function NewNetworkDialog({
             {admin ? (
               <>
                 {field("driver", "Network driver", "bridge")}
-                <Hint>
-                  Bridge connects containers on this server. Macvlan and IPvlan use a configured
-                  parent; overlay needs an active Swarm. An installed plugin can use its registered
-                  driver name.
-                </Hint>
+                {catalogue && (
+                  <datalist id="network-driver-choices">
+                    {catalogue.drivers
+                      .filter((d) => d.creatable)
+                      .map((d) => (
+                        <option key={d.name} value={d.name} />
+                      ))}
+                  </datalist>
+                )}
+                <DriverReading
+                  reading={driver}
+                  loading={drivers.loading}
+                  unread={Boolean(drivers.error) || (drivers.data !== undefined && !catalogue)}
+                  onRetry={drivers.refresh}
+                />
               </>
             ) : (
               <Hint>
@@ -310,5 +338,69 @@ export function NewNetworkDialog({
         )}
       </div>
     </Modal>
+  )
+}
+
+/**
+ * What the Engine says about the driver being typed: whether it has it, why
+ * it would refuse it, and which option keys a built-in driver would ignore.
+ * The backend checks the same catalogue before asking the Engine.
+ */
+function DriverReading({
+  reading,
+  loading,
+  unread,
+  onRetry,
+}: {
+  reading: ReturnType<typeof driverReading>
+  loading: boolean
+  unread: boolean
+  onRetry: () => void
+}) {
+  if (loading) return <Hint>Reading this Engine&apos;s network drivers…</Hint>
+  if (unread || !reading.known) {
+    return (
+      <div className="space-y-1.5">
+        <Hint>
+          This Engine&apos;s network drivers could not be read. A bridge network is created as
+          usual; any other driver is refused until they can be.
+        </Hint>
+        <Button size="xs" variant="outline" onClick={onRetry}>
+          Read drivers again
+        </Button>
+      </div>
+    )
+  }
+  const found = reading.driver
+  return (
+    <div className="space-y-1.5">
+      {!found ? (
+        <p role="alert" className="text-xs text-destructive">
+          This Engine has no {reading.name} network driver. Install and enable its plugin first.
+        </p>
+      ) : !found.creatable ? (
+        <p role="alert" className="text-xs text-destructive">
+          {reading.name} cannot create a network here: {found.reason}
+        </p>
+      ) : found.source === "plugin" ? (
+        <Hint>
+          {reading.name} is an installed plugin&apos;s driver. Its options are the plugin&apos;s own
+          and are passed through unchecked; the plugin decides what they do.
+        </Hint>
+      ) : (
+        <Hint>
+          {reading.name} is built into Docker
+          {found.options.length > 0 &&
+            `; it documents ${found.options.map((option) => option.key).join(", ")}`}
+          .
+        </Hint>
+      )}
+      {reading.ignored.length > 0 && (
+        <p role="alert" className="text-xs text-warning">
+          Docker ignores options {reading.name} does not document, so these would silently not
+          apply: <span className="font-mono">{reading.ignored.join(", ")}</span>
+        </p>
+      )}
+    </div>
   )
 }
