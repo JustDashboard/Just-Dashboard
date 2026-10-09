@@ -129,6 +129,182 @@ type decisionSidecar struct {
 	resources                ProvisionResources
 }
 
+type decisionEndpointReceipt struct {
+	Present bool   `json:"present"`
+	ID      string `json:"id"`
+	Address string `json:"address"`
+	MAC     string `json:"mac"`
+}
+
+type decisionContainerReceipt struct {
+	Present      bool                    `json:"present"`
+	ID           string                  `json:"id"`
+	Image        string                  `json:"image"`
+	Running      bool                    `json:"running"`
+	Restarting   bool                    `json:"restarting"`
+	PID          int                     `json:"pid"`
+	ConfigSHA256 string                  `json:"configSHA256"`
+	HostSHA256   string                  `json:"hostSHA256"`
+	MountsSHA256 string                  `json:"mountsSHA256"`
+	NetworkCount int                     `json:"networkCount"`
+	Endpoint     decisionEndpointReceipt `json:"endpoint"`
+}
+
+type decisionRuntimeReceipt struct {
+	Engine          decisionContainerReceipt `json:"engine"`
+	Sidecar         decisionContainerReceipt `json:"sidecar"`
+	BridgePresent   bool                     `json:"bridgePresent"`
+	BridgeID        string                   `json:"bridgeID"`
+	BridgeOwned     bool                     `json:"bridgeOwned"`
+	BridgeLocal     bool                     `json:"bridgeLocal"`
+	BridgeDriver    bool                     `json:"bridgeDriver"`
+	BridgeInternal  bool                     `json:"bridgeInternal"`
+	BridgeIngress   bool                     `json:"bridgeIngress"`
+	EndpointCount   int                      `json:"endpointCount"`
+	BridgeEngine    decisionEndpointReceipt  `json:"bridgeEngine"`
+	BridgeSidecar   decisionEndpointReceipt  `json:"bridgeSidecar"`
+	ExecPresent     bool                     `json:"execPresent"`
+	ExecRunning     bool                     `json:"execRunning"`
+	ExecExitCode    int                      `json:"execExitCode"`
+	ExecContainerID string                   `json:"execContainerID"`
+	StderrSHA256    string                   `json:"stderrSHA256"`
+	HelperCode      string                   `json:"helperCode"`
+}
+
+type decisionQueryRefusal struct {
+	Stage, Code, OriginalSHA256 string
+	Runtime                     decisionRuntimeReceipt
+	original                    error
+}
+
+func (e *decisionQueryRefusal) Error() string {
+	return fmt.Sprintf("decision query refused stage=%s code=%s originalSHA256=%s", e.Stage, e.Code, e.OriginalSHA256)
+}
+
+func (e *decisionQueryRefusal) Unwrap() error { return e.original }
+
+func decisionDigest(value any) string {
+	body, err := json.Marshal(value)
+	if err != nil {
+		return "unavailable"
+	}
+	sum := sha256.Sum256(body)
+	return hex.EncodeToString(sum[:])
+}
+
+func decisionDiagnosticID(value string) string {
+	if value == "" || regexp.MustCompile(`^(sha256:)?[a-f0-9]{64}$`).MatchString(value) {
+		return value
+	}
+	return "malformed"
+}
+
+func decisionEndpoint(present bool, id, address, mac string) decisionEndpointReceipt {
+	result := decisionEndpointReceipt{Present: present, ID: decisionDiagnosticID(id)}
+	if address != "" {
+		parsed, err := netip.ParsePrefix(address)
+		if err != nil {
+			if host, e := netip.ParseAddr(address); e == nil && host.Is4() && host.IsPrivate() {
+				result.Address = host.String()
+			} else {
+				result.Address = "malformed"
+			}
+		} else if parsed.Addr().Is4() && parsed.Addr().IsPrivate() {
+			result.Address = parsed.String()
+		} else {
+			result.Address = "malformed"
+		}
+	}
+	if mac != "" {
+		if regexp.MustCompile(`^[a-fA-F0-9]{2}(:[a-fA-F0-9]{2}){5}$`).MatchString(mac) {
+			result.MAC = strings.ToLower(mac)
+		} else {
+			result.MAC = "malformed"
+		}
+	}
+	return result
+}
+
+func decisionContainer(info container.InspectResponse, networkID string) decisionContainerReceipt {
+	result := decisionContainerReceipt{Present: info.ContainerJSONBase != nil, ConfigSHA256: decisionDigest(info.Config)}
+	if info.ContainerJSONBase == nil {
+		return result
+	}
+	result.ID, result.Image = decisionDiagnosticID(info.ID), decisionDiagnosticID(info.Image)
+	result.HostSHA256, result.MountsSHA256 = decisionDigest(info.HostConfig), decisionDigest(info.Mounts)
+	if info.State != nil {
+		result.Running, result.Restarting, result.PID = info.State.Running, info.State.Restarting, info.State.Pid
+	}
+	if info.NetworkSettings != nil {
+		result.NetworkCount = len(info.NetworkSettings.Networks)
+		for _, endpoint := range info.NetworkSettings.Networks {
+			if endpoint != nil && endpoint.NetworkID == networkID {
+				result.Endpoint = decisionEndpoint(true, endpoint.EndpointID, endpoint.IPAddress, endpoint.MacAddress)
+			}
+		}
+	}
+	return result
+}
+
+func (s *decisionSidecar) bridgeReceipt(nw network.Inspect) decisionRuntimeReceipt {
+	engine, enginePresent := nw.Containers[s.engineID]
+	sidecar, sidecarPresent := nw.Containers[s.containerID]
+	return decisionRuntimeReceipt{BridgePresent: nw.ID != "", BridgeID: decisionDiagnosticID(nw.ID),
+		BridgeOwned: owned(nw.Labels, s.spec), BridgeLocal: nw.Scope == "local", BridgeDriver: nw.Driver == "bridge",
+		BridgeInternal: nw.Internal, BridgeIngress: nw.Ingress, EndpointCount: len(nw.Containers),
+		BridgeEngine:  decisionEndpoint(enginePresent, engine.EndpointID, engine.IPv4Address, engine.MacAddress),
+		BridgeSidecar: decisionEndpoint(sidecarPresent, sidecar.EndpointID, sidecar.IPv4Address, sidecar.MacAddress)}
+}
+
+func decisionRefusal(stage string, original error, receipt decisionRuntimeReceipt) error {
+	code := map[string]string{
+		"question target differs from the captured engine endpoint":   "target_changed",
+		"sidecar exact identity changed":                              "sidecar_identity_changed",
+		"sidecar isolation or bounds changed":                         "sidecar_bounds_changed",
+		"sidecar bridge or client identity changed":                   "sidecar_endpoint_changed",
+		"owned DNS container identity changed":                        "engine_identity_changed",
+		"owned DNS container isolation or resource contract changed":  "engine_isolation_changed",
+		"owned DNS privilege or resource bound changed":               "engine_bounds_changed",
+		"owned DNS loopback publication or bridge membership changed": "engine_publication_or_membership_changed",
+		"owned DNS bridge identity changed":                           "engine_network_changed",
+		"owned DNS persistent mount identity changed":                 "engine_mount_changed",
+		"exact ordinary owned bridge and two endpoints required":      "bridge_owner_or_roster_changed",
+		"owned engine bridge endpoint differs":                        "engine_endpoint_changed",
+		"observed default-client bridge endpoint differs":             "client_endpoint_changed",
+	}[original.Error()]
+	if code == "" {
+		code = "unreported_native_error"
+		if errors.Is(original, context.Canceled) {
+			code = "cancelled"
+		} else if errors.Is(original, context.DeadlineExceeded) {
+			code = "deadline"
+		} else if errdefs.IsNotFound(original) {
+			code = "native_not_found"
+		}
+	}
+	sum := sha256.Sum256([]byte(original.Error()))
+	return &decisionQueryRefusal{Stage: stage, Code: code, OriginalSHA256: hex.EncodeToString(sum[:]), Runtime: receipt, original: original}
+}
+
+func decisionHelperCode(body []byte) string {
+	for message, code := range map[string]string{
+		"owned engine DNS connection failed\n":                                             "dns_connection_failed",
+		"owned engine DNS exchange failed\n":                                               "dns_exchange_failed",
+		"DNS response lacks the exact fixture question and single successful answer\n":     "dns_response_shape_changed",
+		"DNS answer owner/type/class differs\n":                                            "dns_answer_identity_changed",
+		"DNS answer is outside A/AAAA fixture bodies\n":                                    "dns_answer_type_changed",
+		"DNS answer is neither the owned upstream value nor the explicit null-IP denial\n": "dns_answer_value_changed",
+	} {
+		if string(body) == message {
+			return code
+		}
+	}
+	if len(body) == 0 {
+		return "empty"
+	}
+	return "unreported_helper_error"
+}
+
 func (s *decisionSidecar) labels() map[string]string {
 	return map[string]string{decisionLabel: s.nonce, "io.justdashboard.dns.decision-helper": s.digest}
 }
@@ -301,14 +477,42 @@ func (s *decisionSidecar) cleanup(ctx context.Context) error {
 }
 
 func (s *decisionSidecar) bridge(ctx context.Context) error {
-	if _, err := s.d.containerIdentity(ctx, s.spec, s.resources); err != nil {
-		return err
+	_, err := s.bridgeRead(ctx)
+	return err
+}
+
+func (s *decisionSidecar) bridgeRead(ctx context.Context) (decisionRuntimeReceipt, error) {
+	info, err := s.d.containerIdentity(ctx, s.spec, s.resources)
+	engine := decisionContainer(info, s.networkID)
+	if err != nil {
+		receipt := decisionRuntimeReceipt{Engine: engine}
+		return receipt, decisionRefusal("engine_identity", err, receipt)
 	}
 	nw, err := s.d.cli.NetworkInspect(ctx, s.networkID, network.InspectOptions{})
+	receipt := s.bridgeReceipt(nw)
+	receipt.Engine = engine
 	if err != nil {
-		return err
+		return receipt, decisionRefusal("bridge_inspect", err, receipt)
 	}
-	return s.bridgeIdentity(nw)
+	if err = s.bridgeIdentity(nw); err != nil {
+		return receipt, decisionRefusal("bridge_identity", err, receipt)
+	}
+	return receipt, nil
+}
+
+func (s *decisionSidecar) queryGuard(ctx context.Context) (decisionRuntimeReceipt, error) {
+	info, err := s.inspect(ctx)
+	sidecar := decisionContainer(info, s.networkID)
+	if err != nil {
+		receipt := decisionRuntimeReceipt{Sidecar: sidecar}
+		return receipt, decisionRefusal("sidecar_identity", err, receipt)
+	}
+	receipt, err := s.bridgeRead(ctx)
+	receipt.Sidecar = sidecar
+	if refusal := new(decisionQueryRefusal); errors.As(err, &refusal) {
+		refusal.Runtime = receipt
+	}
+	return receipt, err
 }
 
 func (s *decisionSidecar) bridgeIdentity(nw network.Inspect) error {
@@ -330,37 +534,47 @@ func (s *decisionSidecar) bridgeIdentity(nw network.Inspect) error {
 
 func (s *decisionSidecar) query(ctx context.Context, target, name, kind, protocol string, id uint16) (decisionResult, error) {
 	if target != s.engineAddress {
-		return decisionResult{}, errors.New("question target differs from the captured engine endpoint")
+		return decisionResult{}, decisionRefusal("target", errors.New("question target differs from the captured engine endpoint"), decisionRuntimeReceipt{})
 	}
-	if _, err := s.inspect(ctx); err != nil {
-		return decisionResult{}, err
-	}
-	if err := s.bridge(ctx); err != nil {
+	receipt, err := s.queryGuard(ctx)
+	if err != nil {
 		return decisionResult{}, err
 	}
 	execution, err := s.d.cli.ContainerExecCreate(ctx, s.containerID, container.ExecOptions{User: "65534:65534", AttachStdout: true, AttachStderr: true, Cmd: []string{"/dns-fixture", "query", s.nonce, target + ":53", protocol, kind, name, fmt.Sprint(id)}})
 	if err != nil {
-		return decisionResult{}, err
+		return decisionResult{}, decisionRefusal("exec_create", err, receipt)
 	}
 	attached, err := s.d.cli.ContainerExecAttach(ctx, execution.ID, container.ExecAttachOptions{})
 	if err != nil {
-		return decisionResult{}, err
+		return decisionResult{}, decisionRefusal("exec_attach", err, receipt)
 	}
 	defer attached.Close()
 	attached.Conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	var stdout, stderr bytes.Buffer
 	if _, err = stdcopy.StdCopy(&stdout, &stderr, io.LimitReader(attached.Reader, 8193)); err != nil || stdout.Len()+stderr.Len() > 8192 {
-		return decisionResult{}, errors.New("bounded sidecar query capture failed")
+		if err == nil {
+			err = errors.New("bounded sidecar query capture failed")
+		}
+		return decisionResult{}, decisionRefusal("exec_capture", err, receipt)
 	}
 	state, err := s.d.cli.ContainerExecInspect(ctx, execution.ID)
+	stderrHash := sha256.Sum256(stderr.Bytes())
+	receipt.ExecPresent, receipt.ExecRunning, receipt.ExecExitCode, receipt.ExecContainerID = err == nil, state.Running, state.ExitCode, decisionDiagnosticID(state.ContainerID)
+	receipt.StderrSHA256, receipt.HelperCode = hex.EncodeToString(stderrHash[:]), decisionHelperCode(stderr.Bytes())
 	if err != nil || state.ContainerID != s.containerID || state.Running || state.ExitCode != 0 || stderr.Len() != 0 {
-		return decisionResult{}, errors.New("sidecar query did not terminate successfully")
+		if err == nil {
+			err = errors.New("sidecar query did not terminate successfully")
+		}
+		return decisionResult{}, decisionRefusal("exec_result", err, receipt)
 	}
 	var result decisionResult
 	decoder := json.NewDecoder(&stdout)
 	decoder.DisallowUnknownFields()
 	if err = decoder.Decode(&result); err != nil || result.ID != id || result.Name != name || result.Type != kind || result.Protocol != protocol || decoder.Decode(new(any)) != io.EOF {
-		return decisionResult{}, errors.New("sidecar query outcome lacks exact immutable identity")
+		if err == nil {
+			err = errors.New("sidecar query outcome lacks exact immutable identity")
+		}
+		return decisionResult{}, decisionRefusal("exec_output", err, receipt)
 	}
 	return result, nil
 }
@@ -389,6 +603,10 @@ func (q *decisionQueries) read(name, kind, protocol string) (decisionResult, err
 	q.count++
 	result, err := q.side.query(q.ctx, q.target, name, kind, protocol, uint16(q.count))
 	q.t.Logf("decision sequence=%d source=%s name=%s type=%s protocol=%s answer=%s success=%t", q.count, q.side.address, name, kind, protocol, result.Address, err == nil)
+	if refusal := new(decisionQueryRefusal); errors.As(err, &refusal) {
+		body, _ := json.Marshal(refusal.Runtime)
+		q.t.Logf("decision original refusal sequence=%d stage=%s code=%s originalSHA256=%s runtime=%s", q.count, refusal.Stage, refusal.Code, refusal.OriginalSHA256, body)
+	}
 	return result, err
 }
 
@@ -432,6 +650,7 @@ func (q *decisionQueries) settle(first, second decisionCase) {
 	q.ctx = ctx
 	defer func() { q.ctx = previous }()
 	consecutive := 0
+	var firstRefusal, lastRefusal error
 	for round := 0; round < decisionRounds; round++ {
 		a, e1 := q.read(first.name, "A", "udp")
 		b, e2 := q.read(second.name, "AAAA", "tcp")
@@ -442,12 +661,20 @@ func (q *decisionQueries) settle(first, second decisionCase) {
 			}
 		} else {
 			consecutive = 0
+			for _, err := range []error{e1, e2} {
+				if err != nil {
+					if firstRefusal == nil {
+						firstRefusal = err
+					}
+					lastRefusal = err
+				}
+			}
 		}
 		if ctx.Err() != nil {
 			break
 		}
 	}
-	q.t.Fatal("native compilation/cache settling did not produce two consecutive measured decisions within eight rounds/20 seconds")
+	q.t.Fatalf("native compilation/cache settling did not produce two consecutive measured decisions within eight rounds/20 seconds; originalFirstRefusal=%v originalLastRefusal=%v", firstRefusal, lastRefusal)
 }
 
 func TestDNSServiceNativeDomainDecisions(t *testing.T) {
@@ -632,8 +859,14 @@ func TestDNSServiceNativeDomainDecisions(t *testing.T) {
 	if err = d.Verify(ctx, plan.spec(), plan.Resources); err != nil {
 		t.Fatal(err)
 	}
+	restartBefore, err := side.queryGuard(ctx)
+	if err != nil || !restartBefore.Engine.Running {
+		t.Fatal("owned restart pre-effect runtime guard", err)
+	}
+	restartBody, _ := json.Marshal(restartBefore)
+	t.Logf("decision runtime before owned restart runtime=%s", restartBody)
 	if err = d.cli.ContainerRestart(ctx, plan.Resources.ContainerID, container.StopOptions{Timeout: &seconds}); err != nil {
-		t.Fatal(err)
+		t.Fatal(decisionRefusal("owned_restart", err, restartBefore))
 	}
 	queries.settle(decisionCase{allow, false}, decisionCase{deny, true})
 	// Restart invalidates the FTL session. Renew authentication only; no

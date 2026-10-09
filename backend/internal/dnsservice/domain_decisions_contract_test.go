@@ -815,6 +815,117 @@ func TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine(t *testing.T) {
 	}
 }
 
+func TestDNSDomainDecisionRefusalRetainsOriginalReadWithoutExecOrReread(t *testing.T) {
+	id := strings.Repeat("e", 32)
+	resources := provisionIntent(id)
+	resources.NetworkID, resources.ContainerID = strings.Repeat("a", 64), strings.Repeat("c", 64)
+	spec := provisionSpec{ID: id, Owner: strings.Repeat("f", 32), Image: pinnedImages[AdGuard], ImageID: "sha256:" + strings.Repeat("1", 64), Request: ProvisionRequest{Engine: AdGuard, Username: "admin", Password: "private-native-password", ManagementPort: 43081, DNSPort: 43053, MemoryMiB: 256, CPUs: 0.5, Upstreams: []string{"192.0.2.53:5353"}}}
+	fixture := &dockerProvisionFixture{t: t, spec: spec, resources: resources, volumes: map[string]bool{}, seeds: map[string]string{}}
+	side := &decisionSidecar{nonce: "012345abcdef", digest: strings.Repeat("2", 64), imageID: "sha256:" + strings.Repeat("3", 64), containerID: strings.Repeat("b", 64), networkID: resources.NetworkID, address: "172.20.0.3", mac: "02:00:00:00:00:03", engineID: resources.ContainerID, engineAddress: "172.20.0.2", engineMAC: "02:00:00:00:00:02", spec: spec}
+	pids := int64(16)
+	sideInfo := container.InspectResponse{ContainerJSONBase: &container.ContainerJSONBase{ID: side.containerID, Name: "/jd-dns-decisions-" + side.nonce, Image: side.imageID, State: &container.State{Running: true, Pid: 200}, HostConfig: &container.HostConfig{NetworkMode: container.NetworkMode(side.networkID), ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{Memory: 64 << 20, MemorySwap: 64 << 20, NanoCPUs: 250000000, PidsLimit: &pids}, RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled}}}, Config: &container.Config{Image: side.imageID, User: "65534:65534", Entrypoint: []string{"/dns-fixture"}, Cmd: []string{"serve", side.nonce}, Labels: side.labels()}, NetworkSettings: &container.NetworkSettings{Networks: map[string]*network.EndpointSettings{"owned": {NetworkID: side.networkID, EndpointID: strings.Repeat("4", 64), IPAddress: side.address, MacAddress: side.mac}}}}
+	bridge := network.Inspect{ID: side.networkID, Driver: "bridge", Scope: "local", Labels: ownedLabels(spec), Containers: map[string]network.EndpointResource{side.engineID: {EndpointID: strings.Repeat("5", 64), IPv4Address: side.engineAddress + "/16", MacAddress: side.engineMAC}, side.containerID: {EndpointID: strings.Repeat("4", 64), IPv4Address: side.address + "/16", MacAddress: side.mac}}}
+	engineAddress, engineMAC, engineEndpoint := side.engineAddress, side.engineMAC, strings.Repeat("5", 64)
+	engineReads, sideReads, bridgeReads, effects := 0, 0, 0, 0
+	prepared := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/v1.51")
+		if prepared && r.Method != http.MethodGet {
+			effects++
+			http.Error(w, "refused", http.StatusConflict)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if prepared && path == "/containers/"+side.containerID+"/json" {
+			sideReads++
+			json.NewEncoder(w).Encode(sideInfo)
+			return
+		}
+		if prepared && path == "/networks/"+side.networkID {
+			bridgeReads++
+			json.NewEncoder(w).Encode(bridge)
+			return
+		}
+		if prepared && path == "/containers/"+resources.ContainerID+"/json" {
+			engineReads++
+			capture := httptest.NewRecorder()
+			fixture.serve(capture, r)
+			var info map[string]any
+			if err := json.Unmarshal(capture.Body.Bytes(), &info); err != nil {
+				t.Error(err)
+			}
+			info["NetworkSettings"] = map[string]any{"Networks": map[string]any{resources.NetworkName: map[string]any{"NetworkID": side.networkID, "EndpointID": engineEndpoint, "IPAddress": engineAddress, "MacAddress": engineMAC}}}
+			info["State"] = map[string]any{"Running": true, "Restarting": false, "Pid": 100}
+			json.NewEncoder(w).Encode(info)
+			return
+		}
+		fixture.serve(w, r)
+	}))
+	defer server.Close()
+	cli, err := client.NewClientWithOpts(client.WithHost(server.URL), client.WithVersion("1.51"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &dockerRuntime{cli: cli}
+	defer d.Close()
+	side.d = d
+	side.resources, err = d.Prepare(t.Context(), spec, provisionIntent(id), func(ProvisionResources) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.running, prepared = true, true
+	fixture.config["Env"] = []string{"TOKEN=private-native-password"}
+	before, err := side.queryGuard(t.Context())
+	if err != nil || !before.Engine.Running || before.BridgeEngine.MAC != side.engineMAC || before.BridgeSidecar.MAC != side.mac {
+		t.Fatal("complete original pre-restart receipt unavailable", before, err)
+	}
+	engineReads, sideReads, bridgeReads = 0, 0, 0
+	engineAddress, engineMAC, engineEndpoint = "172.20.0.8", "02:00:00:00:00:08", strings.Repeat("8", 64)
+	bridge.Containers[side.engineID] = network.EndpointResource{EndpointID: engineEndpoint, IPv4Address: engineAddress + "/16", MacAddress: engineMAC}
+	queries := &decisionQueries{t: t, side: side, ctx: t.Context(), target: side.engineAddress}
+	_, err = queries.read("allow.seed-012345abcdef.invalid", "A", "udp")
+	var refusal *decisionQueryRefusal
+	if !errors.As(err, &refusal) || refusal.Stage != "bridge_identity" || refusal.Code != "engine_endpoint_changed" || refusal.Unwrap().Error() != "owned engine bridge endpoint differs" {
+		t.Fatal("original stale-endpoint refusal lost its precise stage/cause", err)
+	}
+	if queries.count != 1 || engineReads != 1 || sideReads != 1 || bridgeReads != 1 || effects != 0 {
+		t.Fatal("diagnostic re-read or exec occurred after guard refusal", queries.count, engineReads, sideReads, bridgeReads, effects)
+	}
+	if refusal.Runtime.Engine.Endpoint.Address != engineAddress || refusal.Runtime.Engine.Endpoint.MAC != engineMAC || refusal.Runtime.BridgeEngine.ID != engineEndpoint || refusal.Runtime.BridgeSidecar.MAC != before.BridgeSidecar.MAC || refusal.Runtime.ExecPresent {
+		t.Fatal("failure receipt did not retain the original selected reads", refusal.Runtime)
+	}
+	retained := mustJSON(refusal.Runtime)
+	bridge.Containers[side.engineID] = network.EndpointResource{IPv4Address: "foreign-secret", MacAddress: "private-native-password"}
+	fixture.config["Env"] = []string{"TOKEN=later-unrelated-native-password"}
+	if !bytes.Equal(retained, mustJSON(refusal.Runtime)) || bytes.Contains(retained, []byte("private-native-password")) || bytes.Contains(retained, []byte("TOKEN")) || bytes.Contains(retained, []byte("foreign-secret")) || before.Engine.Endpoint.Address != side.engineAddress {
+		t.Fatal("retained original scalar diagnostics changed or disclosed native content")
+	}
+	if len(retained) > 4096 || len(refusal.Runtime.Engine.ConfigSHA256) != 64 || len(refusal.Runtime.Engine.HostSHA256) != 64 || len(refusal.Runtime.Engine.MountsSHA256) != 64 {
+		t.Fatal("scalar diagnostic receipt exceeded its fixed shape", len(retained))
+	}
+}
+
+func TestDNSDomainDecisionDiagnosticErrorsAndHelperCodesStayBounded(t *testing.T) {
+	for _, original := range []error{errors.New("native password=private-value\nquery=unrelated-name.invalid"), context.Canceled, context.DeadlineExceeded} {
+		err := decisionRefusal("exec_create", original, decisionRuntimeReceipt{})
+		var receipt *decisionQueryRefusal
+		if !errors.Is(err, original) || !errors.As(err, &receipt) || receipt.Unwrap() != original || len(receipt.OriginalSHA256) != 64 || strings.Contains(err.Error(), "private-value") || strings.Contains(err.Error(), "unrelated-name") || strings.Contains(err.Error(), "\n") {
+			t.Fatal("original native error was lost or disclosed", err)
+		}
+	}
+	if decisionHelperCode([]byte("owned engine DNS connection failed\n")) != "dns_connection_failed" || decisionHelperCode([]byte("owned engine DNS exchange failed\n")) != "dns_exchange_failed" || decisionHelperCode(nil) != "empty" {
+		t.Fatal("closed helper availability refusal was lost")
+	}
+	for _, body := range []string{"owned engine DNS connection failed\nsecret", "secret-native-password", "owned engine DNS connection failed"} {
+		if decisionHelperCode([]byte(body)) != "unreported_helper_error" {
+			t.Fatal("arbitrary stderr spoofed a controlled helper failure")
+		}
+	}
+	if got := decisionEndpoint(true, "private-value", "unrelated-name.invalid", "private-native-password"); got.ID != "malformed" || got.Address != "malformed" || got.MAC != "malformed" || strings.Contains(string(mustJSON(got)), "private") {
+		t.Fatal("untrusted native scalars escaped the closed diagnostic shape", got)
+	}
+}
+
 func decisionMockImage(side *decisionSidecar, id string) map[string]any {
 	return map[string]any{"Id": id, "Parent": "", "RepoTags": []string{side.tag}, "Config": map[string]any{"Labels": side.labels(), "User": "65534:65534", "WorkingDir": "/", "Entrypoint": []string{"/dns-fixture"}, "Cmd": []string{"serve", side.nonce}}, "Os": "linux", "Architecture": "amd64", "Size": 123, "RootFS": map[string]any{"Type": "layers", "Layers": []string{side.layerID}}}
 }

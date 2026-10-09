@@ -95,6 +95,17 @@ UDP from TCP; complete UDP/TCP evidence comes independently from the wire matric
 `transportBasis` names that boundary and AdGuard's plain encryption marker. Only controlled scalar evidence is logged; native
 credentials, unrelated queries and raw response bodies are not printed.
 
+Restart diagnostics retain one verified engine/sidecar/bridge receipt immediately before the owned
+restart and the values returned by the original query guard reads at any refusal. These closed
+receipts contain selected IDs, private IPv4/MAC/endpoint identities, running/restarting/PID state,
+roster counts and full configuration/host/mount digests; native configuration values, labels,
+credentials and unrelated names are not printed. Malformed native scalars are represented as
+`malformed`. The original error remains wrapped with its stage, a whitelisted code and SHA256;
+unknown native error text is not emitted. Exec refusals additionally retain the original inspected
+exit/running/container state, stderr digest and only an exact whitelisted helper error code. The
+settling failure retains its first and last original errors. No later native re-read replaces a
+failure receipt, and there is no endpoint rebind or guard/budget/deadline change in this preparation.
+
 ## Fixed bounds and failure ownership
 
 The static client-question ceiling is exactly **256**: five matrices × eight names × two types ×
@@ -179,6 +190,27 @@ The history correction is test-only preparation from clean assembled `c01322d1`.
 first reproduced rejection of the pinned explicit empty marker, then checks strict malformed marker
 refusal, complete A/AAAA decisions and the existing current-phase/old-same-ID boundaries. Fresh
 frozen assets and an independently reviewed wrapper are required before any later actual attempt.
+
+Clean `438830d7` was then dispatched once for AdGuard. Its first current-phase native history
+corroboration passed after questions 1–108 succeeded. After the owned restart, question attempts
+109–124 failed and the unchanged eight-round/20-second settling bound was exhausted. The 56.302-second
+failure retained zero owned Docker/process/TMP entries and unchanged host/socket/source/binaries
+and complete image inventory; Pi-hole was not dispatched. The original raw is
+`/home/ubuntu/Just-Dashboard-network-dns-decision-history-artifacts/native-decision-history-adguard.log`
+(SHA256 `312111a9230ecd090e3b9084d04f55049587546a3f3645b4357f9a5d416a5359`).
+That log omitted the original refusal and restart endpoint receipts, so it does not establish
+whether the failure came from endpoint ownership, helper/engine readiness or another original
+query stage. The diagnostic-only follow-up starts from root's assembled `f5dbbe21`, with the strict
+engine/client bridge predicates unchanged. Its pure tests demonstrate original-read retention,
+zero exec after endpoint refusal, no diagnostic re-read and closed secret-safe diagnostics. It is
+preparation for a separately reviewed bounded capture, without filtering/restart acceptance.
+
+Pinned Moby [restart](https://github.com/moby/moby/blob/v28.5.2/daemon/restart.go#L51)
+stops and starts the same container. Its [operational endpoint reset and allocation](https://github.com/moby/moby/blob/v28.5.2/daemon/container_operations.go#L565)
+clears runtime endpoint/IP/MAC fields before reconnecting networks. That source permits endpoint
+churn; it does not identify the cause of the preserved `438830d7` failure. Any later planned
+endpoint transition requires its own explicit before/after ownership/configuration evidence and
+unchanged sidecar client identity/two-endpoint roster, rather than admitting arbitrary drift.
 
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
 [the AdGuard encryption enum](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/qlog.go#L53),
