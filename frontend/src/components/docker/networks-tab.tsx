@@ -497,7 +497,7 @@ function NetworkDetailPanel({
               </Detail>
               {data.owner && (
                 <Detail label="Created by" className="text-body leading-relaxed">
-                  {ownerWords(data.owner)}
+                  <span className="block">{ownerWords(data.owner)}</span>
                   <span className="block text-hint text-muted-foreground">
                     {ownerConsequence(data.owner)}
                   </span>
