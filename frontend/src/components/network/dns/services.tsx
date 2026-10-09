@@ -437,6 +437,7 @@ function RetainedReview({
   )
   const review = dnsRetainedReview(returned, retained.data ?? screen.initial)
   const ownerId = review && !("resources" in review) ? review.connectionId : undefined
+  // History omits snapshots; wait for the retained baseline before checking its native selection.
   const owner = usePoll(
     async (signal) => {
       if (!review || "resources" in review) throw new Error("No native change is selected.")
@@ -447,7 +448,7 @@ function RetainedReview({
     },
     5000,
     [ownerId, screen.id, review && !("resources" in review) ? review.generation : undefined],
-    { enabled: Boolean(ownerId) },
+    { enabled: Boolean(ownerId && review && !("resources" in review) && review.before) },
   )
   const ownerProblem =
     review && !("resources" in review) && review.state === "planned"
