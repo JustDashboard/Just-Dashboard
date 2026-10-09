@@ -347,7 +347,7 @@ func (s *Service) RepairDrift(ctx context.Context, req DriftRepairRequest, clien
 		}
 	}
 	if len(chains) > 0 {
-		if _, err := s.requireWritable(ctx); err != nil {
+		if _, err := s.requireWritable(ctx, sp); err != nil {
 			return nil, err
 		}
 	}
@@ -467,7 +467,7 @@ func (s *Service) RepairDrift(ctx context.Context, req DriftRepairRequest, clien
 				return recover(err)
 			}
 		} else {
-			if _, err := s.requireWritable(ctx); err != nil {
+			if _, err := s.requireWritable(ctx, sp); err != nil {
 				return recover(err)
 			}
 			if err := repairSelectedAdmission(ctx, item, r, func(ch AdmissionChainState, listing string) error {

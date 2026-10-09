@@ -441,7 +441,7 @@ func TestLiveTheFullGatewayThroughTheRealServiceCode(t *testing.T) {
 	if _, ok := gwFetchFrom(t, sv, "http://10.77.0.2:8000/"); ok {
 		t.Fatal("the server reached the client through a DROP policy with no NAT entry")
 	}
-	nat, err := svc.AddNAT(ctx, NATRequest{Name: "lab", Source: "10.88.0.0/24", Interface: "gwc"}, "test")
+	nat, err := svc.AddNAT(ctx, NATRequest{Name: "lab", Source: "10.88.0.0/24", Interface: "gwc"}, "", "test")
 	if err != nil {
 		t.Fatal(err)
 	}

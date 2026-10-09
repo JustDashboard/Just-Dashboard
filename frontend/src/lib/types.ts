@@ -7734,6 +7734,93 @@ export type SuricataView = {
 
 type NetworkMade = { createdAt: string; createdBy?: string }
 
+/** An entry's count across gateway table replacements. */
+export type CounterTotal = {
+  packets: number
+  bytes: number
+  /** When the recorder first saw the rule; earlier traffic is not in it. */
+  since: string | null
+  resets: number
+}
+
+/** Labels the live figures and the totals a gateway or protection read shows. */
+export type CounterEvidence = {
+  /** The loaded table's kernel handle; 0 when not loaded. */
+  generation: number
+  observedAt: string | null
+  persistent: boolean
+  gap: string
+}
+
+/** What is installed for an entry, apart from whether a visitor reaches it. */
+export type EntryReadiness = {
+  policy: "installed" | "partial" | "missing" | "drift" | "not_loaded" | "disabled"
+  rules: number
+  expected: number
+  forwarding: boolean
+  admission: "present" | "absent" | "unreadable" | "unsupported" | "not_required"
+  ready: boolean
+  /** Only an external measurement after the last change moves it off unverified. */
+  reachability: "verified" | "failed" | "unverified"
+  reason: string
+}
+
+/** Auto source translation re-checked against the host now. */
+export type NATDecision = {
+  stored: boolean
+  current: boolean | null
+  drift: boolean
+  reason: string
+  error?: string
+}
+
+/** The last check of a forward's target from this server. */
+export type ForwardCheck = {
+  status: "answering" | "refused" | "timeout" | "unreachable" | "error" | "not_measurable"
+  detail: string
+  target: string
+  protocol: string
+  checkedAt: string
+  basis: string
+  current: boolean
+}
+
+/** The external measurement that speaks for a forward's public port. */
+export type ExternalEvidence = {
+  status: "connected" | "failed"
+  checkId: string
+  vantage: string
+  location: string
+  placement: string
+  address: string
+  port: number
+  family: string
+  checkedAt: string
+  detail: string
+  current: boolean
+  basis: string
+}
+
+/** One foreign chain's modeled verdict for one entry's flow. */
+export type FlowLayer = {
+  family: string
+  table: string
+  chain: string
+  hook: string
+  verdict: "clear" | "restricted" | "blocked" | "unknown"
+  rule: number
+  path?: string
+  reason: string
+}
+
+export type EntryFlow = {
+  entry: string
+  name: string
+  direction: "inbound" | "outbound"
+  verdict: "clear" | "blocked" | "unknown"
+  layers: FlowLayer[]
+}
+
 export type GatewayCapability = {
   writable: boolean
   reason?: string
@@ -7749,6 +7836,10 @@ export type GatewayCapability = {
     policy: string
     status: "owned" | "admitted" | "checked" | "blocked" | "unknown"
     reason?: string
+    type?: string
+    rules?: number
+    /** The rule forms the generic check could not read, by position. */
+    uncertain?: string[]
   }[]
   unknownLayers?: string[]
   /** The drop-forward chain that makes the gateway read-only, and the accept to add there. */
@@ -7771,8 +7862,14 @@ export type GatewayForward = NetworkMade & {
   /** What `auto` resolved to: whether the visitor's address is replaced. */
   masquerade: boolean
   enabled: boolean
+  changedAt?: string | null
   packets: number
   bytes: number
+  total?: CounterTotal
+  readiness?: EntryReadiness
+  decision?: NATDecision
+  check?: ForwardCheck
+  external?: ExternalEvidence
 }
 
 export type GatewayNAT = NetworkMade & {
@@ -7782,11 +7879,21 @@ export type GatewayNAT = NetworkMade & {
   interface: string
   /** "" masquerades behind the interface's own address. */
   toAddress: string
+  mode?: "masquerade" | "snat" | "one-to-one" | "nptv6"
+  /** A mapping's public side. */
+  translated?: string
+  /** Empty translates traffic to every destination. */
+  destinations?: string[]
   /** What made it when not a person: "wireguard:wg0". */
   owner: string
   enabled: boolean
   packets: number
   bytes: number
+  inPackets?: number
+  inBytes?: number
+  total?: CounterTotal
+  inTotal?: CounterTotal
+  readiness?: EntryReadiness
 }
 
 export type GatewayView = {
@@ -7808,6 +7915,44 @@ export type GatewayView = {
   }
   forwards: GatewayForward[]
   nat: GatewayNAT[]
+  counters?: CounterEvidence
+  flows?: EntryFlow[]
+}
+
+/** One consequence of a proposed change. */
+export type GatewayImpact = {
+  severity: "refused" | "warning" | "info"
+  kind: string
+  message: string
+  entry?: string
+}
+
+/** Tracked connections a change concerns. */
+export type ConnectionImpact = {
+  tracked: number
+  sources: number
+  sample: string[]
+  truncated: boolean
+  error?: string
+}
+
+export type GatewayPreview = {
+  valid: boolean
+  error?: string
+  forward?: GatewayForward
+  nat?: GatewayNAT
+  impacts: GatewayImpact[]
+  connections?: ConnectionImpact
+  flows: EntryFlow[]
+}
+
+/** How many sources a limit's per-source sets track now. */
+export type LimitMeters = {
+  rateSources: number | null
+  connSources: number | null
+  capacity: number
+  checkedAt: string
+  error?: string
 }
 
 export type ProtectionLimit = NetworkMade & {
@@ -7820,11 +7965,66 @@ export type ProtectionLimit = NetworkMade & {
   burst: number
   perSource: boolean
   maxConnections: number
+  /** The ceiling for every source together; 0 is none. */
+  globalConnections?: number
+  profile?: string
   action: "drop" | "reject"
   enabled: boolean
   /** What it refused since the table was loaded. */
   packets: number
   bytes: number
+  globalPackets?: number
+  total?: CounterTotal
+  meters?: LimitMeters
+}
+
+/** A starting point for a limit on a common service. */
+export type LimitProfile = {
+  id: string
+  name: string
+  why: string
+  protocol: "tcp" | "udp" | "both"
+  ports: string
+  rate: number
+  per: "second" | "minute" | "hour"
+  burst: number
+  perSource: boolean
+  maxConnections: number
+  globalConnections: number
+  action: "drop" | "reject"
+}
+
+/** Where one URL of a fetched list came from. */
+export type BlocklistSource = {
+  url: string
+  country?: string
+  family?: string
+  status: "ok" | "absent" | "unchanged"
+  fetchedAt: string
+  bytes: number
+  sha256?: string
+  networks: number
+  skipped: number
+  etag?: string
+  lastModified?: string
+  signed?: boolean
+}
+
+export type BlocklistDiff = {
+  at: string
+  added: number
+  removed: number
+  addedSample?: string[]
+  removedSample?: string[]
+  baseline: boolean
+}
+
+export type BlocklistCoverage = {
+  ipv4Addresses: number
+  ipv4Share: number
+  ipv6Slash48s: number
+  ipv4Networks: number
+  ipv6Networks: number
 }
 
 export type ProtectionBlocklist = NetworkMade & {
@@ -7857,6 +8057,32 @@ export type ProtectionBlocklist = NetworkMade & {
   containsYou: boolean
   packets: number
   bytes: number
+  total?: CounterTotal
+  /** A fetched list's schedule: 6h, 12h, 24h, 72h, 168h or manual. */
+  refresh?: string
+  nextRefresh?: string | null
+  stale?: boolean
+  lastAttempt?: string | null
+  failures?: number
+  sources?: BlocklistSource[]
+  lastDiff?: BlocklistDiff | null
+  integrity?: "signed" | "https" | "local"
+  signatureUrl?: string
+  coverage?: BlocklistCoverage
+}
+
+/** A network let past the drops for a scope, a reason and maybe until a time. */
+export type ProtectionException = NetworkMade & {
+  id: number
+  address: string
+  /** "all" or "blocklist:<id>". */
+  scope: string
+  scopeName: string
+  reason: string
+  expiresAt: string | null
+  expired: boolean
+  packets: number
+  bytes: number
 }
 
 export type ProtectionSetting = {
@@ -7876,6 +8102,25 @@ export type ProtectionSetting = {
   atRecommended: boolean
 }
 
+/** A set of kernel values for a kind of host, staged like hand-edited ones. */
+export type KernelProfile = {
+  id: string
+  name: string
+  why: string
+  values: Record<string, string>
+}
+
+/** The per-interface protections, as each device actually runs them. */
+export type InterfaceReading = {
+  interfaces: {
+    name: string
+    forwarding: boolean
+    values: { key: string; own: string; all: string; effective: string; differs: boolean }[]
+  }[]
+  rules: { key: string; combine: string; explain: string }[]
+  omitted: number
+}
+
 export type Conntrack = {
   available: boolean
   count: number
@@ -7884,21 +8129,119 @@ export type Conntrack = {
   level: "ok" | "warning" | "critical"
 }
 
+export type ProtectionTrusted = {
+  address: string
+  origin: "loopback" | "allowlist" | "you" | "kept"
+  removable: boolean
+  reason?: string
+  addedBy?: string
+  addedAt?: string | null
+  expiresAt?: string | null
+  expired?: boolean
+  confirmedAt?: string | null
+  confirmedBy?: string
+  lastSeen?: string | null
+  stale?: boolean
+}
+
 export type ProtectionView = {
   loaded: boolean
   limits: ProtectionLimit[]
   blocklists: ProtectionBlocklist[]
   presets: { id: string; name: string; url: string; description: string }[]
-  trusted: {
-    address: string
-    origin: "loopback" | "allowlist" | "you" | "kept"
-    removable: boolean
-  }[]
+  trusted: ProtectionTrusted[]
   client: string
   clientTrusted: boolean
   settings: ProtectionSetting[]
   resetNote: string
   conntrack: Conntrack
+  exceptions?: ProtectionException[]
+  profiles?: LimitProfile[]
+  kernelProfiles?: KernelProfile[]
+  interfaces?: InterfaceReading
+  counters?: CounterEvidence
+}
+
+export type BlocklistPreview = {
+  valid: boolean
+  error?: string
+  refused?: string
+  networks: number
+  coverage: BlocklistCoverage
+  diff?: BlocklistDiff
+  sources: BlocklistSource[]
+  trustedOverlap: string[]
+  localOverlap: { network: string; what: string }[]
+  connections?: ConnectionImpact
+  impacts: GatewayImpact[]
+  geography?: { source: string; basis: string; limits: string[]; countries: string[] }
+}
+
+export type SessionPreview = {
+  network: string
+  blocklist: string
+  connections: ConnectionImpact
+  refused?: string
+  basis: string
+}
+
+export type SessionResult = {
+  network: string
+  matched: number
+  ended: number
+  failed: number
+  truncated: boolean
+  error?: string
+  basis: string
+}
+
+export type SeriesPoint = { t: number; value: number; bytes?: number }
+
+export type PressureCount = { key: string; count: number; share: number }
+
+export type ProtectionPressure = {
+  conntrack: Conntrack
+  stats: {
+    cpus: number
+    found: number
+    invalid: number
+    insert: number
+    insertFailed: number
+    drop: number
+    earlyDrop: number
+    error: number
+    searchRestart: number
+    clashResolve: number
+    chainTooLong: number
+  } | null
+  statsError?: string
+  breakdown: {
+    read: number
+    truncated: boolean
+    byProtocol: PressureCount[]
+    byState: PressureCount[]
+    topSources: PressureCount[]
+    topPorts: PressureCount[]
+    unreplied: number
+    assured: number
+    error?: string
+  }
+  series: Record<string, SeriesPoint[]>
+  since: string
+  causes: { kind: string; severity: "info" | "warning"; message: string; evidence: string }[]
+  limits: {
+    id: number
+    name: string
+    ports: string
+    maxConnections: number
+    globalConnections: number
+    open: number
+    topSources: PressureCount[]
+    refused: SeriesPoint[]
+    meters?: LimitMeters
+  }[]
+  checkedAt: string
+  basis: string
 }
 
 export type QdiscStat = {

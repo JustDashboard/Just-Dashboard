@@ -123,16 +123,19 @@ func (s *Service) driftGateway(ctx context.Context, sp *Spec, rendered string, r
 			mismatch = append(mismatch, "missing chain "+name)
 			continue
 		}
-		hook, typ, priority := name, "filter", "-10"
-		switch name {
-		case "pre":
+		hook, typ, priority, policy := name, "filter", "-10", "accept"
+		switch {
+		case name == "pre":
 			hook, priority = "prerouting", "-150"
-		case "nat_pre":
+		case name == "nat_pre":
 			hook, typ, priority = "prerouting", "nat", "-110"
-		case "nat_post":
+		case name == "nat_post":
 			hook, typ, priority = "postrouting", "nat", "90"
+		case strings.HasPrefix(name, "bx_"):
+			// A list's exception chain is reached by a jump, not a hook.
+			hook, typ, priority, policy = "", "", "", ""
 		}
-		if c.hook != hook || c.typ != typ || c.policy != "accept" || c.priority != priority {
+		if c.hook != hook || c.typ != typ || c.policy != policy || c.priority != priority {
 			mismatch = append(mismatch, "changed base chain "+name)
 		}
 		if ruleCounts[name] != count {

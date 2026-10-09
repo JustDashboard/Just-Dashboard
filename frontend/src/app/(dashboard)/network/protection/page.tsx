@@ -5,8 +5,13 @@ import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
 import { Plus, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
-import type { ProtectionBlocklist, ProtectionLimit, ProtectionView } from "@/lib/types"
+import { bytes, calendarDate, plural } from "@/lib/format"
+import type {
+  ProtectionBlocklist,
+  ProtectionLimit,
+  ProtectionPressure,
+  ProtectionView,
+} from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -14,14 +19,19 @@ import { StatGrid, StatTile } from "@/components/stat-tile"
 import { EmptyNote, ErrorState, LoadingPanel, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
+import { TileTrend } from "@/components/metrics/sparkline"
 import { BlocklistList, BlocklistModal } from "@/components/network/protection/blocklists"
+import { ExceptionList, ExceptionModal } from "@/components/network/protection/exceptions"
+import { PressurePanel } from "@/components/network/protection/pressure"
 import { KernelSettings } from "@/components/network/protection/kernel"
 import { LimitList, LimitModal } from "@/components/network/protection/limits"
 import { levelTone } from "@/components/network/protection/reading"
 import { TrustedList } from "@/components/network/protection/trusted"
 
 type Editor =
-  { kind: "list"; list?: ProtectionBlocklist } | { kind: "limit"; limit?: ProtectionLimit }
+  | { kind: "list"; list?: ProtectionBlocklist }
+  | { kind: "limit"; limit?: ProtectionLimit }
+  | { kind: "exception" }
 
 /**
  * What this server refuses before anything answers.
@@ -48,6 +58,14 @@ export default function NetworkProtectionPage() {
     (signal) => get("/network/protection", undefined, signal),
     10_000,
   )
+  // The table's breakdown names who connects, so it is an administrator's
+  // reading, and slower: it walks the whole connection table.
+  const pressure = usePoll<ProtectionPressure>(
+    (signal) => get("/network/protection/pressure", undefined, signal),
+    30_000,
+    [],
+    { enabled: admin },
+  )
   const [editor, setEditor] = useState<Editor>()
 
   if (!protection.data) {
@@ -73,6 +91,19 @@ export default function NetworkProtectionPage() {
   const failing = lists.filter((l) => l.error).length
   const entries = lists.some((l) => l.enabled) || view.limits.some((l) => l.enabled)
   const table = view.conntrack
+  const listTotal = lists.reduce((n, l) => n + (l.total?.packets ?? 0), 0)
+  const limitTotal = view.limits.reduce((n, l) => n + (l.total?.packets ?? 0), 0)
+  // The earliest a group's totals reach; a group with none yet says only what
+  // the loaded table counted.
+  const sinceOf = (entries: { total?: { since: string | null } }[]) =>
+    entries
+      .map((e) => e.total?.since)
+      .filter((t): t is string => Boolean(t))
+      .sort()[0]
+  const listsSince = sinceOf(lists)
+  const limitsSince = sinceOf(view.limits)
+  const counts = pressure.data?.series["conntrack:count"]?.map((p) => p.value) ?? []
+  const exceptions = view.exceptions ?? []
 
   return (
     <Page className="animate-rise">
@@ -97,13 +128,21 @@ export default function NetworkProtectionPage() {
           label="Dropped by blocklists"
           value={<NumberTicker value={byLists} />}
           trailing="packets"
-          hint={`${bytes(byListsBytes)} since the table was loaded`}
+          hint={
+            listsSince
+              ? `${bytes(byListsBytes)} since load · ${listTotal.toLocaleString()} since ${calendarDate(listsSince)}`
+              : `${bytes(byListsBytes)} since the table was loaded`
+          }
         />
         <StatTile
           label="Refused by limits"
           value={<NumberTicker value={byLimits} />}
           trailing="packets"
-          hint={`${bytes(byLimitsBytes)} · ${plural(view.limits.filter((l) => l.enabled).length, "limit")} in force`}
+          hint={
+            limitsSince
+              ? `${bytes(byLimitsBytes)} since load · ${limitTotal.toLocaleString()} since ${calendarDate(limitsSince)}`
+              : `${bytes(byLimitsBytes)} · ${plural(view.limits.filter((l) => l.enabled).length, "limit")} in force`
+          }
         />
         <StatTile
           label="Networks blocked"
@@ -129,6 +168,16 @@ export default function NetworkProtectionPage() {
           tone={table.available ? levelTone(table.level) : "default"}
           meter={table.available ? table.percent : undefined}
           meterLabel="Connection table fullness"
+          trend={
+            table.available && counts.length > 1 ? (
+              <TileTrend
+                values={counts}
+                max={table.max}
+                label="Tracked connections over the last day"
+                color="var(--chart-1)"
+              />
+            ) : undefined
+          }
           hint={
             table.available
               ? `${table.count.toLocaleString()} of ${table.max.toLocaleString()} connections`
@@ -205,10 +254,34 @@ export default function NetworkProtectionPage() {
           ) : (
             <LimitList
               limits={view.limits}
+              pressure={pressure.data}
               onOpen={(limit) => setEditor({ kind: "limit", limit })}
               onChanged={protection.refresh}
             />
           )}
+        </PanelBody>
+      </Panel>
+
+      <Panel plain>
+        <PanelHeader
+          title="Exceptions"
+          actions={
+            <>
+              <span className="numeric text-hint text-muted-foreground">{exceptions.length}</span>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() => setEditor({ kind: "exception" })}
+                disabled={!admin || !can("destructive")}
+              >
+                <Plus aria-hidden />
+                New exception
+              </Button>
+            </>
+          }
+        />
+        <PanelBody flush>
+          <ExceptionList exceptions={exceptions} onChanged={protection.refresh} />
         </PanelBody>
       </Panel>
 
@@ -237,16 +310,34 @@ export default function NetworkProtectionPage() {
           <KernelSettings
             settings={view.settings}
             resetNote={view.resetNote}
+            profiles={view.kernelProfiles}
+            interfaces={view.interfaces}
             onChanged={protection.refresh}
           />
         </PanelBody>
       </Panel>
+
+      {admin && (
+        <Panel plain>
+          <PanelHeader title="Connection table" />
+          <PanelBody>
+            {pressure.data ? (
+              <PressurePanel pressure={pressure.data} />
+            ) : pressure.error ? (
+              <ErrorState error={pressure.error} onRetry={pressure.refresh} />
+            ) : (
+              <LoadingPanel />
+            )}
+          </PanelBody>
+        </Panel>
+      )}
 
       {editor?.kind === "list" && (
         <BlocklistModal
           key={editor.list?.id ?? "new"}
           list={editor.list}
           presets={view.presets}
+          exceptions={exceptions.filter((e) => e.scope === `blocklist:${editor.list?.id}`)}
           onOpenChange={(open) => !open && setEditor(undefined)}
           onSaved={protection.refresh}
         />
@@ -255,6 +346,15 @@ export default function NetworkProtectionPage() {
         <LimitModal
           key={editor.limit?.id ?? "new"}
           limit={editor.limit}
+          profiles={view.profiles}
+          capacity={pressure.data?.limits.find((l) => l.id === editor.limit?.id)}
+          onOpenChange={(open) => !open && setEditor(undefined)}
+          onSaved={protection.refresh}
+        />
+      )}
+      {editor?.kind === "exception" && (
+        <ExceptionModal
+          lists={lists}
           onOpenChange={(open) => !open && setEditor(undefined)}
           onSaved={protection.refresh}
         />

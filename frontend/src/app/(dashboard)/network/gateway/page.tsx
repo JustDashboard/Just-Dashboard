@@ -5,7 +5,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useCallback, useState } from "react"
 import { Plus } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
+import { bytes, calendarDate, plural, relativeTime } from "@/lib/format"
 import type { GatewayForward, GatewayNAT, GatewayView, NetworkLink } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext, Section } from "@/components/page"
@@ -78,8 +78,23 @@ export default function NetworkGatewayPage() {
   const forwardsOn = view.forwards.filter((f) => inForce(f.enabled)).length
   const natOn = view.nat.filter((n) => inForce(n.enabled)).length
   const entries = view.forwards.length + view.nat.length
-  const packets = [...view.forwards, ...view.nat].reduce((n, e) => n + e.packets, 0)
-  const carried = [...view.forwards, ...view.nat].reduce((n, e) => n + e.bytes, 0)
+  const packets = [...view.forwards, ...view.nat].reduce(
+    (n, e) => n + e.packets + ("inPackets" in e ? (e.inPackets ?? 0) : 0),
+    0,
+  )
+  const carried = [...view.forwards, ...view.nat].reduce(
+    (n, e) => n + e.bytes + ("inBytes" in e ? (e.inBytes ?? 0) : 0),
+    0,
+  )
+  const totals = [
+    ...view.forwards.map((f) => f.total),
+    ...view.nat.flatMap((n) => [n.total, n.inTotal]),
+  ].filter((t) => t !== undefined)
+  const totalPackets = totals.reduce((n, t) => n + t.packets, 0)
+  const earliest = totals
+    .map((t) => t.since)
+    .filter((t): t is string => Boolean(t))
+    .sort()[0]
   const made = view.nat.filter((n) => n.owner).length
 
   return (
@@ -140,7 +155,11 @@ export default function NetworkGatewayPage() {
           label="Carried since load"
           value={<NumberTicker value={packets} />}
           trailing="packets"
-          hint={`${bytes(carried)} through forwards and NAT`}
+          hint={
+            totals.length > 0 && earliest
+              ? `${bytes(carried)} · ${totalPackets.toLocaleString()} in all since ${calendarDate(earliest)}`
+              : `${bytes(carried)} through forwards and NAT`
+          }
         />
         <StatTile
           label="Forwarding"
@@ -171,6 +190,17 @@ export default function NetworkGatewayPage() {
           }
         />
       </StatGrid>
+
+      {view.counters && view.loaded && (
+        <p className="text-hint text-muted-foreground">
+          Live counters belong to table generation{" "}
+          <span className="numeric">{view.counters.generation}</span>
+          {view.counters.observedAt
+            ? `, last recorded ${relativeTime(view.counters.observedAt)}`
+            : ", not yet recorded"}
+          . Totals carry across reloads. {view.counters.gap}
+        </p>
+      )}
 
       <Panel plain>
         <PanelHeader

@@ -193,8 +193,10 @@ packet capture metadata/artifacts (`network_packet_captures`), optional source/c
 (`network_ipam_pools`, `network_ipam_reservations`), private native DNS investigation records
 (`network_dns_evidence`), private native DNS service connections, reviewed changes, provisions and
 resource owner identity (`network_dns_services`, `network_dns_service_changes`,
-`network_dns_service_provisions`, `network_dns_service_settings`), and socket-hour/coverage records
-(`network_flow_buckets`, `network_flow_cycles`). What the network module makes on the host is kept in
+`network_dns_service_provisions`, `network_dns_service_settings`), socket-hour/coverage records
+(`network_flow_buckets`, `network_flow_cycles`), and gateway counter totals across table generations
+with seven days of per-minute protection samples (`network_gateway_counters`,
+`network_protection_samples`). What the network module makes on the host is kept in
 `/etc/just-dashboard/network/spec.json` instead, because it describes the host and has to outlive the
 dashboard ([network module](../backend/network.md#three-rules)). The schema block in `store.go` is the authoritative column-level reference. `migrateLegacyDeployments` maps each populated
 0.6.6 project transactionally and idempotently while preserving ids, ciphertext, hooks, logs, and the old

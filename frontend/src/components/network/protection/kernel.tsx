@@ -5,7 +5,7 @@ import { useMemo, useState } from "react"
 import { del, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { ProtectionSetting } from "@/lib/types"
+import type { InterfaceReading, KernelProfile, ProtectionSetting } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormSection, InfoTip } from "@/components/form"
 import { EmptyNote } from "@/components/state"
@@ -16,9 +16,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Segments } from "@/components/deploy/settings/segments"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { InterfaceValues } from "@/components/network/protection/interfaces"
+import {
   below,
   choiceWord,
   inRange,
+  profileChanges,
   SETTING_GROUPS,
   settingGroup,
   settingWord,
@@ -42,15 +51,28 @@ type Only = "all" | "attention" | "edited"
 export function KernelSettings({
   settings,
   resetNote,
+  profiles = [],
+  interfaces,
   onChanged,
 }: {
   settings: ProtectionSetting[]
   resetNote: string
+  /** Sets of values for a kind of host, staged like hand-edited ones. */
+  profiles?: KernelProfile[]
+  /** The per-interface values the five per-device settings come to. */
+  interfaces?: InterfaceReading
   onChanged: () => void
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
   const [pending, setPending] = useState<Record<string, string>>({})
+  const [profile, setProfile] = useState<string>()
+  const stageProfile = (id: string) => {
+    const p = profiles.find((x) => x.id === id)
+    if (!p) return
+    setProfile(id)
+    setPending((current) => ({ ...current, ...profileChanges(settings, p) }))
+  }
   const [only, setOnly] = useState<Only>("all")
   const [busy, setBusy] = useState(false)
 
@@ -131,8 +153,30 @@ export function KernelSettings({
       },
     })
 
+  const chosen = profiles.find((p) => p.id === profile)
   return (
     <div className="flex min-w-0 flex-col gap-6">
+      {profiles.length > 0 && can("system.admin") && (
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <Select value={profile ?? ""} onValueChange={stageProfile}>
+            <SelectTrigger aria-label="Stage a workload profile" className="w-full sm:w-72">
+              <SelectValue placeholder="Stage a workload profile" />
+            </SelectTrigger>
+            <SelectContent>
+              {profiles.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="min-w-0 flex-1 text-hint text-muted-foreground">
+            {chosen
+              ? `${chosen.why} Staged below; nothing changes until you apply.`
+              : "A profile stages the values for a kind of host; review them and apply together."}
+          </p>
+        </div>
+      )}
       <ChipStrip aria-label="Which settings to show">
         <FilterChip selected={only === "all"} onClick={() => setOnly("all")}>
           All <ChipCount>{settings.length}</ChipCount>
@@ -195,6 +239,7 @@ export function KernelSettings({
       {shown.length === 0 && (
         <EmptyNote>Every setting is at or above its recommendation.</EmptyNote>
       )}
+      {interfaces && <InterfaceValues reading={interfaces} settings={settings} />}
 
       {/* The apply bar follows the reader, as SSH's does: a change may be
           staged at the top of the list and the rest is a screen under it. It
@@ -221,7 +266,10 @@ export function KernelSettings({
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setPending({})}
+                onClick={() => {
+                  setPending({})
+                  setProfile(undefined)
+                }}
                 disabled={busy}
                 className="max-sm:h-10"
               >

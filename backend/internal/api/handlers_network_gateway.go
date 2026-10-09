@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netvantage"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/go-chi/chi/v5"
 )
@@ -36,6 +37,10 @@ func (s *Server) mountNetworkGatewayRoutes(r chi.Router) {
 		r.Method(http.MethodPut, "/gateway/forwards/{id}", s.handle(s.handleForwardSave))
 		r.Method(http.MethodPost, "/gateway/nat", s.handle(s.handleNATSave))
 		r.Method(http.MethodPut, "/gateway/nat/{id}", s.handle(s.handleNATSave))
+		// Previews and the target check change nothing on the host; they are
+		// admin-only because they read listeners, connections and targets.
+		r.Method(http.MethodPost, "/gateway/preview", s.handle(s.handleGatewayPreview))
+		r.Method(http.MethodPost, "/gateway/verify", s.handle(s.handleForwardVerify))
 
 		r.Method(http.MethodPost, "/protection/limits", s.handle(s.handleLimitSave))
 		r.Method(http.MethodPut, "/protection/limits/{id}", s.handle(s.handleLimitSave))
@@ -43,6 +48,10 @@ func (s *Server) mountNetworkGatewayRoutes(r chi.Router) {
 		r.Method(http.MethodPut, "/protection/blocklists/{id}", s.handle(s.handleBlocklistSave))
 		r.Method(http.MethodPost, "/protection/blocklists/{id}/refresh", s.handle(s.handleBlocklistRefresh))
 		r.Method(http.MethodPost, "/protection/settings", s.handle(s.handleProtectionSettings))
+		r.Method(http.MethodPost, "/protection/preview", s.handle(s.handleBlocklistPreview))
+		r.Method(http.MethodPut, "/protection/trusted", s.handle(s.handleTrustedUpdate))
+		r.Method(http.MethodGet, "/protection/pressure", s.handle(s.handleProtectionPressure))
+		r.Method(http.MethodPost, "/protection/sessions/preview", s.handle(s.handleSessionPreview))
 
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodPost, "/gateway/admission/repair", s.handle(s.handleGatewayAdmissionRepair))
@@ -52,8 +61,213 @@ func (s *Server) mountNetworkGatewayRoutes(r chi.Router) {
 			r.Method(http.MethodDelete, "/protection/blocklists/{id}", s.handle(s.handleBlocklistDelete))
 			r.Method(http.MethodDelete, "/protection/settings/{key}", s.handle(s.handleProtectionReset))
 			r.Method(http.MethodDelete, "/protection/trusted", s.handle(s.handleTrustedRemove))
+			// An exception gives part of a blocklist away and its removal can
+			// refuse someone who relies on it; both directions are
+			// destructive. Ending sessions cannot be undone.
+			r.Method(http.MethodPost, "/protection/exceptions", s.handle(s.handleExceptionAdd))
+			r.Method(http.MethodDelete, "/protection/exceptions/{id}", s.handle(s.handleExceptionDelete))
+			r.Method(http.MethodPost, "/protection/sessions/revoke", s.handle(s.handleSessionRevoke))
 		})
 	})
+}
+
+// externalObservations are the retained external TCP measurements, for an
+// administrator's Gateway read. Missing or unready external checks leave
+// the forwards unverified rather than failing the page.
+func (s *Server) externalObservations(r *http.Request) []netx.ExternalObservation {
+	p := httpx.MustPrincipal(r)
+	if s.modules.networkVantages == nil || !p.Can(auth.CapSystemAdmin) || s.modules.networkVantages.Ready() != nil {
+		return nil
+	}
+	vantages, err := s.modules.networkVantages.Vantages(r.Context())
+	if err != nil {
+		return nil
+	}
+	checks, err := s.modules.networkVantages.Checks(r.Context())
+	if err != nil {
+		return nil
+	}
+	return externalObservationsOf(vantages, checks)
+}
+
+func externalObservationsOf(vantages []netvantage.Vantage, checks []netvantage.Check) []netx.ExternalObservation {
+	named := map[string]netvantage.Vantage{}
+	for _, v := range vantages {
+		named[v.ID] = v
+	}
+	var out []netx.ExternalObservation
+	for _, c := range checks {
+		if c.Result == nil || c.CompletedAt == nil {
+			continue
+		}
+		o := netx.ExternalObservation{
+			CheckID: c.ID, Vantage: named[c.VantageID].Name, Location: named[c.VantageID].Location, Placement: named[c.VantageID].Placement,
+			Address: c.Result.Address, Port: c.Request.Port, Family: c.Request.Family, CompletedAt: *c.CompletedAt,
+		}
+		for _, st := range c.Result.Stages {
+			if st.Name == "tcp" {
+				o.TCP, o.Detail = st.State, st.Detail
+			}
+		}
+		out = append(out, o)
+	}
+	return out
+}
+
+func (s *Server) handleGatewayPreview(w http.ResponseWriter, r *http.Request) error {
+	var req netx.GatewayPreviewRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 30*time.Second)
+	defer cancel()
+	v, err := s.modules.network.PreviewGateway(ctx, req, s.networkClient(r), s.protectedPorts(r))
+	if err != nil {
+		return mapGatewayError(err)
+	}
+	httpx.SkipAudit(r)
+	httpx.JSON(w, http.StatusOK, v)
+	return nil
+}
+
+func (s *Server) handleForwardVerify(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		ForwardID int `json:"forwardId"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.ForwardID < 1 {
+		return httpx.BadRequest("forwardId is required")
+	}
+	ctx, cancel := timeoutCtx(r, 15*time.Second)
+	defer cancel()
+	c, err := s.modules.network.VerifyForward(ctx, req.ForwardID)
+	if err != nil {
+		return mapGatewayError(err)
+	}
+	httpx.SetAudit(r, "network.forward.verify", strconv.Itoa(req.ForwardID), map[string]any{"target": c.Target, "status": c.Status})
+	httpx.JSON(w, http.StatusOK, c)
+	return nil
+}
+
+func (s *Server) handleBlocklistPreview(w http.ResponseWriter, r *http.Request) error {
+	var req netx.BlocklistPreviewRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	// A country or feed preview fetches like a save does.
+	ctx, cancel := timeoutCtx(r, 3*time.Minute)
+	defer cancel()
+	v, err := s.modules.network.PreviewBlocklist(ctx, req, s.networkClient(r))
+	if err != nil {
+		return mapGatewayError(err)
+	}
+	// A fetched preview reaches out to the feed, so it is recorded; it
+	// changes nothing here.
+	httpx.SetAudit(r, "network.blocklist.preview", req.List.Name, map[string]any{"id": req.ID, "kind": req.List.Kind, "countries": req.List.Countries, "url": req.List.URL, "preset": req.List.Preset, "networks": v.Networks})
+	httpx.JSON(w, http.StatusOK, v)
+	return nil
+}
+
+func (s *Server) handleProtectionPressure(w http.ResponseWriter, r *http.Request) error {
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	v, err := s.modules.network.Pressure(ctx)
+	if err != nil {
+		return mapNetworkError(err)
+	}
+	httpx.JSON(w, http.StatusOK, v)
+	return nil
+}
+
+func (s *Server) handleSessionPreview(w http.ResponseWriter, r *http.Request) error {
+	var req netx.SessionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 20*time.Second)
+	defer cancel()
+	v, err := s.modules.network.PreviewSessions(ctx, req, s.networkClient(r))
+	if err != nil {
+		return mapGatewayError(err)
+	}
+	httpx.SkipAudit(r)
+	httpx.JSON(w, http.StatusOK, v)
+	return nil
+}
+
+func (s *Server) handleSessionRevoke(w http.ResponseWriter, r *http.Request) error {
+	var req netx.SessionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	v, err := s.modules.network.RevokeSessions(ctx, req, s.networkClient(r))
+	if err != nil {
+		auditChange(r, "network.sessions.revoke", req.Network, req, err)
+		return mapGatewayError(err)
+	}
+	httpx.SetAudit(r, "network.sessions.revoke", v.Network, map[string]any{"blocklistId": req.BlocklistID, "matched": v.Matched, "ended": v.Ended, "failed": v.Failed})
+	httpx.JSON(w, http.StatusOK, v)
+	return nil
+}
+
+func (s *Server) handleExceptionAdd(w http.ResponseWriter, r *http.Request) error {
+	var req netx.ExceptionRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	v, err := s.modules.network.AddException(ctx, req, actor(r))
+	if err != nil {
+		auditChange(r, "network.exception.add", req.Address, req, err)
+		return mapGatewayError(err)
+	}
+	httpx.SetAudit(r, "network.exception.add", v.Address, req)
+	httpx.JSON(w, http.StatusOK, v)
+	return nil
+}
+
+func (s *Server) handleExceptionDelete(w http.ResponseWriter, r *http.Request) error {
+	id, err := entryID(r)
+	if err != nil || id == 0 {
+		return httpx.BadRequest("invalid id")
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	if err := s.modules.network.DeleteException(ctx, id, s.networkClient(r)); err != nil {
+		auditChange(r, "network.exception.delete", strconv.Itoa(id), nil, err)
+		return mapGatewayError(err)
+	}
+	httpx.SetAudit(r, "network.exception.delete", strconv.Itoa(id), nil)
+	httpx.NoContent(w)
+	return nil
+}
+
+func (s *Server) handleTrustedUpdate(w http.ResponseWriter, r *http.Request) error {
+	var req netx.TrustedRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	// An expiry ends trust at a fixed time, which can refuse the address
+	// after it passes; a reason or a review gives nothing away.
+	if req.ExpiresAt != "" {
+		if err := s.requireDestructive(r, "nettrusted", "setting a trusted address to expire"); err != nil {
+			return err
+		}
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	if err := s.modules.network.UpdateTrusted(ctx, req, s.networkClient(r), actor(r)); err != nil {
+		auditChange(r, "network.trusted.update", req.Address, req, err)
+		return mapGatewayError(err)
+	}
+	httpx.SetAudit(r, "network.trusted.update", req.Address, req)
+	httpx.NoContent(w)
+	return nil
 }
 
 func (s *Server) handleGatewayAdmissionRepair(w http.ResponseWriter, r *http.Request) error {
@@ -155,6 +369,7 @@ func (s *Server) handleNetworkGateway(w http.ResponseWriter, r *http.Request) er
 	if err != nil {
 		return mapNetworkError(err)
 	}
+	netx.AttachExternalEvidence(v, s.externalObservations(r))
 	httpx.JSON(w, http.StatusOK, v)
 	return nil
 }
@@ -165,6 +380,9 @@ func (s *Server) handleNetworkProtection(w http.ResponseWriter, r *http.Request)
 	v, err := s.modules.network.Protection(ctx, s.networkClient(r))
 	if err != nil {
 		return mapNetworkError(err)
+	}
+	if !httpx.MustPrincipal(r).Can(auth.CapSystemAdmin) {
+		v.HideOperatorActivity()
 	}
 	httpx.JSON(w, http.StatusOK, v)
 	return nil
@@ -239,10 +457,10 @@ func (s *Server) handleNATSave(w http.ResponseWriter, r *http.Request) error {
 	defer cancel()
 	action, v := "network.nat.add", netx.NATView{}
 	if id == 0 {
-		v, err = s.modules.network.AddNAT(ctx, req, actor(r))
+		v, err = s.modules.network.AddNAT(ctx, req, s.networkClient(r), actor(r))
 	} else {
 		action = "network.nat.update"
-		v, err = s.modules.network.UpdateNAT(ctx, id, req, actor(r))
+		v, err = s.modules.network.UpdateNAT(ctx, id, req, s.networkClient(r), actor(r))
 	}
 	if err != nil {
 		auditChange(r, action, req.Name, req, err)
@@ -349,7 +567,7 @@ func (s *Server) handleBlocklistSave(w http.ResponseWriter, r *http.Request) err
 		return mapGatewayError(err)
 	}
 	// Entries are not recorded: a manual list can be ten thousand lines.
-	httpx.SetAudit(r, action, v.Name, map[string]any{"kind": v.Kind, "countries": v.Countries, "url": v.URL, "count": v.Count, "enabled": v.Enabled})
+	httpx.SetAudit(r, action, v.Name, map[string]any{"kind": v.Kind, "countries": v.Countries, "url": v.URL, "count": v.Count, "enabled": v.Enabled, "refresh": v.Refresh, "integrity": v.Integrity})
 	httpx.JSON(w, http.StatusOK, v)
 	return nil
 }

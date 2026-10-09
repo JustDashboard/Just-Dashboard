@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { ApiError, del, post, put } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, calendarDate } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { GatewayForward, NetworkLink } from "@/lib/types"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
@@ -12,6 +12,7 @@ import { Field, FieldRow } from "@/components/form"
 import { SidePanel } from "@/components/side-panel"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
+import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -24,15 +25,20 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Segments } from "@/components/deploy/settings/segments"
 import { Endpoint, Port, TargetLogo } from "@/components/network/gateway/marks"
+import { ImpactList, useGatewayPreview } from "@/components/network/gateway/impacts"
 import { ForwardingOff, forwardingFamily } from "@/components/network/gateway/notices"
+import { ForwardReadiness } from "@/components/network/gateway/readiness"
 import {
   compact,
   forwardFacts,
   forwardRequest,
   forwardTitle,
   hostPort,
+  reachabilityWord,
+  readinessWord,
   splitList,
   targetPortOf,
+  totalWord,
   type ForwardRequest,
 } from "@/components/network/gateway/reading"
 import { useAuth } from "@/hooks/use-auth"
@@ -105,16 +111,29 @@ export function ForwardList({
             index={index}
             leading={<TargetLogo ports={f.ports} targetPort={f.targetPort} />}
             title={
-              <span className={f.enabled ? undefined : "text-muted-foreground"}>
-                <Port port={f.ports} /> <span className="text-muted-foreground">→</span>{" "}
-                <Endpoint address={f.target} port={targetPortOf(f)} />
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-2">
+                <span className={f.enabled ? undefined : "text-muted-foreground"}>
+                  <Port port={f.ports} /> <span className="text-muted-foreground">→</span>{" "}
+                  <Endpoint address={f.target} port={targetPortOf(f)} />
+                </span>
+                {f.enabled && f.readiness && readinessWord(f.readiness).tone !== "default" && (
+                  <Tag tone={readinessWord(f.readiness).tone}>
+                    {readinessWord(f.readiness).label}
+                  </Tag>
+                )}
+                {f.decision?.drift && <Tag tone="warning">auto decision drifted</Tag>}
               </span>
             }
             verb={`Edit ${forwardTitle(f)}`}
-            description={forwardFacts(f).join(" · ")}
+            description={[...forwardFacts(f), f.enabled ? reachabilityWord(f.readiness) : undefined]
+              .filter(Boolean)
+              .join(" · ")}
             trailing={
               <span className="flex items-center gap-4">
-                <span className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid">
+                <span
+                  className="numeric hidden min-w-[4.5rem] text-right font-mono text-micro leading-tight text-muted-foreground sm:grid"
+                  title={totalWord(f.total, calendarDate)}
+                >
                   <span>{compact(f.packets)} packets</span>
                   <span>{bytes(f.bytes)}</span>
                 </span>
@@ -218,6 +237,10 @@ export function ForwardSheet({
     sources: splitList(sources),
   })
   const ready = name.trim() && ports.trim() && target.trim()
+  const { preview, pending } = useGatewayPreview(
+    ready ? { kind: "forward", id: forward?.id ?? 0, forward: body() } : undefined,
+    Boolean(ready && writable),
+  )
   const submit = async () => {
     setBusy(true)
     setError(undefined)
@@ -444,6 +467,12 @@ export function ForwardSheet({
             chains, and in Docker&rsquo;s, so there is no rule to add there. The allowed sources
             above are the only filter it has.
           </Notice>
+
+          <ImpactList preview={preview} pending={pending} />
+
+          {forward && (
+            <ForwardReadiness forward={forward} writable={writable} onChanged={onSaved} />
+          )}
 
           {family && message ? (
             <ForwardingOff

@@ -2,10 +2,15 @@
 
 import { useState } from "react"
 import { del, post, put } from "@/lib/api"
-import { relativeTime } from "@/lib/format"
+import { calendarDate, relativeTime } from "@/lib/format"
 import { flag } from "@/lib/countries"
 import { notify } from "@/lib/toast"
-import type { ProtectionBlocklist, ProtectionView } from "@/lib/types"
+import type {
+  BlocklistPreview,
+  ProtectionBlocklist,
+  ProtectionException,
+  ProtectionView,
+} from "@/lib/types"
 import { Globe, ListUnordered, RefreshClockwise } from "@/components/icons"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -19,15 +24,32 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useAuth } from "@/hooks/use-auth"
 import { CountryPicker } from "@/components/network/protection/country-picker"
-import { compact, splitList } from "@/components/network/gateway/reading"
+import { compact, splitList, totalWord } from "@/components/network/gateway/reading"
+import {
+  BlocklistPreviewView,
+  Geography,
+  Provenance,
+  SessionRevoke,
+} from "@/components/network/protection/blocklist-detail"
 import {
   blocklistRequest,
   countriesWord,
+  coverageWord,
+  diffWord,
   feedName,
   isFetched,
   listWhat,
+  REFRESH_CHOICES,
+  refreshWord,
   type BlocklistRequest,
 } from "@/components/network/protection/reading"
 
@@ -136,6 +158,8 @@ export function BlocklistList({
                   {list.name}
                 </span>
                 {list.containsYou && <Tag tone="warning">holds your address</Tag>}
+                {list.integrity === "signed" && <Tag tone="success">signed</Tag>}
+                {list.stale && list.enabled && <Tag tone="warning">stale</Tag>}
                 {list.enabled && list.enforcement && (
                   <Tag tone={list.enforcement === "verified" ? "success" : "warning"}>
                     {list.enforcement === "verified"
@@ -157,6 +181,8 @@ export function BlocklistList({
                       ? `fetched ${relativeTime(list.refreshed)}`
                       : "not fetched yet"
                     : undefined,
+                  isFetched(list) && list.enabled ? refreshWord(list, relativeTime) : undefined,
+                  diffWord(list.lastDiff),
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -170,7 +196,10 @@ export function BlocklistList({
             }
             trailing={
               <span className="flex items-center gap-4">
-                <span className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid">
+                <span
+                  className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid"
+                  title={totalWord(list.total, calendarDate)}
+                >
                   <span className="text-body font-medium">{list.count.toLocaleString()}</span>
                   <span className="font-mono text-micro text-muted-foreground">
                     {compact(list.packets)} dropped
@@ -200,6 +229,11 @@ export function BlocklistList({
             onSelect={() => onOpen(list)}
           >
             {list.error && <p className="text-hint text-destructive">{list.error}</p>}
+            {coverageWord(list.coverage) && (
+              <p className="text-hint text-muted-foreground">
+                Covers {coverageWord(list.coverage)}
+              </p>
+            )}
             {list.cache && (
               <div
                 className="space-y-1 text-hint text-muted-foreground"
@@ -261,11 +295,14 @@ const KINDS: { kind: Kind; title: string; hint: string }[] = [
 export function BlocklistModal({
   list,
   presets,
+  exceptions = [],
   onOpenChange,
   onSaved,
 }: {
   list?: ProtectionBlocklist
   presets: ProtectionView["presets"]
+  /** The exceptions scoped to this list, said in its editor. */
+  exceptions?: ProtectionException[]
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
@@ -278,6 +315,12 @@ export function BlocklistModal({
   const [preset, setPreset] = useState(initial ? initial.preset : (presets[0]?.id ?? ""))
   const [url, setUrl] = useState(initial?.url ?? "")
   const [entries, setEntries] = useState(list?.entries.join("\n") ?? "")
+  const [refresh, setRefresh] = useState(list?.refresh || "24h")
+  const [signatureUrl, setSignatureUrl] = useState(list?.signatureUrl ?? "")
+  const [publicKey, setPublicKey] = useState("")
+  // A preview belongs to the body it was asked for; any edit retires it.
+  const [previewed, setPreviewed] = useState<{ key: string; preview: BlocklistPreview }>()
+  const [previewing, setPreviewing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
@@ -295,20 +338,60 @@ export function BlocklistModal({
       : kind === "feed"
         ? Boolean(preset || url.trim())
         : typed.length > 0)
+  // A signed feed keeps its key on the server; the field is filled only to
+  // change it, and left empty it keeps the one already pinned.
+  const signed = kind === "feed" && !preset && Boolean(signatureUrl.trim())
+  const body = (): BlocklistRequest => ({
+    name: (name.trim() || suggestion).slice(0, 64),
+    kind,
+    entries: kind === "manual" ? typed : [],
+    countries: kind === "country" ? countries.map((c) => c.toLowerCase()) : [],
+    url: kind === "feed" && !preset ? url.trim() : "",
+    preset: kind === "feed" ? preset : "",
+    ...(kind === "manual" ? {} : { refresh }),
+    ...(signed ? { signatureUrl: signatureUrl.trim(), publicKey: publicKey.trim() } : {}),
+  })
+  const bodyKey = JSON.stringify(body())
+  const preview = previewed?.key === bodyKey ? previewed.preview : undefined
+  const runPreview = async () => {
+    setPreviewing(true)
+    const key = bodyKey
+    try {
+      const result = await post<BlocklistPreview>("/network/protection/preview", {
+        id: list?.id ?? 0,
+        list: body(),
+      })
+      setPreviewed({ key, preview: result })
+    } catch (err) {
+      setPreviewed({
+        key,
+        preview: {
+          valid: false,
+          error: err instanceof Error ? err.message : String(err),
+          networks: 0,
+          coverage: {
+            ipv4Addresses: 0,
+            ipv4Share: 0,
+            ipv6Slash48s: 0,
+            ipv4Networks: 0,
+            ipv6Networks: 0,
+          },
+          sources: [],
+          trustedOverlap: [],
+          localOverlap: [],
+          impacts: [],
+        },
+      })
+    } finally {
+      setPreviewing(false)
+    }
+  }
   const submit = async () => {
     setBusy(true)
     setError(undefined)
-    const body: BlocklistRequest = {
-      name: (name.trim() || suggestion).slice(0, 64),
-      kind,
-      entries: kind === "manual" ? typed : [],
-      countries: kind === "country" ? countries.map((c) => c.toLowerCase()) : [],
-      url: kind === "feed" && !preset ? url.trim() : "",
-      preset: kind === "feed" ? preset : "",
-    }
     try {
-      if (list) await put(`/network/protection/blocklists/${list.id}`, body)
-      else await post("/network/protection/blocklists", body)
+      if (list) await put(`/network/protection/blocklists/${list.id}`, body())
+      else await post("/network/protection/blocklists", body())
       notify.success(list ? "Blocklist saved" : "Blocklist made")
       onOpenChange(false)
       onSaved()
@@ -438,6 +521,66 @@ export function BlocklistModal({
             </>
           )}
 
+          {kind === "feed" && preset === "" && (
+            <>
+              <Field
+                label="Signature address"
+                htmlFor="blocklist-signature"
+                hint="Optional: an https file holding a detached Ed25519 signature of the list, base64 or hex."
+              >
+                <Input
+                  id="blocklist-signature"
+                  value={signatureUrl}
+                  placeholder="https://example.net/blocklist.txt.sig"
+                  onChange={(event) => setSignatureUrl(event.target.value)}
+                  className="font-mono"
+                  autoComplete="off"
+                />
+              </Field>
+              {signatureUrl.trim() && (
+                <Field
+                  label="Publisher's public key"
+                  htmlFor="blocklist-key"
+                  hint={
+                    list?.integrity === "signed" && signatureUrl.trim() === list.signatureUrl
+                      ? "A key is pinned. Leave this empty to keep it, or give a new one."
+                      : "The 32-byte Ed25519 key in base64. Every fetch must verify against it."
+                  }
+                >
+                  <Input
+                    id="blocklist-key"
+                    value={publicKey}
+                    placeholder="base64"
+                    onChange={(event) => setPublicKey(event.target.value)}
+                    className="font-mono"
+                    autoComplete="off"
+                  />
+                </Field>
+              )}
+            </>
+          )}
+
+          {kind !== "manual" && (
+            <Field
+              label="Fetched again"
+              htmlFor="blocklist-refresh"
+              hint="After a failure it retries sooner, backing off."
+            >
+              <Select value={refresh} onValueChange={setRefresh}>
+                <SelectTrigger id="blocklist-refresh" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REFRESH_CHOICES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
+
           {kind === "manual" && (
             <Field
               label="Addresses and networks"
@@ -473,6 +616,48 @@ export function BlocklistModal({
               autoComplete="off"
             />
           </Field>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void runPreview()}
+              disabled={!can("system.admin") || !ready || previewing}
+              pending={previewing}
+            >
+              Preview what it blocks
+            </Button>
+            {kind !== "manual" && (
+              <span className="text-hint text-muted-foreground">
+                Fetches the list to look; nothing is saved or loaded.
+              </span>
+            )}
+          </div>
+          {preview && <BlocklistPreviewView preview={preview} />}
+          {!preview && kind === "country" && countries.length > 0 && (
+            <Geography
+              geography={{
+                source:
+                  "ipdeny.com aggregated zones, built from the regional internet registries' delegation files.",
+                basis:
+                  "A country list is the address blocks registered to organisations in that country, not where a machine physically is.",
+                limits: [
+                  "Cloud, CDN, VPN and mobile networks carry one country's addresses elsewhere, so legitimate visitors abroad can be refused and attackers can use another country.",
+                ],
+                countries,
+              }}
+            />
+          )}
+
+          {list && (list.sources?.length ?? 0) > 0 && <Provenance sources={list.sources ?? []} />}
+          {list && exceptions.length > 0 && (
+            <p className="text-hint text-muted-foreground">
+              Excepted from it: {exceptions.map((e) => `${e.address} (${e.reason})`).join("; ")}.
+              Change these under Exceptions.
+            </p>
+          )}
+          {list && list.enabled && <SessionRevoke list={list} />}
 
           {error && (
             <p role="alert" className="animate-rise text-body text-destructive">

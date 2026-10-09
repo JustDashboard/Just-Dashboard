@@ -1,0 +1,93 @@
+=== RUN   TestLivePendingBackendDeathAndUnavailableNewSource
+--- PASS: TestLivePendingBackendDeathAndUnavailableNewSource (91.30s)
+=== RUN   TestPendingLiveProcessFixture
+--- PASS: TestPendingLiveProcessFixture (0.00s)
+=== RUN   TestLiveDriftObservesCLIChangesWithoutRepairingNativeObjects
+--- PASS: TestLiveDriftObservesCLIChangesWithoutRepairingNativeObjects (0.62s)
+=== RUN   TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline
+--- PASS: TestLiveDriftRepairTouchesOnlySelectedAdmissionAndRestoresItAfterDeadline (6.46s)
+=== RUN   TestLiveGoldenRulesetLoadsAndReadsBack
+--- PASS: TestLiveGoldenRulesetLoadsAndReadsBack (0.28s)
+=== RUN   TestLiveTheFullGatewayThroughTheRealServiceCode
+--- PASS: TestLiveTheFullGatewayThroughTheRealServiceCode (30.87s)
+=== RUN   TestLiveShapingBatchLoadsAndReadsBack
+--- PASS: TestLiveShapingBatchLoadsAndReadsBack (0.89s)
+=== RUN   TestLiveCapabilityReadsRealRulesets
+--- PASS: TestLiveCapabilityReadsRealRulesets (0.38s)
+=== RUN   TestLiveAdmissionDetectsEveryFamilyAndChainAfterPartialReload
+--- PASS: TestLiveAdmissionDetectsEveryFamilyAndChainAfterPartialReload (9.66s)
+=== RUN   TestLiveCapabilityDetectsExplicitDropInAcceptPolicyChain
+--- PASS: TestLiveCapabilityDetectsExplicitDropInAcceptPolicyChain (0.15s)
+=== RUN   TestLiveBlocklistHealthRetainsLoadedDataAfterCacheLossAndDetectsSetDrift
+--- PASS: TestLiveBlocklistHealthRetainsLoadedDataAfterCacheLossAndDetectsSetDrift (0.34s)
+=== RUN   TestLiveShapingLeavesAClsactQueueAlone
+--- PASS: TestLiveShapingLeavesAClsactQueueAlone (0.58s)
+=== RUN   TestLiveOneToOneMappingTranslatesBothWays
+--- PASS: TestLiveOneToOneMappingTranslatesBothWays (1.60s)
+=== RUN   TestLiveExceptionsExpireInTheKernelAndTotalsSurviveReloads
+--- PASS: TestLiveExceptionsExpireInTheKernelAndTotalsSurviveReloads (16.33s)
+=== RUN   TestLiveGlobalCeilingRefusesPastItsCount
+--- PASS: TestLiveGlobalCeilingRefusesPastItsCount (5.17s)
+=== RUN   TestLiveFlowModelReadsRealIptablesShapes
+--- PASS: TestLiveFlowModelReadsRealIptablesShapes (0.73s)
+=== RUN   TestLiveConntrackNetlinkInANamespace
+    gateway_maturity_live_test.go:250: helper:
+        === RUN   TestLiveConntrackHelper
+        --- PASS: TestLiveConntrackHelper (3.19s)
+        PASS
+--- PASS: TestLiveConntrackNetlinkInANamespace (4.73s)
+=== RUN   TestLiveConntrackHelper
+    gateway_maturity_live_test.go:256: runs as root inside the namespace TestLiveConntrackNetlinkInANamespace creates
+--- SKIP: TestLiveConntrackHelper (0.00s)
+=== RUN   TestLiveModesGoldenLoadsAndDriftReadsItAsOwned
+--- PASS: TestLiveModesGoldenLoadsAndDriftReadsItAsOwned (0.33s)
+=== RUN   TestLiveIPv6PrefixTranslationMapsBothWays
+--- PASS: TestLiveIPv6PrefixTranslationMapsBothWays (2.89s)
+=== RUN   TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies
+=== RUN   TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/cache
+=== RUN   TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/runtime
+--- PASS: TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies (5.44s)
+    --- PASS: TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/cache (2.68s)
+    --- PASS: TestLiveCacheAndGatewayRecoverOneGenerationAfterApplyingProcessDies/runtime (2.68s)
+=== RUN   TestLiveIPAMObservesDualFamilyOwnersWithoutChangingThem
+--- PASS: TestLiveIPAMObservesDualFamilyOwnersWithoutChangingThem (4.00s)
+=== RUN   TestLiveBootFileLoadsWithoutOneError
+--- PASS: TestLiveBootFileLoadsWithoutOneError (0.54s)
+=== RUN   TestLiveMutationsAgainstARealKernel
+=== RUN   TestLiveMutationsAgainstARealKernel/refusals
+--- PASS: TestLiveMutationsAgainstARealKernel (15.91s)
+    --- PASS: TestLiveMutationsAgainstARealKernel/refusals (2.68s)
+=== RUN   TestLiveBootRecoveryRecreatesUnchangedManagedDependenciesAfterColdLoss
+--- PASS: TestLiveBootRecoveryRecreatesUnchangedManagedDependenciesAfterColdLoss (2.91s)
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath/runtime
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath/first_file
+=== RUN   TestLiveIndependentRecoveryAfterProcessDeath/spec
+--- PASS: TestLiveIndependentRecoveryAfterProcessDeath (4.23s)
+    --- PASS: TestLiveIndependentRecoveryAfterProcessDeath/runtime (1.44s)
+    --- PASS: TestLiveIndependentRecoveryAfterProcessDeath/first_file (1.35s)
+    --- PASS: TestLiveIndependentRecoveryAfterProcessDeath/spec (1.37s)
+=== RUN   TestLiveSystemdTimerRecoversExpiredPendingChangeWithoutTheBackend
+    recovery_systemd_live_test.go:22: set JD_SYSTEMD_RECOVERY_LIVE=1 to exercise the real host systemd timer
+--- SKIP: TestLiveSystemdTimerRecoversExpiredPendingChangeWithoutTheBackend (0.02s)
+=== RUN   TestLiveShapingVerifiesEveryRequestedParameter
+--- PASS: TestLiveShapingVerifiesEveryRequestedParameter (0.91s)
+=== RUN   TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree
+--- PASS: TestLiveShapingRestoresSupportedBaselineAndRefusesForeignTree (0.42s)
+=== RUN   TestLiveSQMRecordsCongestionLatencyAndDSCPUnderDeclaredLoad
+    shaping_sqm_congestion_live_test.go:179: Congestion observations (local scope; no universal performance assertion): {"legacy":{"durationSeconds":5.187698760069907,"tcpFlows":4,"tcpBytes":[1851992,1103376,1113512,2145936],"throughputMbit":9.583927344179488,"udpSent":25,"udpReplies":25,"medianMillis":205.25590516626835,"p95Millis":229.61686551570892,"receivedDscp":[46]},"legacyPolicerKbit":10000,"scope":"two disposable namespaces; 10 Mbit/s HTB + 256000-byte FIFO bottleneck; four saturated TCP downloads marked DSCP 0/8/46/34 plus 46-marked UDP echo; 2s warmup + 5s samples per mode; no BBR change","sqm":{"durationSeconds":5.0093541676178575,"tcpFlows":4,"tcpBytes":[1536328,389512,1320576,1712984],"throughputMbit":7.9202225820792975,"udpSent":247,"udpReplies":247,"medianMillis":3.7255138158798218,"p95Millis":7.304848171770573,"receivedDscp":[0]},"sqmKbit":9000,"sqmQueue":{"kind":"cake","dev":"","handle":"ca11:","parent":"","root":true,"options":{"ack-filter":"disabled","atm":"noatm","bandwidth":1125000,"diffserv":"diffserv3","flowmode":"dual-dsthost","fwmark":"0","ingress":true,"mpu":64,"nat":false,"overhead":22,"raw":false,"rtt":100000,"split_gso":true,"wash":true},"bytes":7286766,"packets":5061,"drops":393,"overlimits":8866,"requeues":0,"backlog":0}}
+--- PASS: TestLiveSQMRecordsCongestionLatencyAndDSCPUnderDeclaredLoad (15.87s)
+=== RUN   TestLiveSQMConfirmsFreshResponseAndRecoversFailedOwnedUpdate
+--- PASS: TestLiveSQMConfirmsFreshResponseAndRecoversFailedOwnedUpdate (5.40s)
+=== RUN   TestLiveSQMOwnershipRecoveryAndColdRestore
+--- PASS: TestLiveSQMOwnershipRecoveryAndColdRestore (5.30s)
+=== RUN   TestLiveSQMBackendDeathRestoresOwnedEffectsAndNativeBaseline
+--- PASS: TestLiveSQMBackendDeathRestoresOwnedEffectsAndNativeBaseline (1.89s)
+=== RUN   TestContainersExcludeFutureSamplesAndDoNotReportOldRatesAsLive
+--- PASS: TestContainersExcludeFutureSamplesAndDoNotReportOldRatesAsLive (0.04s)
+=== RUN   TestLiveWireGuardDualStackSplitFullAndContainment
+    wgdual_live_test.go:159: wg is not installed
+--- SKIP: TestLiveWireGuardDualStackSplitFullAndContainment (0.02s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netx	237.396s
+JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -skip 'NativeManager'  50.51s user 42.60s system 35% cpu 4:19.30 total

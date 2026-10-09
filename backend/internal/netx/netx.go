@@ -108,10 +108,15 @@ type Service struct {
 	// gateway table may ever match.
 	trustedRanges []netip.Prefix
 
-	sampler             *Sampler
-	vpn                 *VPNStore
-	wg                  *wgRecord
-	flows               *flowSampler
+	sampler   *Sampler
+	vpn       *VPNStore
+	wg        *wgRecord
+	flows     *flowSampler
+	telemetry *gatewayTelemetry
+	// forwardChecks are the last target checks, by forward id, kept for the
+	// page; they are measurements, not configuration.
+	checksMu            sync.Mutex
+	forwardChecks       map[int]ForwardCheck
 	independentRecovery bool
 	recoveryInstalled   bool
 	// incidentMu serialises the Overview's concurrent readers folding their
@@ -189,6 +194,7 @@ func New(opts Options) *Service {
 	s.vpn = newVPNStore(opts.DB, opts.Seal, opts.Open)
 	s.wg = newWGRecord(opts.DB, opts.Log, opts.Retention)
 	s.flows = newFlowSampler()
+	s.telemetry = newGatewayTelemetry(opts.DB, opts.Log)
 	return s
 }
 
@@ -205,12 +211,14 @@ func (s *Service) Start(ctx context.Context) {
 	}
 	s.sampler.Start(ctx)
 	s.wg.start(ctx)
+	s.telemetry.start(ctx)
 }
 
-// Stop ends the samplers.
+// Stop ends the samplers and the gateway counter recorder.
 func (s *Service) Stop() {
 	s.sampler.Stop()
 	s.wg.stopLoop()
+	s.telemetry.halt()
 }
 
 // Sampler is the interface counter recorder, for the traffic routes.

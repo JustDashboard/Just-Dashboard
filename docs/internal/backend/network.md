@@ -220,7 +220,7 @@ does not attach it, and restart requires a new explicit opt-in.
 
 ## Gateway and protection
 
-Files: `gateway*.go`, `blocklists.go`, `protection.go`, `conntrack.go`.
+Files: `gateway*.go`, `blocklists.go`, `protection*.go`, `conntrack*.go`.
 
 `inet jd_gateway` only ever drops or translates, and a chain exists only while it holds a rule (an
 idle hooked chain still costs every packet a traversal). Chains: `pre` (prerouting at mangle priority,
@@ -234,7 +234,25 @@ another host's same port is not captured, then `ct mark set` and `dnat`) and `na
 SNAT per NAT entry, and per forward whose source NAT resolves to masquerade). Every rule carries a
 comment its counters are read back by; the capability and counter reads use `nft -t -j`.
 Packet-rate limits match new-flow packets and can be global or per source; concurrent-connection
-ceilings are always keyed by source address. Established traffic returns before these limits.
+ceilings are keyed by source address, and a separate optional ceiling for everyone together
+(`globalConnections`, `ct count over N`, comment `limit-global:<id>`) refuses past a total. Established
+traffic returns before these limits. Limits may start from a service profile (SSH, HTTPS, HTTP, DNS,
+SMTP, WireGuard handshakes, an exposed database, a game server); the profile only fills the form and
+is kept for display, and every figure is validated like any other. The Protection read reports each
+limit's per-source meter occupancy (`meters`, elements of its dynamic sets against their 65 535 size)
+and the ceiling's own refusals (`globalPackets`).
+
+NAT entries have four modes. Masquerade and a fixed SNAT address may be scoped to destination networks
+(`destinations`, up to sixteen; the admission mark is scoped the same way, so untranslated traffic is
+not admitted). `one-to-one` maps a private address or network of at most 256 addresses to a public one
+of the same width in both directions; `nptv6` maps an IPv6 network between /16 and /64 to a public one
+of the same length. A mapping renders `snat … to` / `snat … prefix to` in `nat_post` and a marked
+`dnat` for the public side in `nat_pre` (comment `nat-in:<id>`), after every forward, so a forward's
+port takes precedence. nft's prefix NAT is a stateful netmap: connections are tracked and checksums
+recalculated, not RFC 6296's checksum-neutral translation. A single public address must be one of the
+device's own; a routed prefix cannot be checked. A mapping whose public side contains the address the
+requester's own replies leave from is refused with `would_lock_you_out`. Overlapping enabled entries on
+one device (not only equal sources) and two mappings of one public side are refused.
 
 **A port forward admits its own traffic.** One table's `accept` cannot override another's `drop`, and
 ufw and Docker drop forwarded traffic by default, so translated connections carry the mark
@@ -249,14 +267,67 @@ switch.
 Health checks inspect every required family and chain and distinguish absent, unsupported and
 unreadable rules. The gateway page shows checked policy layers and offers an admin/destructive-gated
 repair of owned admission rules. Writable policy and owned-rule presence are separate from measured
-reachability; foreign expressions and provider policy can remain unknown. The full response and
+reachability; foreign expressions and provider policy can remain unknown. A refused generic check
+is re-judged per translated flow before a translation is saved; ordinary Docker shapes pass and a real
+drop names its rule. Entries report installed readiness, totals across table replacements, a
+re-checked auto source-translation decision, an optional target check from this server and, for
+administrators, external evidence of the public port. The full response, the flow model and the
 fail-closed cache contract are in [gateway health](gateway-health.md).
+
+`POST /gateway/preview` runs a forward's or NAT entry's save checks without the lock, journal or any
+host change and returns `impacts` (refused collisions and guards, overlapping entries whose rule would
+win, local listeners a forward or mapping would take, limits and blocklists that also judge it, the
+first admission insertion of a family, the auto decision, forwarding off), the connections an edit or
+disable leaves on the old translation (read over ctnetlink by mark, translation and reply source), and
+the candidate's modeled flows. The editors call it as the form changes.
 
 Cache and kernel rollback retain the prior list under the mutation lock; fetches begun before a
 URL/country edit cannot overwrite newer configuration. Failed boot-unit setup retains the committed
 cache, matching the committed spec and kernel.
 
-Blocklists are manual, country (ipdeny.com aggregated zones, v4 and v6) or feed (Spamhaus DROP,
+Fetched lists keep a schedule (`refresh`: 6h, 12h, 24h — the default — 72h, 168h or manual). The
+refresher checks every fifteen minutes; after a failure it retries after fifteen minutes doubling per
+failure, never longer than the schedule, and counts `failures` with `lastAttempt`. Each successful
+fetch records provenance per URL (`sources`: URL, country and family for a zone, status, bytes,
+SHA-256, networks kept and lines skipped, validators, signature) and `lastDiff` (added/removed counts
+and up to eight of each against the previous readable cache). A feed with a healthy cache sends its
+`ETag`/`Last-Modified`; a 304 records the refresh without touching the cache or the kernel. A custom
+feed may pin a detached Ed25519 signature (`signatureUrl` over https and a 32-byte base64 `publicKey`);
+every fetch is used only when the signature over the exact body verifies, and an edit naming the same
+signature keeps the pinned key. The presets publish no signature, so they cannot be marked signed. The
+view adds `nextRefresh`, `stale` (older than twice the schedule), `integrity` (signed, https, local)
+and `coverage` (IPv4 addresses and share of the space, IPv6 in /48s). Country lists are registry
+allocations, not physical location; the editor says so with the collateral it can cause.
+
+`POST /protection/preview` builds a list from its proposed body (fetching a country or feed list within
+the usual bounds, saving and loading nothing) and returns its size and coverage, the diff against an
+existing list, this host's own networks and NAT sources it covers, the trusted networks and exceptions
+that keep passing, the connections open now from inside it (they continue: a list refuses new
+connections only) and, for a country list, what its geography is.
+
+Exceptions (`exceptions`: address, scope `all` or `blocklist:<id>`, reason, optional expiry, made-by)
+let a network past the drops. An `all` exception and an expiring kept trusted address are rules of
+their own after the trusted sets in `pre`, `input` and `forward`; a list with exceptions jumps to a
+chain of its own (`bx_<id>`) whose returns go back to the next list. An expiry is an absolute
+`meta time < <unix seconds>` match in the rule, so the kernel stops honouring it at that instant
+whether or not the dashboard runs and the boot file stays a pure function of the spec; a half-minute
+sweeper removes expired entries from the spec afterwards (it waits while a change awaits
+confirmation). Exceptions are bounded to 256 and to /8 (IPv4) or /16 (IPv6); creating and removing one
+are both destructive, and removing the one that lets the requester through a list holding them is
+refused. Kept trusted addresses carry notes (`trustedNotes`: reason, made-by, optional expiry, last
+confirmation); an expiring kept address leaves the permanent trusted set and no longer counts as
+trusted for the lockout guards. For administrators, each kept address reports its last dashboard
+session or successful sign-in from inside it (90 days) and is `stale` when neither that nor a
+confirmation is within thirty days; readers without `system.admin` do not receive that sign-in
+evidence, since the audit log and sessions are administrators' reading; `PUT /protection/trusted` records a reason, an expiry (destructive, refused on the requester's
+only coverage) or a review.
+
+A list never cuts an open session. `POST /protection/sessions/preview` counts the tracked connections
+from a network inside an enabled, loaded list, and `POST /protection/sessions/revoke` (destructive,
+audited, not journaled and not undoable) deletes exactly those entries by tuple, zone and id over
+ctnetlink: their next packets meet the list as new connections and are dropped. It refuses a network
+outside the list, a list that is off or not loaded, one wider than /8 (/16), and any network containing
+the requester, a trusted network or this host's own address.
 FireHOL level 1 or any https URL — http, and a redirect down to it, is refused, since anyone on the way
 could answer with a list of your own networks); fetches are bounded (30 s, 16 MB), parsed with `netip`,
 stripped of private and reserved ranges (FireHOL level 1 holds them, and dropping them would cut off
@@ -273,7 +344,15 @@ address is refused; a fetched list that holds it is reported (`containsYou`).
 Kernel protections are a closed list of fifteen sysctls (SYN cookies, loose reverse-path filtering —
 strict is not offered because it breaks policy routing and tunnels — redirects, source routing,
 ICMP, SYN backlog and retries, RFC 1337, martians, the conntrack maximum), each with its recommendation
-and why, written to the sysctl drop-in. Conntrack's count against its maximum is read from `/proc`.
+and why, written to the sysctl drop-in. The read adds `interfaces`: each device's effective value for
+the five per-interface settings, combined as the kernel does (reverse-path filter: the higher of all
+and the device; IPv4 accept_redirects: both when forwarding, either when not; send_redirects and
+log_martians: either; IPv4 source routing: both; IPv6 redirects: the device's own; IPv6 source routing:
+the lower), bounded to 96 devices with container veths last. `kernelProfiles` (internet-facing server,
+VPN or container gateway, busy web server, routing investigation) stage values the closed list allows;
+they are applied through the same confirmation and weakening gate. Conntrack's count against its
+maximum is read from `/proc`; its history, breakdown and pressure indications are described in
+[gateway health](gateway-health.md#protection-evidence).
 
 ## Shaping
 
@@ -439,10 +518,11 @@ upstream router/provider restriction. All probes remain admin-only and audited.
 All under `/api/v1/network` (`handlers_network*.go`). Reads are `read`, except `/vpn/*` and
 `/traffic/processes`, which name who connects and are `system.admin`. Every mutation is `system.admin`;
 removals, setting a device down, turning forwarding off, disabling a forward, NAT entry, limit or
-blocklist, weakening a kernel protection, turning a WireGuard exit off, withdrawing a site's network
-or changing where it is dialled, clearing a peer's usage budget, withdrawing what this server
-offers the tailnet and changing the resolver are inside `s.destructive` (by path, or by content in the
-handler for the PUTs, PATCHes and posts). No route takes a typed phrase.
+blocklist, weakening a kernel protection, setting a trusted address to expire, making or removing an
+exception, ending sessions, turning a WireGuard exit off, withdrawing a site's network or changing
+where it is dialled, clearing a peer's usage budget, withdrawing what this server offers the tailnet
+and changing the resolver are inside `s.destructive` (by path, or by content in the handler for the
+PUTs, PATCHes and posts). No route takes a typed phrase.
 
 | Area | Routes |
 | --- | --- |
@@ -450,8 +530,8 @@ handler for the PUTs, PATCHes and posts). No route takes a typed phrase.
 | Devices | `POST /links`, `DELETE /links/{name}`, `POST /links/{name}/up`, `/down`, `/mtu`, `/master`, `/addresses`, `DELETE /links/{name}/addresses?cidr=`, `PUT /links/{name}/vlans`, `PUT /links/{name}/remotes` (destructive by content when removing); reads `GET /links/{name}/detail`, `/bridge`, `/readiness`, `/master/preview?master=`; `GET`/`POST /namespaces`, `GET /namespaces/{name}?kind=`, `GET /namespaces/{name}/lookup?kind=&target=`, `DELETE /namespaces/{name}` |
 | Changes | `GET /changes/current`, `POST /changes/{id}/verify`, `/confirm` (admin session), `/recover` (also destructive) |
 | Routing | `GET /routing`, `GET /routing/lookup?target=<literal>&source=<optional literal>&mark=<optional value>`, `POST /routing/routes`, `DELETE /routing/routes/{id}`, `POST /routing/rules`, `DELETE /routing/rules/{id}`, `POST /forwarding/{ipv4,ipv6}/{on,off}`, `GET /bgp` |
-| Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}` |
-| Protection | `GET /protection`, `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/settings`, `DELETE /protection/settings/{key}`, `DELETE /protection/trusted?address=` |
+| Gateway | `GET /gateway`, `POST /gateway/admission/repair` (destructive), `POST /gateway/forwards`, `PUT`/`DELETE /gateway/forwards/{id}`, `POST /gateway/nat`, `PUT`/`DELETE /gateway/nat/{id}`, `POST /gateway/preview`, `POST /gateway/verify` (admin; change nothing on the host) |
+| Protection | `GET /protection`, `GET /protection/pressure` (admin), `POST /protection/limits`, `PUT`/`DELETE /protection/limits/{id}`, `POST /protection/blocklists`, `PUT`/`DELETE /protection/blocklists/{id}`, `POST /protection/blocklists/{id}/refresh`, `POST /protection/preview` (admin), `POST /protection/settings`, `DELETE /protection/settings/{key}`, `PUT /protection/trusted` (destructive with an expiry), `DELETE /protection/trusted?address=`, `POST /protection/exceptions`, `DELETE /protection/exceptions/{id}` (both destructive), `POST /protection/sessions/preview` (admin), `POST /protection/sessions/revoke` (destructive) |
 | Shaping | `GET /shaping`, `POST`/`DELETE /shaping/{device}`, `POST /shaping/bbr` |
 | VPN | `GET /vpn`, `POST /vpn/wireguard`, `DELETE /vpn/wireguard/{iface}`, `POST /vpn/wireguard/{iface}/up`, `/down`, `/exit`, `/peers`, `GET /vpn/wireguard/{iface}/history`, `/endpoint`, `PATCH`/`DELETE /vpn/wireguard/{iface}/peers/{id}`, `GET`/`DELETE /vpn/wireguard/{iface}/peers/{id}/config` (`?variant=linux-killswitch`), `PUT`/`DELETE /vpn/wireguard/{iface}/peers/{id}/quota`, `POST /vpn/wireguard/{iface}/peers/{id}/verify`, `GET /vpn/archive`, `POST /vpn/archive/{file}/restore`, `POST /vpn/tailscale` |
 | DNS | `GET`/`POST`/`DELETE /dns`, `GET`/`PUT /dns/hosts`, `POST /dns/lookup` |

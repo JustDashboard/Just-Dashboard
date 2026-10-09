@@ -118,3 +118,95 @@ test("every setting the server offers has a group, and a stranger goes last", ()
   expect(settingGroup("net.ipv4.conf.all.rp_filter")).toBe("Spoofed addresses")
   expect(settingGroup("net.ipv4.something_new")).toBe("Other settings")
 })
+
+test("a connection ceiling is always per address, and the one for everyone is said beside it", async () => {
+  const { ceilingWord } = await import("./reading")
+  expect(ceilingWord(limit({ maxConnections: 50, perSource: false }))).toBe(
+    "at most 50 open per address",
+  )
+  expect(ceilingWord(limit({ maxConnections: 20, globalConnections: 200 }))).toBe(
+    "at most 20 open per address, 200 open for everyone",
+  )
+  expect(ceilingWord(limit({ globalConnections: 300 }))).toBe("at most 300 open for everyone")
+  expect(ceilingWord(limit({}))).toBeUndefined()
+})
+
+test("a fetched list says its schedule, failures and what its last change did", async () => {
+  const { refreshWord, diffWord, coverageWord } = await import("./reading")
+  const until = () => "in 3h"
+  expect(refreshWord({ kind: "feed", refresh: "6h", nextRefresh: "x" }, until)).toBe(
+    "every 6 hours · next fetch in 3h",
+  )
+  expect(refreshWord({ kind: "feed", refresh: "", failures: 2, stale: true }, until)).toBe(
+    "daily · failing (2 tries) · stale",
+  )
+  expect(refreshWord({ kind: "feed", refresh: "manual", nextRefresh: null }, until)).toBe(
+    "only when refreshed by hand",
+  )
+  expect(refreshWord({ kind: "manual" }, until)).toBeUndefined()
+  expect(diffWord({ added: 12, removed: 3, baseline: true })).toBe("+12 −3 at the last change")
+  expect(diffWord({ added: 0, removed: 0, baseline: true })).toBe("unchanged at the last fetch")
+  expect(diffWord({ added: 40, removed: 0, baseline: false })).toBe(
+    "40 networks, nothing to compare with",
+  )
+  expect(
+    coverageWord({
+      ipv4Addresses: 2_100_000,
+      ipv4Share: 0.0005,
+      ipv6Slash48s: 1204,
+      ipv4Networks: 9,
+      ipv6Networks: 3,
+    }),
+  ).toBe("2.1M IPv4 addresses (0.05% of IPv4) · 1.2K IPv6 /48s")
+})
+
+test("expiries, profiles and recorded series become what the server and charts take", async () => {
+  const { expiryFrom, profileChanges, limitFromProfile, seriesRows, trustedNoteWord } =
+    await import("./reading")
+  const now = new Date("2026-10-09T12:00:00.000Z")
+  expect(expiryFrom("24h", now)).toBe("2026-10-10T12:00:00Z")
+  expect(expiryFrom("", now)).toBe("")
+  const settings = [
+    { key: "a", available: true, current: "1" },
+    { key: "b", available: true, current: "0" },
+    { key: "c", available: false, current: "" },
+  ]
+  expect(profileChanges(settings, { values: { a: "1", b: "1", c: "1" } })).toEqual({ b: "1" })
+  expect(
+    limitFromProfile({
+      name: "SSH",
+      protocol: "tcp",
+      ports: "22",
+      rate: 6,
+      per: "minute",
+      burst: 4,
+      perSource: true,
+      maxConnections: 10,
+      globalConnections: 0,
+      action: "drop",
+    }),
+  ).toEqual({
+    name: "SSH",
+    protocol: "tcp",
+    ports: "22",
+    rate: "6",
+    per: "minute",
+    burst: "4",
+    perSource: true,
+    max: "10",
+    global: "",
+    action: "drop",
+  })
+  expect(
+    seriesRows(
+      { "conntrack:count": [{ t: 60, value: 5 }], "conntrack:max": [{ t: 60, value: 9 }] },
+      ["conntrack:count", "conntrack:max"],
+    ),
+  ).toEqual([{ ts: 60_000, "conntrack:count": 5, "conntrack:max": 9 }])
+  expect(
+    trustedNoteWord(
+      { origin: "kept", reason: "office", addedBy: "ion", expiresAt: "x", lastSeen: null },
+      () => "tomorrow",
+    ),
+  ).toBe("office · kept by ion · until tomorrow · no sign-in seen in 90 days")
+})

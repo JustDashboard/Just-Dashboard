@@ -96,7 +96,10 @@ the [route table](../backend/databases-proxy-platform.md#routes).
 - **Network.** The gateway and protection PUTs (`/network/gateway/forwards/{id}`, `/gateway/nat/{id}`,
   `/protection/limits/{id}`, `/protection/blocklists/{id}`) are `system.admin`, and ask for
   `destructive` and spend `destrLim` by hand when the body disables the entry; `POST
-  /network/protection/settings` does the same when a value weakens a kernel protection. Setting a
+  /network/protection/settings` does the same when a value weakens a kernel protection, and `PUT
+  /network/protection/trusted` when it sets an expiry on a kept address. Exceptions (both directions)
+  and session revocation are inside `s.destructive`; previews, the target check and the connection-
+  table pressure read are `system.admin` and change nothing on the host. Setting a
   device down and turning forwarding off are their own paths (`/down`, `/off`) inside `s.destructive`,
   so the two directions of one switch never share a route ([network module](../backend/network.md#routes)).
 - **Native network profiles.** Capability/profile reads and writes require an administrator session.

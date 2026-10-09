@@ -16,6 +16,7 @@ export function supportsPendingNetworkMutation(path: string, method: string): bo
     "/network/protection/blocklists",
     "/network/protection/settings",
     "/network/protection/trusted",
+    "/network/protection/exceptions",
   ].some((prefix) => clean === prefix || clean.startsWith(`${prefix}/`))
 }
 

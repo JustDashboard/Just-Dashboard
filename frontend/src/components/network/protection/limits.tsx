@@ -2,11 +2,14 @@
 
 import { useState } from "react"
 import { del, post, put } from "@/lib/api"
+import { calendarDate } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { ProtectionLimit } from "@/lib/types"
+import type { LimitProfile, ProtectionLimit, ProtectionPressure } from "@/lib/types"
 import { ShieldCheck } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
+import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Sparkline } from "@/components/metrics/sparkline"
 import { Field, FieldRow, OptionRow } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { ProductLogo } from "@/components/product-logo"
@@ -15,8 +18,9 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Segments } from "@/components/deploy/settings/segments"
 import { useAuth } from "@/hooks/use-auth"
-import { compact } from "@/components/network/gateway/reading"
+import { compact, totalWord } from "@/components/network/gateway/reading"
 import {
+  limitFromProfile,
   limitProduct,
   limitRequest,
   limitSentence,
@@ -31,10 +35,13 @@ import {
  */
 export function LimitList({
   limits,
+  pressure,
   onOpen,
   onChanged,
 }: {
   limits: ProtectionLimit[]
+  /** The recorded refusals and open counts, for an administrator. */
+  pressure?: ProtectionPressure
   onOpen: (limit: ProtectionLimit) => void
   onChanged: () => void
 }) {
@@ -83,10 +90,17 @@ export function LimitList({
               </span>
             }
             verb={`Edit ${limit.name}`}
-            description={limitSentence(limit)}
+            description={[limitSentence(limit), metersWord(limit)].filter(Boolean).join(" · ")}
             trailing={
               <span className="flex items-center gap-4">
-                <span className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid">
+                <RefusedTrend
+                  name={limit.name}
+                  points={pressure?.limits.find((l) => l.id === limit.id)?.refused}
+                />
+                <span
+                  className="numeric hidden min-w-[4.5rem] text-right leading-tight sm:grid"
+                  title={totalWord(limit.total, calendarDate)}
+                >
                   <span className="text-body font-medium">{compact(limit.packets)}</span>
                   <span className="font-mono text-micro text-muted-foreground">refused</span>
                 </span>
@@ -104,6 +118,33 @@ export function LimitList({
       </ChoiceList>
       {dialog}
     </>
+  )
+}
+
+/** How many sources a limit's per-source sets track now, and how full they are. */
+function metersWord(limit: ProtectionLimit) {
+  const m = limit.meters
+  if (!m || m.error) return undefined
+  const tracked = Math.max(m.rateSources ?? 0, m.connSources ?? 0)
+  if (m.rateSources === null && m.connSources === null) return undefined
+  const full = tracked / m.capacity
+  return `tracking ${tracked.toLocaleString()} source${tracked === 1 ? "" : "s"}${full >= 0.8 ? ` (${Math.round(full * 100)}% of its meter)` : ""}`
+}
+
+/**
+ * The last day's refusals, recorded per minute: whether the limit is biting
+ * now or only did once. Drawn only from two points up, and only for an
+ * administrator, who can read the recorded history.
+ */
+function RefusedTrend({ name, points }: { name: string; points?: { value: number }[] }) {
+  if (!points || points.length < 2) return null
+  return (
+    <Sparkline
+      values={points.map((p) => p.value)}
+      color="var(--chart-3)"
+      className="hidden sm:inline-block"
+      label={`${name}: refusals per minute over the last day`}
+    />
   )
 }
 
@@ -138,15 +179,22 @@ const whole = (text: string) => (text.trim() === "" ? 0 : Number(text))
  */
 export function LimitModal({
   limit,
+  profiles = [],
+  capacity,
   onOpenChange,
   onSaved,
 }: {
   limit?: ProtectionLimit
+  /** Starting points for a new limit on a common service. */
+  profiles?: LimitProfile[]
+  /** The open counts against this limit's ceilings, for an administrator. */
+  capacity?: ProtectionPressure["limits"][number]
   onOpenChange: (open: boolean) => void
   onSaved: () => void
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
+  const [profile, setProfile] = useState(limit?.profile ?? "")
   const [name, setName] = useState(limit?.name ?? "")
   const [protocol, setProtocol] = useState<ProtectionLimit["protocol"]>(limit?.protocol ?? "tcp")
   const [ports, setPorts] = useState(limit?.ports ?? "")
@@ -155,12 +203,29 @@ export function LimitModal({
   const [burst, setBurst] = useState(limit?.burst ? String(limit.burst) : "")
   const [perSource, setPerSource] = useState(limit?.perSource ?? true)
   const [max, setMax] = useState(limit?.maxConnections ? String(limit.maxConnections) : "")
+  const [global, setGlobal] = useState(
+    limit?.globalConnections ? String(limit.globalConnections) : "",
+  )
   const [action, setAction] = useState<ProtectionLimit["action"]>(limit?.action ?? "drop")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
 
-  const figures = [rate, burst, max].every((t) => t.trim() === "" || /^\d+$/.test(t.trim()))
-  const limited = whole(rate) > 0 || whole(max) > 0
+  const applyProfile = (p: LimitProfile) => {
+    const f = limitFromProfile(p)
+    setProfile(p.id)
+    setName(f.name)
+    setProtocol(f.protocol)
+    setPorts(f.ports)
+    setRate(f.rate)
+    setPer(f.per)
+    setBurst(f.burst)
+    setPerSource(f.perSource)
+    setMax(f.max)
+    setGlobal(f.global)
+    setAction(f.action)
+  }
+  const figures = [rate, burst, max, global].every((t) => t.trim() === "" || /^\d+$/.test(t.trim()))
+  const limited = whole(rate) > 0 || whole(max) > 0 || whole(global) > 0
   const ready = name.trim() && ports.trim() && figures && limited
   const submit = async () => {
     setBusy(true)
@@ -174,6 +239,8 @@ export function LimitModal({
       burst: whole(rate) > 0 ? whole(burst) : 0,
       perSource,
       maxConnections: whole(max),
+      globalConnections: whole(global),
+      profile,
       action,
     }
     try {
@@ -243,6 +310,31 @@ export function LimitModal({
             if (ready && !busy) void submit()
           }}
         >
+          {!limit && profiles.length > 0 && (
+            <fieldset className="min-w-0 space-y-1.5">
+              <legend className="mb-1.5 text-body font-medium">Start from a service</legend>
+              <ChoiceGrid className="sm:grid-cols-4">
+                {profiles.map((p) => (
+                  <ChoiceCard
+                    key={p.id}
+                    selected={profile === p.id}
+                    onClick={() => applyProfile(p)}
+                  >
+                    <ChoiceCardTitle>{p.name}</ChoiceCardTitle>
+                    <ChoiceCardHint className="font-mono">
+                      {p.ports}/{p.protocol === "both" ? "tcp+udp" : p.protocol}
+                    </ChoiceCardHint>
+                  </ChoiceCard>
+                ))}
+              </ChoiceGrid>
+              {profile && (
+                <p className="text-hint text-muted-foreground">
+                  {profiles.find((p) => p.id === profile)?.why} Every figure below is yours to
+                  change.
+                </p>
+              )}
+            </fieldset>
+          )}
           <Field label="Name" htmlFor="limit-name" hint="What it protects: SSH, the website">
             <Input
               id="limit-name"
@@ -300,23 +392,39 @@ export function LimitModal({
               />
             </Field>
           </FieldRow>
-          <Field
-            label="Open at once"
-            htmlFor="limit-max"
-            hint="The most connections that may be open together. Empty for no ceiling."
-          >
-            <Input
-              id="limit-max"
-              value={max}
-              inputMode="numeric"
-              placeholder="50"
-              onChange={(event) => setMax(event.target.value)}
-              autoComplete="off"
-            />
-          </Field>
+          <FieldRow>
+            <Field
+              label="Open at once, per address"
+              htmlFor="limit-max"
+              hint="The most one address may hold together. Empty for no ceiling."
+            >
+              <Input
+                id="limit-max"
+                value={max}
+                inputMode="numeric"
+                placeholder="50"
+                onChange={(event) => setMax(event.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+            <Field
+              label="Open at once, everyone"
+              htmlFor="limit-global"
+              hint="The most all addresses may hold together. Empty for none."
+            >
+              <Input
+                id="limit-global"
+                value={global}
+                inputMode="numeric"
+                placeholder="2000"
+                onChange={(event) => setGlobal(event.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+          </FieldRow>
           <OptionRow
-            title="Count each address on its own"
-            hint="One scanner cannot use up everybody's allowance."
+            title="Count each address's rate on its own"
+            hint="One scanner cannot use up everybody's allowance of new connections."
             checked={perSource}
             onCheckedChange={setPerSource}
           />
@@ -334,6 +442,7 @@ export function LimitModal({
               A limit needs a rate, a number open at once, or both.
             </p>
           )}
+          {capacity && <Capacity capacity={capacity} />}
           {error && (
             <p role="alert" className="animate-rise text-body text-destructive">
               {error}
@@ -343,5 +452,32 @@ export function LimitModal({
       </Modal>
       {dialog}
     </>
+  )
+}
+
+/** How close a limit's ceilings are to what is open now, and who holds most. */
+function Capacity({ capacity }: { capacity: ProtectionPressure["limits"][number] }) {
+  const busiest = capacity.topSources[0]
+  return (
+    <section aria-label="Open now" className="min-w-0 space-y-1.5 border-t border-hairline pt-4">
+      <p className="text-body font-medium">Open now</p>
+      <p className="text-hint text-muted-foreground">
+        <span className="numeric text-foreground">{capacity.open.toLocaleString()}</span>{" "}
+        connections to {capacity.ports}
+        {capacity.globalConnections > 0
+          ? ` of ${capacity.globalConnections.toLocaleString()} allowed for everyone`
+          : ""}
+        {busiest
+          ? `; the busiest address, ${busiest.key}, holds ${busiest.count.toLocaleString()}${capacity.maxConnections > 0 ? ` of its ${capacity.maxConnections.toLocaleString()}` : ""}`
+          : ""}
+        .
+      </p>
+      {capacity.meters?.connSources != null && (
+        <p className="text-hint text-muted-foreground">
+          The per-address counter tracks {capacity.meters.connSources.toLocaleString()} sources of
+          its {capacity.meters.capacity.toLocaleString()}.
+        </p>
+      )}
+    </section>
   )
 }

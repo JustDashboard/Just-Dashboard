@@ -38,8 +38,41 @@ type Spec struct {
 	// loopback and the allowlist: the operator's own, added the first time
 	// they make a protection entry and kept until they remove it.
 	Trusted []string `json:"trusted"`
+	// TrustedNotes say who kept a Trusted address, why, and until when. An
+	// address kept before notes existed has none.
+	TrustedNotes []TrustedNote `json:"trustedNotes,omitempty"`
+	// Exceptions let a network past the drops for a scope and a reason,
+	// optionally until a time the kernel itself enforces.
+	Exceptions []ExceptionSpec `json:"exceptions,omitempty"`
 	// Sysctls are the kernel settings set here, by key.
 	Sysctls map[string]string `json:"sysctls"`
+}
+
+// TrustedNote is the record behind one kept trusted address.
+type TrustedNote struct {
+	Address string `json:"address"`
+	Reason  string `json:"reason,omitempty"`
+	// ExpiresAt, when set, ends the trust: the rendered rule stops matching
+	// at that instant (`meta time`), whether or not the dashboard runs.
+	ExpiresAt time.Time `json:"expiresAt,omitzero"`
+	// ConfirmedAt and ConfirmedBy are the last time an operator said the
+	// address is still needed.
+	ConfirmedAt time.Time `json:"confirmedAt,omitzero"`
+	ConfirmedBy string    `json:"confirmedBy,omitempty"`
+	Made
+}
+
+// ExceptionSpec lets a network past the gateway's drops.
+type ExceptionSpec struct {
+	ID int `json:"id"`
+	// Address is a network or an address, stored masked.
+	Address string `json:"address"`
+	// Scope is "all" (every blocklist and limit) or "blocklist:<id>".
+	Scope  string `json:"scope"`
+	Reason string `json:"reason"`
+	// ExpiresAt, when set, is enforced by the kernel's clock in the rule.
+	ExpiresAt time.Time `json:"expiresAt,omitzero"`
+	Made
 }
 
 const specVersion = 1
@@ -200,6 +233,9 @@ type ForwardSpec struct {
 	// Sources narrows who may use it; empty is anyone.
 	Sources []string `json:"sources,omitempty"`
 	Enabled bool     `json:"enabled"`
+	// ChangedAt is when an operator last saved it; evidence measured
+	// earlier describes a forward that no longer exists in that form.
+	ChangedAt time.Time `json:"changedAt,omitzero"`
 	Made
 }
 
@@ -215,6 +251,16 @@ type NATSpec struct {
 	// ToAddress, when set, is a fixed source address (SNAT) instead of
 	// whatever the interface holds (masquerade).
 	ToAddress string `json:"toAddress,omitempty"`
+	// Mode is empty for the two forms above, or one-to-one (Source and
+	// Translated are the same width and map in both directions) or nptv6
+	// (an IPv6 network mapped to another of the same length, both ways).
+	Mode string `json:"mode,omitempty"`
+	// Translated is the public address or network of a one-to-one or
+	// nptv6 entry.
+	Translated string `json:"translated,omitempty"`
+	// Destinations narrow a masquerade or SNAT entry to traffic for these
+	// networks; empty is everything leaving through Interface.
+	Destinations []string `json:"destinations,omitempty"`
 	// Owner names what made it when that was not a person directly: a
 	// WireGuard exit ("wireguard:wg0"). Removing the owner removes the entry.
 	Owner   string `json:"owner,omitempty"`
@@ -238,6 +284,11 @@ type LimitSpec struct {
 	PerSource bool `json:"perSource"`
 	// MaxConnections refuses a source holding more than this many at once.
 	MaxConnections int `json:"maxConnections,omitempty"`
+	// GlobalConnections refuses a new connection once this many are open
+	// to the port from every source together.
+	GlobalConnections int `json:"globalConnections,omitempty"`
+	// Profile names the service profile the limit started from.
+	Profile string `json:"profile,omitempty"`
 	// Action is drop or reject.
 	Action  string `json:"action"`
 	Enabled bool   `json:"enabled"`
@@ -260,7 +311,54 @@ type BlocklistSpec struct {
 	Refreshed time.Time `json:"refreshed,omitempty"`
 	Count     int       `json:"count"`
 	Error     string    `json:"error,omitempty"`
+	// Refresh is how often a fetched list is fetched again: one of
+	// blocklistRefreshChoices, the daily default when empty.
+	Refresh string `json:"refresh,omitempty"`
+	// LastAttempt and Failures describe the fetches since the last success;
+	// the scheduler backs off by them.
+	LastAttempt time.Time `json:"lastAttempt,omitzero"`
+	Failures    int       `json:"failures,omitempty"`
+	// SignatureURL and PublicKey make a custom feed's refresh verify a
+	// detached Ed25519 signature over the exact body before it is used.
+	SignatureURL string `json:"signatureUrl,omitempty"`
+	PublicKey    string `json:"publicKey,omitempty"`
+	// Sources is where the last successful fetch came from, one per URL.
+	Sources []BlocklistSource `json:"sources,omitempty"`
+	// LastDiff is what the last successful fetch changed.
+	LastDiff *BlocklistDiff `json:"lastDiff,omitempty"`
 	Made
+}
+
+// BlocklistSource is the provenance of one URL a fetched list read.
+type BlocklistSource struct {
+	URL string `json:"url"`
+	// Country and Family are a country zone's; empty for a feed.
+	Country string `json:"country,omitempty"`
+	Family  string `json:"family,omitempty"`
+	// Status is ok, absent (a country without that family's zone) or
+	// unchanged (the feed answered 304 to its validators).
+	Status       string    `json:"status"`
+	FetchedAt    time.Time `json:"fetchedAt"`
+	Bytes        int       `json:"bytes"`
+	SHA256       string    `json:"sha256,omitempty"`
+	Networks     int       `json:"networks"`
+	Skipped      int       `json:"skipped"`
+	ETag         string    `json:"etag,omitempty"`
+	LastModified string    `json:"lastModified,omitempty"`
+	// Signed is a verified detached Ed25519 signature over this body.
+	Signed bool `json:"signed,omitempty"`
+}
+
+// BlocklistDiff is how a refresh changed a list, with a bounded sample.
+type BlocklistDiff struct {
+	At            time.Time `json:"at"`
+	Added         int       `json:"added"`
+	Removed       int       `json:"removed"`
+	AddedSample   []string  `json:"addedSample,omitempty"`
+	RemovedSample []string  `json:"removedSample,omitempty"`
+	// Baseline is false when the previous cache could not be read, so the
+	// numbers compare against nothing.
+	Baseline bool `json:"baseline"`
 }
 
 // emptySpec is what a host the dashboard has never changed reads as.
