@@ -147,7 +147,7 @@ func (f *adGuardFixture) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unbounded query history", http.StatusBadRequest)
 			return
 		}
-		value = map[string]any{"data": []any{map[string]any{"time": "2026-10-08T12:00:00Z", "client": "10.0.0.2", "reason": "FilteredBlackList", "question": map[string]string{"host": "private.corp.example", "type": "A"}}}}
+		value = map[string]any{"data": []any{map[string]any{"time": "2026-10-08T12:00:00Z", "client": "10.0.0.2", "reason": "FilteredBlackList", "client_proto": "udp", "question": map[string]string{"name": "private.corp.example", "type": "A"}}}}
 	case "POST /control/protection":
 		var body struct {
 			Enabled  *bool `json:"enabled"`
@@ -216,7 +216,7 @@ func newServiceFixture(t *testing.T, management bool) (*Service, *adGuardFixture
 
 func TestDNSServiceSealsCredentialsAndKeepsReadOnlyClosed(t *testing.T) {
 	s, f, _, view := newServiceFixture(t, false)
-	if view.Snapshot == nil || view.Snapshot.Transport.State != "loopback_http" || view.Snapshot.ZoneEvidence.State != "unsupported" || len(view.Snapshot.Clients) != 1 || len(view.Snapshot.Queries) != 1 {
+	if view.Snapshot == nil || view.Snapshot.Transport.State != "loopback_http" || view.Snapshot.ZoneEvidence.State != "unsupported" || len(view.Snapshot.Clients) != 1 || len(view.Snapshot.Queries) != 1 || view.Snapshot.Queries[0].Name != "private.corp.example" || view.Snapshot.Queries[0].Protocol != "udp" {
 		t.Fatalf("native snapshot lost scope: %+v", view)
 	}
 	var sealed string

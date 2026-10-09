@@ -202,30 +202,21 @@ func (c *nativeClient) inspectAdGuard(ctx context.Context, s *Snapshot) error {
 		return err
 	}
 	var logs struct {
-		Data []struct {
-			Time     string `json:"time"`
-			Client   string `json:"client"`
-			Reason   string `json:"reason"`
-			Protocol string `json:"client_proto"`
-			Question struct {
-				Host string `json:"host"`
-				Type string `json:"type"`
-			} `json:"question"`
-		} `json:"data"`
+		Data json.RawMessage `json:"data"`
 	}
-	if err = c.request(ctx, http.MethodGet, "/control/querylog?limit=100", nil, &logs); err != nil || logs.Data == nil {
-		if err == nil {
-			err = errors.New("native query log did not declare its entry inventory")
-		}
+	if err = c.request(ctx, http.MethodGet, "/control/querylog?limit=100", nil, &logs); err != nil {
 		s.QueryEvidence.Summary = err.Error()
 	} else {
-		if len(logs.Data) > 100 {
-			return errors.New("native AdGuard query history exceeds its requested bound")
+		queries, decodeErr := c.queryHistory(logs.Data)
+		if errors.Is(decodeErr, errQueryHistoryBound) {
+			return decodeErr
 		}
-		for _, q := range logs.Data {
-			s.Queries = append(s.Queries, Query{c.text(q.Time), c.text(q.Client), c.text(q.Question.Host), c.text(q.Question.Type), c.text(q.Reason), c.text(q.Protocol)})
+		if decodeErr != nil {
+			s.QueryEvidence.Summary = decodeErr.Error()
+		} else {
+			s.Queries = queries
+			s.QueryEvidence = Reading{"native_history", "native_api", "At most 100 recent native query-log entries; absent entries do not prove an absence of DNS traffic."}
 		}
-		s.QueryEvidence = Reading{"native_history", "native_api", "At most 100 recent native query-log entries; absent entries do not prove an absence of DNS traffic."}
 	}
 	return nil
 }
@@ -364,29 +355,21 @@ func (c *nativeClient) inspectPiHole(ctx context.Context, s *Snapshot) error {
 		return err
 	}
 	var logs struct {
-		Queries []struct {
-			Time   float64 `json:"time"`
-			Type   string  `json:"type"`
-			Domain string  `json:"domain"`
-			Status string  `json:"status"`
-			Client struct {
-				IP string `json:"ip"`
-			} `json:"client"`
-		} `json:"queries"`
+		Queries json.RawMessage `json:"queries"`
 	}
-	if err = c.request(ctx, http.MethodGet, "/api/queries?length=100", nil, &logs); err != nil || logs.Queries == nil {
-		if err == nil {
-			err = errors.New("native query history did not declare its entry inventory")
-		}
+	if err = c.request(ctx, http.MethodGet, "/api/queries?length=100", nil, &logs); err != nil {
 		s.QueryEvidence.Summary = err.Error()
 	} else {
-		if len(logs.Queries) > 100 {
-			return errors.New("native Pi-hole query history exceeds its requested bound")
+		queries, decodeErr := c.queryHistory(logs.Queries)
+		if errors.Is(decodeErr, errQueryHistoryBound) {
+			return decodeErr
 		}
-		for _, q := range logs.Queries {
-			s.Queries = append(s.Queries, Query{strconv.FormatFloat(q.Time, 'f', 3, 64), c.text(q.Client.IP), c.text(q.Domain), c.text(q.Type), c.text(q.Status), ""})
+		if decodeErr != nil {
+			s.QueryEvidence.Summary = decodeErr.Error()
+		} else {
+			s.Queries = queries
+			s.QueryEvidence = Reading{"native_history", "native_api", "At most 100 recent native query entries; runtime history and configured client policy are distinct."}
 		}
-		s.QueryEvidence = Reading{"native_history", "native_api", "At most 100 recent native query entries; runtime history and configured client policy are distinct."}
 	}
 	return nil
 }
@@ -546,29 +529,22 @@ func (c *nativeClient) inspectTechnitium(ctx context.Context, s *Snapshot) error
 				return errors.New("native query logger identity exceeds its bound")
 			}
 			var logs struct {
-				Entries []struct {
-					At       string `json:"timestamp"`
-					Client   string `json:"clientIpAddress"`
-					Name     string `json:"qname"`
-					Type     string `json:"qtype"`
-					Status   string `json:"responseType"`
-					Protocol string `json:"protocol"`
-				} `json:"entries"`
+				Entries json.RawMessage `json:"entries"`
 			}
 			form := url.Values{"name": {app.Name}, "classPath": {class.Class}, "pageNumber": {"1"}, "entriesPerPage": {"100"}, "descendingOrder": {"true"}}
-			if err = c.technitium(ctx, "/api/logs/query", form, &logs); err != nil || logs.Entries == nil {
-				if err == nil {
-					err = errors.New("native query logger did not declare its entry inventory")
-				}
+			if err = c.technitium(ctx, "/api/logs/query", form, &logs); err != nil {
 				s.QueryEvidence.Summary = err.Error()
 				return nil
 			}
-			if len(logs.Entries) > 100 {
-				return errors.New("native Technitium query history exceeds its requested bound")
+			queries, decodeErr := c.queryHistory(logs.Entries)
+			if errors.Is(decodeErr, errQueryHistoryBound) {
+				return decodeErr
 			}
-			for _, q := range logs.Entries {
-				s.Queries = append(s.Queries, Query{c.text(q.At), c.text(q.Client), c.text(q.Name), c.text(q.Type), c.text(q.Status), c.text(q.Protocol)})
+			if decodeErr != nil {
+				s.QueryEvidence.Summary = decodeErr.Error()
+				return nil
 			}
+			s.Queries = queries
 			s.QueryEvidence = Reading{"native_history", "native_api", "At most 100 entries from the first installed native query-logger app. The dashboard installs no logging app."}
 			return nil
 		}

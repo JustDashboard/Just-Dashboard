@@ -59,6 +59,34 @@ consumed plan; missing/mismatched readback leaves `needs_review`. The dashboard 
 uncertain native mutation or restore foreign policy. Native client filter groups, local rewrites
 and authoritative zones remain distinct; configured DNSSEC status is not cryptographic proof.
 
+## Native query history
+
+Fresh service inspection reads at most 100 native query rows. The requested collection must be an
+explicit array, and every row must be an object with its required native fields present and correctly
+typed. A malformed, missing or null collection or row leaves query evidence unknown and returns no
+partial history; independently readable configuration stays available. More than 100 rows refuses
+the snapshot as before. An explicit empty array establishes an empty recent native history, never
+an absence of DNS traffic. Unknown native fields are ignored within the existing response bound.
+
+AdGuard maps the native question's `name`, not `host` or its optional Unicode display alias. Native
+time, client, reason, question name and type must be strings. An omitted client protocol remains
+unreported; a present protocol must be a string. FTL requires an actual finite nonnegative numeric
+timestamp, a client object with its IP string, and domain/type strings. Explicit numeric zero is
+preserved; a missing or null timestamp never becomes `0.000`. Its explicit nullable status remains
+unreported, while a missing or wrongly typed status leaves the section unknown. Technitium requires
+native timestamp/client/response-type/protocol strings and either two question strings or the native
+writer's paired explicit null `qname`/`qtype` for an absent question. Missing, mixed-null or malformed
+question fields never become a fabricated question. Explicit empty native strings remain reported.
+These contracts are grounded in the pinned [AdGuard 0.107.71 query writer](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
+[FTL 6.7.1 query schema](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/queries.yaml)
+and [Technitium 15.6.0 query writer](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/WebServiceLogsApi.cs).
+
+Every reported query field uses the existing credential/session redaction, control-character removal
+and 512-byte display bound. Queries do not enter the policy fingerprint, and are removed before a
+review is retained. Technitium reads only the first already-installed query logger with one bounded
+page; it installs no app. These native rows are reported engine history, separate from an observed
+client packet, a measured filtering decision or an atomic configuration snapshot.
+
 ## Read-only native filter metadata
 
 `GET /{id}/filters` also works for dashboard read-only connections. It returns a `FilterView` with
