@@ -80,14 +80,19 @@ policy restoration is used to force a pass.
 
 Native history corroborates the actual source and matched rule/list identity after the added and
 restarted matrices. AdGuard's pinned writer emits `question.name`, `client_proto` and matched rule
-text/list ID; Pi-hole reports client IP, type, status and selected domainlist ID. Documented nullable
+text/list ID. Its `client_proto` enum describes encryption, not UDP versus TCP: the explicit empty
+string is plain DNS. Controlled matched rows must retain that present empty string; missing/null,
+wrong types, invented `udp`/`tcp` values, encrypted values and unknown values refuse corroboration.
+Pi-hole reports client IP, type, status and selected domainlist ID. Documented nullable
 Pi-hole status/list IDs stay unreported and do not become a positive match. Each added/restarted
 matrix captures actual local Go time immediately before its first questions. AdGuard's RFC3339Nano
 row time and Pi-hole's finite nonnegative epoch time must be at or after that boundary and no later
 than the actual completed native read. Missing, null, malformed or future times refuse complete
 corroboration; old rows with the same selected native IDs/status cannot establish a new phase.
-Both clocks use the same local daemon kernel in this fixture. Pi-hole history has no transport field: UDP/TCP evidence
-comes from the wire helper, independently. Only controlled scalar evidence is logged; native
+Both clocks use the same local daemon kernel in this fixture. Each engine requires current-phase
+A and AAAA matches for both selected allow and deny rules. Neither engine's history distinguishes
+UDP from TCP; complete UDP/TCP evidence comes independently from the wire matrices. The logged
+`transportBasis` names that boundary and AdGuard's plain encryption marker. Only controlled scalar evidence is logged; native
 credentials, unrelated queries and raw response bodies are not printed.
 
 ## Fixed bounds and failure ownership
@@ -160,7 +165,23 @@ client evidence, and refuses missing/wrong-type/nonempty overrides without relax
 Any later actual attempt requires a new clean-source race binary and separately frozen receipt;
 the original failure and preparation records retain their original attribution.
 
+The next actual attempt used clean `757e9d24` with that client correction. AdGuard completed 108
+controlled questions through the disabled, baseline and added phases, then stopped at native history:
+the fixture incorrectly required `udp`/`tcp` in the pinned encryption enum. Its 53.792-second failure
+is not full decision acceptance; Pi-hole was not dispatched. Host/socket/source/binaries and the
+complete image inventory remained unchanged, with zero owned Docker/process/TMP entries. The
+original raw logs remain separately attributed under
+`/home/ubuntu/Just-Dashboard-network-dns-domain-decisions-artifacts/native-decision-root-adguard.log`
+(SHA256 `fa486f57dddc398fe682bb997e61d02c92e75a47a15c2f812d37731d72f3d180`)
+and `/home/ubuntu/Just-Dashboard-network-dns-decision-client-scope-artifacts/native-decision-client-scope-adguard.log`
+(SHA256 `02d1d1c5d716ca49a8189d2818d4f787f294dc1c677e150b2740e438d7a3f698`).
+The history correction is test-only preparation from clean assembled `c01322d1`. Its regression
+first reproduced rejection of the pinned explicit empty marker, then checks strict malformed marker
+refusal, complete A/AAAA decisions and the existing current-phase/old-same-ID boundaries. Fresh
+frozen assets and an independently reviewed wrapper are required before any later actual attempt.
+
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
+[the AdGuard encryption enum](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/qlog.go#L53),
 [persistent-client JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/home/clientshttp.go#L86),
 [filter application and precedence](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/filtering.go),
 [null-IP response construction](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/dnsforward/msg.go),

@@ -374,18 +374,20 @@ func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, addres
 			if name == allow && status != "NotFilteredWhiteList" || name == deny && status != "FilteredBlackList" {
 				continue
 			}
-			var protocol string
+			var protocol *string
 			var rules []struct {
 				Text *string `json:"text"`
 				ID   *int    `json:"filter_list_id"`
 			}
-			if json.Unmarshal(row["client_proto"], &protocol) != nil || protocol != "udp" && protocol != "tcp" || json.Unmarshal(row["rules"], &rules) != nil || len(rules) != 1 || rules[0].Text == nil || rules[0].ID == nil || *rules[0].ID != 0 {
-				return false, errors.New("native controlled AdGuard query rule/transport is unreported")
+			// The pinned enum describes encryption; its explicit empty value is plain DNS.
+			// UDP/TCP are independently measured by the complete wire matrices.
+			if json.Unmarshal(row["client_proto"], &protocol) != nil || protocol == nil || *protocol != "" || json.Unmarshal(row["rules"], &rules) != nil || len(rules) != 1 || rules[0].Text == nil || rules[0].ID == nil || *rules[0].ID != 0 {
+				return false, errors.New("native controlled AdGuard query rule/plain-DNS encryption marker is missing or unsupported")
 			}
 			if name == allow && status == "NotFilteredWhiteList" && *rules[0].Text == "@@||"+allow+"^" {
-				allowSeen[kind+protocol] = true
+				allowSeen[kind] = true
 			} else if name == deny && status == "FilteredBlackList" && *rules[0].Text == "||"+deny+"^" {
-				denySeen[kind+protocol] = true
+				denySeen[kind] = true
 			}
 		} else {
 			if name == allow && status != "FORWARDED" && status != "CACHE" || name == deny && status != "DENYLIST" {
@@ -405,11 +407,7 @@ func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, addres
 			}
 		}
 	}
-	want := 4
-	if engine == PiHole {
-		want = 2
-	}
-	return len(allowSeen) == want && len(denySeen) == want, nil
+	return len(allowSeen) == 2 && len(denySeen) == 2, nil
 }
 
 func verifyDecisionHistory(t *testing.T, ctx context.Context, c *nativeClient, engine Engine, address, allow, deny string, notBefore time.Time) {
@@ -421,7 +419,7 @@ func verifyDecisionHistory(t *testing.T, ctx context.Context, c *nativeClient, e
 			t.Fatal("native actual-query corroboration failed", err)
 		}
 		if ok {
-			t.Logf("native query history corroborated engine=%s client=%s allow/deny=A+AAAA phaseNotBefore=%s readNotAfter=%s transportBasis=%s", engine, address, notBefore.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano), map[Engine]string{AdGuard: "native_client_proto_and_wire", PiHole: "wire_only_native_transport_unreported"}[engine])
+			t.Logf("native query history corroborated engine=%s client=%s allow/deny=A+AAAA phaseNotBefore=%s readNotAfter=%s transportBasis=%s", engine, address, notBefore.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano), map[Engine]string{AdGuard: "wire_only_native_plain_encryption_marker", PiHole: "wire_only_native_transport_unreported"}[engine])
 			return
 		}
 		select {
@@ -540,11 +538,9 @@ func TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches(t *testing
 			var mu sync.Mutex
 			rows := []any{}
 			if engine == AdGuard {
-				rows = append(rows, map[string]any{"client": address, "reason": "NotFilteredNotFound", "question": map[string]any{"name": allow, "type": "A"}, "client_proto": "udp", "rules": []any{}})
+				rows = append(rows, map[string]any{"client": address, "reason": "NotFilteredNotFound", "question": map[string]any{"name": allow, "type": "A"}, "client_proto": "", "rules": []any{}})
 				for _, kind := range []string{"A", "AAAA"} {
-					for _, protocol := range []string{"udp", "tcp"} {
-						rows = append(rows, map[string]any{"client": address, "reason": "NotFilteredWhiteList", "question": map[string]any{"name": allow, "type": kind}, "client_proto": protocol, "rules": []any{map[string]any{"text": "@@||" + allow + "^", "filter_list_id": 0}}}, map[string]any{"client": address, "reason": "FilteredBlackList", "question": map[string]any{"name": deny, "type": kind}, "client_proto": protocol, "rules": []any{map[string]any{"text": "||" + deny + "^", "filter_list_id": 0}}})
-					}
+					rows = append(rows, map[string]any{"client": address, "reason": "NotFilteredWhiteList", "question": map[string]any{"name": allow, "type": kind}, "client_proto": "", "rules": []any{map[string]any{"text": "@@||" + allow + "^", "filter_list_id": 0}}}, map[string]any{"client": address, "reason": "FilteredBlackList", "question": map[string]any{"name": deny, "type": kind}, "client_proto": "", "rules": []any{map[string]any{"text": "||" + deny + "^", "filter_list_id": 0}}})
 				}
 			} else {
 				rows = append(rows, map[string]any{"client": map[string]any{"ip": address}, "status": "FORWARDED", "domain": allow, "type": "A", "list_id": nil}, map[string]any{"client": map[string]any{"ip": address}, "status": nil, "domain": allow, "type": "A", "list_id": nil})
@@ -620,6 +616,62 @@ func TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches(t *testing
 			mu.Unlock()
 			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || !ok {
 				t.Fatal("actual current-phase same-ID decisions were withheld", ok, err)
+			}
+			if engine == AdGuard {
+				for _, test := range []struct {
+					name    string
+					present bool
+					value   any
+				}{
+					{"missing", false, nil}, {"null", true, nil}, {"number", true, 0},
+					{"boolean", true, false}, {"object", true, map[string]any{}}, {"array", true, []any{}},
+					{"udp_is_not_encryption_enum", true, "udp"}, {"tcp_is_not_encryption_enum", true, "tcp"},
+					{"doh", true, "doh"}, {"dot", true, "dot"}, {"doq", true, "doq"},
+					{"dnscrypt", true, "dnscrypt"}, {"unknown", true, "plain"},
+				} {
+					t.Run(test.name, func(t *testing.T) {
+						mu.Lock()
+						selected := rows[1].(map[string]any)
+						if test.present {
+							selected["client_proto"] = test.value
+						} else {
+							delete(selected, "client_proto")
+						}
+						mu.Unlock()
+						if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err == nil || ok {
+							t.Fatal("missing/malformed/encrypted/transport enum became plain-DNS evidence", ok, err)
+						}
+						mu.Lock()
+						selected["client_proto"] = ""
+						mu.Unlock()
+					})
+				}
+				if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || !ok {
+					t.Fatal("explicit pinned empty plain-DNS marker was withheld", ok, err)
+				}
+			}
+			for _, name := range []string{allow, deny} {
+				mu.Lock()
+				valid := rows
+				rows = nil
+				for _, row := range valid {
+					selected := row.(map[string]any)
+					rowName, kind := selected["domain"], selected["type"]
+					if engine == AdGuard {
+						question := selected["question"].(map[string]any)
+						rowName, kind = question["name"], question["type"]
+					}
+					if rowName != name || kind != "AAAA" {
+						rows = append(rows, row)
+					}
+				}
+				mu.Unlock()
+				if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || ok {
+					t.Fatal("missing selected AAAA decision became complete A+AAAA evidence", ok, err)
+				}
+				mu.Lock()
+				rows = valid
+				mu.Unlock()
 			}
 			for _, badTime := range []any{nil, true, "malformed", nativeTime(time.Now().Add(time.Hour))} {
 				mu.Lock()
