@@ -77,3 +77,29 @@ func TestHandoffRouteReadsOnlyThePackagesItOffers(t *testing.T) {
 		t.Fatalf("an unknown package = %d %s", w.Code, w.Body)
 	}
 }
+
+// On the machine running the tests, read-only: the phases follow what is
+// actually there, and a package on disk is never reported working by itself.
+func TestHandoffRouteReadsThisHost(t *testing.T) {
+	_, viewer, _ := networkClients(t)
+	for _, pkg := range []string{"bpftool", "wireguard-tools"} {
+		w := viewer.do(http.MethodGet, "/api/v1/network/handoffs/"+pkg, "", nil)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s = %d %s", pkg, w.Code, w.Body)
+		}
+		var h PackageHandoff
+		decodeNetworkBody(t, w.Body.Bytes(), &h)
+		if h.Package != pkg || len(h.Phases) != 4 || h.Phases[0].Key != "installed" || h.Phases[3].Key != "verified" {
+			t.Fatalf("%s = %+v", pkg, h)
+		}
+		installed := h.Phases[0].Status == "done"
+		if !installed && h.Working {
+			t.Fatalf("%s works without being installed: %+v", pkg, h)
+		}
+		for _, p := range h.Phases {
+			if p.Detail == "" {
+				t.Fatalf("%s phase without a sentence: %+v", pkg, p)
+			}
+		}
+	}
+}
