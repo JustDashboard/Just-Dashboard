@@ -155,6 +155,17 @@ the [route table](../backend/databases-proxy-platform.md#routes).
   independent recovery. It can repair only reviewed owned files/canonical required admission;
   other native repair remains advice. Explicit SQM set/clear also requires mandatory pending
   reconnection, with a closed private typed undo. Selected drift recovery rejects that vocabulary.
+- **The access boundary.** A fail2ban ban, a CrowdSec decision and an SSH settings change are judged
+  by `api.boundaryGate` against the dashboard's access boundary (Caddy's listener, the pre-auth
+  allowlist, the tailnet, SSH for a tunnel, tailnet-only previews) after the request is validated
+  and before anything is applied: an impact that `cuts` this session's own way in answers
+  `409 would_lock_you_out`; one that `affects` the boundary for somebody else answers
+  `409 boundary_acknowledgement_required` until the body carries `acknowledgeBoundary: true`, which
+  the forms send only after showing the same sentences from `GET /security/boundary/check`. The
+  check is a GET so judging a proposal is never audited as a change. The existing own-address
+  guards are unchanged and still apply. A pending SSH apply (`X-JD-Network-Apply: pending` on
+  `POST /ssh/config`) is refused to anything but an administrator's interactive session and enrols
+  the apply in the network recovery journal before the first write.
 - **Log sources.** The log routes decide on the source, not the path. `/logs/stream`, `/search`,
   `/download`, `/retention` and `/source` are `read`, but every one parses its `source` through
   `logTargetFor`, which refuses auth data — `auth.log` and `secure` with their generations and anything

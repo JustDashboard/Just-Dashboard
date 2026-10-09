@@ -55,8 +55,10 @@ strategy, and feature ownership behind those rules.
 - [`backend/network-drift.md`](backend/network-drift.md) — owned render/runtime comparison,
   measured unit activation and generation-bound repair review.
 - [`backend/server-advisor.md`](backend/server-advisor.md) — local Health investigations, bounded storage evidence, reviewed cleanup and measured process attribution.
-- [`backend/observability-security.md`](backend/observability-security.md) — metrics, health, exposure,
-  posture, login history, sshd, firewall/fail2ban, and six package managers.
+- [`backend/observability-security.md`](backend/observability-security.md) — metrics, health (TCP
+  windows and correlated probes), exposure, posture, login history, sshd and its pending apply,
+  firewall/fail2ban policy, merged blocks, CrowdSec enforcement, Suricata setup, the access boundary,
+  and six package managers.
 - [`backend/docker-files-logs.md`](backend/docker-files-logs.md) — Docker, compose, file management,
   archives, previews, log discovery/search/tailing, the lenses that read each kind of log, and the
   service logs every page embeds.

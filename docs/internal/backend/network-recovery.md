@@ -7,7 +7,8 @@ commands derived from the previous spec, and the boot unit restores them with co
 failure-tolerant `bridge` lines. Native-owned link
 state, MTU and bridge membership changes use the same journal but remain runtime-only. DNS and
 WireGuard configuration, Tailscale preferences and netsec firewall changes have separate owners and
-are not covered by this journal. Their existing synchronous rollback does not imply independent
+are not covered by this journal. A pending SSH apply is: it enrols as subsystem `sshd` with a closed
+set of sshd files and systemctl undo (see [sshd](observability-security.md#sshd)). Their existing synchronous rollback does not imply independent
 recovery.
 
 [Selected persistent native profiles](network-native-managers.md) also use this journal with a
@@ -101,6 +102,11 @@ generation with a bounded cancellation-independent context.
 capability, and audits a retry of terminal native cleanup. Failed cleanup never authorizes rollback
 of a durable confirmed candidate. Native checkpoint timeout holds and owner bus/boot identities are
 private journal evidence; the native adapter guide explains their failure/restart boundaries.
+
+The verification response also carries the access boundary after the change beside the picture
+taken before the apply (`boundary`: Caddy-only ingress, allowlist, tailnet, SSH, previews), so the
+session sees a lost boundary before it confirms; see
+[the access boundary](observability-security.md#the-access-boundary).
 
 Confirmation establishes a returned dashboard response, not application, tunnel or provider health.
 The UI retains pending evidence during disconnection and waits for recovered/degraded host evidence
