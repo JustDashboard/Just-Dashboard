@@ -223,6 +223,7 @@ function selectedSnapshot(
   native: DNSServiceSnapshot,
   request: DNSChangeRequest,
   records: DNSRecordInventory,
+  comment: string | null = "Keep this existing native client comment",
 ): DNSServiceSnapshot {
   const snapshot = structuredClone(native)
   delete snapshot.records
@@ -233,7 +234,6 @@ function selectedSnapshot(
     snapshot.selectionFingerprint = records.fingerprint
   } else if (request.action === "client_groups") {
     const client = snapshot.clients.find((item) => item.addresses.includes(request.client.address))
-    const comment = "Keep this existing native client comment"
     snapshot.selectedClient = {
       address: request.client.address,
       groups: [...(client?.groups ?? [])],
@@ -265,11 +265,12 @@ export function dnsPolicyChange(
   ),
   snapshot = dnsSnapshot(connection.engine),
   records = dnsRecords(),
+  comment: string | null = "Keep this existing native client comment",
 ): DNSServiceChange {
   return {
     ...dnsChange(connection),
     request: structuredClone(request),
-    before: { ...selectedSnapshot(snapshot, request, records), queries: [] },
+    before: { ...selectedSnapshot(snapshot, request, records, comment), queries: [] },
   }
 }
 
@@ -362,6 +363,7 @@ export type DNSServicePageControl = {
   connections: DNSConnection[]
   view: DNSServiceView
   records: DNSRecordInventory
+  clientComment: string | null
   changes: DNSServiceChange[]
   provisions: DNSServiceProvision[]
   inspectFailure: boolean
@@ -397,6 +399,7 @@ export async function mockDNSServicePage(
       snapshot: dnsSnapshot(connection.engine),
     },
     records: dnsRecords(),
+    clientComment: "Keep this existing native client comment",
     changes: [],
     provisions: [],
     inspectFailure: false,
@@ -451,7 +454,12 @@ export async function mockDNSServicePage(
           ...control.view,
           snapshot: control.currentMissingSelection
             ? control.view.snapshot
-            : selectedSnapshot(control.view.snapshot!, current.request, control.records),
+            : selectedSnapshot(
+                control.view.snapshot!,
+                current.request,
+                control.records,
+                control.clientComment,
+              ),
         })
       }
       const change = control.changes.find((item) => path === `${base}/changes/${item.id}`)
@@ -544,6 +552,7 @@ export async function mockDNSServicePage(
         control.view.connection,
         control.view.snapshot,
         control.records,
+        control.clientComment,
       )
       control.changes = [next]
       return reply(next, 201)

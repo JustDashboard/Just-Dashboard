@@ -608,6 +608,35 @@ test("refreshing native clients preserves edited group choices and an empty-grou
   expect(posts(control)).toEqual([])
 })
 
+for (const comment of [null, ""] as const) {
+  test(`native ${comment === null ? "null" : "empty"} client comment stays explicit before and after group assignment`, async ({
+    page,
+  }) => {
+    const control = await mockDNSServicePage(page, { engine: "pihole" })
+    control.clientComment = comment
+    await selectedClient(page)
+    await sheet(page)
+      .getByRole("checkbox", { name: /^No filtering group · ID 7(?:\s|$)/ })
+      .uncheck()
+    await createReview(page).click()
+    const label = comment === null ? "None (native null)" : "Empty native comment"
+    await expect(detail(section(page, "Before the change"), "Client comment")).toHaveText(label)
+    expect(control.changes[0].before!.selectedClient!.comment).toBe(comment)
+    const originalFingerprint = control.changes[0].before!.selectedClient!.commentFingerprint
+    await expect(applyReview(page)).toBeEnabled()
+    const dialog = await confirmation(page)
+    await dialog.getByRole("button", { name: "Apply native change", exact: true }).click()
+    await expect(detail(section(page, "Native readback"), "Client comment")).toHaveText(label)
+    expect(control.changes[0].after!.selectedClient!.comment).toBe(comment)
+    expect(control.changes[0].after!.selectedClient!.commentFingerprint).toBe(originalFingerprint)
+    expect(control.mutations[0].body).toEqual({
+      action: "client_groups",
+      client: { address: "192.0.2.10", groups: [] },
+    })
+    expect(posts(control)).toHaveLength(1)
+  })
+}
+
 test("record draft validation keeps invalid TTL, family and owner fields without staging", async ({
   page,
 }) => {
