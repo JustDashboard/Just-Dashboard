@@ -261,3 +261,30 @@ func TestPlanDNSValidatesFirst(t *testing.T) {
 		t.Fatalf("an invalid plan asked the host: %v", rec.commands())
 	}
 }
+
+// resolvectl lists a link's loopback-addressed server under Global as well;
+// the read-back belongs that entry to its link, not to the drop-in.
+func TestReadbackDiscountsALinksLoopbackServer(t *testing.T) {
+	rec := record(t)
+	rec.on("resolvectl status --no-pager", `Global
+       DNS Servers: 203.0.113.53#resolver.example 127.0.0.2#resolver.example
+        DNS Domain: ~.
+Link 8 (wg0)
+    Current Scopes: DNS
+       DNS Servers: 127.0.0.2#resolver.example
+        DNS Domain: ~corp.example
+`)
+	req, _ := cleanDNSSettings(DNSSettings{Servers: []string{"203.0.113.53#resolver.example"}, Domains: []string{"~."}})
+	if state, detail := readbackDNS(context.Background(), req); state != "passed" {
+		t.Fatalf("read-back = %s %s", state, detail)
+	}
+	// A loopback server written on purpose is still compared.
+	req, _ = cleanDNSSettings(DNSSettings{Servers: []string{"203.0.113.53#resolver.example", "127.0.0.2#resolver.example"}})
+	if state, _ := readbackDNS(context.Background(), req); state != "passed" {
+		t.Fatalf("a written loopback server was discounted: %s", state)
+	}
+	req, _ = cleanDNSSettings(DNSSettings{Servers: []string{"198.51.100.53"}})
+	if state, detail := readbackDNS(context.Background(), req); state != "failed" || !strings.Contains(detail, "203.0.113.53#resolver.example where 198.51.100.53") {
+		t.Fatalf("a different server passed: %s %s", state, detail)
+	}
+}
