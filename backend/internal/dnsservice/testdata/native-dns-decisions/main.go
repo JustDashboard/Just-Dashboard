@@ -30,10 +30,10 @@ func names(nonce string) ([]string, error) {
 	if !noncePattern.MatchString(nonce) {
 		return nil, errors.New("fixture nonce is outside its closed format")
 	}
-	parent := "seed-" + nonce + ".invalid"
-	deny := "deny-" + nonce + ".invalid"
+	parent := "seed-" + nonce + ".example"
+	deny := "deny-" + nonce + ".example"
 	return []string{parent, "allow." + parent, "child.allow." + parent, deny, "child." + deny,
-		"empty-" + nonce + ".invalid", "neutral-" + nonce + ".invalid", "seed-" + nonce + "-lookalike.invalid"}, nil
+		"empty-" + nonce + ".example", "neutral-" + nonce + ".example", "seed-" + nonce + "-lookalike.example"}, nil
 }
 
 func question(nonce, name, kind string) (dnsmessage.Question, error) {

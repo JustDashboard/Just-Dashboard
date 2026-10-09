@@ -108,7 +108,7 @@ func readDecisionInventory(t *testing.T, ctx context.Context, c *nativeClient, e
 }
 
 func stripDecisionSelections(engine Engine, parent string, inv decisionInventory) decisionInventory {
-	deny := strings.Replace(strings.TrimSuffix(parent, ".invalid"), "seed-", "deny-", 1) + ".invalid"
+	deny := strings.Replace(strings.TrimSuffix(parent, ".example"), "seed-", "deny-", 1) + ".example"
 	empty := strings.Replace(deny, "deny-", "empty-", 1)
 	selected := map[string]bool{"allow." + parent: true, deny: true, empty: true}
 	if engine == AdGuard {
@@ -508,8 +508,8 @@ func TestDNSDomainDecisionAdGuardEmptyClientWriter(t *testing.T) {
 }
 
 func TestDNSDomainDecisionSeedPreservesOpaquePolicy(t *testing.T) {
-	parent := "seed-012345abcdef.invalid"
-	rules := []string{"# untouched comment", "", "||" + parent + "^", "@@||allow." + parent + "^", "||deny-012345abcdef.invalid^"}
+	parent := "seed-012345abcdef.example"
+	rules := []string{"# untouched comment", "", "||" + parent + "^", "@@||allow." + parent + "^", "||deny-012345abcdef.example^"}
 	raw, _ := json.Marshal(rules)
 	inv := decisionInventory{Filters: domainFilterInventory{Rules: rules, Native: map[string]json.RawMessage{"user_rules": raw, "opaque": json.RawMessage(`{"nested":true}`)}}, Clients: json.RawMessage("[]")}
 	filtered := stripDecisionSelections(AdGuard, parent, inv)
@@ -526,7 +526,7 @@ func TestDNSDomainDecisionSeedPreservesOpaquePolicy(t *testing.T) {
 func TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches(t *testing.T) {
 	for _, engine := range []Engine{AdGuard, PiHole} {
 		t.Run(string(engine), func(t *testing.T) {
-			allow, deny, address := "allow.seed-012345abcdef.invalid", "deny-012345abcdef.invalid", "172.20.0.3"
+			allow, deny, address := "allow.seed-012345abcdef.example", "deny-012345abcdef.example", "172.20.0.3"
 			phaseStart := time.Now().Add(-time.Second)
 			oldTime, currentTime := phaseStart.Add(-time.Second), phaseStart.Add(500*time.Millisecond)
 			nativeTime := func(at time.Time) any {
@@ -810,7 +810,7 @@ func TestDNSDomainDecisionBridgeRefusesChangedClientOrEngine(t *testing.T) {
 			}
 		})
 	}
-	if _, err := side.query(t.Context(), "172.20.0.99", "neutral-012345abcdef.invalid", "A", "udp", 1); err == nil {
+	if _, err := side.query(t.Context(), "172.20.0.99", "neutral-012345abcdef.example", "A", "udp", 1); err == nil {
 		t.Fatal("foreign target reached Docker inspection/exec")
 	}
 }
@@ -883,7 +883,7 @@ func TestDNSDomainDecisionRefusalRetainsOriginalReadWithoutExecOrReread(t *testi
 	engineAddress, engineMAC, engineEndpoint = "172.20.0.8", "02:00:00:00:00:08", strings.Repeat("8", 64)
 	bridge.Containers[side.engineID] = network.EndpointResource{EndpointID: engineEndpoint, IPv4Address: engineAddress + "/16", MacAddress: engineMAC}
 	queries := &decisionQueries{t: t, side: side, ctx: t.Context(), target: side.engineAddress}
-	_, err = queries.read("allow.seed-012345abcdef.invalid", "A", "udp")
+	_, err = queries.read("allow.seed-012345abcdef.example", "A", "udp")
 	var refusal *decisionQueryRefusal
 	if !errors.As(err, &refusal) || refusal.Stage != "bridge_identity" || refusal.Code != "engine_endpoint_changed" || refusal.Unwrap().Error() != "owned engine bridge endpoint differs" {
 		t.Fatal("original stale-endpoint refusal lost its precise stage/cause", err)

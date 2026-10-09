@@ -52,13 +52,13 @@ func decisionMatrix(engine Engine, nonce, phase string) ([]decisionCase, error) 
 	if engine != AdGuard && engine != PiHole || !regexp.MustCompile(`^[a-f0-9]{12}$`).MatchString(nonce) || phase != "disabled" && phase != "baseline" && phase != "added" && phase != "removed" {
 		return nil, errors.New("unsupported decision fixture engine, nonce or phase")
 	}
-	parent, deny := "seed-"+nonce+".invalid", "deny-"+nonce+".invalid"
+	parent, deny := "seed-"+nonce+".example", "deny-"+nonce+".example"
 	baseline := phase != "disabled"
 	added := phase == "added"
 	return []decisionCase{{parent, baseline}, {"allow." + parent, baseline && !added},
 		{"child.allow." + parent, baseline && (!added || engine == PiHole)}, {deny, added},
-		{"child." + deny, added && engine == AdGuard}, {"empty-" + nonce + ".invalid", false},
-		{"neutral-" + nonce + ".invalid", false}, {"seed-" + nonce + "-lookalike.invalid", false}}, nil
+		{"child." + deny, added && engine == AdGuard}, {"empty-" + nonce + ".example", false},
+		{"neutral-" + nonce + ".example", false}, {"seed-" + nonce + "-lookalike.example", false}}, nil
 }
 
 func decisionMaximumQueries() int {
@@ -815,7 +815,7 @@ func TestDNSServiceNativeDomainDecisions(t *testing.T) {
 	} else {
 		err = client.request(ctx, http.MethodPost, "/api/clients", map[string]any{"client": "198.51.100.77", "groups": []int{0}, "comment": "owned unselected client comment"}, nil)
 		if err == nil {
-			err = client.request(ctx, http.MethodPost, "/api/domains/deny/regex", map[string]any{"domain": "(^|[.])seed-" + nonce + "[.]invalid$", "enabled": true, "groups": []int{0}, "comment": "owned unselected decision fixture comment"}, nil)
+			err = client.request(ctx, http.MethodPost, "/api/domains/deny/regex", map[string]any{"domain": "(^|[.])seed-" + nonce + "[.]example$", "enabled": true, "groups": []int{0}, "comment": "owned unselected decision fixture comment"}, nil)
 		}
 	}
 	if err != nil {

@@ -33,8 +33,10 @@ engine and the bridge must retain exactly the captured engine and sidecar endpoi
 
 The production owned bridge is an ordinary Docker bridge; it is **not** `Internal: true`. This
 fixture makes no blanket egress-containment claim. The helper never forwards, accepts only eight
-nonce-bound `.invalid` names and A/AAAA questions, and returns fixed documentation addresses with
-TTL zero. Reviewed upstream configuration points only to its literal bridge IPv4 and port 5353.
+nonce-bound `.example` names and A/AAAA questions, and returns fixed documentation addresses with
+TTL zero. The reserved `.example` TLD is undelegated, and RFC 6761 tells caching resolvers to
+resolve it normally; pinned FTL 6.7.1 instead always generates `server=/invalid/` and
+`server=/test/`, answering those names locally without forwarding. Reviewed upstream configuration points only to its literal bridge IPv4 and port 5353.
 Client questions run through bounded Docker exec from that same inspected sidecar IPv4/MAC to the
 literal engine IPv4 on port 53. IPv4 client transport carrying AAAA questions does not establish
 IPv6 client transport. Every response must match transaction ID, question, class, owner and type,
@@ -44,8 +46,8 @@ SERVFAIL, NXDOMAIN, empty answers, aliases and foreign values are failures.
 ## Causality and preserved policy
 
 The fixture seeds one literal unselected parent denial. AdGuard receives an ordered custom-rule
-array with a fixed comment, an intentional empty string and `||seed-<nonce>.invalid^`. Pi-hole
-receives the fixed regex `(^|[.])seed-<nonce>[.]invalid$`, enabled with group `[0]` and a comment,
+array with a fixed comment, an intentional empty string and `||seed-<nonce>.example^`. Pi-hole
+receives the fixed regex `(^|[.])seed-<nonce>[.]example$`, enabled with group `[0]` and a comment,
 plus a foreign exact client with its own preserved comment and `[0]` membership. This private seed
 is fixture setup, not a public regex or arbitrary-rule control. No subscription is configured.
 
@@ -233,6 +235,22 @@ predicate must accept that same read. Any other difference refuses with
 `restart_transition`/`engine_restart_transition_changed` and keeps the old MAC; later endpoint
 changes remain ordinary `engine_endpoint_changed` refusals. Both receipts are logged. The query
 budget, settling rounds/deadline, client predicates and production container guard are unchanged.
+
+Clean `17aeaae3` with that transition then passed AdGuard once: all 184 controlled questions,
+both current-phase history corroborations, the post-restart matrix without reapply, removals and
+exact cleanup in 80.656 seconds. Its first Pi-hole dispatch failed on question 1 of the
+protection-disabled matrix: the helper reported `dns_response_shape_changed` because FTL's
+generated `server=/invalid/` answered the `.invalid` name locally, so the upstream was never asked.
+A separate read of the cached pinned image's generated `/etc/pihole/dnsmasq.conf` confirmed that
+line with `dns.domainNeeded=false`. The 26.997-second failure retained zero owned
+Docker/process/TMP entries and unchanged host/socket/source/binaries and complete image inventory.
+Both originals stay attributed to `17aeaae3`, including the AdGuard pass:
+`/home/ubuntu/Just-Dashboard-network-dns-decision-restart-endpoint-artifacts/native-decision-endpoint-adguard.log`
+(SHA256 `3f65d25108e13424108481df9f2eee50e87cf65956f3e6e8729c2756f6d18b6a`) and
+`native-decision-endpoint-pihole.log` beside it
+(SHA256 `12da44ddb0de273c123847b17a4b99dcc89ddf01e6dd9500a4f58b24e9025da9`). The controlled
+names now use `.example`; neither engine's earlier result is relabeled as acceptance of that
+source.
 
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
 [the AdGuard encryption enum](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/qlog.go#L53),

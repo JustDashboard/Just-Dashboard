@@ -38,7 +38,7 @@ func TestFiniteUpstreamAnswersAndNoForwarding(t *testing.T) {
 			}
 		}
 	}
-	for _, input := range []struct{ nonce, name, kind string }{{nonce, "external.example", "A"}, {nonce, "neutral-" + nonce + ".invalid", "TXT"}, {"../secret", "external.example", "A"}, {nonce, "neutral-" + nonce + ".invalid.attacker.example", "A"}} {
+	for _, input := range []struct{ nonce, name, kind string }{{nonce, "external.example", "A"}, {nonce, "neutral-" + nonce + ".example", "TXT"}, {"../secret", "external.example", "A"}, {nonce, "neutral-" + nonce + ".invalid.attacker.example", "A"}} {
 		if _, err := question(input.nonce, input.name, input.kind); err == nil {
 			t.Fatal("arbitrary name or type escaped the finite inventory")
 		}
@@ -47,7 +47,7 @@ func TestFiniteUpstreamAnswersAndNoForwarding(t *testing.T) {
 
 func TestMalformedQuestionsAndResponsesNeverBecomeDecisions(t *testing.T) {
 	nonce := "012345abcdef"
-	q, _ := question(nonce, "neutral-"+nonce+".invalid", "A")
+	q, _ := question(nonce, "neutral-"+nonce+".example", "A")
 	base := dnsmessage.Message{Header: dnsmessage.Header{ID: 42, RecursionDesired: true}, Questions: []dnsmessage.Question{q}}
 	for _, mutate := range []func(*dnsmessage.Message){func(m *dnsmessage.Message) { m.Response = true }, func(m *dnsmessage.Message) { m.Questions = nil }, func(m *dnsmessage.Message) { m.Questions = append(m.Questions, q) }, func(m *dnsmessage.Message) { m.Questions[0].Class = dnsmessage.ClassCHAOS }, func(m *dnsmessage.Message) { m.Answers = []dnsmessage.Resource{positive(q)} }} {
 		m := base
@@ -97,7 +97,7 @@ func TestFramesAndTargetBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, target := range []string{"example.com:53", "127.0.0.1:53", "192.0.2.53:53", "172.20.0.2:5353", "[fd00::2]:53", "172.20.0.2:53/path"} {
-		if _, err := query(context.Background(), "012345abcdef", target, "udp", "A", "neutral-012345abcdef.invalid", 1); err == nil || !strings.Contains(err.Error(), "target") {
+		if _, err := query(context.Background(), "012345abcdef", target, "udp", "A", "neutral-012345abcdef.example", 1); err == nil || !strings.Contains(err.Error(), "target") {
 			t.Fatal("non-owned classic IPv4 target accepted", target, err)
 		}
 	}
