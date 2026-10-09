@@ -117,7 +117,7 @@ export function readNativeProfile(value: unknown, device: string): NativeProfile
         object(value.intent) &&
         object(value.intent.ipv6) &&
         value.intent.ipv6.method === "slaac") ||
-      !["physical", "dummy", "vlan", "bridge", "bond", "vrf"].includes(value.kind) ||
+      !["physical", "dummy", "veth", "vlan", "bridge", "bond", "vrf"].includes(value.kind) ||
       (value.kind === "vrf" && !integer(value.contract.vrfTable, 1, 4_294_967_295)))
   ) {
     throw new Error("Editable native ownership or intent is incomplete or invalid.")

@@ -101,6 +101,19 @@ async function assertDraft(page: Page) {
   await expect(sheet(page).getByLabel("IPv4 route 1 metric", { exact: true })).toHaveValue("45")
 }
 
+test("a verified standalone veth profile exposes the supported native editor", async ({ page }) => {
+  const value = profile()
+  value.kind = "veth"
+  await setup(page, value)
+  await sheet(page).getByRole("button", { name: "Edit native profile", exact: true }).click()
+  await expect(sheet(page).getByLabel("IPv4 static addresses", { exact: true })).toHaveValue(
+    "192.0.2.20/24",
+  )
+  await expect(sheet(page).getByLabel("IPv4 DNS servers", { exact: true })).toHaveValue(
+    "192.0.2.53",
+  )
+})
+
 test("native apply carries the exact intent and stays pending when the managed preference is off", async ({
   page,
 }) => {

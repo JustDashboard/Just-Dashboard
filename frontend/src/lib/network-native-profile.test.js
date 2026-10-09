@@ -34,6 +34,14 @@ test("native profile reads retain opaque generation and separate boot evidence",
   expect(view.boot.reason).toContain("no reboot measured")
 })
 
+test("verified standalone veth ownership remains editable through the native wire contract", () => {
+  const value = sample()
+  value.kind = "veth"
+  expect(readNativeProfile(value, "ens3").editable).toBe(true)
+  value.runtime.status = "unknown"
+  expect(() => readNativeProfile(value, "ens3")).toThrow("lifecycle evidence")
+})
+
 test("a native owner refusal can be read without an editable intent", () => {
   const value = sample()
   value.editable = false
