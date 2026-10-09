@@ -11,6 +11,7 @@
 - [`network-flow-observer.md`](network-flow-observer.md) — separately reviewed kernel packet observations, owned links, durable batches and explicit quality gaps.
 - [`network-ipam.md`](network-ipam.md) — shared IPv4/IPv6 pools, overlap coverage and native-owner reservation handoffs.
 - [`network-dns-evidence.md`](network-dns-evidence.md) — retained native split-DNS policy, fresh-network answers and scoped resolver trust evidence.
+- [`network-dns-services.md`](network-dns-services.md) — sealed native engine connections, reviewed records/client groups and bounded owned Docker provisions.
 - [`network-sqm.md`](network-sqm.md) — explicit IFB/CAKE download queues, provenance and independent recovery.
 - [`wireguard-dual-stack.md`](wireguard-dual-stack.md) — opt-in IPv6 peer addressing and separately verified dual-family egress.
 - [`network-drift.md`](network-drift.md) — saved/render/runtime comparisons and owned repair review.

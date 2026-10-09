@@ -1,0 +1,10 @@
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/adguard
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/pihole
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/technitium
+--- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects (7.51s)
+    --- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/adguard (2.59s)
+    --- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/pihole (2.44s)
+    --- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/technitium (2.47s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	8.531s

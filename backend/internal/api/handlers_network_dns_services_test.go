@@ -160,3 +160,91 @@ func TestDNSServiceAPIPrivateCapabilitiesSealingAndAudit(t *testing.T) {
 		t.Fatalf("disconnect touched foreign engine: %d", w.Code)
 	}
 }
+
+func TestDNSServiceAPIReviewedAuthoritativeRecordsAndAdminToken(t *testing.T) {
+	admin, s := newClient(t)
+	if err := store.InitializeNetworkDNSServices(t.Context(), s.Store.DB); err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/v1/network/dns/services/"
+	records := []map[string]any{}
+	var mutations atomic.Int32
+	native := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.RawQuery != "" || r.Header.Get("Authorization") != "Bearer native-record-token" {
+			t.Error("native records escaped private closed bearer POST")
+		}
+		r.ParseForm()
+		var result any
+		zone := map[string]any{"name": "owned.example", "type": "Primary", "internal": false, "disabled": false, "dnssecStatus": "Unsigned"}
+		switch r.URL.Path {
+		case "/api/settings/get":
+			result = map[string]any{"version": "15.6.0", "dnsServerLocalEndPoints": []string{"127.0.0.1:53"}, "recursion": "Deny", "recursionNetworkACL": []string{}, "enableBlocking": false, "forwarders": []string{}, "forwarderProtocol": "Udp"}
+		case "/api/zones/list":
+			result = map[string]any{"zones": []any{zone}, "totalZones": 1, "totalPages": 1}
+		case "/api/apps/list":
+			result = map[string]any{"apps": []any{}}
+		case "/api/zones/records/get":
+			result = map[string]any{"zone": zone, "records": records}
+		case "/api/zones/records/add":
+			if r.Form.Get("zone") != "owned.example" || r.Form.Get("domain") != "test.owned.example" || r.Form.Get("type") != "AAAA" || r.Form.Get("ipAddress") != "2001:db8::99" || r.Form.Get("ttl") != "60" || r.Form.Get("overwrite") != "false" {
+				t.Error("native record scope changed")
+			}
+			mutations.Add(1)
+			records = append(records, map[string]any{"name": "test.owned.example", "type": "AAAA", "ttl": 60, "disabled": false, "rData": map[string]string{"ipAddress": "2001:db8::99"}})
+			result = map[string]any{}
+		default:
+			t.Error("unexpected record path", r.URL.Path)
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "response": result})
+	}))
+	defer native.Close()
+	req := dnsservice.ConnectionRequest{Name: "Reviewed native authority", Engine: dnsservice.Technitium, Endpoint: native.URL, Management: true, Credential: dnsservice.Credential{Token: "native-record-token"}}
+	body, _ := json.Marshal(req)
+	connected := admin.do("POST", base, string(body), nil)
+	var view dnsservice.View
+	if connected.Code != 201 || json.Unmarshal(connected.Body.Bytes(), &view) != nil {
+		t.Fatal(connected.Code, connected.Body.String())
+	}
+	viewer := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "authority-reader", auth.RoleReadOnly)}
+	path := base + view.Connection.ID + "/zones/owned.example/records"
+	if w := viewer.do("GET", path, "", nil); w.Code != 403 {
+		t.Fatal("authoritative records allowed readonly account", w.Code)
+	}
+	var userID int64
+	s.Store.DB.QueryRow(`SELECT id FROM users WHERE username='tester'`).Scan(&userID)
+	user, err := s.Auth.UserByID(t.Context(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Auth.CreateAPIToken(t.Context(), user, "Reviewed native DNS administration", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokenClient := &client{t: t, h: s.Routes()}
+	headers := map[string]string{"Authorization": "Bearer " + token}
+	if w := tokenClient.do("GET", path, "", headers); w.Code != 200 || w.Header().Get("Cache-Control") != "private, no-store" || strings.Contains(w.Body.String(), "native-record-token") {
+		t.Fatal("admin token/no-store record contract", w.Code, w.Body.String())
+	}
+	changeBody := `{"action":"record_add","zone":"owned.example","record":{"name":"test.owned.example","type":"AAAA","value":"2001:db8::99","ttl":60}}`
+	if w := admin.do("POST", base+view.Connection.ID+"/changes", strings.TrimSuffix(changeBody, "}")+`,"proxy":{"url":"http://127.0.0.1:1"}}`, nil); w.Code != 400 {
+		t.Fatal("native record proxy field accepted", w.Code)
+	}
+	w := tokenClient.do("POST", base+view.Connection.ID+"/changes", changeBody, headers)
+	var plan dnsservice.Change
+	if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.Before == nil || plan.Before.Records == nil || plan.Before.SelectionFingerprint == "" || mutations.Load() != 0 {
+		t.Fatal("review did not retain complete zone/RR selection", w.Code, w.Body.String())
+	}
+	w = tokenClient.do("POST", base+"changes/"+plan.ID+"/apply", `{}`, headers)
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &plan) != nil || plan.State != "verified" || mutations.Load() != 1 || plan.After.Records == nil || len(plan.After.Records.Records) != 1 {
+		t.Fatal("destructive reviewed native record readback", w.Code, w.Body.String())
+	}
+	if w = tokenClient.do("POST", base+"changes/"+plan.ID+"/apply", `{}`, headers); w.Code != 409 || mutations.Load() != 1 {
+		t.Fatal("native record applied twice", w.Code)
+	}
+	var detail string
+	if err = s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action='network.dns.service.apply' AND target=? AND status=200 ORDER BY id DESC LIMIT 1`, plan.ID).Scan(&detail); err != nil || strings.Contains(detail, "native-record-token") || !strings.Contains(detail, "record_add") {
+		t.Fatal("native record mutation audit", detail, err)
+	}
+}

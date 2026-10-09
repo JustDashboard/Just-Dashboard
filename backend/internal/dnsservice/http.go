@@ -24,6 +24,7 @@ type nativeClient struct {
 	http       *http.Client
 	origin     string
 	engine     Engine
+	version    string
 	credential Credential
 	sid        string
 	transport  Reading

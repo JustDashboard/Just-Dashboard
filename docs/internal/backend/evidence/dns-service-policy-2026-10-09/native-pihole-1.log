@@ -1,0 +1,7 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/pihole-5d117c1cf53a4b517f6339887888ba25.log (8403 bytes)
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/pihole-731c0a51019e9dc60c840cd5eb159cbd.log (701 bytes)
+    provision_live_test.go:341: engine=pihole image=pihole/pihole@sha256:5b9c8cf51de7d6d3f2240dbe72baf5f06e1fd39cb4d77a99fab4fa13e23bd1be nativeVersion=v6.7.1 UDP/TCP=owned-fixture.invalid owner=205611f1ef7d450a496ad639de088971 nativeReadback=verified restart=persisted predecessor=no_replay resources=cleaned
+--- PASS: TestDNSServiceNativeOwnedEngine (58.73s)
+PASS
+wrapper_elapsed=59.76 exit=0

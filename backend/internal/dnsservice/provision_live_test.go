@@ -9,7 +9,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -205,9 +204,9 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	defer nativeClient.logout()
 	switch engine {
 	case AdGuard:
-		err = nativeClient.request(ctx, http.MethodPost, "/control/rewrite/add", map[string]string{"domain": name, "answer": "198.51.100.99"}, nil)
+		err = nil
 	case PiHole:
-		err = nativeClient.request(ctx, http.MethodPatch, "/api/config", map[string]any{"config": map[string]any{"dns": map[string]any{"hosts": []string{"198.51.100.99 " + name}}}}, nil)
+		err = nativeClient.request(ctx, http.MethodPost, "/api/clients", map[string]any{"client": "198.51.100.77", "comment": "owned fixture client comment", "groups": []int{0}}, nil)
 	case Technitium:
 		zone, zoneErr := s.Preview(ctx, connection.ID, ChangeRequest{Action: "zone_create", Zone: name})
 		if zoneErr != nil {
@@ -217,13 +216,36 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		if zoneErr != nil || zone.State != "verified" {
 			t.Fatalf("native authority creation state=%s error=%s err=%v", zone.State, zone.Error, zoneErr)
 		}
-		err = nativeClient.technitium(ctx, "/api/zones/records/add", url.Values{"zone": {name}, "domain": {name}, "type": {"A"}, "ttl": {"60"}, "ipAddress": {"198.51.100.99"}}, nil)
+		err = nil
 	}
 	if err != nil {
 		t.Fatal(err)
 	}
+	policyRequests := []ChangeRequest{{Action: "override_add", Record: &RecordChange{Name: name, Type: "A", Value: "198.51.100.99"}}, {Action: "override_add", Record: &RecordChange{Name: "v6." + name, Type: "AAAA", Value: "2001:db8::99"}}}
+	if engine == Technitium {
+		for i := range policyRequests {
+			policyRequests[i].Action, policyRequests[i].Zone, policyRequests[i].Record.TTL = "record_add", name, 60
+		}
+	}
+	if engine == PiHole {
+		policyRequests = append(policyRequests, ChangeRequest{Action: "client_groups", Client: &ClientGroupChange{Address: "198.51.100.77", Groups: []int{}}})
+	}
+	for _, request := range policyRequests {
+		change, e := s.Preview(ctx, connection.ID, request)
+		if e != nil {
+			t.Fatal("native reviewed policy preview", request.Action, e)
+		}
+		change, e = s.Apply(ctx, change.ID)
+		if e != nil || change.State != "verified" || !policyPreserved(request, change.Before, change.After) {
+			t.Fatalf("native reviewed %s state=%s error=%s err=%v", request.Action, change.State, change.Error, e)
+		}
+		if _, e = s.Apply(ctx, change.ID); !errors.Is(e, ErrConflict) {
+			t.Fatal("native reviewed policy replay", e)
+		}
+	}
 	for _, protocol := range []string{"udp", "tcp"} {
 		nativeDNSAnswer(t, protocol, dnsPort, name, engine == Technitium)
+		nativeDNSAAAAAnswer(t, protocol, dnsPort, "v6."+name, engine == Technitium)
 	}
 	view, err := s.Inspect(ctx, connection.ID)
 	if err != nil || view.State != "available" || view.Snapshot == nil {
@@ -258,6 +280,28 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 		}
 	}
 	nativeDNSAnswer(t, "udp", dnsPort, name, engine == Technitium)
+	nativeDNSAAAAAnswer(t, "tcp", dnsPort, "v6."+name, engine == Technitium)
+	for _, request := range policyRequests {
+		snapshot, e := inspectNativeSelection(ctx, connectionReq, &request)
+		if e != nil || !policyMatches(request, snapshot) {
+			t.Fatal("native reviewed policy did not persist after restart", request.Action, e)
+		}
+		if request.Action == "client_groups" {
+			request.Client.Groups = []int{0}
+		} else if request.Action == "record_add" {
+			request.Action = "record_remove"
+		} else {
+			request.Action = "override_remove"
+		}
+		change, e := s.Preview(ctx, connection.ID, request)
+		if e != nil {
+			t.Fatal("native reviewed removal preview", e)
+		}
+		change, e = s.Apply(ctx, change.ID)
+		if e != nil || change.State != "verified" {
+			t.Fatal("native reviewed removal readback", change.State, change.Error, e)
+		}
+	}
 	removed, err := s.RemoveProvision(ctx, plan.ID)
 	if err != nil || removed.State != "removed" {
 		t.Fatalf("native owned removal state=%s error=%s err=%v", removed.State, removed.Error, err)
@@ -313,11 +357,30 @@ func nativeDNSAnswer(t *testing.T, protocol string, port int, name string, autho
 }
 
 func nativeDNSQuery(protocol string, port int, name string, authoritative bool) error {
+	return nativeDNSQueryType(protocol, port, name, authoritative, dnsmessage.TypeA)
+}
+
+func nativeDNSAAAAAnswer(t *testing.T, protocol string, port int, name string, authoritative bool) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		err := nativeDNSQueryType(protocol, port, name, authoritative, dnsmessage.TypeAAAA)
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal(err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func nativeDNSQueryType(protocol string, port int, name string, authoritative bool, queryType dnsmessage.Type) error {
 	question, err := dnsmessage.NewName(name + ".")
 	if err != nil {
 		return err
 	}
-	message := dnsmessage.Message{Header: dnsmessage.Header{ID: 0x4242, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: question, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}}}
+	message := dnsmessage.Message{Header: dnsmessage.Header{ID: 0x4242, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: question, Type: queryType, Class: dnsmessage.ClassINET}}}
 	wire, err := message.Pack()
 	if err != nil {
 		return err
@@ -353,12 +416,15 @@ func nativeDNSQuery(protocol string, port int, name string, authoritative bool) 
 	if err != nil {
 		return err
 	}
-	if err = message.Unpack(wire); err != nil || message.Header.ID != 0x4242 || !message.Header.Response || message.Header.RCode != dnsmessage.RCodeSuccess || len(message.Questions) != 1 || message.Questions[0].Name != question || authoritative && !message.Header.Authoritative {
+	if err = message.Unpack(wire); err != nil || message.Header.ID != 0x4242 || !message.Header.Response || message.Header.Truncated || message.Header.RCode != dnsmessage.RCodeSuccess || len(message.Questions) != 1 || message.Questions[0].Name != question || message.Questions[0].Type != queryType || message.Questions[0].Class != dnsmessage.ClassINET || authoritative && !message.Header.Authoritative {
 		return fmt.Errorf("native %s DNS owner/authority response rcode=%d: %v", protocol, message.Header.RCode, err)
 	}
 	found := false
 	for _, answer := range message.Answers {
-		if data, ok := answer.Body.(*dnsmessage.AResource); ok && answer.Header.Name == question && data.A == [4]byte{198, 51, 100, 99} {
+		if data, ok := answer.Body.(*dnsmessage.AResource); ok && queryType == dnsmessage.TypeA && answer.Header.Name == question && data.A == [4]byte{198, 51, 100, 99} {
+			found = true
+		}
+		if data, ok := answer.Body.(*dnsmessage.AAAAResource); ok && queryType == dnsmessage.TypeAAAA && answer.Header.Name == question && data.AAAA == [16]byte{0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x99} {
 			found = true
 		}
 	}

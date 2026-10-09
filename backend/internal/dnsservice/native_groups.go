@@ -11,8 +11,9 @@ import (
 
 func (c *nativeClient) inspectAdGuardOverrides(ctx context.Context, s *Snapshot) error {
 	var overrides []struct {
-		Name  string `json:"domain"`
-		Value string `json:"answer"`
+		Name    string `json:"domain"`
+		Value   string `json:"answer"`
+		Enabled *bool  `json:"enabled"`
 	}
 	err := c.request(ctx, http.MethodGet, "/control/rewrite/list", nil, &overrides)
 	if err != nil || overrides == nil {
@@ -23,7 +24,7 @@ func (c *nativeClient) inspectAdGuardOverrides(ctx context.Context, s *Snapshot)
 		return errors.New("native AdGuard rewrite inventory exceeds its bound")
 	}
 	for _, override := range overrides {
-		s.LocalOverrides = append(s.LocalOverrides, LocalOverride{c.text(override.Name), c.text(override.Value), "native_rewrite"})
+		s.LocalOverrides = append(s.LocalOverrides, LocalOverride{Name: c.text(override.Name), Value: c.text(override.Value), Type: "native_rewrite", Enabled: override.Enabled})
 	}
 	s.OverrideEvidence = Reading{"configured", "native_configuration", "Native DNS rewrites are local answer overrides, separate from delegated authoritative zones."}
 	return c.retainPolicy(overrides)

@@ -90,9 +90,10 @@ type Zone struct {
 }
 
 type LocalOverride struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
-	Type  string `json:"type"`
+	Name    string `json:"name"`
+	Value   string `json:"value"`
+	Type    string `json:"type"`
+	Enabled *bool  `json:"enabled,omitempty"`
 }
 
 type NativeGroup struct {
@@ -121,38 +122,41 @@ type NativeProcess struct {
 }
 
 type Snapshot struct {
-	PolicyFingerprint   string              `json:"policyFingerprint"`
-	ObservedAt          time.Time           `json:"observedAt"`
-	Engine              Engine              `json:"engine"`
-	Version             string              `json:"version"`
-	Roles               []string            `json:"roles"`
-	Transport           Reading             `json:"transport"`
-	Runtime             Reading             `json:"runtime"`
-	Process             *NativeProcess      `json:"process,omitempty"`
-	Listeners           []Listener          `json:"listeners"`
-	Access              Reading             `json:"access"`
-	AllowedClients      []string            `json:"allowedClients"`
-	DeniedClients       []string            `json:"deniedClients"`
-	Protection          bool                `json:"protection"`
-	Upstreams           []string            `json:"upstreams"`
-	UpstreamProtocol    string              `json:"upstreamProtocol"`
-	ProtectionTemporary bool                `json:"protectionTemporary"`
-	Clients             []ClientPolicy      `json:"clients"`
-	ClientEvidence      Reading             `json:"clientEvidence"`
-	Zones               []Zone              `json:"zones"`
-	ZoneEvidence        Reading             `json:"zoneEvidence"`
-	Views               Reading             `json:"views"`
-	ViewGroups          []NativeGroup       `json:"viewGroups"`
-	NamedNetworks       map[string][]string `json:"namedNetworks"`
-	TranslationEnabled  *bool               `json:"translationEnabled,omitempty"`
-	FilterGroups        []NativeGroup       `json:"filterGroups"`
-	AppProtection       *bool               `json:"appProtection,omitempty"`
-	AppClientEvidence   Reading             `json:"appClientEvidence"`
-	LocalOverrides      []LocalOverride     `json:"localOverrides"`
-	OverrideEvidence    Reading             `json:"overrideEvidence"`
-	Queries             []Query             `json:"queries"`
-	QueryEvidence       Reading             `json:"queryEvidence"`
-	Limitations         []string            `json:"limitations"`
+	PolicyFingerprint    string              `json:"policyFingerprint"`
+	ObservedAt           time.Time           `json:"observedAt"`
+	Engine               Engine              `json:"engine"`
+	Version              string              `json:"version"`
+	Roles                []string            `json:"roles"`
+	Transport            Reading             `json:"transport"`
+	Runtime              Reading             `json:"runtime"`
+	Process              *NativeProcess      `json:"process,omitempty"`
+	Listeners            []Listener          `json:"listeners"`
+	Access               Reading             `json:"access"`
+	AllowedClients       []string            `json:"allowedClients"`
+	DeniedClients        []string            `json:"deniedClients"`
+	Protection           bool                `json:"protection"`
+	Upstreams            []string            `json:"upstreams"`
+	UpstreamProtocol     string              `json:"upstreamProtocol"`
+	ProtectionTemporary  bool                `json:"protectionTemporary"`
+	Clients              []ClientPolicy      `json:"clients"`
+	ClientEvidence       Reading             `json:"clientEvidence"`
+	Zones                []Zone              `json:"zones"`
+	ZoneEvidence         Reading             `json:"zoneEvidence"`
+	Views                Reading             `json:"views"`
+	ViewGroups           []NativeGroup       `json:"viewGroups"`
+	NamedNetworks        map[string][]string `json:"namedNetworks"`
+	TranslationEnabled   *bool               `json:"translationEnabled,omitempty"`
+	FilterGroups         []NativeGroup       `json:"filterGroups"`
+	AppProtection        *bool               `json:"appProtection,omitempty"`
+	AppClientEvidence    Reading             `json:"appClientEvidence"`
+	LocalOverrides       []LocalOverride     `json:"localOverrides"`
+	OverrideEvidence     Reading             `json:"overrideEvidence"`
+	Queries              []Query             `json:"queries"`
+	QueryEvidence        Reading             `json:"queryEvidence"`
+	Limitations          []string            `json:"limitations"`
+	Records              *RecordInventory    `json:"records,omitempty"`
+	SelectionFingerprint string              `json:"selectionFingerprint,omitempty"`
+	SelectedClient       *ClientGroupPolicy  `json:"selectedClient,omitempty"`
 }
 
 type View struct {
@@ -163,12 +167,14 @@ type View struct {
 }
 
 type ChangeRequest struct {
-	Action         string   `json:"action"`
-	Protection     *bool    `json:"protection,omitempty"`
-	Upstreams      []string `json:"upstreams,omitempty"`
-	AllowedClients []string `json:"allowedClients,omitempty"`
-	DeniedClients  []string `json:"deniedClients,omitempty"`
-	Zone           string   `json:"zone,omitempty"`
+	Action         string             `json:"action"`
+	Protection     *bool              `json:"protection,omitempty"`
+	Upstreams      []string           `json:"upstreams,omitempty"`
+	AllowedClients []string           `json:"allowedClients,omitempty"`
+	DeniedClients  []string           `json:"deniedClients,omitempty"`
+	Zone           string             `json:"zone,omitempty"`
+	Record         *RecordChange      `json:"record,omitempty"`
+	Client         *ClientGroupChange `json:"client,omitempty"`
 }
 
 type Change struct {
@@ -252,6 +258,9 @@ func validateCredential(engine Engine, c Credential) error {
 }
 
 func validateChange(req ChangeRequest, engine Engine) error {
+	if req.Record != nil || req.Client != nil {
+		return validatePolicyChange(req, engine)
+	}
 	switch req.Action {
 	case "protection":
 		if req.Protection == nil || req.Upstreams != nil || req.AllowedClients != nil || req.DeniedClients != nil || req.Zone != "" {

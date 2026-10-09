@@ -13,6 +13,10 @@ import (
 )
 
 func inspectNative(ctx context.Context, req ConnectionRequest) (*Snapshot, error) {
+	return inspectNativeSelection(ctx, req, nil)
+}
+
+func inspectNativeSelection(ctx context.Context, req ConnectionRequest, selection *ChangeRequest) (*Snapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
 	c, err := newNativeClient(req)
@@ -49,6 +53,14 @@ func inspectNative(ctx context.Context, req ConnectionRequest) (*Snapshot, error
 	}
 	if err != nil {
 		return nil, err
+	}
+	if selection != nil && policyAction(selection.Action) {
+		if err = c.inspectPolicySelection(ctx, s, *selection); err != nil {
+			return nil, err
+		}
+		if err = c.retainPolicy(s.SelectionFingerprint); err != nil {
+			return nil, err
+		}
 	}
 	s.Transport = c.transport
 	s.PolicyFingerprint = c.fingerprint()
@@ -409,6 +421,7 @@ func (c *nativeClient) inspectTechnitium(ctx context.Context, s *Snapshot) error
 		return errors.New("Technitium requires readable settings from the supported native version 15 API")
 	}
 	s.Version, s.Protection = policy.Version, *policy.Protection
+	c.version = s.Version
 	s.OverrideEvidence = Reading{"unsupported", "native_contract", "Native authoritative and forwarder zones are inspected separately; they are not host-file overrides."}
 	s.UpstreamProtocol = c.text(policy.Protocol)
 	s.Roles = []string{"authoritative", "recursive"}
@@ -555,7 +568,7 @@ func (c *nativeClient) inspectTechnitium(ctx context.Context, s *Snapshot) error
 	return nil
 }
 
-func applyNative(ctx context.Context, req ConnectionRequest, change ChangeRequest) error {
+func applyNative(ctx context.Context, req ConnectionRequest, change ChangeRequest, before *Snapshot) error {
 	if err := validateChange(change, req.Engine); err != nil {
 		return err
 	}
@@ -568,6 +581,9 @@ func applyNative(ctx context.Context, req ConnectionRequest, change ChangeReques
 		return err
 	}
 	defer c.logout()
+	if policyAction(change.Action) {
+		return applyPolicyNative(ctx, c, change, before)
+	}
 	switch change.Action {
 	case "protection":
 		switch req.Engine {

@@ -1,0 +1,7 @@
+=== RUN   TestDNSServiceNativeOwnedEngine
+    provision_live_test.go:240: native reviewed override_add state=needs_review error=Native readback is unavailable; the operation was not repeated. err=<nil>
+    provision_live_test.go:51: Owned fixture native log retained: /home/ubuntu/Just-Dashboard/.network-worktrees/dns-service-policy-artifacts/native-logs/adguard-c8e0872c4bb4885b4cd0d52ced94b3e6.log (3791 bytes)
+--- FAIL: TestDNSServiceNativeOwnedEngine (14.08s)
+FAIL
+Command exited with non-zero status 1
+wrapper_elapsed=14.11 exit=1

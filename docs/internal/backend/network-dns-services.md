@@ -16,7 +16,8 @@ to the literal endpoint; redirects and environment proxies are refused. Techniti
 `X-FTL-SID` and are explicitly logged out.
 
 All routes below `/api/v1/network/dns/services` require `system.admin` and return private, no-store
-responses. Connection inventory and per-connection review history read only retained metadata;
+responses. This capability applies to authenticated sessions and appropriately scoped administrator
+API tokens; these routes do not require a human session. Connection inventory and per-connection review history read only retained metadata;
 history is bounded to the latest 64 rows with snapshots omitted. `GET /changes/{id}` reads one full
 retained before/after review. These reads do not decrypt native credentials or contact an engine,
 so a read-only or unavailable connection still has inspectable review history. Query entries are
@@ -26,6 +27,7 @@ removed before snapshots become reviewed or retained change state.
 | --- | --- |
 | `GET /`, `POST /` | Metadata-only `Connection[]`; connect with `ConnectionRequest` returns an authenticated `View`. |
 | `GET /{id}`, `PUT /{id}`, `DELETE /{id}` | Fresh `View`; full credential/config replacement on the same engine and origin; disconnect only foreign-connected metadata. |
+| `GET /{id}/zones/{zone}/records` | Technitium-only fresh `RecordInventory` for an explicit lower-case zone, including native version, owner/type/DNSSEC, nullable internal classification, at most 256 records, metadata fingerprints and per-record editability. Read-only connections may inspect it. |
 | `GET /{id}/changes`, `POST /{id}/changes` | Latest 64 metadata-only `Change[]`; `ChangeRequest` creates a five-minute retained reviewed `Change`. |
 | `GET /changes/{id}`, `POST /changes/{id}/apply` | Full retained `Change`; single-use native apply/readback returns the terminal `Change`. |
 | `GET /provisions`, `POST /provisions` | Latest 64 `Provision[]`; `ProvisionRequest` creates a five-minute sealed resource review without creation. |
@@ -40,7 +42,8 @@ selected in the provision review, or a separately created native token can be su
 
 `ChangeRequest` is closed to `protection` (explicit boolean), `upstreams` (1–16 literal classic DNS
 address/port endpoints), AdGuard `access` (nonempty canonical allowed prefixes, optional denied
-prefixes) and Technitium `zone_create` (a validated lower-case primary-zone DNS name). Arbitrary
+prefixes), Technitium `zone_create` (a validated lower-case primary-zone DNS name), and the bounded
+record/client actions below. Arbitrary
 native paths, payloads, app installation and command source are not accepted. Read-only connections
 refuse staging. Consumed/expired/generation-conflicting claims return conflict; a claimed operation
 can return HTTP 200 with `refused` or `needs_review`, so the UI must inspect terminal state/error.
@@ -53,6 +56,59 @@ readback. Sequential native APIs provide no cross-call CAS or atomic snapshot. D
 consumed plan; missing/mismatched readback leaves `needs_review`. The dashboard does not repeat an
 uncertain native mutation or restore foreign policy. Native client filter groups, local rewrites
 and authoritative zones remain distinct; configured DNSSEC status is not cryptographic proof.
+
+## Reviewed records and client groups
+
+The optional `record` request is `{name, type, value, ttl?}`. `name` is a complete lower-case DNS
+owner without a wildcard or trailing dot; `type` is exactly `A` or `AAAA`, and `value` is a canonical
+unicast IP of that family. Mapped IPv6, unspecified, multicast and scoped addresses are refused.
+The optional `client` request is `{address, groups}`. All action-specific fields are mutually
+exclusive with other policy fields; arbitrary record types, native request bodies and unknown JSON
+fields are refused.
+
+| Action | Engine and reviewed scope |
+| --- | --- |
+| `override_add`, `override_remove` | AdGuard or Pi-hole exact name/address override, without `zone` or TTL. Add refuses an existing owner/alias; removal requires one exact simple entry and refuses ambiguous, multi-alias or disabled AdGuard entries. Pi-hole updates only `dns.hosts`, preserving other hosts lines and CNAME configuration. These remain local answer overrides. |
+| `record_add`, `record_remove` | Technitium enabled supported unsigned `Primary` zone, explicit `zone`, contained owner and exact TTL 1–86400 seconds. Add refuses duplicates, incompatible RR-set TTL/metadata, aliases, APP records, more-specific zones and native delegations. Expiring/disabled/unsupported records cannot be removed. There is no overwrite, automatic PTR/reverse-zone creation or SVCB hint update. |
+| `client_groups` | Pi-hole existing canonical literal-IP/prefix client, explicit 0–64 unique nonnegative native group IDs, including an empty list. Every selected group must already exist. Native client comment/null state is preserved; no client or filter group is created. Group assignment does not establish a measured filtering decision. |
+
+`Snapshot.records` retains the selected `RecordInventory`. Its records have
+`{name,type,value?,ttl,disabled,editable,comments?,fingerprint}`; unsupported native RR types remain
+visible with `editable=false`. Inventory `evidence` is configured native authority, separate from
+DNS packet answers, delegated publication and local overrides. `Snapshot.selectedClient` retains
+`{address,groups,comment,commentFingerprint,otherPolicyFingerprint}`, with a redacted comment or
+explicit null. Full native selection metadata enters `selectionFingerprint` and the overall policy
+fingerprint before retention, then is re-read before apply and immediately before sending the
+mutation. Changed zone/RR metadata, client comments or group configuration refuse the consumed review.
+Sequential APIs still provide no compare-and-swap across that last read and the native write.
+AdGuard `LocalOverride.enabled` retains the optional native boolean; missing stays unreported.
+Its pinned add/delete body explicitly selects an enabled entry. Enable-state drift refuses a retained
+review, and unreadable or unknown rewrite policy fields prevent an incomplete mutation.
+
+The actual pinned Technitium 15.6 writer omits the legacy `internal` field shown in its documentation
+example. `RecordInventory.internal` is therefore explicit null when unreported, and `nativeVersion`
+retains the authenticated version. The inspected 15.6/15.6.0 `Primary` class has no separate internal
+zone category; that exact version/type contract permits its enabled unsigned record operations.
+An explicitly true internal flag, or an absent flag on any other version, refuses editing. No missing
+flag is converted to a false external-ownership claim. The [pinned response writer](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/WebServiceZonesApi.cs)
+and [native zone types](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/DnsServerCore/Dns/Zones/AuthZoneInfo.cs)
+define this narrow compatibility rule.
+
+Successful readback requires the intended addition/removal/assignment and unchanged unselected
+records, overrides or client/group policy. A native SOA serial and its last-modified time may advance
+as the engine maintains an unsigned zone; the remaining SOA fields must stay equal. Query-only
+`lastUsedOn` is excluded from record configuration fingerprints. Pi-hole's selected client
+`date_modified` may advance, while its comment, other native properties, other clients and group
+configuration must stay equal. Unavailable, mismatched or uncertain readback ends `needs_review`
+without repeating the operation or restoring native foreign policy.
+
+The backend controls passed focused policy/private API races and actual source-matched AdGuard,
+Pi-hole and Technitium acceptance; the [raw results, commands, hashes and original failures](evidence/dns-service-policy-2026-10-09/)
+retain this bounded proof. The matching retained UI and fresh integrated reachable acceptance are
+required before this product slice is considered verified. AdGuard client-specific
+settings, client/group creation, filter-list content, other RR types, signed/secondary/forwarder zone
+edits, native APP/view mutation, encrypted listener management and clustering remain outside this
+bounded request contract. P17's broader requirements remain open.
 
 FTL upstream changes can acknowledge persisted configuration before asynchronously exiting for a
 native restart. Apply requires its authenticated process/uptime identity before mutation and waits
@@ -153,7 +209,9 @@ cleaned before corrected runs; they are not passing evidence.
 Pinned primary contracts include [AdGuard's native API](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/openapi/openapi.yaml),
 [FTL's configuration API](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/config.yaml),
 [FTL's process PID/millisecond uptime implementation](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/info.c),
-and [Technitium's version 15.6 API](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/APIDOCS.md).
+and [Technitium's version 15.6.0 API](https://github.com/TechnitiumSoftware/DnsServer/blob/v15.6.0/APIDOCS.md).
+Record mutations follow the pinned native add/get/delete contracts; Pi-hole client replacements
+follow its [FTL 6.7.1 client contract](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/clients.yaml).
 Installed native app configuration contracts are distinct from packet-level view selection.
 
 The opt-in owned fixture requires a reachable Docker Engine and all three reviewed images already

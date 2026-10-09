@@ -302,12 +302,15 @@ func (s *Service) Preview(ctx context.Context, id string, req ChangeRequest) (Ch
 		return Change{}, err
 	}
 	defer func() { <-s.active }()
-	before, err := inspectNative(ctx, native)
+	before, err := inspectNativeSelection(ctx, native, &req)
 	if err != nil {
 		return Change{}, err
 	}
 	if before.ProtectionTemporary {
 		return Change{}, errors.New("native temporary protection is active; review its timer in the native console before staging a change")
+	}
+	if err = validatePolicyBaseline(req, before); err != nil {
+		return Change{}, err
 	}
 	if req.Action == "zone_create" {
 		if before.ZoneEvidence.State != "native_authority_configuration" {
@@ -427,7 +430,7 @@ func (s *Service) Apply(ctx context.Context, id string) (Change, error) {
 	_, native, err := s.connection(ctx, plan.ConnectionID)
 	var current *Snapshot
 	if err == nil {
-		current, err = inspectNative(ctx, native)
+		current, err = inspectNativeSelection(ctx, native, &plan.Request)
 		if err == nil && (plan.Before == nil || current.PolicyFingerprint != plan.Before.PolicyFingerprint) {
 			err = ErrConflict
 		}
@@ -442,8 +445,8 @@ func (s *Service) Apply(ctx context.Context, id string) (Change, error) {
 		return s.finishChange(plan)
 	}
 	mutationAt := time.Now().UTC()
-	applyErr := applyNative(ctx, native, plan.Request)
-	after, readErr := inspectNative(ctx, native)
+	applyErr := applyNative(ctx, native, plan.Request, current)
+	after, readErr := inspectNativeSelection(ctx, native, &plan.Request)
 	if applyErr == nil && needsRestart {
 		// A successful FTL config PATCH can precede its asynchronous exit. Only
 		// read again: repeating the mutation could hide an uncertain restart.
@@ -468,11 +471,13 @@ readback:
 	}
 	plan.After = after
 	plan.State = "verified"
-	if applyErr != nil {
+	if errors.Is(applyErr, ErrConflict) {
+		plan.State, plan.Error = "refused", "Native selected policy changed before mutation; no operation was sent."
+	} else if applyErr != nil {
 		plan.State, plan.Error = "needs_review", applyErr.Error()
 	} else if readErr != nil {
 		plan.State, plan.Error = "needs_review", "Native readback is unavailable; the operation was not repeated."
-	} else if !changeMatches(native.Engine, plan.Request, after) {
+	} else if !changeMatches(native.Engine, plan.Request, after) || !policyPreserved(plan.Request, current, after) {
 		plan.State, plan.Error = "needs_review", "Native readback does not match the reviewed intent; no automatic retry or foreign-policy restore was attempted."
 	}
 	return s.finishChange(plan)
@@ -507,6 +512,9 @@ func (s *Service) finishChange(plan Change) (Change, error) {
 func changeMatches(engine Engine, req ChangeRequest, after *Snapshot) bool {
 	if after == nil {
 		return false
+	}
+	if policyAction(req.Action) {
+		return policyMatches(req, after)
 	}
 	switch req.Action {
 	case "protection":

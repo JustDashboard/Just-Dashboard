@@ -1,0 +1,20 @@
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy/adguard
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy/pihole
+=== RUN   TestDNSServiceReviewedRecordsPreserveForeignPolicy/technitium
+--- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy (8.31s)
+    --- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy/adguard (2.88s)
+    --- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy/pihole (2.78s)
+    --- PASS: TestDNSServiceReviewedRecordsPreserveForeignPolicy/technitium (2.66s)
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/adguard
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/pihole
+=== RUN   TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/technitium
+--- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects (7.72s)
+    --- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/adguard (2.60s)
+    --- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/pihole (2.56s)
+    --- PASS: TestDNSServiceUnknownNativePolicyFieldsRefuseEffects/technitium (2.56s)
+=== RUN   TestDNSServiceAdGuardRewriteEnabledPolicyIsRetainedAndFenced
+--- PASS: TestDNSServiceAdGuardRewriteEnabledPolicyIsRetainedAndFenced (2.55s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/dnsservice	19.610s
