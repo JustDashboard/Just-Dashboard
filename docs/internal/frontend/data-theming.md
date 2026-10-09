@@ -55,7 +55,9 @@ one interface/family and literal filter fields; rejected launches retain the ent
 Original PCAP and redacted support have separate downloads. A cancel remains pending until native
 cleanup, and interrupted captures never replay. Admin-only rendering issues no private capture
 requests for read accounts. Incident references compare timestamps without assuming the same flow.
-DNS lookup defaults to the native effective resolver policy. Direct comparison requires selected,
+DNS lookup defaults to the configured host resolver chain. Supported resolved delegation uses the
+native split-policy and explicit alias checks; static/foreign paths report private-policy and recursive
+alias behavior as unknown. The pre-query hint states this support boundary. Direct comparison requires selected,
 named destinations and acknowledgment that private names leave their usual policy scope; the old
 `includePublic` flag does not authorize fan-out. Resolver changes may carry a private
 `verificationName` for a network that cannot resolve public names. This verification input is a check

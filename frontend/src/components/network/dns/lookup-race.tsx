@@ -83,7 +83,7 @@ export function LookupRace() {
               ? "Running DNS diagnostics requires read access."
               : compare
                 ? "This name is sent directly to each selected destination, including when it is private."
-                : "Uses this server's effective resolver policy, including native split-DNS routing."
+                : "Uses the configured resolver chain. Native split-DNS is checked when supported; other paths are marked unknown."
           }
         >
           <InputGroup>

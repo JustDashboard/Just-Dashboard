@@ -82,9 +82,9 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   journal and use independent host recovery when systemd is available; the Network overview reports
   apply, save and recovery phases. Covered interactive changes can require a fresh dashboard
   reconnection and explicit confirmation within ninety seconds. Gateway admission, blocklist sets
-  and shaping expose kernel evidence separately from saved settings. DNS tests follow the host's
-  resolver policy by default; direct comparisons require named destinations and a disclosure
-  acknowledgment.
+  and shaping expose kernel evidence separately from saved settings. DNS tests use the host's
+  configured resolver chain, checking native split policy when supported and reporting unknowns
+  for other paths; direct comparisons require named destinations and a disclosure acknowledgment.
   Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
   measurement. Saved runs retain quick-tool and source-sensitive investigation evidence, stages and
   outcomes across restarts; Drift compares
