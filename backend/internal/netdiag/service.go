@@ -224,7 +224,7 @@ func (s *Service) execute(ctx context.Context, run Run, out jobs.Emitter) error 
 	run.Result, run.ResultTruncated = boundedResult(result)
 	run.HasResult = run.Result != nil
 	run.Outcome, run.OutcomeSource = outcome(ctx.Err(), result, err)
-	succeeded := result != nil && (result.OK || result.Verdict == netsec.ProbeUnknown)
+	succeeded := answered(result)
 	if run.Kind == "investigation" {
 		run.Investigation, run.ResultTruncated = boundedInvestigation(investigation)
 		run.HasResult = run.Investigation != nil
@@ -428,6 +428,18 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	return nil
 }
 
+// answered reports whether a tool produced its answer. A structured verdict
+// decides; a result without one keeps the older OK reading.
+func answered(result *netsec.ProbeResult) bool {
+	if result == nil {
+		return false
+	}
+	if result.Verdict != "" {
+		return result.Verdict != netsec.ProbeFailed
+	}
+	return result.OK
+}
+
 // Detailed protocol stages are not available from every legacy tool. Keep the
 // classification provenance rather than treating an error-text match as proof.
 func outcome(ctxErr error, result *netsec.ProbeResult, runErr error) (string, string) {
@@ -446,9 +458,7 @@ func outcome(ctxErr error, result *netsec.ProbeResult, runErr error) (string, st
 		case netsec.ProbeFindings:
 			return "completed_with_findings", "tool_result"
 		case netsec.ProbeOK:
-			if result.OK {
-				return "completed", "tool_result"
-			}
+			return "completed", "tool_result"
 		}
 	}
 	message := ""

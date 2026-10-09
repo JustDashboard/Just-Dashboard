@@ -20,12 +20,15 @@ const trustFP = "SHA256:" + "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 func TestSSHTrustPersistsReplacesAndForgets(t *testing.T) {
 	s, db := diagnosticService(t, noProbe)
 	entry := netsec.SSHTrust{Target: "host.example.test:22", Keys: []netsec.SSHTrustedKey{{Type: "ssh-ed25519", Fingerprint: trustFP}}, Source: "observed", SavedBy: "operator"}
-	saved, err := s.SaveSSHTrust(t.Context(), entry)
+	saved, err := s.SaveSSHTrust(t.Context(), entry, false)
 	if err != nil || saved.SavedAt.IsZero() {
 		t.Fatalf("%+v %v", saved, err)
 	}
 	entry.Source = "entered"
-	if _, err := s.SaveSSHTrust(t.Context(), entry); err != nil {
+	if _, err := s.SaveSSHTrust(t.Context(), entry, false); !errors.Is(err, ErrTrustExists) {
+		t.Fatalf("existing trust was overwritten without confirmation: %v", err)
+	}
+	if _, err := s.SaveSSHTrust(t.Context(), entry, true); err != nil {
 		t.Fatal(err)
 	}
 	reopened := New(NewStore(db.DB), jobs.New(nil), s.runner)
@@ -51,12 +54,12 @@ func TestSSHTrustPersistsReplacesAndForgets(t *testing.T) {
 	}
 	for i := 0; i < MaxSSHTrust; i++ {
 		entry.Target = "h" + strings.Repeat("x", i%3) + string(rune('a'+i%26)) + string(rune('a'+i/26)) + ".test:22"
-		if _, err := reopened.SaveSSHTrust(t.Context(), entry); err != nil {
+		if _, err := reopened.SaveSSHTrust(t.Context(), entry, false); err != nil {
 			t.Fatalf("entry %d: %v", i, err)
 		}
 	}
 	entry.Target = "one-too-many.test:22"
-	if _, err := reopened.SaveSSHTrust(t.Context(), entry); !errors.Is(err, ErrTooMany) {
+	if _, err := reopened.SaveSSHTrust(t.Context(), entry, false); !errors.Is(err, ErrTooMany) {
 		t.Fatalf("over the bound = %v", err)
 	}
 }

@@ -563,6 +563,9 @@ func (s *Service) HTTPSecurity(ctx context.Context, target string, port int, pro
 	res.metric("hardened", "Applicable headers set", float64(pass), "")
 	res.metric("applicable", "Headers that apply", float64(graded), "")
 	res.OK = final.Code < 400
+	if final.Code >= 400 {
+		res.finding("error-response", "notice", "The graded response is an error page", final.Status+" from "+final.URL+"; the site's normal pages can send different headers.", "Application")
+	}
 	res.Summary = fmt.Sprintf("%d of %d headers that apply to this response are set.", pass, graded)
 	res.Verdict = ProbeOK
 	if len(res.Findings) > 0 {
@@ -675,7 +678,16 @@ func describeTLSState(res *ProbeResult, host string, state tls.ConnectionState) 
 		}
 	}
 	b.WriteString(expiry + "\n")
-	res.fact("Expiry", leaf.NotAfter.UTC().Format("2006-01-02")+" — "+expiry, BasisObserved)
+	// The date, not the countdown: a fact that changes daily would make every
+	// saved comparison differ. Days left is a metric.
+	validity := "valid"
+	switch {
+	case now.After(leaf.NotAfter):
+		validity = "expired"
+	case now.Before(leaf.NotBefore):
+		validity = "not valid yet"
+	}
+	res.fact("Expiry", leaf.NotAfter.UTC().Format("2006-01-02")+" ("+validity+")", BasisObserved)
 	trust := ""
 	if verr != nil {
 		trust = fmt.Sprintf("Not trusted for %s: %v", host, verr)
@@ -934,8 +946,10 @@ func (s *Service) SiteAudit(ctx context.Context, target string, port int) (*Prob
 			status = StageFailed
 		}
 		clock.done(part.id, part.label, status, sub.Summary)
-		if part.id != "headers" {
-			ok = ok && sub.OK
+		// A failed stage ends the audit's success, not an error status the
+		// HTTP stage already reported as a finding (a login page's 401).
+		if part.id != "headers" && status == StageFailed {
+			ok = false
 		}
 		body := sub.Output
 		if part.id == "headers" {

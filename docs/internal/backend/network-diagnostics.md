@@ -59,7 +59,7 @@ any error-text classification: `unknown` → `completed_with_unknowns`, `finding
 
 | Tool | Structured readings |
 | --- | --- |
-| DNS lookup | Process-resolver answers attributed to the hosts file (NSS `files`) or to each configured nameserver asked directly over UDP (TCP after truncation) with rcode/TTL/time; name-service order, nameservers and search domains as configured facts; a hosts override that disagrees with DNS is a finding; a loopback stub links to the DNS page for its upstreams. |
+| DNS lookup | NXDOMAIN and NODATA are told apart from the first configured nameserver's response code (Go's resolver reports both as not found); NODATA is an answer, not a failure. Process-resolver answers attributed to the hosts file (NSS `files`) or to each configured nameserver asked directly over UDP (TCP after truncation) with rcode/TTL/time; name-service order, nameservers and search domains as configured facts; a hosts override that disagrees with DNS is a finding; a loopback stub links to the DNS page for its upstreams. |
 | DNS authority | Zone apex discovery, the parent's referral (delegation set and glue, glue checked against the nameserver's records for in-bailiwick names), and every authoritative address asked SOA/NS with recursion off (authoritative flag, serial, NS set). Lame, silent, mismatched and serial-disagreeing servers are separate findings; an unreadable parent leaves the verdict unknown. |
 | Ping | Sent/received/loss, min/avg/max/mdev and jitter between consecutive replies as metrics, a reply table, and ICMP-error replies distinguished from silence. Total silence is `unknown` with a link to the TCP port check. |
 | Traceroute / tracepath | A hop table (address, round trips, `!X`-style annotations, asymmetry), `hop N address` records for comparison, hops/answering hops/reached metrics; an unreached destination is `unknown`. |
@@ -84,7 +84,7 @@ any error-text classification: `unknown` → `completed_with_unknowns`, `finding
 | Neighbours | Cache rows with each state explained and a per-interface summary (role, local addresses, confirmed/stale/failed); passive read only. |
 | Host support | Tool table plus capability probes (see the network document). |
 | Packet snapshot | Packet count, fixed limits and a link that opens `/network/captures` setup prefilled with the interface and protocol. |
-| Wake-on-LAN | Last cached address for the MAC, a pre-send check, the send stage and optional measured verification (`verify` plus `port`), reporting the seconds until an answer or `unknown`. |
+| Wake-on-LAN | Last cached address for the MAC, a pre-send check, the send stage and optional measured verification (`verify` plus `port`), reporting the seconds until an answer or `unknown`. A device that already answered before the packet is `unknown` (no wake time recorded); ICMP verification requires host `ping`, and a check that cannot run is reported as such rather than as silence. |
 
 ## History, saved interactive results and trusted references
 
@@ -92,20 +92,28 @@ any error-text classification: `unknown` → `completed_with_unknowns`, `finding
 oldest first, with its outcome, verdict, summary and metrics. It reads saved runs only and is bounded
 by the retention policy. Comparison adds `metrics` (before/after per key) and folds structured lines
 (verdict, facts, stage outcomes, table rows, findings) into the record difference; columns whose
-header names a time, round trip, first byte, total or check time are left out so timing alone does
-not make every row differ.
+header names a time, round trip, first byte, total or check time — and the `Checked at` and
+`Local source` facts — are left out so timing and ephemeral ports alone do not make every run
+differ. A run's status follows its verdict: any structured verdict other than `failed` is
+`completed`.
 
 A quick `POST /network/probe` answer carries a `resultId`. The server keeps that exact result in a
 volatile cache for fifteen minutes (at most 64 entries) bound to the requesting account.
 `POST /results` `{resultId,name}` moves it into a completed run without running the tool again; the
-hold is consumed, another account's or an expired ID answers 410, and the run's scope records that
-it was saved after an interactive run. Saved runs never retain a `resultId`.
+hold is consumed only by a successful save (a refused name or unavailable store puts it back),
+another account's or an expired ID answers 410, and the run's scope records that it was saved after
+an interactive run. Saved runs never retain a `resultId`.
 
 Trusted SSH fingerprints and Wake-on-LAN devices are bounded JSON in the existing settings table
 (`network.diagnostics.ssh_trust`, at most 128 hosts × 8 keys; `network.diagnostics.wol_devices`, at
 most 64), so no schema change is needed. A trust entry is keyed by canonical `host:port`, stores
 `observed` (trusted from a scan) or `entered` (copied out of band) with who saved it and when, and
-validates key types and `SHA256:` fingerprints. A device stores name, canonical unicast MAC,
+validates key types and `SHA256:` fingerprints. Observed keys are never taken from the client: the
+server reads them, with the scanned host and port, from the requester's held SSH scan, so editing
+the target after a scan cannot attach one host's keys to another. Saving over existing trust needs
+the destructive replace route, and the UI confirms it with a stronger warning when the scan reported
+a changed key. An unreadable trust store leaves a scan `unknown` ("could not be compared"), never
+"none saved". A device stores name, canonical unicast MAC,
 interface name syntax and an optional literal verification address and TCP port.
 
 ## Retained connection investigations
@@ -212,8 +220,9 @@ not retained probe output.
 | GET | `/{id}/history` | Metrics and outcomes of every retained run of the same request |
 | POST | `/results` | Save `{resultId,name}` from the server's hold as a completed run; 410 when expired |
 | GET | `/ssh-trust` | List saved trusted SSH fingerprints |
-| PUT | `/ssh-trust` | Save `{target,port,source,keys}` for one host and port |
-| DELETE | `/ssh-trust?target=<host:port>` | Forget one host's fingerprints through `s.destructive` |
+| PUT | `/ssh-trust` | Save new trust: `{source:"observed",resultId}` from a held SSH scan, or `{source:"entered",target,port,keys}`; 409 `ssh_trust_exists` when the host already has trust |
+| PUT | `/ssh-trust/replace` | The same body, replacing existing trust, through `s.destructive` |
+| DELETE | `/ssh-trust?host=<host>&port=<port>` | Forget one host's fingerprints (canonicalized server-side) through `s.destructive` |
 | GET | `/wol-devices` | List saved Wake-on-LAN devices |
 | POST / PUT | `/wol-devices`, `/wol-devices/{device}` | Create or replace a device |
 | DELETE | `/wol-devices/{device}` | Delete a device through `s.destructive` |
@@ -234,9 +243,10 @@ Every tool card renders the shared `components/network/tools/probe-evidence.tsx`
 findings (owner, action and an in-product link), measurements, facts with a basis tag, tables with
 row links, next-step links and limits; raw output sits behind **Tool output** when structured
 evidence exists. An answer with a `resultId` offers **Save this result**, which names and saves the
-held result and opens it in Saved runs. The SSH card offers **Trust the keys this scan read** and
-**Save fingerprint** for a pasted `SHA256:` value, and **Forget saved fingerprints** with ordinary
-confirmation; none of these contacts the server. The Wake-on-LAN card adds optional **Verify
+held result and opens it in Saved runs. The SSH card offers **Trust the keys <host> offered** and
+**Save fingerprint** for a pasted `SHA256:` value, replacement of existing trust after a
+confirmation, and **Forget saved fingerprints for <scanned host>** with ordinary confirmation; the
+scan actions follow the shown scan, not the current inputs, and none of these contacts the server. The Wake-on-LAN card adds optional **Verify
 address**/**Verify TCP port** inputs and a saved-device list read only while the card is in view;
 **Use** fills the inputs and sending remains a press. Route lookup takes an optional port and
 protocol; Header grade takes a response kind.

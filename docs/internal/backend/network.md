@@ -343,7 +343,8 @@ host-wrapper process group with bounded cleanup, including descendants holding o
 Wake-on-LAN sends one Ethernet magic frame to a validated unicast MAC on a selected broadcast LAN
 interface. Success confirms the send, not that a remote firmware/NIC woke; an optional literal
 verification address (TCP port, or ICMP when none) is checked once before sending and then every
-three seconds for up to sixty, and silence is reported as unknown rather than asleep. A quick
+three seconds for up to sixty, and silence is reported as unknown rather than asleep; a device that
+already answered before sending is not counted as woken. A quick
 snapshot links to a retained capture job prefilled with its interface and protocol. Neither tool crosses an
 upstream router/provider restriction. All probes remain admin-only and audited.
 

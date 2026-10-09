@@ -139,3 +139,49 @@ func TestStructuredEvidenceIsBoundedAndCopied(t *testing.T) {
 		t.Fatal("bounding mutated the source result")
 	}
 }
+
+// Content that JSON escaping inflates sixfold must still shrink below the
+// artifact bound rather than spin under the service lock.
+func TestBoundingAlwaysTerminatesOnEscapeHeavyEvidence(t *testing.T) {
+	heavy := &netsec.ProbeResult{Tool: "dns", Target: strings.Repeat("<", 4000), Summary: strings.Repeat("&", 4000), Error: strings.Repeat(">", 4000)}
+	for i := 0; i < 8; i++ {
+		row := make([]string, 12)
+		for j := range row {
+			row[j] = strings.Repeat("<", 1024)
+		}
+		heavy.Tables = append(heavy.Tables, netsec.ProbeTable{ID: "t", Title: "x", Columns: make([]string, 12), Rows: [][]string{row}})
+	}
+	for i := 0; i < 32; i++ {
+		heavy.Metrics = append(heavy.Metrics, netsec.ProbeMetric{Key: strings.Repeat("<", 1024), Label: strings.Repeat(">", 1024)})
+		heavy.Links = append(heavy.Links, netsec.ProbeLink{Label: strings.Repeat("&", 1024), Href: strings.Repeat("<", 1024)})
+	}
+	done := make(chan *netsec.ProbeResult, 1)
+	go func() { bounded, _ := boundedResult(heavy); done <- bounded }()
+	select {
+	case bounded := <-done:
+		encoded, _ := json.Marshal(bounded)
+		if len(encoded) > MaxArtifactBytes {
+			t.Fatalf("bounded result is %d bytes", len(encoded))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("bounding did not terminate")
+	}
+}
+
+func TestAnsweredFollowsTheVerdict(t *testing.T) {
+	for _, tc := range []struct {
+		result *netsec.ProbeResult
+		want   bool
+	}{
+		{nil, false},
+		{&netsec.ProbeResult{OK: false, Verdict: netsec.ProbeFindings}, true},
+		{&netsec.ProbeResult{OK: false, Verdict: netsec.ProbeUnknown}, true},
+		{&netsec.ProbeResult{OK: true, Verdict: netsec.ProbeFailed}, false},
+		{&netsec.ProbeResult{OK: true}, true},
+		{&netsec.ProbeResult{OK: false}, false},
+	} {
+		if got := answered(tc.result); got != tc.want {
+			t.Errorf("%+v => %v", tc.result, got)
+		}
+	}
+}

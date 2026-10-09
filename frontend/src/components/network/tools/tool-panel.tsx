@@ -204,7 +204,7 @@ export function ToolPanel({
         )}
 
         {def.key === "ssh" && (
-          <SSHTrustActions target={t.target} port={Number(t.port) || 22} result={t.result} />
+          <SSHTrustActions target={t.target} port={Number(t.port) || 22} scan={t.result} />
         )}
         {def.key === "wol" && active && <WakeDevices run={t} />}
 

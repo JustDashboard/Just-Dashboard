@@ -201,27 +201,32 @@ var (
 )
 
 // checkAwake reports whether the address answered. A TCP refusal counts: the
-// device's own network stack sent it.
-func checkAwake(ctx context.Context, address string, port int) (bool, string) {
+// device's own network stack sent it. An error means the check itself could
+// not run, which is not the same as no answer.
+func checkAwake(ctx context.Context, address string, port int) (bool, string, error) {
 	if port > 0 {
 		d := &net.Dialer{Timeout: 2 * time.Second}
 		conn, err := d.DialContext(ctx, "tcp", net.JoinHostPort(address, strconv.Itoa(port)))
 		if err == nil {
 			conn.Close()
-			return true, "TCP " + strconv.Itoa(port) + " connected"
+			return true, "TCP " + strconv.Itoa(port) + " connected", nil
 		}
 		if errors.Is(err, syscall.ECONNREFUSED) {
-			return true, "TCP " + strconv.Itoa(port) + " refused, so a network stack answered"
+			return true, "TCP " + strconv.Itoa(port) + " refused, so a network stack answered", nil
 		}
-		return false, ""
+		return false, "", nil
 	}
-	if !diagnosticHas("ping") {
-		return false, ""
+	out, _, err := diagnosticRun(ctx, 3*time.Second, "ping", "-n", "-c", "1", "-W", "1", address)
+	if err == nil {
+		return true, "ICMP echo answered", nil
 	}
-	if _, _, err := diagnosticRun(ctx, 3*time.Second, "ping", "-n", "-c", "1", "-W", "1", address); err == nil {
-		return true, "ICMP echo answered"
+	lower := strings.ToLower(out)
+	for _, broken := range []string{"not permitted", "permission denied", "executable file not found", "unknown host"} {
+		if strings.Contains(lower, broken) || strings.Contains(strings.ToLower(err.Error()), broken) {
+			return false, "", fmt.Errorf("ping could not run: %s", strings.TrimSpace(strings.SplitN(nonEmptyOr(out, err.Error()), "\n", 2)[0]))
+		}
 	}
-	return false, ""
+	return false, "", nil
 }
 
 // cachedNeighbour finds the address the neighbour cache last associated with
@@ -262,6 +267,9 @@ func (s *Service) WakeOnLAN(ctx context.Context, target, device, verify string, 
 		if _, err := ValidWakeVerification(verify, verifyPort); err != nil {
 			return nil, err
 		}
+		if verifyPort == 0 && !diagnosticHas("ping") {
+			return nil, fmt.Errorf("ICMP verification needs ping on the host; give a TCP port to verify instead")
+		}
 	}
 	res := &ProbeResult{Tool: "wol", Target: target + " on " + device}
 	start := time.Now()
@@ -284,10 +292,14 @@ func (s *Service) WakeOnLAN(ctx context.Context, target, device, verify string, 
 		}
 		res.fact("Verification", fmt.Sprintf("%s to %s every %s for up to %s", method, verify, wakeInterval, wakeWindow), BasisConfigured)
 		clock := res.begin()
-		if up, detail := wakeCheck(ctx, verify, verifyPort); up {
+		up, detail, checkErr := wakeCheck(ctx, verify, verifyPort)
+		switch {
+		case checkErr != nil:
+			clock.done("precheck", "Before sending", StageUnknown, checkErr.Error())
+		case up:
 			alreadyUp = true
 			clock.done("precheck", "Before sending", StageWarning, "already answering: "+detail)
-		} else {
+		default:
 			clock.done("precheck", "Before sending", StagePassed, "not answering")
 		}
 	}
@@ -314,17 +326,32 @@ func (s *Service) WakeOnLAN(ctx context.Context, target, device, verify string, 
 	sent := time.Now()
 	deadline := sent.Add(wakeWindow)
 	for {
-		if up, detail := wakeCheck(ctx, verify, verifyPort); up {
+		up, detail, checkErr := wakeCheck(ctx, verify, verifyPort)
+		if checkErr != nil {
+			clock.done("verify", "Wake verification", StageUnknown, checkErr.Error())
+			res.Verdict = ProbeUnknown
+			res.Summary = "The packet was sent, but verification could not run: " + checkErr.Error() + "."
+			res.Output += "\n" + res.Summary
+			res.Duration = time.Since(start).Round(time.Millisecond).String()
+			return res, nil
+		}
+		if up {
 			after := time.Since(sent)
+			res.Duration = time.Since(start).Round(time.Millisecond).String()
+			if alreadyUp {
+				// An answer from a device that already answered measures
+				// reachability, not a wake.
+				clock.done("verify", "Wake verification", StageWarning, detail+", but it was already answering before the packet")
+				res.Verdict = ProbeUnknown
+				res.Summary = verify + " was already answering before the packet was sent, so waking was not demonstrated."
+				res.Output += "\n" + res.Summary
+				return res, nil
+			}
 			clock.done("verify", "Wake verification", StagePassed, fmt.Sprintf("%s after %s", detail, after.Round(time.Second)))
 			res.metric("wake_seconds", "Answered after", math.Round(after.Seconds()*10)/10, "s")
 			res.Verdict = ProbeOK
 			res.Summary = fmt.Sprintf("%s answered %s after the packet (%s).", verify, after.Round(time.Second), detail)
-			if alreadyUp {
-				res.Summary = verify + " was already answering before the packet was sent, so waking was not demonstrated."
-			}
 			res.Output += "\n" + res.Summary
-			res.Duration = time.Since(start).Round(time.Millisecond).String()
 			return res, nil
 		}
 		if time.Now().Add(wakeInterval).After(deadline) || ctx.Err() != nil {
@@ -344,7 +371,8 @@ func (s *Service) WakeOnLAN(ctx context.Context, target, device, verify string, 
 }
 
 // ValidWakeVerification checks an optional wake verification target: a
-// unicast literal on this LAN side and a TCP port, or port 0 for ICMP echo.
+// unicast literal (a name could resolve elsewhere once the device is up) and
+// a TCP port, or port 0 for ICMP echo.
 func ValidWakeVerification(address string, port int) (string, error) {
 	a, err := netip.ParseAddr(strings.TrimSpace(address))
 	if err != nil || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() {

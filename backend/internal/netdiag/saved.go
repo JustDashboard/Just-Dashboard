@@ -26,7 +26,10 @@ const (
 	MaxWakeDevices = 64
 )
 
-var ErrTooMany = errors.New("the saved list is full")
+var (
+	ErrTooMany     = errors.New("the saved list is full")
+	ErrTrustExists = errors.New("fingerprints are already saved for this host; replacing them must be confirmed")
+)
 
 func (s *Store) readJSON(ctx context.Context, key string, into any) error {
 	var data string
@@ -80,8 +83,9 @@ func (s *Service) SSHTrustFor(ctx context.Context, target string) (*netsec.SSHTr
 	return nil, nil
 }
 
-// SaveSSHTrust replaces the entry for its target.
-func (s *Service) SaveSSHTrust(ctx context.Context, entry netsec.SSHTrust) (netsec.SSHTrust, error) {
+// SaveSSHTrust saves the entry for its target. Overwriting existing trust
+// erases the fingerprint later scans rely on, so it needs replace.
+func (s *Service) SaveSSHTrust(ctx context.Context, entry netsec.SSHTrust, replace bool) (netsec.SSHTrust, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.ready(); err != nil {
@@ -95,6 +99,9 @@ func (s *Service) SaveSSHTrust(ctx context.Context, entry netsec.SSHTrust) (nets
 	replaced := false
 	for i := range entries {
 		if entries[i].Target == entry.Target {
+			if !replace {
+				return netsec.SSHTrust{}, ErrTrustExists
+			}
 			entries[i], replaced = entry, true
 		}
 	}

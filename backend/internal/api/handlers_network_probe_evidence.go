@@ -82,7 +82,12 @@ func (s *Server) compareSSHTrust(ctx context.Context, req netsec.ProbeRequest, r
 	}
 	trust, err := s.modules.diagnostics.SSHTrustFor(ctx, netsec.SSHTrustTarget(req.Target, req.Port))
 	if err != nil {
+		// An unreadable store is not an empty one: say the comparison could
+		// not run rather than that nothing is saved.
 		res.Facts = append(res.Facts, netsec.ProbeFact{Label: "Saved trust", Value: "unreadable: " + err.Error(), Basis: netsec.BasisUnknown})
+		res.Verdict = netsec.ProbeUnknown
+		res.Summary = "The offered host keys were read, but saved fingerprints could not be read, so they were not compared."
+		return
 	}
 	netsec.CompareSSHKeys(res, trust)
 }
@@ -162,6 +167,26 @@ func (c *quickResultCache) keep(owner string, req netsec.ProbeRequest, res *nets
 	copy.ResultID = ""
 	c.entries[id] = quickResult{owner: owner, request: req, result: copy, started: started, ended: ended, expires: now.Add(quickResultTTL)}
 	return id
+}
+
+// peek returns an unexpired result held for its owner without consuming it.
+func (c *quickResultCache) peek(owner, id string) (quickResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.entries[id]
+	if !ok || entry.owner != owner || c.now().After(entry.expires) {
+		return quickResult{}, fmt.Errorf("that result is no longer held; run the tool again")
+	}
+	return entry, nil
+}
+
+// restore puts back a result whose save was refused, keeping its expiry.
+func (c *quickResultCache) restore(id string, entry quickResult) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.entries) < quickResultMax {
+		c.entries[id] = entry
+	}
 }
 
 // take removes and returns an unexpired result held for its owner.

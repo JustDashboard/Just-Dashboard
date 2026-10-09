@@ -164,6 +164,21 @@ async function fixture(page: Page, records: DiagnosticRun[] = [run()], session =
           },
           503,
         )
+      if (verb === "history")
+        return json(route, {
+          request: record.request,
+          limitations: ["Only runs still inside the retention policy are listed."],
+          points: [...state.runs.values()]
+            .filter((other) => JSON.stringify(other.request) === JSON.stringify(record.request))
+            .map((other) => ({
+              id: other.id,
+              name: other.name,
+              createdAt: other.createdAt,
+              status: other.status,
+              outcome: other.outcome,
+              metrics: other.result?.metrics ?? [],
+            })),
+        })
       return json(route, verb === "export" ? { version: 1, run: record } : record)
     }
     if (method === "PATCH") {

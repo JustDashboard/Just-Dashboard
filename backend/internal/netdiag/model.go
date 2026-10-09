@@ -190,6 +190,8 @@ func boundedResult(result *netsec.ProbeResult) (*netsec.ProbeResult, bool) {
 			break
 		}
 		trimmed = true
+		// Every branch strictly shrinks the result, and the last keeps only a
+		// clipped verdict, so escaping-heavy content cannot loop forever.
 		switch {
 		case len(copy.Output) > 0:
 			copy.Output, _ = clip(copy.Output, len(copy.Output)/2)
@@ -201,8 +203,15 @@ func boundedResult(result *netsec.ProbeResult) (*netsec.ProbeResult, bool) {
 			}
 		case len(copy.Records) > 0:
 			copy.Records = copy.Records[:len(copy.Records)/2]
+		case len(copy.Tables) > 0:
+			copy.Tables = copy.Tables[:len(copy.Tables)/2]
+		case len(copy.Facts)+len(copy.Findings)+len(copy.Stages)+len(copy.Links)+len(copy.Metrics)+len(copy.Limitations) > 0:
+			copy.Facts, copy.Findings, copy.Stages, copy.Links, copy.Metrics, copy.Limitations = nil, nil, nil, nil, nil, nil
 		default:
-			copy.Facts, copy.Findings, copy.Stages = nil, nil, nil
+			copy.Summary, _ = clip(copy.Summary, 256)
+			copy.Error, _ = clip(copy.Error, 256)
+			copy.Target, _ = clip(copy.Target, 256)
+			return &copy, true
 		}
 	}
 	return &copy, trimmed

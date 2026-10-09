@@ -58,7 +58,7 @@ func fakeDNSServer(t *testing.T, answer func(q dnsmessage.Question, recursion bo
 			return nil
 		}
 		a := answer(q, h.RecursionDesired)
-		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, Authoritative: a.authoritative, RCode: a.rcode, Truncated: overUDP && a.truncateUDP, RecursionDesired: h.RecursionDesired})
+		b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: h.ID, Response: true, Authoritative: a.authoritative, RCode: a.rcode, Truncated: overUDP && a.truncateUDP, RecursionDesired: h.RecursionDesired, RecursionAvailable: h.RecursionDesired})
 		_ = b.StartQuestions()
 		_ = b.Question(q)
 		_ = b.StartAnswers()
@@ -408,5 +408,47 @@ func TestDNSAuthorityLiveWireAgainstLoopbackAuthority(t *testing.T) {
 	}
 	if !hasFinding(res, "single-ns") {
 		t.Fatal("a single nameserver drew no notice")
+	}
+}
+
+func TestLookupSeparatesNoDataFromNonexistentNames(t *testing.T) {
+	server := fakeDNSServer(t, func(q dnsmessage.Question, rd bool) fakeAnswer {
+		if strings.HasPrefix(q.Name.String(), "missing.") {
+			return fakeAnswer{rcode: dnsmessage.RCodeNameError}
+		}
+		return fakeAnswer{}
+	})
+	host, port, _ := net.SplitHostPort(server)
+	writeResolverFiles(t, "192.0.2.7 hostsonly.example.test\n", "nameserver "+host+"\n", "hosts: files dns\n")
+	oldPort, oldResolver := dnsPort, lookupResolver
+	t.Cleanup(func() { dnsPort, lookupResolver = oldPort, oldResolver })
+	dnsPort = port
+	lookupResolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, server)
+	}}
+	res, err := New().Lookup(t.Context(), "v4only.example.test.", "AAAA")
+	if err != nil || res.Verdict != ProbeOK || !strings.Contains(res.Summary, "publishes no AAAA records") {
+		t.Fatalf("NODATA = %+v %v", res, err)
+	}
+	res, _ = New().Lookup(t.Context(), "missing.example.test.", "A")
+	if res.Verdict != ProbeFailed || !strings.Contains(res.Summary, "NXDOMAIN") {
+		t.Fatalf("NXDOMAIN = %+v", res)
+	}
+}
+
+func TestHostsOnlyNamesAreNotCalledOverrides(t *testing.T) {
+	res := &ProbeResult{Records: []string{"192.0.2.7"}}
+	server := fakeDNSServer(t, func(dnsmessage.Question, bool) fakeAnswer { return fakeAnswer{rcode: dnsmessage.RCodeNameError} })
+	host, port, _ := net.SplitHostPort(server)
+	writeResolverFiles(t, "192.0.2.7 internal.example.test\n", "nameserver "+host+"\n", "hosts: files dns\n")
+	oldPort := dnsPort
+	t.Cleanup(func() { dnsPort = oldPort })
+	dnsPort = port
+	if rcode := addLookupProvenance(t.Context(), res, "internal.example.test", "A"); rcode != "NXDOMAIN" {
+		t.Fatalf("rcode = %s", rcode)
+	}
+	if hasFinding(res, "hosts-override") || !hasFinding(res, "hosts-only") || res.Findings[0].Level != "notice" {
+		t.Fatalf("findings = %+v", res.Findings)
 	}
 }

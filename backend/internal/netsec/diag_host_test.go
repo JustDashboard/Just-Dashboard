@@ -2,6 +2,7 @@ package netsec
 
 import (
 	"context"
+	"errors"
 	"net/netip"
 	"reflect"
 	"strings"
@@ -117,12 +118,12 @@ func TestWakeOnLANMeasuresVerificationWithinItsWindow(t *testing.T) {
 	sent := false
 	wakeSend = func(int, []byte) error { sent = true; return nil }
 	checks := 0
-	wakeCheck = func(_ context.Context, address string, port int) (bool, string) {
+	wakeCheck = func(_ context.Context, address string, port int) (bool, string, error) {
 		if address != "192.168.1.50" || port != 22 {
 			t.Fatalf("check %s %d", address, port)
 		}
 		checks++
-		return sent && checks >= 3, "TCP 22 connected"
+		return sent && checks >= 3, "TCP 22 connected", nil
 	}
 	res, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "192.168.1.50", 22)
 	if err != nil || !res.OK || res.Verdict != ProbeOK || stageStatus(res, "precheck") != StagePassed || stageStatus(res, "verify") != StagePassed {
@@ -133,17 +134,33 @@ func TestWakeOnLANMeasuresVerificationWithinItsWindow(t *testing.T) {
 	}
 
 	sent = false
-	wakeCheck = func(context.Context, string, int) (bool, string) { return false, "" }
+	wakeCheck = func(context.Context, string, int) (bool, string, error) { return false, "", nil }
 	res, _ = New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "192.168.1.50", 0)
 	if !res.OK || res.Verdict != ProbeUnknown || stageStatus(res, "verify") != StageUnknown || !strings.Contains(res.Summary, "may still have woken") {
 		t.Fatalf("silent = %+v", res)
 	}
 
-	wakeCheck = func(context.Context, string, int) (bool, string) { return true, "ICMP echo answered" }
+	wakeCheck = func(context.Context, string, int) (bool, string, error) { return true, "ICMP echo answered", nil }
 	res, _ = New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "192.168.1.50", 0)
-	if stageStatus(res, "precheck") != StageWarning || !strings.Contains(res.Summary, "already answering") {
+	if stageStatus(res, "precheck") != StageWarning || stageStatus(res, "verify") != StageWarning || res.Verdict != ProbeUnknown || !strings.Contains(res.Summary, "already answering") {
 		t.Fatalf("already awake = %+v", res)
 	}
+	if _, ok := metricValue(res, "wake_seconds"); ok {
+		t.Fatal("an already-awake device recorded a wake time")
+	}
+
+	wakeCheck = func(context.Context, string, int) (bool, string, error) {
+		return false, "", errors.New("ping could not run: operation not permitted")
+	}
+	res, _ = New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "192.168.1.50", 0)
+	if !res.OK || res.Verdict != ProbeUnknown || stageStatus(res, "verify") != StageUnknown || !strings.Contains(res.Summary, "could not run") {
+		t.Fatalf("broken verification = %+v", res)
+	}
+	diagnosticHas = func(name string) bool { return name != "ping" }
+	if _, err := New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "192.168.1.50", 0); err == nil {
+		t.Fatal("ICMP verification was accepted without ping")
+	}
+	diagnosticHas = func(string) bool { return true }
 
 	stubNeighbourCache(t, "192.168.1.50 dev eno1 lladdr 02:11:22:33:44:55 STALE")
 	res, _ = New().WakeOnLAN(t.Context(), "02:11:22:33:44:55", "eno1", "", 0)

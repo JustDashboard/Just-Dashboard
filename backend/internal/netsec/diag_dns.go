@@ -162,8 +162,11 @@ func lookupWireValues(reply *dnsReply, recordType string) []string {
 	return values
 }
 
-// addLookupProvenance runs after the process resolver has answered.
-func addLookupProvenance(ctx context.Context, res *ProbeResult, target, recordType string) {
+// addLookupProvenance runs after the process resolver has answered. It
+// returns the first configured nameserver's response code, which tells a
+// name that does not exist from one without records of this type: Go's
+// resolver reports both as not found.
+func addLookupProvenance(ctx context.Context, res *ProbeResult, target, recordType string) string {
 	target = strings.TrimSpace(target)
 	res.fact("Resolver", "This dashboard's process resolver (Go, host network namespace)", BasisConfigured)
 	nss, ok := readNSSHosts(resolverFiles.NSSwitch)
@@ -214,6 +217,7 @@ func addLookupProvenance(ctx context.Context, res *ProbeResult, target, recordTy
 		}
 	}
 	var wire []string
+	firstRCode := ""
 	answered := 0
 	distinct := map[string]bool{}
 	stub := false
@@ -241,7 +245,7 @@ func addLookupProvenance(ctx context.Context, res *ProbeResult, target, recordTy
 		}
 		table.Rows = append(table.Rows, []string{"nameserver " + server, reply.Transport, result, strings.Join(values, ", "), ttl, reply.Elapsed.Round(time.Millisecond).String()})
 		if answered == 0 {
-			wire = values
+			wire, firstRCode = values, reply.RCode
 		}
 		answered++
 		distinct[strings.Join(values, ",")] = true
@@ -255,9 +259,13 @@ func addLookupProvenance(ctx context.Context, res *ProbeResult, target, recordTy
 			hostOnly = hostOnly || a.Source == "hosts file (NSS files)"
 		}
 		res.Tables = append(res.Tables, attributed)
-		if hostOnly && answered > 0 {
+		switch {
+		case hostOnly && len(wire) > 0:
 			res.finding("hosts-override", "warning", "The hosts file overrides DNS for this name",
-				"Services on this host resolve "+target+" from "+resolverFiles.Hosts+"; the configured nameservers answer "+nonEmptyOr(strings.Join(wire, ", "), "nothing")+". Other machines follow DNS.", "This host's hosts file")
+				"Services on this host resolve "+target+" from "+resolverFiles.Hosts+"; the configured nameservers answer "+strings.Join(wire, ", ")+". Other machines follow DNS.", "This host's hosts file")
+		case hostOnly && answered > 0:
+			res.finding("hosts-only", "notice", "Only this host's hosts file knows this name",
+				"DNS has no "+recordType+" answer for "+target+", so other machines cannot resolve it the way services on this host do.", "This host's hosts file")
 		}
 	}
 	if answered > 1 && len(distinct) > 1 {
@@ -269,6 +277,7 @@ func addLookupProvenance(ctx context.Context, res *ProbeResult, target, recordTy
 		res.Limitations = append(res.Limitations, "A loopback nameserver is a local stub or cache; its own upstream servers and encrypted transport are configured on the DNS page, not visible in this answer.")
 	}
 	res.Limitations = append(res.Limitations, "Direct questions are sent to each configured nameserver with recursion desired, over UDP with TCP only after truncation. Encrypted DNS used by a stub is not observed here.")
+	return firstRCode
 }
 
 // The authority checker's dependencies, replaced by fixtures in tests.

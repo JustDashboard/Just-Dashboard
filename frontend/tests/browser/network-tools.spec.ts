@@ -6,6 +6,7 @@ import type {
   DiagnosticRun,
   WakeDevice,
 } from "../../src/lib/network-diagnostics"
+import { TOOL_EVIDENCE } from "./fixtures/network-tool-results"
 import { admin, json, mockNetwork } from "./network-fixture"
 
 type Call = { method: string; path: string; query: URLSearchParams; body: unknown }
@@ -107,11 +108,11 @@ async function tools(page: Page, answers: Record<string, DiagnosticResult>, sess
       return json(route, { ...devices[0], id: "d2", ...request.postDataJSON() }, 201)
     if (path.startsWith("/wol-devices/") && request.method() === "DELETE")
       return route.fulfill({ status: 204 })
-    if (path === "/ssh-trust" && request.method() === "PUT") {
+    if ((path === "/ssh-trust" || path === "/ssh-trust/replace") && request.method() === "PUT") {
       const body = request.postDataJSON()
       return json(route, {
-        target: "host.example.test:22",
-        keys: body.keys,
+        target: body.target ? `${body.target}:${body.port}` : "host.example.test:22",
+        keys: body.keys ?? [{ type: "ssh-ed25519", fingerprint }],
         source: body.source,
         savedAt: "2026-10-09T10:00:00Z",
         savedBy: "operator",
@@ -289,7 +290,7 @@ test("listeners link each socket to Ports and hop tables render for traceroute",
   await expect(hops.getByRole("row")).toHaveCount(4)
 })
 
-test("SSH host keys are trusted from a scan or entered by hand and forgotten with confirmation", async ({
+test("SSH host keys are trusted from the held scan or entered by hand, replacement and forgetting confirmed", async ({
   page,
 }) => {
   const ssh: DiagnosticResult = {
@@ -303,22 +304,56 @@ test("SSH host keys are trusted from a scan or entered by hand and forgotten wit
     duration: "1s",
     records: [`ssh-ed25519 ${fingerprint}`],
     facts: [{ label: "Saved trust", value: "none for host.example.test:22", basis: "unknown" }],
+    resultId: "s".repeat(32),
   }
   const calls = await tools(page, { ssh })
+  let exists = false
+  await page.route("**/api/v1/network/diagnostics/ssh-trust", async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    calls.push({
+      method: request.method(),
+      path: url.pathname.replace("/api/v1", ""),
+      query: url.searchParams,
+      body: request.postData() ? request.postDataJSON() : undefined,
+    })
+    if (request.method() === "DELETE") return route.fulfill({ status: 204 })
+    if (exists)
+      return json(
+        route,
+        {
+          error: {
+            code: "ssh_trust_exists",
+            message:
+              "fingerprints are already saved for this host; replacing them must be confirmed",
+          },
+        },
+        409,
+      )
+    exists = true
+    return json(route, {
+      target: "host.example.test:22",
+      keys: [{ type: "ssh-ed25519", fingerprint }],
+      source: "observed",
+      savedAt: "2026-10-09T10:00:00Z",
+      savedBy: "operator",
+    })
+  })
   await page.goto("/network/tools?tool=ssh&target=host.example.test")
   await run(page).click()
+  // Editing the input after the scan must not move the scanned keys to another host.
+  await panel(page).getByRole("textbox", { name: "Target", exact: true }).fill("other.example.test")
   await panel(page)
-    .getByRole("button", { name: "Trust the keys this scan read", exact: true })
+    .getByRole("button", { name: "Trust the keys host.example.test offered", exact: true })
     .click()
   await expect(
     panel(page).getByText(/Saved 1 fingerprint for host\.example\.test:22/),
   ).toBeVisible()
   expect(calls.find((call) => call.path === "/network/diagnostics/ssh-trust")?.body).toEqual({
-    target: "host.example.test",
-    port: 22,
     source: "observed",
-    keys: [{ type: "ssh-ed25519", fingerprint }],
+    resultId: ssh.resultId,
   })
+
   await panel(page).getByLabel("Fingerprint", { exact: true }).fill("MD5:aa:bb")
   await expect(panel(page).getByText(/Paste the SHA256 fingerprint/)).toBeVisible()
   await expect(
@@ -326,23 +361,37 @@ test("SSH host keys are trusted from a scan or entered by hand and forgotten wit
   ).toBeDisabled()
   await panel(page).getByLabel("Fingerprint", { exact: true }).fill(fingerprint)
   await panel(page).getByRole("button", { name: "Save fingerprint", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await expect(
+    dialog.getByText(/Fingerprints are already saved for other\.example\.test port 22/),
+  ).toBeVisible()
+  await dialog.getByRole("button", { name: "Replace fingerprints", exact: true }).click()
   await expect
-    .poll(() => calls.filter((call) => call.path === "/network/diagnostics/ssh-trust").at(-1)?.body)
-    .toMatchObject({ source: "entered", keys: [{ type: "ssh-ed25519", fingerprint }] })
+    .poll(() => calls.find((call) => call.path === "/network/diagnostics/ssh-trust/replace")?.body)
+    .toEqual({
+      source: "entered",
+      target: "other.example.test",
+      port: 22,
+      keys: [{ type: "ssh-ed25519", fingerprint }],
+    })
 
   ssh.facts = [
     { label: "Saved trust", value: "1 fingerprint(s) entered by hand", basis: "configured" },
   ]
   ssh.verdict = "ok"
+  await panel(page).getByRole("textbox", { name: "Target", exact: true }).fill("host.example.test")
   await run(page).click()
-  await panel(page).getByRole("button", { name: "Forget saved fingerprints", exact: true }).click()
+  await panel(page)
+    .getByRole("button", { name: "Forget saved fingerprints for host.example.test", exact: true })
+    .click()
   await page
     .getByRole("dialog")
     .getByRole("button", { name: "Forget fingerprints", exact: true })
     .click()
   await expect
-    .poll(() => calls.find((call) => call.method === "DELETE")?.query.get("target"))
-    .toBe("host.example.test:22")
+    .poll(() => calls.find((call) => call.method === "DELETE")?.query.get("host"))
+    .toBe("host.example.test")
+  expect(calls.find((call) => call.method === "DELETE")?.query.get("port")).toBe("22")
   expect(probes(calls)).toHaveLength(2)
 })
 
@@ -643,5 +692,20 @@ for (const width of [375, 1280]) {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     )
     expect(overflow).toBeLessThanOrEqual(0)
+  })
+}
+
+for (const evidence of TOOL_EVIDENCE) {
+  test(`${evidence.key} shows its structured readings`, async ({ page }) => {
+    const calls = await tools(page, { [evidence.key]: evidence.result })
+    await page.goto(
+      `/network/tools?tool=${evidence.key}${evidence.target ? `&target=${encodeURIComponent(evidence.target)}` : ""}`,
+    )
+    await run(page).click()
+    for (const text of evidence.visible)
+      await expect(
+        panel(page).getByText(text, { exact: false }).filter({ visible: true }).first(),
+      ).toBeVisible()
+    expect(probes(calls)).toHaveLength(1)
   })
 }

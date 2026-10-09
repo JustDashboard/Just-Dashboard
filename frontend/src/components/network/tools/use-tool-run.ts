@@ -11,6 +11,13 @@ import { portProblem, toolReady, verifyProblem } from "./tool-input"
 export type ToolPrefill = { target?: string; record?: string }
 
 /**
+ * A result kept with the request that produced it, so actions on a shown
+ * result (trusting its keys, forgetting its host) follow that run rather than
+ * whatever the inputs say now.
+ */
+export type HeldResult = DiagnosticResult & { request: DiagnosticRequest }
+
+/**
  * One block's whole state: its inputs, its run, its current result and the
  * three runs before it.
  *
@@ -33,8 +40,8 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
   const [verify, setVerify] = useState("")
   const [verifyPort, setVerifyPort] = useState("")
   const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<DiagnosticResult | null>(null)
-  const [past, setPast] = useState<DiagnosticResult[]>([])
+  const [result, setResult] = useState<HeldResult | null>(null)
+  const [past, setPast] = useState<HeldResult[]>([])
   const [error, setError] = useState<Error>()
 
   // A link can choose a different target without leaving the workbench. Keep
@@ -81,9 +88,10 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     setBusy(true)
     setError(undefined)
     try {
-      const res = await post<DiagnosticResult>("/network/probe", request)
+      const sent = { ...request }
+      const res = await post<DiagnosticResult>("/network/probe", sent)
       setPast((prev) => (result ? [result, ...prev].slice(0, 3) : prev))
-      setResult(res)
+      setResult({ ...res, request: sent })
     } catch (err) {
       setError(err instanceof Error ? err : new Error(String(err)))
       notify.error(`Could not run ${def.label}`, err)
@@ -92,7 +100,7 @@ export function useToolRun(def: ToolDef, prefill?: ToolPrefill) {
     }
   }
 
-  const restore = (res: DiagnosticResult) => {
+  const restore = (res: HeldResult) => {
     setPast((prev) => (result ? [result, ...prev.filter((p) => p !== res)].slice(0, 3) : prev))
     setResult(res)
   }

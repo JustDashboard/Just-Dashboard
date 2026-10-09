@@ -41,6 +41,7 @@ func (s *Server) mountNetworkDiagnosticRoutes(r chi.Router) {
 			// Forgetting a trusted fingerprint or a saved device erases what
 			// later comparisons and wakes rely on.
 			r.Method(http.MethodDelete, "/ssh-trust", s.handle(s.handleSSHTrustForget))
+			r.Method(http.MethodPut, "/ssh-trust/replace", s.handle(s.handleSSHTrustReplace))
 			r.Method(http.MethodDelete, "/wol-devices/{device}", s.handle(s.handleWakeDeviceDelete))
 		})
 	})
@@ -50,6 +51,8 @@ func mapDiagnosticError(err error) error {
 	switch {
 	case errors.Is(err, netdiag.ErrNotFound):
 		return httpx.ErrNotFound
+	case errors.Is(err, netdiag.ErrTrustExists):
+		return httpx.Err(http.StatusConflict, "ssh_trust_exists", err.Error())
 	case errors.Is(err, netdiag.ErrInvalid):
 		return httpx.BadRequest("%v", err)
 	case errors.Is(err, netdiag.ErrUnavailable):

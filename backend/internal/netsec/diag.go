@@ -214,17 +214,24 @@ func (s *Service) Lookup(ctx context.Context, target, recordType string) (*Probe
 		res.Error = "no " + recordType + " records"
 	}
 	res.Output = strings.Join(res.Records, "\n")
-	addLookupProvenance(ctx, res, target, recordType)
+	rcode := addLookupProvenance(ctx, res, target, recordType)
 	switch {
 	case res.OK:
 		res.Verdict = ProbeOK
 		res.Summary = fmt.Sprintf("%d %s record(s) from this host's resolver.", len(res.Records), recordType)
+	case (err == nil || isDNSNotFound(err)) && rcode == "NOERROR":
+		// NODATA is an answer: the name exists without this record type.
+		res.Verdict, res.Error = ProbeOK, "no "+recordType+" records"
+		res.Summary = "The name exists but publishes no " + recordType + " records (the nameserver answered NOERROR with none)."
+	case err != nil && isDNSNotFound(err) && rcode == "NXDOMAIN":
+		res.Verdict = ProbeFailed
+		res.Summary = "The name does not exist (the nameserver answered NXDOMAIN)."
 	case err != nil && isDNSNotFound(err):
 		res.Verdict = ProbeFailed
-		res.Summary = "The name does not exist for this host's resolver (NXDOMAIN)."
+		res.Summary = "This host's resolver found no " + recordType + " answer; the direct nameserver question did not say whether the name exists."
 	case err == nil:
-		res.Verdict = ProbeFailed
-		res.Summary = "The name exists but has no " + recordType + " records."
+		res.Verdict = ProbeOK
+		res.Summary = "The resolver answered without " + recordType + " records."
 	default:
 		res.Verdict = ProbeFailed
 		res.Summary = "The resolver failed: " + err.Error()

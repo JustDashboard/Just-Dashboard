@@ -189,8 +189,11 @@ func difference(before, after []string) Difference {
 	return d
 }
 
-// volatileColumn names columns that change on every run — timings and
-// timestamps — and would turn every row into a difference.
+// volatileFact and volatileColumn name readings that change on every run —
+// timings, timestamps and ephemeral source ports — and would turn every
+// comparison into a difference.
+var volatileFact = regexp.MustCompile(`(?i)^checked at$|^local source$`)
+
 var volatileColumn = regexp.MustCompile(`(?i)time|round trip|\(ms\)|first byte|total|checked at|^dns$|^connect$|^tls$`)
 
 // structuredLines renders a result's structured evidence as comparable
@@ -202,7 +205,9 @@ func structuredLines(result *netsec.ProbeResult) []string {
 		lines = append(lines, "verdict: "+result.Verdict)
 	}
 	for _, f := range result.Facts {
-		lines = append(lines, "fact "+f.Label+": "+f.Value)
+		if !volatileFact.MatchString(f.Label) {
+			lines = append(lines, "fact "+f.Label+": "+f.Value)
+		}
 	}
 	for _, st := range result.Stages {
 		lines = append(lines, "stage "+st.Label+": "+st.Status)

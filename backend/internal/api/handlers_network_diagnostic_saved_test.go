@@ -29,6 +29,13 @@ func TestSavedQuickResultHistoryTrustAndDevicesAreAdminAndAudited(t *testing.T) 
 	if saved.Outcome != "completed_with_unknowns" || saved.Result == nil || saved.Result.Summary != "No ICMP echo replies" || saved.JobID != "" {
 		t.Fatalf("saved = %+v", saved)
 	}
+	refused := quickResults.keep(owner, netsec.ProbeRequest{Tool: "ping", Target: "192.0.2.9"}, &netsec.ProbeResult{Tool: "ping", Verdict: netsec.ProbeOK}, time.Now(), time.Now())
+	if w := c.do(http.MethodPost, base+"results", `{"resultId":"`+refused+`","name":"   "}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("blank name = %d", w.Code)
+	}
+	if w := c.do(http.MethodPost, base+"results", `{"resultId":"`+refused+`","name":"Kept after refusal"}`, nil); w.Code != http.StatusCreated {
+		t.Fatalf("a refused save consumed the hold: %d %s", w.Code, w.Body.String())
+	}
 	if w := c.do(http.MethodPost, base+"results", `{"resultId":"`+id+`","name":"twice"}`, nil); w.Code != http.StatusGone {
 		t.Fatalf("a held result was saved twice: %d", w.Code)
 	}
@@ -42,25 +49,42 @@ func TestSavedQuickResultHistoryTrustAndDevicesAreAdminAndAudited(t *testing.T) 
 	awaitDiagnostic(t, s, first.ID)
 	w := c.do(http.MethodGet, base+first.ID+"/history", "", nil)
 	var history netdiag.History
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &history) != nil || len(history.Points) != 2 || w.Header().Get("Cache-Control") != "private, no-store" {
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &history) != nil || len(history.Points) != 3 || w.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("history = %d %s", w.Code, w.Body.String())
 	}
 
-	// Trusted fingerprints: validated, audited, and forgotten only destructively.
+	// Trusted fingerprints: observed keys come only from a held SSH scan, with
+	// that scan's host; replacing and forgetting are destructive.
+	scanID := quickResults.keep(owner, netsec.ProbeRequest{Tool: "ssh", Target: "Host.Example.test", Port: 22},
+		&netsec.ProbeResult{Tool: "ssh", Target: "Host.Example.test:22", OK: true, Records: []string{"ssh-ed25519 " + savedFP}}, time.Now(), time.Now())
+	pingID := quickResults.keep(owner, netsec.ProbeRequest{Tool: "ping", Target: "192.0.2.9"}, &netsec.ProbeResult{Tool: "ping"}, time.Now(), time.Now())
+	if w := c.do(http.MethodPut, base+"ssh-trust", `{"source":"observed","resultId":"`+pingID+`"}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("a ping result was trusted as host keys: %d", w.Code)
+	}
 	if w := c.do(http.MethodPut, base+"ssh-trust", `{"target":"Host.Example.test","port":22,"source":"entered","keys":[{"type":"ssh-ed25519","fingerprint":"MD5:aa"}]}`, nil); w.Code != http.StatusBadRequest {
 		t.Fatalf("bad fingerprint = %d", w.Code)
 	}
-	w = c.do(http.MethodPut, base+"ssh-trust", `{"target":"Host.Example.test","port":22,"source":"entered","keys":[{"type":"ssh-ed25519","fingerprint":"`+savedFP+`"}]}`, nil)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"target":"host.example.test:22"`) {
-		t.Fatalf("trust = %d %s", w.Code, w.Body.String())
+	w = c.do(http.MethodPut, base+"ssh-trust", `{"source":"observed","resultId":"`+scanID+`","target":"elsewhere.example.test","keys":[]}`, nil)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"target":"host.example.test:22"`) || !strings.Contains(w.Body.String(), savedFP) {
+		t.Fatalf("observed trust did not follow the held scan: %d %s", w.Code, w.Body.String())
 	}
-	res := &netsec.ProbeResult{Tool: "ssh", Target: "host.example.test:22", OK: true, Records: []string{"ssh-ed25519 " + savedFP}}
+	entered := `{"target":"host.example.test","port":22,"source":"entered","keys":[{"type":"ssh-rsa","fingerprint":"` + savedFP + `"}]}`
+	if w := c.do(http.MethodPut, base+"ssh-trust", entered, nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "ssh_trust_exists") {
+		t.Fatalf("existing trust was overwritten without the destructive route: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodPut, base+"ssh-trust/replace", entered, nil); w.Code != http.StatusOK {
+		t.Fatalf("replace = %d %s", w.Code, w.Body.String())
+	}
+	res := &netsec.ProbeResult{Tool: "ssh", Target: "host.example.test:22", OK: true, Records: []string{"ssh-rsa " + savedFP}}
 	s.compareSSHTrust(t.Context(), netsec.ProbeRequest{Tool: "ssh", Target: "host.example.test", Port: 22}, res)
 	if res.Verdict != netsec.ProbeOK || !strings.Contains(res.Summary, "match the saved fingerprints") {
 		t.Fatalf("scan did not compare with saved trust: %+v", res)
 	}
-	if w := c.do(http.MethodDelete, base+"ssh-trust?target=host.example.test:22", "", nil); w.Code != http.StatusNoContent {
+	if w := c.do(http.MethodDelete, base+"ssh-trust?host=HOST.example.test&port=22", "", nil); w.Code != http.StatusNoContent {
 		t.Fatalf("forget = %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodDelete, base+"ssh-trust?host=--help&port=22", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("forget with a bad host = %d", w.Code)
 	}
 
 	// Saved Wake-on-LAN devices.
@@ -81,12 +105,12 @@ func TestSavedQuickResultHistoryTrustAndDevicesAreAdminAndAudited(t *testing.T) 
 	if w := c.do(http.MethodDelete, base+"wol-devices/"+device.ID, "", nil); w.Code != http.StatusNoContent {
 		t.Fatalf("delete = %d", w.Code)
 	}
-	for action, status := range map[string]int{"network.diagnostic.save_result": 201, "network.ssh_trust.save": 200, "network.ssh_trust.forget": 204, "network.wol_device.save": 201, "network.wol_device.delete": 204} {
+	for action, status := range map[string]int{"network.diagnostic.save_result": 201, "network.ssh_trust.save": 200, "network.ssh_trust.replace": 200, "network.ssh_trust.forget": 204, "network.wol_device.save": 201, "network.wol_device.delete": 204} {
 		if auditCount(t, s, "action=? AND status=?", action, status) == 0 {
 			t.Errorf("missing audit %s/%d", action, status)
 		}
 	}
-	if auditCount(t, s, "action=? AND status=?", "network.diagnostic.save_result", 410) == 0 || auditCount(t, s, "action=? AND status=?", "network.ssh_trust.save", 400) == 0 {
+	if auditCount(t, s, "action=? AND status=?", "network.diagnostic.save_result", 410) == 0 || auditCount(t, s, "action=? AND status=?", "network.ssh_trust.save", 400) == 0 || auditCount(t, s, "action=? AND status=?", "network.ssh_trust.save", 409) == 0 {
 		t.Error("rejected attempts were not audited")
 	}
 
@@ -97,7 +121,7 @@ func TestSavedQuickResultHistoryTrustAndDevicesAreAdminAndAudited(t *testing.T) 
 		client := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, actor.name, actor.role)}
 		for _, request := range []struct{ method, path, body string }{
 			{"GET", "/network/diagnostics/" + first.ID + "/history", ""}, {"POST", "/network/diagnostics/results", `{"resultId":"x","name":"y"}`},
-			{"GET", "/network/diagnostics/ssh-trust", ""}, {"PUT", "/network/diagnostics/ssh-trust", `{}`}, {"DELETE", "/network/diagnostics/ssh-trust?target=a:22", ""},
+			{"GET", "/network/diagnostics/ssh-trust", ""}, {"PUT", "/network/diagnostics/ssh-trust", `{}`}, {"PUT", "/network/diagnostics/ssh-trust/replace", `{}`}, {"DELETE", "/network/diagnostics/ssh-trust?host=a&port=22", ""},
 			{"GET", "/network/diagnostics/wol-devices", ""}, {"POST", "/network/diagnostics/wol-devices", `{}`}, {"DELETE", "/network/diagnostics/wol-devices/x", ""},
 		} {
 			if w := client.do(request.method, "/api/v1"+request.path, request.body, nil); w.Code != http.StatusForbidden {
@@ -139,5 +163,18 @@ func TestQuickProbeOffersAHeldResultAndSiteOwnersResolve(t *testing.T) {
 	cache.now = func() time.Time { return time.Now().Add(quickResultTTL + time.Minute) }
 	if _, err := cache.take("a", expired); err == nil {
 		t.Fatal("an expired result was handed out")
+	}
+}
+
+func TestUnreadableSSHTrustIsNotReportedAsNoneSaved(t *testing.T) {
+	_, s := newClient(t)
+	installDiagnosticRunner(t, s, func(context.Context, netsec.ProbeRequest) (*netsec.ProbeResult, error) { return nil, nil })
+	if _, err := s.Store.DB.Exec(`INSERT INTO settings(key,value) VALUES('network.diagnostics.ssh_trust','not json') ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil {
+		t.Fatal(err)
+	}
+	res := &netsec.ProbeResult{Tool: "ssh", Target: "host.example.test:22", OK: true, Records: []string{"ssh-ed25519 " + savedFP}}
+	s.compareSSHTrust(t.Context(), netsec.ProbeRequest{Tool: "ssh", Target: "host.example.test", Port: 22}, res)
+	if res.Verdict != netsec.ProbeUnknown || !strings.Contains(res.Summary, "could not be read") || len(res.Facts) != 1 {
+		t.Fatalf("unreadable trust = %+v", res)
 	}
 }

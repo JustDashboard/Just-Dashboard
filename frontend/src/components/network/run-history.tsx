@@ -16,7 +16,7 @@ import {
   diagnosticReading,
   formatMetric,
   historyKeys,
-  type DiagnosticHistory,
+  readDiagnosticHistory,
   type DiagnosticRun,
 } from "@/lib/network-diagnostics"
 import { NetworkReadWarning } from "./read-warning"
@@ -28,11 +28,13 @@ import { NetworkReadWarning } from "./read-warning"
  */
 export function RunHistory({ run }: { run: DiagnosticRun }) {
   const history = usePoll(
-    (signal) =>
-      get<DiagnosticHistory>(
-        `/network/diagnostics/${encodeURIComponent(run.id)}/history`,
-        undefined,
-        signal,
+    async (signal) =>
+      readDiagnosticHistory(
+        await get<unknown>(
+          `/network/diagnostics/${encodeURIComponent(run.id)}/history`,
+          undefined,
+          signal,
+        ),
       ),
     0,
     [run.id, run.status],

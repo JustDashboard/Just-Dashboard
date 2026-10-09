@@ -317,6 +317,25 @@ export function hasEvidence(result: DiagnosticResult) {
   )
 }
 
+/**
+ * A history response, checked before it is drawn: an incomplete body is a
+ * failed read with a retry, never a page that breaks or an empty history.
+ */
+export function readDiagnosticHistory(value: unknown): DiagnosticHistory {
+  const history = value as DiagnosticHistory
+  if (
+    !history ||
+    typeof history !== "object" ||
+    !Array.isArray(history.points) ||
+    !Array.isArray(history.limitations) ||
+    !history.points.every(
+      (point) => point && typeof point.id === "string" && Array.isArray(point.metrics),
+    )
+  )
+    throw new Error("The run history response was incomplete.")
+  return history
+}
+
 /** One metric across a request's retained runs, oldest first, gaps kept as null. */
 export function historySeries(history: DiagnosticHistory, key: string) {
   return history.points.map((point) => ({
@@ -362,13 +381,6 @@ export function observedSSHKeys(result: Pick<ProbeResult, "records">): SSHTruste
 export function sshFingerprintProblem(fingerprint: string) {
   if (!/^SHA256:[A-Za-z0-9+/]{43}$/.test(fingerprint.trim()))
     return "Paste the SHA256 fingerprint as ssh-keygen -l prints it: SHA256: and 43 characters."
-}
-
-/** The key a trust entry is saved under, matching the backend's canonical host:port. */
-export function sshTrustTarget(target: string, port: number) {
-  let host = target.trim().replace(/\.$/, "").toLowerCase()
-  if (host.includes(":")) host = `[${host}]`
-  return `${host}:${port || 22}`
 }
 
 export function wakeDeviceProblem(device: Pick<WakeDevice, "name" | "mac" | "interface">) {

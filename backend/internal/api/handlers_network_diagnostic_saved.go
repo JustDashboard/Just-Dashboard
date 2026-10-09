@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netdiag"
@@ -39,6 +40,8 @@ func (s *Server) handleDiagnosticSaveResult(w http.ResponseWriter, r *http.Reque
 	}
 	run, err := s.modules.diagnostics.Adopt(r.Context(), req.Name, held.request, &held.result, owner, held.started, held.ended)
 	if err != nil {
+		// A refused save keeps the hold, so a retry still sends no probe.
+		quickResults.restore(req.ResultID, held)
 		return mapDiagnosticError(err)
 	}
 	httpx.SetAudit(r, "network.diagnostic.save_result", run.ID, map[string]any{"name": run.Name, "tool": run.Request.Tool, "target": run.Request.Target})
@@ -58,18 +61,48 @@ func (s *Server) handleSSHTrustList(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleSSHTrustSave(w http.ResponseWriter, r *http.Request) error {
-	httpx.SetAudit(r, "network.ssh_trust.save", "", nil)
+	return s.saveSSHTrust(w, r, false)
+}
+
+// handleSSHTrustReplace overwrites saved fingerprints; it is mounted inside
+// s.destructive because it erases what later scans compare against.
+func (s *Server) handleSSHTrustReplace(w http.ResponseWriter, r *http.Request) error {
+	return s.saveSSHTrust(w, r, true)
+}
+
+// saveSSHTrust takes observed keys only from a scan the server still holds,
+// with that scan's own target and port, so keys read from one host can never
+// be saved as trusted for another. Entered fingerprints carry their target.
+func (s *Server) saveSSHTrust(w http.ResponseWriter, r *http.Request, replace bool) error {
+	action := "network.ssh_trust.save"
+	if replace {
+		action = "network.ssh_trust.replace"
+	}
+	httpx.SetAudit(r, action, "", nil)
 	var req struct {
-		Target string                 `json:"target"`
-		Port   int                    `json:"port"`
-		Keys   []netsec.SSHTrustedKey `json:"keys"`
-		Source string                 `json:"source"`
+		Target   string                 `json:"target"`
+		Port     int                    `json:"port"`
+		Keys     []netsec.SSHTrustedKey `json:"keys"`
+		Source   string                 `json:"source"`
+		ResultID string                 `json:"resultId"`
 	}
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if req.Source != "observed" && req.Source != "entered" {
-		return httpx.BadRequest("source is observed (trusted from a scan) or entered (copied out of band)")
+	owner := httpx.MustPrincipal(r).Username()
+	switch req.Source {
+	case "observed":
+		held, err := quickResults.peek(owner, req.ResultID)
+		if err != nil {
+			return httpx.Err(http.StatusGone, "result_expired", err.Error())
+		}
+		if held.request.Tool != "ssh" {
+			return httpx.BadRequest("that result is not an SSH host key scan")
+		}
+		req.Target, req.Port, req.Keys = held.request.Target, held.request.Port, netsec.ObservedSSHKeys(&held.result)
+	case "entered":
+	default:
+		return httpx.BadRequest("source is observed (trusted from a held scan) or entered (copied out of band)")
 	}
 	target, keys, err := netsec.ValidateSSHTrust(req.Target, req.Port, req.Keys)
 	if err != nil {
@@ -79,8 +112,8 @@ func (s *Server) handleSSHTrustSave(w http.ResponseWriter, r *http.Request) erro
 	for _, k := range keys {
 		fingerprints = append(fingerprints, k.Type+" "+k.Fingerprint)
 	}
-	httpx.SetAudit(r, "network.ssh_trust.save", target, map[string]any{"source": req.Source, "keys": fingerprints})
-	entry, err := s.modules.diagnostics.SaveSSHTrust(r.Context(), netsec.SSHTrust{Target: target, Keys: keys, Source: req.Source, SavedBy: httpx.MustPrincipal(r).Username()})
+	httpx.SetAudit(r, action, target, map[string]any{"source": req.Source, "keys": fingerprints})
+	entry, err := s.modules.diagnostics.SaveSSHTrust(r.Context(), netsec.SSHTrust{Target: target, Keys: keys, Source: req.Source, SavedBy: owner}, replace)
 	if err != nil {
 		return mapDiagnosticError(err)
 	}
@@ -89,11 +122,14 @@ func (s *Server) handleSSHTrustSave(w http.ResponseWriter, r *http.Request) erro
 }
 
 func (s *Server) handleSSHTrustForget(w http.ResponseWriter, r *http.Request) error {
-	target := r.URL.Query().Get("target")
-	httpx.SetAudit(r, "network.ssh_trust.forget", target, nil)
-	if target == "" {
-		return httpx.BadRequest("target is the saved host:port")
+	host := r.URL.Query().Get("host")
+	port, _ := strconv.Atoi(r.URL.Query().Get("port"))
+	if !netsec.ValidTarget(host) || port < 0 || port > 65535 {
+		httpx.SetAudit(r, "network.ssh_trust.forget", host, nil)
+		return httpx.BadRequest("host is the saved host name or address and port its SSH port")
 	}
+	target := netsec.SSHTrustTarget(host, port)
+	httpx.SetAudit(r, "network.ssh_trust.forget", target, nil)
 	if err := s.modules.diagnostics.ForgetSSHTrust(r.Context(), target); err != nil {
 		return mapDiagnosticError(err)
 	}

@@ -271,3 +271,25 @@ func TestSiteAuditNamesOwnersAndStages(t *testing.T) {
 		t.Fatalf("foreign owner = %+v", other.Facts)
 	}
 }
+
+// A login page's 401 is a finding about the response, not a failed audit.
+func TestSiteAuditDoesNotFailAnAuthenticatedSite(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	trustServer(t, srv)
+	host, port := hostPort(t, srv.URL)
+	res, err := New().SiteAudit(t.Context(), host, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.OK || res.Verdict != ProbeFindings || stageStatus(res, "http") != StageWarning || res.Error != "" || !hasFinding(res, "http-client-error") {
+		t.Fatalf("401 audit = %+v", res)
+	}
+	sec, _ := New().HTTPSecurity(t.Context(), host, port, "auto")
+	if sec.Verdict != ProbeFindings || !hasFinding(sec, "error-response") {
+		t.Fatalf("graded an error page without saying so: %+v", sec)
+	}
+}

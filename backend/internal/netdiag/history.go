@@ -102,7 +102,7 @@ func (s *Service) Adopt(ctx context.Context, name string, req netsec.ProbeReques
 	run.HasResult = run.Result != nil
 	run.Outcome, run.OutcomeSource = outcome(nil, result, nil)
 	run.Status = "completed"
-	if !(result.OK || result.Verdict == netsec.ProbeUnknown) {
+	if !answered(result) {
 		run.Status = "failed"
 	}
 	run.Error = run.Result.Error

@@ -12,9 +12,9 @@ import {
   historyKeys,
   historySeries,
   observedSSHKeys,
+  readDiagnosticHistory,
   resultReading,
   sshFingerprintProblem,
-  sshTrustTarget,
   stageTone,
   wakeDeviceProblem,
 } from "./network-diagnostics"
@@ -202,7 +202,7 @@ describe("structured diagnostic evidence", () => {
     )
   })
 
-  test("SSH trust reads only well-formed scan records and canonical targets", () => {
+  test("SSH trust reads only well-formed scan records", () => {
     const fp = "SHA256:" + "A".repeat(43)
     expect(
       observedSSHKeys({
@@ -211,8 +211,6 @@ describe("structured diagnostic evidence", () => {
     ).toEqual([{ type: "ssh-ed25519", fingerprint: fp }])
     expect(sshFingerprintProblem(fp)).toBeUndefined()
     expect(sshFingerprintProblem("MD5:aa:bb")).toBeDefined()
-    expect(sshTrustTarget("Host.Example.test.", 0)).toBe("host.example.test:22")
-    expect(sshTrustTarget("2001:db8::1", 2222)).toBe("[2001:db8::1]:2222")
   })
 
   test("saved Wake-on-LAN devices refuse unwakeable targets before saving", () => {
@@ -244,4 +242,21 @@ describe("structured diagnostic evidence", () => {
       }),
     ).toBe(false)
   })
+})
+
+test("an incomplete history response is a failed read, not an empty or broken history", () => {
+  const good = {
+    request: { tool: "ping", target: "x" },
+    limitations: [],
+    points: [{ id: "a", metrics: [] }],
+  }
+  expect(readDiagnosticHistory(good)).toBe(good)
+  for (const bad of [
+    null,
+    {},
+    { points: [] },
+    { ...good, points: [{ id: "a" }] },
+    { id: "run", stages: [] },
+  ])
+    expect(() => readDiagnosticHistory(bad)).toThrow("incomplete")
 })
