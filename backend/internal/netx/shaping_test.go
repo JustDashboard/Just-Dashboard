@@ -447,6 +447,7 @@ func TestBBR(t *testing.T) {
 	ctx := context.Background()
 	t.Run("on", func(t *testing.T) {
 		h := newShapeHost(t)
+		h.rec.on("ss -tinH state established", fixture(t, "traffic-ss.txt"))
 		h.rec.on("sysctl -w", "")
 		h.rec.on("sysctl -n net.ipv4.tcp_congestion_control", "bbr")
 		h.rec.on("sysctl -n net.core.default_qdisc", "fq")
@@ -479,6 +480,7 @@ func TestBBR(t *testing.T) {
 		sp := emptySpec()
 		sp.Sysctls = map[string]string{"net.ipv4.tcp_congestion_control": "bbr", "net.core.default_qdisc": "fq", "net.ipv4.tcp_syncookies": "1"}
 		h.seed(t, sp)
+		h.rec.on("ss -tinH state established", fixture(t, "traffic-ss.txt"))
 		h.rec.on("sysctl -w", "")
 		h.rec.on("sysctl -n net.ipv4.tcp_congestion_control", "cubic")
 		h.rec.on("sysctl -n net.core.default_qdisc", "fq_codel")
@@ -495,6 +497,7 @@ func TestBBR(t *testing.T) {
 	})
 	t.Run("a refused write puts the first one back", func(t *testing.T) {
 		h := newShapeHost(t)
+		h.rec.on("ss -tinH state established", fixture(t, "traffic-ss.txt"))
 		h.first("sysctl -w net.core.default_qdisc", "sysctl: permission denied", errors.New("permission denied"))
 		h.rec.on("sysctl -w", "")
 		if err := h.SetBBR(ctx, true, "ops"); err == nil {

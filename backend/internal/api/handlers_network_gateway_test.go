@@ -78,6 +78,7 @@ var gatewayRoutes = map[string]string{
 	"GET /network/gateway":                             "read",
 	"GET /network/protection":                          "read",
 	"GET /network/shaping":                             "read",
+	"GET /network/shaping/congestion":                  "read",
 	"POST /network/gateway/admission/repair":           "destructive",
 	"POST /network/gateway/forwards":                   "system.admin",
 	"PUT /network/gateway/forwards/{id}":               "system.admin",
