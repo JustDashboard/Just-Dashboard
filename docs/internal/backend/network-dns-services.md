@@ -1,5 +1,9 @@
 # Native DNS service connections and owned provisions
 
+The separate [measured custom-domain fixture preparation](network-dns-domain-decisions-fixture.md)
+defines the bounded client decision matrix and owned read-only helper. It has no actual native run
+yet; existing configured-filter and disabled-protection proofs retain their original scope.
+
 `internal/dnsservice` connects to AdGuard Home 0.107, Pi-hole FTL 6 and Technitium 15 through
 closed, version-checked native API adapters. It is not a DNS server, generic HTTP proxy or plugin
 installer. These private administrator routes inspect native configured listeners, client policy,
