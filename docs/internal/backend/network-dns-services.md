@@ -84,9 +84,15 @@ comment entries from settings. Only its pinned 15.6/15.6.0 response writer's exp
 null` establishes no configured subscription entries; a missing field or another version's null
 stays unknown. Its manual Allowed/Blocked zone trees and installed app rule contents remain
 explicitly unsupported here, separate from existing app group inventory.
+AdGuard 0.107.71's pinned writer likewise emits explicit null for its zero-length subscription
+slices and a nil custom-rule slice. Only that exact version's present `filters`,
+`whitelist_filters` and `user_rules` null fields establish zero entries; missing fields and other
+versions' null remain unknown. The original native failure is retained separately from this narrow
+[response-writer compatibility](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/http.go).
 
-Each source/custom-rule collection is bounded to 256 entries; Technitium's native subscription
-contract is 255 entries of at most 255 bytes and an update interval of 0–168 hours. Other native
+Each source/custom-rule collection is bounded to 256 entries. Technitium supports 255 native
+entries; this adapter bounds each identity to 255 bytes and preserves its update interval range
+of 0–168 hours. Other native
 source/rule identities are at most 4096 bytes, groups at most 64 unique nonnegative 32-bit IDs,
 responses at most 512 KiB and the returned inventory at most 192 KiB. Reads share a 20-second
 deadline and the existing pinned literal origin, verified TLS, scoped authentication and no-redirect

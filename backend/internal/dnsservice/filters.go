@@ -185,19 +185,55 @@ func (c *nativeClient) adGuardFilters(ctx context.Context, i *FilterInventory) e
 	if err := c.request(ctx, http.MethodGet, "/control/filtering/status", nil, &raw); err != nil {
 		return nil
 	}
-	var config struct {
-		Enabled *bool             `json:"enabled"`
-		Filters []json.RawMessage `json:"filters"`
-		Allow   []json.RawMessage `json:"whitelist_filters"`
-		Rules   []string          `json:"user_rules"`
+	var enabled *bool
+	if json.Unmarshal(raw["enabled"], &enabled) != nil || enabled == nil {
+		return nil
 	}
-	data, _ := json.Marshal(raw)
-	if json.Unmarshal(data, &config) != nil || config.Enabled == nil || config.Filters == nil || config.Allow == nil || config.Rules == nil || len(config.Filters)+len(config.Allow) > maxFilterEntries || len(config.Rules) > maxFilterEntries {
+	i.Filtering = enabled
+	i.Sources = c.adGuardFilterSources(raw, status.Version)
+	var values []string
+	if json.Unmarshal(raw["user_rules"], &values) != nil {
+		return nil
+	}
+	if strings.TrimPrefix(status.Version, "v") == "0.107.71" && string(raw["user_rules"]) == "null" {
+		values = []string{}
+	}
+	if values == nil || len(values) > maxFilterEntries {
 		return nil
 	}
 	entries := []FilterEntry{}
+	for _, rule := range values {
+		if len(rule) > 4096 {
+			return nil
+		}
+		entries = append(entries, FilterEntry{Kind: "native_rule", Fingerprint: policyHash(rule)})
+	}
+	i.Rules.Evidence, i.Rules.Entries, i.Rules.Fingerprint = Reading{"configured", "native_configuration", "Native custom-rule metadata; rule text and compilation are not exposed or evaluated."}, entries, policyHash(raw["user_rules"])
+	return nil
+}
+
+func (c *nativeClient) adGuardFilterSources(raw map[string]json.RawMessage, version string) FilterSection {
+	unknown := unknownFilters()
+	var filters, allow []json.RawMessage
+	if json.Unmarshal(raw["filters"], &filters) != nil || json.Unmarshal(raw["whitelist_filters"], &allow) != nil {
+		return unknown
+	}
+	// The exact pinned writer starts its subscription slices nil. Only its
+	// explicitly present null fields mean zero items; missing stays unknown.
+	if strings.TrimPrefix(version, "v") == "0.107.71" {
+		if string(raw["filters"]) == "null" {
+			filters = []json.RawMessage{}
+		}
+		if string(raw["whitelist_filters"]) == "null" {
+			allow = []json.RawMessage{}
+		}
+	}
+	if filters == nil || allow == nil || len(filters)+len(allow) > maxFilterEntries {
+		return unknown
+	}
+	entries := []FilterEntry{}
 	seen := map[int64]bool{}
-	for index, list := range [][]json.RawMessage{config.Filters, config.Allow} {
+	for index, list := range [][]json.RawMessage{filters, allow} {
 		for _, entry := range list {
 			var f struct {
 				ID      *int64  `json:"id"`
@@ -208,11 +244,11 @@ func (c *nativeClient) adGuardFilters(ctx context.Context, i *FilterInventory) e
 				Updated string  `json:"last_updated"`
 			}
 			if json.Unmarshal(entry, &f) != nil || !filterNumber(f.ID) || f.Enabled == nil || f.Name == nil || f.URL == nil || len(*f.URL) == 0 || len(*f.URL) > 4096 || len(*f.Name) > 512 || !filterNumber(f.Count) || seen[*f.ID] || len(f.Updated) > 64 {
-				return nil
+				return unknown
 			}
 			if f.Updated != "" {
 				if _, err := time.Parse(time.RFC3339Nano, f.Updated); err != nil {
-					return nil
+					return unknown
 				}
 			}
 			seen[*f.ID] = true
@@ -223,17 +259,9 @@ func (c *nativeClient) adGuardFilters(ctx context.Context, i *FilterInventory) e
 			entries = append(entries, FilterEntry{ID: f.ID, Kind: kind, Origin: c.filterOrigin(*f.URL), Enabled: f.Enabled, RuleCount: f.Count, UpdatedAt: c.text(f.Updated), Fingerprint: policyHash(entry)})
 		}
 	}
-	rules := []FilterEntry{}
-	for _, rule := range config.Rules {
-		if len(rule) > 4096 {
-			return nil
-		}
-		rules = append(rules, FilterEntry{Kind: "native_rule", Fingerprint: policyHash(rule)})
-	}
-	i.Filtering = config.Enabled
-	i.Sources.Evidence, i.Sources.Entries, i.Sources.Fingerprint = Reading{"configured", "native_configuration", "Native block/allow subscriptions and reported rule counts/update times; downloaded content is not inspected."}, entries, policyHash([]any{raw["enabled"], raw["interval"], raw["filters"], raw["whitelist_filters"]})
-	i.Rules.Evidence, i.Rules.Entries, i.Rules.Fingerprint = Reading{"configured", "native_configuration", "Native custom-rule metadata; rule text and compilation are not exposed or evaluated."}, rules, policyHash(raw["user_rules"])
-	return nil
+	section := unknownFilters()
+	section.Evidence, section.Entries, section.Fingerprint = Reading{"configured", "native_configuration", "Native block/allow subscriptions and reported rule counts/update times; downloaded content is not inspected."}, entries, policyHash([]any{raw["enabled"], raw["interval"], raw["filters"], raw["whitelist_filters"]})
+	return section
 }
 
 func (c *nativeClient) piHoleFilters(ctx context.Context, i *FilterInventory) error {

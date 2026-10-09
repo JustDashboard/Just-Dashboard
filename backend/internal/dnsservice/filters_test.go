@@ -107,15 +107,15 @@ func TestDNSFilterAdGuardNativeMetadataAndRawDrift(t *testing.T) {
 }
 
 func TestDNSFilterMissingMalformedAndBoundsRemainUnknown(t *testing.T) {
-	for _, name := range []string{"missing", "null", "wrong-enable", "missing-id", "duplicate-id", "bad-count", "bad-update", "too-many", "too-many-rules", "long-rule", "long-url", "native-error", "body-bound"} {
+	for _, name := range []string{"missing", "null-enable", "wrong-enable", "missing-id", "duplicate-id", "bad-count", "bad-update", "too-many", "too-many-rules", "long-rule", "long-url", "null-response", "body-bound"} {
 		t.Run(name, func(t *testing.T) {
 			p := filterAdGuardPolicy()
 			entry := p["filters"].([]any)[0].(map[string]any)
 			switch name {
 			case "missing":
 				delete(p, "filters")
-			case "null":
-				p["filters"] = nil
+			case "null-enable":
+				p["enabled"] = nil
 			case "wrong-enable":
 				p["enabled"] = "true"
 			case "missing-id":
@@ -138,15 +138,22 @@ func TestDNSFilterMissingMalformedAndBoundsRemainUnknown(t *testing.T) {
 				p["user_rules"] = []string{strings.Repeat("x", 4097)}
 			case "long-url":
 				entry["url"] = strings.Repeat("x", 4097)
-			case "native-error":
+			case "null-response":
 				p = nil
 			case "body-bound":
 				p["unreadable"] = strings.Repeat("x", maxNativeBody+1)
 			}
 			req, _ := filterFixture(t, AdGuard, map[string]any{"/control/status": filterAdGuardStatus(), "/control/filtering/status": p})
 			got, err := inspectNativeFilters(t.Context(), req)
-			if err != nil || got.Sources.Evidence.State != "unknown" || len(got.Sources.Entries) != 0 || got.Fingerprint != "" || got.Rules.Evidence.State != "unknown" {
-				t.Fatalf("incomplete metadata became healthy/empty: %+v %v", got, err)
+			wantSources, wantRules := "unknown", "configured"
+			if name == "too-many-rules" || name == "long-rule" {
+				wantSources, wantRules = "configured", "unknown"
+			}
+			if name == "null-enable" || name == "wrong-enable" || name == "null-response" || name == "body-bound" {
+				wantRules = "unknown"
+			}
+			if err != nil || got.Sources.Evidence.State != wantSources || got.Rules.Evidence.State != wantRules || got.Fingerprint != "" || (wantSources == "unknown" && (len(got.Sources.Entries) != 0 || got.Sources.Fingerprint != "")) || (wantRules == "unknown" && (len(got.Rules.Entries) != 0 || got.Rules.Fingerprint != "")) {
+				t.Fatalf("independent incomplete metadata became healthy/empty or erased supported evidence: %+v %v", got, err)
 			}
 		})
 	}
@@ -169,6 +176,34 @@ func TestDNSFilterPiHoleGroupEmptyAndIndependentRuleKinds(t *testing.T) {
 	i, err = inspectNativeFilters(t.Context(), req)
 	if err != nil || i.Sources.Evidence.State != "unknown" || i.Rules.Evidence.State != "configured" || i.Fingerprint != "" {
 		t.Fatal("malformed FTL source hid independent rule evidence", err)
+	}
+}
+
+func TestDNSFilterAdGuardNullRequiresExactPinnedWriterAndPresentFields(t *testing.T) {
+	for _, version := range []string{"v0.107.71", "v0.107.70", "v0.107.72"} {
+		status := filterAdGuardStatus()
+		status["version"] = version
+		p := map[string]any{"enabled": true, "interval": 24, "filters": nil, "whitelist_filters": nil, "user_rules": nil}
+		req, _ := filterFixture(t, AdGuard, map[string]any{"/control/status": status, "/control/filtering/status": p})
+		i, err := inspectNativeFilters(t.Context(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version == "v0.107.71" {
+			if i.Sources.Evidence.State != "configured" || i.Rules.Evidence.State != "configured" || len(i.Sources.Entries) != 0 || len(i.Rules.Entries) != 0 || i.Fingerprint == "" {
+				t.Fatal("explicit pinned nil-slice writer contract lost")
+			}
+			for _, field := range []string{"filters", "whitelist_filters", "user_rules"} {
+				delete(p, field)
+				missing, _ := inspectNativeFilters(t.Context(), req)
+				if missing.Fingerprint != "" || (field == "user_rules" && (missing.Rules.Evidence.State != "unknown" || missing.Sources.Evidence.State != "configured")) || (field != "user_rules" && (missing.Sources.Evidence.State != "unknown" || missing.Rules.Evidence.State != "configured")) {
+					t.Fatal("missing pinned field inferred empty", field)
+				}
+				p[field] = nil
+			}
+		} else if i.Sources.Evidence.State != "unknown" || i.Fingerprint != "" {
+			t.Fatal("another native writer's null inferred empty", version)
+		}
 	}
 }
 

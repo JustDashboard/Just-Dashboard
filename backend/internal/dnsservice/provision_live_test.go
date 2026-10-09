@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -170,6 +171,33 @@ func TestDNSServiceNativeOwnedEngine(t *testing.T) {
 	}
 	filterRead := func(wantRules int) *FilterInventory {
 		t.Helper()
+		if engine == AdGuard {
+			reader, e := newNativeClient(connectionReq)
+			if e != nil {
+				t.Fatal(e)
+			}
+			var shape map[string]json.RawMessage
+			e = reader.request(ctx, http.MethodGet, "/control/filtering/status", nil, &shape)
+			reader.close()
+			if e != nil {
+				t.Fatal("native filter shape unavailable", e)
+			}
+			for _, field := range []string{"filters", "whitelist_filters", "user_rules"} {
+				value, present := shape[field]
+				kind, count := "unreadable", -1
+				if !present {
+					kind = "missing"
+				} else if string(value) == "null" {
+					kind = "null"
+				} else {
+					var values []json.RawMessage
+					if json.Unmarshal(value, &values) == nil && values != nil {
+						kind, count = "array", len(values)
+					}
+				}
+				t.Logf("native filter metadata shape engine=%s field=%s kind=%s count=%d values=redacted", engine, field, kind, count)
+			}
+		}
 		filters, e := s.Filters(ctx, connection.ID)
 		if e != nil || filters.State != "available" || filters.Inventory == nil || filters.Inventory.Sources.Evidence.State != "configured" || filters.Inventory.Fingerprint == "" || len(filters.Inventory.Sources.Entries) != 0 {
 			t.Fatalf("native %s filter inventory: state=%s err=%v evidence=%+v", engine, filters.State, e, filters.Inventory)
