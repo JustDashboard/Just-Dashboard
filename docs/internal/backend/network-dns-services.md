@@ -78,8 +78,10 @@ not an apply authorization or an atomic native revision.
 AdGuard reads block/allow subscriptions and custom rules from `filtering/status`; its protection
 switch, filtering enable state and DNS-running status stay distinct. Pi-hole reads persistent lists
 and exact/regex allow/deny domain-rule metadata, preserving native enable flags and explicit group
-arrays, including `[]`. Native counts, update times and numeric list statuses are retained only when
-reported; absent values remain unreported. Technitium reads built-in block/allow subscriptions and
+arrays, including `[]`. Each group element must be an actual bounded integer; null membership
+elements keep their section unknown and never become group ID zero. Explicit numeric zero and an
+empty array remain distinct. Native counts, update times and numeric list statuses are retained
+only when reported; absent values remain unreported. Technitium reads built-in block/allow subscriptions and
 comment entries from settings. Only its pinned 15.6/15.6.0 response writer's explicit `blockListUrls:
 null` establishes no configured subscription entries; a missing field or another version's null
 stays unknown. Its manual Allowed/Blocked zone trees and installed app rule contents remain

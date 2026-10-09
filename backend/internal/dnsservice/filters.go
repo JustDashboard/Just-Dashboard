@@ -86,6 +86,22 @@ func filterGroups(groups []int) bool {
 	return true
 }
 
+// A null membership must not acquire group zero through integer decoding.
+func filterRawGroups(raw json.RawMessage) ([]int, bool) {
+	var entries []*int
+	if json.Unmarshal(raw, &entries) != nil || entries == nil || len(entries) > 64 {
+		return nil, false
+	}
+	groups := make([]int, 0, len(entries))
+	for _, id := range entries {
+		if id == nil {
+			return nil, false
+		}
+		groups = append(groups, *id)
+	}
+	return groups, filterGroups(groups)
+}
+
 func filterNumber(value *int64) bool {
 	return value != nil && *value >= 0 && *value <= 9007199254740991
 }
@@ -323,23 +339,28 @@ func (c *nativeClient) piHoleFilters(ctx context.Context, i *FilterInventory) er
 		valid := true
 		for _, entry := range list {
 			var f struct {
-				ID      *int64  `json:"id"`
-				Type    string  `json:"type"`
-				Kind    string  `json:"kind"`
-				Address *string `json:"address"`
-				Domain  *string `json:"domain"`
-				Enabled *bool   `json:"enabled"`
-				Groups  []int   `json:"groups"`
-				Count   *int64  `json:"number"`
-				Updated *int64  `json:"date_updated"`
-				Status  *int64  `json:"status"`
+				ID      *int64          `json:"id"`
+				Type    string          `json:"type"`
+				Kind    string          `json:"kind"`
+				Address *string         `json:"address"`
+				Domain  *string         `json:"domain"`
+				Enabled *bool           `json:"enabled"`
+				Groups  json.RawMessage `json:"groups"`
+				Count   *int64          `json:"number"`
+				Updated *int64          `json:"date_updated"`
+				Status  *int64          `json:"status"`
 			}
-			if json.Unmarshal(entry, &f) != nil || !filterNumber(f.ID) || seen[*f.ID] || f.Enabled == nil || !filterGroups(f.Groups) {
+			if json.Unmarshal(entry, &f) != nil {
+				valid = false
+				break
+			}
+			groups, groupsKnown := filterRawGroups(f.Groups)
+			if !filterNumber(f.ID) || seen[*f.ID] || f.Enabled == nil || !groupsKnown {
 				valid = false
 				break
 			}
 			seen[*f.ID] = true
-			e := FilterEntry{ID: f.ID, Enabled: f.Enabled, Groups: &f.Groups, Fingerprint: policyHash(entry)}
+			e := FilterEntry{ID: f.ID, Enabled: f.Enabled, Groups: &groups, Fingerprint: policyHash(entry)}
 			if index == 0 {
 				if (f.Type != "block" && f.Type != "allow") || f.Address == nil || len(*f.Address) > 4096 || (f.Count != nil && !filterNumber(f.Count)) || (f.Updated != nil && !filterNumber(f.Updated)) || (f.Status != nil && !filterNumber(f.Status)) {
 					valid = false

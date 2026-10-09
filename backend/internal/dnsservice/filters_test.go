@@ -179,6 +179,54 @@ func TestDNSFilterPiHoleGroupEmptyAndIndependentRuleKinds(t *testing.T) {
 	}
 }
 
+func TestDNSFilterPiHoleGroupElementsRequireActualIntegers(t *testing.T) {
+	for _, section := range []string{"sources", "rules"} {
+		t.Run(section, func(t *testing.T) {
+			list := map[string]any{"id": 7, "type": "block", "address": "https://filters.example/list", "enabled": true, "groups": []int{0}}
+			rule := map[string]any{"id": 9, "type": "deny", "kind": "exact", "domain": "native-rule.example", "enabled": true, "groups": []int{0}}
+			policy := map[string]any{"/api/info/version": map[string]any{"version": map[string]any{"ftl": map[string]any{"local": map[string]any{"version": "v6.7.1"}}}}, "/api/dns/blocking": map[string]any{"blocking": "enabled"}, "/api/lists": map[string]any{"lists": []any{list}}, "/api/domains": map[string]any{"domains": []any{rule}}}
+			req, mutations := filterFixture(t, PiHole, policy)
+			before, err := inspectNativeFilters(t.Context(), req)
+			if err != nil || before.Fingerprint == "" || *before.Sources.Entries[0].Groups == nil || (*before.Sources.Entries[0].Groups)[0] != 0 || (*before.Rules.Entries[0].Groups)[0] != 0 {
+				t.Fatalf("explicit native group zero was not retained: %+v %v", before, err)
+			}
+			target := list
+			if section == "rules" {
+				target = rule
+			}
+			for _, malformed := range []any{nil, []any{nil}, []any{0, nil}, []any{true}, []any{0.5}, []any{map[string]any{}}, []int{-1}, []int{2147483648}, []int{0, 0}} {
+				target["groups"] = malformed
+				got, err := inspectNativeFilters(t.Context(), req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				unreadable, independent, prior := got.Sources, got.Rules, before.Rules
+				if section == "rules" {
+					unreadable, independent, prior = got.Rules, got.Sources, before.Sources
+				}
+				if unreadable.Evidence.State != "unknown" || len(unreadable.Entries) != 0 || unreadable.Fingerprint != "" || got.Fingerprint != "" || independent.Evidence.State != "configured" || independent.Fingerprint != prior.Fingerprint {
+					t.Fatalf("malformed memberships acquired a group or erased independent evidence: %+v", got)
+				}
+			}
+			target["groups"] = []int{}
+			empty, err := inspectNativeFilters(t.Context(), req)
+			if err != nil || empty.Fingerprint == "" || empty.Fingerprint == before.Fingerprint {
+				t.Fatalf("explicitly empty memberships lost their own identity: %+v %v", empty, err)
+			}
+			entry := empty.Sources.Entries[0]
+			if section == "rules" {
+				entry = empty.Rules.Entries[0]
+			}
+			if entry.Groups == nil || len(*entry.Groups) != 0 {
+				t.Fatal("explicitly empty memberships did not stay an empty array")
+			}
+			if mutations.Load() != 0 {
+				t.Fatal("read-only group-shape inspection mutated native policy")
+			}
+		})
+	}
+}
+
 func TestDNSFilterAdGuardNullRequiresExactPinnedWriterAndPresentFields(t *testing.T) {
 	for _, version := range []string{"v0.107.71", "v0.107.70", "v0.107.72"} {
 		status := filterAdGuardStatus()
