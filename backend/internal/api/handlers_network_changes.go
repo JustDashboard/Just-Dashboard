@@ -60,7 +60,7 @@ func (s *Server) pendingNetworkApply(next http.Handler) http.Handler {
 			return
 		}
 		if mode != "pending" || (r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodDelete) || !supportsPendingNetworkApply(strings.TrimPrefix(r.URL.Path, "/api/v1")) {
-			httpx.WriteError(w, r, httpx.BadRequest("Pending apply is supported only for managed link, routing, shaping, gateway and kernel-setting mutations."))
+			httpx.WriteError(w, r, httpx.BadRequest("Pending apply is supported only for native profile edits, selected drift repairs, and managed link, routing, shaping, gateway and kernel-setting mutations."))
 			return
 		}
 		p := httpx.MustPrincipal(r)

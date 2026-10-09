@@ -101,11 +101,11 @@ func nativeStageUndoFiles(u *nativeUndo, before []nativeProfileFile, candidates 
 }
 
 func (s *Service) prepareNativeChange(ctx context.Context, u *nativeUndo) (*changeJournal, error) {
-	if err := finishPriorChange(ctx, s.paths.Dir); err != nil {
-		return nil, err
-	}
 	if pendingOwner(ctx) <= 0 || !s.independentRecovery || !has("systemctl") || !has("systemd-run") {
 		return nil, &ConfirmationError{"Native profile changes require an administrator's interactive pending apply and independent host recovery; nothing was applied."}
+	}
+	if err := finishPriorChange(ctx, s.paths.Dir); err != nil {
+		return nil, err
 	}
 	if err := s.installRecoveryBinary(ctx); err != nil {
 		return nil, err
@@ -185,6 +185,9 @@ func (s *Service) EditNativeProfile(ctx context.Context, device string, req Nati
 	if req.Structure != nil {
 		return nil, &ReadOnlyError{Reason: "Existing native bond/VRF structural edits require verified member profiles and independent recovery; no profile was changed."}
 	}
+	if pendingOwner(ctx) <= 0 {
+		return nil, &ConfirmationError{"Native profile edits require pending apply with positive dashboard reconnection confirmation."}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lock, err := lockChange(s.paths.Dir)
@@ -194,9 +197,6 @@ func (s *Service) EditNativeProfile(ctx context.Context, device string, req Nati
 	defer unlockChange(lock)
 	if err := finishPriorChange(ctx, s.paths.Dir); err != nil {
 		return nil, err
-	}
-	if pendingOwner(ctx) <= 0 {
-		return nil, &ConfirmationError{"Native profile edits require pending apply with positive dashboard reconnection confirmation."}
 	}
 	intent, err := normalizeNativeIntent(req.Intent)
 	if err != nil {

@@ -15,7 +15,9 @@ opaque generation. Configured, current runtime and persistent boot enablement ar
 Boot enablement explicitly does not claim a measured reboot. Reads require an administrator session;
 raw profile bytes, file paths, secrets, process/bus identities and checkpoints are never returned.
 
-`PUT /network/native/profiles/{device}` accepts only `{generation, intent}`. Each family has a method,
+`PUT /network/native/profiles/{device}` accepts `{generation, intent}`. The optional typed `structure`
+field is reserved for bounded existing-controller preparation; every structural write currently
+returns a refusal before any profile or recovery effect. Each family has a method,
 address/DNS/domain arrays, automatic DNS/route preferences and typed destination/gateway/metric/table
 routes. Unknown fields, arbitrary paths and shell source are rejected. Limits are 16 addresses,
 8 DNS servers, 16 domains and 32 routes per family. Reserved/protected route tables remain refused.
@@ -55,6 +57,7 @@ can be enabled; arbitrary native topology takeover is not authorized by an L3 in
 ## Temporary apply and durable cleanup
 
 Native writes always require a positive authenticated pending owner and independently armed recovery.
+Immediate requests are refused before taking a recovery lock or retrying prior terminal cleanup.
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
@@ -114,6 +117,10 @@ to check durable confirmation before cleanup, cleanup retry after checkpoint rel
 preservation, next-change refusal, old-bus object refusal and conservative boot-epoch recovery.
 `native_manager_io_test.go` checks the real busctl distinction between property values and method
 return argument arrays, and that effect argv pins both the transport GUID and unique daemon owner.
+Admission fixtures also verify that a refused immediate request creates no recovery state and leaves
+a prior confirmed native journal, selected profile and staging bytes intact. Mounted `Server.Routes`
+fixtures enforce administrator-session reads/writes, token refusal, unknown-path-field rejection and
+the pending header's positive authenticated owner before intent validation.
 
 The opt-in `TestNativeManagerOwnerLive` fixture builds the actual standalone recovery executable and
 runs selected native daemons in its own net/mount/PID namespace. `/etc`, `/run` and `/var/lib` are

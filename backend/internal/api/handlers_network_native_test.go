@@ -3,7 +3,9 @@ package api
 import (
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
@@ -55,5 +57,57 @@ func TestNativeManagerWriteRefusesImmediateApplyAndUnknownProperties(t *testing.
 	}
 	if !supportsPendingNetworkApply("/network/native/profiles/eth0") {
 		t.Fatal("native persistent profile mutation lacks its mandatory pending middleware")
+	}
+}
+
+func TestNativeManagerMountedRoutesRequireAdminSession(t *testing.T) {
+	s := testServer(t)
+	routes := s.Routes()
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
+		actor := &client{t: t, h: routes, cookie: signInAs(t, s, "native-mounted-"+string(role), role)}
+		assertNativeMountedDenied(t, actor, nil)
+	}
+	user, err := s.Auth.CreateUser(t.Context(), "native-mounted-token", "Correct-Horse-Battery-9", auth.RoleAdmin, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token, err := s.Auth.CreateAPIToken(t.Context(), user, "native profile token", auth.RoleAdmin, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNativeMountedDenied(t, &client{t: t, h: routes}, map[string]string{"Authorization": "Bearer " + token})
+}
+
+func assertNativeMountedDenied(t *testing.T, actor *client, headers map[string]string) {
+	t.Helper()
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/network/native/managers"},
+		{http.MethodGet, "/api/v1/network/native/profiles/eth0"},
+		{http.MethodPut, "/api/v1/network/native/profiles/eth0"},
+		{http.MethodPost, "/api/v1/network/changes/pending-one/cleanup"},
+	} {
+		if response := actor.do(route.method, route.path, `{}`, headers); response.Code != http.StatusForbidden {
+			t.Fatalf("mounted %s %s = %d %s", route.method, route.path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestNativeManagerMountedWriteEnforcesPendingAdmission(t *testing.T) {
+	c, s := newClient(t)
+	dir := filepath.Join(t.TempDir(), "network")
+	s.modules.network = netx.New(netx.Options{Paths: netx.Paths{Dir: dir}})
+	path := "/api/v1/network/native/profiles/eth0"
+	body := `{"generation":"old","intent":{}}`
+	response := c.do(http.MethodPut, path, body, nil)
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "network_confirmation") {
+		t.Fatalf("mounted immediate native edit = %d %s", response.Code, response.Body.String())
+	}
+	response = c.do(http.MethodPut, path, `{"generation":"old","intent":{},"filename":"/etc/foreign.network"}`, map[string]string{networkApplyHeader: "pending"})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("mounted native request accepted a caller path = %d %s", response.Code, response.Body.String())
+	}
+	response = c.do(http.MethodPut, path, body, map[string]string{networkApplyHeader: "pending"})
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "native address method") {
+		t.Fatalf("mounted authenticated pending request did not reach intent validation = %d %s", response.Code, response.Body.String())
 	}
 }
