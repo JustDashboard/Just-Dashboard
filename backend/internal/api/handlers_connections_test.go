@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
@@ -129,5 +133,91 @@ func TestConnectionDetailRefusesWhatIsNotAnAddress(t *testing.T) {
 	_, admin, _, _ := blockClients(t)
 	if w := admin.do(http.MethodGet, "/api/v1/connections/not-an-address", "", nil); w.Code != http.StatusBadRequest {
 		t.Fatalf("detail = %d %s", w.Code, w.Body)
+	}
+}
+
+// Against the kernel's own table, read-only: a connection this test opens to
+// itself is listed with its age and TCP's byte counters joined from ss, and
+// once closed is noticed as a close by the next read.
+func TestConnectionDetailReadsTheKernelsTableAndNoticesTheClose(t *testing.T) {
+	if _, err := exec.LookPath("ss"); err != nil {
+		t.Skip("ss is not installed")
+	}
+	_, admin, _, _ := blockClients(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err == nil {
+			accepted <- c
+		}
+	}()
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := <-accepted
+	if _, err := conn.Write(make([]byte, 50_000)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(server, make([]byte, 50_000)); err != nil {
+		t.Fatal(err)
+	}
+	local := conn.LocalAddr().(*net.TCPAddr)
+	listening := ln.Addr().(*net.TCPAddr)
+	find := func(d connectionDetail) *connectionSocket {
+		for i, s := range d.Sockets {
+			if s.Protocol == "tcp" && s.LocalPort == uint32(local.Port) && s.RemotePort == uint32(listening.Port) {
+				return &d.Sockets[i]
+			}
+		}
+		return nil
+	}
+	var first connectionDetail
+	decodeNetworkBody(t, admin.do(http.MethodGet, "/api/v1/connections/127.0.0.1", "", nil).Body.Bytes(), &first)
+	sock := find(first)
+	if sock == nil {
+		t.Fatalf("the test's own connection is not listed: %+v", first.Sockets)
+	}
+	if sock.FirstSeen.IsZero() || sock.TxBytes == nil || *sock.TxBytes < 50_000 || sock.RTTMs == nil || sock.Status != "ESTABLISHED" {
+		t.Fatalf("socket = %+v (counters error %q)", sock, first.CountersError)
+	}
+	conn.Close()
+	server.Close()
+	var second connectionDetail
+	for i := 0; i < 20; i++ {
+		decodeNetworkBody(t, admin.do(http.MethodGet, "/api/v1/connections/127.0.0.1", "", nil).Body.Bytes(), &second)
+		if s := find(second); s == nil || s.Status != "ESTABLISHED" {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if s := find(second); s != nil && s.Status == "ESTABLISHED" {
+		t.Fatalf("still established after close: %+v", s)
+	}
+	if second.Quality.IntervalSeconds <= 0 {
+		t.Fatalf("the second read has no interval: %+v", second.Quality)
+	}
+	// The closing side lingers in TIME_WAIT; the accepting side's tuple
+	// leaves the table once its FIN is acknowledged, and the read after that
+	// records it as a close between two reads.
+	found := false
+	for i := 0; i < 40 && !found; i++ {
+		decodeNetworkBody(t, admin.do(http.MethodGet, "/api/v1/connections/127.0.0.1", "", nil).Body.Bytes(), &second)
+		for _, c := range second.Closed {
+			if c.LocalPort == uint32(listening.Port) && c.RemotePort == uint32(local.Port) {
+				found = true
+			}
+		}
+		if !found {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+	if !found {
+		t.Fatalf("the close was not noticed: %+v", second.Closed)
 	}
 }
