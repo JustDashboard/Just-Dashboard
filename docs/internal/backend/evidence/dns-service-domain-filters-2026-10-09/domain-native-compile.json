@@ -1,0 +1,10 @@
+{
+  "source": "f3fe06aac9ffd4921a3740925650f442cc1a6988",
+  "command": "env TMPDIR=/home/ubuntu/jd-fi-t GOMAXPROCS=2 GOFLAGS=-p=2 go test -race -c -o /home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts/dns-domain-filter-native.test ./internal/dnsservice",
+  "cwd": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls/backend",
+  "exit_code": 0,
+  "binary_sha256": "2c3125e20fc193f618be1b4c368c6d6965ebb663121a27a2b0b5f6716455ceb0",
+  "compile_log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "runner_sha256": "5ddd3a3a16b684575ec9138f5eca543e456400bc085b8c6914da17d8894b1c41",
+  "go_version_m": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-controls-artifacts/dns-domain-filter-native.test: go1.26.8\n\tpath\tgithub.com/Wayy01/Just-Dashboard/backend/internal/dnsservice.test\n\tmod\tgithub.com/Wayy01/Just-Dashboard/backend\t(devel)\t\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\t-race=true\n\tbuild\tCGO_ENABLED=1\n\tbuild\tCGO_CFLAGS=\n\tbuild\tCGO_CPPFLAGS=\n\tbuild\tCGO_CXXFLAGS=\n\tbuild\tCGO_LDFLAGS=\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=linux\n\tbuild\tGOAMD64=v1\n"
+}

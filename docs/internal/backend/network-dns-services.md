@@ -64,7 +64,7 @@ and authoritative zones remain distinct; configured DNSSEC status is not cryptog
 `GET /{id}/filters` also works for dashboard read-only connections. It returns a `FilterView` with
 connection metadata, optional `inventory`, and `available`, `partial`, `unavailable` or `unsupported`
 state. It makes no native policy change, refresh request, subscription download or DNS question.
-The ordinary `Snapshot`, retained review selection and mutation contract remain unchanged.
+This read does not select a retained review or authorize a mutation.
 
 `FilterInventory` separates `sources` and `rules` sections, each with configured/unknown/unsupported
 `evidence`, intentionally redacted `identity`, `entries` and an optional native metadata fingerprint.
@@ -190,6 +190,10 @@ its [replacement handler](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107
 The detail sheet builds those closed engine-specific intents and shows selected native metadata
 before/readback. Unknown Pi-hole group inventory holds additions. Complete assembled browser/native
 acceptance and broader P17 criteria remain separate from isolated backend and frontend checks.
+The [source-matched custom-domain acceptance](evidence/dns-service-domain-filters-2026-10-09.md)
+records final scoped/race checks, both actual owned engine passes, full source/binary/raw hashes,
+selected-current reads and unselected preservation, with the preparation failure kept separate.
+Its native configuration/restart proof does not establish effective client filtering.
 
 ## Reviewed records and client groups
 
