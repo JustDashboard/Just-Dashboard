@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -246,10 +247,38 @@ func verifyDecisionClient(t *testing.T, ctx context.Context, c *nativeClient, en
 			t.Fatal("native Pi-hole NULL mode/protection prerequisite differs")
 		}
 	}
-	t.Logf("default-client engine=%s address=%s mac=%s persistentOverrides=absent protection=%t group=%s", engine, address, mac, protection, map[Engine]string{AdGuard: "global", PiHole: "0"}[engine])
+	t.Logf("default-client engine=%s address=%s mac=%s selectedPersistentOverride=absent protection=%t group=%s", engine, address, mac, protection, map[Engine]string{AdGuard: "global", PiHole: "0"}[engine])
 }
 
-func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, address, allow, deny string) (bool, error) {
+func decisionHistoryPhase(engine Engine, raw json.RawMessage, notBefore, now time.Time) (bool, error) {
+	if notBefore.IsZero() || now.IsZero() || notBefore.After(now) {
+		return false, errors.New("actual matrix/read clock boundary required")
+	}
+	if engine == AdGuard {
+		var reported *string
+		if json.Unmarshal(raw, &reported) != nil || reported == nil {
+			return false, errors.New("native AdGuard history time is missing/null/malformed")
+		}
+		at, err := time.Parse(time.RFC3339Nano, *reported)
+		if err != nil || at.After(now) {
+			return false, errors.New("native AdGuard history time is malformed or in the future")
+		}
+		return !at.Before(notBefore), nil
+	}
+	if engine != PiHole {
+		return false, errors.New("unsupported native decision history engine")
+	}
+	var reported *float64
+	if json.Unmarshal(raw, &reported) != nil || reported == nil || *reported < 0 || math.IsNaN(*reported) || math.IsInf(*reported, 0) || *reported > float64(now.UnixNano())/1e9 {
+		return false, errors.New("native Pi-hole history epoch is missing/null/malformed or in the future")
+	}
+	return *reported >= float64(notBefore.UnixNano())/1e9, nil
+}
+
+func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, address, allow, deny string, notBefore time.Time) (bool, error) {
+	if notBefore.IsZero() || notBefore.After(time.Now()) {
+		return false, errors.New("actual matrix/read clock boundary required")
+	}
 	listIDs := map[string]int64{}
 	if engine == PiHole {
 		version, err := decisionVersion(ctx, c)
@@ -286,6 +315,7 @@ func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, addres
 	if err := c.request(ctx, http.MethodGet, path, nil, &envelope); err != nil {
 		return false, err
 	}
+	now := time.Now()
 	var rows []map[string]json.RawMessage
 	if json.Unmarshal(envelope[key], &rows) != nil || rows == nil || len(rows) > 100 {
 		return false, errors.New("bounded explicit native history rows required")
@@ -294,6 +324,10 @@ func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, addres
 	for _, row := range rows {
 		if row == nil {
 			return false, errors.New("native history row is null")
+		}
+		fromPhase, err := decisionHistoryPhase(engine, row["time"], notBefore, now)
+		if err != nil {
+			return false, err
 		}
 		var client, name, kind, status string
 		if engine == AdGuard {
@@ -314,7 +348,7 @@ func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, addres
 				status = *reported
 			}
 		}
-		if client != address || kind != "A" && kind != "AAAA" || name != allow && name != deny {
+		if !fromPhase || client != address || kind != "A" && kind != "AAAA" || name != allow && name != deny {
 			continue
 		}
 		if engine == AdGuard {
@@ -359,15 +393,16 @@ func decisionHistory(ctx context.Context, c *nativeClient, engine Engine, addres
 	return len(allowSeen) == want && len(denySeen) == want, nil
 }
 
-func verifyDecisionHistory(t *testing.T, ctx context.Context, c *nativeClient, engine Engine, address, allow, deny string) {
+func verifyDecisionHistory(t *testing.T, ctx context.Context, c *nativeClient, engine Engine, address, allow, deny string, notBefore time.Time) {
 	t.Helper()
 	for attempt := 0; attempt < 8; attempt++ {
-		ok, err := decisionHistory(ctx, c, engine, address, allow, deny)
+		ok, err := decisionHistory(ctx, c, engine, address, allow, deny, notBefore)
+		now := time.Now()
 		if err != nil {
 			t.Fatal("native actual-query corroboration failed", err)
 		}
 		if ok {
-			t.Logf("native query history corroborated engine=%s client=%s allow/deny=A+AAAA transportBasis=%s", engine, address, map[Engine]string{AdGuard: "native_client_proto_and_wire", PiHole: "wire_only_native_transport_unreported"}[engine])
+			t.Logf("native query history corroborated engine=%s client=%s allow/deny=A+AAAA phaseNotBefore=%s readNotAfter=%s transportBasis=%s", engine, address, notBefore.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano), map[Engine]string{AdGuard: "native_client_proto_and_wire", PiHole: "wire_only_native_transport_unreported"}[engine])
 			return
 		}
 		select {
@@ -456,6 +491,14 @@ func TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches(t *testing
 	for _, engine := range []Engine{AdGuard, PiHole} {
 		t.Run(string(engine), func(t *testing.T) {
 			allow, deny, address := "allow.seed-012345abcdef.invalid", "deny-012345abcdef.invalid", "172.20.0.3"
+			phaseStart := time.Now().Add(-time.Second)
+			oldTime, currentTime := phaseStart.Add(-time.Second), phaseStart.Add(500*time.Millisecond)
+			nativeTime := func(at time.Time) any {
+				if engine == AdGuard {
+					return at.UTC().Format(time.RFC3339Nano)
+				}
+				return float64(at.UnixNano()) / 1e9
+			}
 			var mu sync.Mutex
 			rows := []any{}
 			if engine == AdGuard {
@@ -471,6 +514,10 @@ func TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches(t *testing
 					rows = append(rows, map[string]any{"client": map[string]any{"ip": address}, "status": "FORWARDED", "domain": allow, "type": kind, "list_id": 7}, map[string]any{"client": map[string]any{"ip": address}, "status": "DENYLIST", "domain": deny, "type": kind, "list_id": 8})
 				}
 			}
+			for _, row := range rows {
+				row.(map[string]any)["time"] = nativeTime(currentTime)
+			}
+			rows[0].(map[string]any)["time"] = nativeTime(oldTime)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mu.Lock()
 				defer mu.Unlock()
@@ -514,20 +561,50 @@ func TestDNSDomainDecisionHistoryDistinguishesPriorAndSelectedMatches(t *testing
 			}
 			defer client.close()
 			client.sid = "owned-test-session"
-			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny); err != nil || !ok {
+			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || !ok {
 				t.Fatal("controlled native decisions did not survive valid prior-phase rows", ok, err)
 			}
+
+			validPhaseRows := rows
+			mu.Lock()
+			for _, row := range rows {
+				row.(map[string]any)["time"] = nativeTime(oldTime)
+			}
+			mu.Unlock()
+			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || ok {
+				t.Fatal("old same-rule-ID/status rows were reused as current-phase proof", ok, err)
+			}
+			mu.Lock()
+			for _, row := range validPhaseRows {
+				row.(map[string]any)["time"] = nativeTime(currentTime)
+			}
+			rows = validPhaseRows
+			mu.Unlock()
+			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || !ok {
+				t.Fatal("actual current-phase same-ID decisions were withheld", ok, err)
+			}
+			for _, badTime := range []any{nil, true, "malformed", nativeTime(time.Now().Add(time.Hour))} {
+				mu.Lock()
+				rows[0].(map[string]any)["time"] = badTime
+				mu.Unlock()
+				if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err == nil || ok {
+					t.Fatal("null/malformed/future native time became phase evidence", ok, err)
+				}
+			}
+			mu.Lock()
+			rows[0].(map[string]any)["time"] = nativeTime(currentTime)
+			mu.Unlock()
 			mu.Lock()
 			valid := rows
 			rows = append(append([]any{}, rows...), nil)
 			mu.Unlock()
-			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny); err == nil || ok {
+			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err == nil || ok {
 				t.Fatal("malformed native rows escaped complete history")
 			}
 			mu.Lock()
 			rows = valid[:1]
 			mu.Unlock()
-			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny); err != nil || ok {
+			if ok, err := decisionHistory(t.Context(), client, engine, address, allow, deny, phaseStart); err != nil || ok {
 				t.Fatal("unmatched/unreported prior decision became selected proof", ok, err)
 			}
 		})
@@ -809,5 +886,49 @@ func TestDNSDomainDecisionForeignImageNeverAcquiresCleanupAuthority(t *testing.T
 				t.Fatal("foreign image was adopted for cleanup")
 			}
 		})
+	}
+}
+
+func TestDNSDomainDecisionHistoryPhaseRequiresActualBoundedTimes(t *testing.T) {
+	start := time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC)
+	now := start.Add(time.Second)
+	for _, engine := range []Engine{AdGuard, PiHole} {
+		native := func(at time.Time) json.RawMessage {
+			var value any = at.UTC().Format(time.RFC3339Nano)
+			if engine == PiHole {
+				value = float64(at.UnixNano()) / 1e9
+			}
+			raw, _ := json.Marshal(value)
+			return raw
+		}
+		for _, test := range []struct {
+			at   time.Time
+			want bool
+		}{{start.Add(-time.Nanosecond * 1000), false}, {start, true}, {start.Add(500 * time.Millisecond), true}, {now, true}} {
+			ok, err := decisionHistoryPhase(engine, native(test.at), start, now)
+			if err != nil || ok != test.want {
+				t.Fatal("actual phase/read interval misclassified", engine, test.at, ok, err)
+			}
+		}
+		bad := []json.RawMessage{nil, json.RawMessage("null"), json.RawMessage("true"), json.RawMessage("{}"), json.RawMessage(`""`), json.RawMessage(`"malformed"`), native(now.Add(time.Second))}
+		if engine == PiHole {
+			bad = append(bad, json.RawMessage("-1"), json.RawMessage("1e1000"), json.RawMessage(`"1791532800"`))
+		}
+		for _, raw := range bad {
+			if ok, err := decisionHistoryPhase(engine, raw, start, now); err == nil || ok {
+				t.Fatal("missing/null/malformed/negative/overflow/future time admitted", engine, string(raw), ok, err)
+			}
+		}
+		if engine == PiHole {
+			if ok, err := decisionHistoryPhase(engine, json.RawMessage("0"), start, now); err != nil || ok {
+				t.Fatal("explicit epoch zero became a current phase", ok, err)
+			}
+		}
+		if ok, err := decisionHistoryPhase(engine, native(start), time.Time{}, now); err == nil || ok {
+			t.Fatal("missing actual phase boundary accepted")
+		}
+		if ok, err := decisionHistoryPhase(engine, native(start), now.Add(time.Second), now); err == nil || ok {
+			t.Fatal("reversed phase/read boundary accepted")
+		}
 	}
 }

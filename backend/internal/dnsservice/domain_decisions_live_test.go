@@ -624,8 +624,9 @@ func TestDNSServiceNativeDomainDecisions(t *testing.T) {
 		apply(emptyRequest)
 		requests = append(requests, emptyRequest)
 	}
+	phaseNotBefore := time.Now()
 	queries.matrix(engine, "added")
-	verifyDecisionHistory(t, ctx, client, engine, side.address, allow, deny)
+	verifyDecisionHistory(t, ctx, client, engine, side.address, allow, deny, phaseNotBefore)
 	configured := readDecisionInventory(t, ctx, client, engine, parent)
 	seconds := 3
 	if err = d.Verify(ctx, plan.spec(), plan.Resources); err != nil {
@@ -651,8 +652,9 @@ func TestDNSServiceNativeDomainDecisions(t *testing.T) {
 	if !reflect.DeepEqual(configured, readDecisionInventory(t, ctx, client, engine, parent)) {
 		t.Fatal("native rule inventory changed on restart without reapply")
 	}
+	phaseNotBefore = time.Now()
 	queries.matrix(engine, "added")
-	verifyDecisionHistory(t, ctx, client, engine, side.address, allow, deny)
+	verifyDecisionHistory(t, ctx, client, engine, side.address, allow, deny, phaseNotBefore)
 	for _, request := range requests {
 		request.Action, request.Filter.Groups = "filter_remove", nil
 		apply(request)

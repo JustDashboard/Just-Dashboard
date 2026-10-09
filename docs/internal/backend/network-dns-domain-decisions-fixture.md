@@ -76,8 +76,12 @@ policy restoration is used to force a pass.
 Native history corroborates the actual source and matched rule/list identity after the added and
 restarted matrices. AdGuard's pinned writer emits `question.name`, `client_proto` and matched rule
 text/list ID; Pi-hole reports client IP, type, status and selected domainlist ID. Documented nullable
-Pi-hole status/list IDs stay unreported and do not become a positive match. Prior phase records are
-not mistaken for current selected matches. Pi-hole history has no transport field: UDP/TCP evidence
+Pi-hole status/list IDs stay unreported and do not become a positive match. Each added/restarted
+matrix captures actual local Go time immediately before its first questions. AdGuard's RFC3339Nano
+row time and Pi-hole's finite nonnegative epoch time must be at or after that boundary and no later
+than the actual completed native read. Missing, null, malformed or future times refuse complete
+corroboration; old rows with the same selected native IDs/status cannot establish a new phase.
+Both clocks use the same local daemon kernel in this fixture. Pi-hole history has no transport field: UDP/TCP evidence
 comes from the wire helper, independently. Only controlled scalar evidence is logged; native
 credentials, unrelated queries and raw response bodies are not printed.
 
@@ -130,6 +134,13 @@ attributed preparation. The replacement local import creates one parentless imag
 sole rootfs entry, exact local request, full result ID, rebound tags and foreign-image cleanup
 refusal. These records establish
 preparation only; final assembled-source checks and native results need their own attribution.
+The single-import `9474c056` preparation also passed its required/focused-race checks and froze
+separate helper/race/runner receipts without any invocation. Root's subsequent review identified
+that post-restart history could reuse old matched rows with the same rule IDs. The separate phase
+correction requires real before-matrix/read boundaries and tests old same-ID rows, current rows,
+nullable/missing/malformed/negative/overflow/future times and explicit old epoch zero. The corrected
+selected-client log describes absence of a selected override; the preserved foreign Pi-hole client
+remains present. Historical preparation records are retained, without relabeling any native pass.
 
 The pinned primary contracts are [AdGuard query-log JSON](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go),
 [filter application and precedence](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/filtering/filtering.go),
@@ -137,6 +148,9 @@ The pinned primary contracts are [AdGuard query-log JSON](https://github.com/Adg
 [FTL default client groups](https://github.com/pi-hole/FTL/blob/v6.7.1/src/database/gravity-db.c),
 [allow-before-deny processing](https://github.com/pi-hole/FTL/blob/v6.7.1/src/dnsmasq_interface.c),
 and [bounded native query metadata](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/queries.yaml).
+The timestamp fields are written by the same pinned
+[AdGuard entry writer](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107.71/internal/querylog/json.go#L58)
+and [FTL query writer](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/queries.c#L961).
 The exact already-used Docker SDK is Moby v28.5.2: its [import client](https://github.com/moby/moby/blob/v28.5.2/client/image_import.go)
 sends the local reader and fixed changes, the [HTTP route](https://github.com/moby/moby/blob/v28.5.2/api/server/router/image/image_routes.go)
 uses the request body for `fromSrc=-` and emits the returned full ID, and the
