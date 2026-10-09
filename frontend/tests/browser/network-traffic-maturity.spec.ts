@@ -451,3 +451,37 @@ test("a past hour is read from the socket history in the live table's shape", as
   await recorded.getByRole("button", { name: "Inspect 203.0.113.200" }).click()
   await expect(page.getByRole("dialog")).toBeVisible()
 })
+
+test.describe("at a phone's width", () => {
+  test.use({ viewport: { width: 390, height: 844 } })
+
+  test("the traffic and connections additions never scroll sideways", async ({
+    page,
+  }, testInfo) => {
+    const overflow = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      )
+    await open(page, [])
+    await page.goto("/network/traffic")
+    await expect(page.getByLabel("Live context")).toContainText("TCP round trip")
+    await expect(page.getByLabel("Transfer budgets")).toContainText("over 80%")
+    expect(await overflow(), "horizontal overflow on /network/traffic").toBeLessThanOrEqual(0)
+    await page.screenshot({ path: testInfo.outputPath("traffic-390.png"), fullPage: true })
+    await page.getByRole("button", { name: "Edit the limits on ens3" }).click()
+    await expect(page.getByRole("dialog").getByLabel("Upload queue delay")).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath("upload-profile-390.png") })
+    await page.keyboard.press("Escape")
+
+    await page.goto("/network/connections")
+    await loaded(page)
+    expect(await overflow(), "horizontal overflow on /network/connections").toBeLessThanOrEqual(0)
+    await page
+      .getByRole("row")
+      .filter({ hasText: "198.51.100.23" })
+      .getByRole("button", { name: "Inspect 198.51.100.23" })
+      .click()
+    await expect(page.getByRole("dialog").getByLabel("Across the layers")).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath("peer-sheet-390.png") })
+  })
+})
