@@ -740,7 +740,9 @@ test("a port check's endpoint is watched as a probe on the watch list's schedule
   await expect(page.getByText("Watching 192.0.2.10:5432")).toBeVisible()
   expect(watched[0]).toMatchObject({ domain: "192.0.2.10", kind: "tcp" })
   expect((watched[0] as { port: number }).port).toBeGreaterThan(0)
+  // The second answer is the server's refusal, named with the port the form sent.
+  const sent = (watched[0] as { port: number }).port
   await panel(page).getByRole("button", { name: "Watch on a schedule" }).click()
-  await expect(page.getByText("192.0.2.10:5432 is already watched")).toBeVisible()
+  await expect(page.getByText(`192.0.2.10:${sent} is already watched`)).toBeVisible()
   await expect(page.getByText("whose handshake checks the connection too")).toBeVisible()
 })
