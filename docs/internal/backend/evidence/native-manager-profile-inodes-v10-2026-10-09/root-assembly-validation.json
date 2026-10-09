@@ -34,7 +34,7 @@
     }
   },
   "independentCodeReview": "DNS agent reviewed all3 equal-byte seams, captured restoration, foreign/cold guards, read-only unrecorded checkpoint prior and legacy undo1/2/3: clear",
-  "nativeProof": "Separate exact c3 source/race/helper all-four engine owner proof; no root live replay",
+  "nativeProof": "Separate exact c3 source/race/helper all-four native manager owner proof; no root live replay",
   "documentationReview": {
     "README.md": "Existing operator contract remains correct; no additional update needed for this recovery/idempotence correction.",
     "AGENTS.md": "Contributor workflow unchanged; no additional update needed.",

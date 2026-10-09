@@ -1,8 +1,8 @@
-# Shipped native profile inode acceptance
+# Native profile inode acceptance
 
 This fixture checkpoint extends the existing accepted owner lifecycles with a canonical unchanged
-intent. It is based on the isolated shipped helper-v10 fix, not the private ordered controller
-adapter. All four established owner paths passed on the final assembled source, including direct
+intent. The public helper-v10 correction preserves the existing standalone profile contract.
+All four established owner paths passed on the final assembled source, including direct
 networkd after the separately reviewed terminal-LF parser correction. The initial frozen-source
 successes and failures below retain their original attribution.
 
@@ -25,7 +25,7 @@ structural, cold, or timer acceptance.
 
 ## Initial frozen source
 
-The tested tree was `66ad7cf8cd3ef74d18daf8c1fd355fd386888a8c`, based on shipped fix
+The tested tree was `66ad7cf8cd3ef74d18daf8c1fd355fd386888a8c`, based on the inode correction
 `b744765cf57cde35f9e6c032967a12b2294faf76`. The required changed gates passed build/vet/selected
 netx tests in 20.439 seconds, followed by the helper-hash logging gate in 20.610 seconds. A distinct
 race binary was compiled from the clean final source. All successful runs used the actual bound
@@ -60,6 +60,9 @@ configuration/state paths. Full source hashes, binary hash, argv/environment, ra
 cleanup outcomes are preserved in [the initial manifest](native-manager-profile-inodes-v10-2026-10-09/initial-source-binary.json).
 The [runner](native-manager-profile-inodes-v10-2026-10-09/runner.py.txt) captures the bounded execution
 and containment checks. Raw logs/results retain each run's exact failed or passed outcome.
+Run 02's original raw bytes are preserved in deterministic gzip; its manifest records the artifact
+encoding, compressed digest and original uncompressed digest. The other initial raw logs stay plain
+text. Decompression reproduces the original failed output without changing its recorded result.
 
 ## Final assembled source
 
@@ -76,6 +79,10 @@ The root required changed gate passed build/vet/selected netx tests in 20.554 se
 (73.12-second wrapper). The targeted `-race '^TestNative'` gate passed in 29.315 seconds
 (57.54-second wrapper), with native live opt-ins explicitly unset. Those checks precede the
 separate actual owner runs below.
+The [root validation](native-manager-profile-inodes-v10-2026-10-09/root-assembly-validation.json)
+and its [required log](native-manager-profile-inodes-v10-2026-10-09/root-assembly-required.log) /
+[race log](native-manager-profile-inodes-v10-2026-10-09/root-assembly-race.log) retain their original
+timings separately from native execution.
 
 | Run | Owner / result | Wrapper / private child | Exact unchanged-file proof |
 | --- | --- | --- | --- |

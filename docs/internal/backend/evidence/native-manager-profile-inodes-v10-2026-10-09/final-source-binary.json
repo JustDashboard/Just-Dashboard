@@ -1859,6 +1859,11 @@
     "backend/scripts/gen-changelog.go": "2f65b2f6524a0b9528acd8c5f3a29ac8e9c1bed4a737bab03828ce7ffa00bd91"
   },
   "backend_go_file_count": 1856,
+  "dependency_files_sha256": {
+    "backend/go.mod": "5f680b84b898ab166ace9fad284ad09ecb73c921ef9b949d2a4a3db82bea76e4",
+    "backend/go.sum": "fac9be6bd85b383d4215b58ae314514070caf7276fcae4caee77b84deaa755fc"
+  },
+  "dependency_source_comparison": "Captured c3 tracked module bytes match both the frozen proof worktree and current root assembly; dependency files are unchanged.",
   "helper_capability": "jd-native-manager-v10",
   "later_root_docs_only_source": "8cb6c6508f65e0ed3646f56b4424ad3e610825bb",
   "limits": [
@@ -1869,7 +1874,7 @@
   "race_binary_sha256": "b3b7ef9e9d63d33d60bc37462ced44fa1962af888fda85401f878659fe9761dc",
   "required_gates": [
     {
-      "command": "scripts/test-changed.sh c62a9fb59ff3bc407365afc1caff8e7e615e03bb",
+      "command": "env TMPDIR=/home/ubuntu/jd-r10-t GOMAXPROCS=2 GOFLAGS=-p=2 /usr/bin/time -f 'elapsed=%e exit=%x' scripts/test-changed.sh c62a9fb59ff3bc407365afc1caff8e7e615e03bb",
       "kind": "required",
       "live_opt_ins": "explicitly unset; separate actual runs recorded below",
       "path": "final-assembly-required.raw.txt",
@@ -1877,7 +1882,7 @@
       "source": "c3c82bf36f5619cb23b5d2b6dfdbc21f253a77c7"
     },
     {
-      "command": "GOMAXPROCS=2 GOFLAGS=-p=2 go test -p 2 -race ./internal/netx -run '^TestNative' -count=1",
+      "command": "env TMPDIR=/home/ubuntu/jd-r10-t GOMAXPROCS=2 GOFLAGS=-p=2 /usr/bin/time -f 'elapsed=%e exit=%x' go test -race ./internal/netx -run '^TestNative' -count=1 -timeout=180s",
       "kind": "race",
       "live_opt_ins": "explicitly unset; separate actual runs recorded below",
       "path": "final-assembly-race.raw.txt",

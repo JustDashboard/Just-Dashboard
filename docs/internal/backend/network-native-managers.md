@@ -6,7 +6,7 @@ current surface edits IPv4/IPv6 addressing methods, per-family static addresses,
 domains, and explicit unicast routes in an existing selected persistent profile. The full P11 scope
 also includes structural bond and supported VRF editing; that work and its acceptance remain open.
 Its prepared owner/member scope is described in [native structure preparation](network-native-structure.md).
-The isolated shipped helper-v10 unchanged-profile fixture is tracked in
+The helper-v10 unchanged-profile acceptance is tracked in
 [profile inode acceptance](evidence/native-manager-profile-inodes-v10-2026-10-09.md).
 Existing controller/member profiles remain refused until saved, loaded, applied and kernel
 topology are verified together; their observed relationships are still reported. Existing standalone
@@ -207,8 +207,8 @@ The [v8 authored Netplan proof](evidence/native-manager-netplan-v8-2026-10-09.md
 standalone policy above. Default Netplan DHCP MTU, DHCPv6 acquisition, wider platform owners and host
 reboot remain open; source ancestry is not interchangeable.
 
-The earlier v8 checkpoint has a separately observed equal-byte ownership defect. When a staged candidate
-has the same bytes as the saved prior profile but a different captured inode, byte-first
+The earlier v8 checkpoint has a separately observed equal-byte ownership defect. When a staged
+candidate has the same bytes as the saved prior profile but a different captured inode, byte-first
 classification can mistake the candidate for the prior file. Exact-origin recovery then refuses
 the known candidate and retains a degraded journal; checkpoint recovery can instead treat it as an
 unrecorded restored inode and skip restoration of the retained authored inode. Foreign-file guards
