@@ -1490,3 +1490,68 @@ test("a failed renewal says where validation failed and whose it is to fix", asy
     "/network/tools?tool=dns&target=www.example.com",
   )
 })
+
+test("a failed issuance says where validation failed, read from the job's own output", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const failed = certbotJob({
+    id: "job-issue",
+    kind: "certbot.issue",
+    title: "Test issuance for app.example.com",
+    target: "app.example.com",
+    status: "failed",
+    exitCode: 1,
+    endedAt: now,
+  })
+  await capture(page, "**/api/v1/certificates/issue", () => failed)
+  const asked: string[] = []
+  await page.route("**/api/v1/certificates/jobs/*/diagnosis", (route) => {
+    asked.push(new URL(route.request().url()).pathname)
+    return json(route, {
+      job: "job-issue",
+      status: "failed",
+      problems: [
+        {
+          stage: "challenge",
+          stageTitle: "Serving the challenge file",
+          owner: "The web server answering the name on port 80",
+          domain: "app.example.com",
+          address: "198.51.100.7",
+          here: false,
+          detail:
+            "198.51.100.7: Invalid response from http://app.example.com/.well-known/acme-challenge/x1: 404",
+          action:
+            "The authority reached a web server that did not serve the challenge file: the name may land on another site, a redirect may leave the path, or the webroot may be another folder.",
+          links: [
+            { label: "Which site answers the name", href: "/proxy/sites" },
+            {
+              label: "Ask the challenge path yourself",
+              href: "/network/tools?tool=http&target=http%3A%2F%2Fapp.example.com%2F.well-known%2Facme-challenge%2Ftest",
+            },
+          ],
+        },
+      ],
+    })
+  })
+  await page.goto("/proxy/certificates")
+  await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Domains").fill("app.example.com")
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Run the test" }).click()
+
+  const where = page.getByRole("region", { name: "Where it failed" })
+  await expect(where).toBeVisible()
+  await expect(where).toContainText(
+    "Serving the challenge file — The web server answering the name on port 80",
+  )
+  await expect(where).toContainText("198.51.100.7 (not this host): Invalid response from")
+  await expect(where.getByRole("link", { name: "Which site answers the name" })).toHaveAttribute(
+    "href",
+    "/proxy/sites",
+  )
+  await expect(where.getByRole("link", { name: "Ask the challenge path yourself" })).toBeVisible()
+  expect(asked).toEqual(["/api/v1/certificates/jobs/job-issue/diagnosis"])
+})
