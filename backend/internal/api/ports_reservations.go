@@ -117,32 +117,25 @@ func ephemeralCheck(span proxysvc.PortRange) reservationCheck {
 
 // firewallCheck passes over a port an enabled firewall already has an
 // inbound rule for: whatever binds it is admitted from where that rule
-// says, or refused by it, the moment it starts.
+// says, or refused by it, the moment it starts. Rules are read as the
+// posture reads them, so one limited to an interface is not taken for one
+// covering every address.
 func firewallCheck(status *netsec.FirewallStatus, protocol string) reservationCheck {
 	return func(port int) (portReservation, bool) {
-		for _, rule := range status.Rules {
-			direction := strings.ToLower(rule.Direction)
-			if direction != "" && direction != "in" && direction != "input" {
-				continue
-			}
-			if rule.Protocol != "" && !strings.EqualFold(rule.Protocol, protocol) && !strings.EqualFold(rule.Protocol, "all") {
-				continue
-			}
-			if !portRuleMatches(rule.Port, strconv.Itoa(port)) {
-				continue
-			}
-			action := strings.ToLower(rule.Action)
-			from := strings.TrimSpace(rule.From)
-			if from == "" || strings.EqualFold(from, "anywhere") || from == "0.0.0.0/0" || from == "::/0" {
-				from = "anywhere"
-			}
-			verb := "admits it from " + from + ", so whatever binds it is reachable from there at once"
-			if strings.Contains(action, "deny") || strings.Contains(action, "reject") || strings.Contains(action, "drop") {
-				verb = "refuses it from " + from + ", so a service bound to it is not reachable from there"
-			}
-			return portReservation{Port: port, Source: "firewall", Detail: fmt.Sprintf("%s rule %d %s", status.Backend, rule.Number, verb)}, true
+		rule, ok := netsec.InboundRuleFor(status, protocol, port)
+		if !ok {
+			return portReservation{}, false
 		}
-		return portReservation{}, false
+		from := strings.TrimSpace(rule.From)
+		if from == "" || strings.EqualFold(from, "anywhere") || from == "0.0.0.0/0" || from == "::/0" {
+			from = "anywhere"
+		}
+		action := strings.ToLower(rule.Action)
+		verb := "admits it from " + from + ", so whatever binds it is reachable from there at once"
+		if strings.Contains(action, "deny") || strings.Contains(action, "reject") || strings.Contains(action, "drop") {
+			verb = "refuses it from " + from + ", so a service bound to it is not reachable from there"
+		}
+		return portReservation{Port: port, Source: "firewall", Detail: fmt.Sprintf("%s rule %d %s", status.Backend, rule.Number, verb)}, true
 	}
 }
 
@@ -207,7 +200,18 @@ func (s *Server) freePortPolicy(ctx context.Context, protocol, address string) p
 		}
 		add(portSource{Key: "deployments", Label: "Deployment port leases", State: portSourceChecked, Detail: fmt.Sprintf("%d active", len(leases))}, leaseCheck(leases, protocol, address))
 	})
+	// Inbound rules and forwards decide what other hosts reach; a loopback
+	// bind is reached by none, so neither claims a port for it.
+	loopback := false
+	if ip, err := netip.ParseAddr(address); err == nil && ip.Unmap().IsLoopback() {
+		loopback = true
+	}
+	const offHost = "a loopback bind is not reached from other hosts, so inbound policy does not apply"
 	run(func() {
+		if loopback {
+			add(portSource{Key: "firewall", Label: "Firewall rules", State: portSourceChecked, Detail: offHost}, nil)
+			return
+		}
 		if s.modules.netsec == nil {
 			add(portSource{Key: "firewall", Label: "Firewall rules", State: portSourceUnavailable, Detail: "no firewall owner"}, nil)
 			return
@@ -227,6 +231,10 @@ func (s *Server) freePortPolicy(ctx context.Context, protocol, address string) p
 		}
 	})
 	run(func() {
+		if loopback {
+			add(portSource{Key: "gateway", Label: "Gateway forwards", State: portSourceChecked, Detail: offHost}, nil)
+			return
+		}
 		if s.modules.network == nil {
 			add(portSource{Key: "gateway", Label: "Gateway forwards", State: portSourceUnavailable, Detail: "no network owner"}, nil)
 			return

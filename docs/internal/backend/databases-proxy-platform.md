@@ -1936,7 +1936,9 @@ containers/volumes/networks.
   range `selfcfg.TailnetPortMin`–`TailnetPortMax` (for a wildcard or tailnet address only), the kernel's
   ephemeral range (outgoing connections take ports from it), an enabled firewall's inbound rule already
   naming the port (admitting it from where the rule says, or refusing it — whatever binds there meets
-  that policy at once), and an enabled gateway forward translating it away. `reservations` names each
+  that policy at once; read through `netsec.InboundRuleFor`, so an interface-limited or profile rule is
+  not taken for one covering every address), and an enabled gateway forward translating it away. A
+  loopback search skips the firewall and gateway, which decide only what other hosts reach. `reservations` names each
   passed-over port (at most 32) and why; `sources` lists every owner consulted with `checked`,
   `unavailable` (with the reason) or `not_supplied` — provider reservations, for which no adapter
   exists, always say so rather than being left out.

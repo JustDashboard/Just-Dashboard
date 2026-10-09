@@ -17,9 +17,9 @@ import (
 
 func TestReservationChecksNameFuturePolicyConflicts(t *testing.T) {
 	ufw := &netsec.FirewallStatus{Backend: netsec.BackendUFW, Available: true, Enabled: true, Rules: []netsec.Rule{
-		{Number: 1, Action: "ALLOW IN", Direction: "IN", From: "Anywhere", Port: "8080", Protocol: "tcp"},
-		{Number: 2, Action: "DENY IN", Direction: "IN", From: "203.0.113.0/24", Port: "7000:7010", Protocol: ""},
-		{Number: 3, Action: "ALLOW OUT", Direction: "OUT", From: "Anywhere", Port: "9000", Protocol: "tcp"},
+		{Number: 1, Action: "ALLOW", Direction: "IN", From: "Anywhere", To: "8080/tcp", Port: "8080", Protocol: "tcp", Raw: "8080/tcp ALLOW IN Anywhere"},
+		{Number: 2, Action: "DENY", Direction: "IN", From: "203.0.113.0/24", To: "7000:7010", Port: "7000:7010", Raw: "7000:7010 DENY IN 203.0.113.0/24"},
+		{Number: 3, Action: "ALLOW", Direction: "OUT", From: "Anywhere", To: "9000/tcp", Port: "9000", Protocol: "tcp", Raw: "9000/tcp ALLOW OUT Anywhere"},
 	}}
 	firewall := firewallCheck(ufw, "tcp")
 	if r, ok := firewall(8080); !ok || !strings.Contains(r.Detail, "admits it from anywhere") {
@@ -109,7 +109,21 @@ func TestFreePortsPassOverLeasesAndSayWhatWasNotSupplied(t *testing.T) {
 	for _, source := range out.Sources {
 		states[source.Key] = source.State
 	}
-	if states["provider"] != portSourceNotSupplied || states["firewall"] != portSourceUnavailable || states["deployments"] != portSourceChecked || states["sockets"] != portSourceChecked {
+	if states["provider"] != portSourceNotSupplied || states["firewall"] != portSourceChecked || states["deployments"] != portSourceChecked || states["sockets"] != portSourceChecked {
 		t.Fatalf("every source says whether it was read: %+v", out.Sources)
+	}
+	for _, source := range out.Sources {
+		if source.Key == "firewall" && !strings.Contains(source.Detail, "loopback") {
+			t.Fatalf("a loopback search says why inbound policy does not apply: %+v", source)
+		}
+	}
+	// The policy alone, without a bind on a routable address: a wildcard
+	// search needs the firewall and gateway owners, which are unread here.
+	states = map[string]string{}
+	for _, source := range s.freePortPolicy(t.Context(), "tcp", "0.0.0.0").sources {
+		states[source.Key] = source.State
+	}
+	if states["firewall"] != portSourceUnavailable || states["gateway"] != portSourceUnavailable {
+		t.Fatalf("a wildcard search needs the firewall and gateway owners: %+v", states)
 	}
 }
