@@ -10,6 +10,10 @@ recovery.
 [Selected persistent native profiles](network-native-managers.md) also use this journal with a
 closed native owner/checkpoint recovery payload. Their addressing, DNS/domain and explicit-route
 edits always require pending confirmation; they do not create dashboard-managed boot files.
+Netplan/networkd recovery validates the exact authored and generated snapshots together. It retains
+dormant authored automatic-domain/MTU policy across a manual transition and refuses unrelated YAML
+changes before any restoration effect; the existing private undo versions and file snapshots carry
+this scope without additional serialized fields.
 
 ## Durable phases
 

@@ -1,0 +1,19 @@
+{
+  "case": "direct-networkd-automatic",
+  "command": [
+    "timeout",
+    "--kill-after=5s",
+    "240s",
+    "/home/ubuntu/jd-network-validation-tmp/native-netplan-v8/netx-auto.test",
+    "-test.run=^TestNativeManagerAutomaticOwnerLive$",
+    "-test.count=1",
+    "-test.timeout=235s",
+    "-test.v"
+  ],
+  "environment": {
+    "JD_NATIVE_AUTO_CASE": "networkd"
+  },
+  "nm_root": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/debian/extracted",
+  "exit": 0,
+  "wall_seconds": 17.68
+}

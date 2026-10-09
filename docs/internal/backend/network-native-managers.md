@@ -80,6 +80,19 @@ and [per-domain source/provider evidence](https://github.com/systemd/systemd/blo
 Raw policy remains fenced by the exact prior/candidate snapshots and ownership generation. Staging
 and recovery decoding refuse a change to that retained policy; the public intent is unchanged.
 
+Authored standalone Netplan/networkd origins have a separate closed policy check. Their generated
+shared `[DHCP]` block is accepted only when it agrees with that exact YAML origin, has the captured
+`RouteMetric=100` and explicitly disables DHCP-provided MTU. Direct networkd shared policy, default
+Netplan DHCP MTU, unknown overrides and per-protocol MTU/route/metric aliases remain refused. The
+authored DHCP/RA automatic-domain and MTU values survive a manual transition even when generation
+removes the inactive DHCP block. Staging and recovery compare the full remaining YAML semantics,
+including every unselected definition, and verify both authored/generated before and candidate
+intent. Netplan's separate RA DNS override is written for DNS suppression; this supported Netplan
+contract cannot persist IPv6 automatic-route suppression, so that request is refused before staging
+or applying a new candidate. IPv6 RA routes remain acquired when automatic DNS is suppressed.
+The [v8 authored-policy proof](evidence/native-manager-netplan-v8-2026-10-09.md) records the measured
+DHCPv4/SLAAC slice and its remaining platform limits.
+
 NetworkManager's active [IPv4 domain and search properties](https://github.com/NetworkManager/NetworkManager/blob/1.52.1/introspection/org.freedesktop.NetworkManager.IP4Config.xml)
 and corresponding IPv6 properties are read from the pinned unique owner and exact selected IP-config
 object. Their bounded union covers DHCP domain-name (option 15) and search-list/RA domains without
@@ -94,9 +107,10 @@ Immediate requests are refused before taking a recovery lock or retrying prior t
 The browser sends pending apply even when its ordinary managed-network preference is off. Before
 activation, the mode-0600 journal contains a closed native recovery command with exact selected file
 snapshots, candidate/rollback staging identities, owner bus/boot identity and any native checkpoint.
-The standalone recovery executable must advertise `jd-native-manager-v6` before admission, including
+The standalone recovery executable must advertise `jd-native-manager-v8` before admission, including
 networkd automatic-domain preservation/provenance, both NetworkManager active domain properties and
-selected-file/stage ownership checks before checkpoint rollback or restored-profile activation.
+selected-file/stage ownership checks before checkpoint rollback or restored-profile activation,
+and exact authored/generated Netplan policy validation across automatic/manual transitions.
 An older helper is refused before journaling
 or arming a new native change. The private undo payload remains at v3 with its peer vocabulary;
 the domain policy is already captured in existing file snapshots, so no additional raw policy is serialized.
@@ -174,8 +188,9 @@ records the matching production build, selected package tests and retained UI co
 actual DHCPv4/SLAAC and final-helper rollback/deadline proof to frozen source. The
 [exact production assembly proof](evidence/native-manager-v6-assembly-2026-10-09.md) passes those
 direct NetworkManager/networkd fixtures against the assembled owner-reader and v6 recovery files.
-Netplan automatic
-admission, wider platform owners and host reboot remain open; source ancestry is not interchangeable.
+The [v8 authored Netplan proof](evidence/native-manager-netplan-v8-2026-10-09.md) measures the explicit
+standalone policy above. Default Netplan DHCP MTU, DHCPv6 acquisition, wider platform owners and host
+reboot remain open; source ancestry is not interchangeable.
 
 `native_manager_recovery_test.go` uses bounded root-owned file fixtures and injected storage failures
 to check durable confirmation before cleanup, cleanup retry after checkpoint release, foreign-stage

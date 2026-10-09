@@ -1,0 +1,16 @@
+{
+  "case": "Netplan/networkd explicit authored automatic policy",
+  "command": [
+    "timeout",
+    "--kill-after=5s",
+    "240s",
+    "env",
+    "/home/ubuntu/jd-network-validation-tmp/native-netplan-v8/netx-auto.test",
+    "-test.run=^TestNativeManagerAutomaticOwnerLive$",
+    "-test.count=1",
+    "-test.timeout=235s",
+    "-test.v"
+  ],
+  "exit": 0,
+  "wall_seconds": 40.7
+}

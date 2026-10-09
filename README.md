@@ -92,8 +92,9 @@ measurements from controlled sources; they cannot manage a host. There is no fle
   Retained outcomes remain inspectable after uncertainty; the dashboard does not replay an apply.
   Existing native profiles expose owner, saved intent and current evidence separately. The
   [native profile adapter and its current limits](docs/internal/backend/network-native-managers.md)
-  describe conservative L3 editing, durable terminal cleanup, separate verified Ubuntu
-  Netplan/NetworkManager origin recovery, and structural/automatic-address work awaiting acceptance.
+  describe conservative L3 editing, durable terminal cleanup, verified Ubuntu Netplan/NetworkManager
+  origin recovery, direct DHCPv4/SLAAC acquisition and bounded authored Netplan automatic-policy
+  preservation. Structural editing, broader native policies and host reboot still await acceptance.
   Connection path explains a chosen host/container tuple with named evidence and bounded optional TCP
   measurement. Saved runs retain quick-tool and source-sensitive investigation evidence, stages and
   outcomes across restarts; Drift compares

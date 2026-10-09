@@ -96,6 +96,10 @@ to the contribution terms above, including the additional licence grant to the p
   has explicit `JD_NATIVE_AUTO_CASE=networkd` or `NetworkManager` selections for its verified direct
   owner slices. Its default all-owner opt-in also runs the still-open Netplan admission cases; those
   known refusals remain failed acceptance rather than successful skips.
+  `JD_NATIVE_AUTO_CASE=netplan JD_NATIVE_NETPLAN_AUTO_POLICY=explicit` selects the separately verified
+  authored Netplan/networkd DHCPv4/SLAAC policy with DHCP MTU disabled and explicit DHCP/RA domains.
+  Follow its [v8 source/helper proof](docs/internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md);
+  this selection does not replace the default-policy, DHCPv6 or structural acceptance requirements.
 - The container-source investigator has an opt-in disposable-container fixture, `JD_NETPATH_LIVE=1`.
   Follow [its native acceptance command](docs/internal/backend/network-investigator.md)
   to compile the narrow test binary and run it as root. It creates a network-none fixture with no

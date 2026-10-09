@@ -68,8 +68,10 @@ client reachability.
 ## Open acceptance
 
 The full [187-requirement ledger](../implementation-status.md) remains six verified, 53 in progress
-and 128 pending. P11 still requires existing-controller structural editing, Netplan automatic
-admission, wider owner/platform and reboot proof. P17 still requires broader query/zone/view/client
+and 128 pending. The subsequent [v8 authored Netplan proof](../../../internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md)
+passes an explicit standalone DHCPv4/SLAAC policy on its separately frozen source. P11 still requires
+existing-controller structural editing, default Netplan DHCP MTU, DHCPv6 acquisition, wider
+owner/platform and reboot proof. P17 still requires broader query/zone/view/client
 policy controls. The historical report scores are unchanged.
 
 The [final pre-push documentation review](native-dns-pre-push-review.json) compares the complete diff

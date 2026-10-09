@@ -1,0 +1,28 @@
+{
+  "source": "Exact environment arguments used in the retained execution commands; original result/log files remain unchanged.",
+  "common": {
+    "JD_NETNS_LIVE": "1",
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2",
+    "TMPDIR": "/home/ubuntu/jd-network-validation-tmp/native-netplan-v8"
+  },
+  "runs": {
+    "netplan-explicit-run01": {
+      "JD_NATIVE_AUTO_CASE": "netplan",
+      "JD_NATIVE_NETPLAN_AUTO_POLICY": "explicit",
+      "JD_NATIVE_MANAGER_NM_ROOT": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/debian/extracted"
+    },
+    "ubuntu-exact-origin-run01": {
+      "JD_NATIVE_MANAGER_CASE": "netplan-NetworkManager",
+      "JD_NATIVE_MANAGER_NM_ROOT": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/extracted"
+    },
+    "direct-nm-automatic-run01": {
+      "JD_NATIVE_AUTO_CASE": "NetworkManager",
+      "JD_NATIVE_MANAGER_NM_ROOT": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/debian/extracted"
+    },
+    "direct-networkd-automatic-run01": {
+      "JD_NATIVE_AUTO_CASE": "networkd",
+      "JD_NATIVE_MANAGER_NM_ROOT": "/home/ubuntu/Just-Dashboard-network-native-managers-artifacts/native-tools/debian/extracted"
+    }
+  }
+}

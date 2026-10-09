@@ -54,7 +54,9 @@ Ubuntu generated-origin pass](native-dns-integrated-acceptance.md).
 
 ## Scope still open
 
-Existing bond/VRF structural editing, Netplan automatic-addressing admission, wider native owners
-and actual host reboot remain open in P11. Disposable fixture process death, native checkpoint
+The subsequent [v8 authored Netplan proof](../../../internal/backend/evidence/native-manager-netplan-v8-2026-10-09.md)
+passes an explicit standalone DHCPv4/SLAAC policy on its separately frozen source. Existing bond/VRF
+structural editing, default Netplan DHCP MTU, DHCPv6 acquisition, wider native owners and actual host
+reboot remain open in P11. Disposable fixture process death, native checkpoint
 expiry and container restart are distinct from those acceptance requirements.
 The [full ledger](../implementation-status.md) keeps P11 in progress.
