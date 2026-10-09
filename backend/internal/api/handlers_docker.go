@@ -53,6 +53,12 @@ func (s *Server) mountDockerRoutes(r chi.Router) {
 			// Where a published port is actually reachable, including
 			// through the reverse proxy this dashboard also manages.
 			r.Method(http.MethodGet, "/{id}/routes", s.handle(s.handleContainerRoutes))
+			// The inbound path to one published port, Docker's NAT and the
+			// forwarded leg's filters included. It reads the host's iptables
+			// and firewall, as the connection investigator does, so it is the
+			// investigator's capability.
+			r.With(httpx.RequireCapability(auth.CapSystemAdmin)).
+				Method(http.MethodGet, "/{id}/published/{port}", s.handle(s.handleContainerPublishedPath))
 			r.Method(http.MethodGet, "/{id}/stats/stream", s.handle(s.handleContainerStatStream))
 			r.Method(http.MethodGet, "/stats/history", s.handle(s.handleContainerSparklines))
 			r.Method(http.MethodGet, "/{id}/stats/history", s.handle(s.handleContainerStatsHistory))

@@ -15,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/go-chi/chi/v5"
 )
@@ -110,6 +111,19 @@ func (s *Server) handleSecurityPosture(w http.ResponseWriter, r *http.Request) e
 	})
 	run(func() { in.SSH = s.modules.netsec.SSHDStatus(ctx) })
 	run(func() { in.Network = netsec.ReadHostNetwork(ctx) })
+	run(func() {
+		address, err := publicHostAddress()
+		in.PublicAddress, in.PublicAddressRead = address, err == nil
+	})
+	run(func() {
+		// The gateway's reading of the nftables ruleset already classifies
+		// every filtering base chain; the posture names the ones no adapter
+		// models as unknown rather than reading the ruleset a second way.
+		if s.modules.network == nil {
+			return
+		}
+		in.Policy = policyCoverage(s.modules.network.GatewayCapability(ctx))
+	})
 	run(func() {
 		// The containers are read beside the walk, as the ports page reads
 		// them, so a port Docker publishes is graded as the page grades it —
@@ -536,4 +550,19 @@ func (s *Server) handleBanOffenders(w http.ResponseWriter, r *http.Request) erro
 	}
 	httpx.JSON(w, http.StatusOK, netsec.SummariseBans(events, top))
 	return nil
+}
+
+// policyCoverage is the gateway's classification of the filtering base
+// chains, as the posture reads it. A capability with no layers and a reason
+// is a ruleset that could not be read — nft missing, unreadable or printed in
+// a form not understood — which the posture names as an unknown.
+func policyCoverage(capability netx.Capability) *netsec.PolicyCoverage {
+	coverage := &netsec.PolicyCoverage{}
+	if len(capability.Layers) == 0 && capability.Reason != "" && !capability.Writable {
+		coverage.Error = capability.Reason
+	}
+	for _, l := range capability.Layers {
+		coverage.Layers = append(coverage.Layers, netsec.PolicyLayer{Family: l.Family, Table: l.Table, Chain: l.Chain, Hook: l.Hook, Policy: l.Policy, Status: l.Status})
+	}
+	return coverage
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/updates"
 )
@@ -153,6 +154,26 @@ func TestPostureAnswersOnABareHost(t *testing.T) {
 	}
 	if posture.CheckedAt.IsZero() {
 		t.Error("no evaluation time")
+	}
+	// Provider policy is never visible to this dashboard; a bare host's
+	// verdict says so rather than leaving it out.
+	if len(posture.Unknowns) == 0 || posture.Unknowns[0].Layer != "provider" {
+		t.Errorf("unknowns = %+v", posture.Unknowns)
+	}
+}
+
+func TestPolicyCoverageKeepsAnUnreadRulesetApartFromAnEmptyOne(t *testing.T) {
+	unread := policyCoverage(netx.Capability{Reason: "nftables is not installed on this host; the gateway needs the nft command."})
+	if unread.Error == "" || len(unread.Layers) != 0 {
+		t.Fatalf("unread ruleset: %+v", unread)
+	}
+	read := policyCoverage(netx.Capability{Writable: true, Layers: []netx.PolicyLayer{{Family: "inet", Table: "crowdsec", Chain: "input", Hook: "input", Policy: "accept", Status: "unknown"}}})
+	if read.Error != "" || len(read.Layers) != 1 || read.Layers[0].Table != "crowdsec" || read.Layers[0].Status != "unknown" {
+		t.Fatalf("read ruleset: %+v", read)
+	}
+	blocked := policyCoverage(netx.Capability{Reason: "The inet table \"edge\" can drop translated traffic", Layers: []netx.PolicyLayer{{Family: "inet", Table: "edge", Chain: "fwd", Hook: "forward", Status: "blocked"}}})
+	if blocked.Error != "" || len(blocked.Layers) != 1 {
+		t.Fatalf("a read ruleset with a blocker is not an unread one: %+v", blocked)
 	}
 }
 

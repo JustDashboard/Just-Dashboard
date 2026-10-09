@@ -1633,19 +1633,23 @@ func judgeReach(port dockerx.PortExposure, route PortRoute) (reach, reasoning st
 		// The trap. Worth spelling out every time, because the operator has
 		// evidence in front of them that says the opposite.
 		return reachExternal, "Bound to every interface. The firewall has a rule denying this port, but Docker publishes ports with NAT rules that are consulted before " +
-			route.Firewall.Backend + "'s filter chain — so the rule does not apply to it and the port is reachable anyway.", true
+			route.Firewall.Backend + "'s filter chain — so the rule does not apply to it, and nothing on this host stops it unless a DOCKER-USER rule does." + providerUnseen, true
 	case route.Firewall.Verdict == "allowed":
-		return reachExternal, "Bound to every interface and allowed by the firewall: " + route.Firewall.Rule + ".", true
+		return reachExternal, "Bound to every interface and allowed by the firewall: " + route.Firewall.Rule + "." + providerUnseen, true
 	case strings.HasPrefix(strings.ToLower(route.Firewall.DefaultIncoming), "deny") && !route.Firewall.DockerBypass:
 		return reachBlocked, "Bound to every interface. No firewall rule names this port and the default incoming policy is to deny.", true
 	case route.Firewall.DockerBypass:
 		return reachExternal, "Bound to every interface. Docker's own NAT rules are consulted before " +
-			route.Firewall.Backend + "'s, so this port is reachable regardless of the default policy.", true
+			route.Firewall.Backend + "'s, so the default policy does not hold it back." + providerUnseen, true
 	default:
 		return reachExternal, "Bound to every interface, and the firewall's default incoming policy is " +
-			route.Firewall.DefaultIncoming + ".", true
+			route.Firewall.DefaultIncoming + "." + providerUnseen, true
 	}
 }
+
+// providerUnseen qualifies every "reachable from outside" this host can
+// conclude: what stands in front of the host is not visible from it.
+const providerUnseen = " Provider policy in front of this host is not visible here, so reaching it from outside is unproven until an external check measures it."
 
 // Compose includes, substitutions, plugins and driver options are evaluated by
 // Docker. Until that full model has a shared policy, executing or editing it
