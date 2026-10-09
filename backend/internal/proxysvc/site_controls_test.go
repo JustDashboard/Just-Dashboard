@@ -103,6 +103,26 @@ func TestControlHelpers(t *testing.T) {
 	if scheme, port, name := siteEndpoint(host); scheme != "https" || port != 8443 || name != "app.x.test" {
 		t.Fatalf("endpoint = %s %d %s", scheme, port, name)
 	}
+	// A site on one address is reached at that address, where nginx picks
+	// it, rather than on loopback, where a catch-all on the wildcard would
+	// answer; a wildcard is reached on loopback in its family.
+	tailnet := VHost{Listen: []string{"100.64.1.2:443 ssl", "100.64.1.2:443 quic", "[::]:80"}}
+	for _, tc := range []struct {
+		v    VHost
+		port int
+		udp  bool
+		want string
+	}{
+		{host, 8443, false, "127.0.0.1"},
+		{host, 80, false, "127.0.0.1"},
+		{tailnet, 443, false, "100.64.1.2"},
+		{tailnet, 443, true, "100.64.1.2"},
+		{tailnet, 80, false, "::1"},
+	} {
+		if got := dialAddress(tc.v, tc.port, tc.udp); got != tc.want {
+			t.Errorf("dialAddress(%v, %d, %v) = %s, want %s", tc.v.Listen, tc.port, tc.udp, got, tc.want)
+		}
+	}
 }
 
 // A hand-written file with an empty limit_conn or listen does not stop the

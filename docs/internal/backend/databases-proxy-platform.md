@@ -2434,8 +2434,11 @@ containers/volumes/networks.
   The connection investigator reuses it as the **service policy** of each site that forwards to the
   destination port (`netpath/policy.go`), with the limitation that a direct connection to the port meets
   none of it. `POST /proxy/sites/{name}/controls/verify {path, asset}` (`system.admin`, audited
-  `proxy.site.controls.verify` with the request count) measures them against this nginx on loopback,
-  naming the site in SNI and Host as the request tester does (`localTarget`: only an enabled nginx site
+  `proxy.site.controls.verify` with the request count) measures them against this nginx on loopback —
+  or, for a site whose listens on the port all name one address, at that address (`dialAddress`), so
+  nginx answers from the block that address picks rather than a catch-all on the wildcard, and only
+  where it is one of this host's own (`hostAddress`; otherwise nothing is sent) — naming the site in
+  SNI and Host as the request tester does (`localTarget`: only an enabled nginx site
   that takes its first exact name on its first TLS port, else its first plain one, and refused when
   another enabled site wins that name on the port, whose controls would be measured instead): HTTP/2 from a
   browser's ALPN offer (`verified`, `not-effective` when the site asks for it and nginx does not
@@ -2447,8 +2450,8 @@ containers/volumes/networks.
   (`not-measured` without one); and, last, since every other check's requests count against it, the
   request limit from burst + 2 requests at once, at most 40, counting the site's `limit_req_status`
   (a dry run is verified by refusing nothing; `not-measured` when the burst needs more than 40, when
-  without `nodelay` nginx would hold the check over five seconds, or when 127.0.0.1 is on the site's
-  exempt list). The connection limit is `not-measured`: `limit_conn` counts requests still being
+  without `nodelay` nginx would hold the check over five seconds, or when the address the requests
+  come from — loopback, or the site's own address — is on the site's exempt list). The connection limit is `not-measured`: `limit_conn` counts requests still being
   answered, which a short request does not hold. The requests reach the application. The site page's
   **Controls** panel (`site-controls-panel.tsx`, `site-controls.ts`) lists the policy and, for an
   administrator, measures it with a path and an optional asset path. Tests:

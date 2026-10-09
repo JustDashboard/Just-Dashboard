@@ -254,7 +254,8 @@ const maxLimitRequests = 40
 var ErrVerifyPath = errors.New("invalid path")
 
 // VerifySiteControls measures a site's controls against this nginx on
-// loopback, naming the site in SNI and Host as the request tester does.
+// loopback, or on the one address of this host the site listens on, naming
+// the site in SNI and Host as the request tester does.
 func (s *Service) VerifySiteControls(ctx context.Context, site string, opts VerifyOptions, vhosts []VHost) (*ControlsVerification, error) {
 	for _, p := range []*string{&opts.Path, &opts.Asset} {
 		if *p == "" {
@@ -293,8 +294,14 @@ func (s *Service) VerifySiteControls(ctx context.Context, site string, opts Veri
 		// would be measured under this site's policy.
 		return nil, fmt.Errorf("nginx answers %s on port %d from %s, not %s, so this site's controls cannot be measured there", host, port, target.site, site)
 	}
+	address, quicAddress := dialAddress(*vhost, port, false), dialAddress(*vhost, port, true)
+	for _, a := range []string{address, quicAddress} {
+		if ip := net.ParseIP(a); !ip.IsLoopback() && !hostAddress(ip) {
+			return nil, fmt.Errorf("%s listens on %s, which is not an address of this host, so its controls are not measured from here", site, a)
+		}
+	}
 	out := &ControlsVerification{Site: site, URL: target.url.String(), CheckedAt: time.Now().UTC(), Policy: policy}
-	m := &measurer{target: target, scheme: scheme, port: port, host: host, out: out}
+	m := &measurer{target: target, scheme: scheme, address: address, quicAddress: quicAddress, port: port, host: host, out: out}
 	defer func() { out.Requests = int(m.requests.Load()) }()
 	// The request limit is measured last: every request the other checks
 	// send counts against it, and a burst sent first would leave them
@@ -369,12 +376,42 @@ func siteEndpoint(v VHost) (scheme string, port int, host string) {
 	return scheme, port, host
 }
 
+// dialAddress is where this host reaches the site's TCP socket on port, or
+// its QUIC one: loopback for a listen on every address, else the one address
+// the site listens on, so nginx answers from the server block that address
+// picks rather than from a catch-all on the wildcard.
+func dialAddress(v VHost, port int, udp bool) string {
+	address := ""
+	for _, l := range v.Listen {
+		b, ok := listenBind(strings.Fields(l), true)
+		if !ok || b.port != port || b.udp != udp {
+			continue
+		}
+		switch ip := net.ParseIP(b.addr); {
+		case ip.Equal(net.IPv4zero):
+			return "127.0.0.1"
+		case ip.Equal(net.IPv6unspecified):
+			address = "::1"
+		case address == "":
+			address = b.addr
+		}
+	}
+	if address == "" {
+		return "127.0.0.1"
+	}
+	return address
+}
+
 type measurer struct {
 	target requestTarget
 	scheme string
-	port   int
-	host   string
-	out    *ControlsVerification
+	// address and quicAddress are where the site's TCP and QUIC sockets
+	// on port are reached from here.
+	address     string
+	quicAddress string
+	port        int
+	host        string
+	out         *ControlsVerification
 	// requests counts what was sent; the limit check sends at once.
 	requests atomic.Int64
 }
@@ -386,7 +423,7 @@ func (m *measurer) client() *http.Client {
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-				return dialer.DialContext(ctx, "tcp", net.JoinHostPort("127.0.0.1", port))
+				return dialer.DialContext(ctx, "tcp", net.JoinHostPort(m.address, port))
 			},
 			TLSClientConfig:    &tls.Config{ServerName: m.host, InsecureSkipVerify: true},
 			DisableKeepAlives:  true,
@@ -425,7 +462,7 @@ func (m *measurer) http2(ctx context.Context, control PolicyControl) ControlChec
 		return ControlCheck{State: state, Detail: "The site has no TLS port; browsers speak HTTP/2 only over TLS, so there is nothing to negotiate."}
 	}
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
-	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(m.port)),
+	conn, err := tls.DialWithDialer(dialer, "tcp", net.JoinHostPort(m.address, strconv.Itoa(m.port)),
 		&tls.Config{ServerName: m.host, InsecureSkipVerify: true, NextProtos: []string{"h2", "http/1.1"}})
 	if err != nil {
 		return ControlCheck{State: ControlNotMeasured, Detail: "The TLS handshake failed: " + err.Error() + "."}
@@ -451,7 +488,7 @@ func (m *measurer) http3(ctx context.Context, control PolicyControl) ControlChec
 	if !control.Configured {
 		return ControlCheck{State: ControlNotConfigured, Detail: "The site has no QUIC listen, so it does not offer HTTP/3."}
 	}
-	probe := probeQUIC(ctx, net.JoinHostPort("127.0.0.1", strconv.Itoa(m.port)))
+	probe := probeQUIC(ctx, net.JoinHostPort(m.quicAddress, strconv.Itoa(m.port)))
 	evidence := []string{}
 	if probe.Answered {
 		evidence = append(evidence, "UDP "+strconv.Itoa(probe.Port)+" answered a QUIC packet with versions "+strings.Join(probe.Versions, ", "))
@@ -545,9 +582,12 @@ func (m *measurer) limit(ctx context.Context, control PolicyControl, s *Service,
 	if limit.zone == "" {
 		return ControlCheck{State: ControlNotMeasured, Detail: "The limit's settings could not be read from the site's file."}
 	}
-	e := accessEval{tree: tree, source: netip.MustParseAddr("127.0.0.1")}
+	// A connection to one of the host's own addresses comes from that
+	// address, as one to loopback comes from loopback.
+	source := netip.MustParseAddr(m.address)
+	e := accessEval{tree: tree, source: source}
 	if exempt, ok := e.geo(limitIdent(limit.zone) + "_limit_exempt"); ok && exempt == "1" {
-		return ControlCheck{State: ControlNotMeasured, Detail: "127.0.0.1 is on the site's list of addresses no limit counts, so a request from here is never refused."}
+		return ControlCheck{State: ControlNotMeasured, Detail: source.String() + " is on the site's list of addresses no limit counts, so a request from here is never refused."}
 	}
 	perSecond, ok := ratePerSecond(zoneRates(tree)[limit.zone])
 	if !ok {
