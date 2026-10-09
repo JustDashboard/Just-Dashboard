@@ -75,9 +75,12 @@ func fakeACME(t *testing.T, problem map[string]any) string {
 		w.Header().Set("Link", "<"+base+"/authz/1>;rel=\"up\"")
 		reply(w, 200, base+"/chall/1", challenge())
 	})
-	server := httptest.NewServer(mux)
+	// The address is known before the server starts, so no handler reads
+	// base while it is being written.
+	server := httptest.NewUnstartedServer(mux)
+	base = "http://" + server.Listener.Addr().String()
+	server.Start()
 	t.Cleanup(server.Close)
-	base = server.URL
 	return base + "/dir"
 }
 
