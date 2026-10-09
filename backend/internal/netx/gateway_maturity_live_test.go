@@ -434,3 +434,77 @@ func TestLiveModesGoldenLoadsAndDriftReadsItAsOwned(t *testing.T) {
 		}
 	}
 }
+
+const gwLiveEcho6 = `
+import http.server, socket, socketserver, sys
+class S(http.server.ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = sys.argv[1], self.server_address[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = self.client_address[0].encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a):
+        pass
+S((sys.argv[1], int(sys.argv[2])), H).serve_forever()
+`
+
+func gwLiveServe6(t *testing.T, ns, addr string, port int) {
+	t.Helper()
+	script := filepath.Join(t.TempDir(), "echo6.py")
+	if err := os.WriteFile(script, []byte(gwLiveEcho6), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := gwLiveCmd(context.Background(), "ip", "netns", "exec", ns, "timeout", "300", "python3", script, addr, fmt.Sprint(port))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if out, _ := gwInNS(t, ns, "ss", "-ltn"); strings.Contains(out, fmt.Sprintf("[%s]:%d", addr, port)) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("the IPv6 echo server did not start in %s", ns)
+}
+
+func TestLiveIPv6PrefixTranslationMapsBothWays(t *testing.T) {
+	gwLiveRequired(t)
+	gw, cl, sv, svc := gwLiveTopology(t)
+	ctx := context.Background()
+	for _, c := range [][]string{
+		{cl, "ip", "-6", "addr", "add", "2001:db8:100::2/64", "dev", "c0", "nodad"},
+		{cl, "ip", "-6", "route", "add", "2001:db8:200::/64", "via", "2001:db8:100::1"},
+		{sv, "ip", "-6", "addr", "add", "fd00:4::25/64", "dev", "s0", "nodad"},
+		{sv, "ip", "-6", "route", "add", "default", "via", "fd00:4::1"},
+		{gw, "ip", "-6", "addr", "add", "2001:db8:100::1/64", "dev", "gwc", "nodad"},
+		{gw, "ip", "-6", "addr", "add", "fd00:4::1/64", "dev", "gws", "nodad"},
+		{gw, "sysctl", "-w", "net.ipv6.conf.all.forwarding=1"},
+		{gw, "ip6tables", "-P", "FORWARD", "DROP"},
+	} {
+		gwMustInNS(t, c[0], c[1:]...)
+	}
+	gwLiveServe6(t, sv, "fd00:4::25", 80)
+	gwLiveServe6(t, cl, "2001:db8:100::2", 8000)
+	if _, ok := gwFetchFrom(t, cl, "http://[2001:db8:200::25]/"); ok {
+		t.Fatal("reached the private network before the mapping existed")
+	}
+	if _, err := svc.AddNAT(ctx, NATRequest{Name: "site", Source: "fd00:4::/64", Interface: "gwc", Mode: "nptv6", Translated: "2001:db8:200::/64"}, "", "test"); err != nil {
+		t.Fatal(err)
+	}
+	// Inbound: the host part is kept and the visitor seen as itself.
+	if body, ok := gwFetchFrom(t, cl, "http://[2001:db8:200::25]/"); !ok || body != "2001:db8:100::2" {
+		t.Fatalf("inbound through the prefix mapping: %q %v", body, ok)
+	}
+	// Outbound: the private host leaves as the same host part in the public prefix.
+	if body, ok := gwFetchFrom(t, sv, "http://[2001:db8:100::2]:8000/"); !ok || body != "2001:db8:200::25" {
+		t.Fatalf("outbound through the prefix mapping: %q %v", body, ok)
+	}
+}
