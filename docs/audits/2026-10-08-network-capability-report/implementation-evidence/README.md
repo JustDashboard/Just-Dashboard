@@ -71,6 +71,12 @@ guard, archive restore, Linux kill switch and tailnet/Headscale approval reading
 changed-file gate, owned-namespace WireGuard races, failed iterations and screenshots beside it.
 P16 workflows, off-host reachability and live control servers remain open.
 
+[Diagnostics maturity acceptance](network-diagnostics-maturity-acceptance.md) (C088–C114) records
+one structured evidence model for all 26 server tools, saved SSH trust and Wake-on-LAN devices,
+server-held quick results, metric history and the measured owned-namespace capture cost. It keeps
+the failed first gate, the review fixes and the passing gate beside it. Production capture cost
+and a real woken device remain open.
+
 ## Native network and independent recovery
 
 [`native-network-race.txt`](native-network-race.txt) is the successful integrated invocation from

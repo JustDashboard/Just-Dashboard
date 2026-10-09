@@ -2,8 +2,8 @@
 
 This records what shipped for the diagnostics package on branch
 `implement/network-diagnostics-maturity` (from PR head `4338e6cc`), the tests that prove each row,
-what remains outside the evidence, and the final scoped check. Raw logs are kept outside the
-repository in `/home/ubuntu/Just-Dashboard-net-diagnostics-artifacts/`. It changes no ledger status;
+what remains outside the evidence, and the final scoped check. Raw logs are kept beside
+this record in [`network-diagnostics-maturity/`](network-diagnostics-maturity/). It changes no ledger status;
 the proposed status per row is for the ledger owner.
 
 ## What changed for every tool
@@ -68,8 +68,7 @@ this host (owned namespace `jd-cap-*`, removed afterwards; none left):
 | UDP flood at 10,000 packets / 2 MiB / 512-byte snapshots | 103 ms | 4,578 | 2,096,748 B | byte_limit | 28 ms | 16,768 KiB | 36 ms | 3,952 KiB |
 | Idle to a 10 s time bound | 10.038 s | 0 | 24 B | time_limit | 21 ms | 17,024 KiB | 149 ms | 240 KiB |
 
-The idle backend CPU includes the test's own 20 ms heap sampler. Raw log:
-`capture-cost.log` in the artifacts directory.
+The idle backend CPU includes the test's own 20 ms heap sampler. [Raw log](network-diagnostics-maturity/capture-cost.log).
 
 ## Final checks
 
@@ -94,5 +93,6 @@ the inspector, and the `mtu` evidence case, whose text matched a hidden card fir
 is now validated (an incomplete body becomes a failed read with retry), the fixture answers
 `/history`, and the evidence cases ignore hidden cards. A read-only review of the same diff then
 found trust-binding, replacement, NODATA, site-audit, wake and bounding issues; they are fixed in
-`c5085d31` with regression tests before the passing run above. Raw logs: `test-changed-1.log`,
-`test-changed-2.log`, `spec-run-1.log` and `capture-cost.log` in the artifacts directory.
+`c5085d31` with regression tests before the passing run above. Raw logs: [first failed gate](network-diagnostics-maturity/test-changed-1.log),
+[passing gate](network-diagnostics-maturity/test-changed-2.log), [selected spec run](network-diagnostics-maturity/spec-run-1.log) and
+[capture cost](network-diagnostics-maturity/capture-cost.log).
