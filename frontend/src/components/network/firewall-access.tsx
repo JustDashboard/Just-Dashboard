@@ -182,7 +182,7 @@ export function FirewallEnforcement({ status }: { status: FirewallStatus }) {
   const zones = status.zones ?? []
   if (detection.length + families.length + zones.length === 0) return null
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Enforcement" />
       <PanelBody className="space-y-5">
         {detection.length > 0 && (

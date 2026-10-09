@@ -24,7 +24,7 @@ export function RouteHistoryPanel({ target }: { target?: string }) {
   )
   const data = history.data
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader
         title="Route history"
         actions={

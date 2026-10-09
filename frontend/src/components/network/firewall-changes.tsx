@@ -105,7 +105,7 @@ export function FirewallHistoryPanel() {
     30_000,
   )
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader title="Recent firewall changes" />
       <PanelBody>
         {history.error && !history.data ? (
@@ -174,7 +174,7 @@ export function FirewallPlanTray({
   }
   const losses = current ? accessLosses(current.checks) : []
   return (
-    <Panel>
+    <Panel plain>
       <PanelHeader
         title="Plan"
         actions={
