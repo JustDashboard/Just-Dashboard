@@ -25,6 +25,13 @@ group assignment. It records selected-policy current-read freshness, immutable c
 native null/empty comments and separate actual three-engine current-read/cleanup proof. Broader
 P17 controls remain open; the original failed browser runs remain attributed separately.
 
+[Reviewed custom-domain filter acceptance](dns-service-domain-filter-ui-acceptance.md) adds mounted
+AdGuard suffix and Pi-hole exact-domain controls, explicit native group memberships, removable
+disappeared selections, ambiguity counts and immutable current-read confirmation holds. It records
+the matching production build, all 205 reachable executable browser cases, twelve captures and
+separate final assembled AdGuard/Pi-hole configuration/restart/cleanup proof. Original browser and
+native preflight failures remain preserved; complete P17/C074 and client filtering remain open.
+
 [Kernel observer acceptance](observer-kernel-acceptance.md) records the bounded native observer,
 owned detach/retry, durable batch receipts and actual Docker/process-death fixtures.
 [Observer UI acceptance](observer-ui-acceptance.md) records its separate measurement channels,

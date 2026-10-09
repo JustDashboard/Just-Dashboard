@@ -64,8 +64,10 @@ Retained reviews distinguish absent, ambiguous and other-target policy with owne
 and show native enabled/groups/comment metadata and configured
 evidence before/readback. Full selected fingerprints and metadata participate in current-read and
 open-confirmation checks; configured rules do not establish precedence or measured client filtering.
-Technitium custom-domain controls remain unsupported. Matching browser/native assembled acceptance
-is required separately from the isolated contract tests and backend proof.
+Technitium custom-domain controls remain unsupported. The
+[assembled custom-domain acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui-acceptance.md)
+records the fresh production build, all 24 interactions, current-read holds, twelve captures and
+separate exact-source AdGuard/Pi-hole configuration/restart proofs. Broader P17 acceptance remains open.
 `service-filters.tsx` adds a separate native filter reading on read-only or managed connections:
 redacted subscription origins, IDs, counts/update metadata, custom-rule fingerprints and explicit
 native group memberships. Configured inventory, native status, unavailable/manual/app scope and

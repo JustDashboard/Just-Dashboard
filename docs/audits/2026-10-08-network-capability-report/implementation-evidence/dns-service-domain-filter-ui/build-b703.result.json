@@ -1,0 +1,15 @@
+{
+  "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "exit_code": 0,
+  "wall_seconds": 17.055,
+  "raw_sha256": "2cc01dd4fb50a07cc1029f3aab0e25063f174322c5c244323bde4722a9d8f34f",
+  "source_unchanged": true,
+  "build_id": "q1-B_Vn9ngYWudWSVJvRc",
+  "argv": [
+    "bun",
+    "run",
+    "build"
+  ],
+  "cwd": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend",
+  "tmpdir": "/home/ubuntu/jd-df-t"
+}

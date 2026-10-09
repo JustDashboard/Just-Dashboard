@@ -188,8 +188,12 @@ its [replacement handler](https://github.com/AdguardTeam/AdGuardHome/blob/v0.107
 [AdGuard DNS filter syntax](https://adguard-dns.io/kb/general/dns-filtering-syntax/) and
 [FTL 6.7.1 exact-domain API](https://github.com/pi-hole/FTL/blob/v6.7.1/src/api/docs/content/specs/domains.yaml).
 The detail sheet builds those closed engine-specific intents and shows selected native metadata
-before/readback. Unknown Pi-hole group inventory holds additions. Complete assembled browser/native
-acceptance and broader P17 criteria remain separate from isolated backend and frontend checks.
+before/readback. Unknown Pi-hole group inventory holds additions. A configured missing selected ID
+stays in the draft until explicitly removed; unknown inventory does not establish disappearance.
+Ambiguous or other-target readback is labeled with owner/exact counts instead of claimed absence.
+The [assembled browser/native acceptance](../../audits/2026-10-08-network-capability-report/implementation-evidence/dns-service-domain-filter-ui-acceptance.md)
+records its fresh build, complete reachable gate and exact matching backend bytes; broader P17
+criteria remain open.
 The [source-matched custom-domain acceptance](evidence/dns-service-domain-filters-2026-10-09.md)
 records final scoped/race checks, both actual owned engine passes, full source/binary/raw hashes,
 selected-current reads and unselected preservation, with the preparation failure kept separate.

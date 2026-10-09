@@ -1,0 +1,17 @@
+{
+  "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "exit_code": 1,
+  "wall_seconds": 80.376,
+  "raw_sha256": "cac2932d7c5872ac8d25f4dd9e2925c326af71e3a9aa7a581bc3afbb8a281390",
+  "argv": [
+    "bunx",
+    "playwright",
+    "test",
+    "tests/browser/network-dns-domain-filters.spec.ts",
+    "--workers=1",
+    "--output=/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-browser-first-output"
+  ],
+  "base_url": "http://127.0.0.1:43151",
+  "build_id": "q1-B_Vn9ngYWudWSVJvRc",
+  "source_unchanged": true
+}

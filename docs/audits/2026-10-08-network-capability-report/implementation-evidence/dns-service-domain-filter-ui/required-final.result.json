@@ -1,0 +1,20 @@
+{
+  "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+  "exit_code": 0,
+  "wall_seconds": 588.175,
+  "raw_sha256": "2c3e311fdb3cd59e0e1f6a82ed8c510ab37e844d4440790a0832935ce21be735",
+  "argv": [
+    "scripts/test-changed.sh",
+    "dc18084316313a978873b499ba8f80f7623814b5"
+  ],
+  "environment": {
+    "GOMAXPROCS": "2",
+    "GOFLAGS": "-p=2",
+    "GOTOOLCHAIN": "go1.26.8",
+    "TMPDIR": "/home/ubuntu/jd-df-t",
+    "JD_BROWSER_BASE_URL": "http://127.0.0.1:43151",
+    "JD_BROWSER_WORKERS": "1"
+  },
+  "build_id": "uCHVu0igB8u374T6N93rv",
+  "source_unchanged": true
+}

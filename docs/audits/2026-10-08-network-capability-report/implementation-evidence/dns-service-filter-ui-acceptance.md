@@ -150,5 +150,8 @@ The [native backend records](../../../internal/backend/evidence/dns-service-filt
 retain their own original AdGuard failure and corrected three-engine passes. Known empty
 subscriptions and AdGuard/Pi-hole local-rule metadata persistence are actual native evidence;
 nonempty source secrecy, malformed responses and these viewport cases are controlled fixtures.
-Filter mutation, manual/app rules, broader query/zone/view/client/DHCP controls, complete native
-lifecycle/platform coverage, host reboot and measured effective filtering remain open.
+This read-only checkpoint does not establish filter mutation. The separate
+[reviewed custom-domain checkpoint](dns-service-domain-filter-ui-acceptance.md) adds bounded AdGuard
+suffix and Pi-hole exact-domain controls with its own mounted/native proof. Subscription and
+manual/app controls, broader query/zone/view/client/DHCP coverage, complete native lifecycle/platform
+coverage, host reboot and measured effective filtering remain open.

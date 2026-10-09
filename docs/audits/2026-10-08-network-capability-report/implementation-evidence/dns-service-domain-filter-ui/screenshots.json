@@ -1,0 +1,137 @@
+{
+  "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+  "build_id": "uCHVu0igB8u374T6N93rv",
+  "base_url": "http://127.0.0.1:43151",
+  "capture_count": 12,
+  "visually_inspected": [
+    "domain-filter-form-adguard-390.png",
+    "domain-filter-review-adguard-390.png",
+    "domain-filter-form-pihole-390.png",
+    "domain-filter-review-pihole-390.png",
+    "domain-filter-review-adguard-1720.png",
+    "domain-filter-review-pihole-1720.png"
+  ],
+  "findings": "All six inspected views fit horizontally; long fingerprints wrap and vertical scrolling remains ordinary. The six engine/width cases separately assert actual settled viewport containment and <=1px internal horizontal overflow.",
+  "shots": [
+    {
+      "file": "domain-filter-form-adguard-1280.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-7fe0e--retained-review-fit-1280px-chromium/domain-filter-form-adguard-1280.png",
+      "sha256": "5281f934ebb4f526260873c5af3d89bdf0609e7f48cb88ee678fa0fbd17c0074",
+      "engine": "adguard",
+      "width": 1280,
+      "kind": "form",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-review-adguard-1280.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-7fe0e--retained-review-fit-1280px-chromium/domain-filter-review-adguard-1280.png",
+      "sha256": "8dac864bdc4d1ef30e16109016cc72a49f5bbdf0606a24da7ea5bc08dd08578e",
+      "engine": "adguard",
+      "width": 1280,
+      "kind": "review",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-form-adguard-1720.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-be033--retained-review-fit-1720px-chromium/domain-filter-form-adguard-1720.png",
+      "sha256": "a19a0a8cfa57607de18f680e95528b550a29c469a80530bbf3c2118d075d43af",
+      "engine": "adguard",
+      "width": 1720,
+      "kind": "form",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-review-adguard-1720.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-be033--retained-review-fit-1720px-chromium/domain-filter-review-adguard-1720.png",
+      "sha256": "eed8306c4fd622a86ee7f0b1aa8c6488d83ec6b6ccef86d684116d58cc5e7db7",
+      "engine": "adguard",
+      "width": 1720,
+      "kind": "review",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-form-pihole-390.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-befe9-d-retained-review-fit-390px-chromium/domain-filter-form-pihole-390.png",
+      "sha256": "00ee80e71fe9370a30eebae6cc7d6f115eaa1ddcc8f6d716b777ef44ff114d01",
+      "engine": "pihole",
+      "width": 390,
+      "kind": "form",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-review-pihole-390.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-befe9-d-retained-review-fit-390px-chromium/domain-filter-review-pihole-390.png",
+      "sha256": "814c053eac3237d61484c0dcae7524da6652b4f457b6d547830dd67e96ec26cc",
+      "engine": "pihole",
+      "width": 390,
+      "kind": "review",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-form-pihole-1280.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-c0f4f--retained-review-fit-1280px-chromium/domain-filter-form-pihole-1280.png",
+      "sha256": "80f1bb964941204567645ece772b312152b52779f10d3bd7755036face2baff4",
+      "engine": "pihole",
+      "width": 1280,
+      "kind": "form",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-review-pihole-1280.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-c0f4f--retained-review-fit-1280px-chromium/domain-filter-review-pihole-1280.png",
+      "sha256": "0aa94a8c25ca387b82644e0a0d12721672fe152eeedb93d94a65f400196dd81c",
+      "engine": "pihole",
+      "width": 1280,
+      "kind": "review",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-form-adguard-390.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-c1ec0-d-retained-review-fit-390px-chromium/domain-filter-form-adguard-390.png",
+      "sha256": "489b5b9bc4126b02d5882e0c047b9102870fcac31143e6adb4cfa6486379f210",
+      "engine": "adguard",
+      "width": 390,
+      "kind": "form",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-review-adguard-390.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-c1ec0-d-retained-review-fit-390px-chromium/domain-filter-review-adguard-390.png",
+      "sha256": "d64e89e35061138f7608032bd53231f0aa0692fdcd7ac47629ad398824255b5c",
+      "engine": "adguard",
+      "width": 390,
+      "kind": "review",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-form-pihole-1720.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-f4ae3--retained-review-fit-1720px-chromium/domain-filter-form-pihole-1720.png",
+      "sha256": "19c7e68d949fbda55607681ea1f9fa4c71218a6761f679625b7f870ba8a085ba",
+      "engine": "pihole",
+      "width": 1720,
+      "kind": "form",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    },
+    {
+      "file": "domain-filter-review-pihole-1720.png",
+      "original": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend/test-results/network-dns-domain-filters-f4ae3--retained-review-fit-1720px-chromium/domain-filter-review-pihole-1720.png",
+      "sha256": "de6c7cd8d318fb14e0e18da0cbd3d0fec8ce75972ec6c1fd7f4d98cf0f39d600",
+      "engine": "pihole",
+      "width": 1720,
+      "kind": "review",
+      "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+      "build_id": "uCHVu0igB8u374T6N93rv"
+    }
+  ]
+}

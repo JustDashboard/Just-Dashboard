@@ -1,0 +1,112 @@
+{
+  "product_source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+  "final_source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+  "frontend_product_count": 1536,
+  "browser_fixture_spec_count": 2,
+  "go_source_count": 1863,
+  "module_count": 2,
+  "product_identical_after_test_only_locator_correction": true,
+  "build": {
+    "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+    "exit_code": 0,
+    "wall_seconds": 16.755,
+    "raw_sha256": "1a4a412a7385f6efc20eee5e124c4c97128ed3a3c7d0efb496cc5bc01bd14500",
+    "build_id": "uCHVu0igB8u374T6N93rv",
+    "source_unchanged": true,
+    "product_identical_to_b703": true,
+    "argv": [
+      "bun",
+      "run",
+      "build"
+    ],
+    "cwd": "/home/ubuntu/Just-Dashboard-network-dns-domain-filter-ui/frontend",
+    "tmpdir": "/home/ubuntu/jd-df-t"
+  },
+  "required": {
+    "source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+    "exit_code": 0,
+    "wall_seconds": 588.175,
+    "raw_sha256": "2c3e311fdb3cd59e0e1f6a82ed8c510ab37e844d4440790a0832935ce21be735",
+    "argv": [
+      "scripts/test-changed.sh",
+      "dc18084316313a978873b499ba8f80f7623814b5"
+    ],
+    "environment": {
+      "GOMAXPROCS": "2",
+      "GOFLAGS": "-p=2",
+      "GOTOOLCHAIN": "go1.26.8",
+      "TMPDIR": "/home/ubuntu/jd-df-t",
+      "JD_BROWSER_BASE_URL": "http://127.0.0.1:43151",
+      "JD_BROWSER_WORKERS": "1"
+    },
+    "build_id": "uCHVu0igB8u374T6N93rv",
+    "source_unchanged": true
+  },
+  "counts": {
+    "bun_tests": 3267,
+    "bun_assertions": 14735,
+    "browser_selected": 213,
+    "browser_pass": 205,
+    "optional_screenshot_skips_unverified": 8,
+    "domain_browser_cases": 24,
+    "existing_dns_service_cases": 45,
+    "filter_metadata_cases": 18
+  },
+  "native": {
+    "mounted_source": "988207ea4d8559a11ac25a51a14179c703e1b9e4",
+    "engines": [
+      {
+        "engine": "adguard",
+        "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+        "wall_seconds": 70.471,
+        "raw_sha256": "b227a92c23f3aade26a10d7231defdd7add7bdc6476911108f814def10745f7e",
+        "root_go_module_mismatches": [],
+        "current_reads": 16,
+        "domain_current_reads": 8,
+        "go_count": 1863,
+        "host_same": true,
+        "cleanup_zero": true
+      },
+      {
+        "engine": "pihole",
+        "source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+        "wall_seconds": 91.545,
+        "raw_sha256": "8406b3855ce34a0f4a1ed7fd469856ef0a4ae3bb11b28ba1ba927f6beda55c10",
+        "root_go_module_mismatches": [],
+        "current_reads": 20,
+        "domain_current_reads": 8,
+        "go_count": 1863,
+        "host_same": true,
+        "cleanup_zero": true
+      }
+    ]
+  },
+  "browser_first_failure": {
+    "source": "b7038998",
+    "pass": 20,
+    "fail": 4,
+    "reason": "Modal aria-hidden background controls require includeHidden in role locator; no product mutation and original existing policy helper already uses this.",
+    "record": "browser-first.result.json"
+  },
+  "confirmation_retest": {
+    "built_source": "b7038998c668fc915404b51a0b2236e68fe148fa",
+    "test_sha256": "280d5cb0553cc1f051d339d55930c0b1e99522eeff7670072d9335e5e98d45d4",
+    "exit_code": 0,
+    "wall_seconds": 10.415,
+    "raw_sha256": "a94e5134cd656f103ac9e3479f671bc30e840a495e3621e5af53944a227201fb",
+    "argv": [
+      "bunx",
+      "playwright",
+      "test",
+      "tests/browser/network-dns-domain-filters.spec.ts",
+      "--grep",
+      "an open filter confirmation",
+      "--workers=1",
+      "--output=/home/ubuntu/jd-network-validation-tmp/dns-domain-filter-ui-browser-confirmation-corrected-output"
+    ],
+    "base_url": "http://127.0.0.1:43151",
+    "build_id": "q1-B_Vn9ngYWudWSVJvRc",
+    "product_unchanged": true
+  },
+  "wider_P17_C074_and_full187_scope": "open; no ledger status/count or historical score changed"
+}
