@@ -1,0 +1,8 @@
+--- FAIL: TestNativeManagerAutomaticOwnerLive (0.02s)
+    native_manager_auto_live_test.go:35: set JD_NATIVE_MANAGER_NM_ROOT to the independently verified Debian NetworkManager/nmcli userland
+--- FAIL: TestNativeManagerOwnerLive (163.78s)
+    native_manager_live_test.go:214: set JD_NATIVE_MANAGER_NM_ROOT to the directory containing the verified NetworkManager/nmcli userland
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/netx	404.483s
+FAIL
+JD_NETNS_LIVE=1 go test -race ./internal/netx -run Live -count=1  398.07s user 77.68s system 108% cpu 7:19.02 total
