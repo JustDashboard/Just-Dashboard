@@ -155,6 +155,49 @@ echo '2026/10/09 10:00:02 [emerg] 1#1: still could not bind()' >> '%[1]s/error.l
 	}
 }
 
+// The master tries a socket it cannot bind five times before it gives the
+// reload up, and a port freed between attempts is bound on the next: the
+// reload then loads after all. Until nginx says it gave up, a bind() failure
+// is not a refusal, and a site is never put back under a load that happened —
+// nor over one nobody saw end either way.
+func TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt(t *testing.T) {
+	previous := bindAttemptsWait
+	bindAttemptsWait = 300 * time.Millisecond
+	t.Cleanup(func() { bindAttemptsWait = previous })
+	for _, tc := range []struct {
+		name  string
+		after []int32
+		state string
+	}{
+		{name: "bound", after: []int32{12, 13}, state: LoadLoaded},
+		{name: "not seen", after: []int32{10, 11}, state: LoadUnconfirmed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			shortLoadWait(t)
+			svc, root := provenSites(t)
+			onReload(t, root, fmt.Sprintf(`touch '%[1]s/reloaded'
+echo '2026/10/09 10:00:00 [emerg] 1#1: bind() to 0.0.0.0:8443 failed (98: Address already in use)' >> '%[1]s/error.log'`, root))
+			loadingNginx(t, root, tc.after, append(listens(80), listens(8443)...), 5, 6)
+			spec := plainSpec("app", "app.example.com")
+			spec.Custom = "listen 8443;"
+			res, err := svc.SaveSite(context.Background(), spec, SiteSave{Enable: true, Reload: true})
+			if err != nil {
+				t.Fatalf("a bind() failure nginx did not give up on was a refusal: %v", err)
+			}
+			proof := res.LoadProof
+			if !res.Reloaded || proof == nil || proof.State != tc.state {
+				t.Fatalf("result = %+v proof = %+v", res, proof)
+			}
+			if tc.state == LoadUnconfirmed && !strings.Contains(proof.Note, "could not bind a socket at first (bind() to 0.0.0.0:8443 failed") {
+				t.Fatalf("note = %q", proof.Note)
+			}
+			if !isLinked(t, root, "app") {
+				t.Fatal("the site was put back")
+			}
+		})
+	}
+}
+
 // A reload refused for something else — another site's port — is a saved
 // site that nginx did not load, with nginx's words; the file stays, as a
 // failed reload's always has.

@@ -120,40 +120,55 @@ func (s *Service) awaitLoad(ctx context.Context, mark loadMark, binds []bind) *L
 	deadline := time.Now().Add(loadWait)
 	offset := mark.reload.offset
 	var logged []string
+	// retried is the master's first bind() failure when its attempts ended
+	// without it giving the reload up: a socket freed between attempts is
+	// bound on the next, and the reload is then read as any other load.
+	retried := ""
 	for {
 		if mark.reload.log != "" {
 			var fresh []string
 			fresh, offset = appendedLines(mark.reload.log, offset)
 			logged = append(logged, emergencies(fresh)...)
 		}
-		if len(logged) > 0 {
-			// A failed attempt logs every socket it could not bind before it
-			// waits to try again; the rest of that attempt is read first.
-			time.Sleep(150 * time.Millisecond)
-			var fresh []string
-			fresh, offset = appendedLines(mark.reload.log, offset)
-			logged = append(logged, emergencies(fresh)...)
-			proof.State, proof.Error = LoadRefused, emergencyText(logged[0])
+		if len(logged) > 0 && (retried == "" || slices.ContainsFunc(logged, gaveUpBinding)) {
+			if retried == "" {
+				// A failed attempt logs every socket it could not bind before
+				// it waits to try again; the rest of that attempt is read
+				// first.
+				time.Sleep(150 * time.Millisecond)
+				var fresh []string
+				fresh, offset = appendedLines(mark.reload.log, offset)
+				logged = append(logged, emergencies(fresh)...)
+			}
 			if _, ok := parseBindFailure(logged[0]); ok && !slices.ContainsFunc(logged, gaveUpBinding) {
 				// The master tries a socket it cannot bind five times, half
-				// a second apart, before it gives the reload up. Its later
-				// attempts are this reload's, and read as the next one's if
-				// it comes before they end.
-				awaitBindAttempts(mark.reload.log, offset)
-			}
-			for _, line := range logged {
-				failure, ok := parseBindFailure(line)
-				if !ok {
-					continue
+				// a second apart, and gives the reload up only after the
+				// last. Its later attempts are this reload's, and read as the
+				// next one's if it comes before they end; and until it says
+				// it gave up, the failure is not a refusal.
+				var fresh []string
+				fresh, offset = awaitBindAttempts(mark.reload.log, offset)
+				logged = append(logged, emergencies(fresh)...)
+				if !slices.ContainsFunc(logged, gaveUpBinding) {
+					retried = emergencyText(logged[0])
 				}
-				for _, b := range binds {
-					if failure.address == b.address() {
-						proof.Error, proof.bindError = failure.text, true
-						return proof
+			}
+			if retried == "" || slices.ContainsFunc(logged, gaveUpBinding) {
+				proof.State, proof.Error = LoadRefused, emergencyText(logged[0])
+				for _, line := range logged {
+					failure, ok := parseBindFailure(line)
+					if !ok {
+						continue
+					}
+					for _, b := range binds {
+						if failure.address == b.address() {
+							proof.Error, proof.bindError = failure.text, true
+							return proof
+						}
 					}
 				}
+				return proof
 			}
-			return proof
 		}
 		view := readNginx(ctx, s, nil, before.master)
 		after := view.nginx
@@ -187,6 +202,8 @@ func (s *Service) awaitLoad(ctx context.Context, mark loadMark, binds []bind) *L
 				proof.Note = "The nginx master the reload was sent to is gone: " + view.why + "."
 			case startedAnew(before, after):
 				proof.Note = fmt.Sprintf("nginx started a new worker but %s after the reload still runs a worker from before it, which a worker that crashed and was replaced also does.", loadWait)
+			case retried != "":
+				proof.Note = fmt.Sprintf("nginx could not bind a socket at first (%s) and, %s after the reload was sent, had neither given it up nor been seen taking it up.", retried, loadWait)
 			case mark.reload.log == "":
 				proof.Note = fmt.Sprintf("nginx had not taken the reload up %s after it was sent, and its error log, which would say why, could not be read.", loadWait)
 			default:
@@ -287,17 +304,20 @@ var bindAttemptsWait = 3 * time.Second
 
 // awaitBindAttempts reads the error log from offset until the master gives a
 // reload up over a socket it could not bind, which it says after its last
-// attempt, or bindAttemptsWait passes.
-func awaitBindAttempts(log string, offset int64) {
+// attempt, or bindAttemptsWait passes, and returns the lines it read.
+func awaitBindAttempts(log string, offset int64) ([]string, int64) {
 	deadline := time.Now().Add(bindAttemptsWait)
+	var read []string
 	for time.Now().Before(deadline) {
 		var fresh []string
 		fresh, offset = appendedLines(log, offset)
+		read = append(read, fresh...)
 		if slices.ContainsFunc(fresh, gaveUpBinding) {
-			return
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	return read, offset
 }
 
 // gaveUpBinding is the line the master logs after its last bind() attempt.

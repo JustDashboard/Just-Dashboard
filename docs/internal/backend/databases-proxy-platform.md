@@ -2113,11 +2113,14 @@ containers/volumes/networks.
     crashed worker replaced on the same load, not a load), each file still holds the digest the change
     wrote (`held`), and nginx holds every socket the site's `listen` lines ask for (`siteBinds`, read
     as the stream watch reads them; `listening`); `refused` with nginx's first `[emerg]` line (`error`)
-    when the master logged one after the signal — after a bind failure the watch reads on until the
-    master gives up, so its later attempts are never read as the next reload's; `unconfirmed` with a
-    `note` when none of that was seen in time, a file was written again before the load, or nginx
+    when the master logged one after the signal — except that a `bind()` failure is a refusal only
+    once the master logs `still could not bind()`: the watch reads its attempts on until it does
+    (`awaitBindAttempts`, so its later attempts are never read as the next reload's), and a socket
+    freed between attempts is bound on the next and the reload read as any other load, `unconfirmed`
+    with the first failure in its note when neither is seen; `unconfirmed` with a `note` when none of
+    that was seen in time, a file was written again before the load, or nginx
     loaded without the site's socket; `unchecked` when the running nginx could not be read. A save
-    whose reload the master refused **over one of the site's own sockets** is put back exactly as a
+    whose reload the master gave up **over one of the site's own sockets** is put back exactly as a
     refused test puts it back (file, link and `.bak`) and answered 409 `load_refused` with
     `SiteLoadRefusedError` naming the program holding the port from the host's listener list (audited
     `result: rolled-back`): left in place, the file would fail every later reload on the host. Any
@@ -2128,7 +2131,8 @@ containers/volumes/networks.
     the import outcome), so none says "nginx reloaded" of a load the master was not seen taking up. The site form says
     "is live" only for `loaded` (or a backend that sends no proof), "saved and reloaded" with the note
     otherwise, and "nginx refused the reload" with nginx's words (`load-proof.ts`, `site-save.ts`); the
-    engine's Reload toast and the pending strip read the same. `TestLiveReloadIsProvenFromTheMaster`
+    engine's Reload toast and the pending strip read the same. `TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt`
+    keeps a site whose port was freed between the master's attempts. `TestLiveReloadIsProvenFromTheMaster`
     runs the host's nginx binary on a private prefix: a loaded save is proven from the real master's
     workers and sockets, a save onto a port the test holds is refused by the master, put back, named as
     held by the test process, and the previous site still answers.
