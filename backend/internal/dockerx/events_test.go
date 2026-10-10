@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/docker/docker/api/types/events"
 )
 
 // recorded is an event log holding these events, oldest first, as the
@@ -105,5 +107,30 @@ func TestEventsByKindAndText(t *testing.T) {
 	}
 	if got := log.Find(50, EventFilter{Stack: "blog", Search: "shop"}); len(got) != 0 {
 		t.Fatalf("every narrowing applies at once: %v", actions(got))
+	}
+}
+
+// A network's connect names the container only by id, and that id is the
+// whole answer to "who joined": the event's own name is the network's.
+func TestNetworkEventsCarryTheContainerTheyMoved(t *testing.T) {
+	ev := convertEvent(events.Message{
+		Type:   events.NetworkEventType,
+		Action: events.ActionConnect,
+		Actor: events.Actor{
+			ID:         "net1",
+			Attributes: map[string]string{"container": webID, "name": "shop_default", "type": "bridge"},
+		},
+		TimeNano: time.Date(2026, 10, 8, 9, 0, 0, 0, time.UTC).UnixNano(),
+	})
+	if ev.Name != "shop_default" || ev.Container != webID || ev.Message != "a container joined network shop_default" {
+		t.Fatalf("network connect = %+v", ev)
+	}
+	// A container's own events keep the field empty: its id is already ID.
+	if ev := convertEvent(events.Message{
+		Type:   events.ContainerEventType,
+		Action: events.ActionStart,
+		Actor:  events.Actor{ID: webID, Attributes: map[string]string{"name": "shop-web-1", "container": "x"}},
+	}); ev.Container != "" {
+		t.Fatalf("container start carried a container: %+v", ev)
 	}
 }

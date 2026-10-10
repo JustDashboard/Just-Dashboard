@@ -4,9 +4,8 @@ import { iso, json, now, user } from "./host-fixture"
 
 /**
  * The host Overview, against a server with something in every place: the
- * machine drawn as itself, each moving reading carrying its last hour, one
- * Health list holding what every module found, the projects as the fleet
- * draws them, who is spending the machine beside the day's activity, and a
+ * machine drawn as itself, each moving reading carrying its last hour, the
+ * projects as the fleet draws them, who is spending the machine beside the day's activity, and a
  * service tile per module naming what it counts with the products.
  */
 
@@ -44,8 +43,8 @@ test("each moving reading carries its last hour in its tile", async ({ page }) =
 test("the readings say they are live and lead on to Metrics", async ({ page }) => {
   await page.goto("/")
   const identity = page.locator('[data-slot="host-identity"]')
-  await expect(identity.getByText("Critical")).toBeVisible()
-  // The identity line describes the machine and carries its verdict, nothing to press.
+  await expect(identity.getByText("atlas", { exact: true })).toBeVisible()
+  // The identity line describes the machine, with nothing to press.
   await expect(identity.getByRole("link")).toHaveCount(0)
 
   const resources = page.locator("section", {
@@ -83,31 +82,6 @@ test("every filesystem is a bar of its own under the readings", async ({ page })
   )
   expect(root?.y).toBe(srv?.y)
   expect(root?.width).toBe(srv?.width)
-})
-
-test("what every module found is one Health list, worst first", async ({ page }) => {
-  await page.goto("/")
-  const health = page.locator("[data-slot=panel]", {
-    has: page.getByRole("heading", { name: "Health" }),
-  })
-  const findings = health.getByRole("list", { name: "Needs attention" }).locator(":scope > li")
-  // The failing project outranks the recorder's disk warning; the
-  // certificate past its renewal and the security updates follow it.
-  await expect(findings.first()).toContainText("docs-site is failing its health check")
-  // Every area checked is on the strip, the disk's amber among the green.
-  const areas = health.getByRole("list", { name: "Areas checked" })
-  await expect(areas).toContainText("/ at 87%")
-  await expect(areas).toContainText("Modules")
-  await expect(health).toContainText("/ is filling up")
-  await expect(health).toContainText("status.example.test: certificate expires in 12d")
-  await expect(health).toContainText("2 security updates waiting")
-  // The verdict is the worst of them, in the panel and on the identity line.
-  await expect(health.getByText("Critical")).toBeVisible()
-  await expect(page.locator('[data-slot="host-identity"]').getByText("Critical")).toBeVisible()
-
-  // Each one opens the page that fixes it.
-  await health.getByRole("link", { name: "Open packages: 2 security updates waiting" }).click()
-  await expect(page).toHaveURL(/\/packages$/)
 })
 
 test("the projects are the fleet's cards, worst first", async ({ page }) => {

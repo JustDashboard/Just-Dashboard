@@ -754,10 +754,12 @@ func (s *Server) handleImagePrune(w http.ResponseWriter, r *http.Request) error 
 
 // handleVolumeList joins the volume list to the containers using each one.
 //
-// The join is what makes the delete button honest. Docker's own RefCount
-// counts running containers only, so a volume belonging to a stopped stack
-// reads as unused — and that is precisely the volume an operator prunes by
-// accident, along with the only copy of whatever was in it.
+// The join is what makes the delete button honest. Docker counts a stopped
+// container's mount as a use and its prune keeps that volume; what a prune
+// destroys is a volume nothing mounts at all — most often the data of a
+// stack taken down with `docker compose down`, which removed the containers
+// and left the volumes. Naming the users, running or not, is what lets the
+// page tell those apart.
 func (s *Server) handleVolumeList(w http.ResponseWriter, r *http.Request) error {
 	list, err := s.modules.docker.ListVolumesWithUsers(r.Context())
 	if err != nil {

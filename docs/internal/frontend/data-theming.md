@@ -129,7 +129,7 @@ leaks until dual-stack egress is configured.
 - `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
   minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
-  empty window with no obvious way out. `useMetricEvents`/`useHealth` poll on much slower cadences.
+  empty window with no obvious way out. `useMetricEvents` polls on a much slower cadence.
 - `src/lib/types.ts` mirrors the backend's JSON by hand, including the `Capability` union — it drifts if
   backend types change without it. The proxy pages' shapes live in `src/lib/proxy/types-*.ts`, one file
   per area of those pages, and `types.ts` re-exports them, so an import from `@/lib/types` finds them. `useAuth`'s `can("capability")` hides controls a role cannot use:

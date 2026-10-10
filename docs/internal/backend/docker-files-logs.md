@@ -76,6 +76,8 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   it reads the buffered past, so an event recorded between the two is sent rather than lost — one
   recorded in that instant arrives twice, and every reader drops the copy. `Event.Service` is the compose
   service (`db`, where the event's name is `shop-db-1`), which is what a stack's log calls a container.
+  `Event.Container` is the container a network's `connect` or `disconnect` moved, by id — Docker puts
+  nothing else of it in the event, so the Networks page names it from the container listing.
 - **A container's and a stack's output are log sources**, `docker:<id>` and `stack:<project>` on the
   `/logs/*` routes (see [Logs](#logs)). `GET /docker/containers/{id}/logs`, its `/logs/stream` and
   `GET /docker/stacks/{name}/logs/stream` are gone: a second reader of the same lines with no lens and no
@@ -103,6 +105,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
 - **`cleanup.go` replaces one word covering five sweeps.** Each category reports what it holds, what
   removing it reclaims (Docker's own figure, which counts a shared layer once) and what that costs.
   Volumes are always listed and never recommended; selecting them still uses ordinary confirmation.
+- **A volume's standing follows the daemon's own rule.** `ListVolumesWithUsers` joins every
+  container's mounts, running or stopped, and each listed volume says what its driver options mount
+  (`mountType`: nfs, cifs, bind, or custom) without carrying the options — a CIFS `o=` holds the
+  share's password, so the options stay on the inspect route. Docker's prune removes only local
+  volumes without options that nothing references: a stopped container's volume is kept, and what a
+  prune takes is what `docker compose down` or a container removed without `-v` left behind. The
+  Volumes page reads the list again before it names that set, and compares the prune's report with
+  it afterwards, because the reference count it would otherwise trust is cached.
 - **Authorization uses effective container resources.** Creation and recreation validate the selected
   spec, including a spec reused from an existing container. Limited accounts may use plain local
   volumes; references to existing named volumes are inspected first. Custom drivers or driver options
@@ -126,7 +136,14 @@ opt into a request-scoped inventory/inspection snapshot; it never survives that 
   from a shell.
 - **Efficiency rules that are load-bearing**: `ListContainers` carries `Mounts` (the Engine summary
   already has them); membership joins for volumes, networks and images, and image-reference discovery
-  use the summary without fetching unused inspection fields. The history recorder reads the enriched
+  use the summary without fetching unused inspection fields. The network listing carries each member's
+  address from the same summary — `Network.Endpoints` (container id and name, IPv4 and IPv6 with their
+  prefix, MAC) and `Network.Gateway` — kept off the containers socket (`Container.Endpoints` is
+  `json:"-"`); the summary has no aliases, so the names a member answers to beyond its own are
+  `NetworkDetail`'s, which inspects. A network's inspect lists endpoints, and a stopped container holds
+  none, so `NetworkDetail` adds every container the summary places on the network that the inspect
+  left out — without an address, with its state and aliases — and counts it: Docker removes a network
+  whose members are all stopped, and they then fail to start. The history recorder reads the enriched
   listing because it persists explicit memory budgets, including a limit equal to host RAM, which the
   stats response alone cannot distinguish from an unlimited container. The shared live table sampler
   reuses the inventory it already collected and samples those IDs without another listing.
@@ -787,7 +804,7 @@ failures report the retained original's parking name.
 PM2 discovery cannot expand log roots. Its file paths must pass the configured `JD_LOG_ROOTS` check,
 including symlink resolution; custom PM2 log directories require explicit administrator configuration.
 
-## Actionable findings and storage investigation
+## Actionable Docker findings
 
 Docker Overview, the container list and container details all use `components/docker/finding-actions.ts`.
 Restart-policy remedies update a standalone container in place; log-driver remedies review replacement,
@@ -803,8 +820,7 @@ allowance. Explicit combined limits are kept. Empty, negative and overflowing up
 Engine warnings remain visible. A real Docker fixture checks that restart policy, RAM and CPU changes
 keep the running PID and start timestamp.
 
-Host storage investigation and selected cleanup are documented in [server advisor](server-advisor.md).
-An advisor file link opens `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
+A file link may open `/files?path=<parent>&entry=<absolute-file>`: the inspector selects only an
 entry already returned by that validated directory listing. An explicit click or deselection overrides
 the URL's initial selection. Paths still pass through the existing file service boundary.
 

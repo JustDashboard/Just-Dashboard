@@ -43,9 +43,25 @@
   distinct" counter and the Hide button are gone — four chips and two counters framing a list capped at
   five rows. `ContainerFindings` filters a diagnosis pass for one container; the containers page passes its own,
   and the container's page asks for one.
-  `RuntimeHealthPanel` is the other half and counts what is *fine* as well as what is not, because a
-  list of problems can never say "eight healthy, four with no health check at all" — and that last
-  number is what stops "all healthy" meaning "nothing is being watched".
+  The other half — what is *fine* as well as what is not — was `RuntimeHealthPanel`, a bar of the
+  health-check counts over the containers list, because a list of problems can never say "eight
+  healthy, four with no health check at all" and that last number is what stops "all healthy" meaning
+  "nothing is being watched". The 0.7.1 containers overhaul moved those counts to where they are read:
+  the page's identity line says how many running containers a passing health check vouches for, and
+  every running row says its own verdict, "no health check" included.
+- The containers page (`app/(dashboard)/docker/containers/page.tsx`) is three parts under the engine's
+  identity line. `container-band.tsx` draws the five containers using the most processor and memory
+  as spans of one bar the size of the host (the Processes band's `ShareBar`), figures gliding to each
+  two-second frame, and **Recent**: Docker's event log over `/docker/events/stream?kinds=container`,
+  a restart loop folded to one line and an OOM kill said on the exit it caused (`foldRestarts`).
+  `container-table.tsx` is the table — sortable headings, a ticking uptime under each state, CPU and
+  memory as figures beside short bars (memory against its limit, amber past 85%), the processor's
+  hour and the network rate from `2xl`, the compose project in its `hueFor(…, LANES)` hue as a filter
+  — drawn down the row below `xl`. `containers.ts` (unit-tested) holds what the rows say: the five
+  buckets the state chips count (failing, starting, running, paused, stopped — failing being a restart
+  loop, a dead container, a failed health check, a crash exit or an exit the event log says the OOM
+  killer caused, since `docker stop` also leaves 137), the exit words, the sort, and the network rate
+  from two frames of Docker's cumulative counters.
 - `tabs.tsx` gives selection, hover and focus three different mechanisms. They had two: the accent
   outline meant both "this filter is on" and "the keyboard is here", so a keyboard user could not tell
   which filters were applied and tabbing looked like the selection moving.
@@ -55,14 +71,27 @@
 - `container-cells.tsx` holds the three cells that were saying something other than what they meant:
   memory showing host RAM as a limit nobody set, CPU with no denominator stated (Docker counts one core
   as 100%), and a Status column carrying the worst security finding underneath the runtime state.
-- `cleanup.tsx` and `deploy-preview.tsx` are the two "before you press it" panels: what each category of
+- `container-band.tsx`, `container-table.tsx` and `overview.ts` are the overview's. The band and the
+  table read the containers socket, so the overview's figures move with every frame where the four
+  tiles it replaced were a poll. `overview.ts` holds the words: a container is *failing* only when
+  its check fails, its restart policy is cycling, or it exited with anything but 0 or 143 — a host
+  of one-shot jobs is otherwise a page of red — and Recent reads Docker's events one line per
+  container, a stop's kill, die and stop as one stop and an OOM kill folded into the exit it caused.
+  The table's figures are plain text: a counting figure starts only once scrolled into view, and a
+  row below the fold read 0.0% until it was.
+- `cleanup.tsx` and `stack-preview.tsx` are the two "before you press it" panels: what each category of
   removable object costs, and what a compose deploy is expected to change — including the sentence about
-  volumes, stated whether or not any are affected. The preview's services are a flat list, not
-  collapsibles: a service that changes gets a row with the server's reason and the images before and
-  after, while the unchanged rest collapses to one line naming it — the same rule the attention panel
-  follows when one finding repeats across several containers, and the reason the section is not five
-  copies of "its configuration is identical". The "compose makes the final call" caveat is stated once
-  underneath. A cleanup category is one line — name, size, count, in
+  volumes, stated whether or not any are affected. The preview opens on that decision as one sentence
+  (*Deploy will recreate 2 services and create 1*) over a bar of the stack's services, each in the
+  colour of what happens to it, and lists them as a framed table, most consequential first: the change,
+  why (the keys that changed as tags over the server's reason), the image and the tag it moves to, and
+  what the service is doing now — a running service about to be recreated says it goes down while it
+  is replaced. The unchanged rest stays in the table, quiet, rather than five copies of "its
+  configuration is identical" each with a heading. The file's diff is grouped by the service each hunk
+  changes (`stack-diff.tsx`, the same view the compose editor's review and the history use), beside
+  the volumes, each kept or destroyed, and the "compose makes the final call" caveat is stated once.
+  Deploy and a fresh read sit at the top, where the reader who has just read what will happen can act
+  on it. A cleanup category is one line — name, size, count, in
   fixed columns — with the cost sentence and the example names behind its `?`. It used to be a block
   whose height depended on how far the cost sentence wrapped and whether that category had examples, so
   the six rows came out at three different heights and the size and count, top-aligned against the
@@ -75,21 +104,77 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
-- `stacks-tab.tsx` is the stack list, as rows in one plain panel rather than a grid of bordered cards:
-  each row carries the stack's state, its services (dot, name, ports, health) and the one action that
-  belongs there — deploy when the application is down. It opens with the same search box and state
-  chips as the containers page, because "which of these is down" is the same question asked of the same
-  server. A stack's own page follows the same rule as a container's: the compose verbs that are pressed
+- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
+  `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
+  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
+  and a history line read as its instruction — in `images.ts` (unit-tested). Its disk lines reclaim
+  their own kind: unused images through `POST /docker/images/prune?all=true`, the build cache through
+  `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
+  only Reclaim beside the total runs the sweep, and says it reaches stopped containers and networks.
+  The pull socket is enabled only while a pull is in flight: the server closes it when the pull
+  ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
+  one about once a second until the page was left. Tag names the same image again, so the copy a
+  container runs can keep a name across the next pull of its tag.
+- `stacks-tab.tsx` is the Stacks page, read the way Services is (`design-system.md` §15 pass 2): the
+  server's identity line (the Compose mark, Docker's version, stacks deployed, services running, ports
+  published, and the attention verdict that presses the Needs attention chip), then `stack-band.tsx`
+  (the five stacks using the most processor and memory as spans of one bar the size of the machine,
+  summed over each stack's containers from the containers socket, a press narrowing the table to that
+  stack; and Recent, the daemon's last starts, exits with their codes, out-of-memory kills folded into
+  the exit they caused and failed checks, each opening its stack), then `stack-table.tsx`: the stacks as
+  one framed table of their containers. A stack is a row with its state, how many declared services are
+  up, its summed CPU and memory and the one action that belongs there — deploy when the application is
+  down — and a lane in its name's hue down its containers; each container is a row of the containers
+  page's readings (state with uptime, health or exit code, CPU with its last hour, memory against its
+  limit, published ports) and its verbs, opening the container. Stacks fold their containers away for
+  the session. Rows are worst first; below 1280px the same rows are drawn down rather than across.
+  The joins, buckets and change words are pure (`stack-readings.ts`, unit-tested). A stack's own page follows the same rule as a container's: the compose verbs that are pressed
   daily (deploy, restart) sit inline, and the rest are behind one overflow menu, one word to a line,
-  drawn the same way as the container menu. Its services tab, the deploy preview's
-  service rows and the deployment history are hairline lists the eye reads down, not stacks of bordered
-  rows; the preview's verdict and the network panel's shape diagram are the two `Group tinted` fences
-  the section keeps, and a diff or a captured compose file sits in a `Well`.
-- `stack-detail.tsx` is a stack as the application it is: clickable ports, the compose file editable in
-  place (validated before saving — and saving is *not* deploying, which the UI says), its logs as one
-  source (`stack:<name>`: every container merged by time, each line under its service in that service's
-  hue, the stack's readings over it, and an Events view of what Docker did to the project), a Files tab
-  over the stack's directory, and links to git and a shell in it. `container-detail.tsx` adds
+  drawn the same way as the container menu. Its services and the deploy preview's services are framed
+  tables (below), its deployment history a rail beside the record it reads; the network panel's shape
+  diagram is the one `Group tinted` fence the section keeps, and a diff sits in a `Well`.
+- `stack-detail.tsx` is a stack as the application it is. It opens on the stack's identity line — its
+  services' products, the compose file, the directory and its checkout (uncommitted changes, how far
+  behind, a link to the Git page), how many services run and how many ports it publishes — with the
+  verdict at its end (*1 service failing*, *1 not created*, *All 5 running*), which narrows the table
+  to those services. Its Services view is a framed table of every service (`stack-services-table.tsx`)
+  fed by the containers socket: the service as its image's product with its log lane down the row,
+  its state read with the event log (out of memory, crashed or stopped by the exit status, a restart
+  loop counted) and how long it has been in it, its processor's last hour beside this second's share,
+  memory against its limit, network rates from 1536 and its published ports, under state chips that
+  count and narrow; each row opens its container and carries the compose verbs for that one service
+  (`docker compose restart|stop|start|up --force-recreate|pull <service>`, each confirmed with its
+  command). Under it are the Services page's band for the stack (`stack-usage-band.tsx`: its share of
+  the processor and memory, and Recent from `/docker/events?stack=`) and a picture of its published
+  ports, services and networks whose wires pulse with each service's traffic (`stack-map.tsx`); the
+  joins and words are `stack-service-readings.ts`, unit-tested. Every other view names a service the
+  same way — its lane, its product, its name (`ServiceLabel`):
+  - the deploy preview (`stack-preview.tsx`, above);
+  - the compose file (`stack-compose.tsx`), editable in place with an outline beside it — each section
+    and the names under it a press from their line, each service with its live state — a state that
+    says whether the screen is the disk and whether compose took it, a status line that says where the
+    cursor is in the stack's terms (*services · api*), Ctrl+S, and a review of an unsaved edit as a diff
+    against the file on disk. An edit survives a look at another view (kept in memory, never written
+    down: a compose file holds passwords). Validation jumps to the line compose names, and saving says
+    it is *not* deploying and offers the preview and Deploy;
+  - the stack's directory (`stack-files.tsx`), read first as what compose takes from it: the compose
+    file, the root `.env`, each build context, bind mount and env file the services name, with the
+    services that read each in their lanes, git's word for any change, and a path that is missing said
+    with what it costs (a build or env file compose cannot start without in red, a mount Docker will
+    create empty in amber). The same words follow the names into the browser under it, which takes the
+    tab's height;
+  - the deployment history (`stack-history.tsx`): a strip from the first record to now, each stretch
+    in the colour of the compose file that was live through it, over the records as a rail (the backup
+    job's runs' shape) and the one picked read whole — who did what from which commit, whether its
+    images are still here, how its file differs from the one on disk now, the digests running just
+    before, and *Edit from this version*, which puts that file in the editor unsaved;
+  - its logs as one source (`stack-logs.tsx`, `stack:<name>`: every container merged by time, each line
+    under its service in that service's hue, the stack's readings over it, and an Events view of what
+    Docker did to the project), under a strip of the services writing into it — each with its state,
+    its lines and errors in the last hour and their shape — where a press narrows the log to one.
+
+  The outline, the line diff, what each service reads from the directory and the history's spans are
+  `stack-views.ts`, unit-tested. The stack's menu opens a shell in its directory. `container-detail.tsx` adds
   the reachability join (published port + the proxy site pointing at it turns "running on 3000" into a
   URL), the writable-layer investigator, the failure diagnosis (whose window the Logs tab opens as a
   Crash window chip, and the Overview's notice as Read those lines), its logs through the lens its

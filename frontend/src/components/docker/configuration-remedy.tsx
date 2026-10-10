@@ -47,7 +47,6 @@ import { Button } from "@/components/ui/button"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { CODE } from "@/components/deploy/run-evidence"
-import { LEVEL_BAR, LEVEL_GROUND, LEVEL_TEXT } from "@/components/metrics/health-vocabulary"
 import { restartWords } from "@/components/docker/container"
 import type { ConfirmFn } from "./shared"
 
@@ -105,6 +104,24 @@ export function ConfigurationRemedy({
 
 /** A finding's severity on the Health page's three levels, which the cards are drawn in. */
 type Level = "critical" | "warning" | "notice"
+
+const LEVEL_GROUND: Record<Level, string> = {
+  critical: "bg-wash-danger",
+  warning: "bg-wash-warning",
+  notice: "",
+}
+
+const LEVEL_BAR: Record<Level, string> = {
+  critical: "bg-destructive",
+  warning: "bg-warning",
+  notice: "bg-muted-foreground/50",
+}
+
+const LEVEL_TEXT: Record<Level, string> = {
+  critical: "text-destructive",
+  warning: "text-warning",
+  notice: "text-muted-foreground",
+}
 
 function levelOf(finding: DockerFinding): Level {
   if (finding.severity === "critical") return "critical"
@@ -566,7 +583,6 @@ function StandaloneRemedy({
             })
           else notify.success("Replacement started; check its health and logs")
           onChanged()
-          window.dispatchEvent(new Event("jd:health-changed"))
           router.push(`/docker/containers/${encodeURIComponent(result.id)}`)
           return "reported"
         } finally {

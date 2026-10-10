@@ -311,55 +311,6 @@ export type MetricEvent = {
   durationSeconds?: number
 }
 
-/** The parts of the host the verdict covers, in the order the strip draws them. */
-export type HealthArea =
-  "cpu" | "memory" | "storage" | "network" | "services" | "containers" | "hardware"
-
-/** A thing a finding names and a fix acts on: a failed unit, a container, a mount. */
-export type HealthSubject = {
-  kind: "unit" | "container" | "mount" | "interface"
-  id: string
-  name: string
-  detail?: string
-  since?: string
-}
-
-/** One thing worth telling the operator, with the reasoning attached. */
-export type HealthFinding = {
-  id: string
-  level: "critical" | "warning" | "notice"
-  title: string
-  /** What was measured. */
-  detail: string
-  /** What to do about it — an opinion, kept separate from the fact. */
-  advice?: string
-  metric?: string
-  value: number
-  threshold: number
-  since?: string
-  area?: HealthArea
-  /** The measured facts behind the verdict, already worded by the server. */
-  evidence?: { label: string; value: string }[]
-  subjects?: HealthSubject[]
-}
-
-/** One area's verdict, so a clean area reads as checked rather than as absent. */
-export type HealthAreaVerdict = {
-  id: HealthArea
-  status: Health["status"] | "unknown"
-  summary: string
-}
-
-export type Health = {
-  silences?: string[]
-  status: "ok" | "critical" | "warning" | "notice"
-  findings: HealthFinding[]
-  checkedAt: string
-  /** False when nothing is recording, which makes the verdict a shallower one. */
-  recorded: boolean
-  areas?: HealthAreaVerdict[]
-}
-
 export type MetricsHistory = {
   from: string
   to: string
@@ -610,6 +561,8 @@ export type DockerVolume = {
   size: number
   refCount: number
   inUse: boolean
+  /** What a local volume's driver options mount (nfs, cifs, bind); a prune skips such a volume. */
+  mountType?: string
 }
 
 export type DockerNetwork = {
@@ -630,6 +583,36 @@ export type DockerNetwork = {
    * was structurally zero on every host until this was joined in.
    */
   usedBy: string[]
+  /** The host device a bridge network is carried on: `docker0`, `br-1a2b3c4d5e6f`. */
+  bridge?: string
+  /** The host's own address on it, which its containers route through. */
+  gateway?: string
+  /**
+   * Each attached container's address, from the same listing as `usedBy`. The
+   * listing has no aliases; a network's own inspect (`members`) does.
+   */
+  endpoints?: NetworkEndpoint[]
+}
+
+export type NetworkEndpoint = {
+  container: string
+  name: string
+  /** With its prefix, as Docker writes it: `172.18.0.4/16`. Absent while stopped. */
+  ipv4?: string
+  ipv6?: string
+  mac?: string
+}
+
+/**
+ * The part of `docker info` the Networks page reads, in the daemon's own field
+ * names: the engine, and the pools new networks are carved from. Docker
+ * reports no pools unless `default-address-pools` is set, and then allocates
+ * from its built-in ones.
+ */
+export type DockerNetworkingInfo = {
+  Name?: string
+  ServerVersion?: string
+  DefaultAddressPools?: { Base: string; Size: number }[] | null
 }
 
 export type ComposeService = {
@@ -863,6 +846,8 @@ export type DockerEvent = {
   exitCode?: string
   /** The compose service: what a stack's log names the container by (`db`, not `shop-db-1`). */
   service?: string
+  /** The container a network's connect or disconnect moved, by id. */
+  container?: string
   /**
    * The dashboard's own labels off the object this happened to, with the
    * `io.just-dashboard.` prefix stripped — `environment-id`, `release-id`,
@@ -893,6 +878,31 @@ export type DockerEventFeed = {
   listening: boolean
   since: string
   buffered: number
+}
+
+/** The part of `docker info` a page names the engine by, in Docker's own field names. */
+export type DockerEngineInfo = {
+  ServerVersion: string
+  Driver: string
+  Images: number
+}
+
+/**
+ * The part of `docker info` the overview's identity line reads. The route
+ * passes the daemon's own document through, so the names are its casing and
+ * every field it adds in a later release is simply not read here.
+ */
+export type DockerInfo = {
+  Name?: string
+  ServerVersion?: string
+  OperatingSystem?: string
+  Architecture?: string
+  /** The storage driver: overlay2, btrfs, zfs. */
+  Driver?: string
+  CgroupVersion?: string
+  NCPU?: number
+  MemTotal?: number
+  Images?: number
 }
 
 /** Whether the tag a container runs still points where it did when pulled. */
@@ -968,7 +978,6 @@ export type NetworkMember = {
 }
 
 export type NetworkDetail = DockerNetwork & {
-  gateway?: string
   options?: Record<string, string>
   members: NetworkMember[]
   system: boolean

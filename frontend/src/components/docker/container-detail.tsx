@@ -415,7 +415,6 @@ function ContainerDetailPanel({
                 onLimitsSaved={() => {
                   health.refresh()
                   setReloads((n) => n + 1)
-                  window.dispatchEvent(new Event("jd:health-changed"))
                 }}
               />
             </TabsContent>
