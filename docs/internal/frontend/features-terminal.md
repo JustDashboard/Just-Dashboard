@@ -83,6 +83,17 @@ eight headings. It started here and now holds product-wide — the prop is gone 
 `Modal`, `SidePanel` and `Section`, and the title sits at `text-title` instead
 (`docs/internal/frontend/design-system.md` §14). The `?` stays: it is the one mark on those headers
 that does something.
+- The Images page is `app/(dashboard)/docker/images/page.tsx` over `image-band.tsx`, `image-table.tsx`,
+  `image-sheet.tsx` and `image-pull.tsx`, with the pure parts — a reference split as a registry reads
+  it, one registry answer per image, the table's filters and order, a pull's stream folded by layer
+  and a history line read as its instruction — in `images.ts` (unit-tested). Its disk lines reclaim
+  their own kind: unused images through `POST /docker/images/prune?all=true`, the build cache through
+  `POST /docker/build-cache/prune` and stopped containers through `POST /docker/containers/prune`;
+  only Reclaim beside the total runs the sweep, and says it reaches stopped containers and networks.
+  The pull socket is enabled only while a pull is in flight: the server closes it when the pull
+  ends, and `useSocket` reconnects whatever is still enabled, so a finished pull used to open a new
+  one about once a second until the page was left. Tag names the same image again, so the copy a
+  container runs can keep a name across the next pull of its tag.
 - `stacks-tab.tsx` is the stack list, as rows in one plain panel rather than a grid of bordered cards:
   each row carries the stack's state, its services (dot, name, ports, health) and the one action that
   belongs there — deploy when the application is down. It opens with the same search box and state
