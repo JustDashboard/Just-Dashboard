@@ -1,0 +1,403 @@
+# 2026-10-10T04:34:04Z workers=1 specs=tests/browser/tmp-orig.spec.ts
+
+Running 15 tests using 1 worker
+
+  ✘   1 [chromium] › tests/browser/tmp-orig.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip (38.6s)
+  ✘   2 [chromium] › tests/browser/tmp-orig.spec.ts:39:5 › a stopped sampler reads as stale, not as a quiet link (13.9s)
+  ✘   3 [chromium] › tests/browser/tmp-orig.spec.ts:48:5 › a typed range reads that window with its percentiles and the incidents in it (38.1s)
+  ✘   4 [chromium] › tests/browser/tmp-orig.spec.ts:84:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared (37.3s)
+  ✘   5 [chromium] › tests/browser/tmp-orig.spec.ts:122:5 › programs say what a read could not see and list UDP peers without byte counters (37.2s)
+  ✘   6 [chromium] › tests/browser/tmp-orig.spec.ts:143:5 › every container can be listed and one opens into its chart, service and peers (35.4s)
+  ✘   7 [chromium] › tests/browser/tmp-orig.spec.ts:170:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree (38.3s)
+  ✘   8 [chromium] › tests/browser/tmp-orig.spec.ts:191:5 › an upload profile goes with CAKE and the delay CAKE measured is shown (35.9s)
+  ✘   9 [chromium] › tests/browser/tmp-orig.spec.ts:230:5 › congestion control is compared on live sockets, now and before the last switch (23.8s)
+  ✘  10 [chromium] › tests/browser/tmp-orig.spec.ts:245:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked (37.1s)
+  ✘  11 [chromium] › tests/browser/tmp-orig.spec.ts:269:5 › an install is followed by configured, active and verified phases, not by a claim (35.8s)
+  ✓  12 [chromium] › tests/browser/tmp-orig.spec.ts:334:5 › a peer opens into its tuples, ages, closes and the layers it crosses (3.6s)
+  ✓  13 [chromium] › tests/browser/tmp-orig.spec.ts:373:5 › a block asks why and until when, opens an incident, and is listed with its end (5.1s)
+  ✓  14 [chromium] › tests/browser/tmp-orig.spec.ts:442:5 › a past hour is read from the socket history in the live table's shape (3.4s)
+  ✘  15 [chromium] › tests/browser/tmp-orig.spec.ts:470:7 › at a phone's width › the traffic and connections additions never scroll sideways (34.4s)
+
+
+  1) [chromium] › tests/browser/tmp-orig.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip 
+
+    Test timeout of 30000ms exceeded.
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-the-live-window-s-ffd0b-s-TCP-resent-and-round-trip-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-the-live-window-s-ffd0b-s-TCP-resent-and-round-trip-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-the-live-window-s-ffd0b-s-TCP-resent-and-round-trip-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-the-live-window-s-ffd0b-s-TCP-resent-and-round-trip-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  2) [chromium] › tests/browser/tmp-orig.spec.ts:39:5 › a stopped sampler reads as stale, not as a quiet link 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByLabel('Live context')
+    Expected pattern: /4\ds old/
+    Received string:  "Newest reading—sampled every 2sPackets—no uplink reading yetTCP resent—of segments in the last minute · 0 resetsTCP round trip—measuring…"
+    Timeout: 5000ms
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByLabel('Live context')
+        - locator resolved to <div data-slot="stat-grid" aria-label="Live context" class="grid min-w-0 [&>*]:min-w-0 [&>a]:block [&>a]:h-full [&>*]:border-t [&>*]:border-hairline [&>*:first-child]:border-t-0 grid-cols-1 sm:grid-cols-2 sm:[&>*]:border-l sm:[&>*:nth-child(-n+2)]:border-t-0 sm:[&>*:nth-child(2n+1)]:border-l-0 sm:max-xl:[&>*:last-child:nth-child(odd)]:col-span-2 xl:grid-cols-4 xl:[&>*]:border-l xl:[&>*:last-child:nth-child(4n+1)]:col-span-4 xl:[&>*:nth-child(-n+4)]:border-t-0 xl:[&>*:nth-child(2n+1)]:border-l xl:[&…>…</div>
+        - unexpected value "Newest reading—sampled every 2sPackets—no uplink reading yetTCP resent—of segments in the last minute · 0 resetsTCP round trip—measuring…"
+
+
+      42 |   await page.goto("/network/traffic")
+      43 |   const context = page.getByLabel("Live context")
+    > 44 |   await expect(context).toContainText(/4\ds old/)
+         |                         ^
+      45 |   await expect(context).toContainText("the sampler has not stepped; figures are stale")
+      46 | })
+      47 |
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:44:25
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-stopped-sampler-3a430-s-stale-not-as-a-quiet-link-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-a-stopped-sampler-3a430-s-stale-not-as-a-quiet-link-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-stopped-sampler-3a430-s-stale-not-as-a-quiet-link-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-a-stopped-sampler-3a430-s-stale-not-as-a-quiet-link-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  3) [chromium] › tests/browser/tmp-orig.spec.ts:48:5 › a typed range reads that window with its percentiles and the incidents in it 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('form', { name: 'Recorded range' }).getByRole('button', { name: 'Show range' })
+        - locator resolved to <button type="submit" data-size="sm" data-slot="button" data-variant="default" class="inline-flex shrink-0 items-center justify-center text-sm font-medium whitespace-nowrap focus-ring transition-all disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-activ…>Show range</button>
+
+
+      61 |   await form.getByLabel("From").fill("2026-10-01T08:00")
+      62 |   await form.getByLabel("To").fill("2026-10-01T09:30")
+    > 63 |   await form.getByRole("button", { name: "Show range" }).click()
+         |                                                          ^
+      64 |   await expect(page.getByLabel("Chosen range")).toBeVisible()
+      65 |   await expect
+      66 |     .poll(() => history.some((u) => u.searchParams.get("from") && u.searchParams.get("to")))
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:63:58
+
+    Error Context: test-results/tmp-orig-a-typed-range-rea-1f12a-les-and-the-incidents-in-it-chromium/error-context.md
+
+    attachment #2: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-typed-range-rea-1f12a-les-and-the-incidents-in-it-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-a-typed-range-rea-1f12a-les-and-the-incidents-in-it-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  4) [chromium] › tests/browser/tmp-orig.spec.ts:84:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: expect(received).toEqual(expected) // deep equality
+
+    Expected: {"body": {"direction": "tx", "limitBytes": 214748364800, "period": "week"}, "method": "PUT", "path": "/network/traffic/quotas/ens3"}
+    Received: undefined
+
+    Call Log:
+    - Timeout 5000ms exceeded while waiting on the predicate
+
+      107 |   await expect
+      108 |     .poll(() => mutations.find((m) => m.method === "PUT"))
+    > 109 |     .toEqual({
+          |      ^
+      110 |       method: "PUT",
+      111 |       path: "/network/traffic/quotas/ens3",
+      112 |       body: { period: "week", direction: "tx", limitBytes: 200 * 2 ** 30 },
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:109:6
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-transfer-budget-0dcb5-erts-and-is-set-and-cleared-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-a-transfer-budget-0dcb5-erts-and-is-set-and-cleared-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-transfer-budget-0dcb5-erts-and-is-set-and-cleared-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-a-transfer-budget-0dcb5-erts-and-is-set-and-cleared-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  5) [chromium] › tests/browser/tmp-orig.spec.ts:122:5 › programs say what a read could not see and list UDP peers without byte counters 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Target page, context or browser has been closed
+
+      136 |   await expect(peers).toContainText("no byte counters")
+      137 |   await expect(peers).toContainText("median RTT 18 ms")
+    > 138 |   await page.getByRole("button", { name: "Who agent-cli talks to" }).click()
+          |                                                                      ^
+      139 |   await page.getByRole("button", { name: "Who caddy talks to" }).click()
+      140 |   await expect(page.getByText("2 unconnected UDP sockets — listeners and servers")).toBeVisible()
+      141 | })
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:138:70
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-programs-say-what-29cd2-peers-without-byte-counters-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-programs-say-what-29cd2-peers-without-byte-counters-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-programs-say-what-29cd2-peers-without-byte-counters-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-programs-say-what-29cd2-peers-without-byte-counters-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  6) [chromium] › tests/browser/tmp-orig.spec.ts:143:5 › every container can be listed and one opens into its chart, service and peers 
+
+    Test timeout of 30000ms exceeded.
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-every-container-c-9f4ff-its-chart-service-and-peers-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-every-container-c-9f4ff-its-chart-service-and-peers-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-every-container-c-9f4ff-its-chart-service-and-peers-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-every-container-c-9f4ff-its-chart-service-and-peers-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  7) [chromium] › tests/browser/tmp-orig.spec.ts:170:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('dialog').getByText('Queues and parameters')
+
+
+      185 |   await expect(sheet.getByText("This device's queues belong to something else")).toBeVisible()
+      186 |   await expect(sheet.getByRole("button", { name: "Apply" })).toBeDisabled()
+    > 187 |   await sheet.getByText("Queues and parameters").click()
+          |                                                  ^
+      188 |   await expect(sheet.getByLabel("jd-lab queue tree")).toContainText("parent 1:10 · sfq 10:")
+      189 | })
+      190 |
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:187:50
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-shaping-says-what-910b6--and-refuses-a-foreign-tree-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-shaping-says-what-910b6--and-refuses-a-foreign-tree-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-shaping-says-what-910b6--and-refuses-a-foreign-tree-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-shaping-says-what-910b6--and-refuses-a-foreign-tree-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  8) [chromium] › tests/browser/tmp-orig.spec.ts:191:5 › an upload profile goes with CAKE and the delay CAKE measured is shown 
+
+    Test timeout of 30000ms exceeded.
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-an-upload-profile-dbb0f-elay-CAKE-measured-is-shown-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-an-upload-profile-dbb0f-elay-CAKE-measured-is-shown-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-an-upload-profile-dbb0f-elay-CAKE-measured-is-shown-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-an-upload-profile-dbb0f-elay-CAKE-measured-is-shown-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  9) [chromium] › tests/browser/tmp-orig.spec.ts:230:5 › congestion control is compared on live sockets, now and before the last switch 
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByLabel('Congestion control on live sockets').getByLabel('Now').getByRole('row', { name: /bbr/ })
+    Expected substring: "22 ms"
+    Timeout: 15000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 15000ms
+      - waiting for getByLabel('Congestion control on live sockets').getByLabel('Now').getByRole('row', { name: /bbr/ })
+
+
+      236 |   const now = panel.getByLabel("Now")
+      237 |   // The panel reads after the shaping view, so it lands last on a busy host.
+    > 238 |   await expect(now.getByRole("row", { name: /bbr/ })).toContainText("22 ms", { timeout: 15_000 })
+          |                                                       ^
+      239 |   await expect(now.getByRole("row", { name: /cubic/ })).toContainText("0.8%")
+      240 |   await expect(panel).toContainText("Before the last switch, cubic → bbr")
+      241 |   await expect(panel.getByLabel("Before the last switch")).toContainText("52 ms")
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:238:55
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-congestion-contro-a302f--and-before-the-last-switch-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-congestion-contro-a302f--and-before-the-last-switch-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-congestion-contro-a302f--and-before-the-last-switch-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-congestion-contro-a302f--and-before-the-last-switch-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  10) [chromium] › tests/browser/tmp-orig.spec.ts:245:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: locator.click: Test timeout of 30000ms exceeded.
+    Call log:
+      - waiting for getByRole('row').filter({ hasText: 'jd_flow_egress' }).getByRole('button', { name: 'Open program 9101' })
+        - locator resolved to <button type="button" aria-label="Open program 9101" class="rounded-sm text-left underline-offset-4 focus-ring hover:underline">…</button>
+      - attempting click action
+        - waiting for element to be visible, enabled and stable
+        - element is visible, enabled and stable
+        - scrolling into view if needed
+        - done scrolling
+        - performing click action
+
+
+      258 |   const row = page.getByRole("row").filter({ hasText: "jd_flow_egress" })
+      259 |   await expect(row).toContainText("this dashboard’s observer")
+    > 260 |   await row.getByRole("button", { name: "Open program 9101" }).click()
+          |                                                                ^
+      261 |   const sheet = page.getByRole("dialog")
+      262 |   await expect(sheet.getByLabel("Where program 9101 is attached")).toContainText(
+      263 |     "/sys/fs/cgroup/system.slice",
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:260:64
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-loaded-program--3e955--and-the-observer-is-marked-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-a-loaded-program--3e955--and-the-observer-is-marked-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-a-loaded-program--3e955--and-the-observer-is-marked-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-a-loaded-program--3e955--and-the-observer-is-marked-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  11) [chromium] › tests/browser/tmp-orig.spec.ts:269:5 › an install is followed by configured, active and verified phases, not by a claim 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: expect(locator).toContainText(expected) failed
+
+    Locator: getByRole('list', { name: 'After installing bpftool' }).first()
+    Expected substring: "Installed: done"
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toContainText" with timeout 5000ms
+      - waiting for getByRole('list', { name: 'After installing bpftool' }).first()
+
+
+      325 |   await page.getByRole("button", { name: "Install bpftool" }).click()
+      326 |   const phases = page.getByRole("list", { name: "After installing bpftool" }).first()
+    > 327 |   await expect(phases).toContainText("Installed: done")
+          |                        ^
+      328 |   await expect(phases).toContainText("Verified: failed")
+      329 |   await expect(
+      330 |     page.getByText("bpftool is installed; it is not a working service yet").first(),
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:327:24
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-an-install-is-fol-6c845-ified-phases-not-by-a-claim-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-an-install-is-fol-6c845-ified-phases-not-by-a-claim-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-an-install-is-fol-6c845-ified-phases-not-by-a-claim-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-an-install-is-fol-6c845-ified-phases-not-by-a-claim-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  12) [chromium] › tests/browser/tmp-orig.spec.ts:470:7 › at a phone's width › the traffic and connections additions never scroll sideways 
+
+    Test timeout of 30000ms exceeded.
+
+    Error: page.screenshot: Test timeout of 30000ms exceeded.
+    Call log:
+      - taking page screenshot
+      - waiting for fonts to load...
+      - fonts loaded
+
+
+      490 |         .every((a) => a.playState !== "running"),
+      491 |     )
+    > 492 |     await page.screenshot({ path: testInfo.outputPath("upload-profile-390.png") })
+          |                ^
+      493 |     await page.keyboard.press("Escape")
+      494 |
+      495 |     await page.goto("/network/connections")
+        at /home/ubuntu/Just-Dashboard-traffic-spec/frontend/tests/browser/tmp-orig.spec.ts:492:16
+
+    attachment #1: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/tmp-orig-at-a-phone-s-widt-57659-tions-never-scroll-sideways-chromium/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/tmp-orig-at-a-phone-s-widt-57659-tions-never-scroll-sideways-chromium/error-context.md
+
+    attachment #3: trace (application/zip) ─────────────────────────────────────────────────────────
+    test-results/tmp-orig-at-a-phone-s-widt-57659-tions-never-scroll-sideways-chromium/trace.zip
+    Usage:
+
+        npx playwright show-trace test-results/tmp-orig-at-a-phone-s-widt-57659-tions-never-scroll-sideways-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  12 failed
+    [chromium] › tests/browser/tmp-orig.spec.ts:14:5 › the live window says how old its reading is, with packets, TCP resent and round trip 
+    [chromium] › tests/browser/tmp-orig.spec.ts:39:5 › a stopped sampler reads as stale, not as a quiet link 
+    [chromium] › tests/browser/tmp-orig.spec.ts:48:5 › a typed range reads that window with its percentiles and the incidents in it 
+    [chromium] › tests/browser/tmp-orig.spec.ts:84:5 › a transfer budget reads exact and estimated bytes, alerts, and is set and cleared 
+    [chromium] › tests/browser/tmp-orig.spec.ts:122:5 › programs say what a read could not see and list UDP peers without byte counters 
+    [chromium] › tests/browser/tmp-orig.spec.ts:143:5 › every container can be listed and one opens into its chart, service and peers 
+    [chromium] › tests/browser/tmp-orig.spec.ts:170:5 › shaping says what the next change does with each device's queues, and refuses a foreign tree 
+    [chromium] › tests/browser/tmp-orig.spec.ts:191:5 › an upload profile goes with CAKE and the delay CAKE measured is shown 
+    [chromium] › tests/browser/tmp-orig.spec.ts:230:5 › congestion control is compared on live sockets, now and before the last switch 
+    [chromium] › tests/browser/tmp-orig.spec.ts:245:5 › a loaded program opens into its maps, attachments and cost, and the observer is marked 
+    [chromium] › tests/browser/tmp-orig.spec.ts:269:5 › an install is followed by configured, active and verified phases, not by a claim 
+    [chromium] › tests/browser/tmp-orig.spec.ts:470:7 › at a phone's width › the traffic and connections additions never scroll sideways 
+  3 passed (7.8m)
+# exit=1 2026-10-10T04:41:55Z

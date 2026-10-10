@@ -327,3 +327,32 @@ From the final gate's production build, at 390 px with the maturity fixture:
 | C085 | verified | Past-hour selection from socket history and cross-layer evidence with hand-offs pass pure, browser and existing filter acceptance. |
 | C086 | implemented / acceptance pending | Reason, end, incident, guarded add and exact expiry pass unit, API and browser tests against a recorded rule list; never exercised against this host's real firewall. |
 | C087 | verified | Installed/configured/active/verified phases are read from the owning modules (this host's included) and shown after an install, with unit, API and browser acceptance. |
+
+## Spec timing
+
+`frontend/tests/browser/network-traffic-maturity.spec.ts` passed 15/15 when it was written and then failed 5–7 of 15 on a busy shared host. The traces showed every expected value rendering; the cases were out of time, not wrong. No product code was involved and none was changed. The fix is in the spec and its fixture (`network-traffic-maturity-fixture.ts`) only; every assertion keeps its meaning and no case, retry or weaker check was added.
+
+The slowdown was reproduced on this host by running the spec against a production build with busy-loop processes competing for the CPU (`spec-timing-before-cpu-stress.log`: 11 competing loops, 12 of 15 failed; 8 loops still passed 15/15, so the host has a cliff rather than a slope).
+
+| Case | Cause | Fix |
+| --- | --- | --- |
+| Every Traffic case (all but the three Connections ones) | The page shell took 10–15 s to appear and each later action 5–13 s, against the default 5 s expectation and 30 s test timeout. Most cases never waited for the page at all; a click or fill that runs before the page has hydrated and loaded races it. | One `visit()` helper opens the page and waits for `loaded()` (shell present, no skeleton left); every case uses it. `expect` is configured at 15 s and the cases' timeout at 120 s for the file, the way the database specs do, in place of the scattered per-assertion `{ timeout: 15_000 }`. |
+| Live window, "3 drops in 15 min" | Fixture data tied to time, not to the poll. The live handler ignored `since` and returned a whole ring every poll with the drop on "the fifth point from the end". The page appends points newer than the last it holds, so a slow poll minted a second drop and the page summed them: `6 drops in 15 min` was received. The whole-ring answer was also five devices of 450 points parsed and merged every two seconds. | `liveRoute()` fixes the drop's instant once per page (`dropAt`) and honours `since` as the API does. |
+| Stopped sampler, `/4\ds old/` | Asserted at 5 s while the context still read "Newest reading … measuring…". | Readiness wait and the longer expectation, as above. |
+| Typed range, transfer budget, programs, containers, shaping, upload profile, congestion, install, phone width | Timeouts only: the budget case's PUT was "not recorded" because its clicks and fills were still queued behind a starved page when the 5 s poll ran out; the others waited on elements the page had not yet drawn. | As above. |
+| Loaded program, `41` read as `40` | The `NumberTicker` is an overdamped spring that counts up once on screen, so any read before it settles sees a partial count (`13` seen in a 300 ms check without the fix). | That case emulates reduced motion (`page.emulateMedia({ reducedMotion: "reduce" })`), under which the ticker writes the value at once; checked that it reads `41` within 300 ms with it and `13` without. |
+
+Checks that the spec still bites: with the budget fixture's used bytes changed from 790 to 700 GiB the budget case fails on `830.0 GB of 1.0 TB`; with the reduced-motion line removed the program case fails on the partial count.
+
+Runs against a production build of this tree (`bun run start --hostname 127.0.0.1 --port 43218`), one section under the heavy lock each:
+
+| Run | Result | Log |
+| --- | --- | --- |
+| `JD_BROWSER_WORKERS=1`, run 1 | 15 passed (1.7 m) | `network-traffic-connections-maturity/spec-timing-workers1-run1.log` |
+| `JD_BROWSER_WORKERS=1`, run 2 | 15 passed (1.7 m) | `.../spec-timing-workers1-run2.log` |
+| `JD_BROWSER_WORKERS=1`, run 3 | 15 passed (1.7 m) | `.../spec-timing-workers1-run3.log` |
+| `JD_BROWSER_WORKERS=3` | 15 passed (55 s) | `.../spec-timing-workers3.log` |
+| `JD_BROWSER_WORKERS=1`, 11 competing CPU loops (the condition that failed 12 of 15 before) | 15 passed (9.6 m) | `.../spec-timing-workers1-cpu-stress.log` |
+| `network-ui.spec.ts` and `network-topology-interfaces.spec.ts`, one worker | 40 passed, 14 skipped (1.2 m) | `.../spec-timing-network-ui-and-topology.log` |
+
+The 14 skips are `network-ui.spec.ts`'s screenshot cases, which run only when `JD_NETWORK_SHOTS` names a directory. The fixture's other time-relative values (quota periods, block expiry, ages) are already built from `Date.now()` and read loosely by the spec; they were not the cause of any failure.
