@@ -13,9 +13,9 @@ exec > >(tee -a /var/log/jd-vm-setup.log) 2>&1
 packages() {
 echo "== offline owner closure"
 dpkg -i "$stage"/debs/*.deb
-echo "== nftables, iptables and Docker from the guest's signed archive"
+echo "== nftables, iptables, Docker and ping from the guest's signed archive"
 apt-get -q update
-DEBIAN_FRONTEND=noninteractive apt-get -q install -y --no-install-recommends nftables iptables docker.io
+DEBIAN_FRONTEND=noninteractive apt-get -q install -y --no-install-recommends nftables iptables docker.io iputils-ping
 for module in vrf ifb sch_cake tcp_bbr; do
 	modprobe "$module" && echo "module $module loaded"
 done
@@ -148,6 +148,8 @@ systemctl daemon-reload
 # without it, so what the guest finds was restored by the host units alone.
 systemctl disable jd-vm-backend.service 2>/dev/null || true
 }
+
+none() { :; }
 
 for step in ${steps//,/ }; do
 	"$step"

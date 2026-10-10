@@ -819,14 +819,23 @@ def phase_p7_daemon_restart(c, args):
     """systemd-networkd removes foreign routes when it restarts; the managed
     unit is PartOf it and must put every object back."""
     before = unit_show(UNIT, "InvocationID")["InvocationID"]
+    restarts = unit_show("systemd-networkd.service", "NRestarts")["NRestarts"]
     sh("systemctl", "restart", "systemd-networkd.service")
-    deadline = time.time() + 60
-    while time.time() < deadline:
+    # Settled: the unit has restarted and kept one invocation, with networkd
+    # active, for five seconds. networkd may restart itself meanwhile.
+    deadline, stable, last = time.time() + 90, 0, None
+    while time.time() < deadline and stable < 5:
         v = unit_show(UNIT, "InvocationID", "ActiveState")
-        if v["InvocationID"] != before and v["ActiveState"] == "active":
-            break
+        settled = v["InvocationID"] != before and v["ActiveState"] == "active" and \
+            unit_show("systemd-networkd.service", "ActiveState")["ActiveState"] == "active"
+        stable = stable + 1 if settled and v["InvocationID"] == last else 0
+        last = v["InvocationID"]
         time.sleep(1)
     after = unit_show(UNIT, "InvocationID", "ActiveState", "Result")
+    crashes = int(unit_show("systemd-networkd.service", "NRestarts")["NRestarts"]) - int(restarts)
+    c.note("networkdAutomaticRestarts", crashes)
+    c.note("networkdAborts", [l for l in sh("journalctl", "-u", "systemd-networkd", "--since", "-2min", "--no-pager",
+                                             check=False).splitlines() if "Assertion" in l or "dumped" in l])
     c.note("invocations", {"before": before, "after": after})
     c.expect(after["InvocationID"] != before, f"{UNIT} did not restart with systemd-networkd")
     c.note("networkUnitCommands", exec_outcomes(UNIT))
@@ -1235,6 +1244,102 @@ def phase_c004_ownership(c, args):
     stop_backend()
 
 
+# C027 VRF: the guest kernel has the vrf module the production host lacks.
+# The routing package with l3mdev rules and VRF listing is a separate branch;
+# its server and test binary are staged beside this one (ROUTING) and run last.
+
+ROUTING = "/var/tmp/jd-vm-acceptance/routing"
+
+
+def phase_vrf_kernel(c, args):
+    """Traffic through a real VRF in two disposable namespaces."""
+    a, b = "jdvrf-a", "jdvrf-b"
+    for ns in (a, b):
+        sh("ip", "netns", "del", ns, check=False)
+        sh("ip", "netns", "add", ns)
+    try:
+        for argv in (["-n", a, "link", "add", "blue", "type", "vrf", "table", "1100"], ["-n", a, "link", "set", "blue", "up"],
+                     ["-n", a, "link", "add", "va", "type", "veth", "peer", "name", "vb", "netns", b],
+                     ["-n", a, "link", "set", "va", "master", "blue"], ["-n", a, "addr", "add", "10.244.0.1/30", "dev", "va"],
+                     ["-n", a, "link", "set", "va", "up"], ["-n", b, "addr", "add", "10.244.0.2/30", "dev", "vb"],
+                     ["-n", b, "link", "set", "vb", "up"], ["-n", b, "link", "set", "lo", "up"]):
+            sh("ip", *argv)
+        rules = sh("ip", "-n", a, "rule", "show")
+        in_vrf = sh("ip", "-n", a, "route", "get", "10.244.0.2", "vrf", "blue", check=False)
+        outside = subprocess.run(["ip", "-n", a, "route", "get", "10.244.0.2"], capture_output=True, text=True)
+        ping_vrf = subprocess.run(["ip", "netns", "exec", a, "ping", "-c", "2", "-W", "2", "-I", "blue", "10.244.0.2"],
+                                  capture_output=True, text=True)
+        ping_main = subprocess.run(["ip", "netns", "exec", a, "ping", "-c", "1", "-W", "1", "10.244.0.2"],
+                                   capture_output=True, text=True)
+        c.note("module", os.path.isdir("/sys/module/vrf"))
+        c.note("rules", rules.splitlines())
+        c.note("routeGetInVRF", in_vrf.strip())
+        c.note("routeGetOutside", (outside.stdout + outside.stderr).strip())
+        c.note("pingThroughVRF", ping_vrf.stdout.strip().splitlines()[-2:])
+        c.note("pingOutsideVRF", (ping_main.stdout + ping_main.stderr).strip().splitlines()[-2:])
+        c.expect("l3mdev" in rules, "the kernel added no l3mdev rule for the VRF")
+        c.expect("table 1100" in in_vrf and "dev va" in in_vrf, f"VRF lookup: {in_vrf}")
+        c.expect(ping_vrf.returncode == 0, "no traffic through the VRF")
+        c.expect(ping_main.returncode != 0, "the VRF-only peer answered outside the VRF")
+    finally:
+        for ns in (a, b):
+            sh("ip", "netns", "del", ns, check=False)
+
+
+def phase_vrf_routing(c, args):
+    """The routing package's l3mdev policy rule and VRF reading against a real
+    VRF device, through its own server, then its live routing test."""
+    state = load_state()
+    live = subprocess.run(["env", "JD_NETNS_LIVE=1", "TMPDIR=" + ROUTING + "/tmp", ROUTING + "/netx-routing.test",
+                           "-test.run", "^TestLiveRoutingMaturity$", "-test.count=1", "-test.v"],
+                          capture_output=True, text=True, cwd=ROUTING, timeout=300)
+    c.note("liveRoutingMaturity", (live.stdout + live.stderr).strip().splitlines()[-6:])
+    c.expect(live.returncode == 0, "TestLiveRoutingMaturity failed in the guest")
+    stop_backend()
+    if not os.path.exists("/usr/local/bin/just-dashboard.main"):
+        os.replace("/usr/local/bin/just-dashboard", "/usr/local/bin/just-dashboard.main")
+    sh("install", "-m", "0755", ROUTING + "/just-dashboard-routing", "/usr/local/bin/just-dashboard")
+    for argv in (["link", "add", "jdvrf0", "type", "vrf", "table", "1100"], ["link", "set", "jdvrf0", "up"],
+                 ["link", "add", "jdvrfm0", "type", "dummy"], ["link", "set", "jdvrfm0", "master", "jdvrf0"],
+                 ["addr", "add", "10.245.0.1/24", "dev", "jdvrfm0"], ["link", "set", "jdvrfm0", "up"]):
+        sh("ip", *argv, check=False)
+    start_backend()
+    api = API()
+    status, _, rule = api.request("POST", "/network/routing/rules", {"l3mdev": True, "from": "10.245.0.0/24"})
+    c.note("addRule", {"status": status, "body": rule})
+    c.expect(status in (200, 201), f"l3mdev rule add answered {status}: {rule}")
+    _, view = api.ok("GET", "/network/routing")
+    vrfs = view.get("vrfs")
+    managed = [r for r in view["rules"] if r.get("l3mdev")]
+    c.note("vrfs", vrfs)
+    c.note("l3mdevRules", managed)
+    c.note("clientDecision", view.get("clientDecision"))
+    c.expect({"name": "jdvrf0", "table": 1100} in [{"name": v.get("name"), "table": v.get("table")} for v in vrfs or []],
+             f"VRF device not read: {vrfs}")
+    c.expect(any(r.get("managed") and r.get("from") == "10.245.0.0/24" for r in managed), f"l3mdev rule not read back as managed: {managed}")
+    status, _, preview = api.request("POST", "/network/routing/rules/preview",
+                                     {"l3mdev": True, "from": "10.245.0.0/24", "probe": {"target": "10.245.0.9", "source": "10.245.0.1"}})
+    c.note("preview", {"status": status, "probe": (preview or {}).get("probe") if isinstance(preview, dict) else preview})
+    c.note("kernelRules", sh("ip", "rule", "show").splitlines())
+    state["vrf"] = {"bootId": boot_id(), "rule": rule}
+    save_state(state)
+    stop_backend()
+
+
+def phase_vrf_routing_verify(c, args):
+    """After a reboot the routing package's boot unit restored its l3mdev rule;
+    the unmanaged VRF device itself is gone, as it was never persisted."""
+    state = load_state()
+    c.expect(state["vrf"]["bootId"] != boot_id(), "no reboot since the rule was added")
+    rules = sh("ip", "rule", "show")
+    c.note("rules", rules.splitlines())
+    c.note("networkUnitCommands", exec_outcomes(UNIT))
+    c.expect(any("from 10.245.0.0/24" in l and "l3mdev" in l for l in rules.splitlines()), "l3mdev rule not restored at boot")
+    stop_backend()
+    if os.path.exists("/usr/local/bin/just-dashboard.main"):
+        os.replace("/usr/local/bin/just-dashboard.main", "/usr/local/bin/just-dashboard")
+
+
 def phase_drift(c, args):
     """Read-only drift inspection, for evidence between steps."""
     start_backend()
@@ -1274,6 +1379,9 @@ PHASES = {
     "p11-boot": phase_p11_boot,
     "p14-apply": phase_p14_apply,
     "p14-verify": phase_p14_verify,
+    "vrf-kernel": phase_vrf_kernel,
+    "vrf-routing": phase_vrf_routing,
+    "vrf-routing-verify": phase_vrf_routing_verify,
     "drift": phase_drift,
     "state": phase_state,
 }

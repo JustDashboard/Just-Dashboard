@@ -75,6 +75,9 @@ run reboot
 for owner in netplan-networkd netplan-nm networkd; do
 	run p11-persist "$owner"
 done
+# The first networkd reload after a boot, recorded on its own; the
+# transaction cases below settle networkd first.
+run p11-first-edit
 for owner in netplan-networkd netplan-nm networkd; do
 	run p11-kill "$owner" 17
 	run p11-timer "$owner-17"
@@ -90,6 +93,14 @@ run p14-apply
 run reboot
 run p14-verify
 
-"$here/vm.sh" ssh 'sudo cat /var/lib/jd-vm-acceptance/results.jsonl' >"$logs/results.jsonl" 2>/dev/null
+# C027 VRF, last because it swaps in the routing branch's server: traffic
+# through a real VRF, then that package's l3mdev rule, VRF reading and boot
+# restoration (needs `vm.sh provision routing`).
+run vrf-kernel
+run vrf-routing
+run reboot
+run vrf-routing-verify
+
+"$here/vm.sh" collect
 echo "failed steps: $failed" | tee -a "$logs/summary.log"
 [ "$failed" -eq 0 ]

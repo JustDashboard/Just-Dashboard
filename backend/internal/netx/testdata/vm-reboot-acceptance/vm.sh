@@ -2,7 +2,7 @@
 #
 # Disposable QEMU/KVM guest for the network reboot acceptance.
 #
-#   vm.sh prepare | start | wait | ssh CMD... | put SRC DST | reboot | provision [steps] | stop | cleanup
+#   vm.sh prepare | start | wait | ssh CMD... | put SRC DST | reboot | provision [steps] | collect | stop | cleanup
 #
 # Only the guest is ever rebooted. The guest gets user-mode networking alone
 # (QEMU's slirp, no bridge, tap or host route) and one loopback-only SSH
@@ -16,6 +16,8 @@
 #                    and host-tools/ (QEMU, qemu-img, genisoimage)
 #   JD_VM_BACKEND    static backend executable built from the source under test
 #   JD_VM_SSH_PORT   loopback SSH forward, 43250-43259 (default 43250)
+#   JD_VM_ROUTING    optional: routing-branch server, netx test binary and its
+#                    netx testdata, for `provision routing` (the C027 VRF check)
 
 set -euo pipefail
 
@@ -132,7 +134,24 @@ provision() {
 	local files=("$here/guest.py" "$here/fault-shim.sh" "$here/jd-vm-backend.service" "$here/guest-setup.sh")
 	[[ $steps == *backend* ]] && files+=("${JD_VM_BACKEND:?set JD_VM_BACKEND}")
 	put "${files[@]}" "jd@127.0.0.1:$stage/"
-	guest "sudo bash $stage/guest-setup.sh $stage $steps" 2>&1 | tee -a "$logs/provision.log"
+	if [[ $steps == *routing* ]]; then
+		# Optional C027 check: the routing package's server and netx test
+		# binary, built from that branch, with its netx testdata.
+		local routing=${JD_VM_ROUTING:?set JD_VM_ROUTING}
+		guest "install -d $stage/routing $stage/routing/tmp"
+		put -r "$routing/just-dashboard-routing" "$routing/netx-routing.test" "$routing/testdata" "jd@127.0.0.1:$stage/routing/"
+		steps=${steps//routing/}
+	fi
+	guest "sudo bash $stage/guest-setup.sh $stage ${steps:-none}" 2>&1 | tee -a "$logs/provision.log"
+}
+
+# Guest-side evidence: phase records, setup output and the journals of the
+# units involved across every boot of this guest.
+collect() {
+	guest 'sudo cat /var/lib/jd-vm-acceptance/results.jsonl' >"$logs/results.jsonl" || true
+	guest 'sudo cat /var/log/jd-vm-setup.log' >"$logs/guest-setup.log" || true
+	guest 'sudo journalctl --list-boots --no-pager' >"$logs/guest-boots.log" || true
+	guest 'sudo journalctl --no-pager -o short-iso-precise -u "just-dashboard-network*" -u jd-vm-backend.service -u systemd-networkd.service -u NetworkManager.service -u docker.service' >"$logs/guest-journal.log" || true
 }
 
 stop() {
@@ -166,6 +185,7 @@ ssh) shift; guest "$@" ;;
 put) shift; put "$@" ;;
 reboot) reboot_guest ;;
 provision) provision "${2:-}" ;;
+collect) collect ;;
 stop) stop ;;
 cleanup) cleanup ;;
 *) sed -n '3,20p' "$0"; exit 2 ;;
