@@ -735,10 +735,18 @@ exit 0
 	return n
 }
 
+// calls are the commands nginx was given, less `nginx -V`: a reload reads
+// the build to find the master it was sent to, which changes nothing.
 func (n fakeNginx) calls(t *testing.T) string {
 	t.Helper()
 	raw, _ := os.ReadFile(n.log)
-	return string(raw)
+	var kept []string
+	for _, line := range strings.SplitAfter(string(raw), "\n") {
+		if line != "nginx -V\n" {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "")
 }
 
 // enabledSite is an enabled nginx site naming certificate.

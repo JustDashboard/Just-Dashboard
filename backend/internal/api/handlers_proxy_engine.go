@@ -259,10 +259,19 @@ func (s *Server) handleProxyReload(w http.ResponseWriter, r *http.Request) error
 			return mapProxyError(fmt.Errorf("%w, so nothing was reloaded", err))
 		case errors.Is(err, proxysvc.ErrNoIngress):
 			return mapProxyError(err)
+		case errors.Is(err, proxysvc.ErrLoadRefused):
+			// The signal went out and the master refused what it read: it
+			// serves the configuration it had, which is not a test failure.
+			httpx.SetAudit(r, "proxy.reload", string(req.Kind), map[string]any{"result": "refused", "error": res.LoadProof.Error})
+			return httpx.Err(http.StatusBadGateway, "load_refused", err.Error())
 		}
 		return httpx.Err(http.StatusBadGateway, "reload_failed", err.Error())
 	}
-	httpx.SetAudit(r, "proxy.reload", string(req.Kind), nil)
+	detail := map[string]any(nil)
+	if res.LoadProof != nil {
+		detail = map[string]any{"load": res.LoadProof.State}
+	}
+	httpx.SetAudit(r, "proxy.reload", string(req.Kind), detail)
 	// The reload's toast opens its test, which places a conflicting name as
 	// Test config's does.
 	res.Validation = s.placeNameConflicts(r, req.Kind, res.Validation)

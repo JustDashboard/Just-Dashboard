@@ -70,6 +70,9 @@ type StreamModule struct {
 type streamNginxBuild struct {
 	// modules maps a module named by --with-<name> to "static" or "dynamic".
 	modules map[string]string
+	// without are the standard modules configure was told to leave out
+	// (--without-<name>), which every other build has.
+	without map[string]bool
 	// order is the modules as configure listed them.
 	order       []string
 	prefix      string
@@ -90,7 +93,7 @@ type streamNginxBuild struct {
 // module, and Ubuntu builds it statically while leaving the module itself
 // dynamic.
 func parseStreamNginxBuild(out string) streamNginxBuild {
-	build := streamNginxBuild{modules: map[string]string{}, prefix: "/usr/local/nginx"}
+	build := streamNginxBuild{modules: map[string]string{}, without: map[string]bool{}, prefix: "/usr/local/nginx"}
 	var args string
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -114,6 +117,8 @@ func parseStreamNginxBuild(out string) streamNginxBuild {
 			build.errorLog = strings.TrimPrefix(arg, "--error-log-path=")
 		case strings.HasPrefix(arg, "--pid-path="):
 			build.pidPath = strings.TrimPrefix(arg, "--pid-path=")
+		case strings.HasPrefix(arg, "--without-"):
+			build.without[strings.TrimPrefix(arg, "--without-")] = true
 		case strings.HasPrefix(arg, "--with-"):
 			name, kind, dynamic := strings.Cut(strings.TrimPrefix(arg, "--with-"), "=")
 			switch {

@@ -2119,13 +2119,45 @@ containers/volumes/networks.
     `reloadError`, where it was a 400 "Not applied" over a file that was written and linked. The toast
     says nginx did not pick it up and to start or reload it, never what nginx is serving: the usual cause
     is an nginx that is not running (`open() "/run/nginx.pid" failed`), which serves nothing. The
-    deployment cutovers still get the error, since their recovery is built on it. Not seen: a reload the
-    master refuses after `nginx -s reload` has returned 0, which only says the signal was delivered. The
+    deployment cutovers still get the error, since their recovery is built on it.
+  - **A reload is proven from the master's side** (`reload_proof.go`). `nginx -s reload` returning 0
+    says only that the signal was delivered; the master then reads the files and either opens what they
+    listen on and replaces every worker, or logs `[emerg]` and keeps serving its old configuration. The
     case that matters is a listen address another process holds — `nginx -t` passes it, because its test
-    ignores `EADDRINUSE` — where the master logs `[emerg] bind() … failed (98: Address already in use)`
-    five times and keeps its old configuration (checked against nginx 1.26.3), and the save still says
-    "is live". Catching it needs the reload verified from the master's side (its error log or its
-    workers), which the engine's reload does not do either.
+    ignores `EADDRINUSE` — where the master logs `bind() … failed (98: Address already in use)` five
+    times, half a second apart, then `still could not bind()` (checked against nginx 1.26.3). Every
+    reload a save, a switch, a link removal, a bulk change or the engine's own **Reload** asks for now
+    goes through `reloadProven`: `markLoad` notes the running master (`markReload`: found by the
+    configuration it was started on, as the stream watch finds it), its workers, the end of its error
+    log and the SHA-256 of each file the change wrote (the site's file and its `sites-enabled` link);
+    `awaitLoad` then watches for `loadWait` (3 s). `LoadProof.state` is `loaded` when every worker
+    serving is one that was not there before (`replacedAll`: one new worker beside old ones is a
+    crashed worker replaced on the same load, not a load), each file still holds the digest the change
+    wrote (`held`), and nginx holds every socket the site's `listen` lines ask for (`siteBinds`, read
+    as the stream watch reads them; `listening`); `refused` with nginx's first `[emerg]` line (`error`)
+    when the master logged one after the signal — except that a `bind()` failure is a refusal only
+    once the master logs `still could not bind()`: the watch reads its attempts on until it does
+    (`awaitBindAttempts`, so its later attempts are never read as the next reload's), and a socket
+    freed between attempts is bound on the next and the reload read as any other load, `unconfirmed`
+    with the first failure in its note when neither is seen; `unconfirmed` with a `note` when none of
+    that was seen in time, a file was written again before the load, or nginx
+    loaded without the site's socket; `unchecked` when the running nginx could not be read. A save
+    whose reload the master gave up **over one of the site's own sockets** is put back exactly as a
+    refused test puts it back (file, link and `.bak`) and answered 409 `load_refused` with
+    `SiteLoadRefusedError` naming the program holding the port from the host's listener list (audited
+    `result: rolled-back`): left in place, the file would fail every later reload on the host. Any
+    other refusal keeps the valid file and is `reloaded: false` with `reloadError` ("nginx did not take
+    the reload up: …"). The engine's reload answers a refused load as 502 `load_refused`
+    (`ErrLoadRefused`, audited `result: refused`) and carries `loadProof` otherwise; every reload
+    toast reads it (`reloadToast`: the command palette, the served-certificate and TLS report reloads,
+    the import outcome), so none says "nginx reloaded" of a load the master was not seen taking up. The site form says
+    "is live" only for `loaded` (or a backend that sends no proof), "saved and reloaded" with the note
+    otherwise, and "nginx refused the reload" with nginx's words (`load-proof.ts`, `site-save.ts`); the
+    engine's Reload toast and the pending strip read the same. `TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt`
+    keeps a site whose port was freed between the master's attempts. `TestLiveReloadIsProvenFromTheMaster`
+    runs the host's nginx binary on a private prefix: a loaded save is proven from the real master's
+    workers and sockets, a save onto a port the test holds is refused by the master, put back, named as
+    held by the test process, and the previous site still answers.
   - `testWarnings` are the test's warnings placed in the site's own file, so "is live" is said only when
     nginx had nothing to say about it: "Saved with 2 warnings" lists them by line, and alongside a
     conflict they are listed after it rather than dropped. A conflict warning names no file, so it is
@@ -2411,6 +2443,45 @@ containers/volumes/networks.
   nginx takes a missing file as a MISS, but its shared-memory size accounting only catches up as the
   cache manager evicts. `VHost.cached` shows the verb. A real-nginx test confirms MISS then HIT,
   Authorization and Cookie bypasses, and a MISS after purge.
+
+  **A site's controls as its service policy, and their measured effect** (`site_controls.go`).
+  `SitePolicy` reads the site's file (by its listed name) for the request limit (`limit_req` with its
+  zone's rate from the file or the loaded tree, burst, `nodelay`), the connection limit, the response
+  cache (`proxy_cache`), browser caching of assets (`expires`), HTTP/2 (`http2 on` or a `listen … http2`)
+  and HTTP/3 (`http3 on` or a `quic` listen), each with paths that set their own, and says per control
+  whether the build nginx runs has what it needs (`nginx -V`: the standard limit, proxy modules unless
+  configure left them out with `--without-`, now kept as `streamNginxBuild.without`;
+  `--with-http_v2_module` and `--with-http_v3_module`): `built-in`, `module`, `missing` or `unknown`.
+  `GET /proxy/sites/{name}/policy` serves it to every account (the site read already shows the file).
+  The connection investigator reuses it as the **service policy** of each site that forwards to the
+  destination port (`netpath/policy.go`), with the limitation that a direct connection to the port meets
+  none of it. `POST /proxy/sites/{name}/controls/verify {path, asset}` (`system.admin`, audited
+  `proxy.site.controls.verify` with the request count) measures them against this nginx on loopback —
+  or, for a site whose listens on the port all name one address, at that address (`dialAddress`), so
+  nginx answers from the block that address picks rather than a catch-all on the wildcard, and only
+  where it is one of this host's own (`hostAddress`; otherwise nothing is sent) — naming the site in
+  SNI and Host as the request tester does (`localTarget`: only an enabled nginx site
+  that takes its first exact name on its first TLS port, else its first plain one, and refused when
+  another enabled site wins that name on the port, whose controls would be measured instead): HTTP/2 from a
+  browser's ALPN offer (`verified`, `not-effective` when the site asks for it and nginx does not
+  negotiate it, or `not-configured` noting that another server block on the address turned it on);
+  HTTP/3 from a QUIC Version Negotiation answer on the UDP port (`probeQUIC`) and an `h3` in the HTTPS
+  answer's Alt-Svc; the response cache from two GETs of the path and `X-Cache-Status` (`HIT` second, or
+  why not: a cookie, `Cache-Control` private/no-store/no-cache, a bypass, an uncacheable status;
+  `not-measured` without the header); browser caching from the asset path's `Cache-Control` max-age
+  (`not-measured` without one); and, last, since every other check's requests count against it, the
+  request limit from burst + 2 requests at once, at most 40, counting the site's `limit_req_status`
+  (a dry run is verified by refusing nothing; `not-measured` when the burst needs more than 40, when
+  without `nodelay` nginx would hold the check over five seconds, or when the address the requests
+  come from — loopback, or the site's own address — is on the site's exempt list). The connection limit is `not-measured`: `limit_conn` counts requests still being
+  answered, which a short request does not hold. The requests reach the application. The site page's
+  **Controls** panel (`site-controls-panel.tsx`, `site-controls.ts`) lists the policy and, for an
+  administrator, measures it with a path and an optional asset path. Tests:
+  `TestSitePolicyReadsTheFormsControlsAndTheBuild`, `TestVerifySiteControlsRefusesBeforeSending`,
+  `TestControlHelpers`, `TestProxyLayerCarriesTheSitesServicePolicy`, and `TestLiveSiteControlsAreMeasured`,
+  where the host's nginx binary on a private prefix serves a TLS site with HTTP/2, a QUIC listen
+  advertised by Alt-Svc, a response cache and CSS caching, and a site limited to one request a minute
+  with a burst of one, and every control is verified from nginx's answers.
 
   **Visitor address** (`site_realip.go`, form "Visitor address"). `SiteSpec.RealIP{Source, Trusted,
   Header, CloudflareOnly}`: `cloudflare` renders `include <nginxDir>/jd-realip/cloudflare.conf;` +
@@ -2754,6 +2825,26 @@ containers/volumes/networks.
   and time. One pass at a time: a caller waiting for a scheduled pass waits only as long as its own budget.
   Every check also goes into `watched_checks` (days left, fingerprint, error; 2000 per endpoint and 90
   days, cascading with the endpoint), read at `GET /certificates/watched/{id}/history`.
+  **Network probes are watched endpoints of their own kind**, not a second monitor:
+  `watched_endpoints.kind` is `tls` (a handshake and its certificate, every row before this) or `tcp`
+  (`POST /certificates/watched {domain, port, ip?, kind: "tcp"}`), checked by the same `TLSMonitor` pass
+  on the same interval through `CheckTCP` — one connection, at the pinned address where there is one,
+  nothing sent, closed — kept as `ProbeCheck` (`ok`, `state`: connected, refused, timeout, unresolvable,
+  error; the address dialled; connect time) in `watched_endpoints.probe`, and in `watched_checks` with
+  its error and `ms`. The two tables moved from `proxySchema` into `schema` because they gained columns
+  after shipping (`kind`, `probe`, `ms`, brought to older installs by `addedColumns`; every existing row
+  reads `tls`). A probe where a TLS watch already exists is 409 `already_watched` (the handshake checks
+  the connection too); a TLS watch where a probe exists takes it over, drops the probe's connect times
+  from its history in the same transaction, and is checked on the next pass,
+  and a probe result still in flight then is not saved onto the row (`… AND kind = 'tcp'`).
+  The `watch_unreachable` alert judges a probe by whether it connected ("No TCP connection (refused):
+  …"); the untrusted and grade rules and the fleet scan leave probes out. The list (`watched-domains.tsx`)
+  draws a probe with its connection and connect-time trend and no TLS report; the Network Tools page's
+  TCP port check offers **Watch on a schedule**, and the Network runs page lists **Watched probes**
+  (`watched-probes.tsx`, `lib/watched-probes.ts`) with check-now and stop. Tests:
+  `TestWatchedEndpointsGainProbeColumns`, `TestTheWatchMonitorProbesNetworkEndpoints`,
+  `TestCheckTCPConnectsOrSaysWhyNot`, `TestNetworkProbesAreWatchedEndpoints` (a real loopback listener
+  watched, checked, its history, the unreachable alert after it closes, and the kind rules).
 - **TLS report history.** Every quick scan that runs to its end (not one its caller cancelled) is stored in
   `tls_scans` (grade, days left, fingerprint, reachability and the report as JSON; 100 per target and 180
   days). `GET /certificates/reports?domain=&port=` lists a target's reports newest first and
@@ -3110,6 +3201,35 @@ containers/volumes/networks.
   lineage or import — unless `force`, which the page sends only after its dialog has named those
   sites. Host-Caddy `tls` file references are not detected. The page's "Delete expired and unused"
   checklist offers expired certbot/imported certificates whose `UsedBy` is empty and never forces.
+- **Where an issuance or a renewal failed, and whose it is to fix** (`issue_diagnosis.go`).
+  `DiagnoseIssuance` reads a certbot run's output — the authority's per-domain report (`Domain:`,
+  `Type:`, `Detail:`), or for a run that failed before or beside validation its meaningful lines, never
+  progress such as "Account registered." — into problems, each with a stage and that stage's owner:
+  `dns` (NXDOMAIN: the DNS provider or registrar; SERVFAIL, timeouts, refusals: the authoritative
+  nameservers), `caa` (the zone's CAA records), `connect` (a timeout: a firewall in front of port 80,
+  this host's or the provider's; refused on this host's address: whatever answers port 80 here; any
+  failure at an address that is not this host's: whoever holds it — the record points there, or a
+  provider maps it here), `challenge` (an invalid response: the web server answering the name on
+  port 80), `dns-plugin` (the plugin's credentials or zone), `dns-01` (a TXT record not found or wrong:
+  the provider and the propagation wait), `rate-limit`, `account`, `local-port` (certbot's own server
+  on an occupied port 80), `installer` (the nginx plugin) or `unknown`. The address the authority
+  reached is taken from its words, and `here` says whether it is one of this host's interfaces' —
+  set only where that can be said: a host with no public address of its own in that family may be
+  behind the provider's NAT. Each problem carries an action and links to the page holding the owner's
+  evidence: the Network DNS lookup and delegation tools, the TLS page's DNS and CAA panel, the host
+  firewall, external checks, the listening ports on 80, the Sites page's URL resolver, the HTTP tool
+  on the challenge path, the rate-limit and account panels. `GET /certificates/jobs/{id}/diagnosis`
+  (`system.admin`) reads a failed `certbot.*` job's held output (404 for another kind; a job that did
+  not fail has none), and `RenewalHealth.problems` carries the last failed renewal run's — none once
+  the run is `recovered` — which the `renewal_failed` alert appends as "domain at stage — owner". The Certificates page's issuance
+  console and a site form's certificate step show **Where it failed** under a failed job
+  (`issuance-problems.tsx`), and the renewal notice shows the renewal's. Tests:
+  `TestDiagnoseIssuanceReadsEachDomainsStageAndOwner`, `TestDiagnoseIssuanceReadsRunFailures`,
+  `TestFailedRenewalRunCarriesItsProblems`, `TestCertJobDiagnosisReadsTheFailedRun`, and
+  `TestLiveCertbotFailureIsReadByStage`, where the host's certbot orders over webroot, into private
+  directories, from a certificate authority on loopback that fails the challenge as a real one does
+  (connection, DNS, unauthorized and CAA problems), and its real output is read into each stage —
+  no request leaves the host and no certificate exists.
 - **Issuing (`certbot_issue.go`, `PlanIssue`).** `IssueRequest` takes `keyType` (`ecdsa`/`rsa`),
   `rsaKeySize` (2048/3072/4096) and `certName` (`certNameRe`, passed as `--cert-name`: names are
   added to a lineage by resending its whole list under its name, which avoids `--expand`). A key of
@@ -3487,7 +3607,11 @@ containers/volumes/networks.
     `GET /proxy/streams/{name}/sessions` lists the ESTABLISHED TCP sockets on the stream's port whose owner
     is nginx or unknown (gopsutil; a UDP-only stream has no per-client socket and says so). All three are
     readable by every account, like the nginx access logs in the log viewer; a Deny or Allow on a client
-    is an ordinary save of the stream (system.admin, audited `proxy.stream.apply`).
+    is an ordinary save of the stream (system.admin, audited `proxy.stream.apply`). The log line's
+    quoted `$upstream_addr` is read too (`streamLogLine.upstream`), and `GET /proxy/streams/{name}/path`
+    (`stream_path.go`, every account) joins the forward, its access list, the client sessions, the
+    connections nginx holds to each backend now and the last hour by backend, for the connection
+    investigator's stream evidence ([network-investigator.md](network-investigator.md#native-streams-on-the-path)).
   - **A save** (`ApplyStream(spec, previous, reload)`) refuses a new name, or a rename, onto a taken one
     (409 `stream_exists`) and a port another stream, a site or another program holds (`PortInUseError`,
     409 `port_in_use` on `spec.listen` with the next free port): `nginx -t` passes all three, and the
@@ -3603,6 +3727,51 @@ containers/volumes/networks.
   rather than guessing. `GET /proxy/resolve?url=` (`handlers_proxy_resolve.go`, mounted in
   `mountVHostRoutes`, `system.admin`, read-only, nothing is sent to the URL) → `RouteResolution`; 400 for
   an unusable URL, 409 `config_unreadable` when `nginx -T` fails.
+- **Who may reach a URL from one address** (`effective_access.go`, `GET /proxy/resolve/access?url=&source=`,
+  `system.admin` beside `/resolve`, read-only, nothing sent). `ExplainAccess` resolves the route, finds the
+  server block and location chain again by file and line, and judges each layer for `source` (one IP
+  address, as nginx sees the visitor; a range or a zone is a 400) in nginx's order: **Outside this host**
+  (provider firewall, security group, CDN, NAT) is always `unknown`; then the host firewall, added by the
+  handler with `netsec.JudgeFirewallFrom` (`netsec/reach_source.go`: JudgeFirewall's rule order for one
+  source — the first inbound rule whose source holds the address and whose target covers the route's
+  port decides, else the inbound default), judged for the source as the connecting address. A rule
+  that may concern the port but cannot be judged for an address from its listing is passed over and
+  returned rather than dropped, as `JudgeFirewall` drops it: a source that is not an address or a
+  range, a ufw rule
+  limited to an interface (`443/tcp on tailscale0`, as `ufw allow in on tailscale0` prints it) or
+  written as a profile the host does not define (a defined one is read through `ufw app info`), an
+  iptables rule limited to an input interface other than loopback, carrying a match other than its
+  ports, a connection state, a comment and a REJECT's answer, or jumping to a chain that is not read
+  (a state match without `NEW` never meets a new connection and is not one). When any of them acts
+  otherwise than the verdict (`netsec.FirewallUndecided`), the layer is `unknown`, naming the rules and
+  the verdict past them; otherwise the verdict stands and says how many were passed over
+  (`TestJudgeFirewallFromOneSource`, `…ReadsUFWProfiles`, `…ReadsIPTablesListing`, on ufw's and
+  iptables' own listings). Then the server block's rewrite-phase checks the site form writes — maintenance (`$jd_<id>_maint` with its `geo $jd_<id>_maint_ip` bypass list and the
+  always-exempt ACME and page paths: 503 unless bypassed), Cloudflare only (`$jd_<id>_edge` over the
+  Cloudflare geo file: 444 unless the address is one of Cloudflare's), the crawler block (by User-Agent,
+  so an ordinary browser is let through); CORS preflight and hotlink checks answer particular requests
+  and are not access; any other server-level `if` is a layer of its own that is `unknown`, never a pass.
+  Then **Allowed addresses**: the allow and deny lines of the innermost level that sets any (a path's
+  replace the site's, an included access list's are read where nginx includes them), first match,
+  naming the deciding line and, for a line in `jd-access/`, the shared list as owner
+  (`/proxy/sites#access-lists`); a `return` answers before addresses are checked, so the layer is
+  `skipped` (an allow list does not restrict a redirect site). Then **Sign-in**: `auth_basic` and its
+  user file, `auth_request` (single sign-on), each innermost and turned off by `off`; then the request
+  limit in effect (its zone's rate, or the site's exempt list), and `ssl_verify_client` (`on` requires a
+  certificate, `optional` lets the application decide). `satisfy any` is applied as nginx applies it: an
+  address the allow lines refuse can still sign in, one an `allow` line matches is not asked, and one
+  no line names is declined rather than allowed, so it is still asked (an allow list without `deny all`
+  under `satisfy any` lets nobody past the password but the listed addresses). The verdict is
+  `refused` (naming the refusing layers), `unknown` (a layer, or a route `certain: false` for anything
+  but the judged server-level ifs), `credentials` or `admitted`; `no-route` where nothing answers the
+  URL. The Sites page's **Which site answers a URL** takes an optional **From address** and draws each
+  layer with its verdict, deciding lines and owner link above the route (`route-resolver.tsx`,
+  `access-explain.ts`). Tests: `TestExplainAccessFollowsNginxsOrderAndInheritance`,
+  `TestExplainAccessJudgesTheFormsOwnChecks` (rendered maintenance, Cloudflare-only, redirect and SSO
+  sites), `TestExplainAccessEdges`, `TestExplainAccessDoesNotGuessAnIf`, `TestJudgeFirewallFromOneSource`,
+  `TestRouteAccessExplainsLayersForAdmins`, and `TestLiveAccessExplanationAgreesWithNginx`, where the
+  host's nginx binary on a private prefix answers 127.0.0.1 exactly as the explanation predicted for
+  an open path, a deny ahead of an allow, and `satisfy any` with and without the address listed.
 - **`certbot.go`** issues, renews and revokes. `renewalScheduled` has its own field because it is the real
   story behind almost every expired certificate: not a forgotten renewal, a timer that stopped months ago;
   `CertbotState` answers it before reading the lineages, whatever they say. A cron file whose command
@@ -3963,6 +4132,33 @@ containers/volumes/networks.
   for 15 s with concurrent readers sharing one, so polling cannot amplify outbound traffic.
   `POST /proxy/upstreams/check` (system.admin, audited `proxy.upstreams.check`) skips the cache. 503
   `no_nginx` on a host without nginx, 503 `invalid_config` when `nginx -T` refuses.
+  **Pools** (`upstream_pools.go`): the same report carries `pools`, the destinations grouped as nginx
+  spreads them — one per upstream block a route forwards to (its method: round-robin, `least_conn`,
+  `ip_hash`, `hash <key>`, `random`; `keepalive`; every `server` with weight, `max_fails`,
+  `fail_timeout`, `backup` and `down`, the down ones listed but never dialled) and one per direct
+  address — each with the routes and site files that use it. `balancing` says who spreads the requests:
+  `native` for a block of several servers nginx chooses among, `native-dns` for one server named by a
+  host name that resolves to several addresses from here now (nginx resolves it when it loads and
+  balances across every address; what it resolved then may differ), and `single` for one address,
+  whose spreading — a provider's load balancer, a floating address, a Kubernetes Service — nginx
+  cannot see and whose failure is the route's; `provider` names the managed balancer a single
+  endpoint's host-name suffix suggests (`.elb.amazonaws.com`, `.run.app`, `.svc.cluster.local` and a
+  dozen more), as a hint and never proof. Each member carries the check's state and, from nginx's own
+  error logs over the last hour (`requestErrorLogs`: every `error_log` the loaded tree names, main,
+  http and server, confined to `/var/log/nginx` like the site logs, or the default there), what nginx
+  met at it by kind — `refused`, `timeout`, `reset`, `closed`, `disabled` (nginx setting the server aside
+  after `max_fails`, logged at warn, so absent where the log level is error), `other` — and when it
+  last did; a member written as a name is matched under each address it resolves to, and nginx's
+  `no live upstreams` (every server set aside) is counted on the block (`noLive`). `verdict` is what a
+  visitor meets: `serving` (every primary up), `degraded` (some), `on-backup` (no primary, a backup),
+  `down`, or `unknown` (nothing checkable). `evidence` names the logs read, the window's start and
+  whether a log's 8 MB bound cut into it. A site's page draws each of its pools as a plain
+  **Balancing** panel (`site-balancing.tsx`, `upstream-pools.ts`): who balances and how, the verdict,
+  `no live upstreams`, and per server its role, check and what nginx logged. Tests:
+  `TestUpstreamPoolsSayWhoBalances`, `TestUpstreamPoolVerdicts`, `TestUpstreamPoolsCountWhatNginxLogged`,
+  `TestRequestErrorLogsStayInsideTheLogDirectory`, and `TestLivePoolOutcomesComeFromNginxItself`, where
+  the host's nginx binary balances a private pool with a refusing member and the report reads the
+  refusals from nginx's own log.
 - **Site traffic and error log** (`proxysvc/site_logs.go`, `proxysvc/site_errors.go`,
   `api/handlers_proxy_traffic.go`): `SiteLogsFor` finds an nginx site by its listed name (never a
   joined path) and reads the `access_log`/`error_log` its file sets at file or server level;

@@ -1,0 +1,142 @@
+# precheck 2026-10-09T23:53:34Z at ce556da0 (+ working tree)
+=== RUN   TestIPTablesIsReadOnlyWithAReason
+--- PASS: TestIPTablesIsReadOnlyWithAReason (0.00s)
+=== RUN   TestIPTablesReadsTheColumnsItActuallyPrints
+--- PASS: TestIPTablesReadsTheColumnsItActuallyPrints (0.00s)
+=== RUN   TestIPTablesPolicyArrivesInTheSharedWords
+--- PASS: TestIPTablesPolicyArrivesInTheSharedWords (0.00s)
+=== RUN   TestIPTablesSurvivesATruncatedChainLine
+--- PASS: TestIPTablesSurvivesATruncatedChainLine (0.00s)
+=== RUN   TestIPTablesSkipsShortRows
+--- PASS: TestIPTablesSkipsShortRows (0.00s)
+=== RUN   TestJudgeFirewallFromOneSource
+--- PASS: TestJudgeFirewallFromOneSource (0.00s)
+=== RUN   TestJudgeFirewallFromReadsUFWProfiles
+--- PASS: TestJudgeFirewallFromReadsUFWProfiles (0.00s)
+=== RUN   TestJudgeFirewallFromReadsIPTablesListing
+--- PASS: TestJudgeFirewallFromReadsIPTablesListing (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	0.023s
+=== RUN   TestLiveAccessListIsTestedWithEverySiteThatIncludesIt
+--- PASS: TestLiveAccessListIsTestedWithEverySiteThatIncludesIt (0.16s)
+=== RUN   TestLiveAccessListDecidesWhoGetsIn
+--- PASS: TestLiveAccessListDecidesWhoGetsIn (1.04s)
+=== RUN   TestLiveAccessExplanationAgreesWithNginx
+--- PASS: TestLiveAccessExplanationAgreesWithNginx (0.52s)
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/_from_192.0.2.7
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/office/x_from_10.1.2.3
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/office/x_from_10.9.0.4
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/office/x_from_192.0.2.7
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/status_from_198.51.100.1
+--- PASS: TestExplainAccessFollowsNginxsOrderAndInheritance (0.00s)
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://maint.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://maint.example.com/_from_192.0.2.9
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://maint.example.com/.well-known/acme-challenge/t_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://edge.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://edge.example.com/_from_173.245.49.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://edge.example.com/_from_2400:cb00::1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://old.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://sso.example.com/_from_198.51.100.1
+--- PASS: TestExplainAccessJudgesTheFormsOwnChecks (0.00s)
+=== RUN   TestExplainAccessEdges
+--- PASS: TestExplainAccessEdges (0.00s)
+=== RUN   TestExplainAccessDoesNotGuessAnIf
+--- PASS: TestExplainAccessDoesNotGuessAnIf (0.00s)
+=== RUN   TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows
+=== RUN   TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows/no_deny_all
+=== RUN   TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows/no_lines
+--- PASS: TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows (0.00s)
+=== RUN   TestLiveReloadIsProvenFromTheMaster
+--- PASS: TestLiveReloadIsProvenFromTheMaster (3.03s)
+=== RUN   TestSaveSiteProvesNginxLoadedIt
+--- PASS: TestSaveSiteProvesNginxLoadedIt (0.02s)
+=== RUN   TestSaveSitePutsBackASiteNginxCouldNotBind
+=== RUN   TestSaveSitePutsBackASiteNginxCouldNotBind/new
+=== RUN   TestSaveSitePutsBackASiteNginxCouldNotBind/edit
+--- PASS: TestSaveSitePutsBackASiteNginxCouldNotBind (0.36s)
+=== RUN   TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt
+=== RUN   TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt/bound
+=== RUN   TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt/not_seen
+--- PASS: TestSaveSiteKeepsASiteNginxBoundOnALaterAttempt (0.95s)
+=== RUN   TestSaveSiteReportsAReloadNginxRefusedForSomethingElse
+--- PASS: TestSaveSiteReportsAReloadNginxRefusedForSomethingElse (0.17s)
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/no_new_workers
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/one_replaced_worker
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/file_written_again
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/no_socket
+--- PASS: TestSaveSiteDoesNotCallAnUnprovenReloadLoaded (0.71s)
+=== RUN   TestSaveSiteSaysWhenItCouldNotProveTheLoad
+--- PASS: TestSaveSiteSaysWhenItCouldNotProveTheLoad (0.02s)
+=== RUN   TestEngineReloadIsProvenFromTheMaster
+=== RUN   TestEngineReloadIsProvenFromTheMaster/loaded
+=== RUN   TestEngineReloadIsProvenFromTheMaster/refused
+--- PASS: TestEngineReloadIsProvenFromTheMaster (0.16s)
+=== RUN   TestLiveSiteControlsAreMeasured
+--- PASS: TestLiveSiteControlsAreMeasured (0.10s)
+=== RUN   TestSitePolicyReadsTheFormsControlsAndTheBuild
+--- PASS: TestSitePolicyReadsTheFormsControlsAndTheBuild (0.01s)
+=== RUN   TestVerifySiteControlsRefusesBeforeSending
+--- PASS: TestVerifySiteControlsRefusesBeforeSending (0.00s)
+=== RUN   TestControlHelpers
+--- PASS: TestControlHelpers (0.00s)
+=== RUN   TestSiteControlsSurviveOddFilesAndRefuseAnotherSitesName
+--- PASS: TestSiteControlsSurviveOddFilesAndRefuseAnotherSitesName (0.01s)
+=== RUN   TestSaveSiteLeavesTheLinkAsItWas
+--- PASS: TestSaveSiteLeavesTheLinkAsItWas (0.08s)
+=== RUN   TestSaveSiteLeavesAnotherSitesLinkAlone
+--- PASS: TestSaveSiteLeavesAnotherSitesLinkAlone (0.04s)
+=== RUN   TestSaveSiteReportsAFailedReloadAsAResult
+--- PASS: TestSaveSiteReportsAFailedReloadAsAResult (0.06s)
+=== RUN   TestSaveSiteRefusesToTakeANameFromTheSiteServingIt
+--- PASS: TestSaveSiteRefusesToTakeANameFromTheSiteServingIt (0.07s)
+=== RUN   TestSaveSiteRefusesANameItsHolderKeeps
+--- PASS: TestSaveSiteRefusesANameItsHolderKeeps (0.04s)
+=== RUN   TestSaveSiteLetsTheSiteAnsweringANameBeEdited
+--- PASS: TestSaveSiteLetsTheSiteAnsweringANameBeEdited (0.13s)
+=== RUN   TestSaveSiteReportsTheTestsWarningsAboutItsOwnFile
+--- PASS: TestSaveSiteReportsTheTestsWarningsAboutItsOwnFile (0.03s)
+=== RUN   TestSaveSiteTestsADisabledSiteAsEnabled
+--- PASS: TestSaveSiteTestsADisabledSiteAsEnabled (0.09s)
+=== RUN   TestSaveSiteReportsADisabledSitesConflictsWithoutRefusing
+--- PASS: TestSaveSiteReportsADisabledSitesConflictsWithoutRefusing (0.07s)
+=== RUN   TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested
+--- PASS: TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested (0.03s)
+=== RUN   TestSaveSiteKeepsAConfDSiteThatIsOffWhereItIs
+--- PASS: TestSaveSiteKeepsAConfDSiteThatIsOffWhereItIs (0.03s)
+=== RUN   TestSaveSiteTakesALinkOfAnotherNameForEnabled
+--- PASS: TestSaveSiteTakesALinkOfAnotherNameForEnabled (0.06s)
+=== RUN   TestSaveSiteSaysNginxServesAFileOfItsOwn
+--- PASS: TestSaveSiteSaysNginxServesAFileOfItsOwn (0.04s)
+=== RUN   TestSaveSiteKeepsAHandWrittenFileAsBak
+--- PASS: TestSaveSiteKeepsAHandWrittenFileAsBak (0.10s)
+=== RUN   TestLiveReloadsBesideADisabledSaveNeverReadIt
+--- PASS: TestLiveReloadsBesideADisabledSaveNeverReadIt (0.90s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	9.069s
+=== RUN   TestRouteAccessExplainsLayersForAdmins
+--- PASS: TestRouteAccessExplainsLayersForAdmins (0.40s)
+=== RUN   TestProxyRoutesKeepTheirPaths
+--- PASS: TestProxyRoutesKeepTheirPaths (0.08s)
+=== RUN   TestTheWatchListHoldsEndpoints
+--- PASS: TestTheWatchListHoldsEndpoints (0.03s)
+=== RUN   TestNetworkProbesAreWatchedEndpoints
+--- PASS: TestNetworkProbesAreWatchedEndpoints (0.03s)
+=== RUN   TestAProbeResultDoesNotLandOnARowATLSWatchTookOver
+--- PASS: TestAProbeResultDoesNotLandOnARowATLSWatchTookOver (0.02s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	0.655s
+specs exit 0
+
+Running 3 tests using 1 worker
+
+  ✓  1 [chromium] › tests/browser/proxy-certificates.spec.ts:1439:5 › a failed renewal says where validation failed and whose it is to fix (1.4s)
+  ✓  2 [chromium] › tests/browser/proxy-certificates.spec.ts:1494:5 › a failed issuance says where validation failed, read from the job's own output (1.8s)
+  ✓  3 [chromium] › tests/browser/proxy-sites-tools.spec.ts:433:5 › the URL resolver says who may take the route from an address, layer by layer (1.2s)
+
+  3 passed (5.5s)
+# specs exit 0
+exit 0

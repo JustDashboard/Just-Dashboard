@@ -709,3 +709,40 @@ for (const evidence of TOOL_EVIDENCE) {
     expect(probes(calls)).toHaveLength(1)
   })
 }
+
+test("a port check's endpoint is watched as a probe on the watch list's schedule", async ({
+  page,
+}) => {
+  const port = TOOL_EVIDENCE.find((evidence) => evidence.key === "port")!
+  await tools(page, { port: port.result })
+  const watched: unknown[] = []
+  await page.route("**/api/v1/certificates/watched", async (route) => {
+    if (route.request().method() !== "POST") return json(route, [])
+    watched.push(route.request().postDataJSON())
+    if (watched.length > 1) {
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            code: "already_watched",
+            message:
+              "This endpoint is already watched for TLS, whose handshake checks the connection too.",
+          },
+        }),
+      })
+    }
+    return json(route, { id: 7, domain: "192.0.2.10", port: 5432, kind: "tcp" }, 201)
+  })
+  await page.goto(`/network/tools?tool=port&target=${encodeURIComponent(port.target)}`)
+  await run(page).click()
+  await panel(page).getByRole("button", { name: "Watch on a schedule" }).click()
+  await expect(page.getByText("Watching 192.0.2.10:5432")).toBeVisible()
+  expect(watched[0]).toMatchObject({ domain: "192.0.2.10", kind: "tcp" })
+  expect((watched[0] as { port: number }).port).toBeGreaterThan(0)
+  // The second answer is the server's refusal, named with the port the form sent.
+  const sent = (watched[0] as { port: number }).port
+  await panel(page).getByRole("button", { name: "Watch on a schedule" }).click()
+  await expect(page.getByText(`192.0.2.10:${sent} is already watched`)).toBeVisible()
+  await expect(page.getByText("whose handshake checks the connection too")).toBeVisible()
+})

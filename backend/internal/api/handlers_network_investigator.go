@@ -197,6 +197,15 @@ func (s *Server) networkPathProviders(ctx context.Context, req netpath.Request) 
 		proxysvc.AttachProxy(result.Listeners, vhosts, streams)
 		return result, nil
 	}
+	if s.modules.proxy != nil && container == nil {
+		p.Stream = func(ctx context.Context, name string) (*proxysvc.StreamPath, error) {
+			return s.modules.proxy.StreamPath(ctx, name, time.Now())
+		}
+		p.StreamSession = func(ctx context.Context, name, client string, since time.Time) (*proxysvc.StreamLoggedSession, error) {
+			return s.modules.proxy.AwaitStreamSession(ctx, name, client, since, 1500*time.Millisecond)
+		}
+		p.Policy = s.modules.proxy.SitePolicy
+	}
 	p.Probe = func(ctx context.Context, request netpath.Request) (*netsec.ProbeResult, error) {
 		if container != nil {
 			return netsec.SourcePortCheck(ctx, command, request.Address, request.Port, request.SourceAddress)

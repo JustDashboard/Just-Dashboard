@@ -1435,3 +1435,123 @@ test("recent renewal runs wrap in the renewal column, each told apart by its tim
   expect(overflow).toBeLessThanOrEqual(1)
   await page.screenshot({ path: testInfo.outputPath("renewal-recent-1280.png") })
 })
+
+test("a failed renewal says where validation failed and whose it is to fix", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page, {
+    health: renewalHealth({
+      problems: [
+        {
+          stage: "connect",
+          stageTitle: "Reaching port 80",
+          owner: "A firewall in front of port 80: this host's or the provider's",
+          domain: "app.example.com",
+          address: "203.0.113.5",
+          here: true,
+          detail:
+            "203.0.113.5: Fetching http://app.example.com/.well-known/acme-challenge/x1: Timeout during connect (likely firewall problem)",
+          action:
+            "The authority's connection went unanswered: open port 80 to the internet in the host firewall and any provider firewall or security group.",
+          links: [
+            { label: "The host firewall", href: "/network/firewall" },
+            { label: "Check from outside", href: "/network/external" },
+          ],
+        },
+        {
+          stage: "dns",
+          stageTitle: "Name resolution",
+          owner: "The DNS provider or registrar",
+          domain: "www.example.com",
+          detail: "DNS problem: NXDOMAIN looking up A for www.example.com",
+          action:
+            "Create an A or AAAA record for the name pointing at this server, then try again.",
+          links: [
+            { label: "Look the name up", href: "/network/tools?tool=dns&target=www.example.com" },
+          ],
+        },
+      ],
+    }),
+  })
+  await page.goto("/proxy/certificates")
+  const where = page.getByRole("region", { name: "Where it failed" })
+  await expect(where).toBeVisible()
+  const connect = where.getByRole("listitem").filter({ hasText: "app.example.com" })
+  await expect(connect).toContainText("Reaching port 80 — A firewall in front of port 80")
+  await expect(connect).toContainText("203.0.113.5 (this host): Fetching http://app.example.com/")
+  await expect(connect).toContainText("Timeout during connect (likely firewall problem)")
+  await expect(connect.getByRole("link", { name: "The host firewall" })).toHaveAttribute(
+    "href",
+    "/network/firewall",
+  )
+  const dns = where.getByRole("listitem").filter({ hasText: "www.example.com" })
+  await expect(dns).toContainText("Name resolution — The DNS provider or registrar")
+  await expect(dns.getByRole("link", { name: "Look the name up" })).toHaveAttribute(
+    "href",
+    "/network/tools?tool=dns&target=www.example.com",
+  )
+})
+
+test("a failed issuance says where validation failed, read from the job's own output", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const failed = certbotJob({
+    id: "job-issue",
+    kind: "certbot.issue",
+    title: "Test issuance for app.example.com",
+    target: "app.example.com",
+    status: "failed",
+    exitCode: 1,
+    endedAt: now,
+  })
+  await capture(page, "**/api/v1/certificates/issue", () => failed)
+  const asked: string[] = []
+  await page.route("**/api/v1/certificates/jobs/*/diagnosis", (route) => {
+    asked.push(new URL(route.request().url()).pathname)
+    return json(route, {
+      job: "job-issue",
+      status: "failed",
+      problems: [
+        {
+          stage: "challenge",
+          stageTitle: "Serving the challenge file",
+          owner: "The web server answering the name on port 80",
+          domain: "app.example.com",
+          address: "198.51.100.7",
+          here: false,
+          detail:
+            "198.51.100.7: Invalid response from http://app.example.com/.well-known/acme-challenge/x1: 404",
+          action:
+            "The authority reached a web server that did not serve the challenge file: the name may land on another site, a redirect may leave the path, or the webroot may be another folder.",
+          links: [
+            { label: "Which site answers the name", href: "/proxy/sites" },
+            {
+              label: "Ask the challenge path yourself",
+              href: "/network/tools?tool=http&target=http%3A%2F%2Fapp.example.com%2F.well-known%2Facme-challenge%2Ftest",
+            },
+          ],
+        },
+      ],
+    })
+  })
+  await page.goto("/proxy/certificates")
+  await page.getByRole("button", { name: "Issue certificate", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByLabel("Domains").fill("app.example.com")
+  await dialog.getByLabel("Contact email").fill("ops@example.com")
+  await dialog.getByRole("radio", { name: "A folder", exact: true }).click()
+  await dialog.getByRole("button", { name: "Run the test" }).click()
+
+  const where = page.getByRole("region", { name: "Where it failed" })
+  await expect(where).toBeVisible()
+  await expect(where).toContainText(
+    "Serving the challenge file — The web server answering the name on port 80",
+  )
+  await expect(where).toContainText("198.51.100.7 (not this host): Invalid response from")
+  await expect(where.getByRole("link", { name: "Which site answers the name" })).toHaveAttribute(
+    "href",
+    "/proxy/sites",
+  )
+  await expect(where.getByRole("link", { name: "Ask the challenge path yourself" })).toBeVisible()
+  expect(asked).toEqual(["/api/v1/certificates/jobs/job-issue/diagnosis"])
+})

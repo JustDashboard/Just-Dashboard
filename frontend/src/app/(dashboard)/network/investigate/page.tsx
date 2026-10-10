@@ -20,14 +20,14 @@ import {
 } from "@/components/ui/select"
 import { useAuth } from "@/hooks/use-auth"
 import { errorMessage, get, post } from "@/lib/api"
-import { newPathDraft, pathRequest } from "@/lib/network-investigator"
+import { pathDraftFromQuery, pathRequest } from "@/lib/network-investigator"
 import type { PathDraft } from "@/lib/network-investigator"
 import type { PathResult, PathSources } from "@/lib/network-investigator-types"
 
-// A report register: the input selects the evidence to read; it does not stage
-// a network change or draw unmeasured edges as successful packet traversal.
-// A device sheet hands a container over by name (`?container=postgres`); the
-// source is chosen once the investigator's own container list names it.
+// Another page names the tuple in the query string — a stream's port, say —
+// or hands a container over by name (`?container=postgres`), chosen once the
+// investigator's own container list names it. The App Router hands the query
+// out only inside a Suspense boundary.
 export default function NetworkInvestigatorPage() {
   return (
     <Suspense fallback={<LoadingPanel />}>
@@ -36,13 +36,15 @@ export default function NetworkInvestigatorPage() {
   )
 }
 
+// A report register: the input selects the evidence to read; it does not stage
+// a network change or draw unmeasured edges as successful packet traversal.
 function NetworkInvestigator() {
   const { can } = useAuth()
   const params = useSearchParams()
   const [handoff] = useState(() => params.get("container") ?? undefined)
   const admin = can("system.admin")
   const [sources, setSources] = useState<PathSources>({ containers: [] })
-  const [draft, setDraft] = useState(newPathDraft)
+  const [draft, setDraft] = useState(() => pathDraftFromQuery(params))
   const [result, setResult] = useState<PathResult>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()

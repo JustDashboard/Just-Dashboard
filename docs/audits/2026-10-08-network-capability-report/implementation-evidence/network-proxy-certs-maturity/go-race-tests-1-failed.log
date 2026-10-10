@@ -1,0 +1,221 @@
+# 2026-10-09T19:43:31Z bec7bd5c go test -race on the package's new tests
+=== RUN   TestLiveAccessListIsTestedWithEverySiteThatIncludesIt
+--- PASS: TestLiveAccessListIsTestedWithEverySiteThatIncludesIt (0.98s)
+=== RUN   TestLiveAccessListDecidesWhoGetsIn
+--- PASS: TestLiveAccessListDecidesWhoGetsIn (1.98s)
+=== RUN   TestSaveAccessListWritesTestsAndReloads
+--- PASS: TestSaveAccessListWritesTestsAndReloads (0.92s)
+=== RUN   TestServedCertificatesWaitsForAReloadInFlight
+--- PASS: TestServedCertificatesWaitsForAReloadInFlight (0.13s)
+=== RUN   TestLiveNginxServesAReplacedCertificateOnlyOnceReloaded
+--- PASS: TestLiveNginxServesAReplacedCertificateOnlyOnceReloaded (0.19s)
+=== RUN   TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage
+--- SKIP: TestLiveCertbotTestRunSavesNothingAndARealIssuanceReplacesAStagingLineage (0.00s)
+=== RUN   TestLiveCertbotRuntimeIsTheHostsCertbot
+--- PASS: TestLiveCertbotRuntimeIsTheHostsCertbot (1.41s)
+=== RUN   TestDeploymentRouteReloadFailureRestoresExactPriorSpec
+--- PASS: TestDeploymentRouteReloadFailureRestoresExactPriorSpec (0.04s)
+=== RUN   TestIngressIsTestedAndReloadedInsideItsContainer
+--- PASS: TestIngressIsTestedAndReloadedInsideItsContainer (0.02s)
+=== RUN   TestIngressReloadIsRefusedWhenItsTestFails
+--- PASS: TestIngressReloadIsRefusedWhenItsTestFails (0.01s)
+=== RUN   TestLiveAccessExplanationAgreesWithNginx
+--- PASS: TestLiveAccessExplanationAgreesWithNginx (0.02s)
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/_from_192.0.2.7
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/office/x_from_10.1.2.3
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/office/x_from_10.9.0.4
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/office/x_from_192.0.2.7
+=== RUN   TestExplainAccessFollowsNginxsOrderAndInheritance/http://admin.example.com/status_from_198.51.100.1
+--- PASS: TestExplainAccessFollowsNginxsOrderAndInheritance (0.00s)
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://maint.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://maint.example.com/_from_192.0.2.9
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://maint.example.com/.well-known/acme-challenge/t_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://edge.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://edge.example.com/_from_173.245.49.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://edge.example.com/_from_2400:cb00::1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://old.example.com/_from_198.51.100.1
+=== RUN   TestExplainAccessJudgesTheFormsOwnChecks/http://sso.example.com/_from_198.51.100.1
+--- PASS: TestExplainAccessJudgesTheFormsOwnChecks (0.01s)
+=== RUN   TestExplainAccessEdges
+--- PASS: TestExplainAccessEdges (0.00s)
+=== RUN   TestExplainAccessDoesNotGuessAnIf
+--- PASS: TestExplainAccessDoesNotGuessAnIf (0.00s)
+=== RUN   TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows
+=== RUN   TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows/no_deny_all
+=== RUN   TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows/no_lines
+--- PASS: TestExplainAccessSatisfyAnyAsksAnAddressNoLineAllows (0.00s)
+=== RUN   TestLimitIdentStripsOnlyTheZonesSuffix
+--- PASS: TestLimitIdentStripsOnlyTheZonesSuffix (0.00s)
+=== RUN   TestLiveCertbotFailureIsReadByStage
+=== RUN   TestLiveCertbotFailureIsReadByStage/connection
+=== RUN   TestLiveCertbotFailureIsReadByStage/dns
+=== RUN   TestLiveCertbotFailureIsReadByStage/unauthorized
+=== RUN   TestLiveCertbotFailureIsReadByStage/caa
+--- FAIL: TestLiveCertbotFailureIsReadByStage (6.44s)
+=== RUN   TestDiagnoseIssuanceReadsEachDomainsStageAndOwner
+--- PASS: TestDiagnoseIssuanceReadsEachDomainsStageAndOwner (0.00s)
+=== RUN   TestDiagnoseIssuanceReadsRunFailures
+--- PASS: TestDiagnoseIssuanceReadsRunFailures (0.00s)
+=== RUN   TestFailedRenewalRunCarriesItsProblems
+--- PASS: TestFailedRenewalRunCarriesItsProblems (0.00s)
+=== RUN   TestRecoveredRenewalCarriesNoProblems
+--- PASS: TestRecoveredRenewalCarriesNoProblems (0.01s)
+=== RUN   TestPendingWaitsForTheLoadAReloadAskedFor
+--- PASS: TestPendingWaitsForTheLoadAReloadAskedFor (0.73s)
+=== RUN   TestLiveReloadIsProvenFromTheMaster
+--- PASS: TestLiveReloadIsProvenFromTheMaster (3.21s)
+=== RUN   TestSaveSiteProvesNginxLoadedIt
+--- PASS: TestSaveSiteProvesNginxLoadedIt (0.04s)
+=== RUN   TestSaveSitePutsBackASiteNginxCouldNotBind
+=== RUN   TestSaveSitePutsBackASiteNginxCouldNotBind/new
+=== RUN   TestSaveSitePutsBackASiteNginxCouldNotBind/edit
+--- PASS: TestSaveSitePutsBackASiteNginxCouldNotBind (0.41s)
+=== RUN   TestSaveSiteReportsAReloadNginxRefusedForSomethingElse
+--- PASS: TestSaveSiteReportsAReloadNginxRefusedForSomethingElse (0.20s)
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/no_new_workers
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/one_replaced_worker
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/file_written_again
+=== RUN   TestSaveSiteDoesNotCallAnUnprovenReloadLoaded/no_socket
+--- PASS: TestSaveSiteDoesNotCallAnUnprovenReloadLoaded (0.85s)
+=== RUN   TestSaveSiteSaysWhenItCouldNotProveTheLoad
+--- PASS: TestSaveSiteSaysWhenItCouldNotProveTheLoad (0.04s)
+=== RUN   TestEngineReloadIsProvenFromTheMaster
+=== RUN   TestEngineReloadIsProvenFromTheMaster/loaded
+=== RUN   TestEngineReloadIsProvenFromTheMaster/refused
+--- PASS: TestEngineReloadIsProvenFromTheMaster (0.17s)
+=== RUN   TestSiteBindsReadEveryServerBlock
+--- PASS: TestSiteBindsReadEveryServerBlock (0.00s)
+=== RUN   TestRenewalRunAfterIsTheRunAJobStarted
+--- PASS: TestRenewalRunAfterIsTheRunAJobStarted (0.01s)
+=== RUN   TestRenewalHookTestsThenReloads
+=== RUN   TestRenewalHookTestsThenReloads/systemd_reloads
+=== RUN   TestRenewalHookTestsThenReloads/no_systemd_unit
+=== RUN   TestRenewalHookTestsThenReloads/a_broken_configuration
+--- PASS: TestRenewalHookTestsThenReloads (0.01s)
+=== RUN   TestLiveRenewalHookReloadsNginxAndAFailedRenewalIsRead
+--- SKIP: TestLiveRenewalHookReloadsNginxAndAFailedRenewalIsRead (0.00s)
+=== RUN   TestLiveSiteControlsAreMeasured
+--- PASS: TestLiveSiteControlsAreMeasured (0.14s)
+=== RUN   TestSitePolicyReadsTheFormsControlsAndTheBuild
+--- PASS: TestSitePolicyReadsTheFormsControlsAndTheBuild (0.02s)
+=== RUN   TestVerifySiteControlsRefusesBeforeSending
+--- PASS: TestVerifySiteControlsRefusesBeforeSending (0.01s)
+=== RUN   TestControlHelpers
+--- PASS: TestControlHelpers (0.00s)
+=== RUN   TestSiteControlsSurviveOddFilesAndRefuseAnotherSitesName
+--- PASS: TestSiteControlsSurviveOddFilesAndRefuseAnotherSitesName (0.01s)
+=== RUN   TestSaveSiteLeavesTheLinkAsItWas
+--- PASS: TestSaveSiteLeavesTheLinkAsItWas (0.13s)
+=== RUN   TestSaveSiteLeavesAnotherSitesLinkAlone
+--- PASS: TestSaveSiteLeavesAnotherSitesLinkAlone (0.04s)
+=== RUN   TestSaveSiteReportsAFailedReloadAsAResult
+--- PASS: TestSaveSiteReportsAFailedReloadAsAResult (0.09s)
+=== RUN   TestSaveSiteRefusesToTakeANameFromTheSiteServingIt
+--- PASS: TestSaveSiteRefusesToTakeANameFromTheSiteServingIt (0.17s)
+=== RUN   TestSaveSiteRefusesANameItsHolderKeeps
+--- PASS: TestSaveSiteRefusesANameItsHolderKeeps (0.10s)
+=== RUN   TestSaveSiteLetsTheSiteAnsweringANameBeEdited
+--- PASS: TestSaveSiteLetsTheSiteAnsweringANameBeEdited (0.31s)
+=== RUN   TestSaveSiteReportsTheTestsWarningsAboutItsOwnFile
+--- PASS: TestSaveSiteReportsTheTestsWarningsAboutItsOwnFile (0.05s)
+=== RUN   TestSaveSiteTestsADisabledSiteAsEnabled
+--- PASS: TestSaveSiteTestsADisabledSiteAsEnabled (0.17s)
+=== RUN   TestSaveSiteReportsADisabledSitesConflictsWithoutRefusing
+--- PASS: TestSaveSiteReportsADisabledSitesConflictsWithoutRefusing (0.18s)
+=== RUN   TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested
+--- PASS: TestSaveSiteSaysWhenADisabledSiteCouldNotBeTested (0.06s)
+=== RUN   TestSaveSiteKeepsAConfDSiteThatIsOffWhereItIs
+--- PASS: TestSaveSiteKeepsAConfDSiteThatIsOffWhereItIs (0.05s)
+=== RUN   TestSaveSiteTakesALinkOfAnotherNameForEnabled
+--- PASS: TestSaveSiteTakesALinkOfAnotherNameForEnabled (0.12s)
+=== RUN   TestSaveSiteSaysNginxServesAFileOfItsOwn
+--- PASS: TestSaveSiteSaysNginxServesAFileOfItsOwn (0.09s)
+=== RUN   TestSaveSiteKeepsAHandWrittenFileAsBak
+--- PASS: TestSaveSiteKeepsAHandWrittenFileAsBak (0.18s)
+=== RUN   TestLiveReloadsBesideADisabledSaveNeverReadIt
+--- PASS: TestLiveReloadsBesideADisabledSaveNeverReadIt (1.11s)
+=== RUN   TestLiveStreamPathReadsNginxsBackendLeg
+--- PASS: TestLiveStreamPathReadsNginxsBackendLeg (0.32s)
+=== RUN   TestStreamPathJoinsConfigurationSocketsAndLog
+--- PASS: TestStreamPathJoinsConfigurationSocketsAndLog (0.01s)
+=== RUN   TestStreamPathSaysWhatItCannotCount
+--- PASS: TestStreamPathSaysWhatItCannotCount (0.01s)
+=== RUN   TestAwaitStreamSessionFindsTheMeasuredConnection
+--- PASS: TestAwaitStreamSessionFindsTheMeasuredConnection (0.20s)
+=== RUN   TestApplyStreamReportsAReloadNginxRefusedForAnotherPort
+--- PASS: TestApplyStreamReportsAReloadNginxRefusedForAnotherPort (0.19s)
+=== RUN   TestApplyStreamReloadsOnlyWhenAsked
+--- PASS: TestApplyStreamReloadsOnlyWhenAsked (0.04s)
+=== RUN   TestApplyStreamReportsAFailedReload
+--- PASS: TestApplyStreamReportsAFailedReload (0.04s)
+=== RUN   TestSwitchingOnWritesTestsReloadsAndWaitsForTheFirstReading
+--- PASS: TestSwitchingOnWritesTestsReloadsAndWaitsForTheFirstReading (0.01s)
+=== RUN   TestSwitchingOffRemovesTestsAndReloads
+--- PASS: TestSwitchingOffRemovesTestsAndReloads (0.00s)
+=== RUN   TestSwitchingOffSaysWhenNginxDidNotReload
+=== RUN   TestSwitchingOffSaysWhenNginxDidNotReload/nginx_running
+=== RUN   TestSwitchingOffSaysWhenNginxDidNotReload/nginx_stopped
+=== RUN   TestSwitchingOffSaysWhenNginxDidNotReload/no_port_read
+--- PASS: TestSwitchingOffSaysWhenNginxDidNotReload (0.02s)
+=== RUN   TestTheWatchMonitorProbesNetworkEndpoints
+--- PASS: TestTheWatchMonitorProbesNetworkEndpoints (0.00s)
+=== RUN   TestCheckTCPConnectsOrSaysWhyNot
+--- PASS: TestCheckTCPConnectsOrSaysWhyNot (0.00s)
+=== RUN   TestScanTLSDiagnosesWhereItStopped
+--- PASS: TestScanTLSDiagnosesWhereItStopped (0.01s)
+=== RUN   TestLiveNginxListenWithoutSSLIsDiagnosed
+--- PASS: TestLiveNginxListenWithoutSSLIsDiagnosed (0.11s)
+=== RUN   TestLivePoolOutcomesComeFromNginxItself
+--- PASS: TestLivePoolOutcomesComeFromNginxItself (0.16s)
+=== RUN   TestUpstreamPoolsSayWhoBalances
+--- PASS: TestUpstreamPoolsSayWhoBalances (0.00s)
+=== RUN   TestUpstreamPoolVerdicts
+=== RUN   TestUpstreamPoolVerdicts/all_primaries
+=== RUN   TestUpstreamPoolVerdicts/one_primary_refused
+=== RUN   TestUpstreamPoolVerdicts/backup_only
+=== RUN   TestUpstreamPoolVerdicts/nothing
+--- PASS: TestUpstreamPoolVerdicts (0.00s)
+=== RUN   TestUpstreamPoolsCountWhatNginxLogged
+--- PASS: TestUpstreamPoolsCountWhatNginxLogged (0.00s)
+=== RUN   TestRequestErrorLogsStayInsideTheLogDirectory
+--- PASS: TestRequestErrorLogsStayInsideTheLogDirectory (0.00s)
+=== RUN   TestLinkChangesReloadInsideTheServiceLock
+--- PASS: TestLinkChangesReloadInsideTheServiceLock (0.26s)
+FAIL
+FAIL	github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc	22.907s
+FAIL
+--- SKIP: TestLiveContainerPathUsesNativeDNSPinnedNamespaceAndSource (0.00s)
+--- PASS: TestValidateBeforeOwnerRead (0.00s)
+--- PASS: TestPrivateDNSUnavailableStopsRouteAndProbe (0.00s)
+--- PASS: TestPinnedDNSAddressAndSourceSharedWithProbe (0.00s)
+--- PASS: TestStaleChosenAddressDoesNotProbe (0.00s)
+--- PASS: TestUnsupportedTupleNeverSendsSubstituteProbe (0.00s)
+--- PASS: TestContainerLocalOwnerIsNotHostOwner (0.00s)
+--- PASS: TestIPv6WildcardDoesNotInventIPv4Listener (0.00s)
+--- PASS: TestDNSCandidatesAreBounded (0.00s)
+--- PASS: TestJoinProbeKeepsLayerBasesAndOwnerLinks (0.00s)
+--- PASS: TestCorrelatePortNamesDisagreementsWithoutChoosingACause (0.00s)
+--- PASS: TestStreamListenerJoinsTheStreamAndItsBackendLeg (0.00s)
+--- PASS: TestStreamBackendLegIsOnlyClaimedFromTheLog (0.00s)
+--- PASS: TestProxyLayerCarriesTheSitesServicePolicy (0.00s)
+PASS
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netpath	1.099s
+--- PASS: TestJudgeFirewallFromOneSource (0.00s)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/netsec	1.039s
+--- PASS: TestWatchedEndpointsKeepTheOldListAndAllowSeveralPorts (5.02s)
+--- PASS: TestWatchedEndpointsGainProbeColumns (3.10s)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/store	9.292s
+--- PASS: TestCertJobDiagnosisReadsTheFailedRun (2.94s)
+--- PASS: TestRenewalReloadsNginxOnlyForACertificateASiteServes (0.34s)
+--- PASS: TestProxyAlertsRequireAdminAndTellEachTransitionOnce (0.41s)
+--- PASS: TestProxyAlertsCheckCurrentPinnedWatchEndpoints (0.31s)
+--- PASS: TestRouteAccessExplainsLayersForAdmins (0.44s)
+--- PASS: TestStreamPathIsReadByEveryAccount (0.35s)
+--- PASS: TestTheWatchListHoldsEndpoints (0.27s)
+--- PASS: TestNetworkProbesAreWatchedEndpoints (0.29s)
+--- PASS: TestAProbeResultDoesNotLandOnARowATLSWatchTookOver (0.20s)
+ok  	github.com/Wayy01/Just-Dashboard/backend/internal/api	7.119s

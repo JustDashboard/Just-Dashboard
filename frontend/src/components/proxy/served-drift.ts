@@ -5,6 +5,7 @@ import { get, post } from "@/lib/api"
 import type { DriftReport, ProxyReloadResult } from "@/lib/types"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
+import { reloadToast } from "./load-proof"
 
 /** How long after a reload nginx's new workers have taken over the ports. */
 const SETTLE_MS = 1500
@@ -27,10 +28,12 @@ export function useServedDrift({ onReloaded }: { onReloaded: () => void }) {
     if (reloading) return
     setReloading(true)
     try {
-      await post<ProxyReloadResult>("/proxy/reload", { kind: "nginx" })
-      notify.success("nginx reloaded", {
+      const res = await post<ProxyReloadResult>("/proxy/reload", { kind: "nginx" })
+      const toast = reloadToast(res.loadProof, {
+        title: "nginx reloaded",
         description: "The served certificates are checked again in a moment.",
       })
+      notify[toast.tone](toast.title, { description: toast.description })
       onReloaded()
       setTimeout(() => {
         force.current = true

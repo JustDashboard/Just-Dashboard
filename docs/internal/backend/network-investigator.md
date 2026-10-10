@@ -66,6 +66,39 @@ The fixture verifies native resolver selection, literal destination/source agree
 connection evidence, retained host/provider unknowns, and stale-identity rejection after a restart.
 It removes only its own container ID. It does not pull an image or alter the production host network.
 
+## Native streams on the path
+
+A local listener the proxy inventory attributes to a native nginx stream (`Listener.Stream`) joins
+that stream as its own evidence item (`stream`, `netpath/stream.go`), read through
+`proxysvc.StreamPath`: the configured forward (protocol, listens, backends with backup/down roles,
+balancing, where nginx ends TLS) and its access list as a sentence, the stream's state as the Streams
+page reads it, the client sessions established to its ports now, the TCP connections nginx holds open
+to each backend now (`streamConnections`: the host's ESTABLISHED sockets owned by nginx, or by an
+owner this account cannot read, whose far end is a backend's address or an address its name resolves
+to), and, for a stream that logs its sessions, the last hour by the backend each session ended on —
+completed and 5xx — with the log's completeness. It is **observed**: none of it is this tuple's
+traversal, and the limitations say so. A UDP stream has no per-session socket and says it cannot be
+counted.
+
+When the request measures a TCP connection and it connects, the investigator reads the session that
+connection left in the stream's log (`proxysvc.AwaitStreamSession`, up to 1.5 s: nginx writes a
+session's line when it closes) by client address and time, since nginx logs no client port, and adds a
+**measured** `stream_traversal` item: `forwarded` to the backend nginx names last in
+`$upstream_addr`, `denied` (403, the access list), `failed` (5xx, no backend took it) or `logged` with
+another status; earlier backends a retried session tried are listed. Without a measurement, after one
+that did not connect, or with nothing logged in time, no backend leg is claimed. Both items link to the
+stream (`/proxy/streams?stream=<name>`). The Streams page's **Trace in Network** verb (TCP streams,
+administrators) opens `/network/investigate?target=&port=&protocol=&family=&measure=` on the stream's
+own address (loopback for a wildcard), and the investigator takes only values its form could have
+produced (`pathDraftFromQuery`). `GET /proxy/streams/{name}/path` serves the same reading to any
+signed-in account, as the stream's sessions and traffic are. Tests: `TestStreamPathJoinsConfigurationSocketsAndLog`,
+`TestStreamPathSaysWhatItCannotCount`, `TestAwaitStreamSessionFindsTheMeasuredConnection`,
+`TestStreamListenerJoinsTheStreamAndItsBackendLeg`, `TestStreamBackendLegIsOnlyClaimedFromTheLog`, and
+`TestLiveStreamPathReadsNginxsBackendLeg`, where the host's nginx binary loads the host's stream
+module on a private prefix, forwards a loopback port to a backend the test holds, and the path counts
+the open client session and nginx's backend connection and then finds the closed session, 200 to that
+backend, in the stream's log.
+
 ## Retaining a scoped report
 
 **Run and save** snapshots the same request into the [retained diagnostics lifecycle](network-diagnostics.md#retained-connection-investigations).

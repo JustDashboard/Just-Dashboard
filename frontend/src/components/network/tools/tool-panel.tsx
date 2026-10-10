@@ -22,6 +22,7 @@ import { ToolResult } from "./tool-result"
 import { SaveDiagnosticRun, SaveHeldResult } from "./save-run"
 import { SSHTrustActions } from "./ssh-trust"
 import { WakeDevices } from "./wake-devices"
+import { WatchProbeButton } from "@/components/network/watched-probes"
 
 /** Each tool retains its inputs, result and request while another tool is selected. */
 export function ToolPanel({
@@ -205,6 +206,9 @@ export function ToolPanel({
 
         {def.key === "ssh" && (
           <SSHTrustActions target={t.target} port={Number(t.port) || 22} scan={t.result} />
+        )}
+        {def.key === "port" && t.result && Number(t.port) > 0 && (
+          <WatchProbeButton target={t.target.trim()} port={Number(t.port)} />
         )}
         {def.key === "wol" && active && <WakeDevices run={t} />}
 

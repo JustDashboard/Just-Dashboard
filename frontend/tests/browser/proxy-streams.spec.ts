@@ -1845,3 +1845,24 @@ test("the states fit a phone, bind errors and all", async ({ page }) => {
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
   ).toBe(true)
 })
+
+test("a TCP stream traces its connection path on the Network page", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const udp = streamEntry({ name: "dns", listen: 5353, protocol: "udp", upstream: "10.0.0.53:53" })
+  await listing(page, { streams: [bastion, udp] })
+  await page.route("**/api/v1/network/investigate/sources", (route) =>
+    json(route, { containers: [] }),
+  )
+  await page.goto("/proxy/streams")
+  await page.getByRole("button", { name: "More actions for dns" }).click()
+  await expect(page.getByRole("menuitem", { name: "Trace in Network" })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+
+  await page.getByRole("button", { name: "More actions for bastion" }).click()
+  await page.getByRole("menuitem", { name: "Trace in Network" }).click()
+  await expect(page).toHaveURL(
+    /\/network\/investigate\?target=127\.0\.0\.1&port=2222&protocol=tcp&family=inet&measure=1$/,
+  )
+  await expect(page.getByLabel("Destination", { exact: true })).toHaveValue("127.0.0.1")
+  await expect(page.getByLabel("Port", { exact: true })).toHaveValue("2222")
+})

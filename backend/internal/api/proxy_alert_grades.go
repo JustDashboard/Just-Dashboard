@@ -46,7 +46,7 @@ func watchSubject(d watchedDomain) string {
 }
 
 func (s *Server) checkWatchedGrades(ctx context.Context, scan watchGradeScanner) ([]watchGrade, bool) {
-	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, domain, port, ip FROM watched_endpoints ORDER BY domain, port, ip`)
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id, domain, port, ip FROM watched_endpoints WHERE kind = 'tls' ORDER BY domain, port, ip`)
 	if err != nil {
 		return nil, false
 	}

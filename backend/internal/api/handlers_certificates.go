@@ -59,6 +59,8 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 		// the caller's names, and for a webroot a challenge file written
 		// where certbot would and removed again, fetched over loopback.
 		r.Method(http.MethodPost, "/issue/preflight", s.handle(s.handleCertIssuePreflight))
+		// Where a finished certbot job failed, read from its own output.
+		r.Method(http.MethodGet, "/jobs/{id}/diagnosis", s.handle(s.handleCertJobDiagnosis))
 		// How close a real issuance for ?domains= is to Let's Encrypt's
 		// limits, from certbot's archive and this process's failed runs.
 		r.Method(http.MethodGet, "/rate-limits", s.handle(s.handleCertRateLimits))
@@ -1195,5 +1197,33 @@ func (s *Server) handleCertImportInspect(w http.ResponseWriter, r *http.Request)
 		return httpx.BadRequest("%v", err)
 	}
 	httpx.JSON(w, http.StatusOK, res)
+	return nil
+}
+
+// handleCertJobDiagnosis reads a failed certbot job's output into the
+// problems it reported, each at the stage of validation it failed and that
+// stage's owner. A job that is not certbot's, or did not fail, has none.
+func (s *Server) handleCertJobDiagnosis(w http.ResponseWriter, r *http.Request) error {
+	job, lines, ok := s.modules.jobs.Get(chi.URLParam(r, "id"))
+	if !ok || !strings.HasPrefix(job.Kind, "certbot.") {
+		return httpx.Err(http.StatusNotFound, "not_found", "No certbot job by that id is held; the dashboard keeps the last fifty jobs.")
+	}
+	out := struct {
+		Job      string                       `json:"job"`
+		Status   jobs.Status                  `json:"status"`
+		Problems []proxysvc.IssuanceDiagnosis `json:"problems"`
+	}{Job: job.ID, Status: job.Status, Problems: []proxysvc.IssuanceDiagnosis{}}
+	if job.Status == jobs.StatusFailed {
+		texts := make([]string, 0, len(lines))
+		for _, line := range lines {
+			if line.Stream != "status" {
+				texts = append(texts, line.Text)
+			}
+		}
+		if problems := proxysvc.DiagnoseIssuanceHere(texts); problems != nil {
+			out.Problems = problems
+		}
+	}
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }

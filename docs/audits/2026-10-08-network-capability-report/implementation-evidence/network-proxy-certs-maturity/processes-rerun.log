@@ -1,0 +1,8 @@
+
+Running 3 tests using 3 workers
+
+  ✓  2 [chromium] › tests/browser/processes-ui.spec.ts:1079:5 › a unit's journal reads its runs, folds a loop and opens one run's own lines (5.0s)
+  ✓  3 [chromium] › tests/browser/processes-ui.spec.ts:1079:5 › a unit's journal reads its runs, folds a loop and opens one run's own lines (5.1s)
+  ✓  1 [chromium] › tests/browser/processes-ui.spec.ts:1079:5 › a unit's journal reads its runs, folds a loop and opens one run's own lines (5.4s)
+
+  3 passed (7.0s)

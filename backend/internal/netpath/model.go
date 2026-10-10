@@ -103,6 +103,14 @@ type Providers struct {
 	Links      func(context.Context) ([]netx.Link, error)
 	Owners     func(context.Context) (OwnerSnapshot, error)
 	Probe      func(context.Context, Request) (*netsec.ProbeResult, error)
+	// Stream reads a native nginx stream's configuration, sockets and
+	// recent log; StreamSession waits for the session a client's connection
+	// left in that log.
+	Stream func(ctx context.Context, name string) (*proxysvc.StreamPath, error)
+	// Policy reads a proxy site's request limits, caching and HTTP versions:
+	// the application-layer service policy requests through it meet.
+	Policy        func(ctx context.Context, site string) (*proxysvc.ServicePolicy, error)
+	StreamSession func(ctx context.Context, name, client string, since time.Time) (*proxysvc.StreamLoggedSession, error)
 }
 
 var containerID = regexp.MustCompile(`^[a-f0-9]{64}$`)

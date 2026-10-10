@@ -11,7 +11,7 @@ import {
   RefreshClockwise,
   Stop,
 } from "@/components/icons"
-import { errorMessage, get, post } from "@/lib/api"
+import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { duration, plural } from "@/lib/format"
 import type {
@@ -44,6 +44,7 @@ import {
   stoppedLabel,
 } from "@/components/proxy/engine-lifecycle"
 import { warningCount } from "@/components/proxy/config-test"
+import { loadProofText, provenLive } from "@/components/proxy/load-proof"
 
 /**
  * The engine itself: whether it is running, and the three things done to it.
@@ -350,20 +351,27 @@ export function EngineActions({
     try {
       const res = await post<ProxyReloadResult>("/proxy/reload", { kind })
       const warnings = warningCount(res.validation)
-      notify.success(
-        `${engine} reloaded`,
-        warnings > 0
-          ? {
-              description: `Its config test has ${plural(warnings, "warning")}.`,
-              action: { label: "Show", onClick: () => onReloadTested(res.validation) },
-            }
-          : undefined,
-      )
+      const tested = warnings > 0 ? ` Its config test has ${plural(warnings, "warning")}.` : ""
+      const proof = res.loadProof ? loadProofText(res.loadProof) : ""
+      const description = `${proof}${tested}`.trim() || undefined
+      const show =
+        warnings > 0 ? { label: "Show", onClick: () => onReloadTested(res.validation) } : undefined
+      if (provenLive(res.loadProof)) {
+        notify.success(
+          `${engine} reloaded`,
+          description ? { description, action: show } : undefined,
+        )
+      } else {
+        // The signal went out; the master was not seen loading what it read.
+        notify.warning(`${engine} reload not confirmed`, { description, action: show })
+      }
       onChanged()
     } catch (err) {
       const refusal = refusalOf(err)
       if (refusal?.validation) {
         onReloadTested(refusal.validation)
+      } else if (err instanceof ApiError && err.code === "load_refused") {
+        notify.error(`${engine} refused the reload`, err)
       } else {
         notify.error("Reload failed", err)
       }

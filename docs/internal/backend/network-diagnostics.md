@@ -329,3 +329,12 @@ PCAP job instead of creating one.
 The connection-path inspector labels elapsed report collection separately from any retained TCP
 measurement. It does not present collection time as connection latency, and missing or invalid
 report timestamps remain “Not recorded”.
+
+## Watched probes
+
+Saved runs are evidence kept on request. A question to be asked again on a schedule is a **watched
+probe**: a TCP connection checked by the proxy's watch monitor on the watch list's interval, with
+its history and the `watch_unreachable` alert, rather than a second monitor. The TCP port check's
+**Watch on a schedule** creates one, and the runs page lists them; see
+[the watch list](databases-proxy-platform.md#proxy) (`watched_endpoints.kind = 'tcp'`).
+

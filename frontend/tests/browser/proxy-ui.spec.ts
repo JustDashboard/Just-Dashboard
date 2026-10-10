@@ -913,6 +913,192 @@ test("/proxy/sites/app.example.com's upstream figure opens its failures, and let
   )
 })
 
+test("/proxy/sites/app.example.com says who balances its requests and what nginx logged of each server", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockLogs(page)
+  const path = "/etc/nginx/sites-available/app.example.com"
+  await page.route("**/api/v1/proxy/upstreams", (route) =>
+    json(route, {
+      checkedAt: new Date().toISOString(),
+      targets: [],
+      evidence: {
+        since: new Date(Date.now() - 3_600_000).toISOString(),
+        logs: ["/var/log/nginx/error.log"],
+        complete: true,
+      },
+      pools: [
+        {
+          name: "jd_app_example_com_pool",
+          kind: "http",
+          sites: ["app.example.com"],
+          files: [path],
+          method: "least_conn",
+          balancing: "native",
+          verdict: "degraded",
+          noLive: 2,
+          members: [
+            { address: "10.0.0.1:3000", weight: 3, state: "up", ms: 2 },
+            {
+              address: "10.0.0.2:3000",
+              maxFails: 1,
+              failTimeout: "30s",
+              state: "refused",
+              failures: { refused: 4, disabled: 1 },
+            },
+            { address: "10.0.0.3:3000", backup: true, state: "up", ms: 1 },
+          ],
+        },
+        {
+          kind: "http",
+          sites: ["other.example.com"],
+          files: ["/etc/nginx/sites-available/other"],
+          balancing: "single",
+          verdict: "serving",
+          members: [{ address: "127.0.0.1:9000", state: "up" }],
+        },
+      ],
+    }),
+  )
+  await page.goto("/proxy/sites/app.example.com")
+
+  const panel = page.getByRole("region", { name: "Balancing · jd_app_example_com_pool" })
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText("Degraded")).toBeVisible()
+  await expect(
+    panel.getByText(
+      "nginx sends requests to the server with the fewest active connections across 2 servers, and sets one aside after it fails. Its backup takes over only when every primary has failed.",
+    ),
+  ).toBeVisible()
+  await expect(panel.getByText("nginx had nowhere to send 2 requests")).toBeVisible()
+  const refused = panel.getByRole("row", { name: /10\.0\.0\.2:3000/ })
+  await expect(refused).toContainText("primary, set aside after 1 failure for 30s")
+  await expect(refused).toContainText("refused")
+  await expect(refused).toContainText("refused 4×, set aside 1×")
+  await expect(panel.getByRole("row", { name: /10\.0\.0\.3:3000/ })).toContainText("backup")
+  // Another site's single endpoint is not this site's.
+  await expect(page.getByText("127.0.0.1:9000")).toHaveCount(0)
+})
+
+test("/proxy/sites/app.example.com reads its controls and measures what each one does", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockLogs(page)
+  const controls = [
+    {
+      id: "rate-limit",
+      title: "Request limit",
+      configured: true,
+      setting: "10r/s, burst 20, no delay",
+      support: "built-in",
+    },
+    { id: "conn-limit", title: "Connection limit", configured: false, support: "built-in" },
+    {
+      id: "proxy-cache",
+      title: "Response cache",
+      configured: true,
+      setting: "zone jd_app_cache",
+      support: "built-in",
+    },
+    {
+      id: "static-cache",
+      title: "Browser caching of assets",
+      configured: false,
+      support: "built-in",
+    },
+    { id: "http2", title: "HTTP/2", configured: true, setting: "http2 on", support: "module" },
+    {
+      id: "http3",
+      title: "HTTP/3",
+      configured: true,
+      setting: "listen 443 quic",
+      support: "missing",
+    },
+  ]
+  const policy = {
+    site: "app.example.com",
+    file: "/etc/nginx/sites-available/app.example.com",
+    engine: "nginx/1.26.3",
+    controls,
+  }
+  await page.route("**/api/v1/proxy/sites/app.example.com/policy", (route) => json(route, policy))
+  const measured: unknown[] = []
+  await page.route("**/api/v1/proxy/sites/app.example.com/controls/verify", (route) => {
+    measured.push(route.request().postDataJSON())
+    return json(route, {
+      site: "app.example.com",
+      url: "https://app.example.com:443/shop",
+      checkedAt: new Date().toISOString(),
+      requests: 27,
+      policy,
+      checks: [
+        {
+          id: "rate-limit",
+          title: "Request limit",
+          state: "verified",
+          detail: "nginx answered 429 to the requests past the burst.",
+          evidence: ["22 requests at once: 21×200, 1×429"],
+        },
+        {
+          id: "conn-limit",
+          title: "Connection limit",
+          state: "not-configured",
+          detail: "The site sets no connection limit.",
+        },
+        {
+          id: "proxy-cache",
+          title: "Response cache",
+          state: "not-effective",
+          detail:
+            "nginx did not answer the second request from its cache. The application sets a cookie, and nginx does not store an answer that does.",
+          evidence: ["first request: 200 MISS", "second request: 200 MISS"],
+        },
+        {
+          id: "static-cache",
+          title: "Browser caching of assets",
+          state: "not-configured",
+          detail: "The site sets no browser caching for assets.",
+        },
+        {
+          id: "http2",
+          title: "HTTP/2",
+          state: "verified",
+          detail: "nginx negotiated HTTP/2 with a browser's offer.",
+          evidence: ["ALPN offered h2 and http/1.1; nginx chose h2"],
+        },
+        {
+          id: "http3",
+          title: "HTTP/3",
+          state: "not-effective",
+          detail:
+            "This nginx is built without the module it needs. Nothing answered QUIC on the port.",
+        },
+      ],
+    })
+  })
+  await page.goto("/proxy/sites/app.example.com")
+
+  const panel = page.getByRole("region", { name: "Controls" })
+  await expect(panel.getByText("10r/s, burst 20, no delay")).toBeVisible()
+  await expect(panel.getByText("this nginx lacks its module")).toBeVisible()
+  await expect(panel.getByText("nginx/1.26.3")).toBeVisible()
+  await panel.getByLabel("Path to measure").fill("shop")
+  await expect(panel.getByRole("button", { name: "Measure" })).toBeDisabled()
+  await panel.getByLabel("Path to measure").fill("/shop")
+  await panel.getByRole("button", { name: "Measure" }).click()
+  const cache = panel.getByRole("listitem").filter({ hasText: "Response cache" })
+  await expect(cache).toContainText("Not in effect")
+  await expect(cache).toContainText("The application sets a cookie")
+  await expect(cache).toContainText("second request: 200 MISS")
+  await expect(panel.getByRole("listitem").filter({ hasText: "Request limit" })).toContainText(
+    "Verified",
+  )
+  await expect(panel.getByText(/with 27\s+requests/)).toBeVisible()
+  expect(measured).toEqual([{ path: "/shop", asset: "" }])
+})
+
 test("/proxy/sites/legacy.example.com says why it has no requests to read, and reads nginx's shared error log for its names", async ({
   page,
 }) => {
